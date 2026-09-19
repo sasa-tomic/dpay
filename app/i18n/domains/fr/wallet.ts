@@ -73,7 +73,7 @@ export const walletFr: WalletMessages = {
     title: 'Comptes',
     intro: 'Appuyez sur un compte pour l’utiliser dans Payer et Recevoir.',
     back: 'Retour',
-    practice: 'Argent d’entraînement — il ne fonctionne que dans dpay et aucun commerce ne l’accepte.',
+    practice: 'Argent d’entraînement. Il ne fonctionne que dans dpay — aucun commerce ne l’accepte.',
     convertHint: 'Convertir auprès d’une plateforme externe',
   },
 
@@ -81,7 +81,7 @@ export const walletFr: WalletMessages = {
     title: 'Carnet d’adresses',
     intro: 'Les adresses auxquelles vous avez envoyé — enregistrées sur cet appareil uniquement.',
     back: 'Retour',
-    empty: 'Aucune adresse enregistrée pour l’instant — chaque adresse à laquelle vous envoyez est enregistrée ici automatiquement.',
+    empty: 'Aucune adresse enregistrée pour l’instant. Celles auxquelles vous envoyez sont enregistrées ici automatiquement.',
     addEntry: 'Ajouter une adresse',
     assetLabel: 'Pour',
     addressLabel: 'Adresse',
@@ -128,8 +128,8 @@ export const walletFr: WalletMessages = {
     mintCounterparty: 'la démo',
     failed: 'Échec — seuls les frais de réseau ont été prélevés',
     dropped: count => count === 1
-      ? '1 transaction Solana n’a pas pu être lue — elle existe toujours on-chain, mais n’est pas affichée ici.'
-      : `${count} transactions Solana n’ont pas pu être lues — elles existent toujours on-chain, mais ne sont pas affichées ici.`,
+      ? '1 transaction Solana n’a pas pu être lue — elle existe on-chain mais n’est pas affichée ici.'
+      : `${count} transactions Solana n’ont pas pu être lues — elles existent on-chain mais ne sont pas affichées ici.`,
   },
 
   fund: {checking: 'Vérification…', checkAgain: 'Revérifier'},
@@ -158,17 +158,17 @@ export const educationFr: EducationMessages = {
       offline: {
         eyebrow: 'D’ABORD, LE DÉROULEMENT',
         title: 'Un téléphone demande, l’autre paie',
-        body: 'Le téléphone qui reçoit affiche une demande. Vous la scannez, vérifiez le montant et l’actif, puis approuvez. Sa connexion envoie le paiement si votre téléphone est hors ligne.',
+        body: 'L’autre téléphone affiche une demande. Vous la scannez, vérifiez le montant, puis approuvez. Sa connexion envoie le paiement si le vôtre est hors ligne.',
       },
       key: {
         eyebrow: 'VOTRE ARGENT',
         title: 'Votre clé reste sur ce téléphone',
-        body: 'dpay ne détient aucun fonds et ne peut pas approuver un paiement à votre place. Il n’y a pas de compte dpay — seulement votre clé.',
+        body: 'dpay ne détient aucun argent et ne peut pas approuver de paiements à votre place. Il n’y a pas de compte dpay — seulement votre clé.',
       },
       exact: {
         eyebrow: 'AUCUNE SURPRISE',
         title: 'Payez exactement l’actif demandé',
-        body: 'Le commerçant demande un actif précis. Vous vérifiez le montant et vous approuvez. dpay ne convertit jamais un autre solde.',
+        body: 'Le commerçant demande un actif précis. Vous vérifiez le montant et vous approuvez. dpay ne convertit jamais.',
       },
     },
     stageTags: ['01 — RÉSEAU', '02 — CLÉ', '03 — ACTIF'],
@@ -203,11 +203,11 @@ export const educationFr: EducationMessages = {
     },
     cooldown: {
       title: 'L’argent d’entraînement, dans un instant',
-      body: reason => `Ce serveur distribue de l’argent d’entraînement de temps en temps — il vient de le faire. Il indique : ${reason} Poursuivez la configuration ; revenez payer quand vous voudrez.`,
+      body: reason => `Ce serveur distribue de l’argent d’entraînement de temps en temps — il vient de le faire. Il indique : ${reason} Poursuivez la configuration ; revenez quand vous voudrez.`,
     },
     offline: {
       title: 'Cet entraînement a besoin d’une connexion',
-      body: 'L’entraînement a besoin d’une connexion — votre téléphone joue le commerçant et le payeur ; un vrai paiement non. Reconnectez-vous et réessayez, ou poursuivez la configuration.',
+      body: 'L’entraînement a besoin d’une connexion, car votre téléphone joue les deux côtés. Reconnectez-vous et réessayez, ou poursuivez la configuration.',
     },
     empty: {
       title: 'Encore rien pour s’entraîner',
@@ -236,7 +236,7 @@ export const educationFr: EducationMessages = {
     title: 'Prêt pour le voyage',
     stamps: {
       recoverySaved: {label: 'MOTS\nNOTÉS', hint: 'Copiez vos mots de récupération dans les Paramètres', short: 'encore la sauvegarde'},
-      flowUnderstood: {label: 'PARCOURS\nVU', hint: 'Faites le paiement d’entraînement au premier lancement — ou faites un paiement', short: 'encore le parcours'},
+      flowUnderstood: {label: 'PARCOURS\nVU', hint: 'Faites le paiement d’entraînement — ou faites un paiement', short: 'encore le parcours'},
       fundsReady: {label: 'FONDS\nCHARGÉS', hint: 'Ajoutez de l’argent utilisable — les fonds d’entraînement ne comptent pas', short: 'encore des fonds'},
       paymentTested: {label: 'PREMIER\nPAIEMENT', hint: 'Faites un paiement — envoyé ou reçu', short: 'encore un paiement'},
     },

@@ -195,28 +195,28 @@ export const errorsEn: ErrorMessages = {
     offline: 'Solana is offline (no RPC endpoint configured)',
     tokenUnavailable: asset => `Solana ${asset} is not available (no RPC endpoint configured)`,
     senderNoTokenAccount: asset =>
-      `You have no ${asset} account yet. Get online once and open Receive ▸ Create my ${asset} account — or pay with an asset you already hold`,
+      `You have no ${asset} account yet. Get online once and open Receive ▸ Create my ${asset} account, or pay with an asset you already hold`,
     senderTokenAccountUnverified: asset =>
-      `dpay couldn’t check whether you have a ${asset} account. If not, this payment cannot settle. Get online once and open Receive ▸ My address to check it, or to create the account.`,
+      `dpay couldn’t check your ${asset} account. Without one, this payment can’t settle. Go online once and open Receive ▸ My address to check or create it.`,
     senderTokenAccountUnverifiedRailDown: asset =>
-      `dpay couldn’t check whether you have a ${asset} account — Solana is not answering this wallet, so more signal will not help. If the account doesn’t exist, this payment cannot settle. Open Receive ▸ My address to check or create it, once Solana answers again.`,
+      `dpay couldn’t check your ${asset} account because Solana isn’t answering. Without one, this payment can’t settle. Check or create it in Receive ▸ My address once Solana is back.`,
     recipientNoTokenAccount: (solAmount, asset) =>
-      `They don't have a ${asset} account yet — creating it needs about ${solAmount} in this wallet (one-time rent + fee, paid by you) — send a little SOL here first`,
+      `They don't have a ${asset} account yet. Creating it costs about ${solAmount}, paid by you — send a little SOL here first`,
     ownTokenAccountRent: (solAmount, asset) =>
-      `Creating your ${asset} account needs about ${solAmount} in this wallet (one-time account rent + fee) — send a little SOL here first`,
+      `Creating your ${asset} account costs about ${solAmount}. Send a little SOL here first.`,
   },
 
   rail: {
     refused: network =>
-      `${network}’s endpoint refused the request, so these balances are out of date. Nothing moved, your other accounts still work, and dpay keeps retrying.`,
+      `${network} refused the request, so these balances are outdated. Nothing moved, and dpay keeps retrying.`,
     offline: network =>
-      `You appear to be offline, so ${network} balances could not be refreshed — nothing moved. They update on their own when a connection returns, and paying by QR still works offline.`,
+      `You seem offline, so ${network} balances are outdated. Nothing moved. They update when you reconnect, and QR payments still work offline.`,
     unreachable: network =>
-      `${network} is unreachable while you are online — dpay’s relay can’t reach ${network} right now, and your money is untouched. Nothing moved, your Internet Computer payments still work, and you can still sign payments offline. Settings ▸ Advanced can point this wallet at any ${network} endpoint.`,
+      `${network} is unreachable while you are online — dpay’s relay can’t reach it. Your money is untouched, Internet Computer payments still work, and you can still sign payments offline. Settings ▸ Advanced can point this wallet at any ${network} endpoint.`,
     unreadable: network =>
-      `${network} answered with data this wallet cannot read, so these balances are out of date. Nothing moved, your other accounts still work, and dpay keeps retrying.`,
+      `${network} sent data this wallet can’t read, so these balances are outdated. Nothing moved, and dpay keeps retrying.`,
     historyStale: network =>
-      `${network} history is out of date — nothing moved, and it refreshes on its own.`,
+      `${network} history is out of date. Nothing moved — it refreshes on its own.`,
     /** accessibilityHint for the unreachable note's Settings ▸ Advanced Pressable (the founder
      *  UX directive that made the escape tappable). Says where the tap lands — never a promise
      *  the tap fixes the outage. */
@@ -227,28 +227,28 @@ export const errorsEn: ErrorMessages = {
     receiptReverted: hash => `transaction ${hash} reverted on chain`,
     receiptTimeout: hash => `transaction ${hash} was not mined within the timeout`,
     hashMissing: received =>
-      `Your wallet answered without a transaction id (${received}), so dpay can't tell whether the transaction was sent.`,
-    sendTimedOut: "Your wallet didn't answer, so dpay can't tell whether the transaction was sent.",
+      `Your wallet answered without a transaction id (${received}), so dpay can't tell if it was sent.`,
+    sendTimedOut: "Your wallet didn't answer, so dpay can't tell if the transaction was sent.",
     requestTimedOut:
       "Your wallet didn't answer. Open it, deal with any pending request, then try again.",
     pairingTimedOut: 'pairing timed out — no wallet scanned within 5 min',
     pairingFailed: detail => `WalletConnect pairing failed: ${detail}`,
     invalidChainId: value =>
-      `Your wallet reported a network dpay can’t read (${value}). Reconnect it, and if that keeps happening use another wallet app.`,
+      `Your wallet reported a network dpay can’t read (${value}). Reconnect it; if it keeps happening, use another wallet app.`,
     chainNotApproved: (requested, approved) =>
       approved === ''
-        ? `Your wallet connected but approved no Ethereum network. This deposit settles on network ${requested} — switch to it in your wallet, then connect again.`
+        ? `Your wallet approved no Ethereum network. This deposit settles on network ${requested}. Switch to it in your wallet, then connect again.`
         : `Your wallet approved network ${approved}; this deposit settles on network ${requested}. Switch in your wallet, then connect again.`,
   },
 
   tap: {
     couldntConfirmOffline: 'Couldn’t confirm — check your balance when back online',
     couldntVerifyRequest: 'Couldn’t verify this request',
-    couldntReturnResult: 'Couldn’t return the payment result — keep the phones together and try again',
+    couldntReturnResult: 'Couldn’t return the result. Keep the phones together and try again.',
     merchantRefusalUnverified:
-      'The ledger says this transfer did not go through, but that answer could not be verified on this phone. Do not hand over the goods. Check your balance and Transactions in a moment — if the money did arrive, it shows there.',
+      'The ledger says the transfer didn’t go through, but this phone couldn’t verify it. Don’t hand over the goods. Check Transactions in a moment — the money shows there if it arrived.',
     merchantNothingArrived:
-      'No payment arrived — do not hand over the goods. A transfer can still land and will show in your balance and Transactions; ask for another tap only if nothing appears.',
+      'No payment arrived. Don’t hand over the goods — a transfer can still land and will show in your balance and Transactions. Ask for another tap only if nothing appears.',
     unsupportedAsset: currency => `Unsupported asset (currency ${currency})`,
     cannotConfirmAsset: currency => `Cannot confirm the asset (currency ${currency})`,
     couldntReadRequest: 'Couldn’t read the payment request',

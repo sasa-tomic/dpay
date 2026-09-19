@@ -9,7 +9,7 @@ import type {PayMessages, ReceiveMessages} from '../../keys';
 export const payFr: PayMessages = {
   notAPaymentCode: 'Ce n’est pas un code de paiement dpay',
   scannedCoinRequest: (coin, uri) =>
-    `C’est une demande de paiement ${coin} (${uri}…). Ce portefeuille règle sur Internet Computer et Solana — payez-la avec un portefeuille qui prend ${coin} en charge.`,
+    `C’est une demande de paiement ${coin} (${uri}…). Ce portefeuille paie sur Internet Computer et Solana — utilisez un portefeuille ${coin}.`,
   requestExpired: 'Cette demande a expiré — demandez un nouveau QR au commerçant',
 
   sent: amount => (amount ? `Envoyé ${amount}` : 'Envoyé'),
@@ -38,11 +38,11 @@ export const payFr: PayMessages = {
     'Hors ligne — le commerçant règle ce paiement en l’envoyant. Vous le verrez sur votre solde une fois confirmé.',
   handedTo: who => `Remis à ${who}`,
   handedToMerchant: 'Remis au commerçant',
-  handedOffHint: 'Marque le paiement signé comme remis ; votre solde se met à jour quand le commerçant règle',
+  handedOffHint: 'Marque ce paiement comme remis. Votre solde se met à jour quand le commerçant règle',
 
   unsupportedAsset: 'Actif non pris en charge',
   unsupportedAssetBody: currency =>
-    `Ce paiement demande un actif que ce portefeuille ne peut pas payer (monnaie ${currency}) — dpay ne convertit jamais. Demandez au commerçant un actif pris en charge.`,
+    `Ce paiement demande un actif que ce portefeuille ne peut pas payer (monnaie ${currency}). dpay ne convertit jamais — demandez au commerçant un actif pris en charge.`,
   paying: 'Vous payez',
   payAmount: amount => `Payer ${amount}`,
   notEnoughBalance: 'Solde insuffisant pour ce paiement.',
@@ -56,58 +56,58 @@ export const payFr: PayMessages = {
   link: {
     title: 'Ce lien de paiement ne peut pas être payé',
     part: {recipient: 'le compte à payer', asset: 'l’actif', network: 'le réseau', amount: 'le montant', ref: 'la référence'},
-    malformed: part => `Le lien n’indique pas ${part}, ou la valeur est corrompue. Demandez un nouveau lien à l’expéditeur.`,
+    malformed: part => `Il manque ${part} dans le lien, ou la valeur est corrompue. Demandez un nouveau lien à l’expéditeur.`,
     unknownAsset: (token, network) =>
-      `Le lien demande ${token} sur ${network}. Ce portefeuille n’a pas cet actif, et dpay ne convertit jamais. Demandez un lien dans un actif que vous détenez.`,
+      `Le lien demande ${token} sur ${network}, que ce portefeuille ne détient pas. dpay ne convertit jamais — demandez un lien dans un actif que vous détenez.`,
     wrongNetwork: (token, network) =>
-      `Le lien demande ${token} sur ${network}. Vous détenez ${token} sur un autre réseau — le paiement partirait sur la mauvaise chaîne. Demandez un lien sur un réseau que vous détenez.`,
+      `Le lien demande ${token} sur ${network}, mais vous détenez ${token} ailleurs. Payer enverrait votre argent sur la mauvaise chaîne — demandez un lien sur un réseau que vous détenez.`,
     hiddenAsset: token =>
       `Le lien demande ${token}, un actif de réseau de test. Ouvrez « Soldes », activez « Afficher les actifs de test », puis rouvrez le lien.`,
     unsupportedAsset: token =>
-      `Le lien demande ${token}, que ce portefeuille ne peut pas payer. dpay ne convertit jamais. Demandez un lien dans un actif que vous détenez.`,
+      `Le lien demande ${token}, que ce portefeuille ne peut pas payer. dpay ne convertit jamais — demandez un lien dans un actif que vous détenez.`,
     badAmount: (amount, token) =>
-      `« ${amount} » n’est pas un montant ${token} valide — il a peut-être plus de décimales que ${token} n’en accepte. Demandez un nouveau lien à l’expéditeur.`,
+      `« ${amount} » n’est pas un montant ${token} valide — il utilise peut-être trop de décimales. Demandez un nouveau lien à l’expéditeur.`,
     badAccount: network =>
-      `Le compte de ce lien n’est pas un compte ${network} valide. Demandez à l’expéditeur de le vérifier et de renvoyer le lien.`,
+      `Le compte de ce lien n’est pas un compte ${network} valide. Demandez à l’expéditeur de le vérifier et d’envoyer un nouveau lien.`,
   },
 
   ocp: {
     solanaTokenUnsupported: symbol =>
-      `Cette caisse accepte les ${symbol} sur Solana, mais son code n’indique pas vers quel compte de jetons les envoyer — payer ainsi risquerait d’envoyer de l’argent réel sur le mauvais compte. Payez plutôt en SOL, ou passez dans « Soldes » à un autre actif accepté par cette caisse.`,
+      `Cette caisse accepte les ${symbol} sur Solana, mais son code n’indique pas quel compte payer. Payer pourrait envoyer de l’argent sur le mauvais compte — payez plutôt en SOL, ou passez dans « Soldes » à un autre actif accepté par cette caisse.`,
     chooseAsset: selected =>
-      `Cette caisse n’accepte pas ${selected}, mais elle accepte ceux-ci — choisis avec lequel payer. dpay ne convertit jamais : tu paies l’actif que tu choisis.`,
+      `Cette caisse n’accepte pas ${selected}, mais elle accepte ceux-ci. Choisissez avec lequel payer — dpay ne convertit jamais.`,
     assetNotAccepted: (selected, accepted) =>
-      `Cette caisse n’accepte pas ${selected}. Elle accepte ${accepted}. dpay ne convertit jamais : passez à l’un de ces actifs dans « Soldes », puis scannez à nouveau.`,
+      `Cette caisse n’accepte pas ${selected} — elle accepte ${accepted}. dpay ne convertit jamais : passez dans « Soldes », puis scannez à nouveau.`,
     methodUnavailable: (selected, alternatives) =>
       alternatives
-        ? `Cette caisse accepte ${selected}, mais le prestataire de paiement du commerçant ne peut pas traiter ${selected} pour le moment. La caisse accepte aussi ${alternatives}. dpay ne convertit jamais : passez à l’un de ces actifs dans « Soldes », puis scannez à nouveau.`
-        : `Cette caisse accepte ${selected}, mais le prestataire de paiement du commerçant ne peut pas traiter ${selected} pour le moment — et ce portefeuille ne peut payer aucun autre actif accepté par cette caisse. Demandez au commerçant un autre moyen de paiement.`,
+        ? `Cette caisse accepte ${selected}, mais son prestataire ne peut pas la traiter pour le moment. La caisse accepte aussi ${alternatives} — dpay ne convertit jamais : passez dans « Soldes », puis scannez à nouveau.`
+        : `Cette caisse accepte ${selected}, mais son prestataire ne peut pas la traiter pour le moment, et ce portefeuille ne peut payer aucun autre actif qu’elle accepte. Demandez au commerçant un autre moyen de paiement.`,
     noPayableAsset: accepted =>
-      `dpay ne peut pas payer à cette caisse. Elle accepte ${accepted}, et ce portefeuille ne peut payer aucun de ces actifs — dpay ne convertit jamais. Réglez cet achat autrement.`,
+      `dpay ne peut pas payer à cette caisse. Elle accepte ${accepted}, que ce portefeuille ne peut pas payer — dpay ne convertit jamais. Payez autrement.`,
     quoteExpired:
-      'Le prix de cette caisse a expiré — chacun tient environ cinq minutes. Scannez le code à nouveau pour obtenir un prix frais.',
+      'Ce prix a expiré — les prix tiennent environ cinq minutes. Scannez le code à nouveau pour en obtenir un frais.',
     notEnoughTime:
       'Ce prix expire trop tôt pour être payé sans risque. Scannez le code à nouveau pour obtenir un prix frais.',
     unreportable: host =>
-      `${host} n’a donné à dpay aucun moyen de lui signaler un paiement : payer ici vous coûterait votre argent sans que la vente soit créditée. Rien n’a été payé. Scanner à nouveau n’y changera rien — demandez au commerçant un autre moyen de paiement.`,
+      `${host} n’a donné à dpay aucun moyen de signaler votre paiement : payer vous coûterait votre argent sans que la vente soit créditée. Rien n’a été payé. Scanner à nouveau n’aidera pas — demandez au commerçant un autre moyen de paiement.`,
     proofElsewhere: (quoteHost, proofHost) =>
-      `Le prix de ce code vient de ${quoteHost}, mais il demande que la preuve de votre paiement soit envoyée à ${proofHost}. Un paiement ne peut pas répondre à deux sociétés différentes : dpay s’est arrêté. Rien n’a été payé — demandez au commerçant de montrer son propre code de paiement.`,
+      `Le prix de ce code vient de ${quoteHost}, mais la preuve de votre paiement partirait vers ${proofHost}. Un paiement ne peut pas répondre à deux sociétés : dpay s’est arrêté. Rien n’a été payé — demandez au commerçant son propre code de paiement.`,
     tillPrice: (price, host) => `${price} · prix de ${host}`,
     checkingTill: 'Vérification auprès du prestataire de paiement du commerçant…',
     badCode:
       'Ce code est abîmé, ou ce n’est pas un code de paiement. Demandez au commerçant de le montrer à nouveau, et vérifiez que rien ne le recouvre.',
     notHttps:
-      'Ce code pointe vers une adresse non sécurisée : dpay ne l’ouvre pas. Demandez au commerçant de montrer son propre code de paiement — un autocollant collé par-dessus le vrai ressemble exactement à cela.',
+      'Ce code pointe vers une adresse non sécurisée : dpay ne l’ouvre pas. Demandez au commerçant son propre code de paiement — un autocollant par-dessus le vrai ressemble exactement à cela.',
     providerUnreachable:
       'Impossible de joindre le prestataire de paiement du commerçant. Rien n’a été payé. Vérifiez votre connexion et scannez à nouveau.',
     badDestination: host =>
-      `${host} a répondu avec une adresse de paiement qui ne correspond pas à votre choix : dpay s’est arrêté. Rien n’a été payé — ne payez pas ce code. Demandez au commerçant de montrer son propre code à nouveau.`,
+      `${host} a renvoyé une adresse de paiement qui ne correspond pas à votre choix : dpay s’est arrêté. Rien n’a été payé — ne payez pas ce code. Demandez au commerçant son propre code à nouveau.`,
     providerRefused: (host, detail) =>
-      `Le prestataire de paiement du commerçant (${host}) n’a pas accepté ce paiement. Rien n’a été payé. Demandez au commerçant d’enregistrer la vente à nouveau, puis scannez le code. Si l’échec persiste, montrez-lui ce que son prestataire a répondu : « ${detail} ».`,
+      `Le prestataire de paiement du commerçant (${host}) a refusé ce paiement. Rien n’a été payé. Demandez au commerçant d’enregistrer de nouveau la vente, puis scannez le code. Si l’échec persiste, montrez-lui ce que son prestataire a répondu : « ${detail} ».`,
     providerFailed: (host, status) =>
-      `Le prestataire de paiement du commerçant (${host}) a répondu par une erreur (${status}) sans en donner la raison. Rien n’a été payé. Patientez un instant et scannez le code à nouveau ; si l’échec persiste, demandez au commerçant un autre moyen de paiement.`,
+      `Le prestataire de paiement du commerçant (${host}) a renvoyé une erreur (${status}) sans raison. Rien n’a été payé. Patientez un instant et scannez à nouveau ; si l’échec persiste, demandez au commerçant un autre moyen de paiement.`,
     badAnswer: (host, part) =>
-      `Le prestataire de paiement du commerçant (${host}) n’a pas envoyé ${part} : dpay ne peut pas payer à cette caisse. Rien n’a été payé. Scannez le code à nouveau, et signalez-le au commerçant si cela se reproduit.`,
+      `Le prestataire de paiement du commerçant (${host}) n’a pas envoyé ${part} : dpay ne peut pas payer à cette caisse. Rien n’a été payé. Scannez à nouveau, et signalez-le au commerçant si cela se reproduit.`,
     answerPart: {
       body: 'de réponse lisible',
       details: 'de données de paiement complètes',
@@ -115,26 +115,26 @@ export const payFr: PayMessages = {
       expiry: 'de date d’expiration lisible',
     },
     noPendingCharge: merchant =>
-      `La caisse de ${merchant} n’a aucun montant en attente. Demandez que la vente soit enregistrée d’abord, puis scannez le code à nouveau.`,
+      `La caisse de ${merchant} n’a aucun montant en attente. Demandez que la vente soit enregistrée d’abord, puis scannez à nouveau.`,
     ref: {
       icBlock: index => `le bloc ${index} du registre`,
       solTransaction: signature => `la transaction Solana ${signature}`,
     },
     submitUnknown: reference =>
-      `Votre transfert est passé, mais le prestataire de paiement du commerçant ne l’a pas confirmé — ce n’est donc ni payé ni échoué. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Montrez au commerçant ${reference}, c’est la preuve de votre transfert.`,
+      `Votre transfert est passé, mais le prestataire ne l’a pas confirmé — ni payé ni échoué. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Montrez au commerçant ${reference}, la preuve de votre transfert.`,
     submitPending: reference =>
-      `Votre transfert est passé et le prestataire de paiement du commerçant en a été informé — il ne l’a simplement pas encore rattaché à cette vente. Il sera crédité dès qu’il verra le transfert : vous n’avez rien d’autre à faire. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Si la caisse ne l’affiche toujours pas, donnez ${reference} au commerçant.`,
+      `Votre transfert est passé et le prestataire en a été informé — il ne l’a simplement pas encore rattaché à cette vente. Il sera crédité dès qu’il verra le transfert. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Si la caisse ne l’affiche pas, donnez ${reference} au commerçant.`,
     submitRejected: (reference, said) =>
-      `Votre transfert est passé, mais le prestataire de paiement du commerçant a refusé la preuve : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui ${reference}.`
+      `Votre transfert est passé, mais le prestataire a refusé la preuve : la vente n’a pas été créditée. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Donnez ${reference} au commerçant.`
       + (said === null ? '' : ` Le prestataire indique : « ${said} »`),
     submitTooLate: reference =>
-      `Votre transfert est passé, mais seulement après l’expiration de ce prix : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui ${reference}, c’est la preuve de votre transfert.`,
+      `Votre transfert est passé, mais seulement après l’expiration du prix : la vente n’a pas été créditée. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Donnez au commerçant ${reference}, la preuve de votre transfert.`,
     transferUnknown:
-      'dpay n’a pas encore pu confirmer votre transfert, le commerçant n’en sait donc rien — ce n’est ni payé ni échoué. Gardez cet écran ouvert : dpay continue de vérifier et terminera le paiement lui-même si le transfert est passé. Entre-temps, ne payez pas une seconde fois.',
+      'dpay n’a pas encore pu confirmer votre transfert, le commerçant n’en sait donc rien — ni payé ni échoué. Gardez cet écran ouvert : dpay continue de vérifier et terminera le paiement si le transfert est passé. Entre-temps, ne payez pas une seconde fois.',
     transferRefused: reason =>
-      `Votre transfert n’est pas passé : rien n’a été payé et votre argent est toujours dans votre portefeuille — ${reason}. Scannez le code à nouveau pour payer à cette caisse.`,
+      `Votre transfert n’est pas passé — rien n’a été payé et votre argent est toujours dans votre portefeuille : ${reason}. Scannez à nouveau pour payer à cette caisse.`,
     transferFailed:
-      'Le réseau Solana a rejeté votre transaction : rien n’a été payé, le montant est toujours dans votre portefeuille (de petits frais de réseau ont été prélevés). Scannez le code à nouveau pour réessayer.',
+      'Le réseau Solana a rejeté votre transaction — rien n’a été payé. Le montant est toujours dans votre portefeuille, mais de petits frais de réseau ont été prélevés. Scannez à nouveau pour réessayer.',
     providerHost: host => `Prix de ${host}`,
   },
 
@@ -154,7 +154,7 @@ export const payFr: PayMessages = {
     switchTo: network => `Passer à ${network}`,
     switchToAsset: asset => `Passer à ${asset}`,
     practice: amount =>
-      `Vous avez ${amount} en argent d’entraînement — vous pouvez vous entraîner à payer avec ; il n’a aucune valeur et ne peut pas payer un vrai commerçant.`,
+      `Vous avez ${amount} en argent d’entraînement. Entraînez-vous avec — il n’a aucune valeur et ne peut pas payer un vrai commerçant.`,
     switchToPractice: 'Passer à l’argent d’entraînement',
   },
 
@@ -166,23 +166,23 @@ export const payFr: PayMessages = {
 
   spay: {
     wrongRail:
-      'C’est une demande Solana Pay. Cet écran règle sur Internet Computer — passez à Solana dans Soldes et scannez-y le code pour la payer.',
+      'C’est une demande Solana Pay. Cet écran règle sur Internet Computer — passez à Solana dans Soldes et scannez-y le code.',
     badUri: 'Ce code Solana Pay est endommagé. Demandez un nouveau QR au commerçant.',
     badRecipient: 'Le destinataire de ce code Solana Pay n’est pas une adresse Solana valide. Demandez un nouveau QR au commerçant.',
     badAmount: 'Le montant de ce code Solana Pay n’est pas un nombre positif simple. Demandez un nouveau QR au commerçant.',
     badSplToken: 'Le mint de jeton de ce code Solana Pay n’est pas valide. Demandez un nouveau QR au commerçant.',
     badReference: 'La référence de paiement de ce code Solana Pay n’est pas valide. Demandez un nouveau QR au commerçant.',
     unexpectedParam: param =>
-      `Ce code Solana Pay porte un paramètre inconnu de dpay (${param}) — dpay ne peut pas vérifier ce que le payer signerait. Demandez au commerçant un code sans ce paramètre.`,
+      `Ce code Solana Pay porte un paramètre inconnu (${param}) : dpay ne peut pas vérifier ce que le payer signerait. Demandez au commerçant un code sans ce paramètre.`,
     memoTooLong: 'Le memo de ce code Solana Pay est trop long pour une transaction Solana. Demandez un nouveau QR au commerçant.',
     unknownMint: mint =>
-      `Ce code Solana Pay demande un jeton que dpay ne propose pas encore (mint ${mint}). Payez-le avec un portefeuille qui le prend en charge.`,
+      `Ce code Solana Pay demande un jeton que dpay ne propose pas (mint ${mint}). Payez-le avec un portefeuille qui le prend en charge.`,
     offline:
-      'Pour un code Solana Pay, c’est votre téléphone qui soumet le transfert : il doit être en ligne. Reconnectez-vous et scannez à nouveau.',
+      'Pour un code Solana Pay, c’est votre téléphone qui soumet : il doit être en ligne. Reconnectez-vous et scannez à nouveau.',
     amountLabel: 'Montant',
     merchantMessage: message => `Message du commerçant : ${message}`,
     pendingNote:
-      'Le réseau a accepté ce paiement, mais sa confirmation est encore en route. La signature de transaction ci-dessous est votre preuve — vérifiez-la avant de payer à nouveau.',
+      'Le réseau a accepté ce paiement, mais la confirmation est encore en route. La signature ci-dessous est votre preuve — vérifiez-la avant de payer à nouveau.',
   },
 
   scanToPay: 'Scanner pour payer',
@@ -262,10 +262,11 @@ export const receiveFr: ReceiveMessages = {
   couldNotSubmit: 'Impossible d’envoyer le paiement — vérifiez la connexion',
   noOpenRequest: 'Aucune demande en cours.',
   paymentRejected: 'Paiement refusé.',
-  paymentRejectedDetail: 'Paiement refusé — le solde du payeur est peut-être insuffisant, ou le blockhash a expiré.',
+    paymentRejectedDetail:
+      'Paiement refusé — le payeur manque peut-être de solde, ou le blockhash a expiré.',
   couldNotConfirmMaySettle: 'Impossible de confirmer — le paiement peut encore être réglé. Vérifiez votre solde dans un instant ou réessayez.',
   stillCannotConfirm: 'Toujours impossible de confirmer — le paiement peut encore être réglé. Réessayez plus tard.',
-  settlementNotVerified: 'Confirmé, mais la transaction on-chain ne correspond pas à cette demande. Ne remettez pas encore la marchandise — vérifiez la signature dans un explorateur Solana et surveillez votre solde ; le paiement peut encore arriver correctement.',
+  settlementNotVerified: 'Confirmé, mais la transaction on-chain ne correspond pas à cette demande. Ne remettez pas encore la marchandise — vérifiez la signature dans un explorateur Solana et surveillez votre solde ; le paiement peut encore arriver.',
   savedDataCorrupt: 'Les données de paiement enregistrées sont corrompues.',
   paymentBeingConfirmed: 'Un paiement est en cours de confirmation',
   broadcastInterrupted: 'Un envoi a été interrompu. Le paiement a peut-être été réglé — réessayez pour vérifier.',
@@ -275,7 +276,7 @@ export const receiveFr: ReceiveMessages = {
   till: {
     tillCode: 'OpenCryptoPay (OCP), Binance Pay, application MoonPay [Le payeur doit être en ligne]',
 
-    ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code qu’il peut payer',
+    ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code payable',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'Un montant de caisse s’arrête au centime — saisissez 10.50 plutôt que 10.505.'
@@ -285,38 +286,38 @@ export const receiveFr: ReceiveMessages = {
 
     wrongAssetTitle: 'Un code de caisse se paie en VCHF',
     wrongAsset: (selected, network) =>
-      `Un code de caisse se paie toujours en VCHF sur l’Internet Computer — un comptoir accepte un seul actif, et dpay ne convertit jamais. Cette demande est en ${selected}${network ? ` sur ${network}` : ''}. Passez à VCHF pour encaisser, ou gardez le code dpay : n’importe quel appareil photo de téléphone l’ouvre — dpay lui-même, ou le portefeuille web — et il se paie en ${selected}.`,
+      `Un code de caisse se paie toujours en VCHF sur l’Internet Computer — dpay ne convertit jamais. Cette demande est en ${selected}${network ? ` sur ${network}` : ''}. Passez à VCHF pour encaisser, ou gardez le code dpay : n’importe quel appareil photo de téléphone l’ouvre, et il se paie en ${selected}.`,
     noTillAsset:
-      'Ce portefeuille ne détient pas de VCHF : il n’y a donc aucun compte où un encaissement pourrait être payé. Utilisez le code dpay — n’importe quel appareil photo de téléphone l’ouvre, et il accepte l’actif choisi.',
+      'Ce portefeuille n’a pas de VCHF : il n’y a donc aucun compte pour un encaissement. Utilisez le code dpay — n’importe quel appareil photo de téléphone l’ouvre, et il accepte l’actif choisi.',
     switchTo: asset => `Passer à ${asset}`,
 
     failedTitle: 'Le montant n’a pas été encaissé',
     notServed: host =>
-      `${host} ne sert pas de codes de caisse : rien n’a été ouvert et rien n’est payable. Demandez à la personne qui exploite ce relais d’activer la caisse, ou utilisez le code dpay — il n’a besoin d’aucune caisse.`,
+      `${host} ne sert pas de codes de caisse : rien n’a été ouvert. Demandez à la personne qui exploite ce relais d’activer la caisse, ou utilisez le code dpay — il n’a besoin d’aucune caisse.`,
     unreachable: host =>
-      `dpay n’a pas pu joindre ${host} : rien n’a été ouvert. Un code de caisse se crée en ligne. Vérifiez la connexion et recommencez — ou utilisez le code dpay, que ce téléphone fabrique seul et peut afficher hors ligne.`,
+      `dpay n’a pas pu joindre ${host} : rien n’a été ouvert. Les codes de caisse se créent en ligne. Vérifiez la connexion et réessayez — ou utilisez le code dpay, que ce téléphone peut afficher hors ligne.`,
     refused: said =>
       `La caisse a refusé ce montant : « ${said} » Rien n’est payable. Corrigez cela, puis recommencez.`,
     refusedNoReason: status =>
-      `La caisse a refusé ce montant (HTTP ${status}) sans dire pourquoi : rien n’est payable. Recommencez ; si elle refuse deux fois, prévenez la personne qui exploite le relais.`,
+      `La caisse a refusé ce montant (HTTP ${status}) sans raison : rien n’est payable. Recommencez ; si elle refuse deux fois, prévenez la personne qui exploite le relais.`,
     mispriced: (rung, quoted) =>
-      `Vous avez encaissé ${rung} et la caisse a répondu ${quoted}. dpay n’affiche pas un code qui réclame un montant que personne n’a choisi ici : rien n’est payable. Recommencez — et si cela se reproduit, prévenez la personne qui exploite le relais avant d’accepter le moindre paiement.`,
+      `Vous avez encaissé ${rung}, mais la caisse a répondu ${quoted}. dpay n’affichera pas un code pour un montant que personne n’a choisi : rien n’est payable. Recommencez ; si cela se reproduit, prévenez la personne qui exploite le relais avant d’accepter de l’argent.`,
     unsigned:
-      'Ce téléphone n’a pas pu signer le montant : rien n’a été ouvert et rien n’est payable. Fermez puis rouvrez dpay, et recommencez.',
+      'Ce téléphone n’a pas pu signer le montant : rien n’est payable. Fermez puis rouvrez dpay, et recommencez.',
     tryAgain: 'Réessayer',
 
     settlesAs: (amount, price) =>
       `Vous recevez ${amount} sur l’Internet Computer. Les frais du registre sont à votre charge, le client paie donc exactement ${price}.`,
     collecting: 'Encaissement du paiement autorisé par le client …',
     collectNotApproved:
-      'Le portefeuille du client n’a pas autorisé assez pour ce montant, ou l’autorisation a expiré. Demandez-lui de repayer le code — rien n’a été prélevé.',
+      'Le portefeuille du client n’a pas autorisé assez, ou l’autorisation a expiré. Demandez-lui de repayer le code — rien n’a été prélevé.',
     collectNoFunds:
-      'Le client a autorisé ce paiement mais n’a pas les fonds. Rien n’a été prélevé ; demandez-lui d’approvisionner son compte et de repayer le code.',
+      'Le client a autorisé le paiement mais n’a pas l’argent. Rien n’a été prélevé — demandez-lui d’approvisionner son compte et de repayer.',
     collectFailed:
-      'Le paiement autorisé n’a pas pu être encaissé, et rien n’a été prélevé. Le code reste payable — demandez au client de le scanner à nouveau, ou de payer sans contact.',
+      'Le paiement autorisé n’a pas pu être encaissé, et rien n’a été prélevé. Le code reste payable — demandez-lui de scanner à nouveau ou de payer sans contact.',
     noFeeTitle: 'Cette caisse ne peut pas chiffrer un montant',
     noFee: (symbol, host) =>
-      `Les frais du registre sont à la charge du commerce et se déduisent du prix — or cette application ne connaît aucuns frais pour ${symbol}, un montant les facturerait donc silencieusement au client. Rien n’est payable. Mettez dpay à jour, ou signalez à l’exploitant de ${host} que sa liste de devises n’indique pas les frais ${symbol}.`,
+      `Les frais du registre sont à la charge du commerce et se déduisent du prix, mais dpay ne connaît aucuns frais pour ${symbol} — un montant facturerait donc silencieusement le client. Rien n’est payable. Mettez dpay à jour, ou signalez à l’exploitant de ${host} que sa liste de devises n’indique pas les frais ${symbol}.`,
     showToCustomer: nfc =>
       nfc === 'tap'
         ? 'Montrez ceci au client — n’importe quel appareil photo de téléphone l’ouvre, et un téléphone dpay peut aussi le contacter.'
@@ -325,15 +326,15 @@ export const receiveFr: ReceiveMessages = {
         : 'Montrez ceci au client — n’importe quel appareil photo de téléphone l’ouvre et paie.',
     waiting: 'En attente du paiement…',
     cantCheck:
-      'Impossible de vérifier ce montant pour l’instant — la caisse est injoignable. Cela ne veut PAS dire qu’il est impayé. Laissez le code affiché : cet écran le dira dès qu’il pourra joindre la caisse.',
+      'Impossible de vérifier ce montant pour l’instant — la caisse est injoignable. Cela ne veut PAS dire qu’il est impayé. Laissez le code affiché ; cet écran se met à jour dès qu’il rejoint la caisse.',
     expiredWatching:
-      'Ce code a expiré : plus personne ne peut le payer. Si le client a déjà envoyé l’argent, il peut encore arriver — surveillance encore un instant.',
+      'Ce code a expiré : plus personne ne peut le payer. Si le client a déjà payé, l’argent peut encore arriver — surveillance encore un instant.',
     cancel: "Annuler l'encaissement",
     cancelling: 'Annulation…',
     cancelFailed: said =>
       `Le montant n’a PAS été annulé : « ${said} » Il peut rester payable — lisez cela avant de remettre quoi que ce soit.`,
     cancelFailedNoReason: status =>
-      `Le montant n’a PAS été annulé (HTTP ${status}) et aucune raison n’a été donnée : considérez-le comme toujours payable. Réessayez, et ne remettez rien sur ce code tant qu’il n’est pas annulé ou expiré.`,
+      `Le montant n’a PAS été annulé (HTTP ${status}) : considérez-le comme toujours payable. Réessayez, et ne remettez rien tant qu’il n’est pas annulé ou expiré.`,
     cancelUnreachable: host =>
       `dpay n’a pas pu joindre ${host} : ce montant n’a donc PAS été annulé — il reste payable jusqu’à son expiration. Réessayez dès que la connexion revient.`,
 
@@ -349,7 +350,7 @@ export const receiveFr: ReceiveMessages = {
         ? 'Rien n’est dû dessus et personne ne peut le payer. Recommencez quand le client suivant est prêt.'
         : reason === 'superseded'
         ? 'Un montant plus récent a été ouvert sur cette caisse : ce code n’accepte plus de paiement. Recommencez pour en montrer un tout neuf.'
-        : 'Le relais ne l’a plus — très probablement parce qu’il a redémarré. Rien n’a été crédité ici. Recommencez ; si le client dit avoir payé, vérifiez votre solde VCHF et vos Transactions avant de lui demander de payer une deuxième fois.',
+        : 'Le relais ne l’a plus — très probablement parce qu’il a redémarré. Rien n’a été crédité ici. Recommencez ; si le client dit avoir payé, vérifiez d’abord votre solde VCHF et vos Transactions.',
     ringUpNext: 'Client suivant',
 
     paidAmount: price => `Payé ${price}`,

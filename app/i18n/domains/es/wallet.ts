@@ -72,7 +72,7 @@ export const walletEs: WalletMessages = {
     title: 'Cuentas',
     intro: 'Toca una cuenta para usarla en Pagar y Recibir.',
     back: 'Atrás',
-    practice: 'Dinero de práctica: solo funciona dentro de dpay y ninguna tienda lo acepta.',
+    practice: 'Dinero de práctica. Solo funciona dentro de dpay, y ninguna tienda lo acepta.',
     convertHint: 'Convertir en un servicio externo',
   },
 
@@ -80,7 +80,7 @@ export const walletEs: WalletMessages = {
     title: 'Libreta de direcciones',
     intro: 'Direcciones a las que has enviado, guardadas solo en este dispositivo.',
     back: 'Atrás',
-    empty: 'Aún no hay direcciones guardadas — cada dirección a la que envías se guarda aquí automáticamente.',
+    empty: 'Aún no hay direcciones guardadas. Las que uses para enviar se guardan aquí automáticamente.',
     addEntry: 'Añadir una dirección',
     assetLabel: 'Para',
     addressLabel: 'Dirección',
@@ -127,8 +127,8 @@ export const walletEs: WalletMessages = {
     mintCounterparty: 'Fondos de prueba',
     failed: 'Falló — solo se cobró la comisión de red',
     dropped: count => count === 1
-      ? 'No se pudo leer 1 transacción de Solana — sigue existiendo on-chain, pero no se muestra aquí.'
-      : `No se pudieron leer ${count} transacciones de Solana — siguen existiendo on-chain, pero no se muestran aquí.`,
+      ? 'No se pudo leer 1 transacción de Solana: existe on-chain, pero no se muestra aquí.'
+      : `No se pudieron leer ${count} transacciones de Solana: existen on-chain, pero no se muestran aquí.`,
   },
 
   fund: {checking: 'Revisando…', checkAgain: 'Revisar de nuevo'},
@@ -157,17 +157,17 @@ export const educationEs: EducationMessages = {
       offline: {
         eyebrow: 'PRIMERO, CÓMO FUNCIONA UN PAGO',
         title: 'Un teléfono solicita y el otro paga',
-        body: 'El teléfono que recibe muestra una solicitud. La escaneas, compruebas el importe y el activo y apruebas. Su conexión envía el pago si tu teléfono está sin conexión.',
+        body: 'El otro teléfono muestra una solicitud. La escaneas, compruebas el importe y apruebas. Su conexión envía el pago si el tuyo está sin conexión.',
       },
       key: {
         eyebrow: 'TU DINERO',
         title: 'Tu clave se queda en este dispositivo',
-        body: 'dpay no guarda fondos ni puede aprobar un pago por ti. No hay ninguna cuenta de dpay: solo tu clave.',
+        body: 'dpay no guarda dinero ni puede aprobar pagos por ti. No hay ninguna cuenta de dpay: solo tu clave.',
       },
       exact: {
         eyebrow: 'SIN SORPRESAS',
         title: 'Paga el activo exacto que te piden',
-        body: 'La tienda pide un activo exacto. Tú revisas el importe y lo apruebas. dpay nunca convierte otro saldo.',
+        body: 'La tienda pide un activo exacto. Tú revisas el importe y lo apruebas. dpay nunca convierte.',
       },
     },
     stageTags: ['01 — SEÑAL', '02 — CLAVE', '03 — ACTIVO'],
@@ -202,11 +202,11 @@ export const educationEs: EducationMessages = {
     },
     cooldown: {
       title: 'Dinero de práctica, en un momento',
-      body: reason => `Este servidor reparte dinero de práctica de vez en cuando, y acaba de hacerlo. Dice: ${reason} Sigue con la configuración; vuelve a pagar cuando quieras.`,
+      body: reason => `Este servidor reparte dinero de práctica de vez en cuando, y acaba de hacerlo. Dice: ${reason} Sigue con la configuración; vuelve cuando quieras.`,
     },
     offline: {
       title: 'Esta práctica necesita conexión',
-      body: 'La práctica necesita conexión: tu teléfono hace de tienda y de quien paga; un pago real no. Vuelve a conectarte e inténtalo otra vez, o sigue con la configuración.',
+      body: 'La práctica necesita conexión porque tu teléfono hace los dos papeles. Vuelve a conectarte e inténtalo otra vez, o sigue con la configuración.',
     },
     empty: {
       title: 'Todavía no hay con qué practicar',
@@ -235,7 +235,7 @@ export const educationEs: EducationMessages = {
     title: 'Preparación del viaje',
     stamps: {
       recoverySaved: {label: 'COPIA\nHECHA', hint: 'Copia tus palabras de recuperación en Ajustes', short: 'falta la copia de seguridad'},
-      flowUnderstood: {label: 'FLUJO\nVISTO', hint: 'Haz el pago de práctica la primera vez, o haz cualquier pago', short: 'falta ver cómo funciona'},
+      flowUnderstood: {label: 'FLUJO\nVISTO', hint: 'Haz el pago de práctica, o haz cualquier pago', short: 'falta ver cómo funciona'},
       fundsReady: {label: 'FONDOS\nCARGADOS', hint: 'Añade dinero que puedas gastar; los fondos de práctica no cuentan', short: 'falta añadir fondos'},
       paymentTested: {label: 'PRIMER\nPAGO', hint: 'Completa un pago: paga o recibe', short: 'falta un pago'},
     },

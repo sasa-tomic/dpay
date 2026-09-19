@@ -7,7 +7,7 @@ import type {ReceiptMessages} from '../../keys';
 export const receiptFr: ReceiptMessages = {
   title: 'Reçu',
   openRow: 'Ouvrir ce reçu',
-  openRowHint: 'Affiche le montant exact, le compte en face et la preuve du registre',
+  openRowHint: 'Affiche le montant exact, les deux comptes et la preuve du registre',
   close: 'Fermer',
 
   amountLabel: 'Montant',
@@ -23,7 +23,7 @@ export const receiptFr: ReceiptMessages = {
   signatureLabel: 'Signature de la transaction',
 
   noAccount: 'Le registre n’a enregistré aucun compte de ce côté.',
-  noReferenceIc: 'Aucune référence — ce transfert ne portait pas de mémo (une demande de paiement dpay en met toujours une).',
+  noReferenceIc: 'Aucune référence — ce transfert ne portait pas de mémo.',
   noReferenceSolana: 'Un transfert Solana ne porte aucune référence dpay — la signature ci-dessous l’identifie.',
   pendingProof: 'Pas encore confirmé — ce paiement sera réglé dans le registre plus tard.',
 
@@ -31,5 +31,5 @@ export const receiptFr: ReceiptMessages = {
   copied: 'Copié ✓',
   copyHint: 'Copie toutes les lignes ci-dessus sous forme de texte',
   source: 'Toutes les valeurs ont été lues dans le registre.',
-  sourceAnnotated: 'Valeurs lues dans le registre · le nom et la note ont été enregistrés sur cet appareil lors du paiement.',
+  sourceAnnotated: 'Valeurs lues dans le registre · le nom et la note ont été enregistrés sur cet appareil.',
 };

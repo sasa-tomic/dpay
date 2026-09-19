@@ -51,9 +51,9 @@ export const depositDe: DepositMessages = {
     whereFrom: (symbol, network) => [
       {t: 'Sende '},
       {t: symbol, em: true},
-      {t: ' aus einer beliebigen Wallet-App, die es auf '},
+      {t: ' aus einer beliebigen Wallet, die es auf '},
       {t: network, em: true},
-      {t: ' hält — oder zahle es von einer Börse aus, die das Netzwerk unterstützt.'},
+      {t: ' hält, oder zahle es von einer Börse aus, die das Netzwerk unterstützt.'},
     ],
     onlyAccepts: (symbol, network) =>
       `Diese Adresse empfängt ${symbol}, das über ${network} gesendet wird — alles andere wird nicht gutgeschrieben.`,
@@ -64,7 +64,7 @@ export const depositDe: DepositMessages = {
     alsoBody: symbol => [
       {t: 'Sende '},
       {t: symbol, em: true},
-      {t: ' von jeder Internet-Computer-Wallet direkt an deine IC-Adresse unten — kein Memo nötig.'},
+      {t: ' von jeder Internet-Computer-Wallet an deine IC-Adresse unten. Kein Memo nötig.'},
     ],
   },
 
@@ -85,28 +85,28 @@ export const depositDe: DepositMessages = {
     txReverted: 'Die Transaktion wurde on-chain zurückgewiesen.',
     txUnconfirmed: 'Transaktion gesendet, aber noch nicht bestätigt — wir warten weiter auf die Gutschrift.',
     approveReverted:
-      'Die Freigabe wurde on-chain zurückgewiesen, die Einzahlung wurde also nie gesendet und es hat kein Geld deine Wallet verlassen. Versuch es erneut — deine Wallet fragt zuerst nach der Freigabe und dann nach der Einzahlung.',
+      'Die Freigabe wurde on-chain zurückgewiesen. Es wurde keine Einzahlung gesendet und kein Geld hat deine Wallet verlassen. Versuch es erneut — deine Wallet fragt zuerst nach der Freigabe und dann nach der Einzahlung.',
     approveUnconfirmed:
-      'Die Freigabe wurde gesendet, aber nicht bestätigt, die Einzahlung wurde also nie gesendet und es hat kein Geld deine Wallet verlassen. Warte einen Moment und versuch es erneut: Deine Wallet fragt dann noch einmal nach der Freigabe — das ist normal und kostet nur Gas.',
+      'Die Freigabe wurde gesendet, aber nicht bestätigt, es hat also kein Geld deine Wallet verlassen. Warte einen Moment und versuch es erneut — deine Wallet fragt dann noch einmal nach der Freigabe. Das ist normal und kostet nur Gas.',
     depositHashUnknown:
-      'Sieh in deiner Wallet-App in den letzten Aktivitäten nach, bevor du es erneut versuchst: Ist die Einzahlung dort, wird sie in etwa 20 Minuten gutgeschrieben, und eine zweite Einzahlung würde das Geld doppelt senden.',
+      'Prüf die letzten Aktivitäten in deiner Wallet, bevor du es erneut versuchst. Ist die Einzahlung dort, wird sie in etwa 20 Minuten gutgeschrieben — eine zweite Einzahlung würde doppelt bezahlen.',
     approveHashUnknown:
-      'Es wurde nichts eingezahlt und es hat kein Geld deine Wallet verlassen. Sieh in deiner Wallet-App in den letzten Aktivitäten nach und versuch es dann erneut — sie fragt zuerst nach der Freigabe, das ist normal und kostet nur Gas.',
+      'Es wurde nichts eingezahlt und kein Geld hat deine Wallet verlassen. Prüf die letzten Aktivitäten in deiner Wallet und versuch es dann erneut — sie fragt zuerst nach der Freigabe, das ist normal und kostet nur Gas.',
     txNotSigned: 'Transaktion nicht signiert.',
     txFailed: 'Transaktion fehlgeschlagen.',
     allowanceStands:
-      'Deine Freigabe ist bereits on-chain bestätigt und es hat kein Geld deine Wallet verlassen. Beim nächsten Versuch fragt deine Wallet wieder nach Freigabe und Einzahlung — beide Signaturen wie zuvor.',
+      'Deine Freigabe ist bereits on-chain bestätigt, und kein Geld hat deine Wallet verlassen. Ein erneuter Versuch fragt beide Signaturen wieder ab: Freigabe, dann Einzahlung.',
     sendOnly: (nativeAsset, networkLabel) => [
       {t: 'Sende nur '},
       {t: nativeAsset, em: true},
       {t: ' auf '},
       {t: networkLabel, em: true},
-      {t: '. Andere Assets oder Chains werden so nicht gutgeschrieben und können verloren gehen.'},
+      {t: '. Alles andere, das so gesendet wird, wird nicht gutgeschrieben und kann verloren gehen.'},
     ],
     mintLine: 'Deine Einzahlung wird nach der Bestätigung (~20 Min.) 1:1 deiner Wallet gutgeschrieben.',
     details: 'Details',
     gasNative: 'Die Netzwerkgebühr wird in ETH bezahlt — sende etwas mehr, als du einzahlen willst.',
-    gasErc20: 'Du brauchst etwas ETH für die Gas-Gebühren im Ethereum-Netzwerk.',
+    gasErc20: 'Du brauchst etwas ETH für die Gas-Gebühren des Netzwerks.',
     scanToPair: 'Zum Koppeln mit deiner Wallet scannen',
     orOpenHere: 'Oder öffne eine Wallet auf diesem Handy:',
     openNamedWallet: name => `${name} öffnen`,
@@ -114,12 +114,12 @@ export const depositDe: DepositMessages = {
     otherWalletHint:
       'Das Koppeln funktioniert, aber dpay kann sie später nicht für dich öffnen — wechsle zum Bestätigen der Einzahlung selbst dorthin.',
     couldntOpenWallet: name =>
-      `${name} konnte nicht geöffnet werden — die App ist vielleicht nicht mehr installiert. Wähle unten eine andere Wallet oder scanne den QR-Code mit einer Wallet auf einem anderen Gerät.`,
+      `${name} konnte nicht geöffnet werden — die App ist vielleicht nicht installiert. Wähle eine andere Wallet oder scanne den QR-Code mit einer Wallet auf einem anderen Gerät.`,
     walletList: 'MetaMask · Trust · Rabby · jede WalletConnect-kompatible Wallet',
     explainNative:
-      'Sende ETH direkt an den Einzahlungs-Contract — eine Transaktion, die deine Wallet signiert, mit deinem Einzahlungsbetrag als ETH-Wert.',
+      'Sende ETH direkt an den Einzahlungs-Contract — eine signierte Transaktion, mit deinem Einzahlungsbetrag als ETH-Wert.',
     explainErc20: nativeAsset =>
-      `${nativeAsset} ist ein Ethereum-Token — für die Einzahlung signiert deine Wallet zwei Transaktionen: erst die Freigabe, dann die Einzahlung.`,
+      `${nativeAsset} ist ein Ethereum-Token. Die Einzahlung braucht zwei signierte Transaktionen: erst die Freigabe, dann die Einzahlung.`,
     connectLabel: 'Ethereum-Wallet verbinden',
     connect: 'Wallet verbinden',
     amountPlaceholder: '0.00',
@@ -143,15 +143,15 @@ export const depositDe: DepositMessages = {
     checkingAta: asset => `Dein ${asset}-Konto wird geprüft…`,
     ataUnverified: asset => `Dein ${asset}-Konto konnte nicht geprüft werden.`,
     ataUnverifiedDetail: asset =>
-      `Mit deiner Adresse ist alles in Ordnung — wir erreichen Solana gerade nur nicht, um dein ${asset}-Konto on-chain zu bestätigen. Prüfe deine Verbindung und versuche es erneut.`,
+      `Mit deiner Adresse ist alles in Ordnung — dpay erreicht Solana nur gerade nicht, um dein ${asset}-Konto zu bestätigen. Prüfe deine Verbindung und versuche es erneut.`,
     ataUnverifiedRefused: asset =>
-      `Mit deiner Adresse ist alles in Ordnung — Solanas Endpunkt hat die Anfrage abgelehnt, daher konnte dein ${asset}-Konto on-chain nicht bestätigt werden. Es hat sich nichts bewegt, und dpay versucht es weiter — versuche es gleich noch einmal.`,
+      `Mit deiner Adresse ist alles in Ordnung — Solana hat die Anfrage abgelehnt, daher konnte dein ${asset}-Konto nicht bestätigt werden. Es hat sich nichts bewegt. Versuche es gleich noch einmal.`,
     ataUnverifiedOffline: asset =>
-      `Mit deiner Adresse ist alles in Ordnung — du scheinst offline zu sein, daher konnte dein ${asset}-Konto on-chain nicht bestätigt werden. Es hat sich nichts bewegt; prüfe erneut, sobald du wieder online bist.`,
+      `Mit deiner Adresse ist alles in Ordnung — du scheinst offline zu sein, daher konnte dein ${asset}-Konto nicht bestätigt werden. Es hat sich nichts bewegt. Prüfe erneut, sobald du wieder online bist.`,
     ataUnverifiedUnreachable: asset =>
-      `Mit deiner Adresse ist alles in Ordnung — dpays Relay erreicht Solana gerade nicht, daher konnte dein ${asset}-Konto on-chain nicht bestätigt werden. Deine Verbindung ist nicht das Problem; dein Geld ist unangetastet, und deine Internet-Computer-Zahlungen funktionieren weiter. Versuche es gleich noch einmal.`,
+      `Mit deiner Adresse ist alles in Ordnung — dpays Relay erreicht Solana nicht, daher konnte dein ${asset}-Konto nicht bestätigt werden. Deine Verbindung ist in Ordnung; dein Geld ist unangetastet, und deine Internet-Computer-Zahlungen funktionieren weiter. Versuche es gleich noch einmal.`,
     ataUnverifiedUnreadable: asset =>
-      `Mit deiner Adresse ist alles in Ordnung — Solana hat mit Daten geantwortet, die diese Wallet nicht lesen kann, daher konnte dein ${asset}-Konto on-chain nicht bestätigt werden. Es hat sich nichts bewegt; versuche es gleich noch einmal.`,
+      `Mit deiner Adresse ist alles in Ordnung — Solana hat Daten gesendet, die dpay nicht lesen kann, daher konnte dein ${asset}-Konto nicht bestätigt werden. Es hat sich nichts bewegt. Versuche es gleich noch einmal.`,
     retryAtaLabel: asset => `${asset}-Konto erneut prüfen`,
     checkAgain: 'Erneut prüfen',
     backToRequest: 'Zurück zur Anfrage',
@@ -171,13 +171,13 @@ export const depositDe: DepositMessages = {
   ata: {
     absent: asset => `Du hast auf diesem Gerät noch kein ${asset}-Konto.`,
     cost: (setupCost, asset) =>
-      `Das Erstellen deines ${asset}-Kontos kostet ${setupCost} (einmalige Miete + Gebühr, aus deinem SOL-Guthaben) — es bleibt deins, unter deinen Schlüsseln.`,
+      `Das Erstellen deines ${asset}-Kontos kostet ${setupCost}, bezahlt aus deinem SOL-Guthaben. Es bleibt deins, unter deinen Schlüsseln.`,
     checkingSol: 'Dein SOL-Guthaben wird geprüft…',
     needSol: setupCost =>
-      `Du brauchst zuerst etwa ${setupCost} in dieser Wallet — empfange SOL an deiner Adresse und erstelle dann das Konto.`,
+      `Du brauchst zuerst etwa ${setupCost} hier. Empfange SOL an deiner Adresse und erstelle dann das Konto.`,
     showSolAddress: 'Meine SOL-Adresse zeigen',
     creating: asset => `Dein ${asset}-Konto wird erstellt — Bestätigung auf Solana…`,
-    createHint: (setupCost, asset) => `Erstellt dein einmaliges ${asset}-Konto für ${setupCost} aus deinem SOL-Guthaben`,
+    createHint: (setupCost, asset) => `Erstellt dein ${asset}-Konto für ${setupCost} aus deinem SOL-Guthaben`,
   },
 
   trust: {
@@ -196,33 +196,33 @@ export const depositDe: DepositMessages = {
       {t: ' und senden Sie es an die Adresse oben.'},
     ],
     bridgeWithGas: (token, chain, gasToken) => [
-      {t: 'Dafür gibt es keine Adresse. Kaufen Sie '},
+      {t: 'Dafür existiert keine Adresse. Kaufen Sie '},
       {t: token, em: true},
       {t: ' auf '},
       {t: chain, em: true},
       {t: ' in eine Wallet, die Ihnen gehört, und halten Sie dort etwas '},
       {t: gasToken, em: true},
-      {t: ' für die Netzwerkgebühr bereit. Verbinden Sie dann diese Wallet hier — sie signiert die Überweisung.'},
+      {t: ' für die Gebühren bereit. Verbinden Sie dann diese Wallet hier — sie signiert die Überweisung.'},
     ],
     bridgeSelfGas: (token, chain) => [
-      {t: 'Dafür gibt es keine Adresse. Kaufen Sie '},
+      {t: 'Dafür existiert keine Adresse. Kaufen Sie '},
       {t: token, em: true},
       {t: ' auf '},
       {t: chain, em: true},
-      {t: ' in eine Wallet, die Ihnen gehört — etwas mehr, als Sie bewegen wollen, denn die Netzwerkgebühr geht davon ab. Verbinden Sie dann diese Wallet hier — sie signiert die Überweisung.'},
+      {t: ' in eine Wallet, die Ihnen gehört — etwas mehr, als Sie bewegen wollen, denn die Gebühr geht davon ab. Verbinden Sie dann diese Wallet hier — sie signiert die Überweisung.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'Kein Anbieter verkauft '},
       {t: target, em: true},
-      {t: ' direkt. Der Weg, der funktioniert: '},
+      {t: ' direkt. Kaufen Sie '},
       {t: viaToken, em: true},
       {t: ' mit Karte kaufen, an die Adresse oben senden und dann über Umtauschen in '},
       {t: target, em: true},
       {t: ' tauschen.'},
     ],
-    testnetOnly: (symbol, chain) => `${symbol} ist Testgeld — es hat keinen Gegenwert und wird nirgends verkauft. Holen Sie sich welches kostenlos bei einem öffentlichen ${chain}-Faucet und senden Sie es an die Adresse oben.`,
-    testnetOnlyWallet: (symbol, chain) => `${symbol} ist Testgeld — es hat keinen Gegenwert und wird nirgends verkauft. Holen Sie sich welches kostenlos bei einem öffentlichen ${chain}-Faucet in eine eigene Wallet und verbinden Sie diese Wallet hier.`,
-    bankRoute: provider => `Von einem Schweizer Bankkonto verkauft ${provider} es direkt per Überweisung. Dafür ist eine vollständige Identitätsprüfung nötig, und es dauert so lange wie eine Banküberweisung.`,
+    testnetOnly: (symbol, chain) => `${symbol} ist Testgeld ohne Gegenwert — es wird nirgends verkauft. Holen Sie sich welches kostenlos bei einem öffentlichen ${chain}-Faucet und senden Sie es an die Adresse oben.`,
+    testnetOnlyWallet: (symbol, chain) => `${symbol} ist Testgeld ohne Gegenwert — es wird nirgends verkauft. Holen Sie sich welches kostenlos bei einem öffentlichen ${chain}-Faucet in eine eigene Wallet und verbinden Sie diese Wallet hier.`,
+    bankRoute: provider => `Von einem Schweizer Bankkonto verkauft ${provider} es per Überweisung. Dafür ist eine vollständige Identitätsprüfung nötig, und es dauert so lange wie eine Banküberweisung.`,
     providersTitle: 'Wo man es kauft',
     costCard: rate => `Karte ${rate}`,
     costBank: rate => `Bank ${rate}`,
@@ -241,7 +241,7 @@ export const depositDe: DepositMessages = {
     qPix: 'Pix',
     upTo: pct => `bis zu ${pct}`,
     from: pct => `ab ${pct}`,
-    attribution: readOn => `Jeweils die vom Anbieter selbst veröffentlichten Angaben, abgerufen am ${readOn}. Es sind Obergrenzen, keine Preise — Ihre genaue Gebühr wird vor der Zahlung angezeigt, und die meisten Anbieter nehmen zusätzlich eine Marge im angebotenen Kurs.`,
+    attribution: readOn => `Jeweils die vom Anbieter selbst veröffentlichten Angaben, abgerufen am ${readOn}. Es sind Obergrenzen, keine Preise. Ihre genaue Gebühr wird vor der Zahlung angezeigt; die meisten Anbieter rechnen zusätzlich eine Marge im Kurs ein.`,
     noEndorsement: 'Alphabetisch aufgeführt. dpay empfiehlt keinen davon, wird von keinem bezahlt und ist an Ihrem Kauf nicht beteiligt.',
   },
 };
@@ -256,7 +256,7 @@ export const withdrawDe: WithdrawMessages = {
 
   ic: {
     resumed:
-      'Beim Schließen der App lief eine Auszahlung. Ein erneuter Versuch sendet dieselben Envelopes noch einmal — doppelt ausgeben ist ausgeschlossen.',
+      'Beim Schließen der App lief eine Auszahlung. Ein erneuter Versuch sendet dieselbe Zahlung noch einmal — doppelt ausgeben ist ausgeschlossen.',
     approvalUnknown: 'Die Freigabe konnte nicht bestätigt werden — prüfe dein Guthaben, wenn du wieder online bist',
     withdrawalUnknown:
       'Die Auszahlung konnte nicht bestätigt werden — sie kann trotzdem noch ankommen; prüfe bald dein Guthaben',
@@ -270,11 +270,11 @@ export const withdrawDe: WithdrawMessages = {
     availableMin: (available, min) => `Verfügbar: ${available} · min. ${min}`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Unter der Mindestauszahlung von ${min}.`,
-    gasNote: 'Du brauchst ckETH für Gas. Zahle zuerst ckETH ein, falls du keins hast.',
+    gasNote: 'Du brauchst ckETH für Gas. Füge zuerst welches hinzu, falls du keins hast.',
     inProgress: 'Auszahlung läuft',
     withdrawAmount: amount => `${amount} auszahlen`,
     resumeNote:
-      'Bereits signiert — ein erneuter Versuch sendet dieselben Envelopes noch einmal (doppelt ausgeben ist ausgeschlossen). Wenn du das Formular änderst, startet stattdessen eine neue Auszahlung.',
+      'Bereits signiert — ein erneuter Versuch sendet dieselbe Zahlung noch einmal (doppelt ausgeben ist ausgeschlossen). Wenn du das Formular änderst, startet eine neue Auszahlung.',
     reviewTitle: 'Auszahlung prüfen',
     confirmLabel: 'Auszahlung bestätigen',
     retry: 'Auszahlung erneut versuchen',
@@ -300,12 +300,12 @@ export const withdrawDe: WithdrawMessages = {
     refuseWrongChain: (pastedChain, asset, assetChain) =>
       `Das ist eine ${pastedChain}-Adresse. ${asset} wird auf ${assetChain} abgewickelt und kann sie deshalb nicht erreichen — füge stattdessen eine ${assetChain}-Adresse ein.`,
     refuseLegacyNotIcp: asset =>
-      `Das ist ein ICP-Account-Identifier — die Form mit 64 Zeichen. Dorthin kann nur ICP selbst gesendet werden; für ${asset} brauchst du den Internet-Computer-Principal des Empfängers (die Schreibweise mit Bindestrichen).`,
+      `Das ist ein ICP-Account-Identifier — die Form mit 64 Zeichen. Dorthin kann nur ICP gesendet werden. Für ${asset} brauchst du den Internet-Computer-Principal des Empfängers (die Schreibweise mit Bindestrichen).`,
     refuseUnrecognised: asset => `Das sieht nicht nach einer Adresse aus, an die ${asset} gesendet werden kann.`,
     refuseMistypedIc: 'Diese Internet-Computer-Adresse ist unvollständig oder vertippt — prüfe, ob du sie ganz kopiert hast.',
     refuseMistypedLegacy: 'Diese ICP-Kontoadresse ist unvollständig oder vertippt — prüfe, ob du alle 64 Zeichen kopiert hast.',
     refuseOwnSubaccount:
-      'Das ist ein Unterkonto deiner eigenen Wallet, und dpay zeigt und verwendet nur dein Hauptkonto — dorthin gesendetes Geld würde hier nicht mehr auftauchen. Du besitzt dieses Guthaben bereits: füge die Adresse einer anderen Person ein, um zu senden.',
+      'Das ist ein Unterkonto deiner eigenen Wallet. dpay zeigt und verwendet nur dein Hauptkonto, daher würde dorthin gesendetes Geld hier nicht mehr auftauchen. Du besitzt dieses Guthaben bereits — füge die Adresse einer anderen Person ein, um zu senden.',
     selfWarning: 'Das ist deine eigene Adresse. Das Geld kommt direkt zurück, und die Gebühr zahlst du trotzdem.',
 
     maxLabel: 'Max',
@@ -328,7 +328,7 @@ export const withdrawDe: WithdrawMessages = {
     sentUnknownBody:
       'Die Überweisung wurde übermittelt, ist aber noch nicht bestätigt. Sie kann trotzdem noch ankommen — prüfe gleich dein Guthaben, statt sie noch einmal zu senden.',
     blockIndex: index => `Ledger-Block ${index}`,
-    noLedger: 'Für dieses Asset ist kein Ledger konfiguriert, deshalb kann es nicht gesendet werden.',
+    noLedger: 'Dieses Asset hat keinen Ledger, deshalb kann es nicht gesendet werden.',
   },
 
   sol: {

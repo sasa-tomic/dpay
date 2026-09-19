@@ -57,7 +57,7 @@ export async function run() {
     assertIncludes(panel, 'Show my VCHF address', 'and still carries the deposit route (the funnel is not lost)');
     const pointer = await driver.readText('fund-sibling-holds');
     assertIncludes(pointer, '∂100.00', 'the pointer names the practice balance the wallet actually holds');
-    assertIncludes(pointer, 'practise a payment', 'and says what it is FOR');
+    assertIncludes(pointer, 'Practise with it', 'and says what it is FOR');
     assertIncludes(pointer, 'cannot pay a real merchant', 'and what it is NOT — never an implied real balance');
     console.log(`[148-pay-camera-and-funded-account] ✓ pointer: ${pointer}`);
 

@@ -79,7 +79,7 @@ describe('PassportArchive (the one full-page surface)', () => {
     expect(hasTestID(tree, 'passport-slot-flowUnderstood')).toBe(true);
     expect(hasTestID(tree, 'passport-slot-paymentTested')).toBe(true);
     // The ONE contextual next step names the first missing capability.
-    expect(findByTestID(tree, 'passport-hint').props.children).toBe('Make the practice payment on your first run — or make any payment');
+    expect(findByTestID(tree, 'passport-hint').props.children).toBe('Make the practice payment — or any payment');
     // Incomplete NEVER retires — no Done button exists.
     expect(hasTestID(tree, 'btn-passport-done')).toBe(false);
   });

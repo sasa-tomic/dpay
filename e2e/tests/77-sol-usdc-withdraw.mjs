@@ -15,9 +15,9 @@
 //
 //   CASE 2 — recipient ATA absent + sender SOL below the rent floor (folded in to share the
 //     setup/teardown): sendSpl's honest cost pre-check fires BEFORE building anything — the
-//     friendly error ("They don't have a USDC account yet — creating it needs about 0.00204428 SOL
-//     in this wallet (one-time rent + fee, paid by you) — send a little SOL here first") renders
-//     via `sol-send-err` and NO "Sent ✓" state is reached (the sheet stays on the form).
+//     friendly error ("They don't have a USDC account yet. Creating it costs about 0.00204428
+//     SOL, paid by you — send a little SOL here first") renders via `sol-send-err` and NO
+//     "Sent ✓" state is reached (the sheet stays on the form).
 //
 // Stub design (the per-address dispatch is the point): `getAccountInfo` must answer differently
 // for the DEVICE/SOURCE ATA (exists — the USDC balance poll + sendSpl's sender check read it) vs
@@ -153,8 +153,8 @@ export async function run() {
     // the unit, so the i18n template must not re-append it; pinned in __tests__/solana-ata-copy).
     assertEq(
       errTxt,
-      "They don't have a USDC account yet — creating it needs about 0.00204428 SOL in this wallet "
-      + '(one-time rent + fee, paid by you) — send a little SOL here first',
+      "They don't have a USDC account yet. Creating it costs about 0.00204428 SOL, paid by you "
+      + '— send a little SOL here first',
       'the pre-check error renders the whole sentence, with the rent amount carrying its unit ONCE',
     );
     console.log('[77-sol-usdc-withdraw] ✓ rent pre-check failure surfaced verbatim');

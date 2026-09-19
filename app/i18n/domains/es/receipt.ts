@@ -7,7 +7,7 @@ import type {ReceiptMessages} from '../../keys';
 export const receiptEs: ReceiptMessages = {
   title: 'Comprobante',
   openRow: 'Abrir este comprobante',
-  openRowHint: 'Muestra el importe exacto, la cuenta de la otra parte y la prueba de la red',
+  openRowHint: 'Muestra el importe exacto, ambas cuentas y la prueba de la red',
   close: 'Cerrar',
 
   amountLabel: 'Importe',
@@ -23,7 +23,7 @@ export const receiptEs: ReceiptMessages = {
   signatureLabel: 'Firma de la transacción',
 
   noAccount: 'La red no registró ninguna cuenta en ese lado.',
-  noReferenceIc: 'Sin referencia: esta transferencia no llevaba memo (una solicitud de pago de dpay siempre pone una).',
+  noReferenceIc: 'Sin referencia: esta transferencia no llevaba memo.',
   noReferenceSolana: 'Una transferencia de Solana no lleva referencia de dpay: la firma de abajo la identifica.',
   pendingProof: 'Aún sin confirmar — este pago se liquidará en la red más tarde.',
 
@@ -31,5 +31,5 @@ export const receiptEs: ReceiptMessages = {
   copied: 'Copiado ✓',
   copyHint: 'Copia todas las líneas de arriba como texto',
   source: 'Todos los valores se leyeron de la red.',
-  sourceAnnotated: 'Valores leídos de la red · el nombre y la nota se guardaron en este dispositivo al hacer el pago.',
+  sourceAnnotated: 'Valores leídos de la red · el nombre y la nota se guardaron en este dispositivo.',
 };

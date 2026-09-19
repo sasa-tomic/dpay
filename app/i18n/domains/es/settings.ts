@@ -44,7 +44,7 @@ export const settingsEs: SettingsMessages = {
   restore: {
     label: 'Restaurar',
     warning:
-      'Sustituye tu billetera actual por la de esta semilla. Si aún no lo has hecho, haz antes copia de la actual: a sus fondos solo se llega con su propia semilla.',
+      'Sustituye tu billetera actual por la de esta semilla. Haz antes copia de la actual: su dinero solo se alcanza con su propia semilla.',
     seedPlaceholder: '24 palabras de recuperación o 64 caracteres hex',
     seedA11y: 'Semilla de recuperación',
     seedHint: 'Tus 24 palabras de recuperación, o la semilla de 64 hex de Copia de seguridad',
@@ -56,13 +56,13 @@ export const settingsEs: SettingsMessages = {
     entryHint: 'Importa una billetera desde una semilla: sustituye la actual',
     errEmpty: 'Introduce tus 24 palabras de recuperación o la semilla de 64 hex.',
     errWords:
-      'Hay palabras incorrectas o que faltan. Revisa que estén las 24 y bien escritas, o pega la semilla de 64 hex.',
+      'Hay palabras incorrectas o que faltan. Revisa que las 24 estén bien escritas, o pega la semilla de 64 hex.',
   },
 
   reset: {
     label: 'Borrar',
     warning:
-      'Esto borra la identidad de tu billetera de este dispositivo. Los fondos de esta dirección quedarán irrecuperables.',
+      'Esto borra tu billetera de este dispositivo. El dinero de esta dirección quedará irrecuperable.',
     confirm: 'Sí, borrarlo todo',
     cancelA11y: 'Cancelar el borrado',
     action: 'Borrar billetera',
@@ -102,7 +102,7 @@ export const settingsEs: SettingsMessages = {
     show: 'Mostrar los ajustes avanzados',
     hide: 'Ocultar los ajustes avanzados',
     hint: 'Servidores y endpoints de red con los que habla esta billetera',
-    serverNote: 'Una dirección por línea: se usa la primera que responde. Se aplica al tocar Aplicar.',
+    serverNote: 'Una dirección por línea. Se usa la primera que responde. Toca Aplicar para guardar.',
     serverLabel: 'Servidor',
     serverPlaceholder: 'http://<ip>:8787',
     apply: 'Aplicar',
@@ -114,7 +114,7 @@ export const settingsEs: SettingsMessages = {
     // F2 — el override de la pasarela IC. Solo para operadores (demos/pruebas contra una réplica
     // local), no es una función de usuario; la nota lo dice con honestidad, como la línea de
     // Solana de arriba.
-    icGatewayNote: 'Solo para operadores: la URL base a la que esta billetera envía las transacciones IC. Vacío usa la pasarela pública; una dirección de réplica local dirige allí demos y pruebas.',
+    icGatewayNote: 'Solo para operadores: la URL base a la que esta billetera envía las transacciones IC. Vacío usa la pasarela pública; pon una réplica local para demos y pruebas.',
     icGatewayLabel: 'Pasarela IC',
     icGatewayPlaceholder: 'http://10.0.2.2:4943',
     icGatewayApplyA11y: 'Aplicar la pasarela IC',
@@ -123,7 +123,7 @@ export const settingsEs: SettingsMessages = {
   about: {
     label: 'Acerca de',
     custody:
-      'dpay no es custodio de tus fondos: los controla únicamente la clave de este dispositivo. No existe ninguna cuenta de dpay, y dpay no puede mover, congelar ni recuperar tus fondos: tus 24 palabras de recuperación son la única forma de recuperarlos.',
+      'dpay no es custodio de tu dinero: lo controla únicamente la clave de este dispositivo. No existe ninguna cuenta de dpay. dpay no puede moverlo, congelarlo ni recuperarlo: tus 24 palabras de recuperación son la única forma de recuperarlos.',
     privacy: 'Política de privacidad',
   },
 };
@@ -133,9 +133,9 @@ export const onboardingEs: OnboardingMessages = {
   custody: 'Sin cuentas. Tu clave nunca sale de este teléfono. Ni siquiera dpay puede mover tu dinero.',
   continue: 'Continuar',
   errOwnSeed:
-    'Esa semilla no parece correcta: pega tus 24 palabras de recuperación o la semilla de 64 hex tal como las anotaste.',
-  errWords: 'Hay palabras incorrectas o que faltan. Revisa que estén las 24 y bien escritas.',
-  errSaveWallet: 'Este teléfono no pudo guardar tu monedero, así que todavía no se ha creado. Vuelve a tocar Continuar; si sigue fallando, libera espacio de almacenamiento en el teléfono.',
+    'Esa semilla no parece correcta. Pega tus 24 palabras de recuperación o la semilla de 64 hex tal como las anotaste.',
+  errWords: 'Hay palabras incorrectas o que faltan. Revisa que las 24 estén bien escritas.',
+  errSaveWallet: 'Este teléfono no pudo guardar tu billetera, así que todavía no se ha creado. Vuelve a tocar Continuar para reintentarlo. Si sigue fallando, libera espacio de almacenamiento en el teléfono.',
 
   recoverySaved: {
     stamp: 'Copia guardada',
@@ -146,7 +146,7 @@ export const onboardingEs: OnboardingMessages = {
     ...copyWordsEs,
     title: 'Haz una copia de seguridad',
     warning:
-      'Anota estas 24 palabras y guárdalas en un lugar seguro: son la ÚNICA forma de recuperar tu billetera si pierdes este dispositivo. No hay cuenta de dpay a la que volver a entrar, y ni siquiera dpay puede recuperarlas.',
+      'Anota estas 24 palabras y guárdalas en un lugar seguro. Son la ÚNICA forma de recuperar tu billetera si pierdes este dispositivo: no hay cuenta de dpay, y ni siquiera dpay puede recuperarlas.',
     copyWordsHint: 'Copia las 24 palabras sin los números de posición',
     ack: 'He anotado las 24 palabras',
   },

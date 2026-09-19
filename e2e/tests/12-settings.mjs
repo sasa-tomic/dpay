@@ -71,7 +71,7 @@ export async function run() {
     //     nobody must read it unless they open Settings.
     const aboutText = await driver.readText('about-custody', { timeoutMs: 4_000 });
     assertIncludes(aboutText, 'non-custodial', 'Settings About must use the explicit term');
-    assertIncludes(aboutText, 'cannot move, freeze, or recover your funds', 'Settings About must state the concrete limits');
+    assertIncludes(aboutText, 'cannot move, freeze, or recover it', 'Settings About must state the concrete limits');
     console.log('[12-settings] ✓ About states the non-custodial model explicitly');
     console.log(`[12-settings] ✓ relay input holds ${relayVal}`);
 

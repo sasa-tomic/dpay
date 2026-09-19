@@ -236,7 +236,7 @@ describe('A4 — a rail the wallet cannot read says so ONCE, for the network', (
     expect(occurrences(screen, M.errors.rail.unreadable('Solana'))).toBe(1);
     const line = textOf(tree, 'rail-unreadable-solana');
     expect(line).toContain('Solana'); // WHICH network is not answering
-    expect(line.toLowerCase()).toContain('other accounts'); // what still works
+    expect(line.toLowerCase()).toContain('sent data this wallet can’t read'); // why the balances are stale — the READ, not the figure
     expect(line.toLowerCase()).toContain('retr'); // it recovers on its own — no button to press
     // It speaks about the READ, not about the figure: 'error' ALSO covers a later failure that
     // keeps the last value it read, and a line saying "unreadable" beside a visible "2 SOL" would

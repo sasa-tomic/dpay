@@ -52,9 +52,9 @@ export const depositEs: DepositMessages = {
     whereFrom: (symbol, network) => [
       {t: 'Envía '},
       {t: symbol, em: true},
-      {t: ' desde cualquier app de billetera que lo tenga en '},
+      {t: ' desde cualquier billetera que lo tenga en '},
       {t: network, em: true},
-      {t: ' — o retíralo desde un exchange que admita la red.'},
+      {t: ', o retíralo desde un exchange que la admita.'},
     ],
     onlyAccepts: (symbol, network) =>
       `Esta dirección recibe ${symbol} enviado por ${network}: cualquier otra cosa no se acreditará.`,
@@ -65,7 +65,7 @@ export const depositEs: DepositMessages = {
     alsoBody: symbol => [
       {t: 'Envía '},
       {t: symbol, em: true},
-      {t: ' desde cualquier billetera de Internet Computer directamente a tu dirección IC de abajo — no hace falta memo.'},
+      {t: ' desde cualquier billetera de Internet Computer a tu dirección IC de abajo. No hace falta memo.'},
     ],
   },
 
@@ -86,28 +86,28 @@ export const depositEs: DepositMessages = {
     txReverted: 'La transacción se revirtió en la cadena.',
     txUnconfirmed: 'Transacción enviada, aún sin confirmar. Seguimos esperando la emisión.',
     approveReverted:
-      'La aprobación se revirtió en la cadena: el depósito nunca se envió y no salió dinero de tu billetera. Vuelve a intentarlo; tu billetera pedirá primero la aprobación y después el depósito.',
+      'La aprobación se revirtió en la cadena. No se envió ningún depósito y no salió dinero de tu billetera. Vuelve a intentarlo; tu billetera pedirá primero la aprobación y después el depósito.',
     approveUnconfirmed:
-      'La aprobación se envió pero no se confirmó: el depósito nunca se envió y no salió dinero de tu billetera. Espera un momento y vuelve a intentarlo; tu billetera pedirá la aprobación otra vez, es lo normal y solo cuesta gas.',
+      'La aprobación se envió pero no se confirmó: no salió dinero de tu billetera. Espera un momento y vuelve a intentarlo; tu billetera pedirá la aprobación otra vez. Es lo normal y solo cuesta gas.',
     depositHashUnknown:
-      'Revisa la actividad reciente en tu app de billetera antes de volver a intentarlo: si el depósito está ahí, se acreditará en unos 20 minutos, y depositar otra vez enviaría el dinero dos veces.',
+      'Revisa la actividad reciente de tu billetera antes de volver a intentarlo. Si el depósito está ahí, se acreditará en unos 20 minutos: depositar otra vez pagaría dos veces.',
     approveHashUnknown:
-      'No se hizo ningún depósito y no salió dinero de tu billetera. Revisa la actividad reciente en tu app de billetera y vuelve a intentarlo: pedirá primero la aprobación, es lo normal y solo cuesta gas.',
+      'No se hizo ningún depósito y no salió dinero de tu billetera. Revisa la actividad reciente de tu billetera y vuelve a intentarlo: pedirá primero la aprobación, es lo normal y solo cuesta gas.',
     txNotSigned: 'La transacción no se firmó.',
     txFailed: 'La transacción falló.',
     allowanceStands:
-      'Tu aprobación de gasto ya está confirmada en la cadena y no salió dinero de tu billetera. Si lo intentas otra vez, tu billetera pedirá la aprobación y después el depósito, las dos firmas igual que antes.',
+      'Tu aprobación de gasto ya está confirmada en la cadena, y no salió dinero de tu billetera. Si lo intentas otra vez, pedirá las dos firmas de nuevo: la aprobación y después el depósito.',
     sendOnly: (nativeAsset, networkLabel) => [
       {t: 'Envía solo '},
       {t: nativeAsset, em: true},
       {t: ' en '},
       {t: networkLabel, em: true},
-      {t: '. Otros activos u otras cadenas enviados por aquí no se acreditarán y podrían perderse.'},
+      {t: '. Todo lo demás enviado por aquí no se acreditará y podría perderse.'},
     ],
     mintLine: 'Tu depósito se emite 1:1 en tu billetera al confirmarse (~20 min).',
     details: 'Detalles',
     gasNative: 'La comisión de red se paga en ETH: envía un poco más de lo que quieras depositar.',
-    gasErc20: 'Necesitarás un poco de ETH para las comisiones de red de Ethereum.',
+    gasErc20: 'Necesitas un poco de ETH para las comisiones de gas de la red.',
     scanToPair: 'Escanea con tu billetera para vincular',
     orOpenHere: 'O abre una billetera en este teléfono:',
     openNamedWallet: name => `Abrir ${name}`,
@@ -115,12 +115,12 @@ export const depositEs: DepositMessages = {
     otherWalletHint:
       'La vinculación funciona, pero después dpay no podrá volver a abrirla por ti: cambia a la billetera tú mismo para aprobar el depósito.',
     couldntOpenWallet: name =>
-      `No se pudo abrir ${name}; puede que ya no esté instalada. Elige otra billetera abajo o escanea el QR con una billetera en otro dispositivo.`,
+      `No se pudo abrir ${name}: puede que no esté instalada. Elige otra billetera o escanea el QR con una billetera en otro dispositivo.`,
     walletList: 'MetaMask · Trust · Rabby · cualquier billetera compatible con WalletConnect',
     explainNative:
-      'Envía ETH directamente al contrato de depósito: una sola transacción que firma tu billetera, con el importe del depósito como valor en ETH.',
+      'Envía ETH directamente al contrato de depósito: una transacción firmada, con el importe del depósito como valor en ETH.',
     explainErc20: nativeAsset =>
-      `${nativeAsset} es un token de Ethereum: depositarlo requiere dos transacciones que firma tu billetera — primero la aprobación y después el depósito.`,
+      `${nativeAsset} es un token de Ethereum. Depositarlo requiere dos transacciones firmadas: primero la aprobación y después el depósito.`,
     connectLabel: 'Conectar billetera de Ethereum',
     connect: 'Conectar billetera',
     amountPlaceholder: '0.00',
@@ -144,15 +144,15 @@ export const depositEs: DepositMessages = {
     checkingAta: asset => `Revisando tu cuenta de ${asset}…`,
     ataUnverified: asset => `No se pudo revisar tu cuenta de ${asset}.`,
     ataUnverifiedDetail: asset =>
-      `Tu dirección está bien; lo que pasa es que ahora mismo no podemos contactar con Solana para confirmar tu cuenta de ${asset} en la cadena. Revisa tu conexión e inténtalo de nuevo.`,
+      `Tu dirección está bien; dpay simplemente no consigue contactar con Solana para confirmar tu cuenta de ${asset}. Revisa tu conexión e inténtalo de nuevo.`,
     ataUnverifiedRefused: asset =>
-      `Tu dirección está bien; el punto de acceso de Solana rechazó la solicitud, así que no se pudo confirmar tu cuenta de ${asset} en la cadena. No se ha movido nada, y dpay sigue reintentando — pruébalo de nuevo en un momento.`,
+      `Tu dirección está bien; Solana rechazó la solicitud, así que no se pudo confirmar tu cuenta de ${asset}. No se ha movido nada. Inténtalo de nuevo en un momento.`,
     ataUnverifiedOffline: asset =>
-      `Tu dirección está bien; parece que estás sin conexión, así que no se pudo confirmar tu cuenta de ${asset} en la cadena. No se ha movido nada; vuelve a comprobarlo cuando recuperes la conexión.`,
+      `Tu dirección está bien; parece que estás sin conexión, así que no se pudo confirmar tu cuenta de ${asset}. No se ha movido nada. Vuelve a comprobarlo cuando recuperes la conexión.`,
     ataUnverifiedUnreachable: asset =>
-      `Tu dirección está bien; el relé de dpay no consigue alcanzar Solana ahora mismo, así que no se pudo confirmar tu cuenta de ${asset} en la cadena. El problema no es tu conexión; tu dinero está intacto y tus pagos de Internet Computer siguen funcionando. Inténtalo de nuevo en un momento.`,
+      `Tu dirección está bien; el relé de dpay no consigue alcanzar Solana, así que no se pudo confirmar tu cuenta de ${asset}. Tu conexión está bien; tu dinero está intacto y tus pagos de Internet Computer siguen funcionando. Inténtalo de nuevo en un momento.`,
     ataUnverifiedUnreadable: asset =>
-      `Tu dirección está bien; Solana respondió con datos que este monedero no puede leer, así que no se pudo confirmar tu cuenta de ${asset} en la cadena. No se ha movido nada; inténtalo de nuevo en un momento.`,
+      `Tu dirección está bien; Solana envió datos que dpay no puede leer, así que no se pudo confirmar tu cuenta de ${asset}. No se ha movido nada. Inténtalo de nuevo en un momento.`,
     retryAtaLabel: asset => `Reintentar la revisión de la cuenta de ${asset}`,
     checkAgain: 'Revisar de nuevo',
     backToRequest: 'Volver a la solicitud',
@@ -172,13 +172,13 @@ export const depositEs: DepositMessages = {
   ata: {
     absent: asset => `Todavía no tienes una cuenta de ${asset} en este dispositivo.`,
     cost: (setupCost, asset) =>
-      `Crear tu cuenta de ${asset} cuesta ${setupCost} (renta única + comisión, de tu saldo de SOL) — la cuenta es tuya y está bajo tus claves.`,
+      `Crear tu cuenta de ${asset} cuesta ${setupCost}, pagado de tu saldo de SOL. La cuenta es tuya y está bajo tus claves.`,
     checkingSol: 'Revisando tu saldo de SOL…',
     needSol: setupCost =>
-      `Primero necesitas unos ${setupCost} en esta billetera: recibe SOL en tu dirección y luego crea la cuenta.`,
+      `Primero necesitas unos ${setupCost} aquí. Recibe SOL en tu dirección y luego crea la cuenta.`,
     showSolAddress: 'Ver mi dirección de SOL',
     creating: asset => `Creando tu cuenta de ${asset}. Confirmando en Solana…`,
-    createHint: (setupCost, asset) => `Crea tu cuenta única de ${asset} por ${setupCost} de tu saldo de SOL`,
+    createHint: (setupCost, asset) => `Crea tu cuenta de ${asset} por ${setupCost} de tu saldo de SOL`,
   },
 
   trust: {
@@ -197,33 +197,33 @@ export const depositEs: DepositMessages = {
       {t: ' y envíelo a la dirección de arriba.'},
     ],
     bridgeWithGas: (token, chain, gasToken) => [
-      {t: 'Para este no hay dirección. Compre '},
+      {t: 'Para este no existe dirección. Compre '},
       {t: token, em: true},
       {t: ' en '},
       {t: chain, em: true},
       {t: ' en una cartera suya, y guarde en ella un poco de '},
       {t: gasToken, em: true},
-      {t: ' para la comisión de red. Después conecte esa cartera aquí: ella firma la transferencia.'},
+      {t: ' para las comisiones. Después conecte esa cartera aquí: ella firma la transferencia.'},
     ],
     bridgeSelfGas: (token, chain) => [
-      {t: 'Para este no hay dirección. Compre '},
+      {t: 'Para este no existe dirección. Compre '},
       {t: token, em: true},
       {t: ' en '},
       {t: chain, em: true},
-      {t: ' en una cartera suya — un poco más de lo que quiera mover, porque la comisión de red sale de ahí. Después conecte esa cartera aquí: ella firma la transferencia.'},
+      {t: ' en una cartera suya — un poco más de lo que quiera mover, porque la comisión sale de ahí. Después conecte esa cartera aquí: ella firma la transferencia.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'Ningún proveedor vende '},
       {t: target, em: true},
-      {t: ' directamente. La ruta que funciona: compre '},
+      {t: ' directamente. Compre '},
       {t: viaToken, em: true},
       {t: ' con tarjeta, envíelo a la dirección de arriba y use Convertir para cambiarlo por '},
       {t: target, em: true},
       {t: '.'},
     ],
-    testnetOnly: (symbol, chain) => `${symbol} es dinero de prueba: no tiene valor y nadie lo vende. Consígalo gratis en un faucet público de ${chain} y envíelo a la dirección de arriba.`,
-    testnetOnlyWallet: (symbol, chain) => `${symbol} es dinero de prueba: no tiene valor y nadie lo vende. Consígalo gratis en un faucet público de ${chain} en una cartera suya y conecte esa cartera aquí.`,
-    bankRoute: provider => `Desde una cuenta bancaria suiza, ${provider} lo vende directamente por transferencia. Requiere verificación de identidad completa y tarda lo que tarda una transferencia bancaria.`,
+    testnetOnly: (symbol, chain) => `${symbol} es dinero de prueba, sin ningún valor: nadie lo vende. Consígalo gratis en un faucet público de ${chain} y envíelo a la dirección de arriba.`,
+    testnetOnlyWallet: (symbol, chain) => `${symbol} es dinero de prueba, sin ningún valor: nadie lo vende. Consígalo gratis en un faucet público de ${chain} en una cartera suya y conecte esa cartera aquí.`,
+    bankRoute: provider => `Desde una cuenta bancaria suiza, ${provider} lo vende por transferencia. Requiere verificación de identidad completa y tarda lo que tarda una transferencia bancaria.`,
     providersTitle: 'Dónde se compra',
     costCard: rate => `tarjeta ${rate}`,
     costBank: rate => `banco ${rate}`,
@@ -242,7 +242,7 @@ export const depositEs: DepositMessages = {
     qPix: 'Pix',
     upTo: pct => `hasta ${pct}`,
     from: pct => `desde ${pct}`,
-    attribution: readOn => `Cifras publicadas por cada proveedor, consultadas el ${readOn}. Son límites, no precios — su comisión exacta se muestra antes de pagar, y la mayoría de proveedores añade además un margen dentro del tipo que ofrece.`,
+    attribution: readOn => `Cifras publicadas por cada proveedor, consultadas el ${readOn}. Son límites, no precios. Su comisión exacta se muestra antes de pagar; la mayoría de proveedores añade además un margen dentro del tipo.`,
     noEndorsement: 'Por orden alfabético. dpay no recomienda ninguno, ninguno le paga ni interviene en su compra.',
   },
 };
@@ -257,7 +257,7 @@ export const withdrawEs: WithdrawMessages = {
 
   ic: {
     resumed:
-      'Había un retiro en curso cuando se cerró la app. Reintentar vuelve a enviar los mismos sobres: no puede gastar dos veces.',
+      'Había un retiro en curso cuando se cerró la app. Reintentar vuelve a enviar el mismo pago: no puede gastar dos veces.',
     approvalUnknown: 'No se pudo confirmar la aprobación: revisa tu saldo cuando vuelvas a tener conexión',
     withdrawalUnknown: 'No se pudo confirmar el retiro: puede que aún llegue; revisa tu saldo en breve',
     noRail: 'Este activo no tiene configurada ninguna vía de retiro',
@@ -270,11 +270,11 @@ export const withdrawEs: WithdrawMessages = {
     availableMin: (available, min) => `Disponible: ${available} · mín. ${min}`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Está por debajo del retiro mínimo de ${min}.`,
-    gasNote: 'Necesitas ckETH para el gas. Si no tienes, añade ckETH primero.',
+    gasNote: 'Necesitas ckETH para el gas. Si no tienes, añade algo primero.',
     inProgress: 'Retiro en curso',
     withdrawAmount: amount => `Retirar ${amount}`,
     resumeNote:
-      'Ya está firmado: Reintentar vuelve a enviar los mismos sobres (no puede gastar dos veces). Si editas el formulario, empezarás un retiro nuevo.',
+      'Ya está firmado: Reintentar vuelve a enviar el mismo pago (no puede gastar dos veces). Si editas el formulario, empezarás un retiro nuevo.',
     reviewTitle: 'Revisa el retiro',
     confirmLabel: 'Confirmar retiro',
     retry: 'Reintentar retiro',
@@ -300,13 +300,13 @@ export const withdrawEs: WithdrawMessages = {
     refuseWrongChain: (pastedChain, asset, assetChain) =>
       `Esa es una dirección de ${pastedChain}. ${asset} se liquida en ${assetChain}, así que no puede llegar ahí: pega una dirección de ${assetChain}.`,
     refuseLegacyNotIcp: asset =>
-      `Ese es un identificador de cuenta ICP: el formato de 64 caracteres. Solo se puede enviar ICP a uno de ellos; para ${asset}, pídele al destinatario su principal de Internet Computer (el que lleva guiones).`,
+      `Ese es un identificador de cuenta ICP: el formato de 64 caracteres. Solo se puede enviar ICP a uno de ellos. Para ${asset}, pídele al destinatario su principal de Internet Computer (el que lleva guiones).`,
     refuseUnrecognised: asset => `Esto no parece una dirección a la que se pueda enviar ${asset}.`,
     refuseMistypedIc: 'Esta dirección de Internet Computer está incompleta o mal escrita: comprueba que la has copiado entera.',
     refuseMistypedLegacy: 'Esta dirección de cuenta ICP está incompleta o mal escrita: comprueba que has copiado los 64 caracteres.',
     refuseOwnSubaccount:
-      'Esa es una subcuenta de tu propia cartera, y dpay solo muestra y usa tu cuenta principal: el dinero enviado ahí dejaría de aparecer aquí. Ya tienes este activo; pega la dirección de otra persona para enviarlo.',
-    selfWarning: 'Esta es tu propia dirección. Los fondos vuelven directamente a ti y aun así pagas la comisión.',
+      'Esa es una subcuenta de tu propia cartera. dpay solo muestra y usa tu cuenta principal, así que el dinero enviado ahí dejaría de aparecer aquí. Ya tienes este activo: pega la dirección de otra persona para enviarlo.',
+    selfWarning: 'Esta es tu propia dirección. El dinero vuelve directamente a ti y aun así pagas la comisión.',
 
     maxLabel: 'Máx.',
     feeLine: fee => `Comisión de red ${fee}`,
@@ -326,9 +326,9 @@ export const withdrawEs: WithdrawMessages = {
     sent: 'Enviado',
     sentUnknown: 'Aún sin confirmar',
     sentUnknownBody:
-      'La transferencia se envió, pero aún no está confirmada. Puede que todavía se complete: revisa tu saldo en un momento en lugar de volver a enviarla.',
+      'La transferencia se envió, pero aún no está confirmada. Puede que todavía se complete: revisa tu saldo en un momento en vez de volver a enviarla.',
     blockIndex: index => `Bloque ${index} del registro`,
-    noLedger: 'Este activo no tiene un registro configurado, así que no se puede enviar.',
+    noLedger: 'Este activo no tiene registro, así que no se puede enviar.',
   },
 
   sol: {

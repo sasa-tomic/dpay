@@ -188,7 +188,7 @@ describe('HomeTab — an UNREADABLE home rail says so (M2)', () => {
     const line = textUnder(tree, 'rail-unreadable-solana');
     expect(line).toContain('Solana');
     expect(line).toContain('Nothing moved');
-    expect(line).toContain('other accounts still work');
+    expect(line).toContain('sent data this wallet can’t read');
     expect(line).toContain('keeps retrying');
     act(() => { tree.unmount(); });
   });

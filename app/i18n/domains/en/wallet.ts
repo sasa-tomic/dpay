@@ -309,7 +309,7 @@ export const walletEn: WalletMessages = {
   },
 
   railHealth: {
-    thin: token => `Very little ${token} exists on-chain today — receiving can be hard, and paying needs someone who holds it.`,
+    thin: 'Thin liquidity',
     deep: 'Circulates widely on-chain today.',
   },
 
@@ -343,7 +343,7 @@ export const walletEn: WalletMessages = {
     title: 'Accounts',
     intro: 'Tap an account to use it in Pay and Receive.',
     back: 'Back',
-    practice: 'Practice money — it only works inside dpay, and no shop will take it.',
+    practice: 'Practice money. It works only inside dpay — no shop takes it.',
     convertHint: 'Convert at an outside venue',
   },
 
@@ -351,7 +351,7 @@ export const walletEn: WalletMessages = {
     title: 'Address book',
     intro: 'Addresses you’ve sent to, saved on this device only.',
     back: 'Back',
-    empty: 'No saved addresses yet — addresses you send to are saved here automatically.',
+    empty: 'No saved addresses yet. Ones you send to are saved here automatically.',
     addEntry: 'Add an address',
     assetLabel: 'For',
     addressLabel: 'Address',
@@ -398,8 +398,8 @@ export const walletEn: WalletMessages = {
     mintCounterparty: 'Demo funds',
     failed: 'Failed — only the network fee was charged',
     dropped: count => count === 1
-      ? '1 Solana transaction could not be read — it still exists on-chain, but is not shown here.'
-      : `${count} Solana transactions could not be read — they still exist on-chain, but are not shown here.`,
+      ? '1 Solana transaction couldn’t be read — it exists on-chain but is not shown here.'
+      : `${count} Solana transactions couldn’t be read — they exist on-chain but are not shown here.`,
   },
 
   fund: {checking: 'Checking…', checkAgain: 'Check again'},
@@ -539,17 +539,17 @@ export const educationEn: EducationMessages = {
       offline: {
         eyebrow: 'FIRST, HOW A PAYMENT WORKS',
         title: 'One phone requests, the other pays',
-        body: 'The receiving phone shows a request. You scan it, check the amount and asset, then approve. Its internet connection sends the payment if your phone is offline.',
+        body: 'The other phone shows a request. You scan it, check the amount, then approve. Their connection sends the payment if yours is offline.',
       },
       key: {
         eyebrow: 'YOUR MONEY',
         title: 'Your key stays on this device',
-        body: 'dpay holds no funds and cannot approve a payment for you. There is no dpay account — only your key.',
+        body: 'dpay holds no money and cannot approve payments for you. There is no dpay account — only your key.',
       },
       exact: {
         eyebrow: 'NO SURPRISES',
         title: 'Pay the exact requested asset',
-        body: 'The shop asks for one exact asset. You review the amount and approve. dpay never converts another balance.',
+        body: 'The shop asks for one exact asset. You check the amount and approve. dpay never swaps.',
       },
     },
     stageTags: ['01 — SIGNAL', '02 — KEY', '03 — ASSET'],
@@ -584,11 +584,11 @@ export const educationEn: EducationMessages = {
     },
     cooldown: {
       title: 'Practice money, in a moment',
-      body: reason => `This server hands out practice money once in a while — it just did. It said: ${reason} Carry on with setup; come back and pay any time.`,
+      body: reason => `This server gives out practice money once in a while — it just did. It said: ${reason} Carry on with setup; come back any time.`,
     },
     offline: {
       title: 'This practice needs a connection',
-      body: 'Practice needs a connection — your phone plays both the shop and the payer; a real payment does not. Reconnect and try again, or carry on with setup.',
+      body: 'Practice needs a connection because your phone plays both sides. Reconnect and try again, or carry on with setup.',
     },
     empty: {
       title: 'Nothing to practise with yet',
@@ -617,7 +617,7 @@ export const educationEn: EducationMessages = {
     title: 'Trip readiness',
     stamps: {
       recoverySaved: {label: 'BACKED\nUP', hint: 'Copy your backup words in Settings', short: 'back up to go'},
-      flowUnderstood: {label: 'SAW THE\nFLOW', hint: 'Make the practice payment on your first run — or make any payment', short: 'see how it works to go'},
+      flowUnderstood: {label: 'SAW THE\nFLOW', hint: 'Make the practice payment — or any payment', short: 'see how it works to go'},
       fundsReady: {label: 'FUNDS\nLOADED', hint: 'Add money you can spend — practice funds do not count', short: 'add funds to go'},
       paymentTested: {label: 'FIRST\nPAYMENT', hint: 'Complete a payment — pay or receive', short: 'one payment to go'},
     },

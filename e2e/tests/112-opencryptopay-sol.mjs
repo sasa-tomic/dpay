@@ -150,10 +150,10 @@ export async function run() {
     console.log('[112-opencryptopay-sol] leg 1 — scanning the till with Solana USDC selected…');
     await selectAndScan(driver, 'sol-usdc');
 
-    assert(await driver.waitForText('doesn’t say which token account', {timeoutMs: 12_000}),
-      'the refusal must name the measured reason: the till\'s code does not say which token account to pay');
+    assert(await driver.waitForText('doesn’t say which account to pay', {timeoutMs: 12_000}),
+      'the refusal must name the measured reason: the till\'s code does not say which account to pay');
     const body = await driver.bodyText();
-    assertIncludes(body, 'Pay with SOL instead', 'the refusal must point at the asset that CAN pay this same till');
+    assertIncludes(body, 'pay with SOL instead', 'the refusal must point at the asset that CAN pay this same till');
     assert(!(await driver.isPresent('sol-pay-amount')), 'a refused till must never render a payment review');
     assert(!(await driver.isPresent('btn-approve')), 'a refused till must never render an Approve button');
 

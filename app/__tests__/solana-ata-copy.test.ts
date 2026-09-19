@@ -66,12 +66,12 @@ describe('both messages stay actionable after the correction', () => {
 describe('the exact strings e2e flow 77 asserts', () => {
   test('the English recipient + own-account sentences, verbatim', () => {
     expect(errorsEn.solana.recipientNoTokenAccount(RENT, 'USDC')).toBe(
-      "They don't have a USDC account yet — creating it needs about 0.00204428 SOL in this wallet "
-      + '(one-time rent + fee, paid by you) — send a little SOL here first',
+      "They don't have a USDC account yet. Creating it costs about 0.00204428 SOL, paid by you "
+      + '— send a little SOL here first',
     );
     expect(errorsEn.solana.ownTokenAccountRent(RENT, 'USDC')).toBe(
-      'Creating your USDC account needs about 0.00204428 SOL in this wallet '
-      + '(one-time account rent + fee) — send a little SOL here first',
+      'Creating your USDC account costs about 0.00204428 SOL. '
+      + 'Send a little SOL here first.',
     );
   });
 });

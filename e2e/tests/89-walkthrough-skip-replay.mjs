@@ -84,7 +84,7 @@ export async function run() {
       await driver.click('btn-how-it-works', { timeoutMs: 5_000 });
       await driver.findByTestID('walkthrough-scene-1', { timeoutMs: 5_000 });
       const body1 = await driver.readText('walkthrough-body-1');
-      assertIncludes(body1, 'receiving phone shows a request', 'replay renders the same education copy');
+      assertIncludes(body1, 'other phone shows a request', 'replay renders the same education copy');
       assert(!(await driver.isPresent('btn-walkthrough-skip')), 'replay must have NO Skip');
       await driver.findByTestID('btn-walkthrough-close', { timeoutMs: 5_000 });
       console.log('[89-walkthrough-skip] ✓ replay: scene 1 + close affordance, no Skip');

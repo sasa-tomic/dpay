@@ -71,7 +71,7 @@ export const walletDe: WalletMessages = {
     title: 'Konten',
     intro: 'Tippe auf ein Konto, um es in Bezahlen und Empfangen zu verwenden.',
     back: 'Zurück',
-    practice: 'Übungsgeld — es funktioniert nur in dpay, kein Geschäft nimmt es an.',
+    practice: 'Übungsgeld. Es funktioniert nur in dpay — kein Geschäft nimmt es an.',
     convertHint: 'Bei einem externen Handelsplatz tauschen',
   },
 
@@ -79,7 +79,7 @@ export const walletDe: WalletMessages = {
     title: 'Adressbuch',
     intro: 'Adressen, an die du gesendet hast — nur auf diesem Gerät gespeichert.',
     back: 'Zurück',
-    empty: 'Noch keine gespeicherten Adressen — Adressen, an die du sendest, werden hier automatisch gespeichert.',
+    empty: 'Noch keine gespeicherten Adressen. Adressen, an die du sendest, werden hier automatisch gespeichert.',
     addEntry: 'Adresse hinzufügen',
     assetLabel: 'Für',
     addressLabel: 'Adresse',
@@ -126,8 +126,8 @@ export const walletDe: WalletMessages = {
     mintCounterparty: 'Demo-Guthaben',
     failed: 'Fehlgeschlagen — nur die Netzwerkgebühr wurde abgebucht',
     dropped: count => count === 1
-      ? '1 Solana-Transaktion konnte nicht gelesen werden — sie existiert weiterhin on-chain, wird hier aber nicht angezeigt.'
-      : `${count} Solana-Transaktionen konnten nicht gelesen werden — sie existieren weiterhin on-chain, werden hier aber nicht angezeigt.`,
+      ? '1 Solana-Transaktion konnte nicht gelesen werden — sie existiert on-chain, wird hier aber nicht angezeigt.'
+      : `${count} Solana-Transaktionen konnten nicht gelesen werden — sie existieren on-chain, werden hier aber nicht angezeigt.`,
   },
 
   fund: {checking: 'Wird geprüft…', checkAgain: 'Erneut prüfen'},
@@ -156,17 +156,17 @@ export const educationDe: EducationMessages = {
       offline: {
         eyebrow: 'ZUERST: SO LÄUFT EINE ZAHLUNG',
         title: 'Ein Handy fordert an, das andere bezahlt',
-        body: 'Das empfangende Handy zeigt eine Anfrage. Du scannst sie, prüfst Betrag und Asset und gibst frei. Ist dein Handy offline, sendet seine Internetverbindung die Zahlung.',
+        body: 'Das andere Handy zeigt eine Anfrage. Du scannst sie, prüfst den Betrag und gibst frei. Seine Verbindung sendet die Zahlung, wenn deins offline ist.',
       },
       key: {
         eyebrow: 'DEIN GELD',
         title: 'Dein Schlüssel bleibt auf diesem Gerät',
-        body: 'dpay hält kein Guthaben und kann keine Zahlung für dich freigeben. Es gibt kein dpay-Konto — nur deinen Schlüssel.',
+        body: 'dpay hält kein Geld und kann keine Zahlungen für dich freigeben. Es gibt kein dpay-Konto — nur deinen Schlüssel.',
       },
       exact: {
         eyebrow: 'KEINE ÜBERRASCHUNG',
         title: 'Genau das angeforderte Asset',
-        body: 'Der Laden fordert genau ein Asset an. Du prüfst den Betrag und gibst frei. dpay rechnet nie ein anderes Guthaben um.',
+        body: 'Der Laden fordert genau ein Asset an. Du prüfst den Betrag und gibst frei. dpay tauscht nie um.',
       },
     },
     stageTags: ['01 — SIGNAL', '02 — SCHLÜSSEL', '03 — ASSET'],
@@ -201,11 +201,11 @@ export const educationDe: EducationMessages = {
     },
     cooldown: {
       title: 'Übungsgeld, gleich',
-      body: reason => `Dieser Server gibt Übungsgeld nur ab und zu aus — gerade eben hat er es getan. Er meldet: ${reason} Mach mit der Einrichtung weiter; komm jederzeit zurück und zahle.`,
+      body: reason => `Dieser Server gibt Übungsgeld nur ab und zu aus — gerade eben hat er es getan. Er meldet: ${reason} Mach mit der Einrichtung weiter; komm jederzeit zurück.`,
     },
     offline: {
       title: 'Diese Übung braucht eine Verbindung',
-      body: 'Die Übung braucht eine Verbindung — dein Handy spielt den Laden und den Zahler; eine echte Zahlung nicht. Verbinde dich wieder und versuche es erneut, oder mach mit der Einrichtung weiter.',
+      body: 'Die Übung braucht eine Verbindung, weil dein Handy beide Seiten spielt. Verbinde dich wieder und versuche es erneut, oder mach mit der Einrichtung weiter.',
     },
     empty: {
       title: 'Noch nichts zum Üben da',
@@ -234,7 +234,7 @@ export const educationDe: EducationMessages = {
     title: 'Reisebereitschaft',
     stamps: {
       recoverySaved: {label: 'BACKUP\nGESICHERT', hint: 'Kopiere deine Backup-Wörter in den Einstellungen', short: 'noch das Backup'},
-      flowUnderstood: {label: 'ABLAUF\nGESEHEN', hint: 'Mach beim ersten Start die Übungszahlung — oder mach eine beliebige Zahlung', short: 'noch den Ablauf ansehen'},
+      flowUnderstood: {label: 'ABLAUF\nGESEHEN', hint: 'Mach die Übungszahlung — oder mach eine beliebige Zahlung', short: 'noch den Ablauf ansehen'},
       fundsReady: {label: 'GUTHABEN\nGELADEN', hint: 'Lade echtes Guthaben auf — Übungsguthaben zählt nicht', short: 'noch Guthaben aufladen'},
       paymentTested: {label: 'ERSTE\nZAHLUNG', hint: 'Schließe eine Zahlung ab — bezahlen oder empfangen', short: 'noch eine Zahlung'},
     },

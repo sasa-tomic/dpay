@@ -123,7 +123,7 @@ describe('IcrcDepositSheet', () => {
     const where = allText(whereNode);
     expect(where).toContain('VCHF');             // the asset to look for
     expect(where).toContain('Internet Computer'); // on which network
-    expect(where.toLowerCase()).toContain('wallet app');
+    expect(where.toLowerCase()).toContain('any wallet');
     expect(where.toLowerCase()).toContain('exchange'); // the second, real route
     const accepts = textOf(tree, 'deposit-only-accepts');
     expect(accepts).toContain('VCHF');

@@ -7,7 +7,7 @@ import type {ReceiptMessages} from '../../keys';
 export const receiptDe: ReceiptMessages = {
   title: 'Beleg',
   openRow: 'Diesen Beleg öffnen',
-  openRowHint: 'Zeigt den genauen Betrag, das Konto der Gegenseite und den Ledger-Nachweis',
+  openRowHint: 'Zeigt den genauen Betrag, beide Konten und den Ledger-Nachweis',
   close: 'Schließen',
 
   amountLabel: 'Betrag',
@@ -23,7 +23,7 @@ export const receiptDe: ReceiptMessages = {
   signatureLabel: 'Transaktionssignatur',
 
   noAccount: 'Das Ledger hat für diese Seite kein Konto festgehalten.',
-  noReferenceIc: 'Keine Referenz — diese Überweisung trug kein Memo (eine dpay-Zahlungsanfrage setzt immer eine).',
+  noReferenceIc: 'Keine Referenz — diese Überweisung trug kein Memo.',
   noReferenceSolana: 'Eine Solana-Überweisung trägt keine dpay-Referenz — die Signatur unten identifiziert sie.',
   pendingProof: 'Noch nicht bestätigt — diese Zahlung wird später im Ledger verbucht.',
 
@@ -31,5 +31,5 @@ export const receiptDe: ReceiptMessages = {
   copied: 'Kopiert ✓',
   copyHint: 'Kopiert alle Zeilen oben als Text',
   source: 'Alle Werte wurden aus dem Ledger gelesen.',
-  sourceAnnotated: 'Werte aus dem Ledger gelesen · Name und Notiz wurden bei der Zahlung auf diesem Gerät gespeichert.',
+  sourceAnnotated: 'Werte aus dem Ledger gelesen · Name und Notiz wurden auf diesem Gerät gespeichert.',
 };

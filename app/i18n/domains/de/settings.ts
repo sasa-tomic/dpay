@@ -44,7 +44,7 @@ export const settingsDe: SettingsMessages = {
   restore: {
     label: 'Wiederherstellen',
     warning:
-      'Ersetzt deine aktuelle Wallet durch die aus diesem Seed. Sichere zuerst die aktuelle, falls noch nicht geschehen — ihr Guthaben ist nur über ihren eigenen Seed erreichbar.',
+      'Ersetzt deine aktuelle Wallet durch die aus diesem Seed. Sichere zuerst die aktuelle — ihr Guthaben ist nur mit ihrem eigenen Seed erreichbar.',
     seedPlaceholder: '24 Wiederherstellungswörter oder 64 Hex-Zeichen',
     seedA11y: 'Wiederherstellungs-Seed',
     seedHint: 'Deine 24 Wiederherstellungswörter oder der 64-Hex-Seed aus dem Backup',
@@ -56,13 +56,13 @@ export const settingsDe: SettingsMessages = {
     entryHint: 'Importiert eine Wallet aus einem Seed — ersetzt deine aktuelle Wallet',
     errEmpty: 'Gib deine 24 Wiederherstellungswörter oder den 64-Hex-Seed ein.',
     errWords:
-      'Einige Wörter sind falsch oder fehlen. Prüfe, ob alle 24 Wörter richtig geschrieben sind — oder füge stattdessen den 64-Hex-Seed ein.',
+      'Einige Wörter sind falsch oder fehlen. Prüfe, ob alle 24 Wörter richtig geschrieben sind, oder füge stattdessen den 64-Hex-Seed ein.',
   },
 
   reset: {
     label: 'Zurücksetzen',
     warning:
-      'Das löscht deine Wallet-Identität von diesem Gerät. Guthaben an dieser Adresse ist dann unwiederbringlich verloren.',
+      'Das löscht deine Wallet von diesem Gerät. Geld an dieser Adresse ist dann unwiederbringlich verloren.',
     confirm: 'Ja, alles zurücksetzen',
     cancelA11y: 'Zurücksetzen abbrechen',
     action: 'Wallet zurücksetzen',
@@ -102,7 +102,7 @@ export const settingsDe: SettingsMessages = {
     show: 'Erweiterte Einstellungen zeigen',
     hide: 'Erweiterte Einstellungen verbergen',
     hint: 'Server- und Netzwerk-Endpunkte, mit denen diese Wallet spricht',
-    serverNote: 'Eine Adresse pro Zeile — verwendet wird die erste, die antwortet. Gilt beim Tippen auf Übernehmen.',
+    serverNote: 'Eine Adresse pro Zeile. Verwendet wird die erste, die antwortet. Tippe auf Übernehmen, um zu speichern.',
     serverLabel: 'Server',
     serverPlaceholder: 'http://<ip>:8787',
     apply: 'Übernehmen',
@@ -113,7 +113,7 @@ export const settingsDe: SettingsMessages = {
     solanaApplyA11y: 'Solana-Endpunkt übernehmen',
     // F2 — der IC-Gateway-Override. Nur für Betreiber (Demos/Tests gegen eine lokale Replica),
     // kein Nutzer-Feature; der Hinweis sagt es ehrlich, wie die Solana-Zeile darüber.
-    icGatewayNote: 'Nur für Betreiber: die Basis-URL, an die diese Wallet IC-Transaktionen sendet. Leer nutzt das öffentliche Gateway; eine lokale Replica-Adresse lenkt Demos und Tests dorthin.',
+    icGatewayNote: 'Nur für Betreiber: die Basis-URL, an die diese Wallet IC-Transaktionen sendet. Leer nutzt das öffentliche Gateway; setze eine lokale Replica für Demos und Tests.',
     icGatewayLabel: 'IC-Gateway',
     icGatewayPlaceholder: 'http://10.0.2.2:4943',
     icGatewayApplyA11y: 'IC-Gateway übernehmen',
@@ -122,7 +122,7 @@ export const settingsDe: SettingsMessages = {
   about: {
     label: 'Über dpay',
     custody:
-      'dpay ist nicht verwahrend: Dein Geld wird allein durch den Schlüssel auf diesem Gerät kontrolliert. Es gibt kein dpay-Konto, und dpay kann dein Guthaben weder bewegen noch einfrieren noch wiederherstellen — deine 24 Backup-Wörter sind der einzige Weg zurück.',
+      'dpay ist nicht verwahrend: Dein Geld wird allein durch den Schlüssel auf diesem Gerät kontrolliert. Es gibt kein dpay-Konto. dpay kann es weder bewegen noch einfrieren noch wiederherstellen — deine 24 Backup-Wörter sind der einzige Weg zurück.',
     privacy: 'Datenschutzerklärung',
   },
 };
@@ -132,9 +132,9 @@ export const onboardingDe: OnboardingMessages = {
   custody: 'Kein Konto. Dein Schlüssel verlässt dieses Handy nie. Nicht einmal dpay kann dein Geld bewegen.',
   continue: 'Weiter',
   errOwnSeed:
-    'Dieser Seed sieht nicht richtig aus — füge deine 24 Wiederherstellungswörter oder den 64-Hex-Seed genau so ein, wie notiert.',
+    'Dieser Seed sieht nicht richtig aus. Füge deine 24 Wiederherstellungswörter oder den 64-Hex-Seed genau so ein, wie notiert.',
   errWords: 'Einige Wörter sind falsch oder fehlen. Prüfe, ob alle 24 Wörter richtig geschrieben sind.',
-  errSaveWallet: 'Dieses Handy konnte deine Wallet nicht speichern, sie wurde also noch nicht erstellt. Tippe erneut auf Weiter — wenn es weiter fehlschlägt, gib Speicherplatz auf dem Handy frei.',
+  errSaveWallet: 'Dieses Handy konnte deine Wallet nicht speichern, sie wurde also noch nicht erstellt. Tippe erneut auf Weiter, um es erneut zu versuchen. Wenn es weiter fehlschlägt, gib Speicherplatz auf dem Handy frei.',
 
   recoverySaved: {
     stamp: 'Backup gesichert',
@@ -145,7 +145,7 @@ export const onboardingDe: OnboardingMessages = {
     ...copyWordsDe,
     title: 'Sichere deine Wallet',
     warning:
-      'Schreib diese 24 Wörter auf und bewahre sie sicher auf — sie sind der EINZIGE Weg, deine Wallet wiederherzustellen, wenn du dieses Gerät verlierst. Es gibt kein dpay-Konto zum Zurück einloggen, und nicht einmal dpay kann sie wiederherstellen.',
+      'Schreib diese 24 Wörter auf und bewahre sie sicher auf. Sie sind der EINZIGE Weg, deine Wallet wiederherzustellen, wenn du dieses Gerät verlierst — es gibt kein dpay-Konto, und nicht einmal dpay kann sie wiederherstellen.',
     copyWordsHint: 'Kopiert alle 24 Wörter ohne die Positionsnummern',
     ack: 'Ich habe alle 24 Wörter aufgeschrieben',
   },

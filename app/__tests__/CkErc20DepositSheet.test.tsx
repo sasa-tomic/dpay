@@ -173,7 +173,7 @@ describe('CkErc20DepositSheet — null-baseline watch honesty (P2#5)', () => {
     const block = tree.root.findByProps({testID: 'ckerc20-details-block'})
       .findAll(n => typeof n.props?.children === 'string')
       .map(n => n.props.children).join(' ');
-    expect(block).toContain('two transactions'); // explainErc20 (nativeEth=false here)
+    expect(block).toContain('two signed transactions'); // explainErc20 (nativeEth=false here)
     expect(block).toContain('mints 1:1');        // mintLine — the old custody line's useful half
     expect(block).toContain('~20 min');          // live timing expectation, decision-relevant
     act(() => { tree.unmount(); });
@@ -348,11 +348,11 @@ describe('CkErc20DepositSheet — submit() routes on whether the DEPOSIT tx was 
     // Two sentences from two owners: WHAT dpay knows (the error's own message — the wallet answered
     // without an id) and WHAT TO DO about it for THIS transaction (the sheet's step copy).
     expect(statusText(tree)).toContain('answered without a transaction id');
-    expect(statusText(tree)).toContain('depositing again would send the money twice');
+    expect(statusText(tree)).toContain('depositing again would pay twice');
     expect(statusText(tree)).not.toContain('Transaction not signed'); // the old, fabricated verdict
-    // …and the allowance line must NOT be appended here: it claims no funds left the wallet, which
+    // …and the allowance line must NOT be appended here: it claims no money left the wallet, which
     // is exactly what this outcome cannot say.
-    expect(statusText(tree)).not.toContain('no funds have left your wallet');
+    expect(statusText(tree)).not.toContain('no money has left your wallet');
     expect(await loadDeposit(IDENTITY.publicHex, 2)).toBeNull();
     act(() => { tree.unmount(); });
   });
@@ -368,7 +368,7 @@ describe('CkErc20DepositSheet — submit() routes on whether the DEPOSIT tx was 
     expect(statusText(tree)).toContain("Your wallet didn't answer");
     expect(statusText(tree)).not.toMatch(/accepted/i);
     expect(statusText(tree)).toContain('No deposit was made');
-    expect(statusText(tree)).not.toContain('send the money twice'); // that risk is the deposit's
+    expect(statusText(tree)).not.toContain('pay twice'); // that risk is the deposit's
     act(() => { tree.unmount(); });
   });
 
@@ -383,7 +383,7 @@ describe('CkErc20DepositSheet — submit() routes on whether the DEPOSIT tx was 
 
     expect(statusText(tree)).toContain('Transaction not signed.');
     expect(statusText(tree)).toContain('spending approval is already confirmed on chain');
-    expect(statusText(tree)).toContain('approve and then deposit');
+    expect(statusText(tree)).toContain('approve, then deposit');
     act(() => { tree.unmount(); });
   });
 

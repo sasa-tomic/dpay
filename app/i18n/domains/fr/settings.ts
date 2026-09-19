@@ -46,7 +46,7 @@ export const settingsFr: SettingsMessages = {
   restore: {
     label: 'Restaurer',
     warning:
-      'Remplace votre portefeuille actuel par celui de ce code. Sauvegardez d’abord l’actuel si ce n’est pas fait — ses fonds ne sont accessibles qu’avec son propre code.',
+      'Remplace votre portefeuille actuel par celui de ce code. Sauvegardez d’abord l’actuel — son argent n’est accessible qu’avec son propre code.',
     seedPlaceholder: '24 mots de récupération ou 64 caractères hexa',
     seedA11y: 'Code de récupération',
     seedHint: 'Vos 24 mots de récupération, ou le code hexadécimal de la Sauvegarde',
@@ -58,13 +58,13 @@ export const settingsFr: SettingsMessages = {
     entryHint: 'Importe un portefeuille depuis un code — remplace votre portefeuille actuel',
     errEmpty: 'Saisissez vos 24 mots de récupération ou votre code de 64 caractères hexadécimaux.',
     errWords:
-      'Certains mots sont incorrects ou manquants. Vérifiez que vous avez bien les 24 mots correctement orthographiés — ou collez plutôt le code de récupération.',
+      'Certains mots sont incorrects ou manquants. Vérifiez que les 24 mots sont correctement orthographiés, ou collez plutôt le code de récupération.',
   },
 
   reset: {
     label: 'Réinitialiser',
     warning:
-      'Cette action efface votre identité de portefeuille de cet appareil. Les fonds à cette adresse deviennent irrécupérables.',
+      'Cette action efface votre portefeuille de cet appareil. L’argent à cette adresse devient irrécupérable.',
     confirm: 'Oui, tout réinitialiser',
     cancelA11y: 'Annuler la réinitialisation',
     action: 'Réinitialiser le portefeuille',
@@ -104,7 +104,7 @@ export const settingsFr: SettingsMessages = {
     show: 'Afficher les paramètres avancés',
     hide: 'Masquer les paramètres avancés',
     hint: 'Serveurs et points d’accès réseau utilisés par ce portefeuille',
-    serverNote: 'Une adresse par ligne — la première qui répond est utilisée. S’applique quand vous appuyez sur Appliquer.',
+    serverNote: 'Une adresse par ligne. La première qui répond est utilisée. Appuyez sur Appliquer pour enregistrer.',
     serverLabel: 'Serveur',
     serverPlaceholder: 'http://<ip>:8787',
     apply: 'Appliquer',
@@ -116,7 +116,7 @@ export const settingsFr: SettingsMessages = {
     // F2 — le remplacement de la passerelle IC. Réservé aux opérateurs (démos/tests contre une
     // réplique locale), pas une fonction utilisateur ; la note le dit honnêtement, comme la
     // ligne Solana ci-dessus.
-    icGatewayNote: 'Réservé aux opérateurs : l’URL de base où ce portefeuille envoie les transactions IC. Vide, la passerelle publique est utilisée ; une adresse de réplique locale y dirige démos et tests.',
+    icGatewayNote: 'Réservé aux opérateurs : l’URL de base où ce portefeuille envoie les transactions IC. Vide, la passerelle publique est utilisée ; définissez une réplique locale pour les démos et les tests.',
     icGatewayLabel: 'Passerelle IC',
     icGatewayPlaceholder: 'http://10.0.2.2:4943',
     icGatewayApplyA11y: 'Appliquer la passerelle IC',
@@ -125,7 +125,7 @@ export const settingsFr: SettingsMessages = {
   about: {
     label: 'À propos',
     custody:
-      'dpay ne conserve pas vos fonds : votre argent est contrôlé par la seule clé de cet appareil. Il n’existe aucun compte dpay, et dpay ne peut ni déplacer, ni bloquer, ni récupérer vos fonds — vos 24 mots de sauvegarde sont le seul moyen de récupération.',
+      'dpay ne conserve pas vos fonds : votre argent est contrôlé par la seule clé de cet appareil. Il n’existe aucun compte dpay. dpay ne peut ni le déplacer, ni le bloquer, ni le récupérer — vos 24 mots de sauvegarde sont le seul moyen de récupération.',
     privacy: 'Politique de confidentialité',
   },
 };
@@ -135,9 +135,9 @@ export const onboardingFr: OnboardingMessages = {
   custody: 'Aucun compte. Votre clé ne quitte jamais ce téléphone. Même dpay ne peut pas déplacer votre argent.',
   continue: 'Continuer',
   errOwnSeed:
-    'Ce code ne semble pas correct — collez vos 24 mots de récupération ou votre code hexadécimal exactement comme notés.',
-  errWords: 'Certains mots sont incorrects ou manquants. Vérifiez que vous avez bien les 24 mots correctement orthographiés.',
-  errSaveWallet: "Ce téléphone n'a pas pu enregistrer votre portefeuille, il n'a donc pas encore été créé. Touchez de nouveau Continuer — si cela échoue encore, libérez de l'espace de stockage sur le téléphone.",
+    'Ce code ne semble pas correct. Collez vos 24 mots de récupération ou votre code hexadécimal exactement comme notés.',
+  errWords: 'Certains mots sont incorrects ou manquants. Vérifiez que les 24 mots sont correctement orthographiés.',
+  errSaveWallet: "Ce téléphone n'a pas pu enregistrer votre portefeuille, il n'a donc pas encore été créé. Touchez de nouveau Continuer pour réessayer. Si cela échoue encore, libérez de l'espace de stockage sur le téléphone.",
 
   recoverySaved: {
     stamp: 'Sauvegarde faite',
@@ -148,7 +148,7 @@ export const onboardingFr: OnboardingMessages = {
     ...copyWordsFr,
     title: 'Sauvegardez votre portefeuille',
     warning:
-      'Notez ces 24 mots et conservez-les en lieu sûr — c’est le SEUL moyen de récupérer votre portefeuille si vous perdez cet appareil. Aucun compte dpay auquel se reconnecter, et même dpay ne peut pas les récupérer.',
+      'Notez ces 24 mots et conservez-les en lieu sûr. C’est le SEUL moyen de récupérer votre portefeuille si vous perdez cet appareil — il n’y a aucun compte dpay, et même dpay ne peut pas les récupérer.',
     copyWordsHint: 'Copie les 24 mots sans les numéros',
     ack: 'J’ai noté les 24 mots',
   },

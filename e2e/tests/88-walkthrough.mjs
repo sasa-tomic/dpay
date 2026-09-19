@@ -49,9 +49,9 @@ export async function run() {
     await driver.findByTestID('walkthrough-scene-1', { timeoutMs: 5_000 });
     assert(!(await driver.isPresent('walkthrough-scene-2')), 'only scene 1 may be mounted');
     const body1 = await driver.readText('walkthrough-body-1');
-    assertIncludes(body1, 'receiving phone shows a request', 'scene 1 must open with the request');
-    assertIncludes(body1, 'check the amount and asset', 'scene 1 must name the check-before-approve step');
-    assertIncludes(body1, 'if your phone is offline', 'scene 1 must state the other connection can send it');
+    assertIncludes(body1, 'other phone shows a request', 'scene 1 must open with the request');
+    assertIncludes(body1, 'check the amount', 'scene 1 must name the check-before-approve step');
+    assertIncludes(body1, 'if yours is offline', 'scene 1 must state the other connection can send it');
     console.log('[88-walkthrough] ✓ scene 1 two-phone payment copy pinned');
 
     // 3. Advance → scene 2 (the key/custody truth).
@@ -59,7 +59,7 @@ export async function run() {
     await driver.findByTestID('walkthrough-scene-2', { timeoutMs: 5_000 });
     assert(!(await driver.isPresent('walkthrough-scene-1')), 'scene 1 must unmount on advance');
     const body2 = await driver.readText('walkthrough-body-2');
-    assertIncludes(body2, 'cannot approve a payment', 'scene 2 must state dpay cannot approve');
+    assertIncludes(body2, 'cannot approve payments', 'scene 2 must state dpay cannot approve');
     assertIncludes(body2, 'no dpay account', 'scene 2 must state there is no dpay account');
     console.log('[88-walkthrough] ✓ scene 2 key-on-device copy pinned');
 
@@ -67,7 +67,7 @@ export async function run() {
     await driver.click('btn-walkthrough-next', { timeoutMs: 5_000 });
     await driver.findByTestID('walkthrough-scene-3', { timeoutMs: 5_000 });
     const body3 = await driver.readText('walkthrough-body-3');
-    assertIncludes(body3, 'never converts', 'scene 3 must state dpay never converts another balance');
+    assertIncludes(body3, 'never swaps', 'scene 3 must state dpay never swaps another balance');
     assertIncludes(body3, 'one exact asset', 'scene 3 must state the shop asks for one exact asset');
     const finalText = await driver.readText('btn-walkthrough-next');
     assertIncludes(finalText, 'Get started', 'the final Next reads "Get started"');

@@ -132,7 +132,7 @@ export async function run() {
     console.log('[109-scan-link-and-address] scanning a bitcoin: payment request…');
     await scan(driver, `BITCOIN:${BTC_ADDRESS}?amount=0.001&label=Coffee`);
     assert(
-      await driver.waitForText('payment request for Bitcoin', {timeoutMs: 5_000}),
+      await driver.waitForText('Bitcoin payment request', {timeoutMs: 5_000}),
       'a bitcoin: request must be refused by name — the coin, the scheme, and where to pay it instead',
     );
     const coinBody = await driver.bodyText();

@@ -7,7 +7,7 @@ import type {PayMessages, ReceiveMessages} from '../../keys';
 export const payDe: PayMessages = {
   notAPaymentCode: 'Das ist kein dpay-Zahlungscode',
   scannedCoinRequest: (coin, uri) =>
-    `Das ist eine Zahlungsanfrage für ${coin} (${uri}…). Diese Wallet wickelt auf dem Internet Computer und Solana ab — bezahle sie mit einer Wallet, die ${coin} unterstützt.`,
+    `Das ist eine Zahlungsanfrage für ${coin} (${uri}…). Diese Wallet zahlt auf dem Internet Computer und Solana — benutze eine ${coin}-Wallet.`,
   requestExpired: 'Diese Anfrage ist abgelaufen — bitte den Händler um einen neuen QR-Code',
 
   sent: amount => (amount ? `${amount} gesendet` : 'Gesendet'),
@@ -37,11 +37,11 @@ export const payDe: PayMessages = {
   handedTo: who => `An ${who} übergeben`,
   handedToMerchant: 'An den Händler übergeben',
   handedOffHint:
-    'Markiert die signierte Zahlung als übergeben; dein Guthaben aktualisiert sich, sobald der Händler abwickelt',
+    'Markiert diese Zahlung als übergeben. Dein Guthaben aktualisiert sich, sobald der Händler abwickelt',
 
   unsupportedAsset: 'Asset nicht unterstützt',
   unsupportedAssetBody: currency =>
-    `Diese Zahlung verlangt ein Asset, das diese Wallet nicht bezahlen kann (Währung ${currency}) — dpay tauscht nie um. Bitte den Händler, ein unterstütztes Asset anzufordern.`,
+    `Diese Zahlung verlangt ein Asset, das diese Wallet nicht bezahlen kann (Währung ${currency}). dpay tauscht nie um — bitte den Händler um ein unterstütztes Asset.`,
   paying: 'Du zahlst',
   payAmount: amount => `${amount} bezahlen`,
   notEnoughBalance: 'Dein Guthaben reicht für diese Zahlung nicht aus.',
@@ -55,58 +55,58 @@ export const payDe: PayMessages = {
   link: {
     title: 'Dieser Zahlungslink kann nicht bezahlt werden',
     part: {recipient: 'das Empfängerkonto', asset: 'der Vermögenswert', network: 'das Netzwerk', amount: 'der Betrag', ref: 'die Referenz'},
-    malformed: part => `Im Link fehlt ${part} oder der Wert ist beschädigt. Bitte den Absender um einen neuen Link.`,
+    malformed: part => `Im Link fehlt ${part}, oder der Wert ist beschädigt. Bitte den Absender um einen neuen Link.`,
     unknownAsset: (token, network) =>
-      `Der Link verlangt ${token} auf ${network}. Diese Wallet kennt diesen Wert nicht, und dpay tauscht nie um. Bitte den Absender um einen Link in einem Wert, den du hältst.`,
+      `Der Link verlangt ${token} auf ${network}, das diese Wallet nicht hält. dpay tauscht nie um — bitte den Absender um einen Link in einem Wert, den du hältst.`,
     wrongNetwork: (token, network) =>
-      `Der Link verlangt ${token} auf ${network}. Du hältst ${token} auf einem anderen Netzwerk — die Zahlung ginge auf die falsche Chain. Bitte den Absender um einen Link auf einem Netzwerk, das du hältst.`,
+      `Der Link verlangt ${token} auf ${network}, aber du hältst ${token} woanders. Zahlen würde dein Geld auf die falsche Chain schicken — bitte den Absender um einen Link auf einem Netzwerk, das du hältst.`,
     hiddenAsset: token =>
       `Der Link verlangt ${token}, einen Testnetz-Wert. Öffne „Guthaben“, aktiviere „Testnetz-Werte anzeigen“ und öffne den Link erneut.`,
     unsupportedAsset: token =>
-      `Der Link verlangt ${token}. Diese Wallet kann das nicht bezahlen, und dpay tauscht nie um. Bitte den Absender um einen Link in einem Wert, den du hältst.`,
+      `Der Link verlangt ${token}, das diese Wallet nicht bezahlen kann. dpay tauscht nie um — bitte den Absender um einen Link in einem Wert, den du hältst.`,
     badAmount: (amount, token) =>
-      `„${amount}“ ist kein gültiger ${token}-Betrag — womöglich hat er mehr Nachkommastellen, als ${token} kennt. Bitte den Absender um einen neuen Link.`,
+      `„${amount}“ ist kein gültiger ${token}-Betrag — er hat womöglich zu viele Nachkommastellen. Bitte den Absender um einen neuen Link.`,
     badAccount: network =>
-      `Das Konto in diesem Link ist kein gültiges ${network}-Konto. Bitte den Absender, es zu prüfen und den Link erneut zu senden.`,
+      `Das Konto in diesem Link ist kein gültiges ${network}-Konto. Bitte den Absender, es zu prüfen und einen neuen Link zu senden.`,
   },
 
   ocp: {
     solanaTokenUnsupported: symbol =>
-      `Diese Kasse nimmt ${symbol} auf Solana, aber ihr Code nennt kein Token-Konto als Ziel — eine Zahlung könnte echtes Geld auf das falsche Konto schicken. Zahle stattdessen mit SOL oder wechsle unter „Guthaben“ zu einem anderen Wert, den diese Kasse nimmt.`,
+      `Diese Kasse nimmt ${symbol} auf Solana, aber ihr Code sagt nicht, welches Konto zu zahlen ist. Zahlen könnte Geld auf das falsche Konto schicken — zahle stattdessen mit SOL oder wechsle unter „Guthaben“ zu einem anderen Wert, den diese Kasse nimmt.`,
     chooseAsset: selected =>
-      `Diese Kasse akzeptiert ${selected} nicht, aber diese hier — wähle eines zum Bezahlen. dpay tauscht nie um: Du zahlst mit dem gewählten Vermögenswert.`,
+      `Diese Kasse akzeptiert ${selected} nicht, aber diese hier. Wähle eines zum Bezahlen — dpay tauscht nie um.`,
     assetNotAccepted: (selected, accepted) =>
-      `Diese Kasse nimmt kein ${selected}. Sie nimmt ${accepted}. dpay tauscht nie um — wechsle unter „Guthaben“ zu einem davon und scanne erneut.`,
+      `Diese Kasse nimmt kein ${selected} — sie nimmt ${accepted}. dpay tauscht nie um: wechsle unter „Guthaben“ und scanne erneut.`,
     methodUnavailable: (selected, alternatives) =>
       alternatives
-        ? `Diese Kasse nimmt ${selected}, aber der Zahlungsanbieter des Händlers kann ${selected} gerade nicht verarbeiten. Die Kasse nimmt auch ${alternatives}. dpay tauscht nie um — wechsle unter „Guthaben“ zu einem davon und scanne erneut.`
-        : `Diese Kasse nimmt ${selected}, aber der Zahlungsanbieter des Händlers kann ${selected} gerade nicht verarbeiten — und von allem anderen, was diese Kasse nimmt, kann diese Wallet nichts bezahlen. Bitte den Händler um eine andere Zahlungsmöglichkeit.`,
+        ? `Diese Kasse nimmt ${selected}, aber ihr Anbieter kann sie gerade nicht verarbeiten. Die Kasse nimmt auch ${alternatives} — dpay tauscht nie um: wechsle unter „Guthaben“ und scanne erneut.`
+        : `Diese Kasse nimmt ${selected}, aber ihr Anbieter kann sie gerade nicht verarbeiten, und von allem anderen, was sie nimmt, kann diese Wallet nichts bezahlen. Bitte den Händler um eine andere Zahlungsmöglichkeit.`,
     noPayableAsset: accepted =>
-      `dpay kann an dieser Kasse nicht zahlen. Sie nimmt ${accepted} — davon kann diese Wallet nichts bezahlen, und dpay tauscht nie um. Bezahle diesen Einkauf anders.`,
+      `dpay kann an dieser Kasse nicht zahlen. Sie nimmt ${accepted}, das diese Wallet nicht bezahlen kann — dpay tauscht nie um. Bezahle anders.`,
     quoteExpired:
-      'Der Preis dieser Kasse ist abgelaufen — er gilt jeweils rund fünf Minuten. Scanne den Code erneut für einen frischen Preis.',
+      'Dieser Preis ist abgelaufen — Preise gelten etwa fünf Minuten. Scanne den Code erneut für einen frischen.',
     notEnoughTime:
       'Dieser Preis läuft zu bald ab, um sicher damit zu zahlen. Scanne den Code erneut für einen frischen Preis.',
     unreportable: host =>
-      `${host} hat dpay keinen Weg genannt, eine Zahlung dorthin zu melden — eine Zahlung hier würde also dein Geld kosten, ohne dass der Verkauf gutgeschrieben wird. Es wurde nichts bezahlt. Erneutes Scannen ändert daran nichts — bitte den Händler um eine andere Zahlungsmöglichkeit.`,
+      `${host} hat dpay keinen Weg genannt, deine Zahlung zu melden — zahlen würde also dein Geld kosten, ohne dass der Verkauf gutgeschrieben wird. Es wurde nichts bezahlt. Erneutes Scannen hilft nicht — bitte den Händler um eine andere Zahlungsmöglichkeit.`,
     proofElsewhere: (quoteHost, proofHost) =>
-      `Der Preis dieses Codes kommt von ${quoteHost}, aber der Nachweis deiner Zahlung soll stattdessen an ${proofHost} gehen. Eine Zahlung kann nicht zwei verschiedenen Firmen gegenüber gelten, deshalb hat dpay abgebrochen. Es wurde nichts bezahlt — bitte den Händler, seinen eigenen Zahlungscode zu zeigen.`,
+      `Der Preis dieses Codes kommt von ${quoteHost}, aber der Nachweis deiner Zahlung würde an ${proofHost} gehen. Eine Zahlung kann nicht zwei Firmen gegenüber gelten, deshalb hat dpay abgebrochen. Es wurde nichts bezahlt — bitte den Händler um seinen eigenen Zahlungscode.`,
     tillPrice: (price, host) => `${price} · Preis von ${host}`,
     checkingTill: 'Wird beim Zahlungsanbieter des Händlers geprüft…',
     badCode:
       'Dieser Code ist beschädigt oder gar kein Zahlungscode. Bitte den Händler, ihn erneut zu zeigen, und achte darauf, dass nichts ihn verdeckt.',
     notHttps:
-      'Dieser Code verweist auf eine unsichere Adresse, deshalb öffnet dpay ihn nicht. Bitte den Händler, seinen eigenen Zahlungscode zu zeigen — ein über den echten geklebter Aufkleber sieht genau so aus.',
+      'Dieser Code verweist auf eine unsichere Adresse, deshalb öffnet dpay ihn nicht. Bitte den Händler um seinen eigenen Zahlungscode — ein über den echten geklebter Aufkleber sieht genau so aus.',
     providerUnreachable:
       'Der Zahlungsanbieter des Händlers war nicht erreichbar. Es wurde nichts bezahlt. Prüfe deine Verbindung und scanne erneut.',
     badDestination: host =>
-      `${host} hat eine Zahlungsadresse geliefert, die nicht zu deiner Auswahl passt — dpay hat abgebrochen. Es wurde nichts bezahlt. Zahle diesen Code nicht; bitte den Händler, seinen eigenen Code erneut zu zeigen.`,
+      `${host} hat eine Zahlungsadresse geliefert, die nicht zu deiner Auswahl passt. dpay hat abgebrochen. Es wurde nichts bezahlt — zahle diesen Code nicht. Bitte den Händler erneut um seinen eigenen Code.`,
     providerRefused: (host, detail) =>
-      `Der Zahlungsanbieter des Händlers (${host}) hat diese Zahlung nicht angenommen. Es wurde nichts bezahlt. Bitte den Händler, den Verkauf erneut zu buchen, und scanne dann den Code. Wenn es weiter fehlschlägt, zeig ihm, was sein Anbieter gemeldet hat: „${detail}“.`,
+      `Der Zahlungsanbieter des Händlers (${host}) hat diese Zahlung abgelehnt. Es wurde nichts bezahlt. Bitte den Händler, den Verkauf erneut zu buchen, und scanne dann den Code. Wenn es weiter fehlschlägt, zeig ihm, was sein Anbieter gemeldet hat: „${detail}“.`,
     providerFailed: (host, status) =>
-      `Der Zahlungsanbieter des Händlers (${host}) hat mit einem Fehler geantwortet (${status}) und keinen Grund genannt. Es wurde nichts bezahlt. Warte einen Moment und scanne den Code erneut; wenn es weiter fehlschlägt, bitte den Händler um eine andere Zahlungsmöglichkeit.`,
+      `Der Zahlungsanbieter des Händlers (${host}) hat einen Fehler gemeldet (${status}) ohne Grund. Es wurde nichts bezahlt. Warte einen Moment und scanne erneut; wenn es weiter fehlschlägt, bitte den Händler um eine andere Zahlungsmöglichkeit.`,
     badAnswer: (host, part) =>
-      `Der Zahlungsanbieter des Händlers (${host}) hat ${part} geliefert, deshalb kann dpay an dieser Kasse nicht zahlen. Es wurde nichts bezahlt. Scanne den Code erneut und sag dem Händler Bescheid, wenn es weiter passiert.`,
+      `Der Zahlungsanbieter des Händlers (${host}) hat ${part} geliefert, deshalb kann dpay an dieser Kasse nicht zahlen. Es wurde nichts bezahlt. Scanne erneut und sag dem Händler Bescheid, wenn es weiter passiert.`,
     answerPart: {
       body: 'keine lesbare Antwort',
       details: 'keine vollständigen Zahlungsdaten',
@@ -120,20 +120,20 @@ export const payDe: PayMessages = {
       solTransaction: signature => `Solana-Transaktion ${signature}`,
     },
     submitUnknown: reference =>
-      `Deine Überweisung ging durch, aber der Zahlungsanbieter des Händlers hat sie nicht bestätigt — das ist also weder bezahlt noch fehlgeschlagen. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Zeig dem Händler ${reference}: das ist der Nachweis deiner Überweisung.`,
+      `Deine Überweisung ging durch, aber der Anbieter hat sie nicht bestätigt — weder bezahlt noch fehlgeschlagen. Das Geld hat deine Wallet verlassen: zahle nicht erneut. Zeig dem Händler ${reference}, den Nachweis deiner Überweisung.`,
     submitPending: reference =>
-      `Deine Überweisung ging durch und der Zahlungsanbieter des Händlers wurde informiert — er hat sie diesem Verkauf nur noch nicht zugeordnet. Sobald er die Überweisung sieht, wird sie gutgeschrieben; du musst nichts weiter tun. Das Geld hat deine Wallet verlassen: zahle nicht erneut. Zeigt die Kasse sie weiterhin nicht, nenne dem Händler ${reference}.`,
+      `Deine Überweisung ging durch, und der Anbieter wurde informiert — er hat sie diesem Verkauf nur noch nicht zugeordnet. Sie wird gutgeschrieben, sobald er die Überweisung sieht. Das Geld hat deine Wallet verlassen: zahle nicht erneut. Zeigt die Kasse sie nicht, nenne dem Händler ${reference}.`,
     submitRejected: (reference, said) =>
-      `Deine Überweisung ging durch, aber der Zahlungsanbieter des Händlers hat den Nachweis abgelehnt, der Verkauf wurde also nicht gutgeschrieben. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Wende dich an den Händler und nenne ihm ${reference}.`
+      `Deine Überweisung ging durch, aber der Anbieter hat den Nachweis abgelehnt — der Verkauf wurde also nicht gutgeschrieben. Das Geld hat deine Wallet verlassen: zahle nicht erneut. Nenne dem Händler ${reference}.`
       + (said === null ? '' : ` Der Anbieter meldet: „${said}“`),
     submitTooLate: reference =>
-      `Deine Überweisung ging durch, aber erst nachdem dieser Preis abgelaufen war — der Verkauf wurde deshalb nicht gutgeschrieben. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Wende dich an den Händler und nenne ihm ${reference}: das ist der Nachweis deiner Überweisung.`,
+      `Deine Überweisung ging durch, aber erst nach Ablauf dieses Preises — der Verkauf wurde also nicht gutgeschrieben. Das Geld hat deine Wallet verlassen: zahle nicht erneut. Nenne dem Händler ${reference}, den Nachweis deiner Überweisung.`,
     transferUnknown:
-      'dpay konnte deine Überweisung noch nicht bestätigen, deshalb weiß der Händler nichts davon — das ist weder bezahlt noch fehlgeschlagen. Lass diesen Bildschirm offen: dpay prüft weiter und schließt die Zahlung selbst ab, falls die Überweisung durchging. Zahle in der Zwischenzeit nicht erneut.',
+      'dpay konnte deine Überweisung noch nicht bestätigen, deshalb weiß der Händler nichts davon — weder bezahlt noch fehlgeschlagen. Lass diesen Bildschirm offen: dpay prüft weiter und schließt die Zahlung ab, falls die Überweisung durchging. Zahle in der Zwischenzeit nicht erneut.',
     transferRefused: reason =>
-      `Deine Überweisung ging nicht durch, es wurde also nichts bezahlt und dein Geld ist noch in deiner Wallet — ${reason}. Scanne den Code erneut, um an dieser Kasse zu zahlen.`,
+      `Deine Überweisung ging nicht durch — es wurde nichts bezahlt, und dein Geld ist noch in deiner Wallet: ${reason}. Scanne erneut, um an dieser Kasse zu zahlen.`,
     transferFailed:
-      'Das Solana-Netzwerk hat deine Transaktion abgelehnt, es wurde also nichts bezahlt — der Betrag ist noch in deiner Wallet (eine kleine Netzwerkgebühr wurde berechnet). Scanne den Code erneut und versuche es noch einmal.',
+      'Das Solana-Netzwerk hat deine Transaktion abgelehnt — es wurde nichts bezahlt. Der Betrag ist noch in deiner Wallet, aber eine kleine Netzwerkgebühr wurde berechnet. Scanne erneut und versuche es noch einmal.',
     providerHost: host => `Preis von ${host}`,
   },
 
@@ -153,7 +153,7 @@ export const payDe: PayMessages = {
     switchTo: network => `Wechseln zu ${network}`,
     switchToAsset: asset => `Wechseln zu ${asset}`,
     practice: amount =>
-      `Du hast ${amount} Übungsgeld — damit kannst du eine Zahlung üben; es hat keinen Gegenwert und kann kein echtes Geschäft bezahlen.`,
+      `Du hast ${amount} Übungsgeld. Übe damit — es hat keinen Gegenwert und kann kein echtes Geschäft bezahlen.`,
     switchToPractice: 'Zum Übungsgeld wechseln',
   },
 
@@ -165,23 +165,23 @@ export const payDe: PayMessages = {
 
   spay: {
     wrongRail:
-      'Das ist eine Solana-Pay-Anfrage. Dieser Bildschirm zahlt über den Internet Computer — wechsle unter Guthaben zu Solana und scanne den Code dort, um zu zahlen.',
+      'Das ist eine Solana-Pay-Anfrage. Dieser Bildschirm zahlt über den Internet Computer — wechsle unter Guthaben zu Solana und scanne den Code dort.',
     badUri: 'Dieser Solana-Pay-Code ist beschädigt. Bitte den Händler um einen neuen QR-Code.',
     badRecipient: 'Der Empfänger in diesem Solana-Pay-Code ist keine gültige Solana-Adresse. Bitte den Händler um einen neuen QR-Code.',
     badAmount: 'Der Betrag in diesem Solana-Pay-Code ist keine klare Zahl über null. Bitte den Händler um einen neuen QR-Code.',
     badSplToken: 'Der Token-Mint in diesem Solana-Pay-Code ist ungültig. Bitte den Händler um einen neuen QR-Code.',
     badReference: 'Die Zahlungsreferenz in diesem Solana-Pay-Code ist ungültig. Bitte den Händler um einen neuen QR-Code.',
     unexpectedParam: param =>
-      `Dieser Solana-Pay-Code trägt einen Parameter, den dpay nicht kennt (${param}) — dpay kann nicht prüfen, was ihn zu zahlen unterschreiben würde. Bitte den Händler um einen Code ohne ihn.`,
+      `Dieser Solana-Pay-Code trägt einen unbekannten Parameter (${param}) — dpay kann nicht prüfen, was ihn zu zahlen unterschreiben würde. Bitte den Händler um einen Code ohne ihn.`,
     memoTooLong: 'Das Memo in diesem Solana-Pay-Code ist zu lang für eine Solana-Transaktion. Bitte den Händler um einen neuen QR-Code.',
     unknownMint: mint =>
-      `Dieser Solana-Pay-Code verlangt einen Token, den dpay noch nicht führt (Mint ${mint}). Zahl ihn mit einer Wallet, die ihn unterstützt.`,
+      `Dieser Solana-Pay-Code verlangt einen Token, den dpay nicht führt (Mint ${mint}). Zahl ihn mit einer Wallet, die ihn unterstützt.`,
     offline:
-      'Bei einem Solana-Pay-Code reicht dein Handy die Zahlung selbst ein — dafür braucht es eine Verbindung. Geh online und scanne erneut.',
+      'Bei einem Solana-Pay-Code reicht dein Handy selbst ein — dafür braucht es eine Verbindung. Geh online und scanne erneut.',
     amountLabel: 'Betrag',
     merchantMessage: message => `Nachricht des Händlers: ${message}`,
     pendingNote:
-      'Das Netzwerk hat diese Zahlung angenommen, aber die Bestätigung ist noch unterwegs. Die Transaktionssignatur unten ist dein Nachweis — prüfe sie, bevor du erneut zahlst.',
+      'Das Netzwerk hat diese Zahlung angenommen, aber die Bestätigung ist noch unterwegs. Die Signatur unten ist dein Nachweis — prüfe sie, bevor du erneut zahlst.',
   },
 
   scanToPay: 'Scannen & zahlen',
@@ -264,13 +264,13 @@ export const receiveDe: ReceiveMessages = {
   noOpenRequest: 'Keine offene Anfrage.',
   paymentRejected: 'Zahlung abgelehnt.',
   paymentRejectedDetail:
-    'Zahlung abgelehnt — das Guthaben des Zahlers reicht möglicherweise nicht, oder der Blockhash ist abgelaufen.',
+    'Zahlung abgelehnt — dem Zahler fehlt vielleicht Guthaben, oder der Blockhash ist abgelaufen.',
   couldNotConfirmMaySettle:
     'Nicht bestätigt — die Zahlung kann trotzdem noch abgewickelt werden. Prüfe gleich dein Guthaben oder versuche es erneut.',
   stillCannotConfirm:
     'Weiterhin nicht bestätigt — die Zahlung kann trotzdem noch abgewickelt werden. Versuche es später erneut.',
   settlementNotVerified:
-    'Bestätigt, aber die On-Chain-Transaktion stimmt nicht mit dieser Anfrage überein. Übergib die Ware noch nicht — prüfe die Signatur in einem Solana-Explorer und beobachte dein Guthaben; die Zahlung kann trotzdem noch korrekt ankommen.',
+    'Bestätigt, aber die On-Chain-Transaktion stimmt nicht mit dieser Anfrage überein. Übergib die Ware noch nicht — prüfe die Signatur in einem Solana-Explorer und beobachte dein Guthaben; die Zahlung kann trotzdem noch ankommen.',
   savedDataCorrupt: 'Die gespeicherten Zahlungsdaten sind beschädigt.',
   paymentBeingConfirmed: 'Eine Zahlung wird gerade bestätigt',
   broadcastInterrupted:
@@ -281,7 +281,7 @@ export const receiveDe: ReceiveMessages = {
   till: {
     tillCode: 'OpenCryptoPay (OCP), Binance Pay, MoonPay App [Zahler muss online sein]',
 
-    ringUpHint: 'Diesen Betrag auf deiner Kasse buchen und der Kundschaft einen bezahlbaren Code zeigen',
+    ringUpHint: 'Diesen Betrag auf deiner Kasse buchen und der Kundschaft einen zahlbaren Code zeigen',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'Ein Kassenbetrag geht auf ganze Rappen — buche 10.50 statt 10.505.'
@@ -291,38 +291,38 @@ export const receiveDe: ReceiveMessages = {
 
     wrongAssetTitle: 'Ein Kassen-Code wird in VCHF bezahlt',
     wrongAsset: (selected, network) =>
-      `Ein Kassen-Code wird immer in VCHF auf dem Internet Computer bezahlt — eine Kasse nimmt einen Wert an, und dpay tauscht nie um. Diese Anforderung lautet auf ${selected}${network ? ` auf ${network}` : ''}. Wechsle zu VCHF, um zu buchen — oder bleib beim dpay-Code: jede Handykamera öffnet ihn — dpay selbst oder die Web-Wallet — und er wird in ${selected} bezahlt.`,
+      `Ein Kassen-Code wird immer in VCHF auf dem Internet Computer bezahlt — dpay tauscht nie um. Diese Anforderung lautet auf ${selected}${network ? ` auf ${network}` : ''}. Wechsle zu VCHF, um zu buchen — oder bleib beim dpay-Code: jede Handykamera öffnet ihn, und er wird in ${selected} bezahlt.`,
     noTillAsset:
-      'Diese Wallet führt kein VCHF, also gibt es kein Konto, auf das eine Kassenbuchung bezahlt werden könnte. Nimm den dpay-Code — jede Handykamera öffnet ihn, und er nimmt den gewählten Wert an.',
+      'Diese Wallet führt kein VCHF, also gibt es kein Konto für eine Kassenbuchung. Nimm den dpay-Code — jede Handykamera öffnet ihn, und er nimmt den gewählten Wert an.',
     switchTo: asset => `Zu ${asset} wechseln`,
 
     failedTitle: 'Der Betrag wurde nicht gebucht',
     notServed: host =>
-      `${host} bietet keine Kassen-Codes an; es wurde nichts gebucht und nichts ist bezahlbar. Bitte die Person, die dieses Relay betreibt, die Kasse einzuschalten — oder nimm den dpay-Code, der braucht keine Kasse.`,
+      `${host} bietet keine Kassen-Codes an; es wurde nichts gebucht. Bitte die Person, die dieses Relay betreibt, die Kasse einzuschalten — oder nimm den dpay-Code, der braucht keine Kasse.`,
     unreachable: host =>
-      `dpay hat ${host} nicht erreicht, es wurde nichts gebucht. Ein Kassen-Code entsteht online. Prüfe die Verbindung und buche erneut — oder nimm den dpay-Code, den dieses Telefon selbst erzeugt und auch offline zeigen kann.`,
+      `dpay hat ${host} nicht erreicht, es wurde nichts gebucht. Kassen-Codes entstehen online. Prüfe die Verbindung und versuche es erneut — oder nimm den dpay-Code, den dieses Telefon auch offline zeigen kann.`,
     refused: said =>
       `Die Kasse hat diese Buchung abgelehnt: „${said}“ Nichts ist bezahlbar. Bring das in Ordnung und buche erneut.`,
     refusedNoReason: status =>
-      `Die Kasse hat diese Buchung ohne Begründung abgelehnt (HTTP ${status}); nichts ist bezahlbar. Buche erneut — lehnt sie zweimal ab, sag der Person Bescheid, die das Relay betreibt.`,
+      `Die Kasse hat diese Buchung ohne Grund abgelehnt (HTTP ${status}); nichts ist bezahlbar. Buche erneut — lehnt sie zweimal ab, sag der Person Bescheid, die das Relay betreibt.`,
     mispriced: (rung, quoted) =>
-      `Du hast ${rung} gebucht, die Kasse hat ${quoted} zurückgemeldet. dpay zeigt keinen Code, der einen Betrag verlangt, den hier niemand gewählt hat — nichts ist bezahlbar. Buche erneut, und wenn es wieder passiert, sag der Person Bescheid, die das Relay betreibt, bevor du Geld annimmst.`,
+      `Du hast ${rung} gebucht, die Kasse hat aber ${quoted} zurückgemeldet. dpay zeigt keinen Code für einen Betrag, den hier niemand gewählt hat — nichts ist bezahlbar. Buche erneut; wenn es wieder passiert, sag der Person Bescheid, die das Relay betreibt, bevor du Geld annimmst.`,
     unsigned:
-      'Dieses Telefon konnte die Buchung nicht signieren; es wurde nichts gebucht und nichts ist bezahlbar. Schliesse dpay, öffne es neu und buche erneut.',
+      'Dieses Telefon konnte die Buchung nicht signieren; nichts ist bezahlbar. Schliesse dpay, öffne es neu und buche erneut.',
     tryAgain: 'Erneut versuchen',
 
     settlesAs: (amount, price) =>
       `Sie erhalten ${amount} auf dem Internet Computer. Die Ledger-Gebühr tragen Sie, die Kundschaft zahlt also genau ${price}.`,
     collecting: 'Die freigegebene Zahlung wird eingezogen …',
     collectNotApproved:
-      'Die Wallet der Kundschaft hat für diesen Betrag zu wenig freigegeben, oder die Freigabe ist abgelaufen. Bitten Sie sie, den Code noch einmal zu bezahlen — es wurde nichts abgebucht.',
+      'Die Wallet der Kundschaft hat zu wenig freigegeben, oder die Freigabe ist abgelaufen. Bitten Sie sie, den Code noch einmal zu bezahlen — es wurde nichts abgebucht.',
     collectNoFunds:
-      'Die Kundschaft hat die Zahlung freigegeben, hat aber nicht genug Guthaben. Es wurde nichts abgebucht; bitten Sie sie, aufzuladen und den Code erneut zu bezahlen.',
+      'Die Kundschaft hat die Zahlung freigegeben, hat aber nicht das Geld. Es wurde nichts abgebucht — bitten Sie sie, aufzuladen und erneut zu bezahlen.',
     collectFailed:
-      'Die freigegebene Zahlung konnte nicht eingezogen werden, und es wurde nichts abgebucht. Der Code ist weiterhin zahlbar — bitten Sie die Kundschaft, ihn erneut zu scannen oder zu tappen.',
+      'Die freigegebene Zahlung konnte nicht eingezogen werden, und es wurde nichts abgebucht. Der Code ist weiterhin zahlbar — bitten Sie sie, erneut zu scannen oder zu tappen.',
     noFeeTitle: 'Diese Kasse kann keinen Betrag berechnen',
     noFee: (symbol, host) =>
-      `Die Ledger-Gebühr trägt das Geschäft und wird vom Preis abgezogen — für ${symbol} kennt diese App aber keine Gebühr, ein Betrag würde sie also still der Kundschaft berechnen. Es ist nichts zahlbar. Aktualisieren Sie dpay, oder melden Sie der Betreiberin von ${host}, dass in der Währungsliste die ${symbol}-Gebühr fehlt.`,
+      `Die Ledger-Gebühr trägt das Geschäft und wird vom Preis abgezogen, aber dpay kennt keine Gebühr für ${symbol} — ein Betrag würde sie also still der Kundschaft berechnen. Es ist nichts zahlbar. Aktualisieren Sie dpay, oder melden Sie der Betreiberin von ${host}, dass in der Währungsliste die ${symbol}-Gebühr fehlt.`,
     showToCustomer: nfc =>
       nfc === 'tap'
         ? 'Zeig das der Kundschaft — jede Handykamera öffnet es, und ein dpay-Handy kann es auch auflegen.'
@@ -331,15 +331,15 @@ export const receiveDe: ReceiveMessages = {
         : 'Zeig das der Kundschaft — jede Handykamera öffnet es und bezahlt.',
     waiting: 'Warten auf die Zahlung…',
     cantCheck:
-      'Diese Buchung lässt sich gerade nicht prüfen — die Kasse ist nicht erreichbar. Das heisst NICHT, dass sie unbezahlt ist. Lass den Code stehen: sobald die Kasse wieder erreichbar ist, steht es hier.',
+      'Diese Buchung lässt sich gerade nicht prüfen — die Kasse ist nicht erreichbar. Das heisst NICHT, dass sie unbezahlt ist. Lass den Code stehen; dieser Bildschirm aktualisiert sich, sobald er die Kasse wieder erreicht.',
     expiredWatching:
-      'Dieser Code ist abgelaufen, neu bezahlen kann ihn niemand mehr. Falls die Kundschaft das Geld schon geschickt hat, kann es noch eintreffen — es wird noch einen Moment beobachtet.',
+      'Dieser Code ist abgelaufen, neu bezahlen kann ihn niemand mehr. Falls die Kundschaft schon bezahlt hat, kann das Geld noch ankommen — es wird noch einen Moment beobachtet.',
     cancel: 'Buchung stornieren',
     cancelling: 'Wird storniert…',
     cancelFailed: said =>
       `Die Buchung wurde NICHT storniert: „${said}“ Sie kann weiterhin bezahlbar sein — lies das und entscheide dann, ob du etwas herausgibst.`,
     cancelFailedNoReason: status =>
-      `Die Buchung wurde ohne Begründung NICHT storniert (HTTP ${status}) — behandle sie als weiterhin bezahlbar. Versuch es erneut und gib auf diesen Code nichts heraus, bis er storniert ist oder abläuft.`,
+      `Die Buchung wurde NICHT storniert (HTTP ${status}) — behandle sie als weiterhin bezahlbar. Versuch es erneut, und gib nichts heraus, bis sie storniert ist oder abläuft.`,
     cancelUnreachable: host =>
       `dpay hat ${host} nicht erreicht, diese Buchung wurde also NICHT storniert — sie bleibt bezahlbar, bis sie abläuft. Versuch es erneut, sobald die Verbindung steht.`,
 
@@ -355,7 +355,7 @@ export const receiveDe: ReceiveMessages = {
         ? 'Darauf ist nichts geschuldet, und bezahlen kann sie niemand. Buche erneut, wenn die nächste Kundschaft dran ist.'
         : reason === 'superseded'
         ? 'Auf dieser Kasse wurde eine neuere Buchung erfasst, dieser Code nimmt kein Geld mehr an. Buche erneut und zeig einen frischen Code.'
-        : 'Das Relay hat sie nicht mehr — höchstwahrscheinlich wurde es neu gestartet. Hier wurde nichts gutgeschrieben. Buche erneut; sagt die Kundschaft, sie habe bezahlt, prüfe erst deinen VCHF-Bestand und die Transaktionen, bevor sie ein zweites Mal zahlt.',
+        : 'Das Relay hat sie nicht mehr — höchstwahrscheinlich wurde es neu gestartet. Hier wurde nichts gutgeschrieben. Buche erneut; sagt die Kundschaft, sie habe bezahlt, prüfe erst deinen VCHF-Bestand und die Transaktionen.',
     ringUpNext: 'Nächste Kundschaft',
 
     paidAmount: price => `Bezahlt ${price}`,

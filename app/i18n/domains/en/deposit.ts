@@ -375,9 +375,9 @@ export const depositEn: DepositMessages = {
     whereFrom: (symbol, network) => [
       {t: 'Send '},
       {t: symbol, em: true},
-      {t: ' from any wallet app that holds it on '},
+      {t: ' from any wallet that holds it on '},
       {t: network, em: true},
-      {t: ' — or withdraw it from an exchange that supports the network.'},
+      {t: ', or withdraw it from an exchange that supports it.'},
     ],
     onlyAccepts: (symbol, network) =>
       `This address receives ${symbol} sent on ${network} — anything else won't credit.`,
@@ -388,7 +388,7 @@ export const depositEn: DepositMessages = {
     alsoBody: symbol => [
       {t: 'Send '},
       {t: symbol, em: true},
-      {t: ' from any Internet Computer wallet directly to your IC address below — no memo needed.'},
+      {t: ' from any Internet Computer wallet to your IC address below. No memo needed.'},
     ],
   },
 
@@ -409,28 +409,28 @@ export const depositEn: DepositMessages = {
     txReverted: 'Transaction reverted on chain.',
     txUnconfirmed: 'Transaction sent but not yet confirmed — still watching for the mint.',
     approveReverted:
-      'The approval reverted on chain, so the deposit was never sent and no funds left your wallet. Try again — your wallet will ask you to approve first, then to deposit.',
+      'The approval reverted on chain. No deposit was sent and no money left your wallet. Try again — your wallet will ask you to approve first, then to deposit.',
     approveUnconfirmed:
-      'Your approval was sent but not confirmed, so the deposit was never sent and no funds left your wallet. Wait a moment, then try again: your wallet will ask you to approve once more, which is expected and only costs gas.',
+      'Your approval was sent but not confirmed, so no money left your wallet. Wait a moment, then try again — your wallet will ask you to approve once more. That is expected and only costs gas.',
     depositHashUnknown:
-      'Check the recent activity in your wallet app before you try again — if the deposit is there, it will still credit in about 20 minutes, and depositing again would send the money twice.',
+      'Check your wallet’s recent activity before trying again. If the deposit is there, it still credits in about 20 minutes — depositing again would pay twice.',
     approveHashUnknown:
-      'No deposit was made and no funds left your wallet. Check the recent activity in your wallet app, then try again — it will ask you to approve first, which is expected and only costs gas.',
+      'No deposit was made and no money left your wallet. Check your wallet’s recent activity, then try again — it will ask you to approve first, which is expected and only costs gas.',
     txNotSigned: 'Transaction not signed.',
     txFailed: 'Transaction failed.',
     allowanceStands:
-      'Your spending approval is already confirmed on chain and no funds have left your wallet. Trying again will ask you to approve and then deposit, both signatures as before.',
+      'Your spending approval is already confirmed on chain, and no money has left your wallet. Trying again asks for both signatures again: approve, then deposit.',
     sendOnly: (nativeAsset, networkLabel) => [
       {t: 'Send only '},
       {t: nativeAsset, em: true},
       {t: ' on '},
       {t: networkLabel, em: true},
-      {t: ". Other assets or chains sent this way won't credit and may be lost."},
+      {t: ". Anything else sent this way won't credit and may be lost."},
     ],
     mintLine: 'Your deposit mints 1:1 to your wallet on confirmation (~20 min).',
     details: 'Details',
     gasNative: 'The network fee is paid in ETH — send a little more than you want to deposit.',
-    gasErc20: "You'll need a small amount of ETH for Ethereum network gas fees.",
+    gasErc20: 'You need a little ETH for network gas fees.',
     scanToPair: 'Scan with your wallet to pair',
     orOpenHere: 'Or open a wallet on this phone:',
     openNamedWallet: name => `Open ${name}`,
@@ -438,12 +438,12 @@ export const depositEn: DepositMessages = {
     otherWalletHint:
       "Pairing works, but dpay can't reopen it later — switch to the wallet yourself to approve the deposit.",
     couldntOpenWallet: name =>
-      `Couldn't open ${name} — it may no longer be installed. Pick another wallet below, or scan the QR with a wallet on another device.`,
+      `Couldn't open ${name} — it may not be installed. Pick another wallet, or scan the QR with a wallet on another device.`,
     walletList: 'MetaMask · Trust · Rabby · any WalletConnect-compatible wallet',
     explainNative:
-      'Send ETH directly to the deposit contract — one transaction your wallet signs, with your deposit amount as the ETH value.',
+      'Send ETH straight to the deposit contract — one signed transaction, with your deposit amount as the ETH value.',
     explainErc20: nativeAsset =>
-      `${nativeAsset} is an Ethereum token — depositing it needs two transactions your wallet signs: first the approval, then the deposit.`,
+      `${nativeAsset} is an Ethereum token. Depositing it takes two signed transactions: first the approval, then the deposit.`,
     connectLabel: 'Connect Ethereum wallet',
     connect: 'Connect wallet',
     amountPlaceholder: '0.00',
@@ -467,15 +467,15 @@ export const depositEn: DepositMessages = {
     checkingAta: asset => `Checking your ${asset} account…`,
     ataUnverified: asset => `Couldn't check your ${asset} account.`,
     ataUnverifiedDetail: asset =>
-      `Your address is fine — we just can't reach Solana right now to confirm your ${asset} account on-chain. Check your connection and try again.`,
+      `Your address is fine — dpay just can’t reach Solana to confirm your ${asset} account. Check your connection and try again.`,
     ataUnverifiedRefused: asset =>
-      `Your address is fine — Solana’s endpoint refused the request, so your ${asset} account could not be confirmed on-chain. Nothing moved, and dpay keeps retrying — try again in a moment.`,
+      `Your address is fine — Solana refused the request, so your ${asset} account couldn’t be confirmed. Nothing moved. Try again in a moment.`,
     ataUnverifiedOffline: asset =>
-      `Your address is fine — you appear to be offline, so your ${asset} account could not be confirmed on-chain. Nothing moved; check again once you’re back online.`,
+      `Your address is fine — you seem offline, so your ${asset} account couldn’t be confirmed. Nothing moved. Check again once you’re back online.`,
     ataUnverifiedUnreachable: asset =>
-      `Your address is fine — dpay’s relay can’t reach Solana right now, so your ${asset} account could not be confirmed on-chain. Your connection is not the problem; your money is untouched and your Internet Computer payments still work. Try again in a moment.`,
+      `Your address is fine — dpay’s relay can’t reach Solana, so your ${asset} account couldn’t be confirmed. Your connection is fine; your money is untouched and Internet Computer payments still work. Try again in a moment.`,
     ataUnverifiedUnreadable: asset =>
-      `Your address is fine — Solana answered with data this wallet cannot read, so your ${asset} account could not be confirmed on-chain. Nothing moved; try again in a moment.`,
+      `Your address is fine — Solana sent data dpay can’t read, so your ${asset} account couldn’t be confirmed. Nothing moved. Try again in a moment.`,
     retryAtaLabel: asset => `Retry checking ${asset} account`,
     checkAgain: 'Check again',
     backToRequest: 'Back to request',
@@ -495,13 +495,13 @@ export const depositEn: DepositMessages = {
   ata: {
     absent: asset => `You don't have a ${asset} account on this device yet.`,
     cost: (setupCost, asset) =>
-      `Creating your ${asset} account costs ${setupCost} (one-time rent + fee, from your SOL balance) — it stays yours, on your keys.`,
+      `Creating your ${asset} account costs ${setupCost}, paid from your SOL balance. It stays yours, on your keys.`,
     checkingSol: 'Checking your SOL balance…',
     needSol: setupCost =>
-      `You need about ${setupCost} in this wallet first — receive SOL at your address, then create the account.`,
+      `You need about ${setupCost} here first. Receive SOL at your address, then create the account.`,
     showSolAddress: 'Show my SOL address',
     creating: asset => `Creating your ${asset} account — confirming on Solana…`,
-    createHint: (setupCost, asset) => `Create your one-time ${asset} account for ${setupCost} from your SOL balance`,
+    createHint: (setupCost, asset) => `Create your ${asset} account for ${setupCost} from your SOL balance`,
   },
 
   trust: {
@@ -520,33 +520,33 @@ export const depositEn: DepositMessages = {
       {t: ', then send it to the address above.'},
     ],
     bridgeWithGas: (token, chain, gasToken) => [
-      {t: 'There is no address for this one. Buy '},
+      {t: 'No address exists for this one. Buy '},
       {t: token, em: true},
       {t: ' on '},
       {t: chain, em: true},
       {t: ' into a wallet you control, and keep a little '},
       {t: gasToken, em: true},
-      {t: ' in it for the network fee. Then connect that wallet here — it signs the transfer.'},
+      {t: ' in it for fees. Then connect that wallet here — it signs the transfer.'},
     ],
     bridgeSelfGas: (token, chain) => [
-      {t: 'There is no address for this one. Buy '},
+      {t: 'No address exists for this one. Buy '},
       {t: token, em: true},
       {t: ' on '},
       {t: chain, em: true},
-      {t: ' into a wallet you control — a little more than you want to move, because the network fee comes out of it. Then connect that wallet here — it signs the transfer.'},
+      {t: ' into a wallet you control — a little more than you want to move, because the fee comes out of it. Then connect that wallet here — it signs the transfer.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'No provider sells '},
       {t: target, em: true},
-      {t: ' directly. The route that works: buy '},
+      {t: ' directly. Buy '},
       {t: viaToken, em: true},
       {t: ' with a card, send it to the address above, then use Convert to swap it for '},
       {t: target, em: true},
       {t: '.'},
     ],
-    testnetOnly: (symbol, chain) => `${symbol} is test money — it has no cash value and nobody sells it. Get some free from a public ${chain} faucet, then send it to the address above.`,
-    testnetOnlyWallet: (symbol, chain) => `${symbol} is test money — it has no cash value and nobody sells it. Get some free from a public ${chain} faucet into a wallet you control, then connect that wallet here.`,
-    bankRoute: provider => `From a Swiss bank account, ${provider} sells it directly by transfer. It needs full identity checks and takes bank-transfer time.`,
+    testnetOnly: (symbol, chain) => `${symbol} is test money with no cash value — nobody sells it. Get some free from a public ${chain} faucet, then send it to the address above.`,
+    testnetOnlyWallet: (symbol, chain) => `${symbol} is test money with no cash value — nobody sells it. Get some free from a public ${chain} faucet into a wallet you control, then connect that wallet here.`,
+    bankRoute: provider => `From a Swiss bank account, ${provider} sells it by bank transfer. It needs full identity checks and takes bank-transfer time.`,
     providersTitle: 'Where people buy it',
     costCard: rate => `card ${rate}`,
     costBank: rate => `bank ${rate}`,
@@ -565,8 +565,8 @@ export const depositEn: DepositMessages = {
     qPix: 'Pix',
     upTo: pct => `up to ${pct}`,
     from: pct => `from ${pct}`,
-    attribution: readOn => `Each provider's own published figures, read ${readOn}. They are limits, not prices — your exact fee is shown before you pay, and most providers also take a margin inside the rate they quote.`,
-    noEndorsement: 'Listed alphabetically. dpay recommends none of them, is paid by none of them, and takes no part in your purchase.',
+    attribution: readOn => `Each provider’s own published figures, read ${readOn}. They are limits, not prices. Your exact fee shows before you pay; most providers also add a margin inside the rate.`,
+    noEndorsement: 'Listed alphabetically. dpay recommends none, is paid by none, and takes no part in your purchase.',
   },
 };
 
@@ -720,7 +720,7 @@ export const withdrawEn: WithdrawMessages = {
 
   ic: {
     resumed:
-      'A withdrawal was in progress when the app closed. Retry re-sends the same envelopes — it cannot double-spend.',
+      'A withdrawal was in progress when the app closed. Retry re-sends the same payment — it cannot double-spend.',
     approvalUnknown: "Couldn't confirm the approval — check your balance when back online",
     withdrawalUnknown: "Couldn't confirm the withdrawal — it may still land; check your balance soon",
     noRail: 'This asset has no withdrawal rail configured',
@@ -733,11 +733,11 @@ export const withdrawEn: WithdrawMessages = {
     availableMin: (available, min) => `Available: ${available} · min ${min}`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Below the ${min} minimum withdrawal.`,
-    gasNote: "You need ckETH for gas. Add ckETH first if you don't have any.",
+    gasNote: "You need ckETH for gas. Add some first if you don't have any.",
     inProgress: 'Withdrawal in progress',
     withdrawAmount: amount => `Withdraw ${amount}`,
     resumeNote:
-      'Already signed — Retry re-sends the same envelopes (it cannot double-spend). Editing the form starts a fresh withdrawal instead.',
+      'Already signed — Retry re-sends the same payment (it cannot double-spend). Editing the form starts a fresh withdrawal.',
     reviewTitle: 'Review withdrawal',
     confirmLabel: 'Confirm withdrawal',
     retry: 'Retry withdrawal',
@@ -768,13 +768,13 @@ export const withdrawEn: WithdrawMessages = {
     refuseWrongChain: (pastedChain, asset, assetChain) =>
       `${pastedChain} addresses can't receive ${asset} — it settles on ${assetChain}. Paste an address for that network instead.`,
     refuseLegacyNotIcp: asset =>
-      `That's an ICP account identifier — the 64-character form. Only ICP itself can be sent to one; for ${asset}, ask the recipient for their Internet Computer principal (the dashed form).`,
+      `That's an ICP account identifier — the 64-character form. Only ICP can be sent there. For ${asset}, ask the recipient for their Internet Computer principal (the dashed form).`,
     refuseUnrecognised: asset => `That doesn't look like an address ${asset} can be sent to.`,
     refuseMistypedIc: 'This Internet Computer address is incomplete or mistyped — check you copied all of it.',
     refuseMistypedLegacy: 'This ICP account address is incomplete or mistyped — check you copied all 64 characters.',
     refuseOwnSubaccount:
-      "That's a subaccount of your own wallet, and dpay only shows and spends your main account — money sent there would stop appearing here. You already hold this asset: paste someone else's address to send it.",
-    selfWarning: 'This is your own address. The funds come straight back and you still pay the fee.',
+      "That's a subaccount of your own wallet. dpay only shows and spends your main account, so money sent there would stop appearing here. You already hold this asset — paste someone else's address to send it.",
+    selfWarning: 'This is your own address. The money comes straight back and you still pay the fee.',
 
     maxLabel: 'Max',
     feeLine: fee => `Network fee ${fee}`,
@@ -794,9 +794,9 @@ export const withdrawEn: WithdrawMessages = {
     sent: 'Sent',
     sentUnknown: 'Not confirmed yet',
     sentUnknownBody:
-      "The transfer was submitted but hasn't been confirmed yet. It may still go through — check your balance in a moment rather than sending again.",
+      "The transfer was submitted but isn't confirmed yet. It may still go through — check your balance in a moment instead of sending again.",
     blockIndex: index => `Ledger block ${index}`,
-    noLedger: 'This asset has no ledger configured, so it cannot be sent.',
+    noLedger: 'This asset has no ledger, so it cannot be sent.',
   },
 
   sol: {

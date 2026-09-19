@@ -26,25 +26,25 @@ describe('education copy (the comprehension contract)', () => {
   test('scene 1 (offline): the RECEIVING phone\'s own connection sends the payment', () => {
     const body = walkthroughScenes()[0].body;
     // The measured truth: the payer's phone may be offline; the receiving phone is NOT.
-    expect(body).toMatch(/receiving phone shows a request/);
-    expect(body).toMatch(/check the amount and asset/);
-    expect(body).toMatch(/if your phone is offline/);
+    expect(body).toMatch(/other phone shows a request/);
+    expect(body).toMatch(/check the amount/);
+    expect(body).toMatch(/if yours is offline/);
     // The banned claim — NEVER "nobody needs internet".
     expect(body.toLowerCase()).not.toMatch(/nobody needs internet|no one needs internet|without the internet/);
   });
 
   test('scene 2 (key): dpay cannot approve; there is no dpay account', () => {
     const body = walkthroughScenes()[1].body;
-    expect(body).toMatch(/cannot approve a payment/);
+    expect(body).toMatch(/cannot approve payments/);
     expect(body).toMatch(/no dpay account/);
-    expect(body).toMatch(/holds no funds/);
+    expect(body).toMatch(/holds no money/);
   });
 
-  test('scene 3 (exact): one exact asset; dpay never converts', () => {
+  test('scene 3 (exact): one exact asset; dpay never swaps', () => {
     const body = walkthroughScenes()[2].body;
     expect(body).toMatch(/one exact asset/);
-    expect(body).toMatch(/never converts/);
-    expect(body).toMatch(/review the amount and approve/);
+    expect(body).toMatch(/never swaps/);
+    expect(body).toMatch(/check the amount and approve/);
   });
 
   test('scene 2 does not duplicate the Onboarding form\'s custody line verbatim', () => {

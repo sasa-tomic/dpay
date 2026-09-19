@@ -5,9 +5,9 @@
 // seam (`SolanaReadFailure` in app/solana.ts) and never guessed at the component:
 //   * REFUSED — the endpoint ANSWERED and did not serve us (the measured case: the baked Helius
 //     key's HTTP 429, "max usage reached", observed 2026-09-08). The rail is down, the phone is
-//     online: the line names the network, states nothing moved, that the other accounts still
-//     work, and that dpay keeps retrying on its own (no button is promised that nothing
-//     implements — against a rate limit an extra manual read is the cause, not the cure).
+//     online: the line names the network, states nothing moved, and that dpay keeps retrying on
+//     its own (no button is promised that nothing implements — against a rate limit an extra
+//     manual read is the cause, not the cure).
 //   * UNREACHABLE — the rail's path is down WHILE THE PHONE IS ONLINE. The blame lands on dpay's
 //     side — since the R2 cutover the Solana path IS dpay's relay, and the line says so: it names
 //     the cause, states the money is untouched, names what still works (Internet Computer PAYMENTS
@@ -18,8 +18,8 @@
 //     entirely.
 //   * OFFLINE — nothing answered anywhere, the IC boundary probe included. The wallet cannot
 //     see that far, so the line names NO cause and offers NO escape: it states the observation
-//     (the phone appears offline), the money fact, the automatic recovery, and that paying by QR
-//     still works offline.
+//     (the phone seems offline), the money fact, the automatic recovery, and that QR payments
+//     still work offline.
 // The refusal is branded (`dpayEndpointRefused`, app/solana/errors.ts) and wins before the oracle
 // runs; transport failures are split by `__DPAY_TEST_SOLANA_CONNECTIVITY` — the hermetic test
 // override this flow injects per stage, so no stage's answer depends on a live probe. (The real
@@ -45,7 +45,7 @@ export const meta = {
   name: 'rail-unreadable',
   journey: 'system',
   covers: ['solana', 'balances', 'home', 'rpc-error', 'honest-copy', 'fail-closed', 'offline-classification', 'escape-hatch'],
-  verifies: 'An unreadable rail says WHY, in ONE line for the network, and the three causes never collapse (R3): an endpoint that answered and refused (HTTP 429) is told apart from a rail path that is down while the phone is online, and from a phone with no connectivity at all — refused names the network, says nothing moved, the other accounts still work, and that dpay keeps retrying; unreachable names dpay\'s relay as the cause, says nothing moved and the money is untouched, names what still works (Internet Computer payments; payments can still be signed offline) and gives the Settings ▸ Advanced escape, made actionable by tapping the note (Settings opens with the Advanced disclosure expanded); offline names no cause and no escape, promises the update on reconnection, and keeps offline QR payments. One outage is one line no matter how many accounts that network carries; a rail that answers, and every IC row on the same screen, say nothing. The LANDING screen states the same sentence as the accounts route when the home currency\'s own rail is the one that cannot be read.',
+  verifies: 'An unreadable rail says WHY, in ONE line for the network, and the three causes never collapse (R3): an endpoint that answered and refused (HTTP 429) is told apart from a rail path that is down while the phone is online, and from a phone with no connectivity at all — refused names the network, says nothing moved, and that dpay keeps retrying; unreachable names dpay\'s relay as the cause, says the money is untouched, names what still works (Internet Computer payments; payments can still be signed offline) and gives the Settings ▸ Advanced escape, made actionable by tapping the note (Settings opens with the Advanced disclosure expanded); offline names no cause and no escape, promises the update on reconnection, and keeps offline QR payments. One outage is one line no matter how many accounts that network carries; a rail that answers, and every IC row on the same screen, say nothing. The LANDING screen states the same sentence as the accounts route when the home currency\'s own rail is the one that cannot be read.',
   timeoutMs: 90000,
 };
 
@@ -116,7 +116,7 @@ export async function run() {
     const line = await driver.readText('rail-unreadable-solana');
     assertIncludes(line, 'Solana', 'the line names the network that is not answering');
     assertIncludes(line, 'Nothing moved', 'the line states the funds did not move');
-    assertIncludes(line, 'other accounts still work', 'the line points at what the user can still do');
+    assertIncludes(line, 'refused the request', 'the line states the classification — the endpoint answered and said no');
     assertIncludes(line, 'keeps retrying', 'the line states the recovery is automatic (there is no button to press)');
     // X9 — three Solana accounts are unreadable at once (one endpoint, one refusal). The banner is
     // stated ONCE for the network; before this it was repeated verbatim on each of them.
@@ -152,8 +152,7 @@ export async function run() {
     const unreachableLine = await driver.readText('rail-unreadable-solana');
     assertIncludes(unreachableLine, 'unreachable while you are online', 'the line names the state AND its premise — the phone is online');
     assertIncludes(unreachableLine, 'dpay’s relay can’t reach', 'the blame lands on dpay’s relay — the service side of the Solana path, never on the phone');
-    assertIncludes(unreachableLine, 'Nothing moved', 'the line states the funds did not move');
-    assertIncludes(unreachableLine, 'your money is untouched', 'the money fact is stated up front — dpay’s outage touched nothing');
+    assertIncludes(unreachableLine, 'Your money is untouched', 'the money fact is stated up front — dpay’s outage touched nothing');
     assertIncludes(unreachableLine, 'Internet Computer payments still work', 'the line names what still works — IC payments go straight to icp-api.io, never through the Solana path');
     assertIncludes(unreachableLine, 'still sign payments offline', 'the offline claim is restated exactly as SIGNING — broadcast still needs a rail, so it is never widened');
     assert(!unreachableLine.includes('Internet Computer balances'), 'IC balance reads DO go through the relay — the balances claim was false and is gone');
@@ -182,14 +181,14 @@ export async function run() {
     console.log('[147-rail-unreadable] phone offline → the row names no cause…');
     await driver.eval(() => { globalThis.__DPAY_TEST_SOLANA_CONNECTIVITY = 'offline'; });
     await driver.waitForFunction(
-      () => (document.querySelector('[data-testid="rail-unreadable-solana"]')?.textContent ?? '').includes('You appear to be offline'),
+      () => (document.querySelector('[data-testid="rail-unreadable-solana"]')?.textContent ?? '').includes('You seem offline'),
       {timeoutMs: 12_000},
     );
     const offlineLine = await driver.readText('rail-unreadable-solana');
-    assertIncludes(offlineLine, 'You appear to be offline', 'the line states the observation — the phone — as the explanation, and names no one as the cause');
-    assertIncludes(offlineLine, '— nothing moved', 'the money fact, lowercase and unpunctuated as the honest aside it is');
-    assertIncludes(offlineLine, 'update on their own when a connection returns', 'the recovery is automatic — nothing to press, nothing promised');
-    assertIncludes(offlineLine, 'paying by QR still works offline', 'what still works is named exactly, not widened');
+    assertIncludes(offlineLine, 'You seem offline', 'the line states the observation — the phone — as the explanation, and names no one as the cause');
+    assertIncludes(offlineLine, 'Nothing moved', 'the money fact, stated plainly as its own sentence');
+    assertIncludes(offlineLine, 'update when you reconnect', 'the recovery is automatic — nothing to press, nothing promised');
+    assertIncludes(offlineLine, 'QR payments still work offline', 'what still works is named exactly, not widened');
     assert(!offlineLine.includes('Settings'), 'the offline copy offers NO escape — the wallet cannot see far enough to blame anyone, and Settings cannot fix no connectivity');
     await driver.screenshot('147-rail-unreadable-offline');
 
@@ -243,7 +242,7 @@ export async function run() {
     assert(headline.includes('—'), `an unreadable home rail still shows no number, saw "${headline}"`);
     const homeLine = await driver.readText('rail-unreadable-solana');
     assertIncludes(homeLine, 'Solana', 'the landing screen names the network that is not answering');
-    assertIncludes(homeLine, 'Nothing moved', 'and states the funds did not move');
+    assertIncludes(homeLine, 'Your money is untouched', 'and states the money is untouched');
     assert(homeLine === unreachableLine, 'the landing screen and the accounts route say the SAME sentence — one fact, one owner');
     await driver.screenshot('147-rail-unreadable-home');
 

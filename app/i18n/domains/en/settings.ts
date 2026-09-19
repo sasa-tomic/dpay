@@ -211,7 +211,7 @@ export const settingsEn: SettingsMessages = {
   restore: {
     label: 'Restore',
     warning:
-      "Replaces your current wallet with the one from this seed. Back up your current wallet first if you haven't — its funds are only reachable via its own seed.",
+      "Replaces your current wallet with the one from this seed. Back up your current wallet first — its money is reachable only with its own seed.",
     seedPlaceholder: '24 recovery words or 64 hex characters',
     seedA11y: 'Recovery seed',
     seedHint: 'Your 24 recovery words, or the 64-hex seed from Backup',
@@ -223,13 +223,13 @@ export const settingsEn: SettingsMessages = {
     entryHint: 'Import a wallet from a seed — replaces your current wallet',
     errEmpty: 'Enter your 24 recovery words or 64-hex seed.',
     errWords:
-      'Some words are wrong or missing. Check you have all 24 words spelled correctly — or paste the 64-hex seed instead.',
+      'Some words are wrong or missing. Check all 24 words are spelled correctly, or paste the 64-hex seed instead.',
   },
 
   reset: {
     label: 'Reset',
     warning:
-      'This erases your wallet identity from this device. Funds at this address become irrecoverable.',
+      'This erases your wallet from this device. Money at this address becomes unrecoverable.',
     confirm: 'Yes, reset everything',
     cancelA11y: 'Cancel reset',
     action: 'Reset wallet',
@@ -269,7 +269,7 @@ export const settingsEn: SettingsMessages = {
     show: 'Show advanced settings',
     hide: 'Hide advanced settings',
     hint: 'Server and network endpoints this wallet talks to',
-    serverNote: 'One address per line — the first that answers is used. Applies when you tap Apply.',
+    serverNote: 'One address per line. The first that answers is used. Tap Apply to save.',
     serverLabel: 'Server',
     serverPlaceholder: 'http://<ip>:8787',
     apply: 'Apply',
@@ -280,7 +280,7 @@ export const settingsEn: SettingsMessages = {
     solanaApplyA11y: 'Apply Solana endpoint',
     // F2 — the IC gateway override. Operator-facing (demos/testing against a local replica), not a
     // user feature; the note says so honestly, mirroring the Solana endpoint row's disclosure.
-    icGatewayNote: 'Operator only: the base URL this wallet sends IC transactions to. Empty uses the public gateway; set a local replica address to point demos and tests at it.',
+    icGatewayNote: 'Operator only: the base URL this wallet sends IC transactions to. Empty uses the public gateway; set a local replica for demos and tests.',
     icGatewayLabel: 'IC gateway',
     icGatewayPlaceholder: 'http://10.0.2.2:4943',
     icGatewayApplyA11y: 'Apply IC gateway',
@@ -289,7 +289,7 @@ export const settingsEn: SettingsMessages = {
   about: {
     label: 'About',
     custody:
-      'dpay is non-custodial: only the key on this device controls your money. There is no dpay account, and dpay cannot move, freeze, or recover your funds — your 24 backup words are the only recovery.',
+      'dpay is non-custodial: only the key on this device controls your money. There is no dpay account. dpay cannot move, freeze, or recover it — your 24 backup words are the only recovery.',
     privacy: 'Privacy policy',
   },
 };
@@ -376,9 +376,9 @@ export const onboardingEn: OnboardingMessages = {
   custody: 'No account. Your key never leaves this phone. Not even dpay can move your money.',
   continue: 'Continue',
   errOwnSeed:
-    "That seed doesn't look right — paste your 24 recovery words or 64-hex seed exactly as written down.",
-  errWords: 'Some words are wrong or missing. Check you have all 24 words spelled correctly.',
-  errSaveWallet: 'This phone could not save your wallet, so it has not been created yet. Tap Continue again to retry — if it keeps failing, free up some storage space on the phone.',
+    "That seed doesn't look right. Paste your 24 recovery words or 64-hex seed exactly as written down.",
+  errWords: 'Some words are wrong or missing. Check all 24 words are spelled correctly.',
+  errSaveWallet: 'This phone could not save your wallet, so it was not created yet. Tap Continue again to retry. If it keeps failing, free up phone storage.',
 
   recoverySaved: {
     stamp: 'Recovery saved',
@@ -389,7 +389,7 @@ export const onboardingEn: OnboardingMessages = {
     ...copyWordsEn,
     title: 'Back up your wallet',
     warning:
-      "Write down these 24 words and store them safely — they are the ONLY way to recover your wallet if you lose this device. There is no dpay account to sign back into, and not even dpay can recover them.",
+      "Write down these 24 words and store them safely. They are the ONLY way to recover your wallet if you lose this device — there is no dpay account, and not even dpay can recover them.",
     copyWordsHint: 'Copies all 24 words without the position numbers',
     ack: "I've written down all 24 words",
   },

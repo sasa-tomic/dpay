@@ -296,7 +296,7 @@ describe('SolanaReceiveSheet — unverified detail is classified (R4, spec 2026-
 
   test("'unreadable' names the untrustworthy answer", () => {
     const tree = mount({token: 'USDC', ataStatus: 'unverified', ataFailure: 'unreadable'});
-    expect(cardText(tree)).toContain('cannot read');
+    expect(cardText(tree)).toContain('can’t read');
     act(() => { tree.unmount(); });
   });
 

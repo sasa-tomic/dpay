@@ -67,7 +67,7 @@ export type ReceiptMessages = {
 export const receiptEn: ReceiptMessages = {
   title: 'Receipt',
   openRow: 'Open this receipt',
-  openRowHint: 'Shows the exact amount, the account it moved between and the ledger proof',
+  openRowHint: 'Shows the exact amount, both accounts, and the ledger proof',
   close: 'Close',
 
   amountLabel: 'Amount',
@@ -83,7 +83,7 @@ export const receiptEn: ReceiptMessages = {
   signatureLabel: 'Transaction signature',
 
   noAccount: 'The ledger recorded no account on that side.',
-  noReferenceIc: 'No reference — this transfer carried no memo (a dpay payment request always sets one).',
+  noReferenceIc: 'No reference — this transfer carried no memo.',
   noReferenceSolana: 'A Solana transfer carries no dpay reference — the signature below identifies it.',
   pendingProof: 'Not confirmed yet — this payment settles on the ledger later.',
 
@@ -91,5 +91,5 @@ export const receiptEn: ReceiptMessages = {
   copied: 'Copied ✓',
   copyHint: 'Copies every line above as text',
   source: 'All values were read from the ledger.',
-  sourceAnnotated: 'Values read from the ledger · the name and note were saved on this device when paying.',
+  sourceAnnotated: 'Values read from the ledger · the name and note were saved on this device.',
 };

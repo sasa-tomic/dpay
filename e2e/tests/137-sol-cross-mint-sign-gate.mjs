@@ -208,7 +208,7 @@ export async function run() {
     await driver.findByTestID('sol-pay-qr', {timeoutMs: 10_000});
     const caveat = await driver.readText('sol-pay-sign-caveat');
     assertIncludes(caveat, 'EURC', 'the caveat must name the token whose account could not be checked');
-    assertIncludes(caveat, 'cannot settle', 'and state what it costs if the account does not exist');
+    assertIncludes(caveat, 'can’t settle', 'and state what it costs if the account does not exist');
     assertIncludes(caveat, 'My address', 'and where the payer can check or create it');
     assert(!caveat.includes('Get online'),
       'the device IS online and the RAIL is down — telling this payer to get online would be a lie');

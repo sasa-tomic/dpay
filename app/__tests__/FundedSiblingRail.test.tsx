@@ -88,7 +88,7 @@ describe('FundedSiblingRail — when the pointer renders at all', () => {
     });
     const line = textOf(tree, 'fund-sibling-holds');
     expect(line).toBe(M.pay.fundSibling.practice('∂100.00'));
-    expect(line).toContain('practise a payment');
+    expect(line).toContain('Practise with it');
     expect(line).toContain('cannot pay a real merchant');
     expect(line).not.toContain('You hold');
     expect(ctaOf(tree)).toBe('Switch to practice money');

@@ -147,8 +147,8 @@ describe('solSignCaveat — the sentence a fact-less signature owes its payer', 
     const line = solSignCaveat('unverified', EURC_MINT_ADDRESS);
     expect(line).toBe(M.errors.solana.senderTokenAccountUnverified('EURC'));
     expect(line).toContain('EURC');
-    expect(line).toContain('cannot settle');
-    expect(line).toContain('Get online');
+    expect(line).toContain('can’t settle');
+    expect(line).toContain('Go online');
     expect(line).toContain('My address');
   });
 
@@ -156,8 +156,8 @@ describe('solSignCaveat — the sentence a fact-less signature owes its payer', 
     const line = solSignCaveat('unverified-rail-down', USDC_MINT_ADDRESS);
     expect(line).toBe(M.errors.solana.senderTokenAccountUnverifiedRailDown('USDC'));
     expect(line).toContain('USDC');
-    expect(line).toContain('Solana is not answering');
-    expect(line).toContain('cannot settle');
+    expect(line).toContain('Solana isn’t answering');
+    expect(line).toContain('can’t settle');
     expect(line).toContain('My address');
     // The distinction is the whole point of the second state: "get online" would be a lie to a
     // payer who already is.
