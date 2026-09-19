@@ -91,6 +91,45 @@ function runBalance(entry) {
   }
 }
 
+/** Watch the abandoned principal. It has no key — its seed was destroyed in the 2026-09-05
+ *  rotation — but it still has a PUBLIC address anyone can paste by mistake, and a payment rail
+ *  accepts transfers to it silently. So every agent-funds run measures the full IC census for it
+ *  through `agent-key.mjs balance <principal>` (which needs no key) and trips LOUDLY if funds
+ *  ever appear: funds on a destroyed key are unrecoverable by construction, and the only honest
+ *  responses are alarm and post-mortem. Returns true on alarm or unreadable watch (exit 1),
+ *  false when measured zero on every ledger. */
+function watchAbandoned(w) {
+  try {
+    const out = execFileSync(process.execPath, [join(ROOT, SCRIPT_OF.icp), 'balance', w.address], {
+      encoding: 'utf8', cwd: ROOT, timeout: 300_000,
+      stdio: ['ignore', 'pipe', 'inherit'], // the child's own die() guidance must reach the user
+    });
+    const lines = out.split('\n').filter(l => l.trim() && !l.startsWith('principal '));
+    for (const l of lines) console.log(`  ${l}`);
+    const measured = lines.map(l => l.match(/^  (\S+)\s+(\d+)\.(\d+)$/)).filter(Boolean)
+      .map(m => ({label: m[1], val: `${m[2]}.${m[3]}`}));
+    const nonzero = measured.filter(r => !/^0\.0*$/.test(r.val));
+    if (nonzero.length > 0) {
+      console.log('');
+      console.log('   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+      console.log('   !! MISDIRECTED FUNDING — funds found on a key whose seed is DESTROYED !!');
+      console.log(`   !! ${nonzero.map(r => `${r.label} ${r.val}`).join(', ')} on ${w.address}`);
+      console.log('   !! They are unrecoverable. NEVER fund this address; record how they arrived.');
+      console.log('   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+      return true;
+    }
+    if (lines.some(l => l.includes('UNREADABLE'))) {
+      console.log('   watch   ledger UNREADABLE above — cannot certify this principal empty');
+      return true;
+    }
+    console.log('   watch   measured 0 on every catalog ledger — still empty');
+    return false;
+  } catch (e) {
+    console.log(`   watch   UNREADABLE (${e.message.split('\n')[0]})`);
+    return true;
+  }
+}
+
 const args = process.argv.slice(2);
 const seedFlag = args.includes('--seed');
 if (args.some(a => a !== '--seed')) die(`unknown argument(s): ${args.filter(a => a !== '--seed').join(' ')} — usage: agent-funds.mjs [--seed]`);
@@ -110,8 +149,9 @@ for (const w of wallets) {
     // The abandoned WHY must be visible even though it lives in the registry's `purpose` field —
     // a fresh session seeing "never fund" should not have to ask why.
     if (w.purpose) console.log(`   note    ${w.purpose}`);
+    failed = watchAbandoned(w) || failed;
     console.log('');
-    continue; // never touched, never queried
+    continue; // never funded, but always WATCHED
   }
   if (!SCRIPT_OF[w.chain] || !runBalance(w)) failed = true;
   if (seedFlag && w.chain === 'solana' && !seedShown) {
