@@ -379,18 +379,24 @@ async function cmdB(icpAmount) {
       await driver.click('convert-dest-mech-sideshift');
       log('mechanism: sideshift');
     } catch { /* single mechanism — already picked */ }
-    const q = await readQuote(driver);
-    log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
-    await driver.screenshot('live-b-quote');
-    const body = await driver.bodyText();
-    if (!/SideShift/i.test(body)) throw new Error('OP B: SideShift is not the venue on the quote — refusing');
-    // HARD gate before any signature: the settle address on screen must BE the agent SOL wallet.
-    const settleShown = await driver.isPresent('convert-settle-address')
-      ? (await driver.readText('convert-settle-address')).trim() : null;
+    // The CeFi surface replaces the venue-quote headline (flow 187's drive): settle address +
+    // quote-source naming the venue. No convert-headline exists on this path.
+    await driver.findByTestID('convert-settle-address', {timeoutMs: 30_000});
+    const settleShown = (await driver.readText('convert-settle-address')).trim();
     if (settleShown !== SOL_SETTLE) {
       throw new Error(`OP B: settle address on screen ${JSON.stringify(settleShown)} != agent SOL wallet — refusing`);
     }
     log(`settle address verified: ${settleShown}`);
+    const qsrc = await driver.isPresent('convert-quote-source')
+      ? await driver.readText('convert-quote-source') : '(none)';
+    log(`quote source: ${qsrc}`);
+    if (!/SideShift/i.test(qsrc)) throw new Error('OP B: quote source is not SideShift — refusing');
+    const cparty = await driver.isPresent('convert-counterparty')
+      ? await driver.readText('convert-counterparty') : '(none)';
+    log(`counterparty disclosure: ${cparty.replace(/\s+/g, ' ').slice(0, 300)}`);
+    const body = await driver.bodyText();
+    log('CEFI SURFACE:', body.replace(/\s+/g, ' ').slice(0, 600));
+    await driver.screenshot('live-b-quote');
     await driver.click('btn-convert-confirm');
 
     // The shift order is created, then the panel waits for the deposit.
