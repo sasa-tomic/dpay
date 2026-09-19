@@ -695,3 +695,17 @@ agent-seed:
 # generate a NEW test-float key. Refuses if one exists — rotating strands any funds still held.
 agent-key-init:
     node scripts/agent-key.mjs init
+
+# generate a NEW agent Solana key. Refuses if one exists — rotating strands any funds still held.
+agent-sol-init:
+    node scripts/agent-sol.mjs init
+
+# the agent's Solana mainnet funding address (no decryption)
+agent-sol-principal:
+    node scripts/agent-sol.mjs principal
+
+# EVERY wallet the agent controls + EVERY live balance, one command (registry: .dev/
+# agent-wallets.json; durable copy: docs/AGENT-FUNDS.md). `--seed` additionally DECRYPTS and
+# prints the SOL seed hex — only immediately before an approved SOL spend.
+agent-funds *flags:
+    node scripts/agent-funds.mjs {{flags}}
