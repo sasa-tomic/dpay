@@ -118,6 +118,10 @@ const record = (over: Partial<ConvertRecord> = {}): ConvertRecord => ({
 
 const fakeRes = (body: unknown, ok = true, status = 200) => ({ok, status, json: async () => body});
 const rowsRes = (rows: unknown[]) => fakeRes({transactions: rows});
+// Probe fixtures must look NEWER than any record's createdAtMs (the settlement
+// probes ignore rows predating the record — 2026-09-19 live fix).
+const NOW = () => Math.floor(Date.now() / 1000) + 3600;
+const ROW_TS = 1_800_000_000; // fixed recent epoch — stable row identity where a test pins it
 const myPrincipal = 'myprincipal123';
 const OPTS = {submitAttempts: 2, poll: {attempts: 1, intervalMs: 0}, settleAttempts: 2, settleIntervalMs: 0};
 
@@ -725,7 +729,7 @@ describe('executeConvert — the §4 state machine', () => {
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never);
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
     jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
-    (String(path).includes('currency=7') ? rowsRes([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, timestamp: 77}]) : rowsRes([])) as never);
+    (String(path).includes('currency=7') ? rowsRes([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, block: '77', timestamp: ROW_TS}]) : rowsRes([])) as never);
     const final = await executeConvert(record(), d, OPTS);
     expect(final.step).toBe('done');
     expect(final.outAmountNet).toBe('190000000');
@@ -746,6 +750,25 @@ describe('executeConvert — the §4 state machine', () => {
     expect(notes.find(n => n.k === 'bbdd')?.msg).toBeUndefined(); // venue rows carry a name, never a message
   });
 
+  test('the settlement probe ignores a POOL row that predates the record (2026-09-19 live defect: a post-restore record claimed an earlier run’s identical payout and flipped done with nothing on-chain)', async () => {
+    const d = deps();
+    jest.mocked(submitTransfer)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never);
+    jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
+    // Same pool, same amount, right shape — but STAMPED BEFORE the record existed. The floor
+    // (createdAtMs − 120s) must refuse it: the record parks pending_withdrawal, never done.
+    const before = rowsRes([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, block: '77', timestamp: 1_700_000_000}]);
+    jest.mocked(relayFetch).mockResolvedValue(before as never);
+    const rec = {...record(), createdAtMs: Date.now()};
+    const parked = await executeConvert(rec, d, OPTS);
+    expect(parked.step).toBe('pending_withdrawal');
+    expect(d.onUpdate.mock.calls.map((c: unknown[]) => (c[0] as ConvertRecord).step)).not.toContain('done');
+    // this test pins a PERSISTENT relayFetch implementation — drop it so later tests stay isolated
+    jest.mocked(relayFetch).mockReset();
+    jest.mocked(submitTransfer).mockReset();
+  });
+
   test("a 'unknown' submit retries the SAME signed bytes, never rebuilds args", async () => {
     const d = deps();
     jest.mocked(submitTransfer)
@@ -753,7 +776,7 @@ describe('executeConvert — the §4 state machine', () => {
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never) // approve, attempt 2
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never); // swap
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
-    jest.mocked(relayFetch).mockResolvedValue(rowsRes([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, timestamp: 9}]) as never);
+    jest.mocked(relayFetch).mockResolvedValue(rowsRes([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, timestamp: NOW()}]) as never);
     const final = await executeConvert(record(), d, OPTS);
     expect(final.step).toBe('done');
     const first = jest.mocked(submitTransfer).mock.calls[0]![0] as {envelopeHex: string; requestIdHex: string};
@@ -806,7 +829,7 @@ describe('executeConvert — the §4 state machine', () => {
 
     // the payout lands; a resumed run (screen open, executor re-armed) flips it to done
     jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
-    (String(path).includes('currency=7') ? rowsRes([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, timestamp: 55}]) : rowsRes([])) as never);
+    (String(path).includes('currency=7') ? rowsRes([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, block: '77', timestamp: ROW_TS}]) : rowsRes([])) as never);
     const done = await executeConvert(pending, d, OPTS);
     expect(done.step).toBe('done');
     expect(done.outAmountNet).toBe('190000000');
@@ -820,7 +843,7 @@ describe('executeConvert — the §4 state machine', () => {
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never);
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
     jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
-    (String(path).includes('currency=8') ? rowsRes([{from: POOL, to: myPrincipal, amount: '100000000', currency: 8, timestamp: 3}]) : rowsRes([])) as never);
+    (String(path).includes('currency=8') ? rowsRes([{from: POOL, to: myPrincipal, amount: '100000000', currency: 8, block: '3', timestamp: ROW_TS}]) : rowsRes([])) as never);
     const final = await executeConvert(record(), d, OPTS);
     expect(final.step).toBe('failed_refunded');
     expect(final.failureCode).toBe('refunded');
@@ -860,7 +883,7 @@ describe('executeConvert — expiry-honest recovery (V6 trichotomy arm b)', () =
   test('expired + the payout already landed → done (the signed update DID execute)', async () => {
     const d = deps();
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
-    rowsFor([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, block: 555, timestamp: 77}], []);
+    rowsFor([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, block: 555, timestamp: NOW()}], []);
     const final = await executeConvert(record({step: 'swapping', legs: expiredLegs()}), d, OPTS);
     expect(final.step).toBe('done');
     expect(final.outAmountNet).toBe('190000000');
@@ -871,7 +894,7 @@ describe('executeConvert — expiry-honest recovery (V6 trichotomy arm b)', () =
   test('expired + refund row on the input ledger → failed_refunded (the venue refused after all)', async () => {
     const d = deps();
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
-    rowsFor([], [{from: POOL, to: myPrincipal, amount: '100000000', currency: 8, timestamp: 5}]);
+    rowsFor([], [{from: POOL, to: myPrincipal, amount: '100000000', currency: 8, block: '5', timestamp: ROW_TS}]);
     const final = await executeConvert(record({step: 'approving', legs: expiredLegs()}), d, OPTS);
     expect(final.step).toBe('failed_refunded');
     expect(final.failureCode).toBe('refunded');
@@ -885,7 +908,7 @@ describe('executeConvert — expiry-honest recovery (V6 trichotomy arm b)', () =
     // 189 995 000 sits between expectedNet (189 990 000) and expectedGross (190 000 000):
     // a production pool deducting part of the output fee lands here, and the PoC's
     // exact-figure-only probe would have called it "unknown".
-    rowsFor([{from: POOL, to: myPrincipal, amount: '189995000', currency: 7, block: 9, timestamp: 9}], []);
+    rowsFor([{from: POOL, to: myPrincipal, amount: '189995000', currency: 7, block: 9, timestamp: NOW()}], []);
     const final = await executeConvert(record({step: 'swapping', legs: expiredLegs()}), d, OPTS);
     expect(final.step).toBe('done');
     expect(final.outAmountNet).toBe('189995000');
@@ -894,7 +917,7 @@ describe('executeConvert — expiry-honest recovery (V6 trichotomy arm b)', () =
   test('a payout BELOW the recorded net never matches (fail-closed posture unchanged)', async () => {
     const d = deps();
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
-    rowsFor([{from: POOL, to: myPrincipal, amount: '189000000', currency: 7, block: 4, timestamp: 4}], []);
+    rowsFor([{from: POOL, to: myPrincipal, amount: '189000000', currency: 7, block: 4, timestamp: NOW()}], []);
     const final = await executeConvert(record({step: 'swapping', legs: expiredLegs()}), d, OPTS);
     expect(final.step).toBe('stuck'); // unknown, never optimistic done
   });
@@ -903,8 +926,8 @@ describe('executeConvert — expiry-honest recovery (V6 trichotomy arm b)', () =
     const d = deps(new Set(['555']));
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
     rowsFor([
-      {from: POOL, to: myPrincipal, amount: '190000000', currency: 7, block: 555, timestamp: 1},
-      {from: POOL, to: myPrincipal, amount: '189990000', currency: 7, block: 556, timestamp: 2},
+      {from: POOL, to: myPrincipal, amount: '190000000', currency: 7, block: 555, timestamp: NOW()},
+      {from: POOL, to: myPrincipal, amount: '189990000', currency: 7, block: 556, timestamp: NOW()},
     ], []);
     const final = await executeConvert(record({step: 'swapping', legs: expiredLegs()}), d, OPTS);
     expect(final.step).toBe('done');
@@ -928,26 +951,26 @@ describe('the constrained refund match', () => {
   };
 
   test('a plausible refund matches: positive and ≤ amountIn + inFee (the ceiling itself matches)', async () => {
-    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '100010000', currency: 8, block: 5}]))
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '100010000', currency: 8, block: 5, timestamp: NOW()}]))
       .toEqual({kind: 'refund', tx: '5'}); // exactly amountIn + inFee — the most the venue took
-    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '100000000', currency: 8, block: 6}]))
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '100000000', currency: 8, block: 6, timestamp: NOW()}]))
       .toEqual({kind: 'refund', tx: '6'}); // the plain full refund
-    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '1', currency: 8, block: 7}]))
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '1', currency: 8, block: 7, timestamp: NOW()}]))
       .toEqual({kind: 'refund', tx: '7'}); // a partial refund is still a refund
   });
 
   test('an over-amount / zero / unparseable / amountless inbound from the venue is NOT this record\'s refund', async () => {
     // amountIn + inFee = 100_010_000; one unit over that ceiling is some other transfer.
-    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '100010001', currency: 8, block: 8}])).toBeNull();
-    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '0', currency: 8, block: 9}])).toBeNull();
-    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: 'NaN', currency: 8, block: 10}])).toBeNull();
-    expect(await refundProbe([{from: POOL, to: myPrincipal, currency: 8, block: 11}])).toBeNull(); // no amount at all
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '100010001', currency: 8, block: 8, timestamp: NOW()}])).toBeNull();
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '0', currency: 8, block: 9, timestamp: NOW()}])).toBeNull();
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: 'NaN', currency: 8, block: 10, timestamp: NOW()}])).toBeNull();
+    expect(await refundProbe([{from: POOL, to: myPrincipal, currency: 8, block: 11, timestamp: NOW()}])).toBeNull(); // no amount at all
   });
 
   test('a refund row another record already claimed as ITS refund is skipped — one row, one record', async () => {
     const rows = [
-      {from: POOL, to: myPrincipal, amount: '100000000', currency: 8, block: 5},
-      {from: POOL, to: myPrincipal, amount: '99999999', currency: 8, block: 6},
+      {from: POOL, to: myPrincipal, amount: '100000000', currency: 8, block: 5, timestamp: NOW()},
+      {from: POOL, to: myPrincipal, amount: '99999999', currency: 8, block: 6, timestamp: NOW()},
     ];
     expect(await refundProbe(rows)).toEqual({kind: 'refund', tx: '5'}); // unclaimed: the row matches
     expect(await refundProbe(rows, new Set(['5']))).toEqual({kind: 'refund', tx: '6'}); // claimed → the free sibling row
@@ -959,7 +982,7 @@ describe('the constrained refund match', () => {
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
     jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
       (String(path).includes('currency=8')
-        ? rowsRes([{from: POOL, to: myPrincipal, amount: '200000000', currency: 8, timestamp: 3}])
+        ? rowsRes([{from: POOL, to: myPrincipal, amount: '200000000', currency: 8, timestamp: NOW()}])
         : rowsRes([])) as never);
     const final = await executeConvert(record({
       step: 'swapping',

@@ -1883,6 +1883,15 @@ export async function probeConvertSettlement(args: {
       return body?.transactions ?? [];
     };
     const pool = venueEndpointOf(record.venueId).toLowerCase();
+    // A row OLDER than the record itself is some EARLIER conversion's payout/refund, never this
+    // record's: the cross-record dedupe above is memory-bound (records do not survive a
+    // restore/reinstall into a fresh record store), but the index's timestamps are absolute.
+    // 2026-09-19 live finding: a same-pair same-amount conversion run after a restore claimed
+    // the PREVIOUS run's payout row and flipped to done with nothing on-chain. 120s covers
+    // block-time lag + client clock skew; a row the probe cannot date proves nothing.
+    const floorSec = Math.floor(record.createdAtMs / 1000) - 120;
+    const rowNewer = (row: TransactionsRowLike): boolean =>
+      row.timestamp != null && Number(row.timestamp) > floorSec;
     // The recorded expected range, inclusive: [net, gross] in the order the record froze them.
     const lo = BigInt(record.expectedNet) < BigInt(record.expectedGross) ? BigInt(record.expectedNet) : BigInt(record.expectedGross);
     const hi = BigInt(record.expectedNet) < BigInt(record.expectedGross) ? BigInt(record.expectedGross) : BigInt(record.expectedNet);
@@ -1899,6 +1908,7 @@ export async function probeConvertSettlement(args: {
         && row.to?.toLowerCase() === myPrincipalLower
         && row.from?.toLowerCase() === pool
         && row.amount != null && matchesExpected(row.amount)
+        && rowNewer(row)
         && !exclude.has(tx)) {
         return {kind: 'output', amount: row.amount ?? '', tx};
       }
@@ -1918,6 +1928,7 @@ export async function probeConvertSettlement(args: {
         && row.to?.toLowerCase() === myPrincipalLower
         && row.from?.toLowerCase() === pool
         && amount != null && amount <= refundCeiling
+        && rowNewer(row)
         && !excludeRefund.has(tx)) {
         return {kind: 'refund', tx};
       }
@@ -1968,6 +1979,10 @@ export async function probeHopPayout(args: {
     if (!r.ok) return null;
     const body = await r.json().catch(() => null) as {transactions?: TransactionsRowLike[]} | null;
     const pool = venueEndpointOf(venueId).toLowerCase();
+    // Same floor as probeConvertSettlement (2026-09-19 live finding): a row predating the
+    // record is an EARLIER conversion's payout — the dedupe set is memory-bound, the index's
+    // timestamps are absolute. An undatable row proves nothing.
+    const floorSec = Math.floor(record.createdAtMs / 1000) - 120;
     for (const row of body?.transactions ?? []) {
       const tx = rowIdentity(row);
       const n = row.amount == null ? null : BigInt(row.amount);
@@ -1975,6 +1990,7 @@ export async function probeHopPayout(args: {
         && row.to?.toLowerCase() === myPrincipalLower
         && row.from?.toLowerCase() === pool
         && n != null && (n === lo || n === hi || (n >= lo && n <= hi))
+        && row.timestamp != null && Number(row.timestamp) > floorSec
         && !exclude.has(tx)) {
         return {amount: row.amount ?? '', tx};
       }

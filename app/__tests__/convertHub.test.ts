@@ -65,6 +65,9 @@ const POOL2 = 'angxa-baaaa-aaaag-qcvnq-cai'; // icpswap-cketh (ICP/ckETH)
 
 const fakeRes = (body: unknown, ok = true, status = 200) => ({ok, status, json: async () => body});
 const rowsRes = (rows: unknown[]) => fakeRes({transactions: rows});
+// Probe fixtures must look NEWER than any record's createdAtMs (the settlement
+// probes ignore rows predating the record — 2026-09-19 live fix).
+const NOW = () => Math.floor(Date.now() / 1000) + 3600;
 const myPrincipal = 'myprincipal123';
 const OPTS = {submitAttempts: 2, poll: {attempts: 1, intervalMs: 0}, settleAttempts: 1, settleIntervalMs: 0};
 let STAMP_NS = '0';
@@ -519,8 +522,8 @@ describe('executeConvert (hub) — the per-swap watch, the hub taxonomy, the exp
     const rec = await hubRecord();
     const updates: ConvertRecord[] = [];
     mockRows({
-      8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11'}], // swap1's hub row
-      6: [{currency: 6, from: POOL2, to: myPrincipal, amount: '2990000000000', block: '22'}], // swap2's dest row
+      8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11', timestamp: NOW()}], // swap1's hub row
+      6: [{currency: 6, from: POOL2, to: myPrincipal, amount: '2990000000000', block: '22', timestamp: NOW()}], // swap2's dest row
     });
     jest.mocked(DpayCore.icpSwapMinOut).mockImplementation(async (gross) => {
       // One derivation rule per swap leg: each floor is its OWN gross × (1−slippage).
@@ -542,7 +545,7 @@ describe('executeConvert (hub) — the per-swap watch, the hub taxonomy, the exp
 
   test('swap2 refused → failed_leg/swap_refused (never failed_refunded — the input already converted)', async () => {
     const rec = await hubRecord();
-    mockRows({8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11'}]});
+    mockRows({8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11', timestamp: NOW()}]});
     jest.mocked(submitTransfer)
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never) // approve1
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never) // swap1 (#ok → hub row seen)
@@ -557,7 +560,7 @@ describe('executeConvert (hub) — the per-swap watch, the hub taxonomy, the exp
 
   test('approve2 refused → failed_leg/withdraw_refused (the user holds the HUB asset in-wallet)', async () => {
     const rec = await hubRecord();
-    mockRows({8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11'}]});
+    mockRows({8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11', timestamp: NOW()}]});
     jest.mocked(submitTransfer)
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never)
@@ -571,7 +574,7 @@ describe('executeConvert (hub) — the per-swap watch, the hub taxonomy, the exp
 
   test('swap2 #ok but NO dest row in budget → parked pending_withdrawal; resume sees the row → done', async () => {
     const rec = await hubRecord();
-    mockRows({8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11'}]});
+    mockRows({8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11', timestamp: NOW()}]});
     jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '1'} as never);
     const parked = await executeConvert(rec, deps(() => {}), OPTS);
     expect(parked.step).toBe('pending_withdrawal');
@@ -579,7 +582,7 @@ describe('executeConvert (hub) — the per-swap watch, the hub taxonomy, the exp
     expect(parked.legPlan![3].state).toBe('sent');
 
     // Resume: the DEST payout has landed — no re-signing, the watch resolves it terminal.
-    mockRows({6: [{currency: 6, from: POOL2, to: myPrincipal, amount: '2990000000000', block: '22'}]});
+    mockRows({6: [{currency: 6, from: POOL2, to: myPrincipal, amount: '2990000000000', block: '22', timestamp: NOW()}]});
     const done = await executeConvert(parked, deps(() => {}), OPTS);
     expect(done.step).toBe('done');
     expect(done.outAmountNet).toBe('2990000000000');
@@ -599,8 +602,8 @@ describe('executeConvert (hub) — the per-swap watch, the hub taxonomy, the exp
 
     // Resume: swap1's hub row appears; legs 3–4 run; swap2's dest row completes the record.
     mockRows({
-      8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11'}],
-      6: [{currency: 6, from: POOL2, to: myPrincipal, amount: '2990000000000', block: '22'}],
+      8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11', timestamp: NOW()}],
+      6: [{currency: 6, from: POOL2, to: myPrincipal, amount: '2990000000000', block: '22', timestamp: NOW()}],
     });
     const done = await executeConvert(parked, deps(() => {}), OPTS);
     expect(done.step).toBe('done');
@@ -612,7 +615,7 @@ describe('executeConvert (hub) — the per-swap watch, the hub taxonomy, the exp
   test('expired with the DEST payout SEEN → done (the swap executed even though its envelope died)', async () => {
     const rec = await hubRecord();
     for (const l of rec.legs) l.expiresAtMs = 1;
-    mockRows({6: [{currency: 6, from: POOL2, to: myPrincipal, amount: '2990000000000', block: '22'}]});
+    mockRows({6: [{currency: 6, from: POOL2, to: myPrincipal, amount: '2990000000000', block: '22', timestamp: NOW()}]});
     const out = await executeConvert(rec, deps(() => {}), {...OPTS, nowMs: 5_000});
     expect(out.step).toBe('done');
     expect(out.outAmountNet).toBe('2990000000000');
@@ -623,7 +626,7 @@ describe('executeConvert (hub) — the per-swap watch, the hub taxonomy, the exp
   test('expired with only the HUB payout seen → failed_leg (swap1 ran, swap2 dead; hub asset in-wallet)', async () => {
     const rec = await hubRecord();
     for (const l of rec.legs) l.expiresAtMs = 1;
-    mockRows({8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11'}]});
+    mockRows({8: [{currency: 8, from: POOL1, to: myPrincipal, amount: '119950000', block: '11', timestamp: NOW()}]});
     const out = await executeConvert(rec, deps(() => {}), {...OPTS, nowMs: 5_000});
     expect(out.step).toBe('failed_leg');
     expect(out.failureCode).toBe('unknown');

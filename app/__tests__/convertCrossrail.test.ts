@@ -107,6 +107,9 @@ const ATA_B58 = bs58.encode(deriveAta(SOL_ADDRESS, USDC_MINT_ADDRESS));
 const STAMP_NS = String(BigInt(Date.now() + 3_600_000) * 1_000_000n);
 const fakeRes = (body: unknown, ok = true, status = 200) => ({ok, status, json: async () => body});
 const rowsRes = (rows: unknown[]) => fakeRes({transactions: rows});
+// Probe fixtures must look NEWER than any record's createdAtMs (the settlement
+// probes ignore rows predating the record — 2026-09-19 live fix).
+const NOW = () => Math.floor(Date.now() / 1000) + 3600;
 const myPrincipal = 'myprincipal123';
 const OPTS = {submitAttempts: 2, poll: {attempts: 1, intervalMs: 0}, settleAttempts: 1, settleIntervalMs: 0};
 
@@ -188,7 +191,7 @@ async function plannedCrossRecord(over: Partial<ConvertRecord> = {}): Promise<Co
 /** Run the five IC legs to the phase boundary (submitter + hop ledger cooperate). */
 async function runIcLegs(rec: ConvertRecord): Promise<ConvertRecord> {
   jest.mocked(relayFetch).mockResolvedValue(rowsRes([
-    {currency: 2, from: POOL, to: myPrincipal, amount: '190000000', block: '7'},
+    {currency: 2, from: POOL, to: myPrincipal, amount: '190000000', block: '7', timestamp: NOW()},
   ]) as never);
   jest.mocked(submitTransfer).mockImplementation(async (_p, _s, _o, decodeReply) => {
     if (decodeReply != null) await decodeReply('reply-hex');

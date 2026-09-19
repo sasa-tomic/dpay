@@ -61,6 +61,9 @@ const DEST = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'.toLowerCase();
 
 const fakeRes = (body: unknown, ok = true, status = 200) => ({ok, status, json: async () => body});
 const rowsRes = (rows: unknown[]) => fakeRes({transactions: rows});
+// Probe fixtures must look NEWER than any record's createdAtMs (the settlement
+// probes ignore rows predating the record — 2026-09-19 live fix).
+const NOW = () => Math.floor(Date.now() / 1000) + 3600;
 const myPrincipal = 'myprincipal123';
 const OPTS = {submitAttempts: 2, poll: {attempts: 1, intervalMs: 0}, settleAttempts: 1, settleIntervalMs: 0};
 // The mocked ingress stamp (set per-test to a future instant; pinned in the approve-args assert).
@@ -314,7 +317,7 @@ describe('hydrateConvertStore — both record shapes load; the shipped one uncha
 
 describe('executeConvert (planned) — per-leg progress, the hop gate, the failure taxonomy', () => {
   const hopRow = (amount: string) => rowsRes([
-    {currency: 2, from: POOL, to: myPrincipal, amount, block: '7'},
+    {currency: 2, from: POOL, to: myPrincipal, amount, block: '7', timestamp: NOW()},
   ]);
   const deps = (onUpdate: (r: ConvertRecord) => void) => ({
     secretHex: '00'.repeat(32),
