@@ -639,7 +639,7 @@ const CONVERT_STEPS: ConvertStep[] = [
   'done', 'pending_withdrawal', 'failed_refunded', 'failed_leg', 'stuck',
   'awaiting_user_authorization', 'awaiting_deposit', 'provider_processing',
   'quote_expired', 'provider_refunded',
-  'awaiting_external', 'crossing', 'sol_ready',
+  'awaiting_external', 'crossing', 'sol_ready', 'aborted',
 ];
 
 /** The steps a cross-rail record (`crossRail`) may sit at: the IC phases (driven by the
@@ -649,6 +649,7 @@ const CONVERT_STEPS: ConvertStep[] = [
 const CROSSRAIL_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
   'approving', 'pending_withdrawal', 'awaiting_external', 'crossing', 'sol_ready',
   'swapping', 'settling', 'done', 'failed_refunded', 'failed_leg', 'stuck',
+  'aborted',
 ]);
 
 /** The steps a legs==0 (CeFi-shaped) record may sit at: the provider driver's own vocabulary,
@@ -659,6 +660,7 @@ const CROSSRAIL_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
 const PROVIDER_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
   'awaiting_user_authorization', 'awaiting_deposit', 'provider_processing',
   'done', 'quote_expired', 'provider_refunded',
+  'aborted',
 ]);
 
 /** The provider vocabulary WITHOUT `done` (the one terminal shared by both drivers). A
@@ -675,6 +677,7 @@ const PROVIDER_ONLY_STEPS: ReadonlySet<ConvertStep> = new Set([
  *  vocabularies. */
 const SOLANA_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
   'swapping', 'settling', 'done', 'pending_withdrawal', 'failed_refunded', 'stuck',
+  'aborted',
 ]);
 
 /** The min-out a record's swap leg signed, re-derived from the record's OWN frozen quote and

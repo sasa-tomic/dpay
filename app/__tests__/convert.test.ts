@@ -30,18 +30,25 @@ import {icStampExpiry} from '../services/icp';
 import {relayFetch} from '../services/relay';
 import {submitTransfer} from '../services/rail';
 import {
+  convertAbortFlavor,
   deriveConvertMath,
   executeConvert,
   fetchConvertQuote,
   hydrateConvertStore,
   isQuoteStale,
+  isTerminalConvertStep,
   loadConvertRecords,
   loadVenueRegistry,
   prepareConvertRecord,
   probeConvertSettlement,
+  requestConvertAbort,
   salvageConvertStore,
   type ConvertQuote,
   type ConvertRecord,
+  type LegKind,
+  type LegPlan,
+  type LegState,
+  type SolanaSwapLeg,
 } from '../convert';
 import {resolveConvertDirection} from '../config/convert';
 import {BUNDLED_VENUES, setRuntimeVenues, venueDisplayName, venueEndpointOf, venuesForPair, type VenueEntry} from '../config/venues';
@@ -1027,5 +1034,64 @@ describe('fail-closed copy — all four locales carry it', () => {
       ];
       for (const s of samples) expect(s).not.toContain('ICPSwap');
     }
+  });
+});
+
+describe('convertAbortFlavor — what the user\'s Stop has already cost', () => {
+  const flavorRec = (legPlan?: LegPlan[], solanaLeg?: SolanaSwapLeg) =>
+    ({id: 'flavor', legs: [], legPlan, solanaLeg} as unknown as ConvertRecord);
+  const plan = (kind: LegKind, state: LegState): LegPlan => ({kind, canister: 'c', fee: '', state});
+
+  test("'aborted' is a terminal step — a frozen record is never re-driven", () => {
+    expect(isTerminalConvertStep('aborted')).toBe(true);
+  });
+
+  test('clean: every planned leg still pending (and a record with no plan at all)', () => {
+    expect(convertAbortFlavor(flavorRec([plan('approve', 'pending'), plan('swap', 'pending')]))).toBe('clean');
+    expect(convertAbortFlavor(flavorRec())).toBe('clean');
+  });
+
+  test('fee: an approve already confirmed — its network fee is spent, the principal untouched', () => {
+    expect(convertAbortFlavor(flavorRec([plan('approve', 'confirmed'), plan('swap', 'pending')]))).toBe('fee');
+  });
+
+  test('watching: the swap was already sent (and stays watching once confirmed)', () => {
+    expect(convertAbortFlavor(flavorRec([plan('approve', 'confirmed'), plan('swap', 'sent')]))).toBe('watching');
+    expect(convertAbortFlavor(flavorRec([plan('approve', 'confirmed'), plan('swap', 'confirmed')]))).toBe('watching');
+  });
+
+  test('watching: a Solana-shaped record wins over the plan — its signed tx may still land', () => {
+    const leg: SolanaSwapLeg = {protocol: 'solana', signedTxHex: 'aa', signature: 'sig', lastValidBlockHeight: 5};
+    expect(convertAbortFlavor(flavorRec(undefined, leg))).toBe('watching');
+    expect(convertAbortFlavor(flavorRec([plan('approve', 'confirmed')], leg))).toBe('watching');
+  });
+});
+
+describe('executeConvert — the user\'s Stop (abort) during the settle watch', () => {
+  test('a stop requested mid-watch freezes the record at aborted even though the payout row matches', async () => {
+    const rec = record({id: 'stop-direct'});
+    jest.mocked(submitTransfer)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never);
+    jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
+    // The probe window: the user's Stop lands INSIDE the watch — and the matching payout
+    // row exists. The done-patch must still collapse at the engine's advance chokepoint.
+    jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) => {
+      requestConvertAbort(rec.id);
+      return (String(path).includes('currency=7')
+        ? rowsRes([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, block: '77', timestamp: NOW()}])
+        : rowsRes([])) as never;
+    });
+    const final = await executeConvert(
+      rec,
+      {secretHex: 'sec', publicHex: 'pub', relayUrl: 'http://r', onUpdate: jest.fn()},
+      {...OPTS, nowMs: 1_234_000},
+    );
+    expect(final.step).toBe('aborted');
+    expect(final.step).not.toBe('done');
+    expect(final.abortedAtMs).toBe(1_234_000);
+    expect((await loadConvertRecords('pub'))[rec.id]?.step).toBe('aborted');
+    jest.mocked(relayFetch).mockReset();
+    jest.mocked(submitTransfer).mockReset();
   });
 });

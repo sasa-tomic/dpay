@@ -39,7 +39,9 @@ import {fetchGasFeeWei, fetchLedgerFee, submitTransfer} from '../services/rail';
 import {
   executeConvert,
   hydrateConvertStore,
+  loadConvertRecords,
   prepareMultihopConvertRecord,
+  requestConvertAbort,
   type ConvertMath,
   type ConvertQuote,
   type ConvertRecord,
@@ -412,5 +414,27 @@ describe('executeConvert (planned) — per-leg progress, the hop gate, the failu
     jest.mocked(relayFetch).mockResolvedValue(rowsRes([]) as never);
     const out = await executeConvert(rec, deps(() => {}), {...OPTS, nowMs: 5_000});
     expect(out.step).toBe('stuck');
+  });
+
+  test('abort requested as leg 0 settles: the freeze — later legs are never signed or submitted', async () => {
+    const rec = await plannedRecord({id: 'abort-plan'});
+    jest.mocked(relayFetch).mockResolvedValue(hopRow('190000000') as never);
+    jest.mocked(submitTransfer).mockImplementation(async (_p, _s, _o, decodeReply) => {
+      const out = {kind: 'settled', blockIndex: '1'} as never;
+      if (decodeReply != null) await decodeReply('reply-hex');
+      // The user taps Stop the moment the input approve settles.
+      requestConvertAbort(rec.id);
+      return out;
+    });
+    const out = await executeConvert(rec, deps(() => {}), {...OPTS, nowMs: 5_000});
+    expect(out.step).toBe('aborted');
+    expect(out.abortedAtMs).toBe(5_000);
+    // The approve was submitted; the swap and every burn leg NEVER went on-chain.
+    const ledgers = jest.mocked(submitTransfer).mock.calls.map(c => (c[0] as {ledger: string}).ledger);
+    expect(ledgers).toEqual([ICP_LEDGER]);
+    expect(out.legPlan!.map(p => p.state)).toEqual(['confirmed', 'pending', 'pending', 'pending', 'pending']);
+    // The frozen record persisted exactly as aborted.
+    expect((await loadConvertRecords('aabb'))[rec.id]?.step).toBe('aborted');
+    jest.mocked(submitTransfer).mockReset();
   });
 });

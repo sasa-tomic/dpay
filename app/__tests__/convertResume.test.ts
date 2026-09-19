@@ -19,10 +19,19 @@ import {afterEach, beforeEach, describe, expect, jest, test} from '@jest/globals
 jest.mock('../convert', () => ({
   executeConvert: jest.fn(),
   probeConvertSettlement: jest.fn(),
+  probeHopPayout: jest.fn(async () => null),
   loadConvertRecords: jest.fn(async () => ({})),
   saveConvertRecord: jest.fn(async () => undefined),
   isTerminalConvertStep: (step: string) =>
-    ['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded'].includes(step),
+    ['done', 'failed_refunded', 'failed_leg', 'stuck', 'quote_expired', 'provider_refunded', 'aborted'].includes(step),
+  requestConvertAbort: jest.fn(),
+  isHubConvertRecord: jest.fn(() => false),
+  prepareCrossRailSolLeg: jest.fn(),
+  attachCctpBurnTx: jest.fn(),
+  declineCctpHandoff: jest.fn(),
+  executeSolanaConvert: jest.fn(),
+  executeCrossRailConvert: jest.fn(),
+  executeCrossRailSolSwap: jest.fn(),
 }));
 
 jest.mock('../services/native', () => ({
@@ -33,13 +42,22 @@ jest.mock('../services/relay', () => ({
   fetchWithTimeout: jest.fn(),
 }));
 
-import {executeConvert, loadConvertRecords, probeConvertSettlement, saveConvertRecord} from '../convert';
+import {
+  prepareCrossRailSolLeg,
+  requestConvertAbort,
+  executeConvert,
+  loadConvertRecords,
+  probeConvertSettlement,
+  saveConvertRecord,
+} from '../convert';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
 import {
   __resetConvertResumeEngineForTest,
+  abortConvertRecord,
   acknowledgeStuckRecord,
   advanceProviderRecord,
+  confirmCrossRailSolLeg,
   convertResumeSnapshot,
   fetchProviderStatus,
   startConvertResumeEngine,
@@ -466,5 +484,70 @@ describe('the engine — every live record driven from wallet load, mounted scre
       stopA();
       stopB();
     }
+  });
+});
+
+describe('abortConvertRecord — the user\'s Stop through the resume engine', () => {
+  test('a live record freezes at aborted; a late driver commit cannot un-abort it', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({
+      'leg-1': legRecord({step: 'sol_ready', crossRail: {kind: 'cctp_sol', solAddress: 'SolAddr1', mintRecipientAta: 'AtaAddr1'}}),
+    });
+    let release: () => void = () => {};
+    const parked = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    jest.mocked(prepareCrossRailSolLeg).mockImplementation(async (_secretHex: string, rec: ConvertRecord) => {
+      await parked; // the driver is mid-prepare when the user taps Stop
+      return {...rec, step: 'swapping', solanaLeg: {protocol: 'solana', signedTxHex: 'aa', signature: 'sig', lastValidBlockHeight: 5}};
+    });
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(20);
+      const driven = confirmCrossRailSolLeg('leg-1'); // captures rec at sol_ready, parks inside prepare
+      await abortConvertRecord('leg-1');
+      expect(jest.mocked(requestConvertAbort)).toHaveBeenCalledWith('leg-1');
+      expect(convertResumeSnapshot()['leg-1']?.step).toBe('aborted');
+      expect(convertResumeSnapshot()['leg-1']?.abortedAtMs).toEqual(expect.any(Number));
+      expect(saveConvertRecord).toHaveBeenCalledWith(
+        'pub',
+        expect.objectContaining({step: 'aborted', abortedAtMs: expect.any(Number)}),
+      );
+      release();
+      await driven; // the late driver commit arrives — and must not resurrect the record
+      expect(convertResumeSnapshot()['leg-1']?.step).toBe('aborted');
+      const saves = jest
+        .mocked(saveConvertRecord)
+        .mock.calls.filter(c => (c[1] as ConvertRecord).id === 'leg-1');
+      expect((saves[saves.length - 1]![1] as ConvertRecord).step).toBe('aborted');
+    } finally {
+      stop();
+    }
+  });
+
+  test('abortConvertRecord on an already-terminal record is a no-op (step unchanged, nothing persisted)', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({
+      'leg-1': legRecord({step: 'done', outAmountNet: '1', outTx: '2'}),
+    });
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(20);
+      jest.mocked(saveConvertRecord).mockClear();
+      await abortConvertRecord('leg-1');
+      // The abort flag is still raised — the executor may be mid-drive on its own copy...
+      expect(jest.mocked(requestConvertAbort)).toHaveBeenCalledWith('leg-1');
+      // ...but the engine record is untouched.
+      expect(convertResumeSnapshot()['leg-1']?.step).toBe('done');
+      expect(convertResumeSnapshot()['leg-1']?.abortedAtMs).toBeUndefined();
+      expect(saveConvertRecord).not.toHaveBeenCalled();
+    } finally {
+      stop();
+    }
+  });
+
+  test('abortConvertRecord for an unknown id does not throw and touches nothing', async () => {
+    await expect(abortConvertRecord('no-such-record')).resolves.toBeUndefined();
+    expect(jest.mocked(requestConvertAbort)).toHaveBeenCalledWith('no-such-record');
+    expect(Object.keys(convertResumeSnapshot())).toEqual([]);
+    expect(saveConvertRecord).not.toHaveBeenCalled();
   });
 });
