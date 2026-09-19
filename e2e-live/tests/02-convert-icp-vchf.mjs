@@ -81,10 +81,10 @@ export async function run() {
       (exp) => {
         const t = document.querySelector('[data-testid="balance"]')?.textContent ?? '';
         const n = parseFloat(t.replace(/[^\d.]/g, ''));
-        if (Number.isFinite(n) && Math.abs(n - icpOnchain) < 0.0001) return true;
+        if (Number.isFinite(n) && Math.abs(n - Number(exp)) < 0.0001) return true;
         return (document.body?.textContent ?? '').includes(exp);
       },
-      { timeoutMs: 120_000 }, icpOnchain,
+      { timeoutMs: 120_000 }, expect,
     ).then(() => true).catch(() => false);
     assert(floatVisible, `the app renders the live ICP balance (${expect}) within 120s`);
 

@@ -15,7 +15,8 @@
 // builds + serves the web app locally and points it at the staging relay via ?relay=<base>.
 import { stopSession } from '../e2e/harness/lib.mjs';
 
-const FLOW = new URL('./tests/01-testnet-wiring.mjs', import.meta.url);
+// The flow to run: DPAY_E2E_LIVE_FLOW=<file under tests/> (default: the testnet-wiring proof).
+const FLOW = new URL(`./tests/${process.env.DPAY_E2E_LIVE_FLOW || '01-testnet-wiring.mjs'}`, import.meta.url);
 
 async function main() {
   if (!process.env.DPAY_E2E_BASE) {
