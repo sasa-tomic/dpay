@@ -87,6 +87,17 @@
 
 ## NEXT SESSION — work order
 
+## THIS SESSION, before the merge (founder, 2026-09-20 — must not be forgotten)
+
+- [ ] **Delete the deprecated `just` alias recipes entirely** (`agent-principal`, `agent-balance`,
+  `agent-history`, `agent-seed`, `agent-key-init`, `agent-sol-principal`, `agent-sol-init`,
+  `agent-funds`, `funds-reconcile`, `funds-doc`) once the live-proof agent has landed — they are
+  one-line forwards to the `just funds …` surface added in `0621b99`, kept ONLY because that agent
+  still invokes the old names mid-spend. Repoint every reference (CLAUDE.md, docs/AGENT-FUNDS.md,
+  e2e/live-drive.mjs, scripts comments) in the same change. One way exactly.
+
+
+
 **1. Objective 3 (card/bank funding) — HARD-BLOCKED on founder/legal; NOTHING is offline-buildable
 until the blockers land. THE thing that unblocks it:**
 
