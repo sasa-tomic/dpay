@@ -352,6 +352,13 @@ async function cmdB(icpAmount) {
     await driver.screenshot('live-b-quote');
     const body = await driver.bodyText();
     if (!/SideShift/i.test(body)) throw new Error('OP B: SideShift is not the venue on the quote — refusing');
+    // HARD gate before any signature: the settle address on screen must BE the agent SOL wallet.
+    const settleShown = await driver.isPresent('convert-settle-address')
+      ? (await driver.readText('convert-settle-address')).trim() : null;
+    if (settleShown !== SOL_SETTLE) {
+      throw new Error(`OP B: settle address on screen ${JSON.stringify(settleShown)} != agent SOL wallet — refusing`);
+    }
+    log(`settle address verified: ${settleShown}`);
     await driver.click('btn-convert-confirm');
 
     // The shift order is created, then the panel waits for the deposit.
