@@ -33,7 +33,13 @@ mkdirSync(SHOTS, {recursive: true});
 
 const RELAY = process.env.DPAY_LIVE_RELAY ?? 'http://127.0.0.1:8899';
 const FLOAT_PRINCIPAL = 'vloyo-oihno-j4uba-nhhke-zyh34-s2r4g-kwgx3-qkzzk-4svfu-focgr-5ae';
-const SOL_SETTLE = '4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU';
+// The app's OWN Solana rail address: SLIP-10 ed25519 m/44'/501'/0'/0' of the IC float seed
+// (app/solana/identity.ts; ConvertMode.tsx:497 derives the CeFi settle address the same way).
+// VERIFIED in-process 2026-09-20: deriveSolanaKeypair(IC float seed) → exactly this address.
+// NOTE the divergence from the registered `sol-float` wallet (4Cuacz…, an independent raw-seed
+// key the app can never sign from) — see the docs/AGENT-FUNDS.md finding; measured live via
+// `node e2e/live-sol.mjs`.
+const SOL_SETTLE = 'BzFNJywhJYtPKNZN8fefuiKetSCD8Uotw1ibuP8MkZgX';
 
 const {buildWeb, serveWeb} = await import('./harness/web.mjs');
 const {Driver} = await import('./harness/driver.mjs');
@@ -440,7 +446,11 @@ async function cmdB(icpAmount) {
     await driver.click('btn-accounts-convert');
     const res = await watchConvert(driver, 'b', {timeoutMs: 25 * 60_000});
     log(`OP B result: ${res.ended}: ${res.text}`);
-    console.log('--- agent-funds after (SOL side truth) ---');
+    // The settle address is the APP-DERIVED SOL rail (BzFNJ…), not the registered sol-float —
+    // measure it with the derived-address watcher; agent-funds' sol-float row will read 0.
+    console.log('--- live-sol (app-derived SOL rail truth) ---');
+    console.log(execFileSync('node', ['live-sol.mjs'], {encoding: 'utf8', cwd: new URL('.', import.meta.url).pathname}));
+    console.log('--- agent-funds after (registered wallets) ---');
     console.log(agentFunds());
   });
 }
