@@ -14,8 +14,10 @@
  *        the swap arg carries no recipient; the settle probe matches only to=user from=venue);
  *   INV-4 the quoted number is the venue's reply byte-for-byte (fetchConvertQuote parametric —
  *        the render half is in convertMode.test.tsx, the relay half in tests/relay.rs);
- *   INV-7 the approval is bounded per venue (exact amount + fee, expected_allowance = the same
- *        figure, expiry ≤ 10 min — the encoder inputs are pinned here; the arg BYTES are the
+ *   INV-7 the approval is bounded per venue (exact amount + fee, expected_allowance ABSENT —
+ *        ICRC-2 compares it with the CURRENT allowance, so a baked figure refuses with
+ *        AllowanceChanged on the first-ever approve; the bound is the ≤10-min expiry — the
+ *        encoder inputs are pinned here; the arg BYTES are the
  *        compiled core's goldens, `crates/dpay-icp` tests);
  *   INV-9 no swap submit traverses a dpay-hosted origin (executeConvert submits each leg to its
  *        own canister; the relay is only ever asked settlement READS — the transport's own URL
@@ -392,7 +394,12 @@ describe('INV-7 — the approve leg is bounded: exact amount + fee, expected_all
         jest.mocked(DpayCore.icpApproveArg).mock.calls.at(-1)!;
       expect(spender).toBe(v.endpoint);
       expect(amount).toBe('100010000'); // amountIn + inFee — EXACTLY, no rounding headroom
-      expect(expected).toBe(amount); // expected_allowance = the same figure: a second pull fails
+      // expected_allowance stays ABSENT (the 2026-09-19 live defect): ICRC-2 compares it with
+      // the CURRENT allowance, so any baked figure refuses with AllowanceChanged whenever it
+      // differs — the first-ever approve included (current 0 ≠ amount). The "second pull"
+      // bound still holds: the allowance EXPIRES at now+CONVERT_APPROVE_LIFETIME_S, and each
+      // conversion re-approves from zero.
+      expect(expected).toBe('');
       expect(memo).toBe('');
       expect(fee).toBe(MATH.inFee); // the ledger's own fee, not a venue tier
       // The allowance lifetime comes from the certified clock + CONVERT_APPROVE_LIFETIME_S…
