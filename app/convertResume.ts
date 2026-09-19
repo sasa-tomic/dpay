@@ -50,6 +50,7 @@ import {
   prepareCrossRailSolLeg,
   probeConvertSettlement,
   probeHopPayout,
+  requestConvertAbort,
   isHubConvertRecord,
   saveConvertRecord,
   type ConvertRecord,
@@ -294,6 +295,12 @@ async function saveConvertRecordFor(record: ConvertRecord): Promise<void> {
 /** Fire-and-forget persistence + notify for engine-local transitions (probe-stuck resolution,
  *  provider steps). Everything executeConvert touches persists inside it. */
 async function commit(next: ConvertRecord): Promise<ConvertRecord> {
+  // The abort guard (2026-09-19): a driver finishing an in-flight await must never overwrite
+  // the user's stop — every later transition collapses to 'aborted'.
+  const cur = state.records.get(next.id);
+  if (cur?.step === 'aborted' && next.step !== 'aborted') {
+    next = {...next, step: 'aborted', abortedAtMs: cur.abortedAtMs};
+  }
   state.records.set(next.id, next);
   await saveConvertRecordFor(next);
   notify();
@@ -670,6 +677,17 @@ export async function acknowledgeStuckRecord(id: string): Promise<void> {
   if (rec == null || rec.step !== 'stuck' || rec.acknowledgedStuckAtMs != null) return;
   await commit({...rec, step: 'stuck', acknowledgedStuckAtMs: Date.now()});
   clearTimer(id); // the honest unknown has been read; nothing advances it but the user now
+}
+
+/** The user's Stop tap on a live record (2026-09-19): set the shared flag (the confirm-flow
+ *  executor honors it at its next checkpoint even when this engine never adopted the record),
+ *  freeze the engine copy at 'aborted' when it has one, and stop its timers. */
+export async function abortConvertRecord(id: string): Promise<void> {
+  const rec = state.records.get(id);
+  requestConvertAbort(id);
+  if (rec == null || isTerminalConvertStep(rec.step)) return;
+  await commit({...rec, step: 'aborted', abortedAtMs: Date.now()});
+  clearTimer(id);
 }
 
 /** The handoff's return path (Routes B/C): the user's own EVM wallet signed the burn, and the

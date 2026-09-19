@@ -105,6 +105,12 @@ export const convertFr: ConvertMessages = {
   refundedBody: sym =>
     `L'échange a échoué et le pool t'a rendu ton ${sym} — ton solde est de nouveau intact.`,
   stuckTitle: 'Issue inconnue',
+  stop: 'Arrêter',
+  stopWatching: 'Arrêter le suivi',
+  abortedTitle: 'Arrêté',
+  abortedClean: 'Rien n’a quitté votre portefeuille.',
+  abortedFee: 'Vous avez déjà payé des petits frais d’approbation.',
+  abortedWatching: 'L’échange peut encore passer. Vérifiez Soldes plus tard.',
   stuckBody:
     'L’échange a été envoyé, mais la réponse du pool n’est pas arrivée. Ne lance pas un second échange avec les mêmes fonds. Si le versement arrive, cet écran passera tout seul à « Converti ».',
   stuckSigned: (amount, minAmount, venue) =>

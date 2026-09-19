@@ -106,6 +106,12 @@ export const convertDe: ConvertMessages = {
   refundedBody: sym =>
     `Der Tausch ist gescheitert und der Pool hat dir dein ${sym} zurückgegeben — dein Guthaben ist wieder vollständig.`,
   stuckTitle: 'Unbekannter Ausgang',
+  stop: 'Stoppen',
+  stopWatching: 'Nicht mehr beobachten',
+  abortedTitle: 'Gestoppt',
+  abortedClean: 'Nichts hat deine Wallet verlassen.',
+  abortedFee: 'Du hast bereits eine kleine Genehmigungsgebühr bezahlt.',
+  abortedWatching: 'Der Tausch kann noch durchgehen. Sieh später unter Guthaben nach.',
   stuckBody:
     'Der Tausch wurde übermittelt, aber die Antwort des Pools kam nicht an. Starte keinen zweiten Tausch mit denselben Mitteln. Wenn die Auszahlung eintrifft, springt dieser Bildschirm von selbst auf „Getauscht".',
   stuckSigned: (amount, minAmount, venue) =>

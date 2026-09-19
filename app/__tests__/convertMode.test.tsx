@@ -34,6 +34,7 @@ jest.mock('../convert', () => ({
   isTerminalConvertStep: (step: string) =>
     ['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded'].includes(step),
   TERMINAL_CONVERT_STEPS: new Set(['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded']),
+  convertAbortFlavor: () => 'clean',
   convertRecordMinOut: jest.fn(async () => null),
   loadVenueRegistry: jest.fn(async () => []),
   fetchConvertQuote: jest.fn(),

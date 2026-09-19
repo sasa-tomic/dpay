@@ -396,6 +396,9 @@ export function isQuoteStale(quote: {fetchedAtMs: number}, nowMs: number = Date.
 export type ConvertStep =
   | 'quote' | 'confirming' | 'approving' | 'approved' | 'swapping' | 'settling'
   | 'done' | 'pending_withdrawal' | 'failed_refunded' | 'failed_leg' | 'stuck'
+  // The user's Stop tap (2026-09-19): the record freezes where it is and no driver ever
+  // re-enters it. The body copy is derived from the legs (convertAbortFlavor).
+  | 'aborted'
   // CeFi-shaped states (multi-venue readiness V2): round-tripped by hydration today; the
   // drivers that move a record INTO them arrive with the CeFi wave. Kept snake_case like
   // the rest of the persisted vocabulary.
@@ -591,6 +594,9 @@ export type ConvertRecord = {
    *  user has read the instructions, and the background watch may stop. Until it is set, an
    *  expired-unconfirmed stuck record keeps being probed at the engine's slow cadence. */
   acknowledgedStuckAtMs?: number;
+  /** Set when the USER taps Stop (2026-09-19): the record freezes where it is. What the stop
+   *  cost is derived from the legs (convertAbortFlavor), not stored. */
+  abortedAtMs?: number;
   /** The cross-rail block (Routes B/C): present iff the record was prepared on a route with
    *  a CCTP leg; extends the five IC legs with the external-signature burn and (Route C)
    *  the final Jupiter leg. */
@@ -776,6 +782,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   if (!CONVERT_STEPS.includes(r.step as ConvertStep)) return null;
   rec.step = r.step as ConvertStep;
   if (typeof r.acknowledgedStuckAtMs === 'number') rec.acknowledgedStuckAtMs = r.acknowledgedStuckAtMs;
+  if (typeof r.abortedAtMs === 'number') rec.abortedAtMs = r.abortedAtMs;
   if (typeof r.inDecimals === 'number') rec.inDecimals = r.inDecimals;
   if (typeof r.outDecimals === 'number') rec.outDecimals = r.outDecimals;
   if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'withdraw_refused', 'unknown', 'external_declined'].includes(r.failureCode as string)) return null;
@@ -1075,10 +1082,37 @@ function salvageRawStore(raw: string): SalvagedStore {
  *  standalone Withdraw flow, so no driver ever re-enters either. */
 export const TERMINAL_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
   'done', 'failed_refunded', 'failed_leg', 'stuck', 'quote_expired', 'provider_refunded',
+  'aborted',
 ]);
 
 export function isTerminalConvertStep(step: ConvertStep): boolean {
   return TERMINAL_CONVERT_STEPS.has(step);
+}
+
+/** The user's Stop requests, keyed by record id. Module-level so BOTH drivers (the confirm-flow
+ *  executor here and the engine's driveOne) honor one flag regardless of adoption timing. */
+const ABORT_REQUESTED = new Set<string>();
+
+/** The user tapped Stop on a live record. Idempotent; the next driver checkpoint collapses it. */
+export function requestConvertAbort(id: string): void {
+  ABORT_REQUESTED.add(id);
+}
+
+/** Internal: has the user asked this record to stop? */
+export function convertAborted(id: string): boolean {
+  return ABORT_REQUESTED.has(id);
+}
+
+/** What the user gave up — the aborted panel's one-line body flavor.
+ *  'watching': a swap was already submitted — it may still go through.
+ *  'fee': an approve confirmed — its tiny network fee is spent, principal untouched.
+ *  'clean': nothing left the wallet at all. */
+export function convertAbortFlavor(rec: ConvertRecord): 'clean' | 'fee' | 'watching' {
+  if (rec.solanaLeg != null) return 'watching';
+  const plan = rec.legPlan ?? [];
+  if (plan.some(l => l.kind === 'swap' && l.state !== 'pending')) return 'watching';
+  if (plan.some(l => l.kind === 'approve' && l.state === 'confirmed')) return 'fee';
+  return 'clean';
 }
 
 /** Has EVERY leg's submission authority died (device-clock death of the signed envelope)?
@@ -2116,6 +2150,7 @@ async function executePlannedConvert(
     const leg = rec.legs[i];
     const plan = rec.legPlan?.[i];
     if (leg == null || plan == null) return rec; // hydration guarantees parallelism; refuse to improvise
+    if (convertAborted(rec.id)) return tools.advance(rec); // the user's Stop: freeze, never sign or submit another leg
     rec = await tools.advance(withLegState(rec, i, 'sent'));
     // Device-saved annotation for the swap-side legs only — the burn-side legs are the
     // Withdraw flow's own calls and carry no venue row to name (parity with WithdrawSheet).
@@ -2262,6 +2297,11 @@ export async function executeConvert(
   };
 
   const advance = async (rec: ConvertRecord): Promise<ConvertRecord> => {
+    // The abort chokepoint (2026-09-19): once the user taps Stop, every later transition
+    // collapses to 'aborted' — no branch has to know the flag exists.
+    if (rec.step !== 'aborted' && (rec.abortedAtMs != null || convertAborted(rec.id))) {
+      rec = {...rec, step: 'aborted', abortedAtMs: rec.abortedAtMs ?? nowMs};
+    }
     deps.onUpdate(rec);
     await saveConvertRecord(deps.publicHex, rec);
     return rec;
@@ -2277,6 +2317,7 @@ export async function executeConvert(
   ): Promise<ConvertRecord> => {
     const myPrincipal = (await DpayCore.icpPrincipalFromPubkey(deps.publicHex)).toLowerCase();
     for (let i = 0; i < attempts; i += 1) {
+      if (convertAborted(rec.id)) return advance(rec);
       const seen = await probeConvertSettlement({
         relayUrl: deps.relayUrl, publicHex: deps.publicHex, myPrincipalLower: myPrincipal, record: rec,
         excludeOutTx: deps.claimedOutTx,

@@ -124,6 +124,12 @@ export type ConvertMessages = {
   failedSwapBody: (reason: string, sym: string, venue: string) => string;
   refundedBody: (sym: string) => string;
   stuckTitle: string;
+  stop: string;
+  stopWatching: string;
+  abortedTitle: string;
+  abortedClean: string;
+  abortedFee: string;
+  abortedWatching: string;
   stuckBody: string;
   stuckSigned: (amount: string, minAmount: string, venue: string) => string;
   /** "Unused approval expires by 14:42 — after that the pool can pull nothing." */
@@ -460,6 +466,13 @@ export const convertEn: ConvertMessages = {
   refundedBody: sym =>
     `The swap failed and the pool returned your ${sym} — your balance is whole again.`,
   stuckTitle: 'Unknown outcome',
+  // The user's Stop (2026-09-19): the button and the frozen-record panel. Short on purpose.
+  stop: 'Stop',
+  stopWatching: 'Stop watching',
+  abortedTitle: 'Stopped',
+  abortedClean: 'Nothing left your wallet.',
+  abortedFee: 'You already paid a tiny approval fee.',
+  abortedWatching: 'The swap may still go through. Check Balances later.',
   stuckBody:
     'The swap was submitted, but the pool\u2019s answer did not arrive. Do not start a second swap with the same funds. If the payout arrives, this screen flips to done on its own.',
   stuckSigned: (amount, minAmount, venue) =>

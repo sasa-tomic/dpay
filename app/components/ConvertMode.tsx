@@ -57,6 +57,7 @@ import {
   buildCctpHandoff,
   ceFiQuoteFromResult,
   ceFiServiceError,
+  convertAbortFlavor,
   convertRecordMinOut,
   deriveConvertMath,
   fetchCeFiConvertQuote,
@@ -77,6 +78,7 @@ import {
   type LegPlan,
 } from '../convert';
 import {
+  abortConvertRecord,
   acknowledgeStuckRecord,
   adoptConvertRecord,
   attachCctpBurnTx,
@@ -2925,6 +2927,35 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
             {M.convert.pendingBody(outSymbol, venuePool, formatClock(new Date(record.createdAtMs)))}
           </Text>
           <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
+        </View>
+      ) : null}
+      {/* The user's Stop (2026-09-19): offered while the conversion runs. The flavor picks the
+          honest label — a submitted swap keeps its own momentum, so the button says so. */}
+      {(record.step === 'approving' || record.step === 'approved' || record.step === 'swapping'
+        || record.step === 'settling' || record.step === 'pending_withdrawal') ? (
+        <Pressable
+          testID="btn-convert-stop"
+          style={S.linkBtn}
+          onPress={() => {
+            void abortConvertRecord(record.id);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={convertAbortFlavor(record) === 'watching' ? M.convert.stopWatching : M.convert.stop}
+          accessibilityState={{disabled: false}}
+        >
+          <Text style={S.linkText}>
+            {convertAbortFlavor(record) === 'watching' ? M.convert.stopWatching : M.convert.stop}
+          </Text>
+        </Pressable>
+      ) : null}
+      {record.step === 'aborted' ? (
+        <View testID="convert-aborted">
+          <Text style={S.convertStateTitle}>{M.convert.abortedTitle}</Text>
+          <Text style={S.convertStateBody}>
+            {convertAbortFlavor(record) === 'watching' ? M.convert.abortedWatching
+              : convertAbortFlavor(record) === 'fee' ? M.convert.abortedFee
+              : M.convert.abortedClean}
+          </Text>
         </View>
       ) : null}
       {record.step === 'failed_refunded' ? (

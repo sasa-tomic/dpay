@@ -105,6 +105,12 @@ export const convertEs: ConvertMessages = {
   refundedBody: sym =>
     `El intercambio falló y el pool te devolvió tu ${sym} — tu saldo vuelve a estar completo.`,
   stuckTitle: 'Desenlace desconocido',
+  stop: 'Detener',
+  stopWatching: 'Dejar de vigilar',
+  abortedTitle: 'Detenido',
+  abortedClean: 'Nada salió de tu billetera.',
+  abortedFee: 'Ya pagaste una pequeña comisión de aprobación.',
+  abortedWatching: 'El intercambio puede completarse igual. Revisa Saldos más tarde.',
   stuckBody:
     'El intercambio se envió, pero la respuesta del pool no llegó. No inicies un segundo intercambio con los mismos fondos. Si el pago llega, esta pantalla pasará a «Convertido» por sí sola.',
   stuckSigned: (amount, minAmount, venue) =>
