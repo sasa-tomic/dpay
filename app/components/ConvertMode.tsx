@@ -512,9 +512,17 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     : null;
   // The quote the checklist/headline derive from: the row's own quote in chooser mode (null
   // until one is picked — that is the none-preselected red line), the single quote otherwise.
+  // A re-key race guard (2026-09-19 live VCHF→USDC finding): the quote effect re-keys on the
+  // picked destination, but until the new fetch lands the OLD quote object is still in state —
+  // the standing VCHF→ICP quote rendered under the USDC pick as "17.074223 USDC" (an 8-decimal
+  // ICP amount formatted with the 6-decimal USDC row) with the min-out floor derived from it.
+  // A quote is displayable only under a destination it actually quotes; anything else is the
+  // busy state the refetch already switched on.
+  const staleDestQuote = !chooserMode && quote != null && effOut != null
+    && quote.tokenOutLedger !== effOut.ledger;
   const activeQuote = chooserMode
     ? selectedVenue != null ? venueQuotes[selectedVenue.venue_id] ?? null : null
-    : quote;
+    : staleDestQuote ? null : quote;
   // The counterparty disclosure is a standing fact about today's venue; once a quote arrives its
   // OWN attribution (venue_id) takes over (V1). Under a chooser PICK with no live quote — fetch
   // in flight, errored into venueQuoteErrs, or cleared by a re-key — the PICKED venue is the
