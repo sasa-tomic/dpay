@@ -119,13 +119,16 @@ const COMMISSION_RATE: &str = "0";
 /// Rail-canonical id → SideShift's own (coin, network) for every asset a registered
 /// SideShift pair names. Verified against the live `GET /coins` (keyless) 2026-09-15:
 /// ICP lives on network `icp` (hasMemo false), SOL on `solana`. The USDC(Solana) row is
-/// BEST-EFFORT and UNVERIFIED until the founder's partner key exists (both cefi routes
-/// 503 until then — the keyless tripwire is unchanged): the coin code `usdc` on
-/// network `solana` follows the venue's documented code shape.
+/// BEST-EFFORT and UNVERIFIED until the founder's partner key exists (its cefi route
+/// 503s until then — the keyless tripwire is unchanged): the coin code `usdc` on
+/// network `solana` follows the venue's documented code shape. The EURC(Solana) row IS
+/// verified: the keyless pair endpoints (2026-09-19) answer `EURC`-`solana` ↔ `ICP`-`icp`
+/// in both directions — the pair exists and those are the venue's own words.
 const SIDESHIFT_ASSETS: &[(&str, &str, &str)] = &[
     (crate::catalog::ICP_LEDGER_PRINCIPAL, "ICP", "icp"),
     (crate::catalog::WRAPPED_SOL_MINT, "SOL", "solana"),
     (crate::catalog::SOLANA_USDC_MINT, "usdc", "solana"),
+    (crate::catalog::SOLANA_EURC_MINT, "eurc", "solana"),
 ];
 
 /// The proxy's state: the two partner credentials (secrets — module header), the API
@@ -575,10 +578,27 @@ mod tests {
             pair_direction(usdc, icp),
             Some(("sideshift-usdc", "usdc", "solana", "ICP", "icp"))
         );
+        // Both directions of the THIRD cefi row (sideshift-eurc, the EUR→IC bridge):
+        // same disambiguation and attribution rule — and the coin codes are the venue's
+        // own live words (the keyless pair endpoints answered them 2026-09-19).
+        let eurc = crate::catalog::SOLANA_EURC_MINT;
+        assert_eq!(
+            pair_direction(icp, eurc),
+            Some(("sideshift-eurc", "ICP", "icp", "eurc", "solana"))
+        );
+        assert_eq!(
+            pair_direction(eurc, icp),
+            Some(("sideshift-eurc", "eurc", "solana", "ICP", "icp"))
+        );
         // Anything else — including rail ids that exist but are not a registered
         // pair — refuses. VCHF is a real IC ledger; it must not ride the partner key.
         assert!(pair_direction(crate::catalog::VCHF_LEDGER_PRINCIPAL, sol).is_none());
         assert!(pair_direction(crate::catalog::VCHF_LEDGER_PRINCIPAL, usdc).is_none());
+        assert!(pair_direction(crate::catalog::VCHF_LEDGER_PRINCIPAL, eurc).is_none());
+        // Solana-rail pairs that EXIST (jupiter rows) are never cefi pairs: the partner
+        // key must not ride the AMM rail-local surface.
+        assert!(pair_direction(sol, eurc).is_none());
+        assert!(pair_direction(usdc, eurc).is_none());
         assert!(pair_direction(sol, usdc).is_none());
         assert!(pair_direction(icp, icp).is_none());
         assert!(pair_direction("", "").is_none());

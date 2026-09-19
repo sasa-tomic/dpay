@@ -495,6 +495,30 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
             test_helpers_served: false,
             fixture: None,
         },
+        VenueEntry {
+            // The THIRD CeFi venue (registered 2026-09-19, the EUR→IC bridge): the same
+            // SideShift venue family, on the cross-rail pair ICP ↔ EURC(Solana) — the pair
+            // that completes dpay's EUR rail: EURC (the user deposits on Solana) ⇄ ICP
+            // (settles on the Internet Computer), the only registered route between the
+            // two. Everything the sideshift row comment above says holds verbatim
+            // (relay-held partner key, status reads device-direct keyless, fixture None).
+            // PAIR VERIFIED keyless 2026-09-19: GET /pair/eurc-solana/icp AND
+            // /pair/icp/eurc-solana both answer live (the reverse direction min
+            // 3.50126051, rate 2.437…), confirming the venue's own coin/network codes the
+            // sideshift integration maps this row's rail ids to (`eurc`/`solana`/`ICP`/
+            // `icp`). The keyless 503-until-creds tripwire applies to QUOTING exactly as
+            // to its siblings; the founder's partner key now EXISTS (sops-encrypted,
+            // secrets/sideshift.sops.json — prod deployment of it stays founder-run).
+            venue_id: "sideshift-eurc",
+            display_name: "SideShift",
+            kind: VenueKind::Cefi,
+            endpoint: "https://sideshift.ai/api/v2",
+            pair_ledgers: [ICP_LEDGER_PRINCIPAL, SOLANA_EURC_MINT],
+            testnet: false,
+            disclosure_key: "sideshift",
+            test_helpers_served: false,
+            fixture: None,
+        },
     ]
 }
 
@@ -857,8 +881,10 @@ pub(crate) const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111
 /// EURC on solana mainnet, 6 decimals). THE EUR asset since the 2026-09-19 VEUR
 /// removal (the IC half of the old dual-rail is gone; VNX wound the token down).
 /// Cross-checked against `dfx/catalog_truth.json` (`principals.eurc_mint`) by the
-/// `catalog_truth_tests` module below.
-const SOLANA_EURC_MINT: &str = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
+/// `catalog_truth_tests` module below. `pub(crate)` because the sideshift integration's
+/// rail-id → coin-code table (`SIDESHIFT_ASSETS`) names it: the `sideshift-eurc`
+/// venue row's Solana-side rail id IS this mint.
+pub(crate) const SOLANA_EURC_MINT: &str = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
 
 /// The solana mainnet section — a relay-level constant provider (NOT a `Ledger` thing: the rail
 /// is device-key + direct RPC and never touches the IC, so it is absent from the trait and
@@ -1968,9 +1994,9 @@ mod venue_truth_tests {
             .collect();
         assert_eq!(
             served.len(),
-            11,
-            "exactly eleven real venues are served today (six IC pools + three Jupiter + \
-             two SideShift, one row per pair)"
+            12,
+            "exactly twelve real venues are served today (six IC pools + three Jupiter + \
+             three SideShift, one row per pair)"
         );
         assert_eq!(
             served
@@ -1989,6 +2015,7 @@ mod venue_truth_tests {
                 "jupiter-usdc-eurc",
                 "sideshift",
                 "sideshift-usdc",
+                "sideshift-eurc",
             ],
             "registry order is the stable wire order"
         );

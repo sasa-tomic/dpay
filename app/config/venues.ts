@@ -210,6 +210,23 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
     testnet: false,
     disclosure_key: 'sideshift',
   },
+  {
+    // The THIRD CeFi venue (registered 2026-09-19, the EUR→IC bridge): the same SideShift
+    // venue family, on the cross-rail pair ICP ↔ EURC(Solana) — the pair that completes
+    // dpay's EUR rail: EURC (deposit on Solana) ⇄ ICP (settle on the Internet Computer),
+    // the only registered route between the two. Everything the sideshift row comment
+    // above says holds verbatim (relay-held partner key, keyless status reads, no
+    // fixture). The pair is verified KEYLESS 2026-09-19: both /pair endpoints answer
+    // live, and the venue's own words are `eurc`/`solana` ↔ `ICP`/`icp`. Quoting 503s
+    // until the relay holds the founder partner key — the tripwire is unchanged.
+    venue_id: 'sideshift-eurc',
+    display_name: 'SideShift',
+    kind: 'cefi',
+    endpoint: 'https://sideshift.ai/api/v2',
+    pair_ledgers: [mainnetIcLedger(8), EURC_MINT_ADDRESS],
+    testnet: false,
+    disclosure_key: 'sideshift',
+  },
 ];
 
 // The RUNTIME overlay — what THIS relay's `GET /api/v1/venues` actually serves (multi-venue

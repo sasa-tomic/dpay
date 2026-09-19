@@ -205,6 +205,19 @@
       ],
       "testnet": false,
       "disclosure_key": "sideshift"
+    },
+    {
+      "_doc": "The THIRD CeFi venue (registered 2026-09-19, the EUR→IC bridge): the same SideShift venue family as the rows above, on the cross-rail pair ICP ↔ EURC(Solana) — the pair that completes dpay's EUR rail: EURC (the user deposits on Solana) ⇄ ICP (settles on the Internet Computer), the only registered route between the two. Identifier semantics match the sideshift rows (rail-canonical pair ids, https API base, relay-held partner key: quote/order ride the proxy, status reads stay device-direct keyless, no fixture). The PAIR is verified keyless 2026-09-19: GET /api/v2/pair/eurc-solana/icp AND /api/v2/pair/icp/eurc-solana both answer live (the reverse direction min 3.50126051, rate 2.437182922012), confirming the venue's own coin/network codes (eurc/solana, ICP/icp) mapped in crates/dpay-relay/src/sideshift.rs. Quoting 503s until the relay holds the founder partner key (sops-encrypted, secrets/sideshift.sops.json — prod deployment of it remains founder-run); the keyless 503 tripwire applies to this row exactly as to its siblings.",
+      "venue_id": "sideshift-eurc",
+      "display_name": "SideShift",
+      "kind": "cefi",
+      "endpoint": "https://sideshift.ai/api/v2",
+      "pair_ledgers": [
+        "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr"
+      ],
+      "testnet": false,
+      "disclosure_key": "sideshift"
     }
    ]
 }

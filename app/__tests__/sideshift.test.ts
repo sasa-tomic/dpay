@@ -44,7 +44,7 @@ import {
   type ConvertQuote,
 } from '../convert';
 import {BUNDLED_VENUES, cefiOtherSide, cefiVenuesForLedger, venueOfId} from '../config/venues';
-import {USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
+import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 import {convertEn} from '../i18n/domains/en/convert';
 
 const RELAY = 'http://relay.local';
@@ -219,7 +219,7 @@ describe('convert.ts — the cefi mapping helpers', () => {
 describe('config/venues — the cefi registry surface', () => {
   test('the bundled sideshift rows are the cross-rail shape: IC principal + Solana mint, https base', () => {
     const rows = BUNDLED_VENUES.filter(v => v.kind === 'cefi');
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     const ss = rows[0]!;
     expect(ss.venue_id).toBe('sideshift');
     expect(ss.endpoint).toBe('https://sideshift.ai/api/v2');
@@ -235,15 +235,27 @@ describe('config/venues — the cefi registry surface', () => {
     expect(ssUsdc.testnet).toBe(false);
     expect(ssUsdc.disclosure_key).toBe('sideshift');
     expect([...ssUsdc.pair_ledgers].sort()).toEqual([ICP_LEDGER, USDC_MINT_ADDRESS].sort());
+    // The THIRD cefi row (2026-09-19, the EUR→IC bridge): same family + endpoint +
+    // disclosure, on the ICP ↔ EURC(Solana) pair — the only registered route between the
+    // two. Registry order keeps it third, beside its siblings.
+    const ssEurc = rows[2]!;
+    expect(ssEurc.venue_id).toBe('sideshift-eurc');
+    expect(ssEurc.display_name).toBe('SideShift');
+    expect(ssEurc.endpoint).toBe('https://sideshift.ai/api/v2');
+    expect(ssEurc.testnet).toBe(false);
+    expect(ssEurc.disclosure_key).toBe('sideshift');
+    expect([...ssEurc.pair_ledgers].sort()).toEqual([ICP_LEDGER, EURC_MINT_ADDRESS].sort());
   });
 
   test('cefiOtherSide answers only the registered pair, either direction; cefiVenuesForLedger finds the row', () => {
     expect(cefiOtherSide(VENUE, ICP_LEDGER)).toBe(WRAPPED_SOL_MINT_ADDRESS);
     expect(cefiOtherSide(VENUE, WRAPPED_SOL_MINT_ADDRESS)).toBe(ICP_LEDGER);
     expect(cefiOtherSide(VENUE, 'ly36x-wiaaa-aaaai-aqj7q-cai')).toBeNull();
-    expect(cefiVenuesForLedger(ICP_LEDGER).map(v => v.venue_id)).toEqual(['sideshift', 'sideshift-usdc']);
+    expect(cefiVenuesForLedger(ICP_LEDGER).map(v => v.venue_id))
+      .toEqual(['sideshift', 'sideshift-usdc', 'sideshift-eurc']);
     expect(cefiVenuesForLedger(WRAPPED_SOL_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['sideshift']);
     expect(cefiVenuesForLedger(USDC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['sideshift-usdc']);
+    expect(cefiVenuesForLedger(EURC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['sideshift-eurc']);
     expect(cefiVenuesForLedger('ly36x-wiaaa-aaaai-aqj7q-cai')).toEqual([]);
     // the IC chooser surface (ic_amm pairs) never sees the cefi rows — rails never cross there
     expect(BUNDLED_VENUES.filter(v => v.kind === 'ic_amm').every(v => v.venue_id !== 'sideshift')).toBe(true);
