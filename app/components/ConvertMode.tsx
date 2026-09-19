@@ -517,9 +517,13 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // the standing VCHF→ICP quote rendered under the USDC pick as "17.074223 USDC" (an 8-decimal
   // ICP amount formatted with the 6-decimal USDC row) with the min-out floor derived from it.
   // A quote is displayable only under a destination it actually quotes; anything else is the
-  // busy state the refetch already switched on.
+  // busy state the refetch already switched on. Scoped to the IN-WALLET DIRECT pick (effOut
+  // overridden away from the flow's own terminal): route/hub/cefi flows legitimately quote
+  // toward a hop ledger while effOut stays legs.outDesc — suppressing those would blank the
+  // whole multihop/crossrail surface.
   const staleDestQuote = !chooserMode && quote != null && effOut != null
-    && quote.tokenOutLedger !== effOut.ledger;
+    && quote.tokenOutLedger !== effOut.ledger
+    && effOut.ledger !== (legs?.outDesc?.ledger ?? '');
   const activeQuote = chooserMode
     ? selectedVenue != null ? venueQuotes[selectedVenue.venue_id] ?? null : null
     : staleDestQuote ? null : quote;
