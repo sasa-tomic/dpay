@@ -709,3 +709,14 @@ agent-sol-principal:
 # prints the SOL seed hex — only immediately before an approved SOL spend.
 agent-funds *flags:
     node scripts/agent-funds.mjs {{flags}}
+
+# computed-from-ledger vs MEASURED live balances per wallet/asset — the carelessness tripwire:
+# drift after a genesis anchor = an unrecorded movement (exit 1). UNKNOWN (UNREADABLE) is not
+# clean. Clean reconcile is REQUIRED before a session that moved funds claims completion.
+funds-reconcile:
+    node scripts/funds.mjs reconcile
+
+# re-render the GENERATED wallet/spend tables in docs/AGENT-FUNDS.md from funds/ — run after any
+# `node scripts/funds.mjs add`; hand-edits inside the GENERATED markers are lost on render.
+funds-doc:
+    node scripts/funds.mjs doc

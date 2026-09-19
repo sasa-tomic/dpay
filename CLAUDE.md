@@ -152,8 +152,8 @@ log: `docs/AGENT-FUNDS.md`. The rules bind here because they must be in context 
   never tops it up itself. Everything below is affordable *because* of the cap.
 - **Spend without asking only when ALL hold:** ≤ CHF 2 equivalent in one operation; the destination
   was validated by the core (`icp_validate_principal` / `icp_validate_icrc_account`); the purpose is
-  a stated verification that cannot be done offline; and the spend is appended to the log in
-  `docs/AGENT-FUNDS.md`.
+  a stated verification that cannot be done offline; and the spend is recorded through the funds
+  tooling (`node scripts/funds.mjs add …` — the hard rule below).
 - **Ask the founder first for:** anything above CHF 2, the first payment to any new counterparty
   (each new merchant/till counts), anything that would empty the float, and any spend whose outcome
   Claude cannot check afterwards.
@@ -162,6 +162,13 @@ log: `docs/AGENT-FUNDS.md`. The rules bind here because they must be in context 
   or a subagent prompt; or print the seed except immediately before an approved spend.
 - **Report honestly.** A spend that bought nothing is a spend that bought nothing — record it. Do
   not spend again to "make it work" without asking.
+- **Every movement goes through the funds tooling — hard rule (2026-09-19).** `funds/ledger.jsonl`
+  (append-only, version-controlled) and `funds/wallets.json` are the only record of what the float
+  holds and did. Append every deposit/spend/conversion/fee/rotation with `node scripts/funds.mjs
+  add …` in the SAME session it happens; re-render the doc tables with `just funds-doc`;
+  `just funds-reconcile` must be CLEAN before the session claims completion. Never hand-edit the
+  JSONL or the GENERATED doc tables (the testruns.py precedent: one interface). A session that
+  moved float funds without ledger rows is INCOMPLETE.
 
 ## Projects
 

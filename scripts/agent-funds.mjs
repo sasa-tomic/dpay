@@ -12,11 +12,10 @@
 //    itself (the `--seed` path decrypts by delegating to agent-sol.mjs, keeping one sops caller
 //    per chain).
 //
-//  - The wallet LIST comes from `.dev/agent-wallets.json` (gitignored, machine-readable — treated
-//    like `.dev/testruns.db`). A missing or unreadable registry is tolerated: this file falls back
-//    to what the custody scripts themselves know (`secrets/*.pub.json`) plus the public record of
-//    the abandoned principal, so a fresh clone still shows everything except curated notes. The
-//    committed copy of the registry lives in docs/AGENT-FUNDS.md ("Wallet registry").
+//  - The wallet LIST comes from the COMMITTED `funds/wallets.json` (founder ask 2026-09-19: the
+//    record is version-controlled — a fresh clone finds every wallet). That file replaced the
+//    gitignored `.dev/agent-wallets.json`, which is retired. The same file renders the registry
+//    table in docs/AGENT-FUNDS.md and feeds `funds-reconcile`.
 //
 //  - A section that cannot be measured prints UNREADABLE and makes the whole command exit 1 — a
 //    wallet overview that silently skipped a chain would be worse than a failing one.
@@ -24,24 +23,13 @@
 // Usage:
 //   node scripts/agent-funds.mjs           every wallet + every live balance (no decryption)
 //   node scripts/agent-funds.mjs --seed    additionally print the SOL seed hex — DECRYPTS
-import {readFileSync, existsSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {dirname, join} from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const REG = join(ROOT, '.dev/agent-wallets.json');
-
-/** Fallback record for the compromised pre-rotation float principal. Public information (it is in
- *  the docs/AGENT-FUNDS.md spend log) — no secret has existed for it since the 2026-09-05 rotation,
- *  and it must never be funded again. Kept here so even a registry-less fresh clone sees it. */
-const ABANDONED_ICP = {
-  chain: 'icp',
-  address: 'lrdna-ain6m-ja6ko-ac4j2-jqk3t-nqs22-4irws-bsm3b-trzzq-3yfz6-mqe',
-  secret: null,
-  status: 'abandoned-never-fund',
-  note: 'compromised 2026-09-05 (partial key disclosure), emptied by rotation — NEVER fund',
-};
+const WALLETS = join(ROOT, 'funds/wallets.json'); // committed registry — the single source
 
 const SCRIPT_OF = {icp: 'scripts/agent-key.mjs', solana: 'scripts/agent-sol.mjs'};
 
@@ -50,28 +38,15 @@ function die(msg) {
   process.exit(1);
 }
 
-function loadRegistry() {
-  if (!existsSync(REG)) return null;
-  try {
-    return JSON.parse(readFileSync(REG, 'utf8'));
-  } catch (e) {
-    die(`registry ${REG} is unreadable (${e.message.split('\n')[0]}) — fix it or delete it; continuing on the pub-file fallback`);
-  }
-}
-
-/** Registry present? Use it. Missing? Rebuild from the custody scripts' own public halves. */
 function walletList() {
-  const reg = loadRegistry();
-  if (reg?.wallets?.length) return reg.wallets;
-  const wallets = [];
-  for (const [chain, pub] of [['icp', 'secrets/agent-icp.pub.json'], ['solana', 'secrets/agent-sol.pub.json']]) {
-    const p = join(ROOT, pub);
-    if (!existsSync(p)) continue; // that chain has no key yet — its section below says so loudly
-    const j = JSON.parse(readFileSync(p, 'utf8'));
-    wallets.push({chain, address: j.address ?? j.principal, secret: pub.replace('.pub.', '.sops.'), status: 'live'});
+  let reg;
+  try {
+    reg = JSON.parse(readFileSync(WALLETS, 'utf8'));
+  } catch (e) {
+    die(`wallet registry ${WALLETS} is missing or unreadable (${e.message.split('\n')[0]}) — it is committed; restore it with git`);
   }
-  wallets.push(ABANDONED_ICP);
-  return wallets;
+  if (!reg.wallets?.length) die(`wallet registry ${WALLETS} lists no wallets`);
+  return reg.wallets;
 }
 
 /** Run one chain's balance command and stream its output verbatim. Loud, never silent. */
@@ -144,11 +119,8 @@ for (const w of wallets) {
   console.log(`── ${w.chain} mainnet · ${label} ${'─'.repeat(Math.max(2, 44 - w.chain.length - label.length))}`);
   console.log(`   address ${w.address}`);
   if (w.secret) console.log(`   secret  ${w.secret}`);
-  if (w.note) console.log(`   note    ${w.note}`);
+  if (w.purpose) console.log(`   purpose ${w.purpose}`);
   if (w.status === 'abandoned-never-fund') {
-    // The abandoned WHY must be visible even though it lives in the registry's `purpose` field —
-    // a fresh session seeing "never fund" should not have to ask why.
-    if (w.purpose) console.log(`   note    ${w.purpose}`);
     failed = watchAbandoned(w) || failed;
     console.log('');
     continue; // never funded, but always WATCHED
