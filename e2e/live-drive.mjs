@@ -393,8 +393,12 @@ async function cmdB(icpAmount) {
       throw new Error(`OP B: settle address on screen ${JSON.stringify(settleShown)} != agent SOL wallet — refusing`);
     }
     log(`settle address verified: ${settleShown}`);
-    const qsrc = await driver.isPresent('convert-quote-source')
-      ? await driver.readText('convert-quote-source') : '(none)';
+    // The venue quote rides the relay's /api/v1/sideshift/* proxy — allow it a moment to land.
+    let qsrc = '(none)';
+    for (let i = 0; i < 30; i++) {
+      if (await driver.isPresent('convert-quote-source')) { qsrc = await driver.readText('convert-quote-source'); break; }
+      await sleep(1_000);
+    }
     log(`quote source: ${qsrc}`);
     if (!/SideShift/i.test(qsrc)) throw new Error('OP B: quote source is not SideShift — refusing');
     const cparty = await driver.isPresent('convert-counterparty')
