@@ -59,7 +59,9 @@ const VCHF_LEDGER = rowOf(7).ledger!;
 const CKUSDC_LEDGER = rowOf(2).ledger!;
 const CKETH_LEDGER = rowOf(6).ledger!;
 const CKBTC_LEDGER = rowOf(1).ledger!;
-const VEUR_LEDGER = rowOf(9).ledger!;
+// Currency 9 (VEUR) is RETIRED (2026-09-19): its ledger literal appears below only as an
+// UNREGISTERED string — no bundled row answers to it any more.
+const RETIRED_VEUR_LEDGER = 'wu6g4-6qaaa-aaaan-qmrza-cai';
 const POOL1 = '65mrh-fqaaa-aaaar-qapoa-cai'; // icpswap (VCHF/ICP) — the registry's own endpoint
 const POOL2 = 'angxa-baaaa-aaaag-qcvnq-cai'; // icpswap-cketh (ICP/ckETH)
 
@@ -231,8 +233,10 @@ describe('hubRoutes — the pure registry walk (no hardcoded hub)', () => {
     ]);
   });
 
-  test('VEUR gets NO routes (no venue pairs it) and DEMO gets none (fee null on the row)', () => {
-    expect(hubRoutes(BUNDLED, VEUR_LEDGER)).toEqual([]);
+  test('the RETIRED VEUR ledger gets NO routes and DEMO gets none (fee null on the row)', () => {
+    // Currency 9 was retired 2026-09-19: the ledger literal is no longer a bundled row, so the
+    // route walk fails it closed exactly like DEMO (whose fee is null by design).
+    expect(hubRoutes(BUNDLED, RETIRED_VEUR_LEDGER)).toEqual([]);
     expect(hubRoutes(BUNDLED, rowOf(0).ledger!)).toEqual([]);
   });
 
@@ -246,18 +250,18 @@ describe('hubRoutes — the pure registry walk (no hardcoded hub)', () => {
     ]);
   });
 
-  test('the hub is found in the REGISTRY, not hardcoded: a runtime venue makes VEUR a hub', () => {
+  test('the hub is found in the REGISTRY, not hardcoded: a runtime venue makes ckETH a hub', () => {
     // The runtime fixtures carry disclosure_key:null (registry rows may ship without one —
     // the TYPE disagrees with reality; the cast is the test's, not the engine's).
     const runtime = [
-      {venue_id: 'fakev', display_name: 'Fake V', kind: 'ic_amm', endpoint: 'fqaaa-fake-1-cai', pair_ledgers: [VCHF_LEDGER, VEUR_LEDGER], testnet: false, disclosure_key: null},
-      {venue_id: 'fakev2', display_name: 'Fake V2', kind: 'ic_amm', endpoint: 'fqaaa-fake-2-cai', pair_ledgers: [VEUR_LEDGER, ICP_LEDGER], testnet: false, disclosure_key: null},
+      {venue_id: 'fakev', display_name: 'Fake V', kind: 'ic_amm', endpoint: 'fqaaa-fake-1-cai', pair_ledgers: [VCHF_LEDGER, CKETH_LEDGER], testnet: false, disclosure_key: null},
+      {venue_id: 'fakev2', display_name: 'Fake V2', kind: 'ic_amm', endpoint: 'fqaaa-fake-2-cai', pair_ledgers: [CKETH_LEDGER, ICP_LEDGER], testnet: false, disclosure_key: null},
     ] as unknown as VenueEntry[];
     setRuntimeVenues(runtime);
     const routes = hubRoutes(BUNDLED, VCHF_LEDGER);
-    // VCHF → VEUR → ICP: the walk composed VEUR (currency 9) as a HUB purely from the
+    // VCHF → ckETH → ICP: the walk composed ckETH (currency 6) as a HUB purely from the
     // registry graph — nothing anywhere pins "the hub is ICP".
-    expect(routes.some(r => r.routeId === 'hub:fakev:9:fakev2' && r.hub.ledger === VEUR_LEDGER && r.dest.ledger === ICP_LEDGER)).toBe(true);
+    expect(routes.some(r => r.routeId === 'hub:fakev:6:fakev2' && r.hub.ledger === CKETH_LEDGER && r.dest.ledger === ICP_LEDGER)).toBe(true);
   });
 
   test('a catalog row missing fee/symbol/network on ANY of the three legs fails the route closed', () => {
@@ -333,7 +337,8 @@ describe('resolveConvertDestinations — the widened Convert-entry enumeration',
   });
 
   test('testnet rows and unregistered assets get NOTHING (same posture as resolveConvertDirection)', () => {
-    expect(resolveConvertDestinations(VEUR_LEDGER, false)).toEqual([]);
+    // The retired VEUR ledger (currency 9, 2026-09-19) is the unregistered-asset specimen.
+    expect(resolveConvertDestinations(RETIRED_VEUR_LEDGER, false)).toEqual([]);
     expect(resolveConvertDestinations(VCHF_LEDGER, true)).toEqual([]);
     expect(resolveConvertDestinations(undefined, false)).toEqual([]);
     expect(resolveConvertDestinations('no-such-ledger', false)).toEqual([]);

@@ -542,12 +542,21 @@ describe('isPayableAsset — payable predicate (MC5 fail-closed before signing)'
     expect(isPayableAsset(BUNDLED_CATALOG, 8)).toBe(true);
   });
 
-  it('the complete bundled VEUR (9) no-minter row is payable (EUR dual-rail Stage 1)', () => {
-    // Same complete-trusted-descriptor contract as VCHF/ICP: VEUR files mainnet-side with every
-    // direct-ICRC fact present, so the rail COULD sign an icrc1_transfer today — Stage 4's
-    // CURRENCY_RAILS.EUR gate is what withholds it from the chooser, not payability.
-    expect(familyDisplay(BUNDLED_CATALOG, 9)).toBeNull();
-    expect(isPayableAsset(BUNDLED_CATALOG, 9)).toBe(true);
+  it('the RETIRED VEUR row (9): absent from the bundle, payable only if a SERVED catalog still carries it', () => {
+    // VEUR was retired 2026-09-19 (relay row removed in 4851c88; the id is never reused), so the
+    // BUNDLED catalog fails id 9 closed — but prod serves the old catalog until the founder
+    // redeploys. TOLERANCE RULE: that legacy row (thin + Partner/DFX) must still parse into a
+    // normal row and stay payable; crashing on or dropping it is the regression this pins.
+    expect(isPayableAsset(BUNDLED_CATALOG, 9)).toBe(false);
+    const legacy: CurrencyDescriptor = mk({
+      currency: 9, minter_family: null, ledger: 'wu6g4-6qaaa-aaaan-qmrza-cai', symbol: 'VEUR', decimals: 8,
+      wrapper_name: 'VEUR', backing_symbol: 'VEUR', network: 'Internet Computer',
+      display_decimals: 8, min_fraction_digits: 2, fee: '10000', cap: '1000000000000',
+      onramp: 'Unavailable', offramp: 'Partner', liquidity: 'thin', ramp_partner: 'DFX',
+    });
+    const served = [...icpCatalogOf(BUNDLED_NETWORKS), legacy];
+    expect(isPayableAsset(served, 9)).toBe(true);
+    expect(familyDisplay(served, 9)).toBeNull();
   });
 
   it('Unavailable ramps do NOT disable payment (no onramp, no offramp, no minter — still pays)', () => {
@@ -588,9 +597,11 @@ describe('isPayableAsset — payable predicate (MC5 fail-closed before signing)'
     expect(isPayableAsset([{...VCHF_COMPLETE, cap: '-5'}], 7)).toBe(false);
     expect(isPayableAsset([{...VCHF_COMPLETE, cap: '1e12'}], 7)).toBe(false);
   });
-  it('unknown currency ids fail closed even beside the complete rows (10 / 999)', () => {
-    // 9 was the pre-EUR "unknown id" pin — VEUR made it a complete PAYABLE row, so the
-    // fail-closed demo moves to 10 (still absent from the bundled catalog).
+  it('unknown/retired currency ids fail closed even beside the complete rows (9 / 10 / 999)', () => {
+    // 9 is RETIRED (VEUR, 2026-09-19): the id is never reused and the bundled catalog no longer
+    // carries the row, so the BUNDLE fails it closed exactly like the never-issued 10 and 999.
+    // (A SERVED catalog still carrying the legacy row keeps it payable — pinned above.)
+    expect(isPayableAsset(BUNDLED_CATALOG, 9)).toBe(false);
     expect(isPayableAsset(BUNDLED_CATALOG, 10)).toBe(false);
     expect(isPayableAsset(BUNDLED_CATALOG, 999)).toBe(false);
   });
@@ -758,9 +769,9 @@ describe('MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol 
 const TRUTH = JSON.parse(
   readFileSync(join(__dirname, '..', '..', 'dfx', 'catalog_truth.json'), 'utf8'),
 ) as {
-  principals: {ckbtc_minter: string; cketh_minter: string; ckusdc_ledger: string; cketh_gas_ledger: string; cketh_ledger: string; vchf_ledger: string; icp_ledger: string; veur_ledger: string; eurc_mint: string};
+  principals: {ckbtc_minter: string; cketh_minter: string; ckusdc_ledger: string; cketh_gas_ledger: string; cketh_ledger: string; vchf_ledger: string; icp_ledger: string; eurc_mint: string};
   erc20_contracts: {ckusdc: string};
-  decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number; vchf: number; icp: number; veur: number; eurc: number};
+  decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number; vchf: number; icp: number; eurc: number};
   wire_consts: {retrieve_btc_min_amount: number; mint_account: string};
   venues: VenueTruth[];
 };
@@ -839,18 +850,20 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(a.decimals).toBe(8);
   });
 
-  // --- EUR dual-rail Stage 1 (2026-09-06): VEUR on IC + EURC on solana --------------------------
-  it('VEUR (currency 9) ledger principal + decimals match the shared truth (veur_ledger, 8)', () => {
-    const a = byId(9);
-    expect(a.ledger).toBe(TRUTH.principals.veur_ledger);
-    expect(a.decimals).toBe(TRUTH.decimals.veur);
-    expect(a.decimals).toBe(8);
+  // --- EUR rail: VEUR RETIRED (2026-09-19, id never reused) + EURC on solana --------------------
+  it('currency 9 (VEUR) is retired: absent from the bundle AND from catalog_truth.json', () => {
+    // The drift alarm guards BOTH directions: the JSON dropped principals.veur_ledger +
+    // decimals.veur in 4851c88 and the bundled row is gone — if either side ever re-adds
+    // currency 9, this goes RED. The id is never reused.
+    expect(byId(9)).toBeUndefined();
+    expect(Object.keys(TRUTH.principals)).not.toContain('veur_ledger');
+    expect(Object.keys(TRUTH.decimals)).not.toContain('veur');
   });
 
   it('EURC (solana) mint + decimals match the shared truth (eurc_mint, 6)', () => {
-    // The solana half of the EUR dual-rail: no app rail constant exists yet (Stage 4 wires one),
-    // so the bundled row's mint is pinned straight against the JSON truth — the only cross-side
-    // guard until the rail lands.
+    // The solana rail — EUR's ONLY rail since the 2026-09-19 VEUR retirement. No app rail
+    // constant exists yet (Stage 4 wires one), so the bundled row's mint is pinned straight
+    // against the JSON truth — the only cross-side guard until the rail lands.
     const eurc = solanaAssetsOf(BUNDLED_NETWORKS).find(a => a.token === 'EURC')!;
     expect(eurc.mint).toBe(TRUTH.principals.eurc_mint);
     expect(eurc.decimals).toBe(TRUTH.decimals.eurc);
@@ -869,16 +882,15 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
 
   it('VCHF/ICP rows pin the locked identity table: unit strings, fee, caps, no-minter shape, Unavailable ramps, order', () => {
     // The full locked table (see the spec's "Locked identities and metadata"). Order: VCHF (7)
-    // comes immediately after currency 6, ICP (8) immediately after VCHF, VEUR (9) immediately
-    // after ICP — in the icp MAINNET section (all rows stamped testnet:false). A change to ANY
+    // comes immediately after currency 6, ICP (8) immediately after VCHF — in the icp MAINNET
+    // section (all rows stamped testnet:false). A change to ANY
     // locked value turns this RED, so a catalog edit can never silently drift from the spec.
     const mainnet = BUNDLED_NETWORKS.find(
       (s): s is Extract<NetworkSection, {protocol: 'icp'}> => s.protocol === 'icp' && s.environment === 'mainnet',
     )!;
-    expect(mainnet.assets.map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8, 9]);
+    expect(mainnet.assets.map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8]);
     expect(mainnet.assets[4].currency).toBe(7); // VCHF directly after ckETH (6)
     expect(mainnet.assets[5].currency).toBe(8); // ICP directly after VCHF (7)
-    expect(mainnet.assets[6].currency).toBe(9); // VEUR directly after ICP (8)
 
     const vchf = byId(7);
     expect(vchf.symbol).toBe('VCHF');
@@ -919,44 +931,21 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(icp.testnet).toBe(false);
   });
 
-  it('VEUR (currency 9) pins the EUR Stage-1 locked shape: issuer-token unit, Partner off-ramp via DFX, thin liquidity, no fake family', () => {
-    // EUR dual-rail Stage 1 (2026-09-06): the IC half. Every value mirrors the founder-approved
-    // spec. The payment unit is the ISSUER token (VEUR — never "EUR", same rule as VCHF/CHF).
-    // The FIRST Partner off-ramp names DFX via the new optional ramp_partner. Liquidity ships
-    // as DATA ('thin' — EURC on solana is the deep half). The cap mirrors VCHF's shape
-    // (10,000 units; flagged for founder confirmation in the stage report).
-    const veur = byId(9);
-    expect(veur.symbol).toBe('VEUR');
-    expect(veur.wrapper_name).toBe('VEUR');
-    expect(veur.backing_symbol).toBe('VEUR');              // the issuer token, never "EUR"
-    expect(veur.network).toBe('Internet Computer');        // mainnet-side by section partition
-    expect(veur.display_decimals).toBe(8);
-    expect(veur.min_fraction_digits).toBe(2);              // unit-denominated: "1.50", never "1.5"
-    expect(veur.fee).toBe('10000');                        // raw 10_000 e8-splits
-    expect(veur.cap).toBe('1000000000000');                // raw 1_000_000_000_000 = 10,000 VEUR
-    expect(veur.mintable).toBe(false);
-    expect(veur.minter).toBeNull();                        // no-minter shape: direct icrc1_transfer
-    expect(veur.minter_family).toBeNull();                 // NEVER a fake family
-    expect(veur.onramp).toBe('Unavailable');               // no compliant fiat rail in
-    expect(veur.offramp).toBe('Partner');                  // the FIRST Partner off-ramp…
-    expect(veur.ramp_partner).toBe('DFX');                 // …naming DFX
-    expect(veur.liquidity).toBe('thin');                   // liquidity as DATA, not prose
-    expect(veur.chain_id).toBeNull();
-    expect(veur.token_contract).toBeNull();
-    expect(veur.gas_ledger).toBeNull();
-    expect(veur.testnet).toBe(false);
-  });
-
-  it('liquidity/ramp_partner ship as DATA on VEUR and stay null on every pre-EUR bundled row', () => {
-    // The optional-field contract: VEUR is the only IC row carrying liquidity or ramp_partner
-    // today; every pre-EUR bundled IC row reads null/null (the relay omits the keys — the wire
-    // byte-shape is pinned on the relay side by wire_byte_shape_tests; this is the app half).
+  it('NO bundled row carries liquidity or ramp_partner (all null after the VEUR retirement)', () => {
+    // The optional-field contract: since the 2026-09-19 VEUR retirement no bundled row carries
+    // liquidity or ramp_partner; every bundled IC row reads null/null (the relay omits the keys —
+    // the wire byte-shape is pinned on the relay side by wire_byte_shape_tests; this is the app
+    // half). A served legacy VEUR row still ships thin/'DFX' — that combination stays covered as
+    // GENERIC machinery (RailLiquidityNote's suite + the payable-tolerance test above), never as
+    // a named row.
     for (const id of [0, 1, 2, 6, 7, 8]) {
       expect(byId(id).liquidity).toBeNull();
       expect(byId(id).ramp_partner).toBeNull();
     }
-    expect(byId(9).liquidity).toBe('thin');
-    expect(byId(9).ramp_partner).toBe('DFX');
+    // …and on the solana half only EURC is tiered ('deep') — nothing anywhere is thin.
+    for (const a of solanaAssetsOf(BUNDLED_NETWORKS)) {
+      expect(a.liquidity === 'thin').toBe(false);
+    }
   });
 });
 
@@ -1355,10 +1344,12 @@ describe('BUNDLED_NETWORKS — one shape with the wire (catalog v2)', () => {
     expect(BUNDLED_NETWORKS.map(s => `${s.protocol}:${s.environment}`)).toEqual(['icp:mainnet', 'icp:testnet', 'solana:mainnet']);
   });
 
-  it('derives the flat IC catalog [0,1,2,6,7,8,9] with every row stamped testnet=false', () => {
+  it('derives the flat IC catalog [0,1,2,6,7,8] with every row stamped testnet=false', () => {
     const flat = icpCatalogOf(BUNDLED_NETWORKS);
-    expect(flat.map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8, 9]);
+    expect(flat.map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8]);
     expect(flat.every(c => !c.testnet)).toBe(true);
+    // Currency 9 (VEUR) is retired — the id is never reused, so it must not reappear.
+    expect(flat.some(c => c.currency === 9)).toBe(false);
   });
 
   it('the icp testnet section is EMPTY (the section exists; the assets list does not)', () => {
@@ -1372,7 +1363,7 @@ describe('BUNDLED_NETWORKS — one shape with the wire (catalog v2)', () => {
     // alarm above. FIAT-RAMP CORRECTION (2026-09-06, mirrors the relay): every row reads
     // Unavailable/Unavailable — the fields declare FIAT ramps now; the old Direct/Direct (which
     // meant structural self-custody on the device-key rail) is gone. liquidity: null on the
-    // pre-EUR rows, 'deep' on EURC (the deep half of the EUR dual-rail; VEUR is the thin half).
+    // other rows, 'deep' on EURC — the sole EUR rail since the 2026-09-19 VEUR retirement.
     expect(solanaAssetsOf(BUNDLED_NETWORKS)).toEqual([
       {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, min_fraction_digits: null, mint: null, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable'},
       {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, min_fraction_digits: 2, mint: USDC_MINT_ADDRESS, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable'},

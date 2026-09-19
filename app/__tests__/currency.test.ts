@@ -46,10 +46,11 @@ const CKBTC = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: 
 const CKUSDC = mk({currency: 2, minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum'});
 const VCHF = mk({currency: 7, minter_family: null, symbol: 'VCHF', decimals: 8, wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer'});
 const ICP = mk({currency: 8, minter_family: null, symbol: 'ICP', decimals: 8, wrapper_name: 'ICP', backing_symbol: 'ICP', network: 'Internet Computer'});
-// The EUR dual-rail catalog shape (Stage 1): VEUR on the IC carries the ramp/liquidity facts —
-// thin liquidity, sellable through DFX, a 10000-e8s transfer fee — while EURC on Solana carries
-// deep liquidity and no ramp (the solana row's parsed defaults).
-const VEUR = mk({currency: 9, minter_family: null, symbol: 'VEUR', decimals: 8, wrapper_name: 'VEUR', backing_symbol: 'VEUR', network: 'Internet Computer', fee: '10000', onramp: 'Unavailable', offramp: 'Partner', liquidity: 'thin', ramp_partner: 'DFX'});
+// The RETIRED VEUR row exactly as a legacy SERVED catalog still carries it (prod serves the old
+// catalog until the founder redeploys): thin liquidity, sellable through DFX, a 10000-e8s
+// transfer fee. EURC on Solana is the ONE catalogued EUR rail — this fixture exists to prove the
+// served row renders honestly WITHOUT becoming a EUR rail again.
+const LEGACY_VEUR = mk({currency: 9, minter_family: null, symbol: 'VEUR', decimals: 8, wrapper_name: 'VEUR', backing_symbol: 'VEUR', network: 'Internet Computer', fee: '10000', onramp: 'Unavailable', offramp: 'Partner', liquidity: 'thin', ramp_partner: 'DFX'});
 
 const build = (catalog: CurrencyDescriptor[], solana = false): SelectableAsset[] =>
   buildSelectableAssets(catalog, {showTestnet: false, solanaEnabled: solana, solanaTokens: solana});
@@ -68,21 +69,23 @@ describe('currencyRails — a currency is a set of rails', () => {
     expect(currencyRails('USD', withSol).map(a => a.id)).toEqual(['ic:2', 'solana:USDC']);
   });
 
-  it('resolves EUR to nothing while neither of its rails is visible', () => {
-    // The honesty gate stays: the rail table names EURC+VEUR, but neither row is in THIS asset
-    // list (no solana section, no VEUR descriptor), so EUR must resolve — and offer — nothing.
+  it('resolves EUR to nothing while its rail is not visible', () => {
+    // The honesty gate stays: the rail table names EURC, but the row is not in THIS asset list
+    // (no solana section), so EUR must resolve — and offer — nothing.
     expect(currencyRails('EUR', FULL)).toEqual([]);
   });
 
-  it('resolves EUR to both rails, EURC first — the stated preference, not catalog order', () => {
-    // The IC descriptor comes BEFORE the solana section in the built list, so the EURC-first
-    // order proves the PREFERENCE won, not the enumeration.
-    const withEur = build([DEMO, CKUSDC, VCHF, VEUR], true);
-    expect(currencyRails('EUR', withEur).map(a => a.id)).toEqual(['solana:EURC', 'ic:9']);
+  it('resolves EUR to its single rail (EURC) even while a legacy VEUR row is still served', () => {
+    // A legacy served catalog may still carry the retired VEUR row — it is NOT a rail (the rail
+    // table shrank to EURC on 2026-09-19), so the resolved group is exactly one rail.
+    const withEur = build([DEMO, CKUSDC, VCHF, LEGACY_VEUR], true);
+    expect(currencyRails('EUR', withEur).map(a => a.id)).toEqual(['solana:EURC']);
   });
 
-  it('resolves EUR to its one visible rail when only VEUR is catalogued', () => {
-    expect(currencyRails('EUR', build([DEMO, VEUR])).map(a => a.id)).toEqual(['ic:9']);
+  it('resolves EUR to nothing when only the retired VEUR row is catalogued', () => {
+    // The honesty gate in its sharpest form: a served VEUR row alone must NOT make EUR offerable
+    // again — the rail table, not the catalog row, decides what EUR is.
+    expect(currencyRails('EUR', build([DEMO, LEGACY_VEUR]))).toEqual([]);
   });
 
   it('ignores assets that are not a currency rail', () => {
@@ -99,8 +102,8 @@ describe('preferredRail — the asset the wallet lands on', () => {
     const withSol = build([DEMO, CKUSDC, VCHF], true);
     expect(preferredRail('USD', withSol)?.id).toBe('ic:2');
     expect(preferredRail('CHF', withSol)?.id).toBe('ic:7');
-    // EUR's preference is the deep-liquidity rail (EURC@Solana), not the catalog-first IC row.
-    expect(preferredRail('EUR', build([DEMO, VEUR], true))?.id).toBe('solana:EURC');
+    // EUR's single rail is the deep-liquidity EURC rail (VEUR retired 2026-09-19).
+    expect(preferredRail('EUR', build([DEMO, LEGACY_VEUR], true))?.id).toBe('solana:EURC');
   });
 
   it('is null when the catalog cannot realise the currency', () => {
@@ -198,9 +201,13 @@ describe('railFees — fee FACTS in each rail\'s own unit, never a cross-token v
     expect(railFees(eurc, []).oneTime).toEqual({raw: '2039280', formatted: '0.00203928 SOL'});
   });
 
-  it('formats the VEUR rail\'s catalog fee with the IC row\'s own token', () => {
-    const veur = build([DEMO, VEUR], true).find(a => a.id === 'ic:9')!;
-    expect(railFees(veur, [VEUR]).perTransfer).toEqual({raw: '10000', formatted: '0.0001 VEUR'});
+  it('formats an IC rail\'s catalog fee with the row\'s own token', () => {
+    // The legacy VEUR fixture proved this same path for a Partner row; VCHF carries the identical
+    // 10000-e8s fee on the real bundled row (the shared fixture above leaves fee null — the
+    // honest default — so this one restates the row's actual fee).
+    const VCHF_FEE = mk({currency: 7, minter_family: null, symbol: 'VCHF', decimals: 8, wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer', fee: '10000'});
+    const vchf = build([DEMO, VCHF_FEE], true).find(a => a.id === 'ic:7')!;
+    expect(railFees(vchf, [VCHF_FEE]).perTransfer).toEqual({raw: '10000', formatted: '0.0001 VCHF'});
   });
 });
 
@@ -234,14 +241,14 @@ describe('chooseRail — which rail, and why', () => {
     expect(out != null && out.rail.protocol === 'solana' ? out.rail.mint : null).toBe(EURC_MINT_ADDRESS);
   });
 
-  it('picks EURC over VEUR on preference, VEUR when it is the funded one', () => {
-    const withEur = build([DEMO, CKUSDC, VCHF, VEUR], true);
-    const veur = withEur.find(a => a.id === 'ic:9')!;
-    // Fresh wallet: the deep-liquidity rail is the stated preference — EURC first.
-    expect(chooseRail('EUR', withEur)).toEqual({rail: withEur.find(a => a.id === 'solana:EURC')!, reason: 'preference'});
-    // Funded VEUR outranks the unfunded default — "already holds" beats "would default", the
-    // same rule USD lives by; being thin changes the health NOTE, never the choice rule.
-    expect(chooseRail('EUR', withEur, bal(['ic:9', 'ok']))).toEqual({rail: veur, reason: 'funded'});
+  it('is null when the only served EUR row is the retired VEUR rail outside the group', () => {
+    // A legacy served catalog carries the VEUR row, but it is NOT a EUR rail any more: with the
+    // solana arm off (no EURC row anywhere in the list), a funded VEUR cannot win the EUR choice
+    // (it is not in the group) and the choice is honestly null — never a crash, never a
+    // resuscitated rail.
+    const legacyOnly = build([DEMO, VCHF, LEGACY_VEUR]);
+    expect(chooseRail('EUR', legacyOnly)).toBeNull();
+    expect(chooseRail('EUR', legacyOnly, bal(['ic:9', 'ok']))).toBeNull();
   });
 
   it('picks the funded rail, in preference order among the funded ones', () => {
@@ -275,8 +282,8 @@ describe('railsLabel — the whole group on one line', () => {
     expect(railsLabel('USD', withSol)).toBe('ckUSDC · Internet Computer, USDC · Solana');
   });
 
-  it('names EUR\'s two rails with EURC first', () => {
-    expect(railsLabel('EUR', build([DEMO, VEUR], true))).toBe('EURC · Solana, VEUR · Internet Computer');
+  it('names EUR\'s single rail (a served legacy VEUR row does not join the line)', () => {
+    expect(railsLabel('EUR', build([DEMO, LEGACY_VEUR], true))).toBe('EURC · Solana');
   });
 
   it('names the single rail of a one-rail currency', () => {
@@ -289,20 +296,23 @@ describe('railsLabel — the whole group on one line', () => {
 });
 
 describe('rail health + ramp lines — catalog facts or silence', () => {
-  // The dual-rail EUR shape: VEUR thin + DFX-sellable on the IC, EURC deep + rampless on Solana.
-  // ckUSDC is rebuilt Direct+Direct (the bundled catalog's shape) so the both-direct derivation
-  // has its live case too — the shared CKUSDC fixture above defaults Unavailable like VCHF.
+  // The LEGACY served EUR shape: VEUR thin + DFX-sellable on the IC (still served until the
+  // founder's redeploy), EURC deep + rampless on Solana. The retired row is the thin+Partner
+  // SPECIMEN: the machinery below is generic and must keep working on whatever row still ships
+  // it. ckUSDC is rebuilt Direct+Direct (the bundled catalog's shape) so the both-direct
+  // derivation has its live case too — the shared CKUSDC fixture above defaults Unavailable
+  // like VCHF.
   const CKUSDC_DIRECT = mk({currency: 2, minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', onramp: 'Direct', offramp: 'Direct'});
-  const withEur = build([DEMO, CKUSDC_DIRECT, VCHF, VEUR], true);
+  const withEur = build([DEMO, CKUSDC_DIRECT, VCHF, LEGACY_VEUR], true);
   const eurc = withEur.find(a => a.id === 'solana:EURC')!;
-  const veur = withEur.find(a => a.id === 'ic:9')!;
+  const legacyVeur = withEur.find(a => a.id === 'ic:9')!;
   const vchf = withEur.find(a => a.id === 'ic:7')!;
   const sol = withEur.find(a => a.id === 'solana:SOL')!;
   const usdc = withEur.find(a => a.id === 'solana:USDC')!;
   const ckusdc = withEur.find(a => a.id === 'ic:2')!;
 
   it('carries the catalog\'s liquidity tier verbatim, null when the row says nothing', () => {
-    expect(railLiquidity(veur)).toBe('thin');
+    expect(railLiquidity(legacyVeur)).toBe('thin');
     expect(railLiquidity(eurc)).toBe('deep');
     // VCHF, SOL and USDC rows carry no tier — that is null, never a default verdict.
     expect(railLiquidity(vchf)).toBeNull();
@@ -311,7 +321,7 @@ describe('rail health + ramp lines — catalog facts or silence', () => {
   });
 
   it('states thin in 2–3 words on the rail it sits on, and deep as a plain fact', () => {
-    expect(railLiquidityLine(veur)).toBe('Thin liquidity');
+    expect(railLiquidityLine(legacyVeur)).toBe('Thin liquidity');
     expect(railLiquidityLine(eurc)).toBe('Circulates widely on-chain today.');
     // Untiered rows make NO statement — no speculative copy for a tier the catalog cannot name.
     expect(railLiquidityLine(vchf)).toBeNull();
@@ -320,8 +330,9 @@ describe('rail health + ramp lines — catalog facts or silence', () => {
   });
 
   it('derives the ramp line from the capabilities, and stays silent otherwise', () => {
-    // VEUR: Unavailable onramp + Partner offramp naming DFX — the partner comes from the row.
-    expect(railRampLine(veur)).toBe('DFX — sell only today.');
+    // The legacy row: Unavailable onramp + Partner offramp naming DFX — the partner comes from
+    // the row, whatever row it is.
+    expect(railRampLine(legacyVeur)).toBe('DFX — sell only today.');
     // VCHF/EURC/SOL: Unavailable both ways ⇒ wallet-to-wallet, no ramp implied.
     expect(railRampLine(vchf)).toBe('No fiat ramp — wallet to wallet only.');
     expect(railRampLine(eurc)).toBe('No fiat ramp — wallet to wallet only.');
@@ -332,9 +343,9 @@ describe('rail health + ramp lines — catalog facts or silence', () => {
 
   it('renders NO ramp line for shapes the catalog does not carry today', () => {
     // A Partner offramp with no named partner has no honest line (the copy names the partner).
-    expect(railRampLine({...veur, rampPartner: null})).toBeNull();
+    expect(railRampLine({...legacyVeur, rampPartner: null})).toBeNull();
     // Direct mixed with a non-Direct direction has no derivable statement — no speculative key.
-    expect(railRampLine({...veur, onramp: 'Direct'})).toBeNull();
+    expect(railRampLine({...legacyVeur, onramp: 'Direct'})).toBeNull();
     expect(railRampLine({...ckusdc, offramp: 'Unavailable'})).toBeNull();
   });
 });

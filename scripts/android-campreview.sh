@@ -293,9 +293,10 @@ check_screen() {
   sleep 2
   # Prime: a wallet whose selected asset is ALREADY the target (DEMO is the IC default) would
   # no-op the target tap, and the label-change check below could never observe a transition.
-  # Select a DIFFERENT row first — VEUR is always in the catalog, DEMO is the fallback primer —
-  # so the target tap always has an observable before-label.
-  local primer="$([ "$rid" = asset-veur ] && echo asset-demo || echo asset-veur)"
+  # Select a DIFFERENT row first — the two targets (demo, sol) are always in the catalog and are
+  # each other's primer (VEUR, the old primer, retired from the catalog 2026-09-19) — so the
+  # target tap always has an observable before-label.
+  local primer="$([ "$rid" = asset-demo ] && echo asset-sol || echo asset-demo)"
   for _ in 1 2 3 4 5; do
     dump_ui || { sleep 1; continue; }
     grep -q "resource-id=\"$primer\"" "$ART/ui.xml" && break

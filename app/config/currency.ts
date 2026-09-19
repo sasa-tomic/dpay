@@ -2,17 +2,19 @@
 //
 // A currency is NOT an asset. It is a set of rails that all settle the same unit: CHF is VCHF on
 // the Internet Computer and (when it lands) VCHF on Solana; USD is ckUSDC on the IC and USDC on
-// Solana; EUR is EURC on Solana and VEUR on the IC. The user picks a currency; this module
+// Solana; EUR is EURC on Solana — the sole EUR rail since the 2026-09-19 VEUR retirement. The user
+// picks a currency; this module
 // resolves it to the concrete assets the CURRENT catalog can actually realise, in preference
 // order. Full direction + the boundary that keeps rail-selection out of swap territory:
 // docs/specs/2026-09-04-currency-first-wallet-plan.md.
 //
 // Two rules this module exists to enforce, both of them honesty rules:
 //
-//   1. A currency is only OFFERED if the catalog carries a rail for it. EUR is the live two-rail
-//      case: EURC on Solana and VEUR on the Internet Computer are both catalog rows, so EUR is
-//      offered — and a currency whose last row vanishes disappears from the chooser on its own,
-//      with no code change here. Shipping a currency the user can select and then cannot hold
+//   1. A currency is only OFFERED if the catalog carries a rail for it. EUR is the live case: it
+//      is offered exactly while an EURC row is catalogued — a currency whose last row vanishes
+//      disappears from the chooser on its own, with no code change here (VEUR's 2026-09-19
+//      retirement shrank EUR to its one remaining rail by editing only CURRENCY_RAILS below).
+//      Shipping a currency the user can select and then cannot hold
 //      would be exactly the dead end the founder's 2026-08-29 rule forbids.
 //   2. The currency is the LABEL; the token is the UNIT. A CHF balance is displayed as
 //      `12.40 VCHF`, never `CHF 12.40` — VCHF is a third party's franc-denominated token whose peg
@@ -47,15 +49,16 @@ export type HomeCurrency = (typeof HOME_CURRENCIES)[number];
 // catalog is the rail the wallet lands on. Order is a product decision, not an accident:
 //   USD prefers ckUSDC because the Internet Computer rail is the one whose offline tap is proven
 //   on physical hardware; the Solana USDC row is the same dollar on a second rail.
-//   EUR prefers EURC on Solana because that rail's liquidity is catalogued deep while VEUR's is
-//   thin — the stated preference, backed by a catalog field, never an adjective.
+//   EUR is EURC on Solana alone since the 2026-09-19 VEUR retirement: VEUR was the thin IC rail
+//   (VEUR rode second in this list as the fallback), and the deep-liquidity EURC rail — the
+//   stated preference, backed by a catalog field — is the one that remains.
 // Matching is by the asset's `linkToken` through `tokenEq` — the ONE definition of asset-token
 // identity in the app (app/config/assets.ts). A second definition here would be a second way to
 // resolve a currency to the wrong asset.
 const CURRENCY_RAILS: Record<HomeCurrency, readonly string[]> = {
   CHF: ['VCHF'],
   USD: ['ckUSDC', 'USDC'],
-  EUR: ['EURC', 'VEUR'],
+  EUR: ['EURC'],
 };
 
 /**

@@ -1,42 +1,42 @@
-// Flow 129 — the EUR dual-rail detail: the chooser's inline expansion (Stage 4+5 of the
-// founder-approved EUR dual-rail addition, docs/specs 2026-09-04-currency-first-wallet-plan.md).
+// Flow 129 — EUR is a SINGLE-rail currency: the chooser card behaves exactly like CHF's.
 //
-// EUR is the first currency whose two rails differ in more than chain: EURC@Solana is catalogued
-// DEEP, VEUR@IC is THIN and sellable only through DFX. This flow pins that the chooser states
-// those differences as FACTS, inside the card, on demand:
+// EUR used to be the dual-rail showcase (EURC@Solana deep + VEUR@IC thin, with the Stage 4+5
+// in-card detail panel). VNX wound VEUR down (2026-09-19 census: zero ICPSwap pools; the deepest
+// pool on any chain held $608 on Base and never traded), and the founder retired currency 9
+// outright (`4851c88`). The catalog now carries ONE EUR rail — EURC · Solana — so the card loses
+// the expansion with it. This flow pins the collapse:
 //
-//   * Tapping the EUR row EXPANDS a detail panel inside the card — both rails in preference
-//     order, the preferred one carrying its reason. A single-rail currency (CHF) NEVER expands:
-//     there is nothing to compare, and its confirm path stays exactly as it was.
-//   * Every line in the panel renders a catalog field: the fee in the rail's OWN unit (SOL+rent
-//     for EURC, e8s VEUR for VEUR), the liquidity tier (thin warns, deep states plainly), the
-//     ramp capability (DFX sell-only on VEUR, wallet-to-wallet on EURC). No adjectives a field
-//     cannot back.
-//   * Back collapses the panel WITHOUT unpicking the row; Continue still commits, and EUR lands
-//     the wallet on EURC@Solana — the stated preference, not the catalog's enumeration order.
+//   * The collapsed EUR row names EXACTLY its one catalogued rail, as ledger token · settlement
+//     chain, and nothing else: no fee, no health note, no ramp copy — and no VEUR line and no IC
+//     chain anywhere on the row (a rail the catalog retired must not survive as copy).
+//   * Tapping EUR picks it and opens NOTHING: no detail panel, no Back link — a single-rail
+//     currency has nothing to compare, the same rule CHF has always followed. The detail panel
+//     itself stays alive for the remaining multi-rail currency (USD) and is pinned in jest
+//     (HomeCurrencyChooser.test.tsx); e2e followed the currency the panel used to serve.
+//   * Continue still commits, and EUR lands the wallet on EURC@Solana — the only rail there is.
 import {
-  setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
+  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   openBalances,
  waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '129',
-  name: 'eur-rail-detail',
+  name: 'eur-single-rail',
   journey: 'onboard',
-  covers: ['home-currency', 'onboard', 'eur', 'eurc', 'veur', 'group-model', 'rail-detail', 'fees'],
-  verifies: 'Tapping the EUR row expands an in-card detail panel: both rails preferred-first (EURC reason on the pick only), fee facts in each rail\'s own units, thin-warn on VEUR vs deep on EURC, DFX sell-only ramp on VEUR; Back collapses without unpicking; CHF never expands; Continue lands the wallet on EURC@Solana.',
+  covers: ['home-currency', 'onboard', 'eur', 'eurc', 'group-model', 'single-rail', 'fees'],
+  verifies: 'EUR — single-rail since the 2026-09-19 VEUR retirement — is offered with exactly its one catalogued rail (EURC · Solana, ledger token · chain; no VEUR line, no IC chain, no detail copy), taps to a pick with NO in-card expansion (uniform with CHF: no detail panel, no Back), and Continue lands the wallet on EURC@Solana.',
   timeoutMs: 90000,
 };
 
 export async function run() {
   const start = Date.now();
-  console.log('[129-eur-rail-detail] setup…');
+  console.log('[129-eur-single-rail] setup…');
   const env = await setup({ lazyBoot: false, solStub: true });
   try {
     const {driver} = env;
 
     // --- 1. onboard by hand, and STOP at the currency question ---------------------------------
-    console.log('[129-eur-rail-detail] onboarding to the currency question…');
+    console.log('[129-eur-single-rail] onboarding to the currency question…');
     await skipWalkthroughIfPresent(driver);
     await driver.typeByPlaceholder('e.g. Alice', 'e2e-eur-detail', {timeoutMs: 8_000});
     await driver.click('btn-create', {timeoutMs: 4_000});
@@ -48,71 +48,34 @@ export async function run() {
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
 
     assert(await driver.isPresent('home-currency-EUR'),
-      'EUR must be offered — both its rails are catalog rows now');
-    // Collapsed, the row names its rails and NOTHING else: no fee, no health, no ramp copy.
+      'EUR must be offered — EURC@Solana is a catalog row (its one rail since VEUR retired)');
+    // Collapsed, the row names its ONE rail and NOTHING else: no fee, no health, no ramp copy —
+    // and no trace of the retired IC rail, not even as a chain name.
     const collapsed = await driver.readText('home-currency-EUR');
     assertIncludes(collapsed, 'EURC · Solana', 'the collapsed EUR row names the Solana rail');
-    assertIncludes(collapsed, 'VEUR · Internet Computer', 'the collapsed EUR row names the IC rail');
+    assert(!collapsed.includes('VEUR'),
+      `the retired VEUR rail must not survive anywhere on the row. Got: ${JSON.stringify(collapsed)}`);
+    assert(!collapsed.includes('Internet Computer'),
+      `an IC chain line would promise the rail the catalog retired. Got: ${JSON.stringify(collapsed)}`);
     for (const absent of ['Fee', 'Thin liquidity', 'Circulates', 'DFX', 'fiat ramp', 'sellable']) {
       assert(!collapsed.includes(absent),
-        `the collapsed row carries no detail copy ("${absent}") — detail is one tap away, not noise. Got: ${JSON.stringify(collapsed)}`);
+        `the collapsed row carries no detail copy ("${absent}") — and a single-rail row never expands to any. Got: ${JSON.stringify(collapsed)}`);
     }
-    console.log('[129-eur-rail-detail] ✓ EUR offered; collapsed row names both rails and nothing more');
+    console.log('[129-eur-single-rail] ✓ EUR offered; collapsed row names exactly its one rail and nothing more');
 
-    // --- 2. tap → the detail panel, both rails, preferred first ---------------------------------
+    // --- 2. tap → a pick, NEVER an expansion (uniform with CHF) ---------------------------------
     await driver.click('home-currency-EUR', {timeoutMs: 4_000});
-    await driver.findByTestID('home-currency-detail', {timeoutMs: 5_000});
-    assert(await driver.isPresent('rail-detail-sol-eurc'), 'the EURC rail block is present');
-    assert(await driver.isPresent('rail-detail-veur'), 'the VEUR rail block is present');
-    const panel = await driver.readText('home-currency-detail');
-    assert(panel.indexOf('EURC') < panel.indexOf('VEUR'),
-      `the preferred rail (EURC) must be first in the panel. Got: ${JSON.stringify(panel)}`);
-    const eurcBlock = await driver.readText('rail-detail-sol-eurc');
-    assertIncludes(eurcBlock, 'EURC · Solana', 'the pick names its rail');
-    // docs/specs/2026-09-07-ux-decisions.md
-    assert(!eurcBlock.includes('— dpay'),
-      `a pure preference adds no reason suffix. Got: ${JSON.stringify(eurcBlock)}`);
-    const veurBlock = await driver.readText('rail-detail-veur');
-    assert(!veurBlock.includes('— dpay'),
-      `the sibling states facts, no reason suffix. Got: ${JSON.stringify(veurBlock)}`);
-    assertIncludes(veurBlock, 'VEUR · Internet Computer', 'the sibling names its rail');
-    // Chain tags: the settlement chain as a pill, proper noun, uppercase.
-    assertIncludes(veurBlock, 'IC', 'the VEUR block tags the Internet Computer');
-    assertIncludes(await driver.readText('rail-detail-sol-eurc'), 'SOLANA', 'the EURC block tags Solana');
-    console.log('[129-eur-rail-detail] ✓ detail panel: both rails, preferred first, no preference suffix');
-
-    // --- 3. every panel line is a catalog field, in the rail's OWN units ------------------------
-    assertEq((await driver.readText('rail-detail-fee-sol-eurc')).trim(),
-      'Solana · Fee 0.000005 SOL + one-time account rent 0.00203928 SOL',
-      'the EURC fee fact: signature fee + the ATA rent (EURC states its one-time rent too), in SOL');
-    assertEq((await driver.readText('rail-detail-fee-veur')).trim(),
-      'Internet Computer · Fee 0.0001 VEUR',
-      'the VEUR fee fact: the catalog row\'s 10000-e8s transfer fee, in VEUR\'s own 8 decimals');
-    assertEq((await driver.readText('rail-detail-liquidity-sol-eurc')).trim(),
-      'Circulates widely on-chain today.',
-      'EURC\'s deep tier states plainly (no caution icon on a good fact)');
-    assertIncludes(await driver.readText('rail-detail-liquidity-veur'), 'Thin liquidity',
-      'VEUR\'s thin tier warns in 2 words (founder 2026-09-19) — the note sits ON the VEUR row, so it names no token');
-    assertIncludes(await driver.readText('rail-detail-ramp-veur'), 'DFX — sell only today.',
-      'VEUR\'s ramp fact: Partner offramp naming DFX, onramp Unavailable — sell-only, stated as such');
-    assertEq((await driver.readText('rail-detail-ramp-sol-eurc')).trim(),
-      'No fiat ramp — wallet to wallet only.',
-      'EURC\'s ramp fact: no ramp claimed where none exists');
-    await driver.screenshot('129-eur-detail-panel');
-    console.log('[129-eur-rail-detail] ✓ per-rail facts: fees in own units, liquidity tiers, ramp capabilities');
-
-    // --- 4. Back collapses without unpicking; CHF NEVER expands ---------------------------------
-    await driver.click('btn-home-currency-back', {timeoutMs: 4_000});
-    await driver.waitGone('home-currency-detail', {timeoutMs: 5_000});
-    assertIncludes(await driver.readText('home-currency-EUR'), 'EURC · Solana',
-      'the row stays picked after Back — collapsing is not unpicking');
-    await driver.click('home-currency-CHF', {timeoutMs: 4_000});
-    await driver.waitGone('home-currency-detail', {timeoutMs: 3_000});
+    assert(!(await driver.isPresent('home-currency-detail')),
+      'a single-rail currency (EUR, like CHF) must never open the in-card detail panel — there is nothing to compare');
     assert(!(await driver.isPresent('btn-home-currency-back')),
-      'a single-rail currency (CHF) must never expand — there is nothing to compare');
-    console.log('[129-eur-rail-detail] ✓ Back collapses, row stays picked; CHF never expands');
+      'no detail panel means no Back link either');
+    // The same rule still holds for the currency it always held for:
+    await driver.click('home-currency-CHF', {timeoutMs: 4_000});
+    assert(!(await driver.isPresent('home-currency-detail')),
+      'CHF must never expand either — single-rail IA is uniform');
+    console.log('[129-eur-single-rail] ✓ tap picks without expanding (EUR and CHF alike)');
 
-    // --- 5. Continue commits: EUR lands the wallet on EURC@Solana -------------------------------
+    // --- 3. Continue commits: EUR lands the wallet on EURC@Solana -------------------------------
     await driver.click('home-currency-EUR', {timeoutMs: 4_000});
     await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});
     await waitForWallet(driver, {timeoutMs: 10_000});
@@ -123,22 +86,21 @@ export async function run() {
     assertIncludes(label, 'uros', 'the header names the CURRENCY (euros), not the token');
     assert(!(await driver.isPresent('home-currency-detail')),
       'the detail panel is a chooser surface — it must not leak into the wallet');
-    // The home screen names the currency, not the token; the landed RAIL is proven in the Home
-    // accounts list,
-    // where the main badge sits on the EURC row (chooseRail's preference — the deep rail).
+    // The home screen names the currency, not the token; the landed rail is proven in the Home
+    // accounts list, where the MAIN badge sits on the EURC row — the only EUR rail there is.
     await openBalances(driver);
     assert(await driver.isPresent('asset-sol-eurc-main'),
-      'Continue commits EUR onto its preferred rail — EURC carries the MAIN badge');
-    assert(!(await driver.isPresent('asset-veur-main')),
-      'VEUR — the thin rail — is the named sibling, never the landing');
-    console.log(`[129-eur-rail-detail] ✓ continue commits → wallet on EURC@Solana (${JSON.stringify(label)})`);
+      'Continue commits EUR onto its one rail — EURC carries the MAIN badge');
+    assert(!(await driver.isPresent('asset-veur')),
+      'the retired VEUR rail renders NO row at all — not a sibling, not a landing');
+    console.log(`[129-eur-single-rail] ✓ continue commits → wallet on EURC@Solana (${JSON.stringify(label)})`);
 
-    console.log(`[129-eur-rail-detail] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
+    console.log(`[129-eur-single-rail] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
   } finally {
     await env.stop();
   }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run().catch(async (e) => { console.error(`\n[129-eur-rail-detail] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
+  run().catch(async (e) => { console.error(`\n[129-eur-single-rail] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
 }

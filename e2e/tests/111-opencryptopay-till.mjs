@@ -135,10 +135,14 @@ export async function run() {
     // per asset, so a menu of bare names would be a choice made blind. SOL is payable too but is
     // NOT here: taking it would unmount this rail's Pay screen mid-payment, so it stays a Balances
     // instruction. Solana USDC is absent for the measured reason (its URI names no token account),
-    // and VEUR because this wallet carries no row for it.
+    // and VEUR because this wallet carries no row for it — currency 9 was retired from the catalog
+    // (2026-09-19 VNX wind-down) while the live till still lists it, and a menu option must never
+    // promise an asset the wallet cannot pay.
     for (const id of ['ic:1', 'ic:7', 'ic:8']) {
       assert(await driver.isPresent(`ocp-option-${id}`), `the menu must offer ${id} — the till lists it and this wallet carries it`);
     }
+    assert(!(await driver.isPresent('ocp-option-ic:9')),
+      'the till still lists VEUR, but the wallet carries no row for it (retired 2026-09-19) — no menu option may offer it');
     assertIncludes(await driver.readText('ocp-option-ic:8'), '0.50805551 ICP', 'the option states its total debit (amount + catalog fee)');
     assert(!(await driver.isPresent('ocp-option-solana:SOL')), 'the menu must not offer an asset on the other rail');
     assert(!(await driver.isPresent('pay-amount')), 'the menu must never render a payment review');

@@ -1,13 +1,14 @@
 /**
- * HomeCurrencyChooser — the per-rail detail expansion (EUR dual-rail Stage 5).
+ * HomeCurrencyChooser — the per-rail detail expansion.
  *
  * What these tests pin, and why each is load-bearing:
- *   • Tapping a MULTI-rail row opens the detail panel INSIDE that card; a single-rail row (CHF)
- *     NEVER expands — its confirmation behaviour is byte-identical to pre-detail.
- *   • The panel renders one block per rail in `currencyRails` order (EURC — the deep-liquidity
- *     stated preference — before VEUR), each stating ONLY catalog-backed facts: rail line, chain
- *     tag, fee in the rail's own unit (`M.receive.rail` vocabulary — the same voice the Receive
- *     disclosure uses), liquidity (thin→warn, deep→pro), ramp capability.
+ *   • Tapping a MULTI-rail row opens the detail panel INSIDE that card; single-rail rows (CHF,
+ *     and EUR since the 2026-09-19 VEUR retirement) NEVER expand — their confirmation behaviour
+ *     is byte-identical to pre-detail.
+ *   • The panel renders one block per rail in `currencyRails` order (ckUSDC — the stated
+ *     preference — before the Solana USDC row), each stating ONLY catalog-backed facts: rail
+ *     line, chain tag, fee in the rail's own unit (`M.receive.rail` vocabulary — the same voice
+ *     the Receive disclosure uses), liquidity (thin→warn, deep→pro), ramp capability.
  *   • Preference still determines rail order, but is never rendered as a reason suffix
  *     (docs/specs/2026-09-07-ux-decisions.md).
  *   • The STRUCTURAL PIN: a COLLAPSED card carries only the currency name + its rail lines — no
@@ -18,8 +19,9 @@
  *   • `home-currency-<CCY>` + `btn-home-currency-continue` are mounted and byte-stable — the
  *     ~106-flow preamble rides them.
  *
- * Uses react-test-renderer with the BUNDLED catalog (VEUR thin + DFX sellable, EURC deep, both
- * fee-carrying) — the same inputs the offline cold-start chooser renders.
+ * Uses react-test-renderer with the BUNDLED catalog — the same inputs the offline cold-start
+ * chooser renders. USD is the live multi-rail case (ckUSDC + Solana USDC); EUR now lists exactly
+ * one rail (EURC) since VEUR was retired, and no bundled row carries a thin tier.
  */
 import {describe, test, expect, jest} from '@jest/globals';
 import React from 'react';
@@ -72,7 +74,7 @@ const rowText = (tree: renderer.ReactTestRenderer, testID: string): string =>
 const isPresent = (tree: renderer.ReactTestRenderer, testID: string): boolean =>
   tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
 
-describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
+describe('HomeCurrencyChooser — per-rail detail', () => {
   test('requires an explicit currency choice, and SAYS SO when Continue is pressed early (X5)', () => {
     // The measured dead end: Continue rendered at 40% opacity in the primary colour, looked
     // pressable, and swallowed the tap in total silence — no shake, no hint, nothing. The
@@ -94,22 +96,27 @@ describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
 
   test('a collapsed multi-rail card carries ONLY the name + rail lines (no fourth string)', () => {
     const tree = mountChooser();
-    // EUR is offered (both rails catalogued) and its collapsed card names both rail lines…
-    const eur = cardText(tree, 'home-currency-EUR');
-    expect(eur).toContain('EURC · Solana');
-    expect(eur).toContain('VEUR · Internet Computer');
+    // USD is offered (both rails catalogued) and its collapsed card names both rail lines…
+    const usd = cardText(tree, 'home-currency-USD');
+    expect(usd).toContain('ckUSDC · Internet Computer');
+    expect(usd).toContain('USDC · Solana');
     // …and NOTHING from the detail vocabulary: no fee, no liquidity statement, no ramp line, no
     // chain tag. The collapsed shape is the pre-detail shape, byte for byte.
-    for (const absent of ['Fee', 'Thin liquidity', 'Circulates', 'DFX', 'fiat ramp', 'SOLANA', 'IC']) {
-      expect(eur).not.toContain(absent);
+    for (const absent of ['Fee', 'Thin liquidity', 'Circulates', 'Deposit and cash-out', 'fiat ramp', 'SOLANA', 'IC']) {
+      expect(usd).not.toContain(absent);
     }
     expect(isPresent(tree, 'home-currency-detail')).toBe(false);
+    // EUR is offered through its ONE rail (EURC — sole EUR rail since the VEUR retirement); the
+    // served-legacy VEUR row is not a rail, so no VEUR line can leak into the collapsed card.
+    const eur = cardText(tree, 'home-currency-EUR');
+    expect(eur).toContain('EURC · Solana');
+    expect(eur).not.toContain('VEUR');
     act(() => { tree.unmount(); });
   });
 
-  test('tapping the EUR row opens the detail INSIDE the card; CHF never expands', () => {
+  test('tapping a multi-rail row opens the detail INSIDE the card; single-rail rows never expand', () => {
     const tree = mountChooser();
-    press(tree, 'home-currency-EUR');
+    press(tree, 'home-currency-USD');
     expect(isPresent(tree, 'home-currency-detail')).toBe(true);
     // Back collapses it again (covered below); collapse first, then prove the single-rail rule.
     press(tree, 'btn-home-currency-back');
@@ -118,65 +125,71 @@ describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
     press(tree, 'home-currency-CHF');
     expect(isPresent(tree, 'home-currency-detail')).toBe(false);
     expect(isPresent(tree, 'btn-home-currency-back')).toBe(false);
+    // EUR joined the single-rail set when VEUR retired (2026-09-19): one rail, no expansion.
+    press(tree, 'home-currency-EUR');
+    expect(isPresent(tree, 'home-currency-detail')).toBe(false);
+    expect(isPresent(tree, 'btn-home-currency-back')).toBe(false);
     act(() => { tree.unmount(); });
   });
 
-  test('both rail blocks render, EURC first, each with its chain tag', () => {
+  test('both rail blocks render, ckUSDC first, each with its chain tag', () => {
     const tree = mountChooser();
-    press(tree, 'home-currency-EUR');
-    const blocks = tree.root.findAll(node => node.props && node.props.testID === 'rail-detail-sol-eurc');
+    press(tree, 'home-currency-USD');
+    const blocks = tree.root.findAll(node => node.props && node.props.testID === 'rail-detail-ckusdc');
     expect(blocks.length).toBeGreaterThan(0);
-    expect(isPresent(tree, 'rail-detail-veur')).toBe(true);
-    // Preferred-first order: the EURC block precedes the VEUR block in the panel's children.
+    expect(isPresent(tree, 'rail-detail-sol-usdc')).toBe(true);
+    // Preferred-first order: the ckUSDC block precedes the Solana block in the panel's children.
     const panel = tree.root.findAll(node => node.props && node.props.testID === 'home-currency-detail')[0]!;
     const order = [...new Set(panel
-      .findAll(node => node.props && /^rail-detail-(sol-eurc|veur)$/.test(node.props.testID))
+      .findAll(node => node.props && /^rail-detail-(ckusdc|sol-usdc)$/.test(node.props.testID))
       .map(node => node.props.testID as string))];
     // Each testID matches its RN composite + host node pair; deduped, the order is exactly the
-    // preference order — EURC before VEUR.
-    expect(order).toEqual(['rail-detail-sol-eurc', 'rail-detail-veur']);
-    expect(rowText(tree, 'rail-detail-sol-eurc')).toContain('SOLANA');
-    expect(rowText(tree, 'rail-detail-veur')).toContain('IC');
+    // preference order — ckUSDC before Solana USDC.
+    expect(order).toEqual(['rail-detail-ckusdc', 'rail-detail-sol-usdc']);
+    expect(rowText(tree, 'rail-detail-ckusdc')).toContain('IC');
+    expect(rowText(tree, 'rail-detail-sol-usdc')).toContain('SOLANA');
     act(() => { tree.unmount(); });
   });
 
   test('each block states its OWN facts: fee in own unit, liquidity, ramp', () => {
     const tree = mountChooser();
-    press(tree, 'home-currency-EUR');
+    press(tree, 'home-currency-USD');
     // Fee facts — the M.receive.rail vocabulary, each rail in its own unit:
-    expect(rowText(tree, 'rail-detail-fee-sol-eurc')).toBe(
+    expect(rowText(tree, 'rail-detail-fee-ckusdc')).toBe('Internet Computer · Fee 0.01 ckUSDC');
+    expect(rowText(tree, 'rail-detail-fee-sol-usdc')).toBe(
       'Solana · Fee 0.000005 SOL + one-time account rent 0.00203928 SOL',
     );
-    expect(rowText(tree, 'rail-detail-fee-veur')).toBe('Internet Computer · Fee 0.0001 VEUR');
-    // Liquidity: deep on EURC (pro line), thin on VEUR (warn statement, 2–3 words, no token).
-    expect(rowText(tree, 'rail-detail-liquidity-sol-eurc')).toBe('Circulates widely on-chain today.');
-    expect(rowText(tree, 'rail-detail-liquidity-veur')).toBe('Thin liquidity');
-    // Ramp: VEUR is DFX-sellable; EURC has no fiat ramp today.
-    expect(rowText(tree, 'rail-detail-ramp-veur')).toBe('DFX — sell only today.');
-    expect(rowText(tree, 'rail-detail-ramp-sol-eurc')).toBe('No fiat ramp — wallet to wallet only.');
+    // Liquidity: NO bundled USD rail is tiered, so NEITHER block makes a liquidity statement —
+    // after the VEUR retirement the thin branch has no bundled row to fire on (its generic
+    // machinery stays covered by RailLiquidityNote's served-legacy suite).
+    expect(isPresent(tree, 'rail-detail-liquidity-ckusdc')).toBe(false);
+    expect(isPresent(tree, 'rail-detail-liquidity-sol-usdc')).toBe(false);
+    // Ramp: ckUSDC is wired both ways; Solana USDC has no fiat ramp today.
+    expect(rowText(tree, 'rail-detail-ramp-ckusdc')).toBe('Deposit and cash-out are wired in.');
+    expect(rowText(tree, 'rail-detail-ramp-sol-usdc')).toBe('No fiat ramp — wallet to wallet only.');
     act(() => { tree.unmount(); });
   });
 
   test('the preferred rail stays first without a default-rail suffix', () => {
     const tree = mountChooser();
-    press(tree, 'home-currency-EUR');
-    expect(rowText(tree, 'rail-detail-sol-eurc')).toContain('EURC · Solana');
-    expect(rowText(tree, 'rail-detail-sol-eurc')).not.toContain('default rail');
-    expect(rowText(tree, 'rail-detail-veur')).not.toContain('default rail');
+    press(tree, 'home-currency-USD');
+    expect(rowText(tree, 'rail-detail-ckusdc')).toContain('ckUSDC · Internet Computer');
+    expect(rowText(tree, 'rail-detail-ckusdc')).not.toContain('default rail');
+    expect(rowText(tree, 'rail-detail-sol-usdc')).not.toContain('default rail');
     act(() => { tree.unmount(); });
   });
 
   test('Back collapses without unpicking; Continue still commits the picked currency', () => {
     const onChoose = jest.fn();
     const tree = mountChooser(onChoose);
-    press(tree, 'home-currency-EUR');
+    press(tree, 'home-currency-USD');
     press(tree, 'btn-home-currency-back');
     expect(isPresent(tree, 'home-currency-detail')).toBe(false);
     // The row stays picked and the preferred line remains first without implementation jargon.
-    expect(cardText(tree, 'home-currency-EUR')).toContain('EURC · Solana');
-    expect(cardText(tree, 'home-currency-EUR')).not.toContain('default rail');
+    expect(cardText(tree, 'home-currency-USD')).toContain('ckUSDC · Internet Computer');
+    expect(cardText(tree, 'home-currency-USD')).not.toContain('default rail');
     press(tree, 'btn-home-currency-continue');
-    expect(onChoose).toHaveBeenCalledWith('EUR');
+    expect(onChoose).toHaveBeenCalledWith('USD');
     act(() => { tree.unmount(); });
   });
 });

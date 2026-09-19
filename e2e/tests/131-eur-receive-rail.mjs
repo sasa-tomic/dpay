@@ -1,27 +1,27 @@
-// Flow 131 — Receive on the EUR dual-rail: both addresses, both fee facts, and the thin note
-// exactly where it belongs (Stage 5 of the EUR dual-rail addition).
+// Flow 131 — Receive on home=EUR: ONE address surface, exactly like any single-rail currency
+// (the 2026-09-19 VEUR retirement collapsed the former dual-rail disclosure).
 //
-// EUR's default rail is EURC@Solana (deep liquidity — the stated preference), so Receive ▸
-// "My address" opens on the SOLANA side: the wallet's EURC ATA, the SOL signature fee + one-time
-// ATA rent in SOL, and NO health line (warn tone renders nothing on a deep rail). One toggle
-// right flips to VEUR@IC WITHOUT leaving the sub-mode: the wallet's own ICRC-1 principal, the
-// 10000-e8s fee in VEUR, and the thin-liability note — receiving on VEUR is the action the note
-// qualifies, so the note rides the disclosure itself, above the toggle.
+// EUR used to default Receive ▸ "My address" to EURC@Solana and offer the VEUR@IC principal one
+// toggle away, with the thin-liability note riding the disclosure. With VEUR retired, EUR has ONE
+// rail, so the whole rail machinery renders NOTHING: `RailDisclosure` nulls outside a two-rail
+// group (the same rule CHF has always followed — flow 122's control), leaving Receive ▸ "My
+// address" as the plain EURC ATA surface. This flow pins:
 //
-// Ownership assertions mirror flow 122: the IC address must equal railPrincipalText of the
-// account's public hex; the EURC ATA is base58-shaped and stable across a flip-away-and-back
-// (the harness has no independent ATA derivation — stability under one identity is the bound).
+//   * The surface IS the EURC ATA: base58-shaped, derived from the onboarding seed.
+//   * NO rail disclosure survives the retirement: no pick-and-why line, no fee line, no
+//     two-sided toggle, and no thin-liability note anywhere (VEUR was the only thin rail).
+//   * The ATA is stable across leaving and re-opening the sub-mode (the harness has no
+//     independent ATA derivation — stability under one identity is the bound).
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency,
-  accountOf, railPrincipalText,
  waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '131',
-  name: 'eur-receive-rail',
+  name: 'eur-receive-single-rail',
   journey: 'deposit',
-  covers: ['home-currency', 'receive', 'rails', 'eur', 'eurc', 'veur', 'rail-health', 'fees'],
-  verifies: 'Receive ▸ My address on home=EUR defaults to EURC@Solana (own ATA + SOL fees, no health line on the deep rail) and toggles to VEUR@IC (own principal + e8s VEUR fee + the thin-liability note on the disclosure) without leaving the sub-mode; both addresses stable across flips.',
+  covers: ['home-currency', 'receive', 'rails', 'eur', 'eurc', 'rail-health', 'fees'],
+  verifies: 'Receive ▸ My address on home=EUR — single-rail since the 2026-09-19 VEUR retirement — lands directly on the EURC ATA (base58, seed-derived) with NO rail disclosure at all: no why/fee lines, no two-sided toggle, no thin-liability note (uniform with CHF), and the ATA is stable across a leave-and-return.',
   timeoutMs: 90000,
 };
 
@@ -30,12 +30,12 @@ const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export async function run() {
   const start = Date.now();
-  console.log('[131-eur-receive-rail] setup (relay + web + browser, solStub)…');
+  console.log('[131-eur-receive-single-rail] setup (relay + web + browser, solStub)…');
   const env = await setup({solStub: true});
   try {
     const {driver} = env;
 
-    console.log('[131-eur-receive-rail] onboarding, pinning home=EUR…');
+    console.log('[131-eur-receive-single-rail] onboarding, pinning home=EUR…');
     await onboardWallet(driver, 'e2e-eur-receive');
     await driver.click('btn-settings', {timeoutMs: 5_000});
     await driver.click('btn-currency-EUR', {timeoutMs: 5_000});
@@ -43,8 +43,6 @@ export async function run() {
     await waitForWallet(driver, {timeoutMs: 8_000});
     await openBalances(driver);
     await selectCurrency(driver, 'sol-eurc');
-    const account = await accountOf(driver);
-    const wantPrincipal = await railPrincipalText(account.publicHex);
 
     // The Solana RPC simulator (same seam as every SOL flow): the EURC ATA EXISTS with a zero
     // balance, so the address surface is READY rather than the setup gate.
@@ -59,58 +57,41 @@ export async function run() {
       };
     });
 
-    // 1. The default rail is EURC@Solana: own ATA, SOL fee + rent, and NO health line (deep).
-    console.log('[131-eur-receive-rail] opening Receive ▸ My address on the default rail (EURC)…');
+    // 1. The surface IS the EURC ATA — and NO rail machinery renders for a one-rail currency.
+    console.log('[131-eur-receive-single-rail] opening Receive ▸ My address on EURC…');
     await driver.click('tab-receive');
     await driver.click('btn-receive-address');
-    const why1 = await driver.readText('receive-rail-why');
-    assertIncludes(why1, 'EURC · Solana', 'the default rail is the stated preference (EURC), named');
-    // docs/specs/2026-09-07-ux-decisions.md
-    assert(!why1.includes('—'), `a pure preference adds no reason suffix, got "${why1}"`);
-    assertEq((await driver.readText('receive-rail-fee')).trim(),
-      'Solana · Fee 0.000005 SOL + one-time account rent 0.00203928 SOL',
-      'the EURC fee fact: signature fee + the one-time ATA rent, in SOL — never converted');
-    const disclosure1 = await driver.readText('receive-rail-disclosure');
-    assert(!disclosure1.includes('Thin liquidity'),
-      `the DEEP rail carries no thin note — warn tone renders nothing on EURC. Got: ${JSON.stringify(disclosure1)}`);
-    const eurcAddr1 = (await driver.readText('sol-receive-address')).trim();
-    assert(BASE58.test(eurcAddr1), `the EURC rail address is a valid base58 ATA, got "${eurcAddr1}"`);
-    const toggleTxt = await driver.readText('receive-rail-toggle');
-    assertIncludes(toggleTxt, 'Solana', 'the rail toggle offers the Solana side');
-    assertIncludes(toggleTxt, 'Internet Computer', 'the rail toggle offers the IC side');
+    const eurcAddr1 = (await driver.readText('sol-receive-address', {timeoutMs: 10_000})).trim();
+    assert(BASE58.test(eurcAddr1), `the EURC address is a valid base58 ATA, got "${eurcAddr1}"`);
+    assert(!(await driver.isPresent('receive-rail-disclosure')),
+      'a single-rail currency renders NO rail disclosure — the component nulls outside a two-rail group (uniform with CHF, flow 122)');
+    assert(!(await driver.isPresent('receive-rail-why')) && !(await driver.isPresent('receive-rail-fee')),
+      'no pick-and-why line and no fee line survive the retirement — the disclosure they lived on is gone');
+    assert(!(await driver.isPresent('receive-rail-toggle'))
+      && !(await driver.isPresent('btn-receive-rail-right')) && !(await driver.isPresent('btn-receive-rail-left')),
+      'no rail toggle may remain — there is no sibling rail to flip to (VEUR retired 2026-09-19)');
+    const body = await driver.bodyText();
+    assert(!body.includes('Thin liquidity'),
+      `the thin-liability note renders NOWHERE on the surface — VEUR was the only thin rail. Got: ${JSON.stringify(body.slice(0, 400))}`);
+    assert(!body.includes('VEUR'),
+      `the retired rail must not survive as copy anywhere on the receive surface. Got: ${JSON.stringify(body.slice(0, 400))}`);
     await driver.screenshot('131-eur-receive-eurc');
-    console.log('[131-eur-receive-rail] ✓ default rail disclosed (EURC, no preference suffix, own ATA + fees)');
+    console.log('[131-eur-receive-single-rail] ✓ EURC ATA surface with no rail disclosure, toggle, or thin note');
 
-    // 2. One toggle right: VEUR@IC — own principal, e8s fee, and the thin note ON the disclosure.
-    console.log('[131-eur-receive-rail] flipping to the sibling rail (VEUR)…');
-    await driver.click('btn-receive-rail-right');
-    await driver.findByTestID('deposit-address', {timeoutMs: 10_000});
-    const why2 = await driver.readText('receive-rail-why');
-    assertIncludes(why2, 'VEUR · Internet Computer', 'the sibling rail is named by its own line');
-    assert(!why2.includes('—'), `the sibling carries no reason suffix (only the pick does), got "${why2}"`);
-    assertEq((await driver.readText('receive-rail-fee')).trim(),
-      'Internet Computer · Fee 0.0001 VEUR',
-      'the VEUR fee fact: the catalog row\'s 10000-e8s fee, in VEUR\'s own 8 decimals');
-    const disclosure2 = await driver.readText('receive-rail-disclosure');
-    assertIncludes(disclosure2, 'Thin liquidity',
-      'the thin note rides the disclosure itself — 2 words, per the founder (2026-09-19)');
-    const veurAddr = (await driver.readText('deposit-address')).trim();
-    assertEq(veurAddr, wantPrincipal, 'the VEUR rail address is the wallet\'s own ICRC-1 principal');
-    await driver.screenshot('131-eur-receive-veur');
-    console.log('[131-eur-receive-rail] ✓ sibling rail disclosed (VEUR, own principal, e8s fee, thin note)');
-
-    // 3. Toggle back: still in the sub-mode, and the ATA is the SAME derivation (same identity).
-    await driver.click('btn-receive-rail-left');
+    // 2. Leave and re-open: the SAME derivation (same identity, single rail).
+    await driver.click('tab-pay', {timeoutMs: 5_000});
+    await driver.click('tab-receive', {timeoutMs: 5_000});
+    await driver.click('btn-receive-address', {timeoutMs: 5_000});
     const eurcAddr2 = (await driver.readText('sol-receive-address', {timeoutMs: 10_000})).trim();
-    assertEq(eurcAddr2, eurcAddr1, 'the EURC ATA is stable across a rail flip (same wallet)');
-    console.log('[131-eur-receive-rail] ✓ rail flip is reversible and the ATA is stable');
+    assertEq(eurcAddr2, eurcAddr1, 'the EURC ATA is stable across a leave-and-return (same wallet)');
+    console.log('[131-eur-receive-single-rail] ✓ re-open lands on the same ATA');
 
-    console.log(`[131-eur-receive-rail] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
+    console.log(`[131-eur-receive-single-rail] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {
     await env.stop();
   }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run().catch(async (e) => { console.error(`\n[131-eur-receive-rail] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
+  run().catch(async (e) => { console.error(`\n[131-eur-receive-single-rail] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
 }

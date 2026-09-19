@@ -105,7 +105,8 @@ export type OcpRefusal =
    *  USDC sends (`app/solana/spl.ts`), so the leg is buildable — it is simply not built here, and
    *  paying a token URI as if it were native SOL is what refusing it prevents. */
   | 'solana-usdc-unsupported'
-  /** The provider accepts this asset; this wallet does not carry it (VEUR, USDT). */
+  /** The provider accepts this asset; this wallet does not carry it (USDT — or an asset the
+   *  catalog has retired, e.g. the 2026-09-19 VEUR withdrawal). */
   | 'asset-not-in-wallet'
   /** Two wallet assets answer to the same token on the same chain — which one the provider meant is
    *  unknowable, so neither is paid. Mirrors `resolvePayLink`'s `ambiguous_asset`. */

@@ -778,12 +778,13 @@ describe('resolveOcpScan', () => {
     expect(out.kind).toBe('choose');
     if (out.kind !== 'choose') return;
     expect(out.host).toBe('api.dfx.swiss');
-    // Every IC asset the till lists and this wallet carries — since the EUR Stage-1 row (2026-09-06)
-    // that includes VEUR, listed FIRST because the menu follows the till's own order.
-    expect(out.options.map(o => o.assetId)).toEqual(['ic:9', 'ic:1', 'ic:7', 'ic:8']);
+    // Every IC asset the till lists and this wallet carries — since the 2026-09-19 VEUR retirement
+    // that no longer includes VEUR (the till's legacy line is skipped, not paid), and the menu
+    // follows the till's own order for the rest.
+    expect(out.options.map(o => o.assetId)).toEqual(['ic:1', 'ic:7', 'ic:8']);
     // The amount is IN ITS OWN UNITS — the price differs per asset, so a menu of bare names would
     // be a choice made blind.
-    expect(out.options.map(o => o.rawAmount)).toEqual(['107480111', '1596', '100000000', '50885919']);
+    expect(out.options.map(o => o.rawAmount)).toEqual(['1596', '100000000', '50885919']);
     // Offering a menu must cost NOTHING: one read, and no destination requested for an asset the
     // payer has not chosen. A quote spent on an unchosen asset is a quote the real payment lacks.
     expect(mock.mock.calls.length).toBe(1);
@@ -907,11 +908,12 @@ describe('resolveOcpScan', () => {
     installRoutes([{match: '/lnurlp/pl_', status: 200, body: solDown}]);
     const out = await resolveOcpScan(SCAN, ctx('ic:2'));
     // The till never named ckUSDC, so the answer is its menu — and the down Solana method is simply
-    // absent from it rather than blamed for an asset it never offered. VEUR (ic:9) rides along with
-    // the Stage-1 catalog row, in the till's listing order.
+    // absent from it rather than blamed for an asset it never offered. VEUR is NOT on the menu
+    // since the 2026-09-19 retirement (the wallet no longer carries ic:9); the rest keep the till's
+    // listing order.
     expect(out.kind).toBe('choose');
     if (out.kind !== 'choose') return;
-    expect(out.options.map(o => o.assetId)).toEqual(['ic:9', 'ic:1', 'ic:7', 'ic:8']);
+    expect(out.options.map(o => o.assetId)).toEqual(['ic:1', 'ic:7', 'ic:8']);
   });
 
   test('Solana USDC is refused BY NAME rather than buried under a menu', async () => {

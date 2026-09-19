@@ -155,7 +155,7 @@ export async function run() {
       assert(!/scrapes/.test(body), 'the watching state must not use the "scrapes" jargon (M9)');
       // H1: the inline body names the ASSET (USDC) in the instructions card, not the network title.
       assertIncludes(body, 'USDC', 'CkErc20DepositSheet body should name the asset (USDC) (H1)');
-      assertIncludes(body, 'ETH for Ethereum network gas', 'the sheet must warn about Ethereum gas fees (M8)');
+      assertIncludes(body, 'ETH for network gas fees', 'the sheet must warn about Ethereum gas fees (M8)');
       console.log('[16-ckusdc-onramp] ✓ happy path: USDC named + gas note + watching (no "scrapes")');
     }
 

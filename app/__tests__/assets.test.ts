@@ -441,16 +441,53 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
   it('derives stable ids ic:7/ic:8 with testKeys vchf/icp — MAINNET-visible under showTestnet=false', () => {
     // No production special case: the builder maps the two no-minter rows like any IC descriptor.
     // They are stamped testnet:false by the owning icp MAINNET section, so the default wallet view
-    // (showTestnet=false) shows them in catalog order after ckETH (ic:6). VEUR (ic:9) joined the
-    // same enumeration with the EUR Stage-1 row (2026-09-06) — the chooser withholding is done by
-    // the home-currency rail map, not by this list builder.
+    // (showTestnet=false) shows them in catalog order after ckETH (ic:6). VEUR (ic:9) is RETIRED
+    // (2026-09-19) and no longer enumerates — the id is never reused.
     const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
-    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'ic:6', 'ic:7', 'ic:8', 'ic:9']);
+    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'ic:6', 'ic:7', 'ic:8']);
     expect(assets.find(a => a.id === 'ic:7')!.testKey).toBe('vchf');
     expect(assets.find(a => a.id === 'ic:8')!.testKey).toBe('icp');
-    expect(assets.find(a => a.id === 'ic:9')!.testKey).toBe('veur');
     expect(assets.find(a => a.id === 'ic:7')!.visible).toBe(true);
     expect(assets.find(a => a.id === 'ic:8')!.visible).toBe(true);
+  });
+
+  it('a persisted VEUR selection reconciles to EURC — the retired rail never strands the wallet', () => {
+    // Tolerance pin (2026-09-19): a user whose persisted preferred rail was ic:9 must fall back
+    // cleanly now that the rail is uncatalogued — no crash, and the EUR group's remaining rail
+    // (solana:EURC) wins once the solana rows are on.
+    const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
+    expect(reconcileSelectedAsset('ic:9', assets, 'solana:EURC')).toBe('solana:EURC');
+    // With no preferred id either, the fallback walks the visible list (DEMO first) — still no
+    // crash, never a resuscitated ic:9.
+    expect(reconcileSelectedAsset('ic:9', assets, null)).toBe('ic:0');
+  });
+
+  it('a legacy SERVED catalog still carrying the retired VEUR row renders it as a normal row', () => {
+    // TOLERANCE RULE (2026-09-19): prod serves the old catalog until the founder redeploys. The
+    // retired row (thin + Partner/DFX) must parse, enumerate, and stay visible — no crash, no
+    // dropped row; the home-currency rail map alone keeps it out of the EUR group.
+    const legacy: CurrencyDescriptor = {
+      ...BUNDLED[0],
+      currency: 9, ledger: 'wu6g4-6qaaa-aaaan-qmrza-cai', mintable: false, minter: null, minter_family: null,
+      symbol: 'VEUR', decimals: 8, wrapper_name: 'VEUR', backing_symbol: 'VEUR', network: 'Internet Computer',
+      display_decimals: 8, min_fraction_digits: 2, fee: '10000', cap: '1000000000000',
+      chain_id: null, token_contract: null, gas_ledger: null,
+      onramp: 'Unavailable', offramp: 'Partner', liquidity: 'thin', ramp_partner: 'DFX', testnet: false,
+    };
+    const wire = {
+      networks: [
+        {protocol: 'icp', name: 'Internet Computer', environment: 'mainnet', assets: [...BUNDLED.map(c => ({...c})), legacy]},
+        {protocol: 'icp', name: 'Internet Computer', environment: 'testnet', assets: []},
+        {protocol: 'solana', name: 'Solana', environment: 'mainnet', assets: []},
+      ],
+    };
+    const parsed = parseNetworkCatalog(wire)!;
+    const assets = buildSelectableAssets(icpCatalogOf(parsed), {showTestnet: false, solanaEnabled: true, solanaTokens: true});
+    const veur = assets.find(a => a.id === 'ic:9')!;
+    expect(veur.testKey).toBe('veur');
+    expect(veur.visible).toBe(true);
+    expect(veur.liquidity).toBe('thin');
+    expect(veur.rampPartner).toBe('DFX');
   });
 
   it('network labels distinguish the IC rows honestly ("Internet Computer", never Bitcoin/Ethereum)', () => {
@@ -482,7 +519,7 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
       ],
     };
     const parsed = parseNetworkCatalog(wire)!;
-    expect(icpCatalogOf(parsed).map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8, 9]);
+    expect(icpCatalogOf(parsed).map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8]);
     const before = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
     const after = buildSelectableAssets(icpCatalogOf(parsed), {showTestnet: false, solanaEnabled: false});
     expect(ids(after)).toEqual(ids(before));

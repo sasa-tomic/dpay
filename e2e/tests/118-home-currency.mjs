@@ -6,8 +6,8 @@
 //
 //   * The chooser stands in FRONT of the wallet on a first run, for any wallet with no stored
 //     currency — it is not an onboarding-only screen.
-//   * It offers exactly the currencies the catalog can realise: CHF, USD and — since the EUR
-//     dual-rail landed (EURC@Solana + VEUR@IC, both catalog rows) — EUR, with each row naming
+//   * It offers exactly the currencies the catalog can realise: CHF, USD and EUR (single-rail
+//     since the 2026-09-19 VEUR retirement: EURC@Solana alone), with each row naming
 //     exactly its catalogued rails, each as ledger token · settlement chain. The honesty gate
 //     is now shape, not absence: a row may not name a rail the catalog does not carry (founder
 //     rule 2026-08-29).
@@ -31,16 +31,16 @@ export const meta = {
   id: '118',
   name: 'home-currency',
   journey: 'onboard',
-  covers: ['home-currency', 'onboard', 'vchf', 'ckusdc', 'settings', 'asset-selector', 'persistence'],
-  verifies: 'The first run asks which currency the user thinks in, offers only currencies the catalog can realise (CHF/USD/EUR) with each row naming exactly its catalogued rails as token · chain, names the ledger token on its settlement chain, lands the wallet on that currency, follows a Settings change, and remembers the asset across a reload.',
+  covers: ['home-currency', 'onboard', 'vchf', 'ckusdc', 'eur', 'eurc', 'settings', 'asset-selector', 'persistence'],
+  verifies: 'The first run asks which currency the user thinks in, offers only currencies the catalog can realise (CHF/USD/EUR — EUR single-rail, EURC · Solana, since the 2026-09-19 VEUR retirement) with each row naming exactly its catalogued rails as token · chain, names the ledger token on its settlement chain, lands the wallet on that currency, follows a Settings change, and remembers the asset across a reload.',
   timeoutMs: 90000,
 };
 
 export async function run() {
   const start = Date.now();
   console.log('[118-home-currency] setup…');
-  // solStub: the EUR row's second rail (EURC@Solana) must be enumerable offline — the stub is the
-  // harness's stand-in for the solana RPC the app's coherence check reads.
+    // solStub: the EUR row's rail (EURC@Solana) must be enumerable offline — the stub is the
+    // harness's stand-in for the solana RPC the app's coherence check reads.
   const env = await setup({ lazyBoot: false, solStub: true });
   try {
     const {driver, webBaseURL, relayBaseURL} = env;
@@ -66,14 +66,15 @@ export async function run() {
     assert(await driver.isPresent('home-currency-CHF'), 'CHF must be offered (VCHF is a catalog row)');
     assert(await driver.isPresent('home-currency-USD'), 'USD must be offered (ckUSDC is a catalog row)');
     assert(await driver.isPresent('home-currency-EUR'),
-      'EUR must be offered — both its rails (EURC@Solana, VEUR@IC) are catalog rows');
-    // ...and the EUR row names EXACTLY its two catalogued rails — the honesty gate inverted from
-    // absence to shape: a third rail would promise one the catalog does not carry.
+      'EUR must be offered — EURC@Solana is a catalog row (its one rail since VEUR retired)');
+    // ...and the EUR row names EXACTLY its one catalogued rail — the honesty gate is shape: a
+    // second line would promise the rail the 2026-09-19 VEUR retirement removed.
     const eurRow = await driver.readText('home-currency-EUR');
-    assertIncludes(eurRow, 'EURC · Solana', 'the EUR row names its Solana rail');
-    assertIncludes(eurRow, 'VEUR · Internet Computer', 'the EUR row names its IC rail');
+    assertIncludes(eurRow, 'EURC · Solana', 'the EUR row names its one rail, the Solana one');
+    assert(!eurRow.includes('VEUR'),
+      `the retired VEUR rail must not survive anywhere on the row. Got: ${JSON.stringify(eurRow)}`);
     assert(!/(^|[^A-Za-z])EUR ·/.test(eurRow),
-      `no phantom "EUR" token rail — the row carries exactly its two catalogued rails. Got: ${JSON.stringify(eurRow)}`);
+      `no phantom "EUR" token rail — the row carries exactly its one catalogued rail. Got: ${JSON.stringify(eurRow)}`);
     console.log('[118-home-currency] ✓ CHF + USD + EUR offered, EUR with exactly its catalogued rails');
 
     // Each row names the LEDGER TOKEN on the SETTLEMENT chain.

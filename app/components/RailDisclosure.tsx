@@ -57,7 +57,7 @@ export function RailDisclosure({currency, assets, balances, catalog, selectedAss
       <Text testID="receive-rail-why" style={[S.assetSub, disclosureLine]}>{why}</Text>
       <Text testID="receive-rail-fee" style={[S.assetSub, disclosureLine]}>{fee}</Text>
       {/* Third line: the SHOWN rail's liquidity statement — warn tone, so it renders exactly on
-          the thin side (VEUR) and says nothing on the deep side (a caution icon on "circulates
+          a thin rail and says nothing on the deep side (a caution icon on "circulates
           widely" would contradict itself). Same component as Balances/chooser detail → one voice. */}
       <RailLiquidityNote asset={shown} tone="warn" />
       <ModeToggle

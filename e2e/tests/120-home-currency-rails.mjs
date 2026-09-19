@@ -11,10 +11,10 @@
 //     must never read as one balance; naming both is how they stay distinct).
 //   * CHF is a ONE-rail currency (VCHF on the Internet Computer) — its row must not carry a
 //     Solana line that would promise a rail the catalog does not have.
-//   * EUR is a TWO-rail currency too (EURC on Solana, VEUR on the Internet Computer — the
-//     dual-rail addition), and its preferred rail is the DEEP-liquidity one: EURC first, then
-//     VEUR. Preference is a catalog-backed statement, not an
-//     accident of enumeration.
+//   * EUR is a ONE-rail currency too, since the 2026-09-19 VEUR retirement (currency 9,
+//     `4851c88`): EURC on Solana alone. Its row must not carry an IC line — a second line would
+//     promise the VEUR rail the catalog retired (the dual-rail "EURC first, then VEUR" preference
+//     is gone with the rail it preferred against).
 //   * The preferred rail is FIRST, without exposing the internal “dpay default rail” policy label.
 //   * Settings shows the same group shape for the main currency, so "Main currency: USD" there
 //     never reads as one token either.
@@ -28,8 +28,8 @@ export const meta = {
   id: '120',
   name: 'home-currency-rails',
   journey: 'onboard',
-  covers: ['home-currency', 'onboard', 'ckusdc', 'solana-usdc', 'eur', 'eurc', 'veur', 'settings', 'group-model'],
-  verifies: 'The chooser row lists EVERY rail of a currency (USD: ckUSDC · Internet Computer AND USDC · Solana; EUR: EURC · Solana first — the deep-liquidity preference — then VEUR · Internet Computer; CHF: VCHF only), keeps the preferred rail first without a “dpay default rail” suffix, Settings shows the same group for the main currency, and Continue still works.',
+  covers: ['home-currency', 'onboard', 'ckusdc', 'solana-usdc', 'eur', 'eurc', 'settings', 'group-model'],
+  verifies: 'The chooser row lists EVERY rail of a currency (USD: ckUSDC · Internet Computer AND USDC · Solana; CHF: VCHF only; EUR: EURC · Solana only — single-rail since the 2026-09-19 VEUR retirement, no IC line), keeps the preferred rail first without a “dpay default rail” suffix, Settings shows the same group for the main currency, and Continue still works.',
   timeoutMs: 90000,
 };
 
@@ -64,17 +64,17 @@ export async function run() {
       `the preferred rail must be listed first. Got: ${JSON.stringify(usdRow)}`);
     console.log('[120-home-currency-rails] ✓ USD row names both rails, preferred first without policy jargon');
 
-    // --- 2b. the EUR row names BOTH rails, deep-liquidity EURC preferred first -------------------
+    // --- 2b. the EUR row names its ONE rail — no retired-rail phantom ---------------------------
     const eurRow = await driver.readText('home-currency-EUR');
     assertIncludes(eurRow, 'EURC · Solana',
       'the EUR row names the Solana rail as ledger token · settlement chain');
-    assertIncludes(eurRow, 'VEUR · Internet Computer',
-      'the EUR row ALSO names the IC rail — EUR is a two-rail currency');
+    assert(!eurRow.includes('VEUR'),
+      `the retired VEUR rail must not survive on the row. Got: ${JSON.stringify(eurRow)}`);
+    assert(!eurRow.includes('Internet Computer'),
+      `an IC line would promise the rail the 2026-09-19 VEUR retirement removed. Got: ${JSON.stringify(eurRow)}`);
     assert(!eurRow.includes("dpay's default rail"),
       `the EUR row must not expose the internal preference label. Got: ${JSON.stringify(eurRow)}`);
-    assert(eurRow.indexOf('EURC') < eurRow.indexOf('VEUR'),
-      `the preferred EUR rail must be listed first. Got: ${JSON.stringify(eurRow)}`);
-    console.log('[120-home-currency-rails] ✓ EUR row names both rails, EURC preferred first');
+    console.log('[120-home-currency-rails] ✓ EUR row names exactly its one rail (EURC · Solana)');
 
     // --- 3. the CHF row names its ONE rail and no phantom second one ----------------------------
     const chfRow = await driver.readText('home-currency-CHF');

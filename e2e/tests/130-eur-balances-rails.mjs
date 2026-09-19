@@ -1,87 +1,85 @@
-// Flow 130 — the EUR group in the accounts route: two named rows, health note on the THIN rail only
-// (Stage 5 of the EUR dual-rail addition).
+// Flow 130 — the EUR group in the accounts route: ONE row, and the health note renders NOWHERE
+// (the 2026-09-19 VEUR retirement collapsed the former dual-rail group).
 //
-// Flow 129 pinned the chooser's detail; this flow pins the route where the money lives:
-//   * home=EUR keeps EURC (MAIN) and VEUR (named rail badge) as two DISTINCT rows — never one
-//     summed balance (the founder's honesty rule, same as USD in flow 121).
-//   * The rail-health note is ONE shared row-footer, rendered in warn tone — so it appears on
-//     VEUR (thin) and on NOBODY else: not on EURC (deep — a caution icon on "circulates widely"
-//     would contradict itself), not on untiered rows (VCHF, SOL, USDC say nothing they cannot
-//     back), not on non-EUR rows.
+// Flow 129 pinned the chooser's single-rail collapse; this flow pins the route where the money
+// lives:
+//   * home=EUR renders exactly ONE row — EURC, carrying MAIN. The founder's rule ("two rails are
+//     two rows, never one summed balance") retires with the second rail: one rail is one row, and
+//     no trace of VEUR may survive as a row, a badge, or a sum.
+//   * The rail-health note renders on NO bundled row anymore. VEUR was the only THIN rail in the
+//     catalog; with it gone the warn-tone footer (`RailLiquidityNote`) has nothing to say
+//     anywhere: not on EURC (deep — a caution icon on "circulates widely" would contradict
+//     itself, and warn tone gates to thin anyway), not on untiered rows (VCHF, SOL, USDC say
+//     nothing they cannot back).
 //   * No badge colours change and no group total appears — the note is text, not chrome.
 import {setup, assert, assertIncludes, onboardWallet, openBalances, waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '130',
-  name: 'eur-balances-rails',
+  name: 'eur-single-rail-balances',
   journey: 'onboard',
-  covers: ['home-currency', 'balances', 'eur', 'eurc', 'veur', 'vchf', 'group-model', 'rail-health'],
-  verifies: 'home=EUR in the accounts route: EURC carries MAIN and VEUR a named rail badge as distinct rows with no group sum; the thin note ("Thin liquidity", 2 words) renders on VEUR ONLY (warn tone) — EURC/VCHF/other rows carry none.',
+  covers: ['home-currency', 'balances', 'eur', 'eurc', 'vchf', 'group-model', 'rail-health'],
+  verifies: 'home=EUR in the accounts route renders ONE row — EURC with MAIN, no VEUR row or badge anywhere (retired 2026-09-19) — and the thin note ("Thin liquidity") renders on NO bundled row: absent on EURC/VCHF/SOL alike, with no group sum.',
   timeoutMs: 90000,
 };
 
 export async function run() {
   const start = Date.now();
-  console.log('[130-eur-balances-rails] setup…');
+  console.log('[130-eur-single-rail-balances] setup…');
   const env = await setup({solStub: true});
   try {
     const {driver} = env;
 
-    // --- 1. onboard seeded, pin home=EUR, land on its preferred rail -----------------------------
-    console.log('[130-eur-balances-rails] onboarding, pinning home=EUR…');
+    // --- 1. onboard seeded, pin home=EUR, land on its one rail ----------------------------------
+    console.log('[130-eur-single-rail-balances] onboarding, pinning home=EUR…');
     await onboardWallet(driver, 'e2e-eur-balances');
     await driver.click('btn-settings', {timeoutMs: 5_000});
     await driver.click('btn-currency-EUR', {timeoutMs: 5_000});
     await driver.click('btn-settings-close', {timeoutMs: 5_000});
     await waitForWallet(driver, {timeoutMs: 8_000});
 
-    // --- 2. both EUR rails are distinct rows: MAIN on EURC, VEUR named ---------------------------
+    // --- 2. one rail, one row: EURC with MAIN, no VEUR anything ---------------------------------
     await openBalances(driver);
     assert(await driver.isPresent('asset-sol-eurc'),
-      'the preferred EUR rail (EURC@Solana) must have its own row');
-    assert(await driver.isPresent('asset-veur'),
-      'the sibling EUR rail (VEUR@IC) must ALSO have its own row — two rails are two rows, never one');
+      'the EUR rail (EURC@Solana) must have its own row');
     assert(await driver.isPresent('asset-sol-eurc-main'),
-      'the preferred rail (EURC) carries the MAIN badge');
+      'EURC carries the MAIN badge — it is the only EUR rail there is');
     assert(!(await driver.isPresent('asset-sol-eurc-rail')),
-      'the preferred rail carries MAIN only, not both badges');
-    assert(!(await driver.isPresent('asset-veur-main')),
-      'the sibling rail must NOT wear a second MAIN badge');
-    assert(await driver.isPresent('asset-veur-rail'),
-      'the sibling rail carries a rail badge');
-    assertIncludes(await driver.readText('asset-veur-rail'), 'VEUR · Internet Computer',
-      'the sibling badge NAMES its rail (ledger token · settlement chain)');
-    console.log('[130-eur-balances-rails] ✓ EUR group: two rows, MAIN on EURC, VEUR named');
+      'EURC carries MAIN only — a rail badge names a SIBLING rail, and EUR has none');
+    assert(!(await driver.isPresent('asset-veur')),
+      'the retired VEUR rail must render NO row — not MAIN, not a named sibling, nothing');
+    assert(!(await driver.isPresent('asset-veur-main')) && !(await driver.isPresent('asset-veur-rail')),
+      'no VEUR badge may survive either');
+    console.log('[130-eur-single-rail-balances] ✓ EUR group: one row (EURC · MAIN), no VEUR trace');
 
-    // --- 3. the health note: on the THIN rail only ------------------------------------------------
-    const veurRow = await driver.readText('asset-veur');
-    assertIncludes(veurRow, 'Thin liquidity',
-      'the thin rail carries the warn note — 2 words, per the founder (2026-09-19), no essay');
+    // --- 3. the health note: on NO bundled row ---------------------------------------------------
     const eurcRow = await driver.readText('asset-sol-eurc');
     assert(!eurcRow.includes('Thin liquidity') && !eurcRow.includes('Circulates widely'),
-      `the deep rail carries NO health line in the accounts route (warn tone renders nothing on deep). Got: ${JSON.stringify(eurcRow)}`);
+      `the deep rail carries NO health line (warn tone gates to thin, and VEUR — the only thin row — is gone). Got: ${JSON.stringify(eurcRow)}`);
     const vchfRow = await driver.readText('asset-vchf');
     assert(!vchfRow.includes('Thin liquidity') && !vchfRow.includes('Circulates widely'),
       `an untiered row (VCHF) states nothing — no tier, no copy. Got: ${JSON.stringify(vchfRow)}`);
     const solRow = await driver.readText('asset-sol');
     assert(!solRow.includes('Thin liquidity') && !solRow.includes('Circulates widely'),
       `native SOL states nothing either. Got: ${JSON.stringify(solRow)}`);
+    assert(!(await driver.isPresent('rail-liquidity-note')),
+      'the rail-health footer renders on NO bundled row — VEUR was the only thin rail in the catalog');
     await driver.screenshot('130-eur-balance-rails');
 
     // --- 4. nothing summed, no chrome change -------------------------------------------------------
     const sheet = await driver.bodyText();
     assert(!/\btotal\b/i.test(sheet),
-      `a two-rail currency must never be summed. Got: ${JSON.stringify(sheet.slice(0, 400))}`);
+      `a currency's rails must never be summed. Got: ${JSON.stringify(sheet.slice(0, 400))}`);
     assert(!(await driver.isPresent('balances-group-total')),
-      'no group-total element may exist for the EUR group');
-    console.log('[130-eur-balances-rails] ✓ health note scoped to VEUR; nothing summed');
+      'no group-total element may exist for the EUR row');
+    console.log('[130-eur-single-rail-balances] ✓ health note renders nowhere; nothing summed');
 
-    console.log(`[130-eur-balances-rails] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
+    console.log(`[130-eur-single-rail-balances] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
   } finally {
     await env.stop();
   }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run().catch(async (e) => { console.error(`\n[130-eur-balances-rails] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
+  run().catch(async (e) => { console.error(`\n[130-eur-single-rail-balances] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
 }

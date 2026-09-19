@@ -61,9 +61,10 @@ export type CurrencyDescriptor = {
   onramp: RampCapability;          // funding capability; Unavailable ⇒ no "Add money" button
   offramp: RampCapability;         // cash-out capability; Unavailable ⇒ no "Cash out" button
   // EUR dual-rail Stage 1 (2026-09-06) — DATA, not prose. Market-liquidity tier + the fiat-ramp
-  // PARTNER an `offramp: 'Partner'` row names (e.g. 'DFX' on VEUR). Both OPTIONAL on the wire
-  // (the relay skips the keys when unset — pre-EUR rows serialize byte-identically) and parsed
-  // FAIL-CLOSED to null on anything unexpected. Inert until later stages surface them.
+  // PARTNER an `offramp: 'Partner'` row names — generic machinery kept for legacy served catalogs
+  // (the 2026-09-19-retired VEUR row still names 'DFX' on prod until the redeploy). Both OPTIONAL
+  // on the wire (the relay skips the keys when unset — rows without them serialize
+  // byte-identically) and parsed FAIL-CLOSED to null on anything unexpected.
   liquidity: 'deep' | 'thin' | null;
   ramp_partner: string | null;
   // Catalog v2 — SERVER-DECLARED environment: stamped at parse time from the owning icp section's
@@ -252,7 +253,7 @@ export function catalogCacheKey(relayUrl: string): string {
 // Bundled fallback so a cold/offline first load still renders. Overwritten by the live catalog on
 // the first successful fetch. ONE shape with the wire (NetworkSection[]): icp mainnet carries the
 // demo deployment's rows (DEMO_USD + ckBTC + ckUSDC + ckETH — all stamped testnet:false — plus the
-// VCHF + ICP + VEUR complete no-minter direct-ICRC rows, payable without ramps; see isPayableAsset),
+// VCHF + ICP complete no-minter direct-ICRC rows, payable without ramps; see isPayableAsset),
 // icp testnet is EMPTY (the relay still emits the section — clients shouldn't infer from absence),
 // and the solana section mirrors app/solana.ts's rail constants VERBATIM (decimals + the USDC
 // mainnet mint are imported from the rail modules — never re-typed here) plus the EURC row (its
@@ -260,8 +261,10 @@ export function catalogCacheKey(relayUrl: string): string {
 // wires one). Ramp honesty (no-swap + Fork-C/O3): DEMO onramp=Direct(faucet)/offramp=Unavailable;
 // ckBTC + ckUSDC + ckETH onramp=Direct/offramp=Direct (ckUSDC's dual-ledger withdraw_erc20
 // cash-out is gated on the user holding ckETH for gas — the gas_ledger carries the ckETH
-// principal). VEUR onramp=Unavailable/offramp=Partner — the first Partner row, naming DFX via
-// ramp_partner. Solana FIAT-ramp semantics (2026-09-06, mirroring the relay's correction):
+// principal). VEUR (currency 9) was RETIRED 2026-09-19 — dropped from the bundled rows (the id is
+// never reused); a legacy SERVED catalog may still carry its thin+Partner row and the generic
+// liquidity/ramp_partner machinery renders it as a normal row until the prod redeploy.
+// Solana FIAT-ramp semantics (2026-09-06, mirroring the relay's correction):
 // SOL/USDC/EURC all read Unavailable/Unavailable — the fields declare FIAT ramps now; the old
 // Direct/Direct meant structural self-custody (true of every row on the device-key rail).
 export const BUNDLED_NETWORKS: NetworkSection[] = [
@@ -300,19 +303,6 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
       {currency: 8, ledger: 'ryjl3-tyaaa-aaaaa-aaaba-cai', mintable: false, minter: null, minter_family: null, symbol: 'ICP', decimals: 8,
         wrapper_name: 'ICP', backing_symbol: 'ICP', network: 'Internet Computer', display_decimals: 8, min_fraction_digits: null, fee: '10000', cap: '100000000000',
         chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Unavailable', offramp: 'Unavailable', liquidity: null, ramp_partner: null, testnet: false},
-      // VEUR (currency 9) — EUR dual-rail Stage 1 (2026-09-06). Complete NO-MINTER direct-ICRC
-      // mainnet asset, same shape as VCHF/ICP above: payment is a plain icrc1_transfer to
-      // `ledger`; never a fake family. The FIRST Partner off-ramp: DFX (ramp_partner 'DFX'),
-      // while the on-ramp stays honestly Unavailable (no compliant fiat rail in). backing_symbol
-      // is VEUR — the payment unit is the ISSUER token, never "EUR" (same rule as VCHF/CHF).
-      // Cap 10,000 VEUR mirrors VCHF's shape (initial payment-policy value). liquidity 'thin'
-      // (EURC on solana is the deep half). INERT until Stage 4 wires CURRENCY_RAILS.EUR — the
-      // row is catalog data only for now; isPayableAsset already accepts it (complete trusted
-      // descriptor), the chooser rail gate is what withholds it from the UI. Principal +
-      // decimals drift-checked against dfx/catalog_truth.json (veur_ledger) by the jest suite.
-      {currency: 9, ledger: 'wu6g4-6qaaa-aaaan-qmrza-cai', mintable: false, minter: null, minter_family: null, symbol: 'VEUR', decimals: 8,
-        wrapper_name: 'VEUR', backing_symbol: 'VEUR', network: 'Internet Computer', display_decimals: 8, min_fraction_digits: 2, fee: '10000', cap: '1000000000000',
-        chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Unavailable', offramp: 'Partner', liquidity: 'thin', ramp_partner: 'DFX', testnet: false},
     ],
   },
   {protocol: 'icp', name: 'Internet Computer', environment: 'testnet', assets: []},

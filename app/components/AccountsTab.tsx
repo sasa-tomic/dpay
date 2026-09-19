@@ -194,7 +194,7 @@ export function AccountsTab({
               {railBadge}
               {setupBadge}
               {/* The rail-health footer — ONE shared slot under the badge stack, rendered by the
-                  same component everywhere so the thin-liability statement (VEUR) reads with one
+                  same component everywhere so a thin rail's statement reads with one
                   voice. Warn tone: only THIN rails carry it; deep/untiered rows render nothing
                   (no badge colours change — the note is text, not chrome). */}
               <RailLiquidityNote asset={asset} tone="warn" />

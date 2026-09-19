@@ -87,9 +87,9 @@ export async function run() {
     // the shape of the defect: the old copy was a complete, confident, wrong instruction.
     assert(!/send it to the address/i.test(usdc),
       `a wallet-signed deposit must never tell the user to send the token to an address — there is none. Got: ${JSON.stringify(usdc)}`);
-    assertIncludes(usdc, 'no address for this one', 'the card must say plainly that this deposit has no address');
+    assertIncludes(usdc, 'No address exists for this one', 'the card must say plainly that this deposit has no address');
     assertIncludes(usdc, 'ETH', 'and it must name ETH — without it in the same wallet, the deposit cannot be signed at all');
-    assertIncludes(usdc, 'network fee', 'the reason ETH is needed must be given, not left as a bare token name');
+    assertIncludes(usdc, 'in it for fees', 'the reason ETH is needed must be given, not left as a bare token name');
     // The chain to buy on is Ethereum — the BACKING chain here, which is right for this mechanism
     // and wrong for the address one. Both readings of `network` exist; the mechanism picks.
     assertIncludes(usdc, 'Ethereum', 'ckUSDC is bought on Ethereum, which is where the signed deposit runs');
@@ -110,7 +110,7 @@ export async function run() {
       'ckBTC is bought on BITCOIN — the row settles on the Internet Computer, and naming that as the place to buy sends the user looking for something nobody sells there');
     assertIncludes(btc, 'send it to the address above',
       'and this mechanism DOES have an address, so the instruction must end there');
-    assert(!/no address for this one/i.test(btc),
+    assert(!/no address exists for this one/i.test(btc),
       'the wallet-signed sentence must not leak onto a sheet that shows a real address');
     console.log('[163-funding-mechanism] ✓ ckBTC: buy BTC on Bitcoin, send it to the address shown');
 

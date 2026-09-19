@@ -285,7 +285,7 @@ export function fundingRoute(asset: SelectableAsset, isTestnet: boolean, mechani
     return {kind: 'buy', token: asset.symbol, chain};
   }
   // `icrc-transfer`: an Internet Computer account. Native ICP is the ONE asset here a card can
-  // reach; everything else on this rail (VCHF, VEUR) is bought as ICP and converted by a swap the
+  // reach; everything else on this rail (VCHF) is bought as ICP and converted by a swap the
   // user signs on their own device.
   return asset.linkToken === ICP_TOKEN
     ? {kind: 'buy', token: ICP_TOKEN, chain}

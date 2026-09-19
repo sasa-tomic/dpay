@@ -687,8 +687,8 @@ describe('prepareConvertRecord — both envelopes built + signed exactly once, u
     });
     expect(rec.inSymbol).toBe('ICP');
     // Backing symbol straight from the catalog — the relay's compiled catalog pins VCHF's
-    // backing_symbol to 'VCHF' intentionally (issuer token, same rule as VEUR), so the record
-    // carries the catalog's own words, never a hardcoded CHF/ledger id.
+    // backing_symbol to 'VCHF' intentionally (issuer token — the catalog's own words are
+    // authoritative), so the record carries the catalog's words, never a hardcoded CHF/ledger id.
     expect(rec.outSymbol).toBe(VCHF_DESC.backing_symbol ?? VCHF_DESC.symbol);
     // The legs' death is the ENVELOPES' own ingress expiry — the exact stamp icStampExpiry
     // returned for signing (the mock pins it at 1_700_000_000_000_000_000 ns), ns → ms. The

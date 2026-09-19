@@ -69,7 +69,6 @@ const ASSETS: SelectableAsset[] = [
   {id: 'ic:9', protocol: 'ic', currency: 9, symbol: 'CHF', networkLabel: 'Swiss Franc', network: 'Swiss Franc', decimals: 2, linkToken: 'CHF', minFractionDigits: 0, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'chf'},
   // The home-currency rails (config/currency.ts CURRENCY_RAILS), matched by `linkToken`.
   {id: 'ic:7', protocol: 'ic', currency: 7, symbol: 'VCHF', networkLabel: 'Internet Computer', network: 'Internet Computer', decimals: 8, linkToken: 'VCHF', minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'vchf'},
-  {id: 'ic:10', protocol: 'ic', currency: 10, symbol: 'VEUR', networkLabel: 'Internet Computer', network: 'Internet Computer', decimals: 8, linkToken: 'VEUR', minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Partner', rampPartner: 'DFX', gasToken: null, visible: true, testKey: 'veur'},
   {id: 'solana:EURC', protocol: 'solana', token: 'EURC', symbol: 'EURC', networkLabel: 'Solana', network: 'Solana', mint: EURC_MINT_ADDRESS, decimals: 6, linkToken: 'EURC', minFractionDigits: 2, liquidity: 'deep', onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'sol-eurc'},
 ];
 
@@ -106,11 +105,8 @@ describe('glyphFor', () => {
       expect(glyphFor(byId('ic:7')).glyph).toBe('CHF');
     });
 
-    test('EUR: BOTH rails wear € — the Solana rail is a euro row, not a SOL row', () => {
+    test('EUR: the EURC rail wears € — the sole euro rail since the VEUR retirement', () => {
       expect(glyphFor(byId('solana:EURC')).glyph).toBe('€');
-      expect(glyphFor(byId('ic:10')).glyph).toBe('€');
-      // …and they are the same chip, so the two EUR rails read as one currency on two rails.
-      expect(glyphFor(byId('solana:EURC'))).toEqual(glyphFor(byId('ic:10')));
     });
 
     test('USD: both rails keep $ (the rule that already held, now derived from the currency)', () => {

@@ -204,7 +204,7 @@ function icAsset(desc: CurrencyDescriptor, catalog: CurrencyDescriptor[]): Selec
   // for the chooser's symbols, and that guard is worth more than the convenience of a symbol here.)
   //
   // The BACKING SYMBOL is kept either way (the founder's display rule: BTC/USDC/ETH, never the ck*
-  // wrapper). A row already ON the Internet Computer (VCHF/ICP/VEUR) has one chain and says one.
+  // wrapper). A row already ON the Internet Computer (VCHF/ICP) has one chain and says one.
   const settles = prettyNetwork('internet-computer');
   const networkLabel = isPrimary
     ? M.wallet.asset.demoSubtitle
@@ -259,9 +259,10 @@ function solanaAssetRow(row: SolanaAsset): SelectableAsset {
     liquidity: row.liquidity,
     onramp: row.onramp,
     offramp: row.offramp,
-    // The solana wire carries no ramp partner today — the only Partner row in the catalog is VEUR
-    // on the IC. The field exists on BOTH arms so `railRampLine` treats every rail uniformly; the
-    // day a solana partner ships, SolanaAsset gains the field and this maps it.
+    // The solana wire carries no ramp partner today — no bundled row names one (a legacy SERVED
+    // catalog may still carry the 2026-09-19-retired VEUR Partner row on the IC). The field exists
+    // on BOTH arms so `railRampLine` treats every rail uniformly; the day a solana partner ships,
+    // SolanaAsset gains the field and this maps it.
     rampPartner: null,
     visible: true,
     testKey,

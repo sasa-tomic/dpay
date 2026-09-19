@@ -1167,7 +1167,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   const gateBalance = withdrawCurrency === 0 ? shownBalance : (assetBalances[withdrawCurrency] ?? null);
   const selectedUnfunded = online && gateBalance != null && cmpRaw(gateBalance, '0') === 0 && gateDesc != null && !gateDesc.mintable;
   // The unfunded rail itself — its catalog row's liquidity statement rides INSIDE the fund panel
-  // (warn tone ⇒ renders exactly for a thin rail like VEUR; untiered/deep rails show nothing).
+  // (warn tone ⇒ renders exactly on a thin rail; untiered/deep rails show nothing).
   const gatedAsset = assets.find(a => a.id === selectedAssetId) ?? null;
   const fundInstruction = selectedUnfunded ? (
     <>

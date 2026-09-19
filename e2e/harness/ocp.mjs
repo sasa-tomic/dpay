@@ -63,7 +63,7 @@ export const TRANSFER_AMOUNTS = [
       {asset: 'ckBTC', amount: '0.000016'},
       {asset: 'VCHF', amount: '1.'},          // the trailing bare decimal point, verbatim
       {asset: 'ICP', amount: '0.50795551'},
-      {asset: 'VEUR', amount: '1.06'},        // amount synthetic; VEUR's presence on the menu is measured
+      {asset: 'VEUR', amount: '1.06'},        // amount synthetic; VEUR's presence on the LIVE till's menu is measured — dpay retired currency 9 (2026-09-19) but the provider still lists it, and flow 111 pins that the wallet's menu drops what its catalog has no row for
     ],
   },
   {

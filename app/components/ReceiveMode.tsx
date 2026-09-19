@@ -549,7 +549,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   // (`IcrcAccountSection`), so it is the strictly richer of the two, and the rail disclosure below
   // is keyed on the GROUP rather than on the sheet, so it still renders.
   //
-  // A complete no-minter direct-ICRC row (VCHF/ICP/VEUR) → IcrcDepositSheet: the user's own ICRC-1
+  // A complete no-minter direct-ICRC row (VCHF/ICP) → IcrcDepositSheet: the user's own ICRC-1
   // principal with real top-up instructions (founder hard rule 2026-08-29 — no "check back soon"
   // dead ends). The toggle above lets the user flip back to "Request payment". The sheets are
   // inline-only (no overlay chrome — the tab body provides the surface).

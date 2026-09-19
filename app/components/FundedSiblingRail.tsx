@@ -66,7 +66,7 @@ export function FundedSiblingRail({homeCurrency, assets, balances, selectedAsset
       <Text testID="fund-sibling-holds" style={[S.assetSub, pointerLine]}>{line}</Text>
       {/* The named account's rail-health note — rendered BEFORE the switch button because it is the
           cost of the very thing the button offers: the user is one tap from moving there, and a
-          thin rail (VEUR) must say so at the decision, not after it. Warn tone: it renders exactly
+          thin rail must say so at the decision, not after it. Warn tone: it renders exactly
           on the thin rails; a deep or untiered account (practice money included) shows nothing. */}
       <RailLiquidityNote asset={asset} tone="warn" />
       {onSwitch ? (

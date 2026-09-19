@@ -60,9 +60,9 @@ export async function run() {
     let body = await open('asset=ckUSDC&network=solana&amount=1');
     assertIncludes(body, 'ckUSDC', 'the refusal must name the asset the link asked for');
     assertIncludes(body, 'Solana', 'the refusal must name the chain the link asked for');
-    assertIncludes(body, 'different network', 'the refusal must say the wallet holds it on another chain');
+    assertIncludes(body, 'elsewhere', 'the refusal must say the wallet holds it elsewhere (another chain)');
     assertIncludes(body, 'wrong chain', 'the refusal must state the consequence of guessing');
-    assertIncludes(body, 'Ask the sender', 'the refusal must tell the payer what to do next');
+    assertIncludes(body, 'ask the sender', 'the refusal must tell the payer what to do next');
     // No payment surface may be rendered behind it — nothing about this link was understood.
     assert(!(await driver.isPresent('pay-amount')), 'a refused link must not render a payment review');
     assert(!(await driver.isPresent('btn-approve')), 'a refused link must not render an Approve button');

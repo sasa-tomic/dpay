@@ -194,7 +194,7 @@ export async function run() {
     assert(await driver.findByTestID('ocp-outcome', {timeoutMs: 25_000}) != null,
       'a PENDING answer must render the honest outcome note, not silence and not a toast');
     const outcome = await driver.readText('ocp-outcome');
-    assertIncludes(outcome, 'hasn’t matched it', 'the note says the provider has the report but has not matched it yet');
+    assertIncludes(outcome, 'hasn’t matched this sale yet', 'the note says the provider has the report but has not matched the sale yet');
     assertIncludes(outcome, 'don’t pay again', 'the payer is told not to pay twice');
     assert(/ledger block \d+/.test(outcome),
       `the note carries the reference that proves the transfer, got ${JSON.stringify(outcome)}`);
