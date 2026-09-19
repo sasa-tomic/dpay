@@ -338,8 +338,12 @@ export type ConvertMessages = {
     solReadyTitle: string;
     solReadyBody: (credit: string, ata: string) => string;
     solQuoteLabel: (venue: string) => string;
-    solMinLine: (min: string) => string;
-    solConfirmButton: string;
+    /** Generalized (2026-09-19): the final leg lands ANY registered USDC-pair token —
+     *  EURC on the jupiter-usdc-eurc route, SOL on the original. `min` is the BARE
+     *  number (the caller passes an empty fmtAsset unit); `sym` is the destination
+     *  symbol, standing alone in prose. */
+    solMinLine: (min: string, sym: string) => string;
+    solConfirmButton: (sym: string) => string;
     solFeeLine: (fee: string) => string;
     solPreflightTitle: string;
     /** Rendered only when the measured SOL balance is exactly zero — plain fact, no figure. */
@@ -615,8 +619,8 @@ export const convertEn: ConvertMessages = {
     solReadyTitle: 'USDC landed on Solana',
     solReadyBody: (credit, ata) => `${credit} is at ${ata}, verified on-chain. Finish the route, or leave the USDC there — it is yours either way.`,
     solQuoteLabel: venue => `${venue} quote (fresh)`,
-    solMinLine: min => `At least ${min} SOL at your address`,
-    solConfirmButton: 'Swap to SOL',
+    solMinLine: (min, sym) => `At least ${min} ${sym} at your address`,
+    solConfirmButton: sym => `Swap to ${sym}`,
     solFeeLine: fee => `Solana transaction fee: ${fee}`,
     solPreflightTitle: 'A little SOL is needed for the fee',
     solPreflightBody:

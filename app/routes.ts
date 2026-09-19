@@ -13,7 +13,9 @@
  * canonical USDC row on Ethereum, Route B composes Circle's CCTP V2 burn (domain 5,
  * fast finality — infrastructure, not a venue, so no venue row) to the device's own
  * Solana address; Route C additionally composes a registered solana_amm venue pairing
- * USDC(SOL) with wrapped SOL. The EVM signing boundary holds: dpay builds the burn
+ * USDC(SOL) with a REGISTERED out token — wrapped SOL and every other mint the Solana
+ * token registry can name (e.g. EURC); a mint it cannot name is skipped, fail closed.
+ * The EVM signing boundary holds: dpay builds the burn
  * calldata, the USER's own wallet signs it — dpay never holds EVM keys.
  */
 
@@ -25,6 +27,7 @@ import {
   WRAPPED_SOL_MINT_ADDRESS,
   WRAPPED_SOL_TOKEN,
   solanaTokenInfo,
+  solanaTokenOfMint,
 } from './solana/tokens';
 
 /** The destination network name for CCTP domain 5 as routes and records carry it. */
@@ -162,29 +165,39 @@ export function multihopRoutesFrom(
         crossRail: {cctp},
         dest: {symbol: hopSymbol, network: CCTP_DESTINATION_NETWORK},
       });
-      // Route C: + a registered solana_amm venue pairing USDC(SOL) with wrapped SOL.
-      // Registry order, like every venue walk; the out-symbol/decimals come from the
-      // token registry the Solana rail already pins against the catalog truth.
+      // Route C: + a registered solana_amm venue pairing USDC(SOL) with a KNOWN out
+      // token — wrapped SOL (the original destination) and every other mint the Solana
+      // token registry can name (e.g. EURC via jupiter-usdc-eurc). Registry order, like
+      // every venue walk; the out symbol/decimals come from that registry. A venue whose
+      // other side is unnamable (no symbol/decimals in the registry) is SKIPPED, fail
+      // closed — an unnamed destination is never rendered, never guessed.
       for (const solVenue of registeredVenues()) {
         if (solVenue.kind !== 'solana_amm' || solVenue.testnet) continue;
         if (!solVenue.pair_ledgers.includes(USDC_MINT_ADDRESS)) continue;
         const outMint = solVenue.pair_ledgers.find(m => m !== USDC_MINT_ADDRESS);
-        if (outMint !== WRAPPED_SOL_MINT_ADDRESS) continue;
-        const solToken = solanaTokenInfo(WRAPPED_SOL_TOKEN);
-        if (solToken == null) continue; // no decimals on the registry token — fail closed
+        if (outMint == null) continue;
+        let outSymbol: string;
+        let outDecimals: number;
+        if (outMint === WRAPPED_SOL_MINT_ADDRESS) {
+          const solToken = solanaTokenInfo(WRAPPED_SOL_TOKEN);
+          if (solToken == null) continue; // no decimals on the registry token — fail closed
+          outSymbol = WRAPPED_SOL_TOKEN;
+          outDecimals = solToken.decimals;
+        } else {
+          const token = solanaTokenOfMint(outMint);
+          const info = token != null ? solanaTokenInfo(token) : null;
+          if (token == null || info == null || info.mint !== outMint) continue;
+          outSymbol = token;
+          outDecimals = info.decimals;
+        }
         routes.push({
           ...base,
           routeId: `${base.routeId}:cctp:${solVenue.venue_id}`,
           crossRail: {
             cctp,
-            sol: {
-              venueId: solVenue.venue_id,
-              outMint,
-              outSymbol: WRAPPED_SOL_TOKEN,
-              outDecimals: solToken.decimals,
-            },
+            sol: {venueId: solVenue.venue_id, outMint, outSymbol, outDecimals},
           },
-          dest: {symbol: WRAPPED_SOL_TOKEN, network: CCTP_DESTINATION_NETWORK},
+          dest: {symbol: outSymbol, network: CCTP_DESTINATION_NETWORK},
         });
       }
     }

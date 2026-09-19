@@ -255,8 +255,8 @@ export const convertEs: ConvertMessages = {
     solReadyTitle: 'Los USDC ya están en Solana',
     solReadyBody: (credit, ata) => `${credit} están en ${ata}, verificado on-chain. Termina la ruta — o deja ahí los USDC; son tuyos en cualquier caso.`,
     solQuoteLabel: venue => `Cotización de ${venue} (reciente)`,
-    solMinLine: min => `Como mínimo ${min} SOL a tu dirección`,
-    solConfirmButton: 'Cambiar a SOL',
+    solMinLine: (min, sym) => `Como mínimo ${min} ${sym} a tu dirección`,
+    solConfirmButton: sym => `Cambiar a ${sym}`,
     solFeeLine: fee => `Comisión de la transacción Solana: ${fee}`,
     solPreflightTitle: 'Hace falta algo de SOL para la comisión',
     solPreflightBody:

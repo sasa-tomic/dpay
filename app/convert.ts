@@ -499,8 +499,19 @@ export type CrossRailInfo = {
   /** Route C's final leg: the registered Jupiter venue id (frozen at prepare from the
    *  route — the record's own `venueId` stays the IC venue the five legs traded on). */
   solVenueId?: string;
-  /** The Jupiter leg's own min-out floor (lamports), frozen when the leg is signed. */
+  /** The Jupiter leg's own min-out floor (lamports), frozen when the leg is signed.
+   *  The native-SOL shape — an SPL-out record freezes `solExpectedSubunits` instead,
+   *  and the two shapes are mutually exclusive (hydration refuses both). */
   solExpectedLamports?: string;
+  /** The SPL-out widening (2026-09-19, any registered USDC↔token venue — e.g. EURC):
+   *  the final leg's OUT mint + its decimals, frozen at prepare from the route. Absent
+   *  on a native-SOL record — the out mint is WRAPPED_SOL_MINT_ADDRESS by construction
+   *  there. All optional, so native-SOL records keep their exact bytes. */
+  solOutMint?: string;
+  solOutDecimals?: number;
+  /** The Jupiter leg's own min-out floor for an SPL out, in the OUT MINT's base units,
+   *  frozen when the leg is signed. Requires solOutMint+solOutDecimals (hydration). */
+  solExpectedSubunits?: string;
 };
 
 export type ConvertRecord = {
@@ -832,6 +843,21 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     const optStr = (k: string): string | undefined =>
       (typeof c[k] === 'string' && (c[k] as string).length > 0 ? c[k] as string : undefined);
     if (!CROSSRAIL_CONVERT_STEPS.has(rec.step)) return null;
+    // The SPL-out widening (2026-09-19): the out mint + its decimals travel TOGETHER,
+    // the frozen subunit floor requires both, and the two floor shapes — native lamports
+    // vs SPL subunits of the out mint — are mutually exclusive. Any other pairing is a
+    // shape this build never wrote (fail closed); every field stays optional, so legacy
+    // native-SOL records hydrate byte-identically.
+    const solExpectedLamports = optStr('solExpectedLamports');
+    const solOutMint = optStr('solOutMint');
+    const solOutDecimals =
+      typeof c.solOutDecimals === 'number' && Number.isSafeInteger(c.solOutDecimals) && c.solOutDecimals >= 0
+        ? c.solOutDecimals
+        : undefined;
+    const solExpectedSubunits = optStr('solExpectedSubunits');
+    if ((solOutMint != null) !== (solOutDecimals != null)) return null;
+    if (solExpectedSubunits != null && (solOutMint == null || solExpectedLamports != null)) return null;
+    if (solOutMint != null && solExpectedLamports != null) return null;
     crossRail = {
       kind: c.kind,
       solAddress: c.solAddress,
@@ -842,7 +868,9 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
       forwardTxHash: optStr('forwardTxHash'),
       mintSubunits: optStr('mintSubunits'),
       solVenueId: optStr('solVenueId'),
-      solExpectedLamports: optStr('solExpectedLamports'),
+      solExpectedLamports,
+      ...(solOutMint != null && solOutDecimals != null ? {solOutMint, solOutDecimals} : {}),
+      ...(solExpectedSubunits != null ? {solExpectedSubunits} : {}),
     };
     rec.crossRail = crossRail;
   }
@@ -1486,7 +1514,17 @@ export async function prepareMultihopConvertRecord(args: {
       mintRecipientAta: ataB58,
       maxFeeSubunits: maxFee.toString(),
       mintFloorSubunits: cctpMintFloor(BigInt(burnAmount), maxFee).toString(),
-      ...(route.crossRail.sol != null ? {solVenueId: route.crossRail.sol.venueId} : {}),
+      ...(route.crossRail.sol != null
+        ? {
+            solVenueId: route.crossRail.sol.venueId,
+            // The SPL-out widening: a non-wrapped-SOL out mint is frozen WITH its decimals —
+            // the final leg quotes/pays out in the out mint, the done screen formats through
+            // them, and the payout read keys on the mint. Native-SOL records stay byte-stable.
+            ...(route.crossRail.sol.outMint !== WRAPPED_SOL_MINT_ADDRESS
+              ? {solOutMint: route.crossRail.sol.outMint, solOutDecimals: route.crossRail.sol.outDecimals}
+              : {}),
+          }
+        : {}),
     };
   }
 
@@ -2814,10 +2852,12 @@ export async function executeCrossRailConvert(
 
 /** Build + verify + sign Route C's final Jupiter leg and move `sol_ready` → `swapping`.
  *  The wave-3a red lines verbatim: the venue row is a registered mainnet solana_amm; the
- *  fresh quote names the registry pair (USDC mint → wrapped SOL); the venue's tx is
- *  decodable, fee-payer IS the user, and the native-SOL proceeds land on the fee payer
- *  (no ATA needed); the message fee is quoted honestly; the device signs. The input is
- *  the VERIFIED mint credit — never an estimate. */
+ *  fresh quote names the registry pair (USDC mint → the record's own out mint — wrapped
+ *  SOL on the original Route C, any registered USDC-pair SPL token such as EURC on the
+ *  generalized one); the venue's tx is decodable, fee-payer IS the user, and the proceeds
+ *  land at the user's OWN destination — the fee payer for a native-SOL unwrap (no ATA
+ *  needed), the user's own ATA for the out mint on an SPL out; the message fee is quoted
+ *  honestly; the device signs. The input is the VERIFIED mint credit — never an estimate. */
 export async function prepareCrossRailSolLeg(secretHex: string, rec: ConvertRecord, relayUrl: string): Promise<ConvertRecord> {
   const cross = rec.crossRail;
   if (cross == null || rec.step !== 'sol_ready' || cross.kind !== 'cctp_sol') {
@@ -2830,7 +2870,11 @@ export async function prepareCrossRailSolLeg(secretHex: string, rec: ConvertReco
   if (venue == null || venue.kind !== 'solana_amm' || venue.testnet) {
     throw new Error(M.convert.errors.quoteUnavailable('venue'));
   }
-  if (!venue.pair_ledgers.includes(USDC_MINT_ADDRESS) || !venue.pair_ledgers.includes(WRAPPED_SOL_MINT_ADDRESS)) {
+  // The record's own out mint (frozen at prepare): wrapped SOL unless the record names
+  // an SPL token. The venue must actually serve the USDC→outMint pair — a record whose
+  // venue stopped pairing it is refused, never re-routed.
+  const outMint = cross.solOutMint ?? WRAPPED_SOL_MINT_ADDRESS;
+  if (!venue.pair_ledgers.includes(USDC_MINT_ADDRESS) || !venue.pair_ledgers.includes(outMint)) {
     throw new Error(M.convert.errors.quoteUnavailable('pool'));
   }
   const kp = deriveSolanaKeypair(secretHex);
@@ -2838,7 +2882,7 @@ export async function prepareCrossRailSolLeg(secretHex: string, rec: ConvertReco
     // The derivation no longer matches the frozen recipient — refuse, never re-target.
     throw new Error(M.convert.errors.quoteUnavailable('venue'));
   }
-  const quoted = await fetchJupiterQuote(relayUrl, venue, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, rec.slippageBps);
+  const quoted = await fetchJupiterQuote(relayUrl, venue, USDC_MINT_ADDRESS, outMint, cross.mintSubunits, rec.slippageBps);
   if (!quoted.ok) {
     if (quoted.code === 'refused') throw new Error(M.convert.errors.quoteRefused(venue.display_name));
     throw new Error(M.convert.errors.quoteUnavailable(quoted.code));
@@ -2852,8 +2896,14 @@ export async function prepareCrossRailSolLeg(secretHex: string, rec: ConvertReco
   if (decoded == null) {
     throw new Error(M.convert.errors.quoteUnavailable('shape'));
   }
-  // Native-SOL output: unwrap lands on the fee payer — no SPL destination to pin.
-  const beneficiary = verifyVenueSwapTxBeneficiaries(decoded, {pubkey: kp.publicKey, outAta: null});
+  // Output destination (the beneficiary red line, both shapes): a native-SOL unwrap lands
+  // on the fee payer — no SPL destination to pin; an SPL out (e.g. EURC) MUST arrive at
+  // the USER'S OWN ATA for the out mint — the device's address, the same rule the
+  // standalone Solana swap applies. Anything else is refused before anything signs.
+  const beneficiary = verifyVenueSwapTxBeneficiaries(decoded, {
+    pubkey: kp.publicKey,
+    outAta: outMint === WRAPPED_SOL_MINT_ADDRESS ? null : deriveAta(kp.address, outMint),
+  });
   if (!beneficiary.ok) {
     throw new Error(M.convert.errors.quoteUnavailable('venue'));
   }
@@ -2881,17 +2931,25 @@ export async function prepareCrossRailSolLeg(secretHex: string, rec: ConvertReco
       lastValidBlockHeight: built.swap.lastValidBlockHeight,
     },
     ...(solFeeLamports != null ? {solFeeLamports} : {}),
-    crossRail: {...cross, solExpectedLamports: quoted.quote.otherAmountThreshold},
+    crossRail: {
+      ...cross,
+      // The floor is frozen in the OUT ASSET's own units: lamports for native SOL (the
+      // original field, byte-stable), the out mint's base subunits for an SPL token.
+      ...(outMint === WRAPPED_SOL_MINT_ADDRESS
+        ? {solExpectedLamports: quoted.quote.otherAmountThreshold}
+        : {solExpectedSubunits: quoted.quote.otherAmountThreshold}),
+    },
   };
 }
 
 /** Drive the cross-rail Jupiter leg (`swapping`/`settling`/its `stuck`): the wave-3a
- *  machine's exact transitions, with the payout reads keyed on the cross-rail facts (the
- *  output is native SOL, so the realized credit is the fee payer's lamports delta on the
- *  swap signature; the fallback floor is the leg's own signed min-out, NOT the record's
- *  IC-hop figures — different asset, different units). A refusal leaves the USDC(SOL)
- *  AT THE USER'S ATA — the failed copy names it and the exit (a standalone Solana
- *  convert, or holding the USDC). */
+ *  machine's exact transitions, with the payout reads keyed on the cross-rail facts —
+ *  the realized credit is the fee payer's lamports delta for a native-SOL out, the
+ *  out-mint token credit at the user's ATA for an SPL out (expected and realized both
+ *  in the out mint's base units); the fallback floor is the leg's own signed min-out,
+ *  NOT the record's IC-hop figures — different asset, different units. A refusal leaves
+ *  the USDC(SOL) AT THE USER'S ATA — the failed copy names it and the exit (a standalone
+ *  Solana convert, or holding the USDC). */
 export async function executeCrossRailSolSwap(
   start: ConvertRecord,
   deps: CrossRailDeps,
@@ -2904,6 +2962,11 @@ export async function executeCrossRailSolSwap(
   const leg = rec.solanaLeg;
   const cross = rec.crossRail;
   if (leg == null || cross == null) return rec;
+  // The out asset (the record's own frozen mint): native SOL on the original Route C,
+  // the SPL token (e.g. EURC) on the generalized one. Every payout read + floor
+  // fallback below keys on it — expected vs realized compare in the SAME base units.
+  const outMint = cross.solOutMint ?? WRAPPED_SOL_MINT_ADDRESS;
+  const nativeOut = outMint === WRAPPED_SOL_MINT_ADDRESS;
   const advance = async (patch: Partial<ConvertRecord>): Promise<ConvertRecord> => {
     rec = {...rec, ...patch};
     await saveConvertRecord(deps.publicHex, rec);
@@ -2923,11 +2986,14 @@ export async function executeCrossRailSolSwap(
   const settle = async (): Promise<ConvertRecord> => {
     const outcome = await watchSolTx(leg, confirmAttempts, intervalMs);
     if (outcome.kind === 'confirmed') {
-      const realized = await getSolNativeCredit(leg.signature).catch(() => null);
+      const realized = await (nativeOut
+        ? getSolNativeCredit(leg.signature)
+        : getSolTokenCredit(leg.signature, cross.solAddress, outMint)
+      ).catch(() => null);
       rec = confirmSolLeg(rec);
       return advance({
         step: 'done',
-        outAmountNet: realized ?? cross.solExpectedLamports ?? '',
+        outAmountNet: realized ?? (nativeOut ? cross.solExpectedLamports : cross.solExpectedSubunits) ?? '',
         outTx: leg.signature,
         ...(realized == null ? {failureDetail: 'payout-floor'} : {}),
       });

@@ -3333,7 +3333,7 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
     const venue = venueOfId(cross.solVenueId);
     if (venue == null) return;
     let live = true;
-    fetchJupiterQuote(relayUrl, venue, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, record.slippageBps)
+    fetchJupiterQuote(relayUrl, venue, USDC_MINT_ADDRESS, cross.solOutMint ?? WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, record.slippageBps)
       .then((q) => {
         if (!live || !mountedRef.current) return;
         if (q.ok) { setSolQuote(q.quote); setSolQuoteErr(null); }
@@ -3342,7 +3342,7 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
       })
       .catch(() => { if (live && mountedRef.current) setSolQuoteErr(M.convert.errors.quoteUnreachable(solVenueName)); });
     return () => { live = false; };
-  }, [record.step, record.id, cross?.mintSubunits, cross?.solVenueId, record.slippageBps]);
+  }, [record.step, record.id, cross?.mintSubunits, cross?.solVenueId, cross?.solOutMint, record.slippageBps]);
 
   // The attach gesture. Production: the hash the user pasted back from their wallet. Under
   // e2e: if the harness installed a wallet double (__DPAY_TEST_EVM_SIGN), asking IT to sign
@@ -3376,13 +3376,16 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
 
   if (cross == null) return null; // the render fork only reaches here with a crossRail record
 
+  // The final leg's out units: the record's own frozen decimals when it names an SPL out
+  // mint (e.g. EURC's 6), the native-SOL 9 otherwise.
+  const solOutDecimals = cross.solOutDecimals ?? SOLANA_TOKENS.SOL.decimals;
   const solFeeKnown = record.solFeeLamports != null && BigInt(record.solFeeLamports) > 0n;
   const solShort = solLamports != null && solLamports.length > 0 && BigInt(solLamports) <= 0n
     && record.step !== 'done' && record.step !== 'failed_refunded' && record.step !== 'failed_leg';
   // doneBody carries its own ${sym} — hand it the BARE number (fmtAssetCompact appends the unit,
   // so pass an empty unit and trim the trailing space it leaves).
   const amountStr = fmtAssetCompact(record.outAmountNet ?? '0',
-    cross.kind === 'cctp_sol' ? SOLANA_TOKENS.SOL.decimals : hopDecimals, '').trim();
+    cross.kind === 'cctp_sol' ? solOutDecimals : hopDecimals, '').trim();
 
   return (
     <View testID="convert-crossrail" style={S.convertWrap}>
@@ -3550,10 +3553,12 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
                 {M.convert.crossrail.solQuoteLabel(venueDisplayName(cross.solVenueId ?? record.venueId))}
               </Text>
               <Text testID="crossrail-sol-out" style={S.convertHeadlineAmount}>
-                {fmtAssetCompact(solQuote.outAmount, SOLANA_TOKENS.SOL.decimals, destSymbol)}
+                {fmtAssetCompact(solQuote.outAmount, solOutDecimals, destSymbol)}
               </Text>
               <Text style={S.convertChecklistLine}>
-                {M.convert.crossrail.solMinLine(fmtAssetCompact(solQuote.otherAmountThreshold, SOLANA_TOKENS.SOL.decimals, destSymbol))}
+                {/* The BARE number + the sym: the copy owns the unit (one owner), and the
+                    sym argument renders EURC and SOL through the SAME sentence. */}
+                {M.convert.crossrail.solMinLine(fmtAssetCompact(solQuote.otherAmountThreshold, solOutDecimals, '').trim(), destSymbol)}
               </Text>
             </>
           ) : solQuoteErr != null ? (
@@ -3576,8 +3581,8 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
             onPress={() => void confirmCrossRailSolLeg(record.id)}
             disabled={solQuote == null}
             accessibilityRole="button"
-            accessibilityLabel={M.convert.crossrail.solConfirmButton}>
-            <Text style={S.primaryText}>{M.convert.crossrail.solConfirmButton}</Text>
+            accessibilityLabel={M.convert.crossrail.solConfirmButton(destSymbol)}>
+            <Text style={S.primaryText}>{M.convert.crossrail.solConfirmButton(destSymbol)}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -3591,7 +3596,9 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
           <Text style={S.convertStateBody}>{M.convert.crossrail.legSolSwap(solVenueName, destSymbol)}</Text>
           {solFeeKnown ? (
             <Text testID="crossrail-sol-fee" style={S.convertChecklistLine}>
-              {M.convert.crossrail.solFeeLine(fmtAssetCompact(record.solFeeLamports!, SOLANA_TOKENS.SOL.decimals, destSymbol))}
+              {/* The network fee is paid in SOL whatever the out token is (SOL, EURC) —
+                  the fee line's unit is always the gas asset, never the destination. */}
+              {M.convert.crossrail.solFeeLine(fmtAssetCompact(record.solFeeLamports!, SOLANA_TOKENS.SOL.decimals, WRAPPED_SOL_TOKEN))}
             </Text>
           ) : null}
         </View>
