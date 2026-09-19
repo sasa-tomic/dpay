@@ -95,6 +95,13 @@ async function startApp() {
 }
 
 async function bootAndRestore(driver, base) {
+  // The e2e shims point the app's /api/v2 envelope transport at ?relay= (the OFFLINE fake-IC
+  // seam). This is LIVE: the plain relay build has no /api/v2, so the value path must go
+  // device-direct to the real boundary. The app's own operator override (IC_GATEWAY_STORAGE_KEY,
+  // applied by App.tsx before the wallet renders) outranks the test seam — seed it pre-load.
+  await driver.addInitScript(() => {
+    try { localStorage.setItem('dpay.icpGateway.v1', 'https://icp-api.io'); } catch { /* fresh ctx */ }
+  });
   log(`navigating ${base}/?relay=${RELAY}`);
   await driver.navigate(base, `/?relay=${encodeURIComponent(RELAY)}`);
   await driver.waitReady();
@@ -114,8 +121,16 @@ async function bootAndRestore(driver, base) {
   } finally {
     seed.replace(/./g, '0'); // in-memory only hygiene; never logged anywhere
   }
-  // The wallet lands on Home; wait for the balance headline.
-  await driver.findByTestID('balance', {timeoutMs: 20_000});
+  // The wallet lands on the first-run HOME-CURRENCY chooser (restore path skips backup gates),
+  // then Home. Pick CHF (the float's home story) and continue when the chooser appears.
+  try {
+    await driver.findByTestID('btn-home-currency-continue', {timeoutMs: 8_000});
+    await driver.click('home-currency-CHF');
+    await driver.click('btn-home-currency-continue');
+    log('home currency: CHF');
+  } catch { /* chooser already answered */ }
+  // Wait for Home (the headline IS the accounts affordance on this surface).
+  await driver.findByTestID('btn-home-accounts', {timeoutMs: 20_000});
   // Verify the restored principal is THE float principal before anything else.
   const acct = await accountOf(driver);
   if (!acct?.secretHex) throw new Error('restore: no identity in storage after restore');
@@ -148,34 +163,62 @@ async function withApp(fn) {
 // ---------------------------------------------------------------------------
 
 async function openConvert(driver, assetKey) {
+  // The dance: accounts route → select the row (harness returns us to the PAY tab) → accounts
+  // route again → the SELECTED row's convert action.
   await openBalances(driver);
   await selectCurrency(driver, assetKey);
-  await driver.click('btn-accounts-convert');
+  await openBalances(driver);
+  await driver.click('btn-accounts-convert', {timeoutMs: 10_000});
   await driver.findByTestID('convert-screen', {timeoutMs: 10_000});
   log(`convert open for ${assetKey}`);
 }
 
 async function listDestRoutes(driver) {
-  return driver.eval(() =>
+  const routes = await driver.eval(() =>
     Array.from(document.querySelectorAll('[data-testid^="convert-dest-route-"]')).map((el) => ({
       id: el.getAttribute('data-testid'),
       text: (el.innerText || '').replace(/\s*\n\s*/g, ' | ').trim(),
     })),
   );
+  if (routes.length > 0) return routes;
+  // Fallback visibility aid: every dest-picker testID on screen (the picker's row scheme is
+  // other agents' territory — this only records what IS there, verbatim).
+  const all = await driver.eval(() =>
+    Array.from(document.querySelectorAll('[data-testid^="convert-dest"]')).map((el) => ({
+      id: el.getAttribute('data-testid'),
+      text: (el.innerText || '').replace(/\s*\n\s*/g, ' | ').trim().slice(0, 70),
+    })),
+  );
+  console.log('[live] dest-picker testIDs (no route-* rows):', JSON.stringify(all, null, 1));
+  return [];
 }
 
 async function pickDest(driver, substr, {timeoutMs = 15_000} = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const routes = await listDestRoutes(driver);
-    const hit = routes.find((r) => r.id.includes(substr) || r.text.includes(substr));
-    if (hit) {
-      log(`dest picked: ${hit.id} — ${hit.text}`);
-      await driver.click(hit.id);
-      return hit;
+    // Candidate scheme (this build): destination-currency rows `convert-dest-inwallet-<cur>`,
+    // mechanism rows `convert-dest-mech-*`, and the older `convert-dest-route-*` rows. Prefer
+    // the destination-currency row on a hit; the mechanism sub-picker defaults sensibly and
+    // readQuote records exactly which route was chosen.
+    const rows = await driver.eval(() =>
+      Array.from(document.querySelectorAll('[data-testid^="convert-dest-"]')).map((el) => ({
+        id: el.getAttribute('data-testid'),
+        text: (el.innerText || '').replace(/\s*\n\s*/g, ' | ').trim(),
+      })).filter((r) => r.id !== 'convert-dest' && r.id !== 'convert-dest-mechs'
+        && r.id !== 'convert-dest-cross-note' && !r.id.endsWith('-address')
+        && !r.id.endsWith('-invalid') && !r.id.startsWith('convert-dest-mechs')),
+    );
+    const rank = (id) => (id.startsWith('convert-dest-inwallet-') ? 0
+      : id.startsWith('convert-dest-route-') ? 1 : 2);
+    const hits = rows.filter((r) => r.id.includes(substr) || r.text.toLowerCase().includes(String(substr).toLowerCase()))
+      .sort((a, b) => rank(a.id) - rank(b.id));
+    if (hits.length > 0) {
+      log(`dest picked: ${hits[0].id} — ${hits[0].text}`);
+      await driver.click(hits[0].id);
+      return hits[0];
     }
     if (Date.now() > deadline) {
-      throw new Error(`pickDest: no dest route matching ${JSON.stringify(substr)}; options: ${JSON.stringify(routes, null, 2)}`);
+      throw new Error(`pickDest: no dest row matching ${JSON.stringify(substr)}; options: ${JSON.stringify(rows, null, 2)}`);
     }
     await sleep(300);
   }
@@ -212,8 +255,11 @@ async function watchConvert(driver, label, {timeoutMs, shotEveryMs = 60_000}) {
       await driver.screenshot(`live-${label}-done`);
       return {ended: 'convert-done', text};
     }
-    let step = '(waiting)';
+    let step = '(form)';
     if (await driver.isPresent('convert-step')) step = await driver.readText('convert-step');
+    else if (await driver.isPresent('convert-awaiting-deposit')) step = 'awaiting-deposit (cefi handoff)';
+    else if (await driver.isPresent('convert-approving')) step = 'approving';
+    else if (await driver.isPresent('convert-pending')) step = 'pending';
     if (step !== last) {
       log(`watch ${label}: ${step}`);
       last = step;
@@ -344,8 +390,8 @@ async function cmdB(icpAmount) {
     await driver.click('btn-send-done');
 
     // Back to Convert — the resume engine adopts the parked shift and polls it to settlement.
+    // The send surface left the Pay tab with ICP still the selected asset.
     await openBalances(driver);
-    await selectCurrency(driver, 'icp');
     await driver.click('btn-accounts-convert');
     const res = await watchConvert(driver, 'b', {timeoutMs: 25 * 60_000});
     log(`OP B result: ${res.ended}: ${res.text}`);
@@ -405,8 +451,8 @@ async function cmdC3(eurcAmount) {
 
 async function cmdWatch() {
   await withApp(async (driver) => {
-    await openBalances(driver);
     await selectCurrency(driver, 'icp');
+    await openBalances(driver);
     await driver.click('btn-accounts-convert');
     const res = await watchConvert(driver, 'watch', {timeoutMs: 20 * 60_000});
     log(`watch result: ${res.ended}: ${res.text}`);
