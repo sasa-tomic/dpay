@@ -83,7 +83,7 @@ copy. Update BOTH whenever a wallet is added, rotated, or abandoned.
 
 | Wallet | Chain | Address | Secret | Status | What it is for |
 |--------|-------|---------|--------|--------|----------------|
-| `icp-float` | ICP | `vloyo-oihno-j4uba-nhhke-zyh34-s2r4g-kwgx3-qkzzk-4svfu-focgr-5ae` | `secrets/agent-icp.sops.json` | live | The mainnet test float itself (ICP / VCHF / ckBTC); custody `scripts/agent-key.mjs`; created 2026-09-05 |
+| `icp-float` | ICP | `vloyo-oihno-j4uba-nhhke-zyh34-s2r4g-kwgx3-qkzzk-4svfu-focgr-5ae` | `secrets/agent-icp.sops.json` | live | The mainnet test float itself — `agent-balance` measures EVERY ICRC ledger in the bundled catalog (currently ICP, VCHF, ckUSDC, ckBTC, ckETH); custody `scripts/agent-key.mjs`; created 2026-09-05 |
 | `sol-float` | Solana | `4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU` | `secrets/agent-sol.sops.json` | live, unfunded | Solana-side float (native SOL + USDC/EURC SPL); custody `scripts/agent-sol.mjs`; created 2026-09-19 |
 | `icp-float-old` | ICP | `lrdna-ain6m-ja6ko-ac4j2-jqk3t-nqs22-4irws-bsm3b-trzzq-3yfz6-mqe` | none (destroyed) | **abandoned — NEVER FUND** | Pre-rotation principal, compromised 2026-09-05 and emptied by the same-day rotation; listed so no fresh context ever funds it |
 
@@ -108,6 +108,23 @@ To fund the SOL wallet: run the CeFi convert in the app (local relay with the en
 ~1.04 ICP from the IC float to `4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU`, or the founder
 drips SOL directly. Until the shift runs, the wallet stays at a measured 0 — via
 `just agent-funds`, never an assumption.
+
+## Funding the float — do not guess the address
+
+A top-up sent to a wrong address string is not recoverable by care — only by procedure. The old
+float principal `lrdna-…-mqe` (full form in the registry above) is DESTROYED: its seed no longer
+exists anywhere, so a misdirected send there is gone forever. `just agent-funds` watches it every
+run and trips a loud MISDIRECTED FUNDING alarm if funds ever appear — but the alarm is the
+post-mortem, the procedure below is the prevention:
+
+1. run `just agent-principal` and copy the address from ITS OUTPUT — never from memory, chat
+   scrollback, or an older doc;
+2. paste-send the top-up;
+3. within a minute run `just agent-history` and CONFIRM the IN row — only then is the top-up
+   considered landed.
+
+Same discipline for the SOL wallet: `just agent-sol-principal`, paste-send, then `just agent-funds`
+must show the arrival before anything depends on it.
 
 ## Recovery
 
