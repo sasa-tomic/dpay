@@ -1,0 +1,36 @@
+{
+  "note": "Authoritative registry of EVERY wallet the agent controls (founder ask, 2026-09-19: version-controlled, so a fresh clone finds them all). Addresses are public; seeds live ONLY sops-encrypted under secrets/. The registry table in docs/AGENT-FUNDS.md is RENDERED from this file by scripts/funds.mjs doc — edit wallets here, never in the doc.",
+  "wallets": [
+    {
+      "id": "icp-float",
+      "chain": "icp",
+      "address": "vloyo-oihno-j4uba-nhhke-zyh34-s2r4g-kwgx3-qkzzk-4svfu-focgr-5ae",
+      "status": "live",
+      "custody": "scripts/agent-key.mjs",
+      "secret": "secrets/agent-icp.sops.json",
+      "created": "2026-09-05",
+      "purpose": "The mainnet test float itself — agent-balance measures EVERY ICRC ledger in the bundled catalog (currently ICP / VCHF / ckUSDC / ckBTC / ckETH); rules in CLAUDE.md, record in funds/ledger.jsonl"
+    },
+    {
+      "id": "sol-float",
+      "chain": "solana",
+      "address": "4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU",
+      "status": "live-unfunded",
+      "custody": "scripts/agent-sol.mjs",
+      "secret": "secrets/agent-sol.sops.json",
+      "created": "2026-09-19",
+      "purpose": "Solana-side float (native SOL + USDC/EURC SPL); funded via the SideShift partner key (secrets/sideshift.sops.json) or a direct founder drip"
+    },
+    {
+      "id": "icp-float-old",
+      "chain": "icp",
+      "address": "lrdna-ain6m-ja6ko-ac4j2-jqk3t-nqs22-4irws-bsm3b-trzzq-3yfz6-mqe",
+      "status": "abandoned-never-fund",
+      "custody": null,
+      "secret": null,
+      "created": "2026-09-01",
+      "abandoned": "2026-09-05",
+      "purpose": "Pre-rotation principal, compromised 2026-09-05 (partial key disclosure into a local tool log) and emptied by the same-day rotation; seed DESTROYED — a misdirected send here is unrecoverable. agent-funds watches it; funds-reconcile anchors it at measured 0"
+    }
+  ]
+}

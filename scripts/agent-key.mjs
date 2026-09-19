@@ -158,12 +158,17 @@ async function cmdSeed() {
 }
 
 async function cmdBalance() {
-  // An explicit principal measures THAT principal (agent-funds' abandoned-principal watch passes
-  // one) and deliberately needs no key file at all — ledger balances are public.
-  const principal = process.argv[3] ?? readPub().principal;
+  // An explicit principal measures THAT principal (agent-funds' abandoned-principal watch and
+  // funds-reconcile pass one) and deliberately needs no key file at all — ledger balances are
+  // public. `--json` switches to a machine-readable form (same measures, same rules) for
+  // scripts/funds.mjs reconcile; the human-readable shape is unchanged.
+  const rest = process.argv.slice(3);
+  const json = rest.includes('--json');
+  const principal = rest.find(a => a !== '--json') ?? readPub().principal;
   const truth = JSON.parse(readFileSync(TRUTH, 'utf8'));
   const assets = census(truth);
-  console.log(`principal ${principal}`);
+  const out = [];
+  if (!json) console.log(`principal ${principal}`);
   for (const a of assets) {
     const ledger = truth.principals[a.ledgerKey];
     const dec = truth.decimals[a.decKey];
@@ -177,12 +182,17 @@ async function cmdBalance() {
       raw = BigInt(out.replace(/[^0-9]/g, ''));
     } catch (e) {
       // Never print a zero we did not measure — an unreachable ledger is not an empty balance.
-      console.log(`  ${a.label.padEnd(6)} UNREADABLE (${e.message.split('\n')[0]})`);
+      const why = e.message.split('\n')[0];
+      if (json) out.push({label: a.label, unreadable: why});
+      else console.log(`  ${a.label.padEnd(6)} UNREADABLE (${why})`);
       continue;
     }
     const s = raw.toString().padStart(dec + 1, '0');
-    console.log(`  ${a.label.padEnd(6)} ${s.slice(0, -dec)}.${s.slice(-dec)}`);
+    const val = `${s.slice(0, -dec)}.${s.slice(-dec)}`;
+    if (json) out.push({label: a.label, value: val});
+    else console.log(`  ${a.label.padEnd(6)} ${val}`);
   }
+  if (json) console.log(JSON.stringify({principal, rows: out}));
 }
 
 

@@ -1,0 +1,240 @@
+#!/usr/bin/env node
+// The ONLY interfaces to the agent-funds record — the testruns.py precedent, applied to money
+// (founder ask 2026-09-19: the record must be version-controlled, and using the tooling is a HARD
+// rule, not a habit):
+//
+//   add        append ONE validated movement to funds/ledger.jsonl. The JSONL is append-only and
+//              this is its only writer — corrections are NEW `correction` rows referencing the
+//              original, never edits.
+//   import F   append many validated rows from a JSON array file (backfill / ingesting rows that
+//              were hand-written into the doc before this tooling existed).
+//   doc        re-render the two GENERATED tables in docs/AGENT-FUNDS.md from funds/ (the
+//              FLOWS.md pattern: committed doc, rendered tables, hand-written prose around them).
+//   reconcile  computed-from-ledger vs MEASURED live balances per wallet/asset. The carelessness
+//              tripwire: any movement after a wallet's genesis anchor that has no ledger row is a
+//              loud DRIFT and a nonzero exit — an unrecorded movement can never look clean.
+//
+// Why committed files: the record survives fresh clones and fresh contexts.
+// funds/wallets.json is the authoritative wallet registry (it REPLACES the gitignored
+// .dev/agent-wallets.json). Addresses are public; seeds stay sops-encrypted under secrets/ —
+// nothing in funds/ is secret. Why genesis rows: each wallet/asset anchors at a MEASURED balance;
+// ledger rows dated before their anchor are absorbed history (kept for audit), rows after it must
+// be explained exactly by the math, or reconcile fails.
+//
+// Usage:
+//   node scripts/funds.mjs add --kind spend --wallet icp-float --asset ICP --amount 0.01 \
+//        --direction out --counterparty "..." --tx icp:12345 --purpose "..."
+//   node scripts/funds.mjs import /tmp/opencode/backfill.json   (shred the file afterwards)
+//   node scripts/funds.mjs doc
+//   node scripts/funds.mjs reconcile
+import {readFileSync, writeFileSync, existsSync, appendFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {dirname, join} from 'node:path';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const LEDGER = join(ROOT, 'funds/ledger.jsonl');
+const WALLETS = join(ROOT, 'funds/wallets.json');
+const DOC = join(ROOT, 'docs/AGENT-FUNDS.md');
+const KEY = join(ROOT, 'scripts/agent-key.mjs');
+const SOL = join(ROOT, 'scripts/agent-sol.mjs');
+const KINDS = ['genesis', 'deposit', 'spend', 'convert', 'fee', 'correction'];
+const FIELDS = ['ts', 'kind', 'wallet', 'asset', 'amount', 'direction', 'counterparty', 'tx', 'purpose'];
+const DEC = /^\d+(\.\d+)?$/;
+const TS = /^\d{4}-\d{2}-\d{2}(T[\d:.]+Z)?$/;
+
+function die(msg) {
+  console.error(`funds: ${msg}`);
+  process.exit(1);
+}
+
+function wallets() {
+  return JSON.parse(readFileSync(WALLETS, 'utf8')).wallets;
+}
+
+function rows() {
+  if (!existsSync(LEDGER)) return [];
+  return readFileSync(LEDGER, 'utf8').split('\n').filter(l => l.trim()).map((l, i) => {
+    try { return JSON.parse(l); }
+    catch (e) { die(`${LEDGER}:${i + 1} is not valid JSON — the ledger is corrupt; repair by APPENDING a correction row, never by editing (${e.message})`); }
+  });
+}
+
+/** Validate one row and return it serialized in canonical field order. Dies loudly — a ledger
+ *  row that cannot be parsed later is worse than no row. */
+function validate(r) {
+  const miss = FIELDS.filter(f => r[f] === undefined);
+  if (miss.length) die(`row is missing field(s): ${miss.join(', ')}`);
+  if (!KINDS.includes(r.kind)) die(`bad kind "${r.kind}" — one of ${KINDS.join('|')}`);
+  if (!['in', 'out'].includes(r.direction)) die(`bad direction "${r.direction}" — in|out`);
+  if (!DEC.test(r.amount)) die(`bad amount "${r.amount}" — plain decimal string like 0.02`);
+  if (!TS.test(r.ts)) die(`bad ts "${r.ts}" — ISO date (2026-09-19) or full ISO timestamp`);
+  if (typeof r.purpose !== 'string' || !r.purpose.trim()) {
+    die('purpose is required — the ledger records what moved, the purpose records WHY');
+  }
+  if (r.kind === 'genesis' && r.direction !== 'in') die('genesis rows are direction in');
+  if (r.kind === 'deposit' && r.direction !== 'in') die('deposit rows are direction in');
+  if (['spend', 'fee'].includes(r.kind) && r.direction !== 'out') die(`${r.kind} rows are direction out`);
+  if (!wallets().some(w => w.id === r.wallet)) die(`unknown wallet "${r.wallet}" — funds/wallets.json is the registry`);
+  for (const f of ['counterparty', 'tx']) {
+    if (r[f] !== null && typeof r[f] !== 'string') die(`${f} must be a string or null`);
+  }
+  return JSON.stringify({
+    ts: r.ts, kind: r.kind, wallet: r.wallet, asset: r.asset, amount: r.amount,
+    direction: r.direction, counterparty: r.counterparty ?? null, tx: r.tx ?? null, purpose: r.purpose,
+  });
+}
+
+function append(line) {
+  appendFileSync(LEDGER, line + '\n');
+}
+
+function cmdAdd() {
+  const a = process.argv.slice(3);
+  if (a.length % 2) die('usage: funds.mjs add --field value ... (--ts/--counterparty/--tx optional)');
+  const r = {};
+  for (let i = 0; i < a.length; i += 2) {
+    if (!a[i].startsWith('--')) die(`expected --field at "${a[i]}"`);
+    r[a[i].slice(2)] = a[i + 1];
+  }
+  if (!r.ts) r.ts = new Date().toISOString();
+  if (!r.ts.includes('T')) die('add requires a FULL ISO timestamp — bare dates are for import (history rows only); a bare date can sort before today\'s genesis instant and be silently absorbed');
+  const line = validate(r);
+  append(line);
+  const n = rows().length;
+  console.log(`funds: appended row ${n} — ${r.kind} ${r.direction} ${r.amount} ${r.asset} (${r.wallet})`);
+}
+
+function cmdImport() {
+  const file = process.argv[3];
+  if (!file) die('usage: funds.mjs import <file-with-JSON-array> — shred the file afterwards');
+  const list = JSON.parse(readFileSync(file, 'utf8'));
+  if (!Array.isArray(list)) die(`${file} must contain a JSON array of rows`);
+  for (const r of list) append(validate(r));
+  console.log(`funds: appended ${list.length} rows (${rows().length} total)`);
+}
+
+/** The two GENERATED regions in docs/AGENT-FUNDS.md, rendered from funds/. Idempotent: the same
+ *  funds/ always renders the same bytes. Hand-edits inside the markers are LOST on the next
+ *  render — that is the point; rows are ingested through add/import instead. */
+function cmdDoc() {
+  const rs = rows().slice().sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+  const wtab = [
+    '| Wallet | Chain | Address | Secret | Status | What it is for |',
+    '|--------|-------|---------|--------|--------|----------------|',
+    ...wallets().map(w =>
+      `| \`${w.id}\` | ${w.chain} | \`${w.address}\` | ${w.secret ? `\`${w.secret}\`` : 'none (destroyed)'} | `
+      + `${w.status === 'abandoned-never-fund' ? '**abandoned — NEVER FUND**' : w.status} | ${w.purpose}`
+      + `${w.custody ? `; custody \`${w.custody}\`` : ''} |`),
+  ];
+  const stab = [
+    '| Date | Kind | Wallet | Asset | Amount | To / From | Tx | Purpose |',
+    '|------|------|--------|-------|--------|-----------|----|---------|',
+    ...rs.map(r =>
+      `| ${r.ts.slice(0, 10)} | ${r.kind} | \`${r.wallet}\` | ${r.asset} | `
+      + `${r.direction === 'in' ? '+' : '-'}${r.amount} | ${r.counterparty ?? '—'} | `
+      + `${r.tx ? `\`${r.tx}\`` : '—'} | ${r.purpose} |`),
+  ];
+  renderRegion(wtab, 'wallets');
+  renderRegion(stab, 'spendlog');
+  console.log('funds: rendered docs/AGENT-FUNDS.md GENERATED tables (wallets, spendlog)');
+}
+
+function renderRegion(lines, name) {
+  const open = `<!-- GENERATED:${name} -->`;
+  const close = `<!-- /GENERATED:${name} -->`;
+  const src = readFileSync(DOC, 'utf8');
+  const a = src.indexOf(open);
+  const b = src.indexOf(close);
+  if (a < 0 || b < 0 || b < a) die(`${DOC}: GENERATED markers for ${name} are missing — re-add them before rendering`);
+  const note = '_GENERATED by `scripts/funds.mjs doc` from `funds/` — do not hand-edit. '
+    + 'Record a movement with `node scripts/funds.mjs add …` (hard rule), then re-render with `just funds-doc`._';
+  writeFileSync(DOC, `${src.slice(0, a + open.length)}\n${note}\n\n${lines.join('\n')}\n${src.slice(b)}`);
+}
+
+// --- reconcile -------------------------------------------------------------
+
+/** Decimal string → BigInt at a fixed scale, so 0.129610 === 0.12961 compares equal. */
+function scaled(s, scale) {
+  const [i, f = ''] = s.split('.');
+  return BigInt(i + f.padEnd(scale, '0'));
+}
+function fracLen(s) { return s.includes('.') ? s.split('.')[1].length : 0; }
+function eq(a, b) { const m = Math.max(fracLen(a), fracLen(b)); return scaled(a, m) === scaled(b, m); }
+
+/** Ledger math: per wallet/asset, the genesis anchor plus every movement dated AFTER it.
+ *  Rows dated before the anchor are absorbed history — audit-only by design. */
+function computed() {
+  const map = new Map();
+  for (const r of rows()) {
+    const k = `${r.wallet}/${r.asset}`;
+    if (r.kind === 'genesis') {
+      if (map.has(k)) die(`two genesis anchors for ${k} — corrections are rows, never a second anchor`);
+      map.set(k, {gen: r.amount, genTs: r.ts, moves: []});
+      continue;
+    }
+    const e = map.get(k);
+    if (e) e.moves.push(r); // no anchor yet → absorbed history; after the anchor → counted
+  }
+  return map;
+}
+
+/** MEASURED balances through the custody scripts' own `balance --json` (one balance
+ *  implementation per chain; the abandoned principal needs no key at all). */
+function measure(w) {
+  const script = w.status === 'abandoned-never-fund' ? [KEY, 'balance', w.address, '--json']
+    : w.chain === 'icp' ? [KEY, 'balance', '--json'] : [SOL, 'balance', '--json'];
+  try {
+    const out = execFileSync(process.execPath, script, {
+      encoding: 'utf8', cwd: ROOT, timeout: 300_000, stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    return JSON.parse(out);
+  } catch (e) {
+    return null; // every pair of this wallet becomes UNKNOWN — never zero
+  }
+}
+
+function cmdReconcile() {
+  const comp = computed();
+  let bad = 0, unknown = 0, pairs = 0;
+  const fail = m => { console.log(m); bad++; };
+  console.log('funds reconcile — computed-from-ledger vs MEASURED live (an unrecorded movement cannot look clean)');
+  for (const w of wallets()) {
+    const m = measure(w);
+    if (!m) { unknown++; console.log('  (wallet measure failed — every asset UNKNOWN, never zero)'); continue; }
+    const measured = new Map((m.rows ?? []).map(r => [r.label, r]));
+    console.log(`\nwallet ${w.id} (${w.status})${m ? '' : ' — UNREADABLE'}`);
+    const seen = new Set();
+    for (const r of m?.rows ?? []) {
+      if (r.unreadable !== undefined) { unknown++; console.log(`  ${r.label.padEnd(6)} UNKNOWN  (measure failed: ${r.unreadable})`); continue; }
+      const k = `${w.id}/${r.label}`;
+      const e = comp.get(k);
+      seen.add(r.label);
+      if (!e) { fail(`  ${r.label.padEnd(6)} DRIFT    measured ${r.value} — no genesis anchor in the ledger; add one`); continue; }
+      let sum = 0n;
+      const scale = Math.max(fracLen(e.gen), ...e.moves.map(x => fracLen(x.amount)), fracLen(r.value));
+      for (const x of e.moves) sum += scaled(x.amount, scale) * (x.direction === 'in' ? 1n : -1n);
+      const want = (scaled(e.gen, scale) + sum).toString().padStart(scale + 1, '0');
+      const computedStr = `${want.slice(0, -scale)}.${want.slice(-scale)}`;
+      pairs++;
+      if (eq(computedStr, r.value)) console.log(`  ${r.label.padEnd(6)} OK       computed ${computedStr}  measured ${r.value}`);
+      else fail(`  ${r.label.padEnd(6)} DRIFT    computed ${computedStr}  measured ${r.value} — a movement has no ledger row; record it (scripts/funds.mjs add) and re-run`);
+    }
+    for (const [k, e] of comp) {
+      if (!k.startsWith(`${w.id}/`)) continue;
+      const asset = k.split('/')[1];
+      if (!seen.has(asset)) fail(`  ${asset.padEnd(6)} MAPPING  in the ledger but not in the balance output — asset name and balance label disagree`);
+    }
+  }
+  console.log(`\nresult: ${pairs} pair(s) checked — ${bad === 0 && unknown === 0 ? 'CLEAN' : `${bad} drift/mapping, ${unknown} unknown`}`);
+  if (bad || unknown) {
+    console.log('A DRIFT is an unrecorded movement: append the missing row(s) — never edit existing ones.');
+    console.log('UNKNOWN is not clean either: a balance that cannot be measured cannot be certified.');
+    process.exit(1);
+  }
+}
+
+const CMDS = {add: cmdAdd, import: cmdImport, doc: cmdDoc, reconcile: cmdReconcile};
+const cmd = process.argv[2];
+if (!CMDS[cmd]) die(`usage: funds.mjs <${Object.keys(CMDS).join('|')}>`);
+CMDS[cmd]();

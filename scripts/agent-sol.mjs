@@ -159,14 +159,22 @@ async function cmdSeed() {
 }
 
 async function cmdBalance() {
+  // `--json` is the machine-readable form of the exact same measures (for scripts/funds.mjs
+  // reconcile); the human-readable shape is unchanged.
+  const json = process.argv.slice(3).includes('--json');
   const {address} = readPub();
-  console.log(`address   ${address}`);
+  const rows = [];
+  if (!json) console.log(`address   ${address}`);
   try {
     const lamports = BigInt((await rpc('getBalance', [address])).value);
-    console.log(`  ${'SOL'.padEnd(6)} ${fmt(lamports, 9)}`);
+    const val = fmt(lamports, 9);
+    if (json) rows.push({label: 'SOL', value: val});
+    else console.log(`  ${'SOL'.padEnd(6)} ${val}`);
   } catch (e) {
     // Never print a zero we did not measure — an unreachable RPC is not an empty balance.
-    console.log(`  ${'SOL'.padEnd(6)} UNREADABLE (${String(e.message).split('\n')[0]})`);
+    const why = String(e.message).split('\n')[0];
+    if (json) rows.push({label: 'SOL', unreadable: why});
+    else console.log(`  ${'SOL'.padEnd(6)} UNREADABLE (${why})`);
   }
   for (const t of TOKENS) {
     try {
@@ -178,11 +186,16 @@ async function cmdBalance() {
         dec = info.tokenAmount.decimals;
       }
       // An absent SPL account is a measured zero (the RPC answered), not a failed lookup.
-      console.log(`  ${t.label.padEnd(6)} ${fmt(raw, dec)}`);
+      const val = fmt(raw, dec);
+      if (json) rows.push({label: t.label, value: val});
+      else console.log(`  ${t.label.padEnd(6)} ${val}`);
     } catch (e) {
-      console.log(`  ${t.label.padEnd(6)} UNREADABLE (${String(e.message).split('\n')[0]})`);
+      const why = String(e.message).split('\n')[0];
+      if (json) rows.push({label: t.label, unreadable: why});
+      else console.log(`  ${t.label.padEnd(6)} UNREADABLE (${why})`);
     }
   }
+  if (json) console.log(JSON.stringify({address, rows}));
 }
 
 const CMDS = {init: cmdInit, principal: cmdPrincipal, seed: cmdSeed, balance: cmdBalance};
