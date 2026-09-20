@@ -169,6 +169,17 @@ log: `docs/AGENT-FUNDS.md`. The rules bind here because they must be in context 
   `just funds reconcile` must be CLEAN before the session claims completion. Never hand-edit the
   JSONL or the GENERATED doc tables (the testruns.py precedent: one interface). A session that
   moved float funds without ledger rows is INCOMPLETE.
+- **The wallet census is complete or the tooling is lying — hard rule (2026-09-20).** EVERY wallet
+  AND derived address that holds or receives value MUST be registered in `funds/wallets.json` in
+  the same session it is created or first used. `just funds` is the complete census: an address
+  appearing in any history, reconciliation, or driver log that is NOT a registered wallet is a
+  defect to fix immediately. No ephemeral or side addresses, ever. (Exposed 2026-09-20: the app's
+  derived SOL rail held the real SOL/USDC/EURC while `just funds` showed only an unused wallet.)
+- **Every private key is persisted or it must not hold value — hard rule (2026-09-20).** Every key
+  the agent creates or uses is sops-encrypted under `secrets/` (per the `.sops.yaml` creation
+  rule), committed, and decrypt-verified in the SAME session it is created; derivation paths for
+  derived keys are documented in docs/AGENT-FUNDS.md so a fresh session can always re-derive. A
+  key that is not persisted is forbidden from holding value (the destroyed-principal precedent).
 
 ## Projects
 
