@@ -5,7 +5,7 @@
 // lock. Founder rule: every currency through the SAME UI surfaces — per-rail divergence is a bug.
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
-import {describe, expect, jest, test} from '@jest/globals';
+import {beforeEach, describe, expect, jest, test} from '@jest/globals';
 
 jest.mock('../services/native', () => ({
   DpayCore: {
@@ -74,6 +74,7 @@ function mount() {
         selectedAsset={EURC_ASSET}
         assetBalances={{}}
         solana={{sol: '5000000000', tokens: BALANCES}}
+        onActivity={() => undefined}
         onBack={() => undefined}
         onShowDepositAddress={() => undefined}
       />,
