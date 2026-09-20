@@ -1539,14 +1539,18 @@ export function gasFundNeededWei(gasFeeWei: string): bigint {
  *  `neededWei`. Sizing starts at the whole spendable budget and SHRINKS toward the smallest
  *  input that still covers (≤4 re-quotes, +5% margin) — never up past the budget. Every
  *  quote must name its route leg exactly (venue, pool, pair, live direction) or the route
- *  is unusable. Null = this route cannot fund the target (or cannot be quoted at all). */
+ *  is unusable. Null = this route cannot fund the target (or cannot be quoted at all);
+ *  otherwise the winner carries `probeFloor` — the first pass's floor at the FULL budget,
+ *  the route's honest deliverability, which ranking compares (the shrunk plan's floor is
+ *  ~equal for every fundable route by construction, so ranking on it would be a tie-break
+ *  of margin noise, not of net). */
 async function resolveGasFundRoute(args: {
   relayUrl: string;
   route: GasFundRoute;
   slippageBps: number;
   budget: bigint;
   neededWei: bigint;
-}): Promise<ResolvedGasFundPlan | null> {
+}): Promise<{plan: ResolvedGasFundPlan; probeFloor: bigint} | null> {
   const {relayUrl, route: r, slippageBps, budget, neededWei} = args;
   const endpoints = r.hub != null ? [r.from, r.hub, r.dest] : [r.from, r.dest];
   const chainOnce = async (input: bigint): Promise<ResolvedGasFundPlan['legs'] | null> => {
@@ -1580,18 +1584,20 @@ async function resolveGasFundRoute(args: {
     return legs;
   };
   let best: ResolvedGasFundPlan | null = null;
+  let probeFloor = 0n; // the FIRST pass's floor at the full budget — the route's deliverability
   let input = budget;
   for (let k = 0; k < 4; k += 1) {
     const legs = await chainOnce(input);
     if (legs == null) break;
     const floor = BigInt(legs[legs.length - 1]!.minOut);
     if (floor < neededWei) break; // under target — a smaller input never covers either
+    if (k === 0) probeFloor = floor;
     best = {neededWei: neededWei.toString(), legs};
     const scaled = (input * neededWei * 105n) / (floor * 100n) + 1n; // shrink toward the target
     if (scaled >= input) break; // converged at the floor's own resolution
     input = scaled;
   }
-  return best;
+  return best == null ? null : {plan: best, probeFloor};
 }
 
 /** Resolve the gas-fund plan for one cross-rail intent (2026-09-20): which in-wallet IC
@@ -1632,7 +1638,13 @@ export async function resolveGasFundPlan(args: {
     const bal = BigInt(balRaw);
     if (bal <= 0n) continue;
     const sameLedger = row.ledger === route.from.ledger;
-    if (sameLedger && bal < mainIn + mainInFee * 2n + neededWei) continue; // the squeeze gate
+    // The one-shared-balance rule, coarse pre-quote half: a source that cannot even cover
+    // the MAIN intent's own draw (amount + both approves' fees) is out before any quote.
+    // The "+gasNeed +floors" half is enforced EXACTLY by the budget cap below — sizing
+    // quotes in the source's own units (a raw cross-ledger comparison here would be
+    // unit-blind), and a budget that cannot reach the target kills the route instead of
+    // ever shrinking the main amount.
+    if (sameLedger && bal < mainIn + mainInFee * 2n) continue;
     for (const r of gasFundRoutes(catalog, row.ledger, route.burn.gasLedger)) {
       // Spendable for the funding flow: the balance minus the funding approve's own fee,
       // and for the shared source minus the main intent's own draw (amount + its fee).
@@ -1641,8 +1653,7 @@ export async function resolveGasFundPlan(args: {
       if (budget <= 0n) continue;
       const plan = await resolveGasFundRoute({relayUrl, route: r, slippageBps, budget, neededWei});
       if (plan == null) continue;
-      const floor = BigInt(plan.legs[plan.legs.length - 1]!.minOut);
-      if (best == null || floor > best.floor) best = {plan, floor};
+      if (best == null || plan.probeFloor > best.floor) best = {plan: plan.plan, floor: plan.probeFloor};
     }
   }
   return best?.plan ?? null;

@@ -11,6 +11,9 @@
 //     answers 404 "Message not found…" until the burn is attested; the stub mirrors that,
 //     then a scripted state machine the TEST advances from node (pending → attested →
 //     complete, where complete carries the forwardTxHash = Circle's own destination mint).
+//   * POST https://ethereum-rpc.publicnode.com eth_getBalance — the gas-fund widening's
+//     read of the user's EXTERNAL wallet (app/cctp.ts fetchEthBalance, the same staging
+//     the 2026-09-15 live eth_call verification used). Answers a fixed hex-wei balance.
 //
 // The state lives at globalThis.__E2E_CCTP so the flow can drive and read it via driver.eval
 // (setCctpMessageState / cctpStubState below). No other seam: the app's own fetchCctpBurnFee /
@@ -44,6 +47,7 @@ export async function installCctpStub(driver, cfg) {
       state: 'pending', // 'pending' | 'attested' | 'complete' — the test advances this
       feesCalls: 0,
       messageCalls: [], // {hash, state} — every status poll, in order
+      balanceCalls: [], // {address} — every external-wallet eth_getBalance, in order
       unexpected: [],
     };
     const orig = window.fetch.bind(window);
@@ -54,6 +58,18 @@ export async function installCctpStub(driver, cfg) {
         parsed = new URL(url, window.location.href);
       } catch {
         return orig(input, init);
+      }
+      if (parsed.origin === 'https://ethereum-rpc.publicnode.com') {
+        let body = {};
+        try { body = JSON.parse((init && init.body) || '{}'); } catch { /* fall through */ }
+        if (body.method === 'eth_getBalance') {
+          globalThis.__E2E_CCTP.balanceCalls.push({address: body.params && body.params[0]});
+          return Promise.resolve(new Response(JSON.stringify({
+            jsonrpc: '2.0', id: body.id ?? 1, result: c.ethBalanceHex ?? '0x0',
+          }), {status: 200, headers: {'content-type': 'application/json'}}));
+        }
+        globalThis.__E2E_CCTP.unexpected.push(`publicnode-method:${body.method ?? '?'}`);
+        return Promise.reject(new Error(`e2e cctp stub: unexpected publicnode method ${body.method}`));
       }
       if (parsed.origin === 'https://iris-api.circle.com') {
         if (parsed.pathname.startsWith('/v2/burn/USDC/fees/')) {
@@ -92,7 +108,7 @@ export async function installCctpStub(driver, cfg) {
       globalThis.__E2E_CCTP.unexpected.push(parsed.origin);
       return Promise.reject(new Error(`e2e cctp stub: unexpected origin ${parsed.origin}`));
     };
-  }, {fees: cfg.fees, forwardTxHash: cfg.forwardTxHash ?? FORWARD_TX_HASH, passOrigins: cfg.passOrigins});
+  }, {fees: cfg.fees, forwardTxHash: cfg.forwardTxHash ?? FORWARD_TX_HASH, passOrigins: cfg.passOrigins, ethBalanceHex: cfg.ethBalanceHex});
 }
 
 /** Advance the scripted message state (the "user's wallet signed, Circle is working" clock). */
@@ -102,12 +118,13 @@ export async function setCctpMessageState(driver, state) {
   }, state);
 }
 
-/** Read the stub's counters (fees calls, status polls, refused origins). */
+/** Read the stub's counters (fees calls, status polls, balance reads, refused origins). */
 export async function cctpStubState(driver) {
   return driver.eval(() => ({
     state: globalThis.__E2E_CCTP.state,
     feesCalls: globalThis.__E2E_CCTP.feesCalls,
     messageCalls: globalThis.__E2E_CCTP.messageCalls,
+    balanceCalls: globalThis.__E2E_CCTP.balanceCalls ?? [],
     unexpected: globalThis.__E2E_CCTP.unexpected,
   }));
 }

@@ -36,6 +36,7 @@ jest.mock('../services/rail', () => ({
   submitTransfer: jest.fn(),
   fetchGasFeeWei: jest.fn(),
   fetchLedgerFee: jest.fn(),
+  railBalanceOf: jest.fn(),
 }));
 jest.mock('../solana', () => ({
   getSolBlockHeight: jest.fn(),
@@ -64,7 +65,8 @@ jest.mock('../services/jupiter', () => ({
 import {DpayCore} from '../services/native';
 import {icStampExpiry} from '../services/icp';
 import {relayFetch} from '../services/relay';
-import {fetchGasFeeWei, fetchLedgerFee, submitTransfer} from '../services/rail';
+import {fetchGasFeeWei, fetchLedgerFee, railBalanceOf, submitTransfer} from '../services/rail';
+import {fetchEthBalance} from '../cctp';
 import {
   getSolBlockHeight,
   getSolNativeCredit,
@@ -85,6 +87,7 @@ import {
   hydrateConvertStore,
   prepareCrossRailSolLeg,
   prepareMultihopConvertRecord,
+  resolveGasFundPlan,
   type ConvertMath,
   type ConvertQuote,
   type ConvertRecord,
@@ -693,5 +696,309 @@ describe('the EURC widening — Route C to a registered USDC-pair SPL out', () =
     expect(out.step).toBe('done');
     expect(out.outAmountNet).toBe(EURC_FLOOR);
     expect(out.failureDetail).toBe('payout-floor');
+  });
+});
+
+// =================================================================================================
+// The GAS-FUND widening (2026-09-20, founder-approved): when a route's burn legs need ckETH
+// the wallet does not have, the intent PREPENDS ordinary device-signed approve+swap legs
+// funding the user's OWN in-wallet ckETH. Pinned here: the route-resolution matrix (1-hop
+// direct vs 2-hop hub, largest-net pick, unquotable fallback, the same-asset squeeze rule
+// that NEVER shrinks the main amount), the chained-floor sizing (leg i+1 quoted on leg i's
+// minOut, final floor ≥ feeWei+20%), the double-gas guard at prepare, the frozen record
+// block, hydration compat (legacy byte-identical, malformed shapes dropped), and the
+// executor's post-pre-leg re-check (actual balance before approve_gas — short terminates
+// failed_leg/gas_short with nothing further submitted).
+// =================================================================================================
+
+describe('the gas-fund widening — resolution, prepare, hydration, execution', () => {
+  const NEEDED = 93600000000000n; // gasFundNeededWei('78000000000000') = fee × 1.2
+  const LED = (n: number): string => BUNDLED.find(c => c.currency === n)!.ledger!;
+  const MINTER = BUNDLED.find(c => c.currency === 2)!.minter!;
+  const ANGXA_POOL = 'angxa-baaaa-aaaag-qcvnq-cai'; // icpswap-cketh (ICP ↔ ckETH)
+  const ICPSWAP_POOL = '65mrh-fqaaa-aaaar-qapoa-cai'; // icpswap (VCHF ↔ ICP)
+  const AKBTC_POOL = 'akhru-myaaa-aaaag-qcvna-cai'; // icpswap-ckbtc-cketh (ckBTC ↔ ckETH)
+  const ROUTE = () => multihopRoutesFrom(BUNDLED, 8)[1]; // :cctp — ICP → ckUSDC → USDC@Sol
+
+  beforeEach(() => {
+    // The real floor arithmetic (1% slippage at the record's 100 bps) — the file default
+    // (a constant MIN_OUT) cannot express a CHAIN that shrinks per leg.
+    jest.mocked(DpayCore.icpSwapMinOut).mockImplementation(async (gross: unknown, bps: unknown) =>
+      ((BigInt(gross as string) * BigInt(10000 - (bps as number))) / 10000n).toString() as never);
+    jest.mocked(DpayCore.icpDecodeApproveResult).mockResolvedValue({ok: true} as never);
+  });
+
+  const CUR_OF_LEDGER: Record<string, number> = Object.fromEntries(
+    BUNDLED.filter(c => c.ledger != null).map(c => [c.ledger!, c.currency]),
+  );
+  const PAIR_META: Record<string, {venueId: string; pool: string}> = {
+    '8>6': {venueId: 'icpswap-cketh', pool: ANGXA_POOL}, '6>8': {venueId: 'icpswap-cketh', pool: ANGXA_POOL},
+    '7>8': {venueId: 'icpswap', pool: ICPSWAP_POOL}, '8>7': {venueId: 'icpswap', pool: ICPSWAP_POOL},
+    '1>6': {venueId: 'icpswap-ckbtc-cketh', pool: AKBTC_POOL}, '6>1': {venueId: 'icpswap-ckbtc-cketh', pool: AKBTC_POOL},
+    '8>2': {venueId: 'icpswap-ckusdc', pool: POOL}, '2>8': {venueId: 'icpswap-ckusdc', pool: POOL},
+  };
+  /** The relay's swap_quote stand-in: deterministic linear rates by currency pair; a pair
+   *  with no rate answers 422 (unquotable — the resolver must skip that route). */
+  function mockSwapQuotes(rates: Record<string, bigint>): string[] {
+    const amounts: string[] = [];
+    jest.mocked(relayFetch).mockImplementation(async (_u: unknown, rawPath: unknown) => {
+      const u = new URL('http://x' + String(rawPath));
+      if (u.pathname !== '/api/v1/swap_quote') return rowsRes([]) as never;
+      const tin = u.searchParams.get('token_in') ?? '';
+      const tout = u.searchParams.get('token_out') ?? '';
+      const amountIn = u.searchParams.get('amount_in') ?? '0';
+      amounts.push(amountIn);
+      const key = `${CUR_OF_LEDGER[tin]}>${CUR_OF_LEDGER[tout]}`;
+      const meta = PAIR_META[key];
+      const rate = rates[key];
+      if (meta == null || rate == null) return fakeRes({}, false, 422) as never;
+      return fakeRes({
+        venue_id: meta.venueId, pool: meta.pool, token_in: tin, token_out: tout,
+        amount_in: amountIn, amount_out: (BigInt(amountIn) * rate).toString(),
+        zero_for_one: true, fee_millionths: 3000, fetched_at: Math.floor(Date.now() / 1000),
+      }) as never;
+    });
+    return amounts;
+  }
+
+  async function plannedGasRecord(balances: Record<number, string>, have: string | null): Promise<ConvertRecord> {
+    jest.mocked(railBalanceOf).mockResolvedValueOnce(have as never);
+    return prepareMultihopConvertRecord({
+      secretHex: SECRET, quote: hopQuote(), math: hopMath(), route: ROUTE(), destAddress: DEST,
+      gasFund: {relayUrl: 'http://relay', balances},
+    });
+  }
+
+  async function execGas(rec: ConvertRecord, have: string | null): Promise<ConvertRecord> {
+    jest.mocked(railBalanceOf).mockResolvedValue(have as never);
+    jest.mocked(relayFetch).mockResolvedValue(rowsRes([
+      {currency: 2, from: POOL, to: myPrincipal, amount: '190000000', block: '7', timestamp: NOW()},
+    ]) as never);
+    const submittedCanisters: string[] = [];
+    jest.mocked(submitTransfer).mockImplementation(async (
+      prepared: unknown, _s: unknown, _o: unknown, decodeReply?: (h: string) => Promise<unknown>,
+    ) => {
+      submittedCanisters.push(String((prepared as {ledger?: string}).ledger));
+      if (decodeReply != null) await decodeReply('reply-hex');
+      return {kind: 'settled', blockIndex: '1'} as never;
+    });
+    const out = await executeConvert(rec, {
+      secretHex: SECRET, publicHex: 'aabb', relayUrl: 'http://relay', onUpdate: () => {},
+    }, OPTS);
+    (out as ConvertRecord & {submittedCanisters?: string[]}).submittedCanisters = submittedCanisters;
+    return out;
+  }
+
+  test('resolution — 2-hop hub route with chained floors: leg2 quoted on leg1 minOut, final floor covers fee+20%', async () => {
+    mockSwapQuotes({'7>8': 4n, '8>6': 320000n});
+    const plan = await resolveGasFundPlan({
+      secretHex: SECRET, relayUrl: 'http://relay', route: ROUTE(),
+      balances: {7: '1000000000'}, mainAmountIn: hopMath().amountIn, slippageBps: 100,
+    });
+    expect(plan).not.toBeNull();
+    expect(plan!.neededWei).toBe(NEEDED.toString());
+    expect(plan!.legs).toHaveLength(2);
+    expect(plan!.legs[0]!.venueId).toBe('icpswap');
+    expect(plan!.legs[0]!.fromLedger).toBe(LED(7));
+    expect(plan!.legs[1]!.venueId).toBe('icpswap-cketh');
+    expect(plan!.legs[1]!.inAmount).toBe(plan!.legs[0]!.minOut); // the compounding floor
+    expect(plan!.legs[1]!.toLedger).toBe(LED(6));
+    expect(BigInt(plan!.legs[1]!.minOut)).toBeGreaterThanOrEqual(NEEDED);
+    expect(BigInt(plan!.legs[0]!.inAmount)).toBeLessThanOrEqual(1000000000n);
+  });
+
+  test('resolution — largest-NET wins: a bigger direct floor beats the hub; unquotable direct falls back', async () => {
+    mockSwapQuotes({'7>8': 4n, '8>6': 320000n, '1>6': 400000n});
+    const best = await resolveGasFundPlan({
+      secretHex: SECRET, relayUrl: 'http://relay', route: ROUTE(),
+      balances: {1: '10000000000', 7: '1000000000'}, mainAmountIn: hopMath().amountIn, slippageBps: 100,
+    });
+    expect(best!.legs).toHaveLength(1); // ckBTC direct: ~3.96e15 floor > the VCHF hub's ~1.25e15
+    expect(best!.legs[0]!.venueId).toBe('icpswap-ckbtc-cketh');
+
+    delete PAIR_META['1>6']; // ckBTC→ckETH unquotable → the hub route must take over
+    const fallback = await resolveGasFundPlan({
+      secretHex: SECRET, relayUrl: 'http://relay', route: ROUTE(),
+      balances: {1: '10000000000', 7: '1000000000'}, mainAmountIn: hopMath().amountIn, slippageBps: 100,
+    });
+    PAIR_META['1>6'] = {venueId: 'icpswap-ckbtc-cketh', pool: AKBTC_POOL};
+    expect(fallback!.legs).toHaveLength(2);
+    expect(fallback!.legs[0]!.venueId).toBe('icpswap');
+  });
+
+  test('resolution — the same-asset squeeze: a barely-covering main source is NEVER drawn down; nothing shrinks the main amount', async () => {
+    // 1.01 ICP vs a 1 ICP main intent: it covers main + fees, so the coarse gate passes,
+    // but the leftover budget (~7.98e5 raw) cannot POSSIBLY reach 9.36e13 wei of ckETH —
+    // the route must die, not shrink the main amount. Every quote the resolver fires stays
+    // at the leftover scale, never near the main amount.
+    const amounts = mockSwapQuotes({'8>6': 320000n});
+    const plan = await resolveGasFundPlan({
+      secretHex: SECRET, relayUrl: 'http://relay', route: ROUTE(),
+      balances: {8: '101000000'}, mainAmountIn: hopMath().amountIn, slippageBps: 100,
+    });
+    expect(plan).toBeNull();
+    expect(amounts.length).toBeGreaterThan(0);
+    for (const a of amounts) expect(BigInt(a)).toBeLessThanOrEqual(6000000n);
+
+    // 300 ICP covers everything → the shared source funds the gas over the DIRECT venue.
+    const ok = await resolveGasFundPlan({
+      secretHex: SECRET, relayUrl: 'http://relay', route: ROUTE(),
+      balances: {8: '30000000000'}, mainAmountIn: hopMath().amountIn, slippageBps: 100,
+    });
+    expect(ok).not.toBeNull();
+    expect(ok!.legs).toHaveLength(1);
+    expect(ok!.legs[0]!.venueId).toBe('icpswap-cketh');
+    expect(ok!.legs[0]!.fromLedger).toBe(LED(8));
+    expect(BigInt(ok!.legs[0]!.minOut)).toBeGreaterThanOrEqual(NEEDED);
+  });
+
+  test('prepare — the record freezes the gasPre block, prepends approve+swap pairs, and keeps the plan rhythm', async () => {
+    mockSwapQuotes({'8>6': 320000n});
+    const rec = await plannedGasRecord({8: '30000000000'}, '1000000000'); // 1e9 wei < needed → fund
+    expect(rec.legPlan!.map(p => p.kind)).toEqual([
+      'approve', 'swap', // the funding pair, FIRST
+      'approve', 'swap', 'approve', 'approve_gas', 'withdraw_erc20', 'cctp_burn',
+    ]);
+    expect(rec.legs).toHaveLength(7); // 2 funding legs + the route's own five
+    expect(rec.legs[0]).toMatchObject({canister: LED(8), method: 'icrc2_approve'});
+    expect(rec.legs[1]).toMatchObject({canister: ANGXA_POOL, method: 'depositFromAndSwap'});
+    // The frozen block carries EXACTLY the six contract fields — the signer-side extras
+    // (zeroForOne, per-leg fees) live only in memory, never serialized.
+    expect(rec.gasPre!.neededWei).toBe(NEEDED.toString());
+    expect(rec.gasPre!.legs[0]).toEqual({
+      venueId: 'icpswap-cketh', pool: ANGXA_POOL, fromLedger: LED(8), toLedger: LED(6),
+      inAmount: rec.gasPre!.legs[0]!.inAmount, minOut: rec.gasPre!.legs[0]!.minOut,
+    });
+    expect(BigInt(rec.gasPre!.legs[0]!.minOut)).toBeGreaterThanOrEqual(NEEDED);
+    expect(BigInt(rec.gasPre!.legs[0]!.inAmount)).toBeLessThanOrEqual(30000000000n - 20000n);
+    // The pre-swap arg: (inAmount, minOut, fromFee, toFee, live direction) — the direct
+    // flow's exact builder, real catalog fees.
+    const swapCall = jest.mocked(DpayCore.icpDepositAndSwapArg).mock.calls[0]!;
+    expect(swapCall[0]).toBe(rec.gasPre!.legs[0]!.inAmount);
+    expect(swapCall[1]).toBe(rec.gasPre!.legs[0]!.minOut);
+    expect(swapCall[2]).toBe(BUNDLED.find(c => c.currency === 8)!.fee!);
+    expect(swapCall[3]).toBe(BUNDLED.find(c => c.currency === 6)!.fee!);
+    expect(swapCall[4]).toBe(true);
+  });
+
+  test('prepare — the DOUBLE-GAS guard: an already-funded wallet (or an unreadable one) yields a byte-compatible unfunded record', async () => {
+    mockSwapQuotes({'8>6': 320000n});
+    const atTarget = await plannedGasRecord({8: '30000000000'}, NEEDED.toString()); // exactly the target
+    expect(atTarget.gasPre).toBeUndefined();
+    expect(atTarget.legPlan).toHaveLength(6);
+    const unreadable = await plannedGasRecord({8: '30000000000'}, null);
+    expect(unreadable.gasPre).toBeUndefined();
+    expect(unreadable.legPlan).toHaveLength(6);
+  });
+
+  test('prepare — gas funding requested but unresolvable THROWS: nothing signed, no gas-less record', async () => {
+    mockSwapQuotes({'8>6': 320000n});
+    await expect(plannedGasRecord({8: '101000000'}, '1000000000')).rejects.toThrow();
+    expect(jest.mocked(DpayCore.icpSignUpdate).mock.calls.length).toBe(0);
+  });
+
+  test('hydration — the gasPre block round-trips; malformed shapes drop; legacy stays byte-identical', async () => {
+    mockSwapQuotes({'8>6': 320000n});
+    const rec = await plannedGasRecord({8: '30000000000'}, '1000000000');
+    const raw = JSON.parse(JSON.stringify(rec));
+    const ok = hydrateConvertStore({[rec.id]: raw})[rec.id]!;
+    expect(ok.gasPre).toEqual(rec.gasPre);
+    expect(ok.legPlan!.map(p => p.kind)).toEqual(rec.legPlan!.map(p => p.kind));
+
+    const drop = (mutate: (r: ConvertRecord) => void): unknown => {
+      const bad = JSON.parse(JSON.stringify(rec));
+      mutate(bad);
+      return hydrateConvertStore({[rec.id]: bad});
+    };
+    expect(drop(r => { r.gasPre!.legs[0].pool = ''; })).toEqual({}); // an empty fact
+    expect(drop(r => { r.gasPre!.legs[0].inAmount = '12x'; })).toEqual({}); // not a digit string
+    expect(drop(r => { r.legs = r.legs.slice(0, 5); })).toEqual({}); // rhythm: 5 ≠ 1×2+5
+    expect(drop(r => { r.legPlan![1].kind = 'approve'; })).toEqual({}); // the pair rhythm
+    expect(drop(r => { delete r.legPlan; })).toEqual({}); // gasPre rides a PLANNED record only
+
+    // The LEDGER CHAIN needs two legs to break: the hub-funded record (VCHF → ICP → ckETH).
+    mockSwapQuotes({'7>8': 4n, '8>6': 320000n});
+    const hub = await plannedGasRecord({7: '1000000000'}, '1000000000');
+    expect(hub.gasPre!.legs).toHaveLength(2);
+    const hubOk = hydrateConvertStore({[hub.id]: JSON.parse(JSON.stringify(hub))})[hub.id]!;
+    expect(hubOk.gasPre).toEqual(hub.gasPre);
+    const broken = JSON.parse(JSON.stringify(hub));
+    broken.gasPre.legs[0].toLedger = LED(2); // ≠ legs[1].fromLedger — a chain this build never signed
+    expect(hydrateConvertStore({[hub.id]: broken})).toEqual({});
+
+    const short = JSON.parse(JSON.stringify(rec));
+    short.failureCode = 'gas_short';
+    expect(hydrateConvertStore({[rec.id]: short})[rec.id]!.failureCode).toBe('gas_short');
+
+    const legacy = JSON.parse(JSON.stringify(await plannedCrossRecord()));
+    expect(hydrateConvertStore({[legacy.id]: legacy})[legacy.id]!.gasPre).toBeUndefined();
+  });
+
+  test('execution — funding legs confirm, the re-check passes, and the route runs to awaiting_external', async () => {
+    mockSwapQuotes({'8>6': 320000n});
+    const rec = await plannedGasRecord({8: '30000000000'}, '1000000000');
+    const out = await execGas(rec, '100000000000000'); // 1e14 ≥ 9.36e13 → the burn legs may run
+    expect(out.step).toBe('awaiting_external');
+    expect(out.legPlan!.slice(0, 6).every(p => p.state === 'confirmed')).toBe(true);
+    expect(out.legPlan![7].state).toBe('pending'); // the external burn still waits on the user
+    const cans = (out as ConvertRecord & {submittedCanisters?: string[]}).submittedCanisters ?? [];
+    expect(cans).toEqual([LED(8), ANGXA_POOL, LED(8), POOL, LED(2), LED(6), MINTER]);
+  });
+
+  test('execution — the re-check SHORT: terminal gas_short naming the shortfall, nothing further submitted', async () => {
+    mockSwapQuotes({'8>6': 320000n});
+    const rec = await plannedGasRecord({8: '30000000000'}, '1000000000');
+    const out = await execGas(rec, '93000000000000'); // 9.3e13 < 9.36e13
+    expect(out.step).toBe('failed_leg');
+    expect(out.failureCode).toBe('gas_short');
+    expect(out.failureDetail).toContain('have 93000000000000');
+    expect(out.failureDetail).toContain('93600000000000');
+    const cans = (out as ConvertRecord & {submittedCanisters?: string[]}).submittedCanisters ?? [];
+    // The funding legs ran; the main swap + hop approve ran; the BURN triple never did.
+    expect(cans).toEqual([LED(8), ANGXA_POOL, LED(8), POOL, LED(2)]);
+    expect(out.legPlan![5].state).toBe('pending');
+    expect(out.outTx).toBeUndefined();
+  });
+
+  test('execution — an UNREADABLE balance is not a pass: the burn legs are held and the record stays live', async () => {
+    mockSwapQuotes({'8>6': 320000n});
+    const rec = await plannedGasRecord({8: '30000000000'}, '1000000000');
+    const out = await execGas(rec, null);
+    expect(out.step).toBe('approving'); // non-terminal — the engine re-arms and re-checks
+    expect(out.legPlan![5].state).toBe('pending'); // the approve_gas was never submitted
+    expect(out.legPlan![6].state).toBe('pending'); // and nothing after it either
+  });
+
+  test('execution — a refused FUNDING swap terminates gas_short before the main flow starts', async () => {
+    mockSwapQuotes({'8>6': 320000n});
+    const rec = await plannedGasRecord({8: '30000000000'}, '1000000000');
+    jest.mocked(railBalanceOf).mockResolvedValue('100000000000000');
+    jest.mocked(relayFetch).mockResolvedValue(rowsRes([]) as never);
+    jest.mocked(submitTransfer).mockImplementation(async (prepared: unknown) =>
+      ((prepared as {ledger: string}).ledger === ANGXA_POOL
+        ? {kind: 'rejected' as const, variant: 'refunded', reason: 'slippage: min out not met'}
+        : {kind: 'settled' as const, blockIndex: '1'}) as never);
+    const out = await executeConvert(rec, {
+      secretHex: SECRET, publicHex: 'aabb', relayUrl: 'http://relay', onUpdate: () => {},
+    }, OPTS);
+    expect(out.step).toBe('failed_leg');
+    expect(out.failureCode).toBe('gas_short');
+    expect(out.failureDetail).toBe('slippage: min out not met');
+    expect(out.legPlan![1].state).toBe('failed');
+    expect(out.legPlan![2].state).toBe('pending'); // the main flow never started
+  });
+
+  test('fetchEthBalance — the external wallet read: hex-wei decoded, unreachable → null, malformed → null', async () => {
+    fetchMock.mockResolvedValue(fakeRes({jsonrpc: '2.0', id: 1, result: '0x1bc16d674ec80000'}));
+    await expect(fetchEthBalance(DEST)).resolves.toBe('2000000000000000000');
+    fetchMock.mockResolvedValue(fakeRes({jsonrpc: '2.0', id: 1, result: '0x0'}));
+    await expect(fetchEthBalance(DEST)).resolves.toBe('0');
+    fetchMock.mockResolvedValue(fakeRes({}, false, 503));
+    await expect(fetchEthBalance(DEST)).resolves.toBeNull();
+    fetchMock.mockResolvedValue(fakeRes({result: 'not-hex'}));
+    await expect(fetchEthBalance(DEST)).resolves.toBeNull();
+    fetchMock.mockClear();
+    await expect(fetchEthBalance('not-an-address')).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled(); // malformed input never dials
   });
 });
