@@ -363,7 +363,9 @@ async function cmdA() {
   // OP A — ckUSDC→VCHF through pool hx7nb (completes every IC pool in BOTH directions).
   await withApp(async (driver) => {
     await openConvert(driver, 'ckusdc');
-    await driver.type('convert-amount', '0.1');
+    // 0.099 not 0.1: the fund gate needs amount + two ledger fees (0.12) and the
+    // float holds 0.11961 ckUSDC after yesterday's 0.01 approve-fee burn — 0.1 no longer clears.
+    await driver.type('convert-amount', '0.099');
     await pickDest(driver, 'vchf');
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
