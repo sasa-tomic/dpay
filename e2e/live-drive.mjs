@@ -378,6 +378,58 @@ async function cmdA() {
   });
 }
 
+// probe-confirm — diagnostic (founder rule: verbatim evidence). Reaches the CeFi surface
+// exactly like conv-b, then instead of blind re-clicks: dumps the confirm button's live DOM
+// state (disabled, bounding box, pointer events), attaches a console listener, fires a
+// DOM-level click (React synthetic events still receive it), and polls the surface so the
+// POST-click truth (order created? error? no-op?) is observable.
+async function cmdProbeConfirm() {
+  await withApp(async (driver) => {
+    await openConvert(driver, 'icp');
+    await driver.type('convert-amount', '1.10');
+    await pickDest(driver, 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter');
+    try {
+      await driver.findByTestID('convert-dest-mechs', {timeoutMs: 4_000});
+      await driver.click('convert-dest-mech-sideshift');
+      log('mechanism: sideshift');
+    } catch { /* single mechanism */ }
+    await driver.findByTestID('convert-settle-address', {timeoutMs: 30_000});
+    for (let i = 0; i < 30; i++) {
+      if (await driver.isPresent('convert-quote-source')) break;
+      await sleep(1_000);
+    }
+    const state = await (await driver.page.$('body')).evaluate(() => {
+      const btn = document.querySelector('[data-testid="btn-convert-confirm"]');
+      if (!btn) return {present: false};
+      const r = btn.getBoundingClientRect();
+      const cs = getComputedStyle(btn);
+      return {
+        present: true,
+        disabled: btn.hasAttribute('disabled'),
+        ariaDisabled: btn.getAttribute('aria-disabled'),
+        rect: {x: r.x, y: r.y, w: r.width, h: r.height},
+        opacity: cs.opacity, pointerEvents: cs.pointerEvents, visibility: cs.visibility, display: cs.display,
+        cls: btn.className,
+        text: (btn.textContent ?? '').trim(),
+      };
+    });
+    log(`CONFIRM BUTTON DOM STATE: ${JSON.stringify(state)}`);
+    driver.page.on('console', (m) => log(`[page-console] ${m.type()}: ${m.text().slice(0, 300)}`));
+    await (await driver.page.$('body')).evaluate(() => {
+      const btn = document.querySelector('[data-testid="btn-convert-confirm"]');
+      if (btn) btn.click();
+    });
+    log('DOM click dispatched');
+    for (let i = 0; i < 10; i++) {
+      await sleep(1_000);
+      const t = (await driver.bodyText()).replace(/\s+/g, ' ');
+      if (/awaiting deposit|Awaiting your deposit|Deposit exactly/i.test(t)) { log(`t+${i}s: AWAITING DEPOSIT up`); return; }
+      if (i === 2 || i === 5 || i === 9) log(`t+${i}s surface: ${t.slice(0, 500)}`);
+    }
+    await driver.screenshot('live-probe-confirm-end');
+  });
+}
+
 async function cmdB(icpAmount) {
   // OP B — ICP→SOL via venue sideshift (the FIRST live CeFi order). The app creates the shift;
   // the deposit is the float's OWN signed icrc1_transfer. Watch the shift to settlement.
@@ -408,7 +460,17 @@ async function cmdB(icpAmount) {
       await sleep(1_000);
     }
     log(`quote source: ${qsrc}`);
-    if (!/SideShift/i.test(qsrc)) throw new Error('OP B: quote source is not SideShift — refusing');
+    if (!/SideShift/i.test(qsrc)) {
+      // Diagnose before refusing: the quote effect can fail SILENTLY (legs == null) or with a
+      // rendered error line — either way the surface body is the evidence (founder rule:
+      // verbatim venue/app errors are findings).
+      const errEl = await driver.isPresent('convert-quote-err') ? await driver.readText('convert-quote-err') : '(no convert-quote-err)';
+      log(`quote-err: ${errEl}`);
+      const body = await driver.bodyText();
+      log('SURFACE AT QUOTE FAILURE:', body.replace(/\s+/g, ' ').slice(0, 1200));
+      await driver.screenshot('live-b-quote-failure');
+      throw new Error('OP B: quote source is not SideShift — refusing');
+    }
     const cparty = await driver.isPresent('convert-counterparty')
       ? await driver.readText('convert-counterparty') : '(none)';
     log(`counterparty disclosure: ${cparty.replace(/\s+/g, ' ').slice(0, 300)}`);
@@ -546,19 +608,36 @@ async function clickByText(driver, text) {
 async function confirmWithRequote(driver, label, opts = {}) {
   for (let attempt = 1; attempt <= 30; attempt++) {
     await driver.click('btn-convert-confirm');
-    for (let i = 0; i < 4; i++) {
-      await sleep(600);
+    // Order creation (fresh venue quote + fixed-order POST + panel render) can take ~5s on a
+    // live venue — poll long enough to SEE it before declaring "no progress" (finding 2026-09-20:
+    // the 2.4s window mis-read every successful confirm as a no-op and re-clicked a dead form).
+    for (let i = 0; i < 20; i++) {
+      await sleep(750);
       if (opts.cefi && await driver.isPresent('convert-awaiting-deposit')) {
         return await readDepositFacts(driver, {timeoutMs: 90_000});
       }
       if (!opts.cefi && await driver.isPresent('convert-state')) return true;
-      if (await driver.isPresent('convert-failed')) return opts.cefi ? null : true;
+      if (await driver.isPresent('convert-failed')) {
+        log(`[${label}] convert-failed after attempt ${attempt}: ${await driver.readText('convert-failed')}`);
+        return opts.cefi ? null : true;
+      }
     }
     const bodyNow = await driver.bodyText();
     if (/Quote changed/i.test(bodyNow)) {
       log(`[${label}] confirm attempt ${attempt}: quote drifted — rapid re-confirm`);
+    } else if (await driver.isPresent('convert-awaiting-deposit')) {
+      // Late handoff: the panel landed between polls.
+      return opts.cefi ? await readDepositFacts(driver, {timeoutMs: 90_000}) : true;
+    } else if (await driver.isPresent('convert-state')) {
+      return opts.cefi ? null : true;
+    } else if (await driver.isPresent('convert-failed')) {
+      log(`[${label}] convert-failed after attempt ${attempt}: ${await driver.readText('convert-failed')}`);
+      return opts.cefi ? null : true;
     } else {
-      log(`[${label}] confirm attempt ${attempt}: no progress, no drift notice — retrying`);
+      // No recognized state — dump the surface so the actual post-click state is evidence,
+      // not guesswork (verbatim errors are findings).
+      log(`[${label}] confirm attempt ${attempt}: no recognized state — SURFACE NOW: ${bodyNow.slice(0, 1400)}`);
+      await driver.shot(`live-${label.toLowerCase()}-after-confirm-${attempt}`);
       await sleep(1_500);
     }
   }
@@ -613,6 +692,7 @@ const [cmd, ...args] = process.argv.slice(2);
 try {
   if (cmd === 'boot') await cmdBoot();
   else if (cmd === 'probe') await cmdProbe(args[0], args[1]);
+  else if (cmd === 'probe-confirm') await cmdProbeConfirm();
   else if (cmd === 'conv-a') await cmdA();
   else if (cmd === 'conv-b') await cmdB(args[0] ?? '1.04');
   else if (cmd === 'conv-c1') await cmdC1(args[0]);
