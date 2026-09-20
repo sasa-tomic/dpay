@@ -132,6 +132,11 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 /// a request — it is a constant of this integration.
 const COMMISSION_RATE: &str = "0";
 
+/// The venue rows this adapter serves: since the trocador row registered the SAME
+/// ICP↔SOL pair (2026-09-20), a pair alone no longer disambiguates a cefi row — the
+/// adapter names its rows, so attribution follows THIS list, never first-match-on-pair.
+const SIDESHIFT_VENUE_IDS: &[&str] = &["sideshift", "sideshift-usdc", "sideshift-eurc"];
+
 /// Rail-canonical id → SideShift's own (coin, network) for every asset a registered
 /// SideShift pair names. Verified against the live `GET /coins` (keyless) 2026-09-15:
 /// ICP lives on network `icp` (hasMemo false), SOL on `solana`. The USDC(Solana) row is
@@ -450,7 +455,9 @@ pub async fn shifts_fixed_proxy(
              rail id (the same id the quote surface accepted)",
         );
     };
-    if refund_address.is_empty() || !refund_address_wellformed(refund_network, refund_address) {
+    if refund_address.is_empty()
+        || !crate::addrcheck::refund_address_wellformed(refund_network, refund_address)
+    {
         return err(
             StatusCode::BAD_REQUEST,
             "`refundAddress` must be a well-formed address on the DEPOSIT rail — an Internet \
@@ -472,50 +479,6 @@ pub async fn shifts_fixed_proxy(
     json_response(outcome.status, &outcome.body)
 }
 
-/// Is this a well-formed address on the given SideShift NETWORK (the deposit rail of the
-/// order)? Structural only — the venue still owns reachability/ownership; this refuses
-/// the orders that could never be refunded to the stated address before they exist.
-/// `icp`: an IC principal (CRC-checked) or a full ICRC-1 account text, both via the
-/// shared `dpay-icp` codec (the exact parser the ledgers speak). `solana`: base58 that
-/// decodes to exactly 32 bytes (the same check the transaction builder applies).
-fn refund_address_wellformed(network: &str, s: &str) -> bool {
-    match network {
-        "icp" => {
-            use dpay_icp::principal::{Account, Principal};
-            Principal::from_text(s).is_ok() || Account::from_text(s).is_ok()
-        }
-        "solana" => bs58_decode(s).is_some_and(|b| b.len() == 32),
-        // A network code this integration does not serve cannot be refunded-to: refuse.
-        _ => false,
-    }
-}
-
-/// Minimal bs58 DECODE (alphabet table + big-number base conversion, leading-'1' zeros).
-/// Hand-rolled because the relay tree has no bs58 dependency — the same shape as the
-/// test-helpers stub's decoder in `app.rs`, but this one is PROD code: it is the refund
-/// address's well-formedness gate, so it lives next to the handler that calls it.
-fn bs58_decode(s: &str) -> Option<Vec<u8>> {
-    const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    let mut digits: Vec<u8> = Vec::new(); // big-endian base-256 accumulator
-    for ch in s.bytes() {
-        let val = u32::try_from(ALPHABET.iter().position(|&a| a == ch)?).ok()?;
-        let mut carry = val;
-        for byte in digits.iter_mut().rev() {
-            let acc = u32::from(*byte) * 58 + carry;
-            *byte = (acc & 0xff) as u8;
-            carry = acc >> 8;
-        }
-        while carry > 0 {
-            digits.insert(0, (carry & 0xff) as u8);
-            carry >>= 8;
-        }
-    }
-    let zeros = s.bytes().take_while(|&b| b == b'1').count();
-    let mut out = vec![0u8; zeros];
-    out.extend(digits);
-    Some(out)
-}
-
 /// Map a (deposit, settle) rail-id pair onto SideShift's own codes — accepted only if
 /// it is EXACTLY a registered `cefi` row's pair, unordered (the registry's own rule:
 /// pair_ledgers carry no order; one row per pair, so the pair disambiguates the row).
@@ -534,6 +497,7 @@ fn pair_direction(
 )> {
     let row = crate::catalog::venues().into_iter().find(|v| {
         v.kind == crate::catalog::VenueKind::Cefi
+            && SIDESHIFT_VENUE_IDS.contains(&v.venue_id)
             && (v.pair_ledgers == [deposit, settle] || v.pair_ledgers == [settle, deposit])
     })?;
     let lookup = |id: &str| {
@@ -811,59 +775,6 @@ mod tests {
             end_user_ip(None, Some("198.51.100.9")),
             Some("198.51.100.9".parse().unwrap())
         );
-    }
-
-    #[test]
-    fn refund_address_wellformedness_is_rail_scoped() {
-        use dpay_icp::principal::{Account, Principal};
-        // IC rail: a valid principal passes…
-        let principal = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-        assert!(super::refund_address_wellformed("icp", &principal.to_text()));
-        // …and so does the full ICRC-1 account text (owner + 7-char checksum + subaccount).
-        let mut subaccount = [0u8; 32];
-        subaccount[31] = 0xa0;
-        let account_text = Account { owner: principal, subaccount }.text();
-        assert_eq!(
-            account_text,
-            Account::from_text(&account_text).unwrap().text(),
-            "the fixture is the codec's own canonical text"
-        );
-        assert!(super::refund_address_wellformed("icp", &account_text));
-        // …and the CRC/alphabet check refuses a malformed principal outright.
-        assert!(!super::refund_address_wellformed("icp", "not-a-principal"));
-        assert!(!super::refund_address_wellformed("icp", ""));
-        // Solana rail: base58 that decodes to exactly 32 bytes (a real mainnet address).
-        assert!(super::refund_address_wellformed(
-            "solana",
-            "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
-        ));
-        // Not 32 bytes / not base58 at all.
-        assert!(!super::refund_address_wellformed("solana", "111"));
-        assert!(!super::refund_address_wellformed(
-            "solana",
-            "0OIl-not-base58-safe"
-        ));
-        // An unknown network code is refused structurally (cannot be refunded-to).
-        assert!(!super::refund_address_wellformed("ethereum", "0xabc"));
-    }
-
-    #[test]
-    fn bs58_decode_roundtrips_and_counts_leading_ones() {
-        // The system program's address is 32 zero bytes: all-'1' text, zeros only.
-        assert_eq!(
-            super::bs58_decode("11111111111111111111111111111111").unwrap(),
-            vec![0u8; 32]
-        );
-        // A real 32-byte pubkey decodes to exactly 32 bytes.
-        assert_eq!(
-            super::bs58_decode("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
-                .unwrap()
-                .len(),
-            32
-        );
-        // Off-alphabet characters are rejected.
-        assert!(super::bs58_decode("0OIl").is_none());
-        assert!(super::bs58_decode("").unwrap().is_empty());
     }
 
     #[test]

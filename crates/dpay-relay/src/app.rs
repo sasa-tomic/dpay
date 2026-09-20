@@ -89,6 +89,8 @@
 //! /api/v2 envelopes; the test-helpers fake-IC gateway is the offline e2e stand-in for that
 //! surface).
 
+#[cfg(feature = "test-helpers")]
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -179,6 +181,14 @@ pub struct AppState {
     /// that unconfigured proxy; `main` replaces it via [`AppState::with_sideshift`] from the
     /// env. BOTH credential halves are secrets: never logged, never echoed.
     pub sideshift: Arc<crate::sideshift::SideShiftProxy>,
+    /// The Trocador aggregator proxy (`crate::trocador`) — `POST /api/v1/trocador/rate`,
+    /// `POST /api/v1/trocador/trade`, `GET /api/v1/trocador/trade`. Same always-registered
+    /// contract: an unset `DPAY_TROCADOR_API_KEY` still answers 503 naming it (a LEGAL
+    /// deploy state — the venue is simply absent until the founder's key request lands).
+    /// UNLIKE sideshift the STATUS read is proxied too: every Trocador method is key-gated,
+    /// so there is no keyless device-direct read. The key is a SECRET: never logged, never
+    /// echoed.
+    pub trocador: Arc<crate::trocador::TrocadorProxy>,
     /// The Jupiter proxy (`crate::jupiter`) — `GET /api/v1/jupiter/quote` +
     /// `POST /api/v1/jupiter/swap` (2026-09-16 founder ask). Same always-registered
     /// contract as the proxies above, but with NO unconfigured state at all: the venue is
@@ -216,6 +226,15 @@ impl AppState {
                 None,
                 crate::sideshift::DEFAULT_API_BASE.to_string(),
                 crate::sideshift::DEFAULT_TIMEOUT,
+            )),
+            // The unconfigured Trocador aggregator proxy: /api/v1/trocador/* answers 503
+            // naming the missing env var until `with_trocador` attaches the partner API key
+            // (see `crate::trocador` — the FIRST aggregator venue; key requested from
+            // commercial@trocador.app).
+            trocador: Arc::new(crate::trocador::TrocadorProxy::new(
+                None,
+                crate::trocador::DEFAULT_API_BASE.to_string(),
+                crate::trocador::DEFAULT_TIMEOUT,
             )),
             // The Jupiter proxy, ALWAYS serving (keyless — no unconfigured state): the
             // default state carries the venue's documented lite-api base; `main` re-points
@@ -269,6 +288,16 @@ impl AppState {
     /// proxy still answers, honestly, 503 naming the missing variable(s).
     pub fn with_sideshift(mut self, proxy: crate::sideshift::SideShiftProxy) -> Self {
         self.sideshift = Arc::new(proxy);
+        self
+    }
+
+    /// Attach the Trocador aggregator proxy (`crate::trocador::TrocadorProxy`). `main`
+    /// builds it from `DPAY_TROCADOR_API_KEY` (+ optional `DPAY_TROCADOR_API_BASE`);
+    /// tests build it against the local stub upstream. The key is a SECRET (the partner
+    /// credential — never logged here or anywhere else), and it may stay unset: an
+    /// unconfigured proxy still answers, honestly, 503 naming the missing variable.
+    pub fn with_trocador(mut self, proxy: crate::trocador::TrocadorProxy) -> Self {
+        self.trocador = Arc::new(proxy);
         self
     }
 
@@ -362,6 +391,20 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/sideshift/shifts/fixed",
             axum::routing::post(crate::sideshift::shifts_fixed_proxy),
+        )
+        // The Trocador aggregator proxy (registered 2026-09-20) — registered ALWAYS for
+        // the same reason: an unset key still answers 503 naming DPAY_TROCADOR_API_KEY.
+        // The relay attaches the partner key server-side (rate + trade creation + the
+        // key-gated STATUS read the sideshift venue polls keyless); the device never sees
+        // it. See `crate::trocador`.
+        .route(
+            "/trocador/rate",
+            axum::routing::post(crate::trocador::rate_proxy),
+        )
+        .route(
+            "/trocador/trade",
+            axum::routing::post(crate::trocador::trade_proxy)
+                .get(crate::trocador::trade_status_proxy),
         )
         // The Jupiter proxy (2026-09-16 founder ask) — registered ALWAYS, and unlike the
         // proxies above there is no unconfigured 503 branch at all: the venue is keyless
@@ -486,6 +529,35 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/test/sideshift-upstream/hits",
             axum::routing::get(sideshift_stub_hits),
+        );
+    // Test-only TROCADOR UPSTREAM (flow 198 — the cross-rail aggregator surface): the
+    // harness points the key-gated proxy (src/trocador.rs, DPAY_TROCADOR_API_KEY +
+    // DPAY_TROCADOR_API_BASE set explicitly in harness/relay.mjs) at these routes ON
+    // THE SAME SERVER, so the flow drives the REAL client path — app → the relay's
+    // /api/v1/trocador/* → THIS stub — offline, with no partner key. The upstream calls
+    // are GETs (the venue's own all-GET API); the stub counts key-bearing vs bare calls
+    // (the partner-key audit) and scripts the trade status a flow's lifecycle needs.
+    #[cfg(feature = "test-helpers")]
+    let api = api
+        .route(
+            "/test/trocador-upstream/new_rate",
+            axum::routing::get(trocador_stub_new_rate),
+        )
+        .route(
+            "/test/trocador-upstream/new_trade",
+            axum::routing::get(trocador_stub_new_trade),
+        )
+        .route(
+            "/test/trocador-upstream/trade",
+            axum::routing::get(trocador_stub_trade_status),
+        )
+        .route(
+            "/test/trocador-upstream/config",
+            axum::routing::post(trocador_stub_config),
+        )
+        .route(
+            "/test/trocador-upstream/hits",
+            axum::routing::get(trocador_stub_hits),
         );
     // Test-only JUPITER UPSTREAM (flows 185/186/189 — the SOL convert surfaces): the harness
     // points the Jupiter proxy (src/jupiter.rs, DPAY_JUPITER_API_BASE set explicitly in
@@ -1329,6 +1401,207 @@ async fn sideshift_stub_hits() -> Response {
             "bareCalls": SIDESHIFT_STUB_BARE_CALLS.load(Ordering::Relaxed),
             "quoteCalls": SIDESHIFT_STUB_QUOTE_CALLS.load(Ordering::Relaxed),
             "shiftCalls": SIDESHIFT_STUB_SHIFT_CALLS.load(Ordering::Relaxed),
+        })),
+    )
+        .into_response()
+}
+
+// --- test-only TROCADOR upstream (the key-gated aggregator's offline stand-in) -------------------
+//
+// The wire shapes the venue's own docs pin (https://trocador.app/en/docs/, fetched
+// 2026-09-20): ALL methods are GET answering flat JSON — `new_rate` → {trade_id, amount_from,
+// amount_to, provider, fixed, status, …}; `new_trade` → the same plus address_provider (the
+// VENUE's deposit address); `trade?id=` → the trade record incl. status + details.hashout.
+// The stub ECHOES the request's own query params where the real venue does (amount_from,
+// provider, refund) and serves the figures the flow configures, so the app's shape
+// validation and the flow's UI assertions run against exactly the field names the real
+// venue uses. The upstream calls are GETs carrying the `API-Key` header — the stub counts
+// key-bearing vs bare calls (bare must stay ZERO: a bare hit means a path reached the stub
+// without the relay's key). Status is FLOW-SCRIPTED via POST …/config (the status read
+// rides the relay here — unlike sideshift there is no keyless device-direct read to stub
+// in-page).
+
+/// Counters + scripted state (the repo's process-global static idiom: every flow gets a
+/// fresh relay process, so counters start at zero per flow).
+#[cfg(feature = "test-helpers")]
+static TROCADOR_STUB_KEY_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-helpers")]
+static TROCADOR_STUB_BARE_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-helpers")]
+static TROCADOR_STUB_RATE_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-helpers")]
+static TROCADOR_STUB_TRADE_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-helpers")]
+static TROCADOR_STUB_STATUS_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-helpers")]
+static TROCADOR_STUB_LAST_QUERY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// The scripted trade status (default the venue's waiting word) + settle figures.
+#[cfg(feature = "test-helpers")]
+static TROCADOR_STUB_STATE: std::sync::Mutex<(String, String, Option<String>)> =
+    std::sync::Mutex::new((String::new(), String::new(), None));
+
+/// Record one stub hit: key-bearing vs bare + the last query string (the audit reads it).
+#[cfg(feature = "test-helpers")]
+fn trocador_stub_record(headers: &axum::http::HeaderMap, query: &str) {
+    use std::sync::atomic::Ordering;
+    if headers.contains_key("API-Key") {
+        TROCADOR_STUB_KEY_CALLS.fetch_add(1, Ordering::Relaxed);
+    } else {
+        TROCADOR_STUB_BARE_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+    *TROCADOR_STUB_LAST_QUERY.lock().unwrap() = Some(query.to_string());
+}
+
+/// `GET /api/v1/test/trocador-upstream/new_rate` — the venue's rate shape (one quote, the
+/// aggregator's own pick — the stub serves ONE).
+#[cfg(feature = "test-helpers")]
+async fn trocador_stub_new_rate(
+    headers: axum::http::HeaderMap,
+    Query(params): Query<BTreeMap<String, String>>,
+) -> Response {
+    use std::sync::atomic::Ordering;
+    let query = params
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    trocador_stub_record(&headers, &query);
+    TROCADOR_STUB_RATE_CALLS.fetch_add(1, Ordering::Relaxed);
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "trade_id": "stub-rate-1",
+            "date": "2026-09-20 12:00:00",
+            "ticker_from": params.get("ticker_from").cloned().unwrap_or_default(),
+            "ticker_to": params.get("ticker_to").cloned().unwrap_or_default(),
+            "network_from": params.get("network_from").cloned().unwrap_or_default(),
+            "network_to": params.get("network_to").cloned().unwrap_or_default(),
+            "amount_from": params.get("amount_from").cloned().unwrap_or_default(),
+            "amount_to": "0.0496",
+            "provider": "StubSwap",
+            "fixed": true,
+            "status": "Waiting",
+            "min_kycrating": params.get("min_kycrating").cloned().unwrap_or_default(),
+            "quotes": [],
+            "payment": false,
+        })),
+    )
+        .into_response()
+}
+
+/// `GET /api/v1/test/trocador-upstream/new_trade` — the venue's trade shape: the record
+/// carries the VENUE's own deposit address (`address_provider`) + the user's echoed
+/// refund.
+#[cfg(feature = "test-helpers")]
+async fn trocador_stub_new_trade(
+    headers: axum::http::HeaderMap,
+    Query(params): Query<BTreeMap<String, String>>,
+) -> Response {
+    use std::sync::atomic::Ordering;
+    let query = params
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    trocador_stub_record(&headers, &query);
+    TROCADOR_STUB_TRADE_CALLS.fetch_add(1, Ordering::Relaxed);
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "trade_id": "stub-trade-1",
+            "date": "2026-09-20 12:00:00",
+            "ticker_from": params.get("ticker_from").cloned().unwrap_or_default(),
+            "ticker_to": params.get("ticker_to").cloned().unwrap_or_default(),
+            "network_from": params.get("network_from").cloned().unwrap_or_default(),
+            "network_to": params.get("network_to").cloned().unwrap_or_default(),
+            "amount_from": params.get("amount_from").cloned().unwrap_or_default(),
+            "amount_to": "0.0496",
+            "provider": params.get("provider").cloned().unwrap_or_default(),
+            "fixed": true,
+            "status": "Waiting",
+            "address_provider": "e2e-trocador-deposit-01",
+            "address_provider_memo": null,
+            "address_user": params.get("address").cloned().unwrap_or_default(),
+            "refund_address": params.get("refund").cloned().unwrap_or_default(),
+            "id_provider": "stub-provider-id-1",
+            "payment": false,
+        })),
+    )
+        .into_response()
+}
+
+/// `GET /api/v1/test/trocador-upstream/trade?id=` — the venue's status shape, scripted by
+/// the flow (status word, settle amount, payout hash).
+#[cfg(feature = "test-helpers")]
+async fn trocador_stub_trade_status(
+    headers: axum::http::HeaderMap,
+    Query(params): Query<BTreeMap<String, String>>,
+) -> Response {
+    use std::sync::atomic::Ordering;
+    let query = params
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("&");
+    trocador_stub_record(&headers, &query);
+    TROCADOR_STUB_STATUS_CALLS.fetch_add(1, Ordering::Relaxed);
+    let (status, amount_to, hashout) = TROCADOR_STUB_STATE.lock().unwrap().clone();
+    let mut body = serde_json::json!({
+        "trade_id": params.get("id").cloned().unwrap_or_default(),
+        "status": status,
+        "amount_from": "2",
+        "amount_to": amount_to,
+        "provider": "StubSwap",
+        "fixed": true,
+        "address_user": "e2e-settle-address",
+    });
+    if let Some(hash) = hashout {
+        body["details"] = serde_json::json!({ "hashout": hash });
+    }
+    (StatusCode::OK, Json(body)).into_response()
+}
+
+/// `POST /api/v1/test/trocador-upstream/config` — arm the scripted lifecycle: `{"status":
+/// "Waiting"|"processing-word"|…, "amount_to"?: "<decimal>", "hashout"?: "<tx id>"}`.
+#[cfg(feature = "test-helpers")]
+async fn trocador_stub_config(body: axum::body::Bytes) -> Response {
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap_or(serde_json::json!({}));
+    let mut state = TROCADOR_STUB_STATE.lock().unwrap();
+    if let Some(s) = v.get("status").and_then(|x| x.as_str()) {
+        state.0 = s.to_string();
+    }
+    if let Some(a) = v.get("amount_to").and_then(|x| x.as_str()) {
+        state.1 = a.to_string();
+    }
+    state.2 = v
+        .get("hashout")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
+    StatusCode::OK.into_response()
+}
+
+/// `GET /api/v1/test/trocador-upstream/hits` — how many key-bearing vs bare calls the
+/// stub has served (bare should stay ZERO for every flow: the proxy always attaches the
+/// key — a bare hit means a path reached the stub without the relay's credential), plus
+/// per-route counts (rate/trade/status) so the flow can prove a trade was NEVER
+/// re-created across a reload while quotes and status reads legitimately re-fetch.
+#[cfg(feature = "test-helpers")]
+async fn trocador_stub_hits() -> Response {
+    use std::sync::atomic::Ordering;
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "keyCalls": TROCADOR_STUB_KEY_CALLS.load(Ordering::Relaxed),
+            "bareCalls": TROCADOR_STUB_BARE_CALLS.load(Ordering::Relaxed),
+            "rateCalls": TROCADOR_STUB_RATE_CALLS.load(Ordering::Relaxed),
+            "tradeCalls": TROCADOR_STUB_TRADE_CALLS.load(Ordering::Relaxed),
+            "statusCalls": TROCADOR_STUB_STATUS_CALLS.load(Ordering::Relaxed),
+            "lastQuery": TROCADOR_STUB_LAST_QUERY.lock().unwrap().clone(),
         })),
     )
         .into_response()

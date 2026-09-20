@@ -19,6 +19,7 @@
 //!
 //! Money-critical logic is NOT here — it stays in `dpay-core` (shared with the canister & app).
 
+pub mod addrcheck;
 pub mod app;
 pub mod catalog;
 pub mod jupiter;
@@ -26,6 +27,7 @@ pub mod ledger;
 pub mod sideshift;
 pub mod solana;
 pub mod till;
+pub mod trocador;
 
 /// Unix seconds now — the ONE clock reading in this crate, and it stops rather than guesses.
 ///

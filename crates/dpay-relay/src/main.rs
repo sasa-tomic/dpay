@@ -93,6 +93,21 @@
 //!                           state — the routes serve on every build. The offline loop points
 //!                           it at the relay's own test stub. A set-but-malformed URL
 //!                           refuses startup (EXIT_CONFIG).
+//!   DPAY_TROCADOR_API_KEY   the Trocador partner API key for the aggregator proxy
+//!                           (registered 2026-09-20 — POST+GET /api/v1/trocador/*; see
+//!                           src/trocador.rs). Attached server-side as the `API-Key`
+//!                           header (the venue's own auth header — every method is
+//!                           key-gated, including the status read); the device never sees
+//!                           it. SECRET deploy config: never logged, never echoed, never
+//!                           committed. Unset is LEGAL — the routes still register and
+//!                           answer 503 naming this variable (the key does not exist yet:
+//!                           requested from commercial@trocador.app; docs/OPS.md §3).
+//!   DPAY_TROCADOR_API_BASE  the Trocador API base the proxy calls (default
+//!                           `https://api.trocador.app` — verified live 2026-09-20
+//!                           answering the venue's own key gate; the docs also name the
+//!                           equivalent `https://trocador.app/api/` prefix host). The
+//!                           offline loop points it at the relay's own test stub. A
+//!                           set-but-malformed URL refuses startup (EXIT_CONFIG).
 
 use std::net::SocketAddr;
 use std::process;
@@ -191,6 +206,15 @@ async fn main() {
         cfg.sideshift_affiliate_id.clone(),
         cfg.sideshift_api_base.clone(),
         dpay_relay::sideshift::DEFAULT_TIMEOUT,
+    ));
+    // The Trocador aggregator proxy (registered 2026-09-20): same always-registered
+    // contract — an unset key answers 503 naming the missing variable. The key is SECRET
+    // deploy config: never logged, never echoed in a response. UNLIKE sideshift the status
+    // read is proxied too — every venue method is key-gated. See src/trocador.rs.
+    let state = state.with_trocador(dpay_relay::trocador::TrocadorProxy::new(
+        cfg.trocador_api_key.clone(),
+        cfg.trocador_api_base.clone(),
+        dpay_relay::trocador::DEFAULT_TIMEOUT,
     ));
     // The Jupiter proxy (2026-09-16 founder ask: quotes + swap-tx builds "through our relay
     // (for caching etc)"). ALWAYS serving — the venue is keyless and the base has a constant
@@ -293,6 +317,21 @@ async fn main() {
             "POST /api/v1/sideshift/*: unconfigured — the routes answer 503 until {} set in the \
              deploy environment (the SideShift partner account credentials; see docs/OPS.md §3).",
             missing.join(" and ")
+        );
+    }
+
+    // The Trocador one-line WHETHER (never the value — the partner API key).
+    if cfg.trocador_api_key.is_some() {
+        println!(
+            "POST /api/v1/trocador/*: ENABLED — the aggregator proxy (rate + trade + the \
+             key-gated status read) attaches DPAY_TROCADOR_API_KEY server-side; the device \
+             never sees it."
+        );
+    } else {
+        println!(
+            "POST /api/v1/trocador/*: unconfigured — the routes answer 503 until \
+             DPAY_TROCADOR_API_KEY set in the deploy environment (the Trocador partner API \
+             key, requested from commercial@trocador.app; see docs/OPS.md §3)."
         );
     }
 
@@ -407,6 +446,12 @@ struct Config {
     /// The Jupiter API base (`DPAY_JUPITER_API_BASE`); default the venue's keyless lite
     /// host. Not a secret (no credential exists for this venue).
     jupiter_api_base: String,
+    /// The Trocador partner API key (`DPAY_TROCADOR_API_KEY`) — the SECOND relay-held
+    /// partner credential. SECRET: never logged, never echoed, never committed. Unset is
+    /// legal (503 naming the variable).
+    trocador_api_key: Option<String>,
+    /// The Trocador API base (`DPAY_TROCADOR_API_BASE`); default the verified-live host.
+    trocador_api_base: String,
 }
 
 impl Config {
@@ -555,6 +600,23 @@ impl Config {
             None => dpay_relay::jupiter::DEFAULT_API_BASE.to_string(),
         };
 
+        // The Trocador partner key (2026-09-20). UNSET is a legal state — the routes still
+        // register and answer 503 naming the variable (the founder's key request to
+        // commercial@trocador.app is outstanding). There is deliberately no shape
+        // validation: Trocador documents no format, only the upstream can judge it, and
+        // its own 401 is the honest refusal. The base defaults to the host verified live
+        // 2026-09-20; a set-but-malformed URL refuses startup — same ParseError discipline
+        // as the other bases (the text names the defect, never the value).
+        let trocador_api_key = non_empty("DPAY_TROCADOR_API_KEY");
+        let trocador_api_base = match non_empty("DPAY_TROCADOR_API_BASE") {
+            Some(base) => {
+                reqwest::Url::parse(&base)
+                    .map_err(|e| format!("DPAY_TROCADOR_API_BASE is not a valid URL: {e}"))?;
+                base
+            }
+            None => dpay_relay::trocador::DEFAULT_API_BASE.to_string(),
+        };
+
         Ok(Config {
             addr,
             ledger,
@@ -566,6 +628,8 @@ impl Config {
             sideshift_affiliate_id,
             sideshift_api_base,
             jupiter_api_base,
+            trocador_api_key,
+            trocador_api_base,
         })
     }
 }
