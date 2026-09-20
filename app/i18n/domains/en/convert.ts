@@ -375,8 +375,15 @@ export type ConvertMessages = {
     gasFundRecheck: string;
     gasFundShort: (short: string) => string;
     gasLegsNote: string;
-    abortedGasBody: (eth: string, address: string) => string;
+    /** Abort AFTER the funding pre-legs ran (gas delivered in-wallet) but the conversion
+     *  never started — the honest "your gas money is still here" card. */
+    abortedGasBody: string;
+    /** Decline/abandonment at awaiting_external on a gas-funded record: BOTH the USDC (at
+     *  the address) and the gas funding (still in-wallet) get their whereabouts named. */
     declinedWithGasBody: (address: string) => string;
+    /** failureCode 'gas_short' failed card: the funding did not deliver, the main
+     *  conversion never started, everything sits in-wallet. `needed` is the target. */
+    gasShortFailedBody: (needed: string) => string;
   };
 
   // --- module-thrown errors (app/convert.ts) ----------------------------------------------------
@@ -669,8 +676,9 @@ export const convertEn: ConvertMessages = {
     gasFundRecheck: 'Check again',
     gasFundShort: short => `Still ${short} short`,
     gasLegsNote: 'The first legs fund the gas.',
-    abortedGasBody: (eth, address) => `${eth} is at your Ethereum address ${address}. The conversion never ran.`,
-    declinedWithGasBody: address => `Nothing crossed. Your USDC and the gas ETH are at your Ethereum address ${address}.`,
+    abortedGasBody: 'The gas funding completed — it is still in this wallet. The conversion itself never ran.',
+    declinedWithGasBody: address => `Nothing crossed. Your USDC is at your Ethereum address ${address}; the gas funding is still in this wallet.`,
+    gasShortFailedBody: needed => `The gas funding came up short of ${needed}. Nothing left this wallet — the conversion never started.`,
   },
 
   errors: {

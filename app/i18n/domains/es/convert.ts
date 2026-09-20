@@ -285,8 +285,9 @@ export const convertEs: ConvertMessages = {
     gasFundRecheck: 'Comprobar de nuevo',
     gasFundShort: short => `Todavía faltan ${short}`,
     gasLegsNote: 'Los primeros pasos financian el gas.',
-    abortedGasBody: (eth, address) => `${eth} están en tu dirección Ethereum ${address}. La conversión no se ejecutó.`,
-    declinedWithGasBody: address => `Nada cruzó. Tus USDC y el ETH de gas están en tu dirección Ethereum ${address}.`,
+    abortedGasBody: 'La financiación del gas se completó — sigue en esta cartera. La conversión en sí nunca se ejecutó.',
+    declinedWithGasBody: address => `Nada cruzó. Tus USDC están en tu dirección Ethereum ${address}; el gas financiado sigue en esta cartera.`,
+    gasShortFailedBody: needed => `La financiación del gas se quedó por debajo de ${needed}. Nada salió de esta cartera — la conversión nunca empezó.`,
   },
 
   errors: {

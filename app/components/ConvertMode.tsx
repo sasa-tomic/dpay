@@ -63,6 +63,7 @@ import {
   fetchCeFiConvertQuote,
   fetchConvertQuote,
   fetchCctpBurnFee,
+  gasFundNeededWei,
   isQuoteStale,
   isTerminalConvertStep,
   loadVenueRegistry,
@@ -87,12 +88,12 @@ import {
   declineCctpHandoff,
   subscribeConvertRecords,
 } from '../convertResume';
-import {cctpMaxFee, cctpMintFloor} from '../cctp';
+import {cctpMaxFee, cctpMintFloor, fetchEthBalance} from '../cctp';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
 import {createSideShiftFixedShift, fetchSideShiftQuote, type SideShiftQuoteResult} from '../services/sideshift';
 import {deriveSolanaAddress} from '../solana/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
-import {hubRoutes, multihopRoutesFrom, type HubRoute, type MultihopRoute} from '../routes';
+import {hubRoutes, multihopRoutesFrom, gasFundRoutes, type HubRoute, type MultihopRoute} from '../routes';
 import {solanaVenuesForMint} from '../config/venues';
 import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
@@ -399,6 +400,14 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // address, so any later edit re-locks the gate.
   const [destRetype, setDestRetype] = useState('');
   const [destReentered, setDestReentered] = useState<string | null>(null);
+  // The gas-fund offer's measured have (2026-09-20): undefined = not measuring / card not
+  // wanted, null = measured UNKNOWN (publicnode unreachable — the card hides), else wei.
+  const [destEthWei, setDestEthWei] = useState<string | null | undefined>(undefined);
+  const [ethRecheckNonce, setEthRecheckNonce] = useState(0);
+  const [selfFundOpen, setSelfFundOpen] = useState(false);
+  // Bumped once when the offer card first becomes wanted — the NEED line re-quotes the
+  // minter's gas fresh at the moment the user is looking at it, never a stale review copy.
+  const [gasNonce, setGasNonce] = useState(0);
   // The minter's live gas quote for the census + preflight — refreshed per route, re-queried
   // fresh inside prepare at confirm (the signed number is never this cached one).
   const [routeGas, setRouteGas] = useState<{feeWei: string; gasLedgerFee: string} | null>(null);
@@ -964,7 +973,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoute?.routeId, relayUrl, record != null && isLiveRecord(record)]);
+  }, [activeRoute?.routeId, relayUrl, record != null && isLiveRecord(record), gasNonce]);
 
   // --- the CROSS-RAIL fee census (Routes B/C): Circle's own published number for the burn
   //     (fast finality, med forward fee, 20% buffer) + the honest external-gas line naming
@@ -1046,7 +1055,9 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     }
   };
 
-  const onConfirm = async () => {
+  // The funded variant passes the wallet's balances so the engine resolves + prepends the
+  // gas-funding pre-legs; the plain confirm never does (byte-identical unfunded records).
+  const onConfirm = async (gasFundArg?: {relayUrl: string; balances: Record<number, string>} | null) => {
     if (legs == null || confirmBusy) return;
     // A multi-mechanism destination signs NOTHING until a mechanism sub-row is picked (D2/D5) —
     // same rule as the venue chooser's never-preselected confirm gate, one level down.
@@ -1081,12 +1092,16 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
           setQuoteChanged({oldAmt: reviewed.amountOutGross, newAmt: fresh.amountOutGross});
           return;
         }
+        // The gas-fund widening (2026-09-20): a funded offer passes the wallet's balances so
+        // prepare resolves + prepends the funding pre-legs (the DOUBLE-GAS guard inside keeps
+        // this honest against the fresh quote). Absent → byte-identical unfunded record.
         const rec = await prepareMultihopConvertRecord({
           secretHex: identity.secretHex,
           quote: fresh,
           math,
           route: activeRoute,
           destAddress,
+          ...(gasFundArg != null ? {gasFund: gasFundArg} : {}),
         });
         if (!mountedRef.current) return;
         recordIdRef.current = rec.id;
@@ -1489,6 +1504,9 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           itself by its refusal state. This list is the progress UI the route promised. D14:
           it stays FULLY expanded for hub records — four legs, no folding. */}
       <View testID="convert-route-legs" style={S.convertChecklistCard}>
+        {record.gasPre != null ? (
+          <Text testID="convert-gas-legs-note" style={S.convertStateMeta}>{M.convert.crossrail.gasLegsNote}</Text>
+        ) : null}
         {(record.legPlan ?? []).map((lp, i) => {
           const leg = record.legs[i];
           const canister = leg?.canister ?? lp.canister;
@@ -1543,6 +1561,67 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
     && (!routeMode || (destValid && routeGas != null && routeGasErr == null && !gasShort))
     // Cross-rail routes also need Circle's fee on the table before confirm (fail-closed).
     && (activeRoute == null || activeRoute.crossRail == null || crossFee != null);
+  // --- the cross-rail gas-fund offer (2026-09-20): the gasShort warn upgraded from a dead end
+  //     into the two honest paths out. NEED is the minter's live feeWei plus the engine's own
+  //     20% forward-fee headroom convention; HAVE is the destination wallet's measured ETH
+  //     (eth_getBalance, publicnode). No measured have → no card: a need-vs-have offer without
+  //     a measured have is not honest, and today's fail-open warn stands instead.
+  const gasFundCardWanted = routeMode && gasShort && destConfirmed && activeRoute?.crossRail != null;
+  // [Fund from this wallet] is enabled iff a funding path exists — the engine's own enumeration
+  // over the registry (direct venue first, else hub), from this conversion's input ledger.
+  const gasFundRouteOk = legs != null && activeRoute != null
+    && gasFundRoutes(catalog, legs.inDesc.ledger, activeRoute.burn.gasLedger).length > 0;
+  // NEED per the engine's own derivation (feeWei + its 20% headroom convention) — the card's
+  // number is the same arithmetic prepare freezes, never a UI-local re-derivation.
+  const gasFundNeedStr = routeGas != null && activeRoute != null
+    ? fmtAssetCompact(gasFundNeededWei(routeGas.feeWei).toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
+    : null;
+  const gasFundHaveStr = destEthWei != null && activeRoute != null
+    ? fmtAssetCompact(destEthWei, activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
+    : null;
+  const gasFundShortStr = gasFundNeedStr != null && destEthWei != null && routeGas != null && activeRoute != null
+    ? (() => {
+        const need = BigInt(routeGas.feeWei) + BigInt(routeGas.feeWei) / 5n;
+        const have = BigInt(destEthWei);
+        return have >= need ? null : fmtAssetCompact((need - have).toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol);
+      })()
+    : null;
+  const gasFundCardShown = gasFundCardWanted && destEthWei != null && gasFundNeedStr != null && gasFundHaveStr != null;
+  // Fresh NEED the moment the offer is first wanted (the effect order makes this a no-op
+  // until the card's conditions hold; leaving the offer re-arms it for the next entry).
+  const gasFundFreshRef = useRef(false);
+  useEffect(() => {
+    if (gasFundCardWanted && !gasFundFreshRef.current) {
+      gasFundFreshRef.current = true;
+      setGasNonce(n => n + 1);
+    } else if (!gasFundCardWanted) {
+      gasFundFreshRef.current = false;
+    }
+  }, [gasFundCardWanted]);
+  // The measured HAVE: eth_getBalance on the destination wallet, only while the offer is
+  // wanted. Unknown (null) keeps the card hidden — the passive warn stands, fail-open.
+  useEffect(() => {
+    if (!gasFundCardWanted) {
+      setDestEthWei(ethWei => (ethWei === undefined ? ethWei : undefined));
+      return;
+    }
+    const addr = destAddress;
+    setDestEthWei(undefined); // measuring
+    let cancelled = false;
+    void (async () => {
+      const wei = await fetchEthBalance(addr);
+      if (!cancelled && mountedRef.current && destAddress === addr) setDestEthWei(wei);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gasFundCardWanted, destAddress, ethRecheckNonce]);
+  // A recheck that finds the wallet funded closes the self-fund instruction — the offer card
+  // returns with the fresh numbers (the shortfall line is its own unblock signal).
+  useEffect(() => {
+    if (selfFundOpen && ethRecheckNonce > 0 && destEthWei != null && gasFundShortStr == null) setSelfFundOpen(false);
+  }, [selfFundOpen, ethRecheckNonce, destEthWei, gasFundShortStr]);
   // Route-mode quote-derived figures describe the HOP asset (ckUSDC), not the direct pair's
   // other side — the destination's own figure is the min-you'll-receive line in the checklist.
   // CeFi mode likewise describes the VENUE's settle asset (SOL via the registry mint), not
@@ -2134,13 +2213,59 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
       ) : null}
 
       {/* ckETH-gas preflight (spec §6): with a KNOWN shortfall the intent form says so BEFORE
-          anything is signed — the requirement, the minimum, and the honest path (this build
-          cannot buy the slice for you). An unknown balance never blocks: the number is re-checked
-          against the minter's live quote at confirm, and prepare refuses if it still fails. */}
-      {routeMode && gasShort && gasNeededStr != null ? (
+          anything is signed. On a cross-rail route with a CONFIRMED destination and a measured
+          have, the passive warn upgrades to the gas-fund offer card (2026-09-20): need vs have,
+          one number per line, and the two honest paths out. Without a measured have the card
+          never renders — the passive warn stands (today's fail-open). */}
+      {routeMode && gasShort && gasNeededStr != null && !gasFundCardShown ? (
         <View testID="convert-gas-preflight">
           <Text style={S.convertChecklistWarn}>{M.convert.multihop.gasPreflightTitle}</Text>
           <Text style={S.convertChecklistLine}>{M.convert.multihop.gasPreflightBody(gasNeededStr)}</Text>
+        </View>
+      ) : null}
+      {gasFundCardShown ? (
+        <View testID="convert-gas-fund-card">
+          <Text style={S.convertChecklistWarn}>{M.convert.crossrail.gasFundTitle}</Text>
+          {!selfFundOpen ? (
+            <>
+              <Text testID="gas-fund-need" style={S.convertChecklistLine}>{M.convert.crossrail.gasFundNeed(gasFundNeedStr!)}</Text>
+              <Text testID="gas-fund-have" style={S.convertChecklistLine}>{M.convert.crossrail.gasFundHave(gasFundHaveStr!)}</Text>
+              <Pressable
+                testID="btn-gas-fund-wallet"
+                style={[S.primary, !gasFundRouteOk && S.disabledFlat]}
+                onPress={() => void onConfirm({relayUrl, balances: assetBalances})}
+                disabled={!gasFundRouteOk}
+                accessibilityRole="button"
+                accessibilityState={{disabled: !gasFundRouteOk}}
+                accessibilityLabel={M.convert.crossrail.gasFundWalletButton}>
+                <Text style={[S.primaryText, !gasFundRouteOk && S.disabledText]}>{M.convert.crossrail.gasFundWalletButton}</Text>
+              </Pressable>
+              <Pressable
+                testID="btn-gas-fund-self"
+                onPress={() => setSelfFundOpen(true)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.crossrail.gasFundSelfButton}>
+                <Text style={S.linkText}>{M.convert.crossrail.gasFundSelfButton}</Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Text style={S.convertChecklistLine}>{M.convert.crossrail.gasFundSelfMin(gasFundNeedStr!)}</Text>
+              <Text testID="gas-fund-self-address" style={S.convertPrincipal} selectable>{destAddress}</Text>
+              {gasFundShortStr != null ? (
+                <Text testID="gas-fund-short" style={S.err}>{M.convert.crossrail.gasFundShort(gasFundShortStr)}</Text>
+              ) : null}
+              <Pressable
+                testID="btn-gas-fund-recheck"
+                onPress={() => setEthRecheckNonce(n => n + 1)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.crossrail.gasFundRecheck}>
+                <Text style={S.linkText}>{M.convert.crossrail.gasFundRecheck}</Text>
+              </Pressable>
+            </>
+          )}
         </View>
       ) : null}
 
@@ -2890,6 +3015,16 @@ function UnavailablePanel({selectedAsset, onBack}: {selectedAsset: SelectableAss
 /** Renders the §4 state-machine record — every non-done state carries practical instructions. */
 function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void}) {
   const [, forceTick] = useState(0);
+  // The gas-fund abort read (2026-09-20): the funding pre-legs CONFIRMED and no main leg has
+  // moved — the generic abort flavors would misread this position, so the card says exactly
+  // what happened: the gas money is still in the wallet, the conversion never ran.
+  const gasPreFundedAborted = (rec: ConvertRecord): boolean => {
+    if (rec.step !== 'aborted' || rec.gasPre == null) return false;
+    const pre = rec.gasPre.legs.length * 2;
+    const plan = rec.legPlan ?? [];
+    return plan.slice(0, pre).every(l => l.state === 'confirmed')
+      && plan.slice(pre).every(l => l.state === 'pending');
+  };
   // Which deposit fact was last copied ('address' | 'memo') — the transient "Copied" label on
   // the CeFi handoff's copy buttons, same pattern as the cross-rail calldata buttons.
   const [copiedDeposit, setCopiedDeposit] = useState<'address' | 'memo' | null>(null);
@@ -2999,7 +3134,8 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
         <View testID="convert-aborted">
           <Text style={S.convertStateTitle}>{M.convert.abortedTitle}</Text>
           <Text style={S.convertStateBody}>
-            {convertAbortFlavor(record) === 'watching' ? M.convert.abortedWatching
+            {gasPreFundedAborted(record) ? M.convert.crossrail.abortedGasBody
+              : convertAbortFlavor(record) === 'watching' ? M.convert.abortedWatching
               : convertAbortFlavor(record) === 'fee' ? M.convert.abortedFee
               : M.convert.abortedClean}
           </Text>
@@ -3688,10 +3824,23 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
         <View testID="convert-failed-leg">
           {record.failureCode === 'external_declined' ? (
             /* The user walked away from the wallet step: nothing crossed; the USDC is at
-                their OWN Ethereum address — an address they control, not a dead end. */
+                their OWN Ethereum address — an address they control, not a dead end. On a
+                gas-funded record BOTH stranded assets get their whereabouts named. */
             <>
               <Text style={S.convertStateTitle}>{M.convert.crossrail.declinedTitle}</Text>
-              <Text style={S.convertStateBody}>{M.convert.crossrail.declinedBody(record.destAddress ?? '')}</Text>
+              <Text style={S.convertStateBody}>{record.gasPre != null
+                ? M.convert.crossrail.declinedWithGasBody(record.destAddress ?? '')
+                : M.convert.crossrail.declinedBody(record.destAddress ?? '')}</Text>
+            </>
+          ) : record.failureCode === 'gas_short' ? (
+            /* The funding pre-legs did not deliver (a refusal, or the executor's balance
+                re-check came up short): the main conversion never started and every source
+                value sits in-wallet — the card names the shortfall as the exit. */
+            <>
+              <Text style={S.convertStateTitle}>{M.convert.multihop.failedLegTitle}</Text>
+              <Text testID="convert-gas-short-failed" style={S.convertStateBody}>
+                {M.convert.crossrail.gasShortFailedBody(fmtAssetCompact(record.gasPre?.neededWei ?? '0', record.gasDecimals ?? 18, record.gasSymbol ?? 'ckETH'))}
+              </Text>
             </>
           ) : (
             <>
@@ -3731,6 +3880,9 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
 
       {/* The leg list — same shape as Route A's, extended with the two cross-rail kinds. */}
       <View testID="convert-crossrail-legs" style={S.convertChecklistCard}>
+        {record.gasPre != null ? (
+          <Text testID="convert-gas-legs-note" style={S.convertStateMeta}>{M.convert.crossrail.gasLegsNote}</Text>
+        ) : null}
         {(record.legPlan ?? []).map((lp, i) => {
           const leg = record.legs[i];
           const canister = leg?.canister ?? lp.canister;

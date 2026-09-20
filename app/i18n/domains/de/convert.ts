@@ -286,8 +286,9 @@ export const convertDe: ConvertMessages = {
     gasFundRecheck: 'Noch einmal prüfen',
     gasFundShort: short => `Es fehlen weiterhin ${short}`,
     gasLegsNote: 'Die ersten Schritte finanzieren das Gas.',
-    abortedGasBody: (eth, address) => `${eth} liegen an deiner Ethereum-Adresse ${address}. Die Umwandlung wurde nicht ausgeführt.`,
-    declinedWithGasBody: address => `Nichts ist überquert. Deine USDC und das Gas-ETH liegen an deiner Ethereum-Adresse ${address}.`,
+    abortedGasBody: 'Die Gas-Finanzierung ist abgeschlossen — sie liegt noch in dieser Wallet. Die Umwandlung selbst lief nie.',
+    declinedWithGasBody: address => `Nichts ist überquert. Deine USDC liegen an deiner Ethereum-Adresse ${address}; die Gas-Finanzierung liegt noch in dieser Wallet.`,
+    gasShortFailedBody: needed => `Die Gas-Finanzierung blieb unter ${needed}. Nichts hat diese Wallet verlassen — die Umwandlung startete nie.`,
   },
 
   errors: {

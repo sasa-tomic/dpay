@@ -285,8 +285,9 @@ export const convertFr: ConvertMessages = {
     gasFundRecheck: 'Revérifier',
     gasFundShort: short => `Il manque toujours ${short}`,
     gasLegsNote: 'Les premières étapes financent le gaz.',
-    abortedGasBody: (eth, address) => `${eth} est à ton adresse Ethereum ${address}. La conversion n\u2019a pas été exécutée.`,
-    declinedWithGasBody: address => `Rien n\u2019a traversé. Tes USDC et l\u2019ETH de gaz sont à ton adresse Ethereum ${address}.`,
+    abortedGasBody: 'Le financement du gaz est terminé — il est toujours dans ce portefeuille. La conversion, elle, n\u2019a jamais tourné.',
+    declinedWithGasBody: address => `Rien n\u2019a traversé. Tes USDC sont à ton adresse Ethereum ${address} ; le gaz financé est toujours dans ce portefeuille.`,
+    gasShortFailedBody: needed => `Le financement du gaz est resté sous ${needed}. Rien n\u2019a quitté ce portefeuille — la conversion n\u2019a jamais démarré.`,
   },
 
   errors: {
