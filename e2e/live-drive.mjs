@@ -697,6 +697,71 @@ async function cmdC4(eurcAmount) {
 }
 
 
+/** OP 2 — gas-funder core mechanic, live: 0.5 ICP → USDC at OUR Ethereum address (EVM-float),
+ *  WITH the gas-fund card (the wallet's ckETH is far short of gas; the app prepends gas legs and
+ *  funds ckETH from the input). The CCTP burn itself stays user-side by design — the record parks
+ *  at awaiting_external naming both assets; we verify native ETH arrived at the destination. */
+async function cmdGas(icpAmount, evmAddress) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(evmAddress)) throw new Error(`conv-gas: not an EVM address: ${evmAddress}`);
+  await withApp(async (driver) => {
+    log(`OP 2 — gas-funder: ${icpAmount} ICP → USDC at ${evmAddress} (gas funded from this wallet)`);
+    await openConvert(driver, 'icp');
+    await driver.type('convert-amount', icpAmount);
+    await pickDest(driver, 'convert-dest-route-multihop:icpswap-ckusdc:2');
+    // EVM destination + checksum gate (the human-facing double-type gate). §1: a lowercase
+    // (shape-valid, checksum-BAD) form must be refused; the checksummed re-type clears it.
+    await driver.type('convert-dest-address', evmAddress.toLowerCase());
+    const bad = await driver.waitForText('Checksum mismatch', {timeoutMs: 8_000});
+    if (!bad) {
+      await driver.screenshot('live-gas-checksum-gate');
+      throw new Error('OP 2: lowercase address did NOT trip the checksum gate — gate missing?');
+    }
+    log('checksum gate: lowercase refused ✓');
+    await driver.screenshot('live-gas-checksum-bad');
+    await driver.type('convert-dest-address', evmAddress);
+    if (await driver.isPresent('convert-dest-reenter')) {
+      log('re-enter gate up — typing the address again');
+      await driver.type('convert-dest-reenter', evmAddress);
+      await sleep(500);
+    }
+    await driver.screenshot('live-gas-dest-ok');
+    // Gas-fund card: need-vs-have, then the wallet-fund gesture.
+    await driver.waitForText('ETH', {timeoutMs: 30_000});
+    const cardText = await driver.readText('convert-gas-fund-card');
+    log(`GAS CARD: ${cardText.replace(/\s+/g, ' ')}`);
+    await driver.screenshot('live-gas-card');
+    // §3 [I'll fund it myself] renders + the short-recheck branch (evm-float starts at 0 ETH).
+    await driver.click('btn-gas-fund-self');
+    await sleep(1_000);
+    const selfText = (await driver.bodyText()).replace(/\s+/g, ' ').match(/.{0,80}(Send ≥|Send >=|fund it myself|gas-fund-self).{0,220}/i);
+    log(`SELF-FUND PATH: ${selfText ? selfText[0] : '(pattern not found — dumping card) ' + (await driver.readText('convert-gas-fund-card')).replace(/\s+/g, ' ')}`);
+    await driver.screenshot('live-gas-self');
+    const short = await driver.isPresent('btn-gas-fund-recheck');
+    if (short) {
+      await driver.click('btn-gas-fund-recheck');
+      await sleep(1_000);
+      const shortText = (await driver.readText('convert-gas-fund-card')).replace(/\s+/g, ' ');
+      log(`SHORT RECHECK: ${shortText.slice(0, 300)}`);
+      if (!/short/i.test(shortText)) throw new Error('OP 2: recheck after 0-ETH balance did not report short');
+      log('still-short recheck ✓ (honest 0-ETH read)');
+      await driver.screenshot('live-gas-short');
+    }
+    // §4 the real gesture: fund the gas from this wallet.
+    await driver.click('btn-gas-fund-wallet');
+    await driver.waitForText('ETH', {timeoutMs: 20_000}); // legs note names the gas funding
+    const body = (await driver.bodyText()).replace(/\s+/g, ' ');
+    const legsNote = body.match(/convert gas[^.]*|fund the gas[^.]*|.{0,120}gas.{0,160}/i);
+    log(`AFTER FUND GESTURE: ${legsNote ? legsNote[0] : body.slice(0, 400)}`);
+    await driver.screenshot('live-gas-funded');
+    const done = await confirmWithRequote(driver, 'GAS', {cefi: false});
+    log(`OP 2 confirm → ${done === true ? 'submitted' : JSON.stringify(done)?.slice(0, 200)}`);
+    await watchConvert(driver, 'gas', {timeoutMs: 20 * 60_000});
+    log(`FINAL SURFACE: ${(await driver.bodyText()).replace(/\s+/g, ' ').slice(0, 1400)}`);
+    await driver.screenshot('live-gas-final');
+    await agentFunds();
+  });
+}
+
 async function cmdC3(eurcAmount) {
   await withApp(async (driver) => {
     await openConvert(driver, 'sol-eurc'); // the SOURCE is the SOL rail's EURC token row
@@ -830,6 +895,7 @@ try {
   else if (cmd === 'conv-c2') await cmdC2(args[0]);
   else if (cmd === 'conv-c3') await cmdC3(args[0]);
   else if (cmd === 'conv-c4') await cmdC4(args[0]);
+  else if (cmd === 'conv-gas') await cmdGas(args[0], args[1]);
   else if (cmd === 'b-send-sol') await cmdBSendSol(args[0], args[1]);
   else if (cmd === 'watch') await cmdWatch();
   else if (cmd === 'b-send') await cmdBSend(args[0], args[1]);
