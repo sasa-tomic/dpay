@@ -147,6 +147,7 @@ describe('CeFi confirm vs a ticking venue rate', () => {
       expect(args.quoteId).toBe('q-confirm'); // the order rides the FRESH quote id
       expect(args.settleAddress.length).toBeGreaterThan(0); // the user's own derived address
       expect(args.refundAddress).toBe('my-ic-principal-refund'); // the user's own IC principal — refunds land THERE
+      expect(args.depositLedger).toBe(CATALOG.find(c => c.currency === 8)!.ledger); // names the deposit rail for the relay's refund check
       return {...ORDER, id: `${ORDER.id}-${venue.venue_id}`};
     });
   });

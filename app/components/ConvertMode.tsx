@@ -1184,6 +1184,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             quoteId: freshRes.quoteId,
             settleAddress: cefiSettleAddress,
             refundAddress: cefiRefundAddress,
+            depositLedger: legs.inDesc.ledger,
           });
         } catch (e) {
           throw ceFiServiceError(e, activeCefiVenue.display_name);
@@ -2755,6 +2756,7 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
             quoteId: freshRes.quoteId,
             settleAddress: icSettleAddress,
             refundAddress: solRefundAddress,
+            depositLedger: legs.inMint,
           });
         } catch (e) {
           throw ceFiServiceError(e, venueName);

@@ -158,6 +158,7 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
       quoteId: 'q1',
       settleAddress: 'myprinc-ipay',
       refundAddress: deriveSolanaAddress(IDENTITY.secretHex),
+      depositLedger: EURC_MINT_ADDRESS,
     });
     // Nothing signed, nothing adopted beyond the watch record.
     expect(adoptConvertRecord).toHaveBeenCalledTimes(1);
@@ -193,6 +194,7 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
       quoteId: 'q-confirm',
       settleAddress: 'myprinc-ipay',
       refundAddress: deriveSolanaAddress(IDENTITY.secretHex),
+      depositLedger: EURC_MINT_ADDRESS,
     });
     const rec = jest.mocked(adoptConvertRecord).mock.calls[0][0];
     expect(rec.expectedNet).toBe('4000000'); // 0.0400 ICP raw (8 decimals), the ORDER's own locked figure

@@ -143,18 +143,21 @@ export async function fetchSideShiftQuote(
  *  carries the quote the user approved, the user's OWN settle address, and the user's
  *  OWN refund address ON THE DEPOSIT RAIL — where the venue returns the funds if the
  *  deposit fails or the order expires (a fund-loss class defect without it: the venue
- *  would keep them). The venue answers with ITS deposit address, which the record shows
- *  to the user verbatim (this screen is the honest CeFi handoff: nothing is signed, the
- *  user sends). The relay re-validates both addresses and refuses an order whose refund
- *  address is missing or malformed for the deposit rail. */
+ *  would keep them). `depositLedger` names that rail (the device's rail id — never
+ *  forwarded to the venue) so the relay can scope the refund-address check. The venue
+ *  answers with ITS deposit address, which the record shows to the user verbatim (this
+ *  screen is the honest CeFi handoff: nothing is signed, the user sends). The relay
+ *  re-validates both addresses and refuses an order whose refund address is missing or
+ *  malformed for the deposit rail. */
 export async function createSideShiftFixedShift(
   relayUrl: string,
   venue: VenueEntry,
-  args: {quoteId: string; settleAddress: string; refundAddress: string; settleMemo?: string},
+  args: {quoteId: string; settleAddress: string; refundAddress: string; depositLedger: string; settleMemo?: string},
   timeoutMs = 8000,
 ): Promise<SideShiftFixedShift> {
   if (venue.kind !== 'cefi' || venue.testnet) throw new Error('refused');
-  if (args.settleAddress.length === 0 || args.refundAddress.length === 0) throw new Error('refused');
+  if (args.settleAddress.length === 0 || args.refundAddress.length === 0
+    || args.depositLedger.length === 0) throw new Error('refused');
   let r: Response;
   try {
     r = await relayFetch(relayUrl, '/api/v1/sideshift/shifts/fixed', {
@@ -164,6 +167,7 @@ export async function createSideShiftFixedShift(
         quoteId: args.quoteId,
         settleAddress: args.settleAddress,
         refundAddress: args.refundAddress,
+        depositLedger: args.depositLedger,
         ...(args.settleMemo != null ? {settleMemo: args.settleMemo} : {}),
       }),
     }, timeoutMs);

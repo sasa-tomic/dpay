@@ -151,6 +151,7 @@ describe('services/sideshift — the relay-proxied client', () => {
       quoteId: 'q-1',
       settleAddress: 'SolSettleAddr',
       refundAddress: 'MyIcPrincipalRefund',
+      depositLedger: ICP_LEDGER,
       settleMemo: 'SolSettleMemo',
     });
     expect(order).toEqual({
@@ -169,6 +170,7 @@ describe('services/sideshift — the relay-proxied client', () => {
       quoteId: 'q-1',
       settleAddress: 'SolSettleAddr',
       refundAddress: 'MyIcPrincipalRefund',
+      depositLedger: ICP_LEDGER,
       settleMemo: 'SolSettleMemo',
     });
     // no credential anywhere the device can see
@@ -179,7 +181,7 @@ describe('services/sideshift — the relay-proxied client', () => {
     // The fund-loss class: a refundable order needs the user's OWN address on the
     // DEPOSIT rail. The client refuses the empty form outright — the relay re-checks.
     await expect(
-      createSideShiftFixedShift(RELAY, VENUE, {quoteId: 'q-1', settleAddress: 'SolSettleAddr', refundAddress: ''}),
+      createSideShiftFixedShift(RELAY, VENUE, {quoteId: 'q-1', settleAddress: 'SolSettleAddr', refundAddress: '', depositLedger: ICP_LEDGER}),
     ).rejects.toThrow('refused');
     expect(relayFetch).not.toHaveBeenCalled();
   });
