@@ -30,8 +30,14 @@
 //   POST {base}/quotes    {depositCoin, depositNetwork, settleCoin, settleNetwork,
 //                          depositAmount, settleAmount: null, affiliateId, commissionRate}
 //     → 201 {...echo, id: QUOTE_ID, rate, settleAmount} (quote lives 15 min)
-//   POST {base}/shifts/fixed {quoteId, settleAddress, settleMemo?, affiliateId}
+//   POST {base}/shifts/fixed {quoteId, settleAddress, settleMemo?, refundAddress,
+//                          affiliateId}
 //     → 201 {id, depositAddress, depositMemo?, depositAmount, settleAmount, expiresAt, …}
+//     `refundAddress` is the USER'S OWN address on the DEPOSIT rail — where the venue
+//     returns the funds when a deposit fails or the order expires. Non-custodial red
+//     line: it is derived from the user's own key in the flow that already knows it
+//     (IC-side: the wallet's IC principal; SOL-side: the wallet's Solana address), never
+//     a dpay-controlled address, and the relay refuses an order without one.
 //   GET  {base}/shifts/{id}  — KEYLESS status read: {status: settled|refund|refunded|
 //     expired|multiple|…, settleAmount, settleHash, …}
 // The device→relay bodies deliberately speak RAIL ids (IC ledger principal / Solana
@@ -134,17 +140,21 @@ export async function fetchSideShiftQuote(
 }
 
 /** Create the fixed order THROUGH THE RELAY (credential attached server-side). The body
- *  is minimal: the quote the user approved, and the user's OWN settle address — the
- *  venue answers with ITS deposit address, which the record shows to the user verbatim
- *  (this screen is the honest CeFi handoff: nothing is signed, the user sends). */
+ *  carries the quote the user approved, the user's OWN settle address, and the user's
+ *  OWN refund address ON THE DEPOSIT RAIL — where the venue returns the funds if the
+ *  deposit fails or the order expires (a fund-loss class defect without it: the venue
+ *  would keep them). The venue answers with ITS deposit address, which the record shows
+ *  to the user verbatim (this screen is the honest CeFi handoff: nothing is signed, the
+ *  user sends). The relay re-validates both addresses and refuses an order whose refund
+ *  address is missing or malformed for the deposit rail. */
 export async function createSideShiftFixedShift(
   relayUrl: string,
   venue: VenueEntry,
-  args: {quoteId: string; settleAddress: string; settleMemo?: string},
+  args: {quoteId: string; settleAddress: string; refundAddress: string; settleMemo?: string},
   timeoutMs = 8000,
 ): Promise<SideShiftFixedShift> {
   if (venue.kind !== 'cefi' || venue.testnet) throw new Error('refused');
-  if (args.settleAddress.length === 0) throw new Error('refused');
+  if (args.settleAddress.length === 0 || args.refundAddress.length === 0) throw new Error('refused');
   let r: Response;
   try {
     r = await relayFetch(relayUrl, '/api/v1/sideshift/shifts/fixed', {
@@ -153,6 +163,7 @@ export async function createSideShiftFixedShift(
       body: JSON.stringify({
         quoteId: args.quoteId,
         settleAddress: args.settleAddress,
+        refundAddress: args.refundAddress,
         ...(args.settleMemo != null ? {settleMemo: args.settleMemo} : {}),
       }),
     }, timeoutMs);

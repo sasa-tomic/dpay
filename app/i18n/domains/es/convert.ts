@@ -206,6 +206,7 @@ export const convertEs: ConvertMessages = {
     depositAmountLabel: 'Cantidad exacta a depositar',
     depositMemoLabel: 'Memo (obligatorio)',
     depositExpiryLine: at => `La orden caduca ${at}`,
+    shiftId: id => `Shift ${id}`,
     counterparty: venue =>
       `Ejecutado por ${venue}: un servicio de intercambio automatizado, no un proveedor con licencia y no dpay.`,
     checklistSigns:

@@ -12,8 +12,9 @@
  *
  *   - an omitted currency keeps its PRIOR value (no flap, and never a zero);
  *   - a currency never answered for has NO ENTRY, so a consumer's `?? null` reads "unknown";
- *   - a batch with no primary flips `online` false and LEAVES the last known balance alone;
- *   - a non-2xx does the same, and writes nothing.
+ *   - ONE missed poll is a blip, not an outage (F4, 2026-09-20): `online` holds; going
+ *     offline takes BALANCE_OFFLINE_AFTER_FAILURES CONSECUTIVE failures — and no failure
+ *     ever touches a balance (stale, not zero).
  *
  * Plus the 2026-09-15 offline-payments contract: the poll STAMPS a per-currency freshness clock
  * (`atByCurrency` — the one clock the pending-outbox subtraction and the 60 s approx marker read)
@@ -38,7 +39,7 @@ jest.mock('../services/relay', () => ({
 import {relayFetch} from '../services/relay';
 import {useBalancePoll} from '../hooks/useBalancePoll';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
-import {POLL} from '../config/constants';
+import {POLL, BALANCE_OFFLINE_AFTER_FAILURES} from '../config/constants';
 
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 const DISPLAY_ASSETS = CATALOG.filter(c => c.currency !== 0);
@@ -120,43 +121,54 @@ describe('useBalancePoll — an unknown balance is never reported as zero', () =
     act(() => { tree.unmount(); });
   });
 
-  test('a batch with no primary goes offline and leaves the last known balance alone', async () => {
+  test('ONE missed poll is a blip — online holds and the mid-flow form survives (F4)', async () => {
     jest.mocked(relayFetch)
       .mockResolvedValueOnce(answer({'0': '10000', [String(VCHF)]: '500000000'}) as never)
-      .mockResolvedValueOnce(answer({[String(VCHF)]: '500000000'}) as never);
+      // The next batch answers VCHF but NOT the primary: a primary-ledger hiccup.
+      .mockResolvedValueOnce(answer({[String(VCHF)]: '500000000'}) as never)
+      .mockResolvedValueOnce(answer({'0': '10000', [String(VCHF)]: '500000000'}) as never);
 
     const {latest, tree} = await mountPoll();
     expect(latest().online).toBe(true);
 
     await nextPoll();
-    // Offline is the honest state; the balance is stale, not zero — and the gate only HARD-blocks
-    // while online, so a stale reading degrades to the warning rather than a refusal.
-    expect(latest().online).toBe(false);
+    // One failure is not a reachability fact: the dot does NOT flip, the send form stays up,
+    // and the balance is stale-but-known, never zero.
+    expect(latest().online).toBe(true);
+    expect(latest().balance).toBe('10000');
+
+    await nextPoll();
+    // Recovery was instant before and stays instant — one success resets the streak.
+    expect(latest().online).toBe(true);
     expect(latest().balance).toBe('10000');
     act(() => { tree.unmount(); });
   });
 
-  test('a non-2xx goes offline and writes no balance at all', async () => {
-    jest.mocked(relayFetch)
-      .mockResolvedValueOnce(answer({'0': '10000', [String(VCHF)]: '500000000'}) as never)
-      .mockResolvedValueOnce(refuse(503, '{"error":"ledger unreachable"}') as never);
+  test(`offline takes BALANCE_OFFLINE_AFTER_FAILURES (${BALANCE_OFFLINE_AFTER_FAILURES}) CONSECUTIVE failures, any class`, async () => {
+    const N = BALANCE_OFFLINE_AFTER_FAILURES;
+    const ok = () => answer({'0': '10000', [String(VCHF)]: '500000000'});
+    const mock = jest.mocked(relayFetch)
+      .mockResolvedValueOnce(ok() as never); // the mount's own poll
+    for (let i = 0; i < N - 1; i++) mock.mockResolvedValueOnce(refuse(503, '{"error":"ledger"}') as never);
+    mock.mockResolvedValueOnce(ok() as never); // one success splits the streak
+    for (let i = 0; i < N - 1; i++) mock.mockResolvedValueOnce(refuse(503, '{"error":"ledger"}') as never);
+    mock.mockRejectedValueOnce(new Error('ECONNREFUSED') as never); // the Nth miss: a transport failure — the class does not matter
 
     const {latest, tree} = await mountPoll();
+    expect(latest().online).toBe(true);
+
+    // N-1 consecutive failures: still online — the old rule would have flipped here already.
+    for (let i = 0; i < N - 1; i++) { await nextPoll(); expect(latest().online).toBe(true); }
+
+    // A single success resets the count: the next N-1 misses STILL do not flip it.
+    await nextPoll();
+    expect(latest().online).toBe(true);
+    for (let i = 0; i < N - 1; i++) { await nextPoll(); expect(latest().online).toBe(true); }
+
+    // The Nth CONSECUTIVE failure: only now is offline the honest reading.
     await nextPoll();
     expect(latest().online).toBe(false);
-    expect(latest().balance).toBe('10000');
-    expect(latest().assetBalances[VCHF]).toBe('500000000');
-    act(() => { tree.unmount(); });
-  });
-
-  test('a transport failure goes offline without touching a single balance', async () => {
-    jest.mocked(relayFetch)
-      .mockResolvedValueOnce(answer({'0': '10000', [String(VCHF)]: '500000000'}) as never)
-      .mockRejectedValueOnce(new Error('ECONNREFUSED') as never);
-
-    const {latest, tree} = await mountPoll();
-    await nextPoll();
-    expect(latest().online).toBe(false);
+    // And a failure never wrote a balance, in any class.
     expect(latest().balance).toBe('10000');
     expect(latest().assetBalances[VCHF]).toBe('500000000');
     act(() => { tree.unmount(); });

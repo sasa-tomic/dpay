@@ -26,7 +26,13 @@
 //!   venue's numbers untouched (the relay never computes, blends or rounds a rate).
 //! - `POST /api/v1/sideshift/shifts/fixed` — fixed-shift (order) creation, same
 //!   credential attachment, response VERBATIM (no wrap: an order is not a quote
-//!   surface). The device then shows the user SideShift's `depositAddress` — the user
+//!   surface). The device posts the quote id, the user's OWN settle address, and a
+//!   REQUIRED `refundAddress` — the user's OWN address on the DEPOSIT rail, where the
+//!   venue returns the funds when a deposit fails or the order expires (without one they
+//!   stay with the venue: a fund-loss). The relay validates the refund address is
+//!   present and well-formed FOR THE DEPOSIT RAIL (named by `depositLedger`) and
+//!   refuses the order otherwise — 400, house error, before any upstream call. The
+//!   device then shows the user SideShift's `depositAddress` — the user
 //!   sends the deposit to SIDESHIFT's address; that is what CeFi means and the app's
 //!   disclosure says so.
 //!
@@ -373,9 +379,21 @@ pub async fn quotes_proxy(
 
 /// `POST /api/v1/sideshift/shifts/fixed` — fixed-order creation. Request (device):
 /// `{"quoteId": "<id from the quote surface>", "settleAddress": "<the user's OWN
-/// address on the settle rail>", "settleMemo"?: string}`. Response VERBATIM (module
-/// header): the device persists `id`, `depositAddress` (+`depositMemo`, required for
-/// some venues' networks) and `expiresAt` off the venue's own answer.
+/// address on the settle rail>", "refundAddress": "<the user's OWN address on the
+/// DEPOSIT rail>", "depositLedger": "<the deposit rail id>", "settleMemo"?: string}`.
+/// Response VERBATIM (module header): the device persists `id`, `depositAddress`
+/// (+`depositMemo`, required for some venues' networks) and `expiresAt` off the venue's
+/// own answer.
+///
+/// The refund address is a FUND-LOSS guard, not paperwork: when a deposit fails or the
+/// order expires, the venue returns the funds to `refundAddress` — and without one they
+/// stay with the venue. It must be present and well-formed FOR THE DEPOSIT RAIL (an IC
+/// principal/account on `icp`, a 32-byte base58 pubkey on `solana`), and it is the
+/// DEVICE's job to derive it from the user's own key — a refund may only ever land at a
+/// user-owned address (the non-custodial red line), never a dpay-controlled one. A
+/// missing or malformed field is a client bug: the 400 house error, refused BEFORE any
+/// upstream call (the file's failure-semantics convention — this is a device error, not
+/// a 503-class relay fact).
 pub async fn shifts_fixed_proxy(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
@@ -394,19 +412,23 @@ pub async fn shifts_fixed_proxy(
                 StatusCode::BAD_REQUEST,
                 format!(
                     "request body is not valid JSON ({e}) — POST /api/v1/sideshift/shifts/fixed \
-                     takes {{quoteId, settleAddress, settleMemo?}}"
+                     takes {{quoteId, settleAddress, refundAddress, depositLedger, settleMemo?}}"
                 ),
             );
         }
     };
-    let (Some(quote_id), Some(settle_address)) = (
+    let (Some(quote_id), Some(settle_address), Some(refund_address), Some(deposit_ledger)) = (
         req.get("quoteId").and_then(Value::as_str),
         req.get("settleAddress").and_then(Value::as_str),
+        req.get("refundAddress").and_then(Value::as_str),
+        req.get("depositLedger").and_then(Value::as_str),
     ) else {
         return err(
             StatusCode::BAD_REQUEST,
-            "request needs string fields `quoteId` and `settleAddress` (the user's own address \
-             on the settle rail)",
+            "request needs string fields `quoteId`, `settleAddress` (the user's own address \
+             on the settle rail), `refundAddress` (the user's own address on the DEPOSIT \
+             rail — where the venue returns funds on failure) and `depositLedger` (the \
+             deposit rail id)",
         );
     };
     if quote_id.is_empty() || settle_address.is_empty() {
@@ -415,9 +437,30 @@ pub async fn shifts_fixed_proxy(
             "`quoteId` and `settleAddress` must be non-empty strings",
         );
     }
+    // The refund rail is a fact about the DEPOSIT: the registered asset table names the
+    // venue's own network for the rail id, and well-formedness is checked against THAT.
+    let Some((_, refund_network)) = SIDESHIFT_ASSETS
+        .iter()
+        .find(|(rail_id, _, _)| *rail_id == deposit_ledger)
+        .map(|(_, coin, network)| (*coin, *network))
+    else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "unsupported deposit rail: `depositLedger` must be a registered SideShift pair's \
+             rail id (the same id the quote surface accepted)",
+        );
+    };
+    if refund_address.is_empty() || !refund_address_wellformed(refund_network, refund_address) {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "`refundAddress` must be a well-formed address on the DEPOSIT rail — an Internet \
+             Computer principal or account text for icp, a base58 32-byte pubkey for solana",
+        );
+    }
     let mut upstream_body = json!({
         "quoteId": quote_id,
         "settleAddress": settle_address,
+        "refundAddress": refund_address,
         "affiliateId": affiliate_id,
     });
     // settleMemo is the venue's own field for memo-required settle networks (ICP is
@@ -427,6 +470,50 @@ pub async fn shifts_fixed_proxy(
     }
     let outcome = post_upstream(&proxy, "/shifts/fixed", &upstream_body, &secret, ip).await;
     json_response(outcome.status, &outcome.body)
+}
+
+/// Is this a well-formed address on the given SideShift NETWORK (the deposit rail of the
+/// order)? Structural only — the venue still owns reachability/ownership; this refuses
+/// the orders that could never be refunded to the stated address before they exist.
+/// `icp`: an IC principal (CRC-checked) or a full ICRC-1 account text, both via the
+/// shared `dpay-icp` codec (the exact parser the ledgers speak). `solana`: base58 that
+/// decodes to exactly 32 bytes (the same check the transaction builder applies).
+fn refund_address_wellformed(network: &str, s: &str) -> bool {
+    match network {
+        "icp" => {
+            use dpay_icp::principal::{Account, Principal};
+            Principal::from_text(s).is_ok() || Account::from_text(s).is_ok()
+        }
+        "solana" => bs58_decode(s).is_some_and(|b| b.len() == 32),
+        // A network code this integration does not serve cannot be refunded-to: refuse.
+        _ => false,
+    }
+}
+
+/// Minimal bs58 DECODE (alphabet table + big-number base conversion, leading-'1' zeros).
+/// Hand-rolled because the relay tree has no bs58 dependency — the same shape as the
+/// test-helpers stub's decoder in `app.rs`, but this one is PROD code: it is the refund
+/// address's well-formedness gate, so it lives next to the handler that calls it.
+fn bs58_decode(s: &str) -> Option<Vec<u8>> {
+    const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut digits: Vec<u8> = Vec::new(); // big-endian base-256 accumulator
+    for ch in s.bytes() {
+        let val = u32::try_from(ALPHABET.iter().position(|&a| a == ch)?).ok()?;
+        let mut carry = val;
+        for byte in digits.iter_mut().rev() {
+            let acc = u32::from(*byte) * 58 + carry;
+            *byte = (acc & 0xff) as u8;
+            carry = acc >> 8;
+        }
+        while carry > 0 {
+            digits.insert(0, (carry & 0xff) as u8);
+            carry >>= 8;
+        }
+    }
+    let zeros = s.bytes().take_while(|&b| b == b'1').count();
+    let mut out = vec![0u8; zeros];
+    out.extend(digits);
+    Some(out)
 }
 
 /// Map a (deposit, settle) rail-id pair onto SideShift's own codes — accepted only if
@@ -727,8 +814,60 @@ mod tests {
     }
 
     #[test]
-    fn unconfigured_proxy_names_exactly_the_missing_variables() {
-        let none = SideShiftProxy::new(None, None, DEFAULT_API_BASE.to_string(), DEFAULT_TIMEOUT);
+    fn refund_address_wellformedness_is_rail_scoped() {
+        use dpay_icp::principal::{Account, Principal};
+        // IC rail: a valid principal passes…
+        let principal = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+        assert!(super::refund_address_wellformed("icp", &principal.to_text()));
+        // …and so does the full ICRC-1 account text (owner + 7-char checksum + subaccount).
+        let mut subaccount = [0u8; 32];
+        subaccount[31] = 0xa0;
+        let account_text = Account { owner: principal, subaccount }.text();
+        assert_eq!(
+            account_text,
+            Account::from_text(&account_text).unwrap().text(),
+            "the fixture is the codec's own canonical text"
+        );
+        assert!(super::refund_address_wellformed("icp", &account_text));
+        // …and the CRC/alphabet check refuses a malformed principal outright.
+        assert!(!super::refund_address_wellformed("icp", "not-a-principal"));
+        assert!(!super::refund_address_wellformed("icp", ""));
+        // Solana rail: base58 that decodes to exactly 32 bytes (a real mainnet address).
+        assert!(super::refund_address_wellformed(
+            "solana",
+            "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+        ));
+        // Not 32 bytes / not base58 at all.
+        assert!(!super::refund_address_wellformed("solana", "111"));
+        assert!(!super::refund_address_wellformed(
+            "solana",
+            "0OIl-not-base58-safe"
+        ));
+        // An unknown network code is refused structurally (cannot be refunded-to).
+        assert!(!super::refund_address_wellformed("ethereum", "0xabc"));
+    }
+
+    #[test]
+    fn bs58_decode_roundtrips_and_counts_leading_ones() {
+        // The system program's address is 32 zero bytes: all-'1' text, zeros only.
+        assert_eq!(
+            super::bs58_decode("11111111111111111111111111111111").unwrap(),
+            vec![0u8; 32]
+        );
+        // A real 32-byte pubkey decodes to exactly 32 bytes.
+        assert_eq!(
+            super::bs58_decode("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+                .unwrap()
+                .len(),
+            32
+        );
+        // Off-alphabet characters are rejected.
+        assert!(super::bs58_decode("0OIl").is_none());
+        assert!(super::bs58_decode("").unwrap().is_empty());
+    }
+
+    #[test]
+    fn unconfigured_proxy_names_exactly_the_missing_variables() {        let none = SideShiftProxy::new(None, None, DEFAULT_API_BASE.to_string(), DEFAULT_TIMEOUT);
         let response = unconfigured(&none).expect("fully unconfigured → 503");
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         // The detail names BOTH variables (leak-free by construction: fixed strings).

@@ -44,6 +44,7 @@ import {ConvertMode} from '../components/ConvertMode';
 import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config/catalog';
 import {EURC_MINT_ADDRESS} from '../solana/tokens';
+import {deriveSolanaAddress} from '../solana/identity';
 import {fetchSideShiftQuote, createSideShiftFixedShift} from '../services/sideshift';
 import {adoptConvertRecord} from '../convertResume';
 
@@ -149,9 +150,15 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     await act(async () => {
       present(tree, 'btn-convert-confirm')[0].props.onPress();
     });
-    // The order was created with the user's own derived settle address.
+    // The order was created with the user's own derived settle address, and the
+    // deposit-rail refund address: the wallet's OWN Solana address (the venue returns
+    // the funds THERE on a failed deposit or expiry — the fund-loss guard).
     expect(createSideShiftFixedShift).toHaveBeenCalledTimes(1);
-    expect(jest.mocked(createSideShiftFixedShift).mock.calls[0][2]).toMatchObject({quoteId: 'q1', settleAddress: 'myprinc-ipay'});
+    expect(jest.mocked(createSideShiftFixedShift).mock.calls[0][2]).toMatchObject({
+      quoteId: 'q1',
+      settleAddress: 'myprinc-ipay',
+      refundAddress: deriveSolanaAddress(IDENTITY.secretHex),
+    });
     // Nothing signed, nothing adopted beyond the watch record.
     expect(adoptConvertRecord).toHaveBeenCalledTimes(1);
     const rec = jest.mocked(adoptConvertRecord).mock.calls[0][0];
@@ -182,7 +189,11 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     });
     expect(fetchSideShiftQuote).toHaveBeenCalledTimes(2);
     expect(createSideShiftFixedShift).toHaveBeenCalledTimes(1);
-    expect(jest.mocked(createSideShiftFixedShift).mock.calls[0][2]).toMatchObject({quoteId: 'q-confirm', settleAddress: 'myprinc-ipay'});
+    expect(jest.mocked(createSideShiftFixedShift).mock.calls[0][2]).toMatchObject({
+      quoteId: 'q-confirm',
+      settleAddress: 'myprinc-ipay',
+      refundAddress: deriveSolanaAddress(IDENTITY.secretHex),
+    });
     const rec = jest.mocked(adoptConvertRecord).mock.calls[0][0];
     expect(rec.expectedNet).toBe('4000000'); // 0.0400 ICP raw (8 decimals), the ORDER's own locked figure
     expect(present(tree, 'convert-awaiting-deposit').length).toBeGreaterThan(0);

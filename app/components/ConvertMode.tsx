@@ -513,6 +513,31 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     () => (cefiMode ? deriveSolanaAddress(identity.secretHex) : null),
     [cefiMode, identity.secretHex],
   );
+  // The CeFi REFUND address — the user's OWN address ON THE DEPOSIT RAIL, where the venue
+  // returns the funds if the deposit fails or the order expires (an order without one
+  // leaves the funds with the venue: the fund-loss class). IC-side the deposit rail is the
+  // IC: the wallet's own IC principal, derived from the same key that derives the Solana
+  // settle address (async native derivation → state; the confirm gate withholds the order
+  // until it is in). The relay independently refuses an order without a well-formed one.
+  const [cefiRefundAddress, setCefiRefundAddress] = useState<string | null>(null);
+  useEffect(() => {
+    if (!cefiMode) {
+      setCefiRefundAddress(null);
+      return;
+    }
+    let alive = true;
+    DpayCore.icpPrincipalFromPubkey(identity.publicHex)
+      .then(p => {
+        if (alive) setCefiRefundAddress(p);
+      })
+      .catch(() => {
+        if (alive) setCefiRefundAddress(null);
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cefiMode, identity.publicHex]);
   // The chooser's candidate rows — only under a DIRECT mechanism pick with 2+ registered
   // venues on that pair (registry order, unordered-set match). 2+ rows switch the screen to
   // the chooser layout; ONE row = the plain single-venue surface. A hub/route/cefi pick
@@ -1116,7 +1141,8 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       }
       return;
     }
-    if (cefiMode && activeCefiVenue != null && cefiOutMint != null && cefiOut != null && cefiSettleAddress != null) {
+    if (cefiMode && activeCefiVenue != null && cefiOutMint != null && cefiOut != null
+      && cefiSettleAddress != null && cefiRefundAddress != null) {
       setConfirmBusy(true);
       setConfirmErr(null);
       setQuoteChanged(null);
@@ -1148,12 +1174,16 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         // Order creation is CeFi: the DEVICE posts the order body to the relay proxy (the
         // relay attaches the partner credential server-side); the venue answers with its
         // OWN deposit address. The user sends the deposit to the VENUE, never to dpay —
-        // the record's providerDeposit block carries exactly that handoff.
+        // the record's providerDeposit block carries exactly that handoff. The refund
+        // address is the user's OWN IC principal: if the deposit fails or the order
+        // expires, the venue returns the funds THERE — never to a dpay-controlled
+        // address, and the relay refuses an order that omits it.
         let order;
         try {
           order = await createSideShiftFixedShift(relayUrl, activeCefiVenue, {
             quoteId: freshRes.quoteId,
             settleAddress: cefiSettleAddress,
+            refundAddress: cefiRefundAddress,
           });
         } catch (e) {
           throw ceFiServiceError(e, activeCefiVenue.display_name);
@@ -2529,6 +2559,13 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cefiMode, identity.publicHex]);
+  // The CeFi REFUND address, SOL surface: the DEPOSIT rail here is Solana, so refunds go
+  // to the user's OWN derived Solana address (same shape as the IC surface's cefiRefundAddress —
+  // the venue returns the funds there on a failed deposit or expiry; never a dpay address).
+  const solRefundAddress = useMemo(
+    () => deriveSolanaAddress(identity.secretHex),
+    [identity.secretHex],
+  );
 
   // --- engine view (the same shape as the IC surface: newest live/unacknowledged-stuck record,
   // honored-record lock, subscribe for updates — this screen never runs a private executor).
@@ -2693,7 +2730,9 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
       // The ORDER is the lock and the consent point: its depositAmount is the reviewed
       // deposit, its settle figure is the venue's own locked number, and prepare still
       // refuses an order whose depositAmount differs.
-      if (icSettleAddress == null) {
+      // The refund guard sits beside the settle guard: both addresses come from the
+      // wallet's own key, and the order (per the relay's contract) needs both.
+      if (icSettleAddress == null || solRefundAddress == null) {
         setConfirmErr(M.convert.errors.quoteUnavailable('order'));
         return;
       }
@@ -2709,7 +2748,14 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
         const fresh = ceFiQuoteFromResult(venue, legs.inMint, legs.outLedger, amountRaw, freshRes, legs.outDecimals);
         let order;
         try {
-          order = await createSideShiftFixedShift(relayUrl, venue, {quoteId: freshRes.quoteId, settleAddress: icSettleAddress});
+          // SOL-side cefi: the DEPOSIT rail is Solana, so the refund address — where the
+          // venue returns the funds on a failed deposit or expiry — is this wallet's own
+          // derived Solana address. The relay refuses any order without a well-formed one.
+          order = await createSideShiftFixedShift(relayUrl, venue, {
+            quoteId: freshRes.quoteId,
+            settleAddress: icSettleAddress,
+            refundAddress: solRefundAddress,
+          });
         } catch (e) {
           throw ceFiServiceError(e, venueName);
         }
@@ -3514,6 +3560,13 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
               {record.providerDeposit.expiresAtMs != null ? (
                 <Text style={S.convertStateMeta}>
                   {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(record.providerDeposit.expiresAtMs)))}
+                </Text>
+              ) : null}
+              {/* The venue's own order id: the one handle support and the user both need
+                  when talking to the venue's own status page — visible, not buried. */}
+              {record.providerRef != null ? (
+                <Text testID="convert-shift-id" style={S.convertStateMeta} selectable>
+                  {M.convert.cefi.shiftId(record.providerRef.orderId)}
                 </Text>
               ) : null}
             </View>

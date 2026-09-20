@@ -25,6 +25,11 @@ jest.mock('../services/sideshift', () => ({
   fetchSideShiftQuote: jest.fn(),
   createSideShiftFixedShift: jest.fn(),
 }));
+// The CeFi refund derivation (the user's OWN IC principal) rides the native core; under
+// jest it is the same stubbed principal every IC-surface test can name.
+jest.mock('../services/native', () => ({
+  DpayCore: {icpPrincipalFromPubkey: jest.fn(async () => 'my-ic-principal-refund')},
+}));
 jest.mock('../convertResume', () => ({
   convertResumeSnapshot: jest.fn((): Record<string, unknown> => ({})),
   subscribeConvertRecords: jest.fn(() => () => undefined),
@@ -141,6 +146,7 @@ describe('CeFi confirm vs a ticking venue rate', () => {
     jest.mocked(createSideShiftFixedShift).mockImplementation(async (_relayUrl, venue, args) => {
       expect(args.quoteId).toBe('q-confirm'); // the order rides the FRESH quote id
       expect(args.settleAddress.length).toBeGreaterThan(0); // the user's own derived address
+      expect(args.refundAddress).toBe('my-ic-principal-refund'); // the user's own IC principal — refunds land THERE
       return {...ORDER, id: `${ORDER.id}-${venue.venue_id}`};
     });
   });

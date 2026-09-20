@@ -484,9 +484,11 @@ async fn upstream_error_passes_through_verbatim_unwrapped() {
 
 // ---- fixed-order creation ----
 
-/// `/shifts/fixed` forwards quoteId + settleAddress (+settleMemo only when present)
-/// with the config credentials, and passes the venue's 201 back VERBATIM — the
-/// deposit address the user must send to is the venue's own answer, untouched.
+/// `/shifts/fixed` forwards quoteId + settleAddress + the REQUIRED refundAddress (with
+/// settleMemo only when present) with the config credentials, and passes the venue's
+/// 201 back VERBATIM — the deposit address the user must send to is the venue's own
+/// answer, untouched. The refund address rides the DEPOSIT rail (ICP here): where the
+/// venue returns the funds if the deposit fails or the order expires.
 #[tokio::test]
 async fn shift_creation_forwards_and_passes_back_verbatim() {
     let (stub, base) = spawn_stub().await;
@@ -495,6 +497,8 @@ async fn shift_creation_forwards_and_passes_back_verbatim() {
     let with_memo = serde_json::json!({
         "quoteId": "stub-quote-1",
         "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "refundAddress": ICP,
+        "depositLedger": ICP,
         "settleMemo": "optional-memo",
     })
     .to_string();
@@ -505,8 +509,17 @@ async fn shift_creation_forwards_and_passes_back_verbatim() {
     let sent: serde_json::Value = serde_json::from_str(&seen_body).unwrap();
     assert_eq!(sent["quoteId"], "stub-quote-1");
     assert_eq!(sent["settleAddress"], "UserSolAddr1111111111111111111111111111111111");
+    assert_eq!(
+        sent["refundAddress"], ICP,
+        "the refund address rides through to the venue, untouched"
+    );
     assert_eq!(sent["settleMemo"], "optional-memo");
     assert_eq!(sent["affiliateId"], STUB_AFFILIATE, "from config");
+    assert!(
+        sent.get("depositLedger").is_none(),
+        "depositLedger is the DEVICE's rail vocabulary — it names the refund rail and is \
+         never forwarded to the venue"
+    );
 
     // The device gets the venue's body byte-faithfully: id, depositAddress, expiresAt.
     let got: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -519,6 +532,8 @@ async fn shift_creation_forwards_and_passes_back_verbatim() {
     let no_memo = serde_json::json!({
         "quoteId": "stub-quote-1",
         "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "refundAddress": ICP,
+        "depositLedger": ICP,
     })
     .to_string();
     let (status, _h, _body) = post_json(&state, "/api/v1/sideshift/shifts/fixed", &no_memo).await;
@@ -526,6 +541,57 @@ async fn shift_creation_forwards_and_passes_back_verbatim() {
     let (_seen_headers, seen_body) = stub.last();
     let sent: serde_json::Value = serde_json::from_str(&seen_body).unwrap();
     assert!(sent.get("settleMemo").is_none(), "absent memo is not forwarded");
+}
+
+/// An order without a refund address, a refund address malformed FOR ITS DEPOSIT RAIL,
+/// or an unknown deposit rail is refused — 400 house error, ZERO upstream calls. This is
+/// the fund-loss guard: an order the venue could only keep the funds on must never exist.
+#[tokio::test]
+async fn shift_creation_refuses_missing_or_malformed_refund_before_any_upstream_call() {
+    let (stub, base) = spawn_stub().await;
+    let state = state_with(configured(&base));
+
+    // Missing / empty / malformed refundAddress, unknown depositLedger.
+    let missing = serde_json::json!({
+        "quoteId": "q", "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+    })
+    .to_string();
+    let empty = serde_json::json!({
+        "quoteId": "q", "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "refundAddress": "", "depositLedger": ICP,
+    })
+    .to_string();
+    let wrong_rail = serde_json::json!({
+        // A Solana base58 pubkey offered as the refund on an ICP deposit: not an IC
+        // principal, so the rail-scoped check refuses it.
+        "quoteId": "q", "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "refundAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+        "depositLedger": ICP,
+    })
+    .to_string();
+    let malformed_solana = serde_json::json!({
+        // A Solana deposit wants a base58 32-byte pubkey; this text is neither.
+        "quoteId": "q", "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "refundAddress": "not-a-solana-address", "depositLedger": SOL,
+    })
+    .to_string();
+    let unknown_ledger = serde_json::json!({
+        "quoteId": "q", "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "refundAddress": ICP, "depositLedger": "ly36x-wiaaa-aaaai-aqj7q-cai",
+    })
+    .to_string();
+
+    for body in [missing, empty, wrong_rail, malformed_solana, unknown_ledger] {
+        let (status, _h, got) = post_json(&state, "/api/v1/sideshift/shifts/fixed", &body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body}");
+        let v: serde_json::Value = serde_json::from_slice(&got).unwrap();
+        assert!(v["error"].is_string(), "house error shape for {body}");
+    }
+    assert_eq!(
+        stub.shifts_hits(),
+        0,
+        "no order the venue could hold funds on was ever created"
+    );
 }
 
 /// Empty quoteId/settleAddress (or missing fields) are 400s before any upstream call.

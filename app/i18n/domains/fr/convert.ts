@@ -206,6 +206,7 @@ export const convertFr: ConvertMessages = {
     depositAmountLabel: 'Montant exact à déposer',
     depositMemoLabel: 'Memo (obligatoire)',
     depositExpiryLine: at => `L'ordre expire ${at}`,
+    shiftId: id => `Shift ${id}`,
     counterparty: venue =>
       `Exécuté par ${venue} — un service d'échange automatisé, pas un prestataire agréé et pas dpay.`,
     checklistSigns:

@@ -301,6 +301,7 @@ export type ConvertMessages = {
     /** Where a completed cross-rail payout landed (the user's own address on the other rail). */
     payoutAt: (address: string) => string;
     depositExpiryLine: (at: string) => string;
+    shiftId: (id: string) => string;
     /** The CeFi fact itself: the user sends to the VENUE's address; the venue holds mid-trade. */
     depositNote: (venue: string, sym: string) => string;
     /** The awaiting_deposit tail line: watches the DEPOSIT (the payout lines belong to the
@@ -613,6 +614,7 @@ export const convertEn: ConvertMessages = {
       `This deposit needs ${needed} — the amount plus one transfer fee — and this wallet holds ${balance}. Lower the amount, or receive more first.`,
     payoutAt: address => `Paid out to your own address: ${address}`,
     depositExpiryLine: at => `Order expires ${at}`,
+    shiftId: id => `Shift ${id}`,
     depositNote: (venue, sym) =>
       `Send ${sym} from your wallet to ${venue}\u2019s deposit address above — exactly the deposit amount. ${venue} is an automated exchange service: it holds your ${sym} mid-trade, then pays out to your address. dpay is not a party to this trade and is paid nothing.`,
     stillWaitingDeposit: 'Still watching for your deposit — this page updates on its own.',

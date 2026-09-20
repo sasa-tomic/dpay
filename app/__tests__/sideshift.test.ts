@@ -150,6 +150,7 @@ describe('services/sideshift — the relay-proxied client', () => {
     const order = await createSideShiftFixedShift(RELAY, VENUE, {
       quoteId: 'q-1',
       settleAddress: 'SolSettleAddr',
+      refundAddress: 'MyIcPrincipalRefund',
       settleMemo: 'SolSettleMemo',
     });
     expect(order).toEqual({
@@ -167,10 +168,20 @@ describe('services/sideshift — the relay-proxied client', () => {
     expect(JSON.parse(init.body)).toEqual({
       quoteId: 'q-1',
       settleAddress: 'SolSettleAddr',
+      refundAddress: 'MyIcPrincipalRefund',
       settleMemo: 'SolSettleMemo',
     });
     // no credential anywhere the device can see
     expect(init.body).not.toContain('secret');
+  });
+
+  test('an order WITHOUT the deposit-rail refund address is refused before any network', async () => {
+    // The fund-loss class: a refundable order needs the user's OWN address on the
+    // DEPOSIT rail. The client refuses the empty form outright — the relay re-checks.
+    await expect(
+      createSideShiftFixedShift(RELAY, VENUE, {quoteId: 'q-1', settleAddress: 'SolSettleAddr', refundAddress: ''}),
+    ).rejects.toThrow('refused');
+    expect(relayFetch).not.toHaveBeenCalled();
   });
 
   test('sideShiftStatusUrl is the venue\'s own keyless GET — the relay is not in the status path', () => {

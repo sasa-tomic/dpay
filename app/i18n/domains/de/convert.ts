@@ -207,6 +207,7 @@ export const convertDe: ConvertMessages = {
     depositAmountLabel: 'Genauer Einzahlungsbetrag',
     depositMemoLabel: 'Memo (erforderlich)',
     depositExpiryLine: at => `Bestellung läuft um ${at} ab`,
+    shiftId: id => `Shift ${id}`,
     counterparty: venue =>
       `Ausgeführt von ${venue} — ein automatisierter Tauschdienst, kein lizenzierter Anbieter und nicht dpay.`,
     checklistSigns:

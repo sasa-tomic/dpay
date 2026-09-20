@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {type CurrencyDescriptor} from '../config/catalog';
-import {POLL, BALANCE_TIMEOUT_MS} from '../config/constants';
+import {POLL, BALANCE_TIMEOUT_MS, BALANCE_OFFLINE_AFTER_FAILURES} from '../config/constants';
 import {relayFetch} from '../services/relay';
 
 type Args = {
@@ -79,6 +79,12 @@ async function loadBalanceCache(publicHex: string): Promise<BalanceCache | null>
  *     `setBalance` (the faucet topUp path) bumps key 0's timestamp too — the faucet response is an
  *     authoritative read, and a pending DEMO hand-off must stop subtracting against it exactly as it
  *     would against a poll.
+ *   - OFFLINE = N CONSECUTIVE FAILURES (F4, 2026-09-20): ONE failed poll is a blip — a dropped
+ *     response must not read as "the rail is down" and must never replace a mid-flow form (the SOL
+ *     send sheet) with the offline panel. `setOnline(false)` fires only on
+ *     BALANCE_OFFLINE_AFTER_FAILURES consecutive OBSERVED failures (stale/retired attempts count
+ *     for nothing, per the overlap rule above); any success resets the streak and flips online
+ *     instantly. The manual refresh ("Check again") path is untouched.
  */
 export function useBalancePoll(args: Args): {
   balance: string | null;
@@ -158,12 +164,25 @@ export function useBalancePoll(args: Args): {
     //     a success that arrived on top of a still-hanging older attempt retires that attempt's
     //     eventual timeout. Newest OBSERVATION wins; a stale abort is not an observation.
     let successCount = 0;
+    // F4 (2026-09-20): a single failed poll is a BLIP, not a reachability fact — the old
+    // rule flipped `online=false` on the first miss and a mid-flow SOL send form was
+    // replaced by the offline panel behind one dropped response. Failures now COUNT, and
+    // only BALANCE_OFFLINE_AFTER_FAILURES consecutive observed failures flip the dot;
+    // any success resets the count (recovery was instant before and stays instant).
+    let consecutiveFailures = 0;
 
     const poll = async () => {
       const startSuccesses = successCount;
       // A failure whose poll was overtaken by a sibling SUCCESS (completed after this poll
       // started) is retired, not observed — every failure write below gates on !staleFailure().
       const staleFailure = () => !fresh() || successCount !== startSuccesses;
+      // One observed (non-stale) failure: count it, flip offline only at the consecutive
+      // threshold. Stale failures — a retired attempt's late timeout — count for nothing.
+      const noteFailure = () => {
+        if (staleFailure()) return;
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= BALANCE_OFFLINE_AFTER_FAILURES) setOnline(false);
+      };
       // SINGLE batch fetch — the relay returns EVERY catalog currency's balance in one response
       // (a flat map {currency: minor-units-string}), replacing the old N+1 loop (1 primary + 1 per
       // asset, each a relay→IC round trip). The relay fans the per-currency queries out concurrently
@@ -186,17 +205,18 @@ export function useBalancePoll(args: Args): {
             // failure / non-object body is treated like an offline blip (no state change to balances).
             const j: unknown = await r.json().catch(() => null);
             const map = (j && typeof j === 'object' && !Array.isArray(j)) ? j as Record<string, string> : null;
-            if (!map) { if (!staleFailure()) setOnline(false); return; }
+            if (!map) { noteFailure(); return; }
             // Primary (currency 0): a successful read sets the balance + flips online + resets the
             // DEMO offline deduction (the authoritative balance replaces the optimistic local view).
             // A missing/non-string primary in an otherwise-200 batch → offline (primary ledger hiccup).
             const primary = map['0'];
             if (fresh() && typeof primary === 'string') {
               successCount++; // completed success — retires every still-in-flight sibling timeout
+              consecutiveFailures = 0; // one good answer ends any failure streak
               setBalanceState(primary);
               setOnline(true);
-            } else if (!staleFailure()) {
-              setOnline(false);
+            } else {
+              noteFailure();
             }
             if (!fresh()) return;
             // Non-primary assets: merge keeping prior on a missing entry (the relay omits a currency
@@ -243,10 +263,10 @@ export function useBalancePoll(args: Args): {
             // flip offline (the next poll retries). The body is tiny JSON; read best-effort.
             const bodyText = await r.text().catch(() => '<unreadable>');
             console.warn(`balances ${r.status}: ${bodyText}`);
-            if (!staleFailure()) setOnline(false);
+            noteFailure();
           }
         } finally { t.stop(); }
-      } catch (e) { console.warn('balance poll failed:', e instanceof Error ? e.message : String(e)); if (!staleFailure()) setOnline(false); }
+      } catch (e) { console.warn('balance poll failed:', e instanceof Error ? e.message : String(e)); noteFailure(); }
     };
     poll(); const id = setInterval(poll, POLL.balance);
     // Manual-refresh handle (2026-08-16 zero-funds UX): the fund-first panel's "Check again" re-fires

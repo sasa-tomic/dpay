@@ -129,6 +129,13 @@ export const POLL = (() => {
     historyIdle: t?.historyIdle ?? 60000,
   };
 })();
+// How many CONSECUTIVE failed balance polls read as offline (F4, 2026-09-20): ONE failed
+// poll is a blip, not a fact about reachability — a single dropped response must never
+// replace a mid-flow form with the offline panel. Three misses at the 2.5 s active cadence
+// is ≈ 7.5 s of silence before the dot flips gray; ONE success recovers instantly (the
+// recovery direction was never the problem). The test override mirrors POLL's seam.
+export const BALANCE_OFFLINE_AFTER_FAILURES =
+  (globalThis as unknown as {__DPAY_TEST_BALANCE_OFFLINE_AFTER?: number}).__DPAY_TEST_BALANCE_OFFLINE_AFTER ?? 3;
 // How long a money flow keeps the SOL rail at its ACTIVE cadence. Started by the wallet opening
 // and by every targeted refresh (a confirmed send, a "Check again" tap) — the events that mean a
 // number on screen is about to change and the user is watching for it.
