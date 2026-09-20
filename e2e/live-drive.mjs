@@ -61,13 +61,13 @@ function floatSeed() {
 }
 
 async function agentBalance() {
-  return runCapture('just', ['agent-balance']);
+  return runCapture('just', ['funds', 'balance']);
 }
 async function agentFunds() {
-  return runCapture('just', ['agent-funds']);
+  return runCapture('just', ['funds']);
 }
 async function agentHistory() {
-  return runCapture('just', ['agent-history']);
+  return runCapture('just', ['funds', 'history']);
 }
 
 /** pubkey hex (the account hex every IC route keys on) from the seed hex. */
@@ -373,7 +373,7 @@ async function cmdA() {
     await driver.click('btn-convert-confirm');
     const res = await watchConvert(driver, 'a', {timeoutMs: 8 * 60_000});
     log(`OP A result: ${res.ended}: ${res.text}`);
-    console.log('--- agent-balance after ---');
+    console.log('--- funds balance after ---');
     console.log(await agentBalance());
   });
 }
@@ -487,9 +487,9 @@ async function cmdB(icpAmount) {
     const depositAmount = m[1];
 
     // Was the deposit already sent by the app's confirm flow? (CeFi handoff design says the user
-    // sends it — but measure, never assume.) agent-history shows recent ICP ledger transfers.
+    // sends it — but measure, never assume.) `just funds history` shows recent ICP ledger transfers.
     const histBefore = await agentHistory();
-    if (histBefore.split('\n').filter(Boolean).length === 0) throw new Error('agent-history empty?');
+    if (histBefore.split('\n').filter(Boolean).length === 0) throw new Error('funds history empty?');
 
     // Send the deposit through the app's OWN send surface (Pay ▸ Send to address) — a signed
     // icrc1_transfer to the venue's deposit address, exactly the amount the panel froze.
@@ -509,7 +509,7 @@ async function cmdB(icpAmount) {
     const blockLine = await driver.isPresent('send-block') ? await driver.readText('send-block') : '(no block line)';
     log(`DEPOSIT SENT: ${outcome} — ${blockLine}`);
     await driver.screenshot('live-b-sent');
-    console.log('--- agent-history after deposit ---');
+    console.log('--- funds history after deposit ---');
     console.log(agentHistory());
     await driver.click('btn-send-done');
 
@@ -520,10 +520,10 @@ async function cmdB(icpAmount) {
     const res = await watchConvert(driver, 'b', {timeoutMs: 25 * 60_000});
     log(`OP B result: ${res.ended}: ${res.text}`);
     // The settle address is the APP-DERIVED SOL rail (BzFNJ…), not the registered sol-float —
-    // measure it with the derived-address watcher; agent-funds' sol-float row will read 0.
+    // measure it with the derived-address watcher; `just funds`' sol-float row will read 0.
     console.log('--- live-sol (app-derived SOL rail truth) ---');
     console.log(execFileSync('node', ['live-sol.mjs'], {encoding: 'utf8', cwd: new URL('.', import.meta.url).pathname}));
-    console.log('--- agent-funds after (registered wallets) ---');
+    console.log('--- funds after (registered wallets) ---');
     console.log(agentFunds());
   });
 }
@@ -545,7 +545,7 @@ async function cmdC1(solAmount) {
       await driver.dumpDiagnostics('c1-stuck', null);
       log('C1 diagnostics dumped');
     }
-    console.log('--- agent-funds after ---');
+    console.log('--- funds after ---');
     console.log(agentFunds());
   });
 }
@@ -561,7 +561,7 @@ async function cmdC2(usdcAmount) {
     await confirmWithRequote(driver, 'C2');
     const res = await watchConvert(driver, 'c2', {timeoutMs: 6 * 60_000});
     log(`OP C2 result: ${res.ended}: ${res.text}`);
-    console.log('--- agent-funds after ---');
+    console.log('--- funds after ---');
     console.log(agentFunds());
   });
 }
@@ -773,7 +773,7 @@ async function cmdC3(eurcAmount) {
     await confirmWithRequote(driver, 'C3');
     const res = await watchConvert(driver, 'c3', {timeoutMs: 6 * 60_000});
     log(`OP C3 result: ${res.ended}: ${res.text}`);
-    console.log('--- agent-funds after ---');
+    console.log('--- funds after ---');
     console.log(agentFunds());
   });
 }

@@ -4,7 +4,7 @@
 // rule, not a habit). The custody scripts (agent-key.mjs / agent-sol.mjs / agent-funds.mjs) stay
 // the per-chain mechanism; this file is the single CLI on top of them — every subcommand is
 // reachable as `just funds <subcommand>` (founder ask 2026-09-20: ONE way to do all of it; the
-// old `just agent-*` recipe names are deprecated forwards and die at the merge wave).
+// old `just agent-*` recipe names were deleted 2026-09-20 — no forwarding stubs).
 //
 //   (bare)        overview — every wallet + every live balance + the abandoned-principal watch
 //   balance [W]   one wallet's live census, measured (default: the IC float; UNREADABLE never 0)

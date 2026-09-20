@@ -66,9 +66,8 @@ root wallet. Recording a movement is part of the same surface: `node scripts/fun
 (hard rule — CLAUDE.md), then `just funds doc`.
 
 The old recipe names (`just agent-balance`, `just agent-funds --seed`, `just agent-seed`,
-`just funds-reconcile`, …) still work as DEPRECATED forwards — each prints a notice to stderr and
-does exactly the equivalent above, byte-identically. They are deleted at the merge wave; do not
-start new usage with them.
+`just funds-reconcile`, …) are DELETED (2026-09-20) — no forwarding stubs remain. `just funds
+<subcommand>` above is the one way; every driver and doc has been repointed to it.
 
 `just funds` is the one command a fresh session runs first: it prints every wallet the agent
 controls (from the committed `funds/wallets.json` registry), each wallet's ADDRESS, and every live
