@@ -488,7 +488,7 @@ async function cmdC1(solAmount) {
 
 async function cmdC2(usdcAmount) {
   await withApp(async (driver) => {
-    await openConvert(driver, 'usdc'); // SOURCE is the SOL rail's USDC token (from C1)
+    await openConvert(driver, 'sol-usdc'); // SOURCE is the SOL rail's USDC token (from C1)
     await driver.type('convert-amount', usdcAmount);
     await clickByText(driver, 'EURC — in this wallet');
     const q = await readQuote(driver);
@@ -504,7 +504,7 @@ async function cmdC2(usdcAmount) {
 
 async function cmdC3(eurcAmount) {
   await withApp(async (driver) => {
-    await openConvert(driver, 'eurc'); // the SOURCE is the SOL rail's EURC token row
+    await openConvert(driver, 'sol-eurc'); // the SOURCE is the SOL rail's EURC token row
     await driver.type('convert-amount', eurcAmount);
     await clickByText(driver, 'USDC — in this wallet');
     const q = await readQuote(driver);
@@ -618,6 +618,12 @@ try {
   else if (cmd === 'conv-c3') await cmdC3(args[0]);
   else if (cmd === 'watch') await cmdWatch();
   else if (cmd === 'b-send') await cmdBSend(args[0], args[1]);
+  else if (cmd === 'assets') await withApp(async (driver) => {
+    await openBalances(driver);
+    await sleep(1_500);
+    const ids = await driver.eval(() => [...document.querySelectorAll('[data-testid^="asset-"]')].map((e) => e.getAttribute('data-testid')));
+    log('asset rows:', JSON.stringify(ids));
+  });
   else {
     console.error('unknown command — see header comment');
     process.exit(2);
