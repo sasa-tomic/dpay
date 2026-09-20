@@ -463,7 +463,8 @@ async function cmdC1(solAmount) {
   await withApp(async (driver) => {
     await openConvert(driver, 'sol');
     await driver.type('convert-amount', solAmount);
-    await pickDest(driver, 'usdc');
+    // USDC — in this wallet is the DEFAULT selected destination on the SOL rail
+    // (rows carry no convert-dest-* testIDs; nothing to click).
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
     await driver.screenshot('live-c1-quote');
@@ -479,7 +480,7 @@ async function cmdC2(usdcAmount) {
   await withApp(async (driver) => {
     await openConvert(driver, 'sol'); // USDC/EURC are SOL-rail assets
     await driver.type('convert-amount', usdcAmount);
-    await pickDest(driver, 'eurc');
+    await clickByText(driver, 'EURC — in this wallet');
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
     await driver.screenshot('live-c2-quote');
@@ -493,9 +494,9 @@ async function cmdC2(usdcAmount) {
 
 async function cmdC3(eurcAmount) {
   await withApp(async (driver) => {
-    await openConvert(driver, 'sol');
+    await openConvert(driver, 'eurc'); // the SOURCE is the SOL rail's EURC token row
     await driver.type('convert-amount', eurcAmount);
-    await pickDest(driver, 'usdc');
+    await clickByText(driver, 'USDC — in this wallet');
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
     await driver.screenshot('live-c3-quote');
@@ -505,6 +506,20 @@ async function cmdC3(eurcAmount) {
     console.log('--- agent-funds after ---');
     console.log(agentFunds());
   });
+}
+
+// clickByText — the SOL-rail destination rows ("USDC — in this wallet") carry no
+// convert-dest-* testIDs (SolConvertMode renders its own picker); click by visible text.
+async function clickByText(driver, text) {
+  const ok = await driver.eval((t) => {
+    const els = [...document.querySelectorAll('div,span,button')];
+    const hit = els.filter((e) => e.textContent && e.textContent.includes(t) && e.textContent.length < t.length + 30).pop();
+    if (hit == null) return false;
+    hit.click();
+    return true;
+  }, text);
+  if (!ok) throw new Error(`clickByText: no row containing ${JSON.stringify(text)}`);
+  log(`clicked row by text: ${text}`);
 }
 
 // confirmWithRequote — shared confirm loop for live venue quotes. The app's confirm
