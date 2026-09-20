@@ -407,10 +407,30 @@ async function cmdB(icpAmount) {
     const body = await driver.bodyText();
     log('CEFI SURFACE:', body.replace(/\s+/g, ' ').slice(0, 600));
     await driver.screenshot('live-b-quote');
-    await driver.click('btn-convert-confirm');
-
-    // The shift order is created, then the panel waits for the deposit.
-    const facts = await readDepositFacts(driver, {timeoutMs: 90_000});
+    // Confirm with re-quote retries: the venue's live rate moves between fetch and
+    // confirm, and the app honestly refuses to sign a stale quote ("Quote changed:
+    // X → Y. Review and confirm again." + the button flips to "Re-quote and confirm").
+    // Each retry re-quotes and confirms again; give up only after several drifted rounds.
+    let facts = null;
+    for (let attempt = 1; attempt <= 4 && !facts; attempt++) {
+      await driver.click('btn-convert-confirm');
+      // The shift order is created, then the panel waits for the deposit; a drifted
+      // quote instead surfaces the quote-changed notice on the (still-open) form.
+      for (let i = 0; i < 12 && !facts; i++) {
+        await sleep(1_000);
+        if (await driver.isPresent('convert-awaiting-deposit')) {
+          facts = await readDepositFacts(driver, {timeoutMs: 90_000});
+        } else if (i === 11) {
+          const bodyNow = await driver.bodyText();
+          if (/Quote changed/i.test(bodyNow)) {
+            log(`confirm attempt ${attempt}: quote drifted — re-quoting and confirming again`);
+          } else {
+            log(`confirm attempt ${attempt}: no deposit panel and no quote-changed notice yet — retrying`);
+          }
+        }
+      }
+    }
+    if (!facts) throw new Error('OP B: awaiting-deposit panel never appeared after 4 confirm attempts');
     log('DEPOSIT FACTS:', JSON.stringify(facts, null, 2));
     await driver.screenshot('live-b-awaiting-deposit');
     const m = facts.depositAmountLine.match(/([\d.]+)\s*ICP/);
