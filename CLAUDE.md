@@ -144,6 +144,13 @@ Founder hard rule, verbatim: **"user MUST be given useful practical instructions
 Claude holds a funded mainnet key so it can prove things that have no sandbox (the OpenCryptoPay
 provider has none; the VCHF/ICP funded-transfer proof has none). Mechanism, recovery and the spend
 log: `docs/AGENT-FUNDS.md`. The rules bind here because they must be in context every session.
+- **Never repeat a failed or abnormally-slow transfer hoping it succeeds** (2026-09-20). A venue
+settlement completes in seconds-to-minutes; one failure or an abnormal wait means STOP spending,
+diagnose the cause (swarm agents on status endpoints, tx traces, logs), and recover stranded value
+as a first-class task. Retrying a suspected-broken rail is how floats die.
+- **When simply testing a flow, always use the SMALLEST AMOUNT ALLOWED BY THE PLATFORM** (2026-09-20).
+Prove the mechanism at the venue's minimum, not at a comfortable size; scale up only when the
+mechanism is proven and a larger size is itself the thing under test.
 
 - **Measure, never assume.** `just funds` (per wallet: `just funds balance`) is the only statement
   of what the float holds. A balance from memory, from a doc, or from a previous session is not
