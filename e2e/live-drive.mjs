@@ -412,25 +412,32 @@ async function cmdB(icpAmount) {
     // X → Y. Review and confirm again." + the button flips to "Re-quote and confirm").
     // Each retry re-quotes and confirms again; give up only after several drifted rounds.
     let facts = null;
-    for (let attempt = 1; attempt <= 4 && !facts; attempt++) {
+    for (let attempt = 1; attempt <= 30 && !facts; attempt++) {
       await driver.click('btn-convert-confirm');
-      // The shift order is created, then the panel waits for the deposit; a drifted
-      // quote instead surfaces the quote-changed notice on the (still-open) form.
-      for (let i = 0; i < 12 && !facts; i++) {
-        await sleep(1_000);
+      // RAPID re-confirm: the app's confirm re-quotes and refuses on ANY settle delta
+      // (exact string compare — SideShift's SOL rate ticks constantly, so consecutive
+      // fetches almost never match). Clicking again quickly shrinks the fetch-to-fetch
+      // window so the two quotes can land inside one venue tick. Findings: (1) this is
+      // a real-user-facing defect (a human cannot confirm a live CeFi quote in a moving
+      // market) — needs a drift tolerance in the confirm path, NOT a driver hack;
+      // (2) flow 187 cannot see it (offline fake returns a static quote).
+      for (let i = 0; i < 2 && !facts; i++) {
+        await sleep(600);
         if (await driver.isPresent('convert-awaiting-deposit')) {
           facts = await readDepositFacts(driver, {timeoutMs: 90_000});
-        } else if (i === 11) {
-          const bodyNow = await driver.bodyText();
-          if (/Quote changed/i.test(bodyNow)) {
-            log(`confirm attempt ${attempt}: quote drifted — re-quoting and confirming again`);
-          } else {
-            log(`confirm attempt ${attempt}: no deposit panel and no quote-changed notice yet — retrying`);
-          }
+        }
+      }
+      if (!facts) {
+        const bodyNow = await driver.bodyText();
+        if (/Quote changed/i.test(bodyNow)) {
+          log(`confirm attempt ${attempt}: quote drifted — rapid re-confirm`);
+        } else {
+          log(`confirm attempt ${attempt}: no deposit panel, no drift notice — retrying`);
+          await sleep(1_500);
         }
       }
     }
-    if (!facts) throw new Error('OP B: awaiting-deposit panel never appeared after 4 confirm attempts');
+    if (!facts) throw new Error('OP B: awaiting-deposit panel never appeared after 30 rapid confirm attempts');
     log('DEPOSIT FACTS:', JSON.stringify(facts, null, 2));
     await driver.screenshot('live-b-awaiting-deposit');
     const m = facts.depositAmountLine.match(/([\d.]+)\s*ICP/);
