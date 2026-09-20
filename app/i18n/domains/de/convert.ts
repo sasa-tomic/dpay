@@ -219,6 +219,9 @@ export const convertDe: ConvertMessages = {
     depositNote: (venue, sym) =>
       `Sende ${sym} aus deiner Wallet an die Einzahlungs-Adresse von ${venue} oben — genau den Einzahlungsbetrag. ${venue} ist ein automatisierter Tauschdienst: Er hält dein ${sym} während des Tauschs und zahlt dann an deine Adresse aus. dpay ist keine Partei dieses Tauschs und wird nicht bezahlt.`,
     stillWaitingDeposit: 'Weitere Beobachtung deiner Einzahlung — diese Seite aktualisiert sich von selbst.',
+    depositSolFeeNote: 'Beim Senden der Einzahlung fällt auch eine kleine Netzwerkgebühr in SOL an — halte etwas SOL in dieser Wallet.',
+    solInsufficientLine: (needed, balance) =>
+      `Diese Einzahlung sendet genau ${needed} und diese Wallet hält ${balance}. Reduziere den Betrag oder empfange zuerst mehr.`,
   },
 
   /** Die Cross-Rail-Familie (Routen B/C, 2026-09-16): alles nach den fünf IC-Beinen —

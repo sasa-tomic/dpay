@@ -1448,7 +1448,10 @@ export function prepareCeFiConvertRecord(args: {
   quote: ConvertQuote;
   order: SideShiftFixedShift;
   settleAddress: string;
-  inCurrency: number;
+  /** The IC catalog currency of the INPUT — null when the input lives on ANOTHER rail
+   *  (the SOL-side cefi surface converts a SPL asset; hydration's cefi exemption covers
+   *  the absent field exactly like the out side). */
+  inCurrency: number | null;
   inSymbol: string;
   outSymbol: string;
   inDecimals?: number;
@@ -1480,7 +1483,9 @@ export function prepareCeFiConvertRecord(args: {
     createdAtMs: Date.now(),
     step: 'awaiting_deposit',
     venueId: quote.venueId,
-    inCurrency: args.inCurrency,
+    // Null (another-rail input, the SOL-side cefi surface) is stored ABSENT — hydration
+    // already treats the field as optional and the cefi exemption covers the both-null shape.
+    inCurrency: args.inCurrency ?? undefined,
     // outCurrency deliberately ABSENT: the out side lives on another rail (SOL is not an
     // IC catalog currency) — the cefi hydration exemption pins why that is sound.
     inLedger: quote.tokenInLedger,

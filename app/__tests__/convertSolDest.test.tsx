@@ -164,10 +164,10 @@ describe('SOL convert out-destination picker', () => {
     const tree = await mount(SOL_ASSET);
     // The picker renders with BOTH rows; the heading already names the default pair.
     expect(exists(tree, 'convert-sol-dest')).toBe(true);
-    expect(exists(tree, 'convert-sol-dest-USDC')).toBe(true);
-    expect(exists(tree, 'convert-sol-dest-EURC')).toBe(true);
-    expect(checked(tree, 'convert-sol-dest-USDC')).toBe(true);
-    expect(checked(tree, 'convert-sol-dest-EURC')).toBe(false);
+    expect(exists(tree, 'convert-sol-dest-sol-usdc')).toBe(true);
+    expect(exists(tree, 'convert-sol-dest-sol-eurc')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-sol-usdc')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-sol-eurc')).toBe(false);
     expect(exists(tree, 'convert-unavailable')).toBe(false);
     // No amount typed → no venue ask yet. Typing asks the DEFAULT pair (the same pair the
     // surface served before a second venue existed).
@@ -199,12 +199,12 @@ describe('SOL convert out-destination picker', () => {
 
     // Pick EURC: the OLD quote resets immediately (no stale USDC digits under the EURC pair),
     // the amount survives, and the fresh quote is asked from the EURC venue's own pair.
-    const eurcChip = present(tree, 'convert-sol-dest-EURC')[0];
+    const eurcChip = present(tree, 'convert-sol-dest-sol-eurc')[0];
     await act(async () => {
       eurcChip.props.onPress();
     });
-    expect(checked(tree, 'convert-sol-dest-USDC')).toBe(false);
-    expect(checked(tree, 'convert-sol-dest-EURC')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-sol-usdc')).toBe(false);
+    expect(checked(tree, 'convert-sol-dest-sol-eurc')).toBe(true);
     expect(present(tree, 'convert-amount')[0].props.value).toBe('1');
     expect(lastQuoteCall()).toEqual({
       venueId: 'jupiter-eurc',
@@ -222,10 +222,10 @@ describe('SOL convert out-destination picker', () => {
     // Registry order: the SOL-pair venue (jupiter) first and preselected — the one-venue
     // behavior is the default — then the rail-local FX venue's EURC row.
     expect(exists(tree, 'convert-sol-dest')).toBe(true);
-    expect(exists(tree, 'convert-sol-dest-SOL')).toBe(true);
-    expect(exists(tree, 'convert-sol-dest-EURC')).toBe(true);
-    expect(checked(tree, 'convert-sol-dest-SOL')).toBe(true);
-    expect(checked(tree, 'convert-sol-dest-EURC')).toBe(false);
+    expect(exists(tree, 'convert-sol-dest-sol')).toBe(true);
+    expect(exists(tree, 'convert-sol-dest-sol-eurc')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-sol')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-sol-eurc')).toBe(false);
     expect(exists(tree, 'convert-unavailable')).toBe(false);
     const input = present(tree, 'convert-amount')[0];
     await act(async () => {
@@ -238,12 +238,12 @@ describe('SOL convert out-destination picker', () => {
       amount: '1000000',
     });
     // Pick EURC: the FX venue's own pair, quoted from the USDC mint.
-    const eurcChip = present(tree, 'convert-sol-dest-EURC')[0];
+    const eurcChip = present(tree, 'convert-sol-dest-sol-eurc')[0];
     await act(async () => {
       eurcChip.props.onPress();
     });
-    expect(checked(tree, 'convert-sol-dest-SOL')).toBe(false);
-    expect(checked(tree, 'convert-sol-dest-EURC')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-sol')).toBe(false);
+    expect(checked(tree, 'convert-sol-dest-sol-eurc')).toBe(true);
     expect(present(tree, 'convert-amount')[0].props.value).toBe('1');
     expect(lastQuoteCall()).toEqual({
       venueId: 'jupiter-usdc-eurc',
@@ -258,9 +258,9 @@ describe('SOL convert out-destination picker', () => {
   test('EURC input: TWO destinations — SOL first (default), USDC second via jupiter-usdc-eurc', async () => {
     const tree = await mount(EURC_ASSET);
     expect(exists(tree, 'convert-sol-dest')).toBe(true);
-    expect(exists(tree, 'convert-sol-dest-SOL')).toBe(true);
-    expect(exists(tree, 'convert-sol-dest-USDC')).toBe(true);
-    expect(checked(tree, 'convert-sol-dest-SOL')).toBe(true);
+    expect(exists(tree, 'convert-sol-dest-sol')).toBe(true);
+    expect(exists(tree, 'convert-sol-dest-sol-usdc')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-sol')).toBe(true);
     expect(exists(tree, 'convert-unavailable')).toBe(false);
     const input = present(tree, 'convert-amount')[0];
     await act(async () => {
@@ -273,12 +273,12 @@ describe('SOL convert out-destination picker', () => {
       amount: '1000000',
     });
     // Pick USDC: the FX venue's own pair, quoted from the EURC mint.
-    const usdcChip = present(tree, 'convert-sol-dest-USDC')[0];
+    const usdcChip = present(tree, 'convert-sol-dest-sol-usdc')[0];
     await act(async () => {
       usdcChip.props.onPress();
     });
-    expect(checked(tree, 'convert-sol-dest-SOL')).toBe(false);
-    expect(checked(tree, 'convert-sol-dest-USDC')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-sol')).toBe(false);
+    expect(checked(tree, 'convert-sol-dest-sol-usdc')).toBe(true);
     expect(present(tree, 'convert-amount')[0].props.value).toBe('1');
     expect(lastQuoteCall()).toEqual({
       venueId: 'jupiter-usdc-eurc',
@@ -306,7 +306,7 @@ describe('SOL convert out-destination picker', () => {
 
     // Picking EURC wipes the old pair's error with the old pair's quote.
     await act(async () => {
-      present(tree, 'convert-sol-dest-EURC')[0].props.onPress();
+      present(tree, 'convert-sol-dest-sol-eurc')[0].props.onPress();
     });
     expect(exists(tree, 'convert-confirm-err')).toBe(false);
     expect(textOf(tree, 'convert-headline')).toContain('84.12 EURC');
@@ -332,10 +332,10 @@ describe('SOL convert out-destination picker', () => {
     // Mid-flight: the EURC gesture is a no-op — the in-flight confirm closes over THIS pair,
     // and its late setQuote must never land under the newly picked pair's heading.
     await act(async () => {
-      present(tree, 'convert-sol-dest-EURC')[0].props.onPress();
+      present(tree, 'convert-sol-dest-sol-eurc')[0].props.onPress();
     });
-    expect(checked(tree, 'convert-sol-dest-USDC')).toBe(true);
-    expect(checked(tree, 'convert-sol-dest-EURC')).toBe(false);
+    expect(checked(tree, 'convert-sol-dest-sol-usdc')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-sol-eurc')).toBe(false);
 
     await act(async () => {
       release(quoteOf('jupiter', WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS, '1000000000'));

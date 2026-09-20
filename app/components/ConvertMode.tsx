@@ -91,11 +91,12 @@ import {
 import {cctpMaxFee, cctpMintFloor, fetchEthBalance} from '../cctp';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
 import {createSideShiftFixedShift, fetchSideShiftQuote, type SideShiftQuoteResult} from '../services/sideshift';
+import {DpayCore} from '../services/native';
 import {deriveSolanaAddress} from '../solana/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {hubRoutes, multihopRoutesFrom, gasFundRoutes, type HubRoute, type MultihopRoute} from '../routes';
 import {solanaVenuesForMint} from '../config/venues';
-import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
+import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN, solanaTokenOfMint} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
 import {fmtAssetCompact, parseUserAmount, rawToDecimal, toUnits} from '../lib/format';
@@ -366,6 +367,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         identity={identity}
         relayUrl={relayUrl}
         asset={selectedAsset}
+        catalog={catalog}
         solana={solana ?? {sol: null, tokens: {}}}
         onBack={onBack}
         onShowDepositAddress={onShowDepositAddress}
@@ -2331,47 +2333,99 @@ function solAssetOfMint(mint: string): {symbol: string; decimals: number} | null
  *  ORDER (the registry's order is the display order — never sorted, never ranked). Null for a
  *  mint the SPL registry does not know; an empty `dests` for a mint no venue serves — both
  *  fail closed on the unavailable panel. */
-function resolveSolDestinations(asset: Extract<SelectableAsset, {protocol: 'solana'}>): {
-  inMint: string;
-  dests: {venue: VenueEntry; outMint: string; outSym: string; outDecimals: number}[];
-} | null {
+/** One MECHANISM the Solana surface offers toward a destination: a solana_amm (Jupiter) pair,
+ *  or — since 2026-09-20 (live-sweep defect 1, founder rule: every currency through the SAME
+ *  surfaces) — a registered cefi venue whose pair carries this mint as the DEPOSIT side. A
+ *  cefi mechanism's output lives on the IC rail: `outLedger` is the catalog ledger it settles. */
+type SolDestMech =
+  | {kind: 'amm'; venue: VenueEntry; outMint: string; outSym: string; outDecimals: number}
+  | {kind: 'cefi'; venue: VenueEntry; outLedger: string; outSym: string; outDecimals: number};
+
+/** One DESTINATION row (where the money LANDS) with its mechanisms — the IC-side D4 group
+ *  shape mirrored: in-wallet SPL destinations keyed by mint, IC destinations keyed by the
+ *  settling catalog ledger (two venues landing the same asset merge into ONE group). */
+type SolDestGroup = {key: string; testID: string; label: string; mechs: SolDestMech[]};
+
+/** The e2e asset testKeys ('sol', 'sol-usdc', 'sol-eurc') — the dest-row testID contract,
+ *  the same keys HomeAccounts/Ledger/AssetPicker pin (never derived from metadata). */
+const solDestTestKey = (sym: string): string =>
+  sym === WRAPPED_SOL_TOKEN ? 'sol' : `sol-${sym.toLowerCase()}`;
+
+function resolveSolDestinations(
+  asset: Extract<SelectableAsset, {protocol: 'solana'}>,
+  catalog: CurrencyDescriptor[],
+): {inMint: string; groups: SolDestGroup[]} | null {
   // Native SOL is mint:null in the asset model but WRAPPED-sol in the venue registry — the two
   // identifiers for the same asset, translated here and only here.
   const inMint = asset.mint ?? WRAPPED_SOL_MINT_ADDRESS;
-  const inTok = solAssetOfMint(inMint);
-  if (inTok == null) return null;
-  const dests: {venue: VenueEntry; outMint: string; outSym: string; outDecimals: number}[] = [];
-  const seen = new Set<string>();
+  if (solAssetOfMint(inMint) == null) return null;
+  const groups: SolDestGroup[] = [];
+  const byKey = new Map<string, SolDestGroup>();
+  const push = (g: SolDestGroup): void => {
+    groups.push(g);
+    byKey.set(g.key, g);
+  };
   for (const venue of solanaVenuesForMint(inMint)) {
     const outMint = venue.pair_ledgers.find(m => m !== inMint);
-    if (outMint == null || seen.has(outMint)) continue;
+    if (outMint == null || byKey.has(outMint)) continue;
     const outTok = solAssetOfMint(outMint);
     if (outTok == null) continue;
-    seen.add(outMint);
-    dests.push({venue, outMint, outSym: outTok.symbol, outDecimals: outTok.decimals});
+    push({
+      key: outMint,
+      testID: `convert-sol-dest-${solDestTestKey(outTok.symbol)}`,
+      label: M.convert.multihop.destDirect(outTok.symbol),
+      mechs: [{kind: 'amm', venue, outMint, outSym: outTok.symbol, outDecimals: outTok.decimals}],
+    });
   }
-  return {inMint, dests};
+  // The CeFi half: registered cefi venues whose pair carries this mint as the deposit side —
+  // the SAME rows the IC surface offers in the other direction, merged by landing spot. A
+  // settle ledger the catalog doesn't know is registry/catalog drift: fail closed, no row.
+  for (const venue of cefiVenuesForLedger(inMint)) {
+    const outLedger = cefiOtherSide(venue, inMint);
+    if (outLedger == null) continue;
+    const row = catalog.find(c => c.ledger === outLedger);
+    // The pricing gate's own red lines (same as resolveConvertDestinations): a settle side
+    // without a catalog row or without decimals cannot be priced honestly — no row.
+    if (row == null || row.decimals == null) continue;
+    const outSym = row.backing_symbol ?? row.symbol ?? '';
+    if (outSym === '') continue;
+    const key = `ic:${outLedger}`;
+    const mech: SolDestMech = {kind: 'cefi', venue, outLedger, outSym, outDecimals: row.decimals};
+    const existing = byKey.get(key);
+    if (existing != null) {
+      existing.mechs.push(mech);
+      continue;
+    }
+    push({
+      key,
+      testID: `convert-sol-dest-cefi-${venue.venue_id}`,
+      label: M.convert.cefi.destRow(outSym, 'Internet Computer', venue.display_name),
+      mechs: [mech],
+    });
+  }
+  return {inMint, groups};
 }
 
-/** The Solana analog of `resolveLegs`: the legs the SELECTED venue serves — the venue's own
- *  registry row names the pair, the OTHER side of `pair_ledgers` is the destination. Null when
- *  no venue is selected (zero destinations — the fail-closed panel renders). */
-function resolveSolLegs(asset: Extract<SelectableAsset, {protocol: 'solana'}>, venue: VenueEntry | null): {
-  inMint: string;
-  outMint: string;
-  inSym: string;
-  outSym: string;
-  inDecimals: number;
-  outDecimals: number;
-} | null {
+/** The Solana analog of `resolveLegs`: the legs the SELECTED mechanism serves — an amm
+ *  venue's other mint, or a cefi venue's settle ledger on the IC rail. Null when nothing is
+ *  selected (zero destinations — the fail-closed panel renders). */
+type SolLegs =
+  | {kind: 'amm'; inMint: string; outMint: string; inSym: string; outSym: string; inDecimals: number; outDecimals: number}
+  | {kind: 'cefi'; inMint: string; outLedger: string; inSym: string; outSym: string; inDecimals: number; outDecimals: number};
+
+function resolveSolLegs(
+  asset: Extract<SelectableAsset, {protocol: 'solana'}>,
+  mech: SolDestMech | null,
+): SolLegs | null {
   const inMint = asset.mint ?? WRAPPED_SOL_MINT_ADDRESS;
-  if (venue == null) return null;
-  const outMint = venue.pair_ledgers.find(m => m !== inMint);
-  if (outMint == null) return null;
   const inTok = solAssetOfMint(inMint);
-  const outTok = solAssetOfMint(outMint);
-  if (inTok == null || outTok == null) return null;
-  return {inMint, outMint, inSym: inTok.symbol, outSym: outTok.symbol, inDecimals: inTok.decimals, outDecimals: outTok.decimals};
+  if (mech == null || inTok == null) return null;
+  if (mech.kind === 'amm') {
+    const outTok = solAssetOfMint(mech.outMint);
+    if (outTok == null) return null;
+    return {kind: 'amm', inMint, outMint: mech.outMint, inSym: inTok.symbol, outSym: outTok.symbol, inDecimals: inTok.decimals, outDecimals: outTok.decimals};
+  }
+  return {kind: 'cefi', inMint, outLedger: mech.outLedger, inSym: inTok.symbol, outSym: mech.outSym, inDecimals: inTok.decimals, outDecimals: mech.outDecimals};
 }
 
 type SolConvertProps = {
@@ -2379,16 +2433,22 @@ type SolConvertProps = {
   /** The active relay — the Jupiter quote/swap dials go through it (2026-09-16). */
   relayUrl: string;
   asset: Extract<SelectableAsset, {protocol: 'solana'}>;
+  /** The catalog — resolves a cefi venue's settle ledger into the destination row's
+   *  symbol/decimals (the IC half of the pair, on this surface since 2026-09-20). */
+  catalog: CurrencyDescriptor[];
   solana: {sol: string | null; tokens: Record<string, string | null>};
   onBack: () => void;
   onShowDepositAddress: () => void;
   onSwitchAsset?: (id: AssetId) => void;
 };
 
-function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDepositAddress, onSwitchAsset}: SolConvertProps) {
+function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onShowDepositAddress, onSwitchAsset}: SolConvertProps) {
   const [amountText, setAmountText] = useState('');
   const [slippageBps, setSlippageBps] = useState<number>(CONVERT_SLIPPAGE_BPS_DEFAULT);
   const [quote, setQuote] = useState<JupiterQuote | null>(null);
+  // The CeFi quote (a ConvertQuote — the venue's verbatim settle figure), parallel to the
+  // Jupiter quote: whichever MECHANISM is active renders its own quote's digits.
+  const [cefiQuote, setCefiQuote] = useState<ConvertQuote | null>(null);
   const [quoteErr, setQuoteErr] = useState<string | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [staleRefreshing, setStaleRefreshing] = useState(false);
@@ -2406,40 +2466,69 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
   // gesture — observed once under heavy host load, 2026-09-17). The ref closes it same-tick.
   const confirmBusyRef = useRef(false);
 
-  // --- the destination (spec 2026-09-16 §2 decision 5): every registered solana_amm venue for
-  //     this mint is one out option — registry order, deduped by out mint, never ranked. The
-  //     DEFAULT is the FIRST option: the exact pair this surface served before a second venue
-  //     existed, so a one-venue mint renders no chooser chrome and behaves exactly as before.
-  //     A switch resets the quote + its review state (the amount stays — the user's number is
-  //     not the venue's business).
+  // --- the destination (spec 2026-09-16 §2 decision 5, widened 2026-09-20): one GROUP per
+  //     destination ASSET — in-wallet SPL destinations (every registered solana_amm venue for
+  //     this mint) plus the registered cefi venues settling onto the IC rail (defect 1 of the
+  //     live sweep: the SAME rows the IC surface offers in the other direction). Registry
+  //     order, merged by landing spot, never ranked. The DEFAULT is the FIRST option — the
+  //     exact pair this surface served before widening, so a one-group mint renders no chooser
+  //     chrome and behaves exactly as before. A switch resets the quote + its review state
+  //     (the amount stays — the user's number is not the venue's business).
   const inMint = asset.mint ?? WRAPPED_SOL_MINT_ADDRESS;
-  const [destVenueId, setDestVenueId] = useState<string | null>(null);
-  const [destMint, setDestMint] = useState<string | null>(null);
-  if (destMint !== inMint) {
+  const [destKey, setDestKey] = useState<string | null>(null);
+  const [destMintKey, setDestMintKey] = useState<string | null>(null);
+  if (destMintKey !== inMint) {
     // The pick is per-mint state — a different asset re-derives the default (render-phase
     // adjustment: set during render when a prop changed the fact the state is keyed on).
-    setDestMint(inMint);
-    setDestVenueId(null);
+    setDestMintKey(inMint);
+    setDestKey(null);
   }
-  const solDests = resolveSolDestinations(asset);
-  const destVenues: {venue: VenueEntry; outSym: string}[] = [];
-  if (solDests != null) {
-    for (const d of solDests.dests) destVenues.push({venue: d.venue, outSym: d.outSym});
-  }
-  const activeDest = destVenues.find(x => x.venue.venue_id === destVenueId) ?? destVenues[0] ?? null;
-  const venue = activeDest?.venue ?? null;
-  const legs = venue != null ? resolveSolLegs(asset, venue) : null;
+  const solDests = resolveSolDestinations(asset, catalog);
+  const destGroups: SolDestGroup[] = solDests?.groups ?? [];
+  const activeGroup = destGroups.find(g => g.key === destKey) ?? destGroups[0] ?? null;
+  // Groups are single-mechanism today (an amm venue and a cefi venue never land the same
+  // asset on this surface yet); the group object keeps the merged-slot shape so widening to
+  // multi-mechanism sub-pickers is additive. A group with no mechanism cannot exist.
+  const activeMech = activeGroup?.mechs[0] ?? null;
+  const venue = activeMech?.venue ?? null;
+  const legs = activeMech != null ? resolveSolLegs(asset, activeMech) : null;
+  const cefiMode = activeMech?.kind === 'cefi';
   const venueName = venue != null ? venueDisplayName(venue.venue_id) : venueDisplayName('jupiter');
 
-  const pickDest = (venueId: string) => {
+  const pickDest = (key: string) => {
     // Frozen while a confirm is in flight: the in-flight confirm closes over THIS pair, and its
     // late setQuote/setQuoteChanged must never land under the newly picked pair's heading.
-    if (venueId === destVenueId || confirmBusy) return;
-    setDestVenueId(venueId);
+    if (key === destKey || confirmBusy) return;
+    setDestKey(key);
     setQuote(null); setQuoteErr(null); setQuoteChanged(null); setQuoteBusy(false); setConfirmErr(null);
   };
   const balanceRaw = legs == null ? null : legs.inMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.inMint] ?? null;
-  const outHeldRaw = legs == null ? null : legs.outMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.outMint] ?? null;
+  const outHeldRaw = legs != null && legs.kind === 'amm'
+    ? (legs.outMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.outMint] ?? null)
+    : null; // a cefi settle side lives on the IC rail — this wallet's other SOL token is irrelevant
+
+  // --- the CeFi payout target (IC-side twin: the cefiSettleAddress memo): the user's OWN
+  //     address ON THE DESTINATION RAIL — the wallet's derived IC principal, from the same
+  //     key that derives the Solana address. Nothing typed, nothing entrusted.
+  const [icSettleAddress, setIcSettleAddress] = useState<string | null>(null);
+  useEffect(() => {
+    if (!cefiMode) {
+      setIcSettleAddress(null);
+      return;
+    }
+    let alive = true;
+    DpayCore.icpPrincipalFromPubkey(identity.publicHex)
+      .then(p => {
+        if (alive) setIcSettleAddress(p);
+      })
+      .catch(() => {
+        if (alive) setIcSettleAddress(null);
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cefiMode, identity.publicHex]);
 
   // --- engine view (the same shape as the IC surface: newest live/unacknowledged-stuck record,
   // honored-record lock, subscribe for updates — this screen never runs a private executor).
@@ -2473,13 +2562,39 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
 
   // --- the quote: through the relay proxy per keystroke (the relay pipes the venue
   // byte-faithfully, short-TTL-caching identical asks). Slippage IS a dep here (unlike IC):
-  // Jupiter's route + threshold are computed against it, so a changed chip must re-ask the venue.
+  // Jupiter's route + threshold are computed against it, so a changed chip must re-ask the
+  // venue. The cefi branch goes through the SAME CeFi quote path the IC surface uses
+  // (partner-key proxy, verbatim settle figure) — rails differ, the pipeline does not.
   useEffect(() => {
     if (legs == null || venue == null || showRecord) return;
     const parsed = parseUserAmount(amountText, legs.inDecimals);
     if (!parsed.ok || parsed.raw === '0') {
-      setQuote(null); setQuoteErr(null); setQuoteBusy(false); setQuoteChanged(null);
+      setQuote(null); setCefiQuote(null); setQuoteErr(null); setQuoteBusy(false); setQuoteChanged(null);
       return;
+    }
+    if (legs.kind === 'cefi') {
+      let cancelled = false;
+      setQuoteBusy(true);
+      fetchCeFiConvertQuote(relayUrl, venue, legs.inMint, legs.outLedger, parsed.raw, {
+        inDecimals: legs.inDecimals,
+        outDecimals: legs.outDecimals,
+      })
+        .then(q => {
+          if (cancelled) return;
+          setCefiQuote(q);
+          setQuoteErr(null);
+        })
+        .catch((e: unknown) => {
+          if (cancelled) return;
+          setCefiQuote(null);
+          setQuoteErr(e instanceof Error ? e.message : M.convert.errors.quoteUnreachable(venueName));
+        })
+        .finally(() => {
+          if (!cancelled) setQuoteBusy(false);
+        });
+      return () => {
+        cancelled = true;
+      };
     }
     let cancelled = false;
     setQuoteBusy(true);
@@ -2505,11 +2620,36 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amountText, legs?.inMint, legs?.outMint, slippageBps, showRecord]);
+  }, [amountText, legs?.inMint, legs != null && legs.kind === 'amm' ? legs.outMint : null, legs != null && legs.kind === 'cefi' ? legs.outLedger : null, slippageBps, showRecord]);
 
   // --- stale refresh (same 30s clock + test seam as IC; keeps the OLD quote on failure).
   useEffect(() => {
-    if (legs == null || venue == null || quote == null || showRecord) return;
+    if (legs == null || venue == null || showRecord) return;
+    if (legs.kind === 'cefi') {
+      if (cefiQuote == null) return;
+      const tick = setInterval(() => {
+        if (!isQuoteStale(cefiQuote)) return;
+        setStaleRefreshing(true);
+        fetchCeFiConvertQuote(relayUrl, venue, legs.inMint, legs.outLedger, cefiQuote.amountIn, {
+          inDecimals: legs.inDecimals,
+          outDecimals: legs.outDecimals,
+        })
+          .then(q => {
+            if (mountedRef.current) {
+              setCefiQuote(q);
+              if (q.amountOutGross !== cefiQuote.amountOutGross) {
+                setQuoteChanged({oldAmt: cefiQuote.amountOutGross, newAmt: q.amountOutGross});
+              }
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (mountedRef.current) setStaleRefreshing(false);
+          });
+      }, 1000);
+      return () => clearInterval(tick);
+    }
+    if (quote == null) return;
     const tick = setInterval(() => {
       if (!isQuoteStale(quote)) return;
       setStaleRefreshing(true);
@@ -2529,7 +2669,7 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
     }, 1000);
     return () => clearInterval(tick);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quote, slippageBps, showRecord]);
+  }, [quote, cefiQuote, slippageBps, showRecord]);
 
   const parsedAmount = parseUserAmount(amountText, legs != null ? legs.inDecimals : 0);
   const amountRaw = parsedAmount.ok ? parsedAmount.raw : null;
@@ -2539,11 +2679,62 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
   // INPUT the honest available figure is the balance itself (the fee lives under the same SOL;
   // a dust edge fails on-chain and lands in the honest failure state, never a false pass).
   const insufficient = legs != null && amountN > 0n && balanceN != null && amountN > balanceN;
-  const canConfirm = legs != null && quote != null && !quoteBusy && !confirmBusy && !insufficient && amountN > 0n;
+  const canConfirm = legs != null && !quoteBusy && !confirmBusy && !insufficient && amountN > 0n
+    && (cefiMode ? cefiQuote != null && icSettleAddress != null : quote != null);
 
   const onConfirm = async () => {
     if (confirmBusyRef.current) return; // sync latch: a duplicate press before the re-render is a no-op
     if (legs == null || venue == null || amountRaw == null) return;
+    if (legs.kind === 'cefi') {
+      // The CeFi confirm — the IC surface's branch, mirrored rail-side. The re-quote exists
+      // ONLY to mint a fresh quoteId (SideShift pins quoteId↔rate); there is deliberately NO
+      // exact-match gate against the reviewed quote — a ticking venue rate can never be
+      // matched exactly and the gate would livelock (the IC-side defect the same sweep found).
+      // The ORDER is the lock and the consent point: its depositAmount is the reviewed
+      // deposit, its settle figure is the venue's own locked number, and prepare still
+      // refuses an order whose depositAmount differs.
+      if (icSettleAddress == null) {
+        setConfirmErr(M.convert.errors.quoteUnavailable('order'));
+        return;
+      }
+      confirmBusyRef.current = true;
+      setConfirmBusy(true); setConfirmErr(null);
+      try {
+        let freshRes;
+        try {
+          freshRes = await fetchSideShiftQuote(relayUrl, venue, legs.inMint, legs.outLedger, rawToDecimal(amountRaw, legs.inDecimals));
+        } catch (e) {
+          throw ceFiServiceError(e, venueName);
+        }
+        const fresh = ceFiQuoteFromResult(venue, legs.inMint, legs.outLedger, amountRaw, freshRes, legs.outDecimals);
+        let order;
+        try {
+          order = await createSideShiftFixedShift(relayUrl, venue, {quoteId: freshRes.quoteId, settleAddress: icSettleAddress});
+        } catch (e) {
+          throw ceFiServiceError(e, venueName);
+        }
+        const rec = prepareCeFiConvertRecord({
+          quote: fresh,
+          order,
+          settleAddress: icSettleAddress,
+          inCurrency: null, // the INPUT is a Solana-rail asset — no IC catalog currency
+          inSymbol: legs.inSym,
+          outSymbol: legs.outSym,
+          inDecimals: legs.inDecimals,
+          outDecimals: legs.outDecimals,
+        });
+        if (!mountedRef.current) return;
+        recordIdRef.current = rec.id;
+        setRecord(rec);
+        await adoptConvertRecord(rec);
+      } catch (e) {
+        setConfirmErr(e instanceof Error ? e.message : M.convert.errors.quoteUnavailable('unknown'));
+      } finally {
+        confirmBusyRef.current = false;
+        setConfirmBusy(false);
+      }
+      return;
+    }
     confirmBusyRef.current = true;
     setConfirmBusy(true); setConfirmErr(null);
     try {
@@ -2582,12 +2773,15 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
   // the OTHER leg when the user already holds it there (the pair's other side is the only
   // account that could ever help — the same argument as the IC gate).
   if (legs != null && balanceN === 0n) {
-    const otherHeld = outHeldRaw != null && /^\d+$/.test(outHeldRaw) && BigInt(outHeldRaw) > 0n
+    const otherHeld = !cefiMode && outHeldRaw != null && /^\d+$/.test(outHeldRaw) && BigInt(outHeldRaw) > 0n
       ? fmtAssetCompact(outHeldRaw, legs.outDecimals, legs.outSym)
       : null;
     return (
       <View testID="convert-screen" style={S.convertWrap}>
-        <ConvertHeader title={M.convert.sol.heading(legs.inSym, legs.outSym)} onBack={onBack} />
+        <ConvertHeader
+          title={cefiMode ? M.convert.heading(legs.inSym, legs.outSym) : M.convert.sol.heading(legs.inSym, legs.outSym)}
+          onBack={onBack}
+        />
         <InstructionPanel
           testID="convert-fund"
           title={M.pay.fundTitle(legs.inSym)}
@@ -2639,18 +2833,28 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
   }
 
   if (showRecord && record != null) {
-    return <SolStatePanel record={record} onBack={onBack} />;
+    // A provider-shaped record (the CeFi family) renders through the GENERIC StatePanel — its
+    // awaiting_deposit handoff, provider_processing and refunded states are rail-agnostic and
+    // already know the venue-driven machine; the SOL surface never had its own copy.
+    return record.providerRef != null
+      ? <StatePanel record={record} onBack={onBack} />
+      : <SolStatePanel record={record} onBack={onBack} />;
   }
 
   const fmtIn = (raw: string) => fmtAssetCompact(raw, legs.inDecimals, legs.inSym);
   const fmtOut = (raw: string) => fmtAssetCompact(raw, legs.outDecimals, legs.outSym);
   const impact = quote?.priceImpactPct ?? null;
-  const outEstimate = quote != null ? fmtOut(quote.outAmount) : null;
-  const outFloor = quote != null ? fmtOut(quote.otherAmountThreshold) : null;
+  const outEstimate = cefiMode
+    ? (cefiQuote != null ? fmtOut(cefiQuote.amountOutGross) : null)
+    : (quote != null ? fmtOut(quote.outAmount) : null);
+  const outFloor = quote != null && !cefiMode ? fmtOut(quote.otherAmountThreshold) : null;
 
   return (
     <View testID="convert-screen" style={S.convertWrap}>
-      <ConvertHeader title={M.convert.sol.heading(legs.inSym, legs.outSym)} onBack={onBack} />
+      <ConvertHeader
+        title={cefiMode ? M.convert.heading(legs.inSym, legs.outSym) : M.convert.sol.heading(legs.inSym, legs.outSym)}
+        onBack={onBack}
+      />
 
       <Text style={S.convertAmountLabel}>{M.convert.amountLabel(legs.inSym)}</Text>
       <View style={S.amountRow}>
@@ -2670,35 +2874,36 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
       ) : null}
       {insufficient && balanceN != null ? (
         <Text testID="convert-insufficient" style={S.err}>
-          {M.convert.insufficientLine(fmtIn(amountN.toString()), fmtIn(balanceN.toString()))}
+          {cefiMode
+            ? M.convert.cefi.solInsufficientLine(fmtIn(amountN.toString()), fmtIn(balanceN.toString()))
+            : M.convert.insufficientLine(fmtIn(amountN.toString()), fmtIn(balanceN.toString()))}
         </Text>
       ) : null}
 
-      {/* The out-destination (spec 2026-09-16 §2 decision 5): one row per registered venue for
-          this mint, in the venue chooser's own visual language — registry order, explicit pick,
-          never chosen for the user. Only when there is a CHOICE: a single venue's destination is
-          a fact of the pair, not an option, and renders no chrome. */}
-      {destVenues.length > 1 ? (
+      {/* The out-destination (spec 2026-09-16 §2 decision 5, widened 2026-09-20): one row per
+          DESTINATION ASSET — in-wallet SPL rows and the cefi rows settling onto the IC rail,
+          in the venue chooser's own visual language — registry order, explicit pick, never
+          chosen for the user. Only when there is a CHOICE: a single destination is a fact of
+          the pair, not an option, and renders no chrome. */}
+      {destGroups.length > 1 ? (
         <View testID="convert-sol-dest">
           <Text style={S.convertDestLabel}>{M.convert.multihop.destLabel}</Text>
-          {destVenues.map(x => {
-            const on = venue?.venue_id === x.venue.venue_id;
+          {destGroups.map(g => {
+            const on = activeGroup?.key === g.key;
             return (
               <Pressable
-                key={x.venue.venue_id}
-                testID={`convert-sol-dest-${x.outSym}`}
+                key={g.key}
+                testID={g.testID}
                 style={[S.convertVenueRow, on && S.convertVenueRowOn]}
-                onPress={() => pickDest(x.venue.venue_id)}
+                onPress={() => pickDest(g.key)}
                 accessibilityRole="radio"
                 accessibilityState={{checked: on}}
-                accessibilityLabel={M.convert.multihop.destDirect(x.outSym)}>
+                accessibilityLabel={g.label}>
                 <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
                   {on ? <View style={S.convertVenueRadioDot} /> : null}
                 </View>
                 <View style={S.convertVenueRowText}>
-                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>
-                    {M.convert.multihop.destDirect(x.outSym)}
-                  </Text>
+                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{g.label}</Text>
                 </View>
               </Pressable>
             );
@@ -2706,16 +2911,25 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
         </View>
       ) : null}
 
-      {/* The decision number + attribution — the IC headline card's exact shape, carrying
-          Jupiter's OWN digits (outAmount verbatim). The rate folds behind the Details control
-          on the checklist card below (10x-verbosity pass 2026-09-16); the attribution line
-          stays — it is WHOSE number this is. */}
-      {quote != null ? (
+      {/* The CeFi payout target, shown BEFORE anything is created (the IC surface's exact
+          slot): the user's own derived IC principal — read-only, selectable, never typed. */}
+      {cefiMode && icSettleAddress != null ? (
+        <View>
+          <Text style={S.convertAmountLabel}>{M.convert.cefi.settleAddressLabel}</Text>
+          <Text testID="convert-settle-address" style={S.convertMetaLine} selectable>{icSettleAddress}</Text>
+        </View>
+      ) : null}
+
+      {/* The decision number + attribution — the IC headline card's exact shape, carrying the
+          venue's OWN digits (Jupiter's outAmount / the cefi settle figure verbatim). The rate
+          folds behind the Details control on the checklist card below (10x-verbosity pass
+          2026-09-16); the attribution line stays — it is WHOSE number this is. */}
+      {outEstimate != null ? (
         <View testID="convert-headline" style={S.convertHeadlineCard}>
           <Text style={S.convertHeadlineLabel}>{M.convert.receiveHeadline}</Text>
           <Text style={S.convertHeadlineAmount}>{outEstimate}</Text>
           <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
-            {M.convert.quoteSource(nonBreakingClock(new Date(quote.fetchedAtMs)), venueName)}
+            {M.convert.quoteSource(nonBreakingClock(new Date((cefiMode ? cefiQuote : quote)?.fetchedAtMs ?? 0)), venueName)}
           </Text>
           {staleRefreshing ? (
             <Text testID="convert-stale" style={S.convertHeadlineMeta}>{M.convert.staleRefreshing}</Text>
@@ -2729,6 +2943,9 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
           impact exception still holds — Jupiter DOES publish a price-impact figure — but it
           too is census, not decision, so it lives behind the same control. */}
       <View style={S.convertChecklistCard}>
+        {/* A fixed-shift CeFi order has NO slippage axis (its rate is LOCKED at order creation
+            — the same reason the IC cefi surface hides this block). */}
+        {!cefiMode ? (
         <View testID="convert-slippage">
           <Text style={S.convertSlippageLabel}>{M.convert.slippageLabel}</Text>
           <View
@@ -2750,11 +2967,15 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
             ))}
           </View>
         </View>
+        ) : null}
         {/* The floor is the VENUE'S OWN otherAmountThreshold — Jupiter computed it against the
-            chosen slippage; dpay derives nothing here (V8). */}
-        <Text testID="convert-min-out" style={S.convertMinOutLine}>
-          {M.convert.minReceiveLine(outFloor ?? '', formatBps(slippageBps))}
-        </Text>
+            chosen slippage; dpay derives nothing here (V8). A cefi order's floor IS its locked
+            settle figure — no second number, so no floor line (the IC cefi rule). */}
+        {!cefiMode ? (
+          <Text testID="convert-min-out" style={S.convertMinOutLine}>
+            {M.convert.minReceiveLine(outFloor ?? '', formatBps(slippageBps))}
+          </Text>
+        ) : null}
         {quoteChanged != null ? (
           <Text testID="convert-quote-changed" style={S.convertChecklistWarn}>
             {M.convert.quoteChanged(fmtOut(quoteChanged.oldAmt), fmtOut(quoteChanged.newAmt))}
@@ -2768,21 +2989,35 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
         />
         {detailsOpen ? (
           <View testID="convert-details-block">
-            {quote != null ? (
+            {!cefiMode && quote != null ? (
               <View testID="convert-rate" style={S.convertRateRow}>
                 <Text style={S.convertRateLabel}>{M.convert.rateLabel(legs.inSym, legs.outSym)}</Text>
                 <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(quote.outAmount, quote.inAmount, legs.inDecimals), legs.outDecimals, legs.outSym)}</Text>
               </View>
             ) : null}
+            {cefiMode && cefiQuote != null ? (
+              <View testID="convert-rate" style={S.convertRateRow}>
+                <Text style={S.convertRateLabel}>{M.convert.rateLabel(legs.inSym, legs.outSym)}</Text>
+                <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(cefiQuote.amountOutGross, cefiQuote.amountIn, legs.inDecimals), legs.outDecimals, legs.outSym)}</Text>
+              </View>
+            ) : null}
             <View testID="convert-counterparty">
-              <Text style={S.convertChecklistLine}>{M.convert.sol.counterparty(venueName)}</Text>
-              <Text testID="convert-pool-principal" style={S.convertPrincipal}>{venue.endpoint}</Text>
-              <Text style={S.convertChecklistLine}>{M.convert.sol.counterpartySigns}</Text>
+              <Text style={S.convertChecklistLine}>
+                {cefiMode ? M.convert.cefi.counterparty(venueName) : M.convert.sol.counterparty(venueName)}
+              </Text>
+              {/* The IC-side cefi rule: NO pool-principal line — the venue's https API base is
+                  where the relay carries the partner key, not a depositor-checkable fact. */}
+              {!cefiMode ? (
+                <Text testID="convert-pool-principal" style={S.convertPrincipal}>{venue.endpoint}</Text>
+              ) : null}
+              <Text style={S.convertChecklistLine}>
+                {cefiMode ? M.convert.cefi.checklistSigns : M.convert.sol.counterpartySigns}
+              </Text>
             </View>
             <Text testID="convert-venue-disclosure" style={S.convertChecklistLine}>
               {venueDisclosure(venue.venue_id)}
             </Text>
-            {impact != null ? (
+            {!cefiMode && impact != null ? (
               <Text testID="convert-sol-impact" style={S.convertChecklistLine}>
                 {M.convert.sol.priceImpactLine(impact, venueName)}
               </Text>
@@ -2790,7 +3025,7 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
             {/* The refusal consequence (context, not an active error — the active error
                 branches never fold). */}
             <Text testID="convert-refusal" style={S.convertChecklistLine}>
-              {M.convert.sol.refusalLine(legs.inSym)}
+              {cefiMode ? M.convert.cefi.refusalLine(legs.inSym) : M.convert.sol.refusalLine(legs.inSym)}
             </Text>
             {/* Fee census, Solana side: the ROUTE's fees are inside the quoted output (Jupiter
                 publishes no separate tier through this keyless integration — platformFee null,
@@ -3250,6 +3485,14 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
               <Text testID="convert-deposit-amount" style={S.convertStateMeta}>
                 {M.convert.cefi.depositAmountLabel}: {fmtAssetCompact(toUnits(record.providerDeposit.depositAmount, inDecimals), inDecimals, inSymbol)}
               </Text>
+              {/* SOL-side deposit leg (2026-09-20): the user sends an SPL transfer THEMSELVES —
+                  its network fee is paid in SOL from the same wallet, a fact the IC-side
+                  handoff never had to name. */}
+              {solanaTokenOfMint(record.inLedger) != null ? (
+                <Text testID="convert-deposit-sol-fee-note" style={S.convertStateMeta}>
+                  {M.convert.cefi.depositSolFeeNote}
+                </Text>
+              ) : null}
               {record.providerDeposit.depositMemo != null ? (
                 <>
                   <Text testID="convert-deposit-memo" style={S.convertCalldata} selectable>

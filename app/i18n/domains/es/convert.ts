@@ -218,6 +218,9 @@ export const convertEs: ConvertMessages = {
     depositNote: (venue, sym) =>
       `Envía ${sym} desde tu monedero a la dirección de depósito de ${venue} arriba — exactamente la cantidad indicada. ${venue} es un servicio de intercambio automatizado: retiene tu ${sym} durante el intercambio y luego paga a tu dirección. dpay no es parte de este intercambio y no cobra nada.`,
     stillWaitingDeposit: 'Siguiendo con la espera de tu depósito — esta página se actualiza sola.',
+    depositSolFeeNote: 'Enviar el depósito también paga una pequeña comisión de red en SOL: conserva algo de SOL en este monedero.',
+    solInsufficientLine: (needed, balance) =>
+      `Este depósito envía exactamente ${needed} y este monedero tiene ${balance}. Baja el importe o recibe más primero.`,
   },
 
   /** La familia cross-rail (rutas B/C, 2026-09-16): todo lo que sigue a las cinco piernas IC —

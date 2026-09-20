@@ -125,12 +125,12 @@ export async function run() {
     await driver.click('btn-accounts-convert', {timeoutMs: 5_000});
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for USDC(Solana)');
     assert(await driver.findByTestID('convert-sol-dest', {timeoutMs: 5_000}) != null, 'the out-destination picker renders (two venues now hold the USDC mint)');
-    assert(await driver.findByTestID('convert-sol-dest-SOL', {timeoutMs: 3_000}) != null, 'the SOL row is present (the jupiter SOL-pair venue)');
-    assert(await driver.findByTestID('convert-sol-dest-EURC', {timeoutMs: 3_000}) != null, 'the EURC row is present (the FX venue)');
+    assert(await driver.findByTestID('convert-sol-dest-sol', {timeoutMs: 3_000}) != null, 'the SOL row is present (the jupiter SOL-pair venue)');
+    assert(await driver.findByTestID('convert-sol-dest-sol-eurc', {timeoutMs: 3_000}) != null, 'the EURC row is present (the FX venue)');
     assertIncludes(await driver.readText('convert-screen'), 'Convert USDC to SOL', 'the default pair is still USDC→SOL (first venue in registry order)');
 
     // §2 — the pick re-targets the pair: the FX venue's own USDC → EURC route.
-    await driver.click('convert-sol-dest-EURC', {timeoutMs: 3_000});
+    await driver.click('convert-sol-dest-sol-eurc', {timeoutMs: 3_000});
     assertIncludes(await driver.readText('convert-screen'), 'Convert USDC to EURC', 'the heading names the picked pair');
 
     // §3 — Jupiter's own digits for the FX pair, verbatim through the relay proxy.

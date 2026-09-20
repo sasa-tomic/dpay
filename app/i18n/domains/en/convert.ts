@@ -306,6 +306,12 @@ export type ConvertMessages = {
     /** The awaiting_deposit tail line: watches the DEPOSIT (the payout lines belong to the
      *  states after the venue has the money). */
     stillWaitingDeposit: string;
+    /** SOL-side deposit handoff (2026-09-20 SOL-side cefi): the deposit is an SPL transfer
+     *  the USER sends — its network fee is paid in SOL from the same wallet. */
+    depositSolFeeNote: string;
+    /** SOL-side cefi insufficientLine: the deposit moves EXACTLY the amount (its network
+     *  fee is SOL-side, named in the handoff note) — the pool's fee arithmetic is false here. */
+    solInsufficientLine: (needed: string, balance: string) => string;
   };
 
   // --- the cross-rail family (Routes B/C, 2026-09-16): the CCTP handoff (the USER's own
@@ -610,6 +616,9 @@ export const convertEn: ConvertMessages = {
     depositNote: (venue, sym) =>
       `Send ${sym} from your wallet to ${venue}\u2019s deposit address above — exactly the deposit amount. ${venue} is an automated exchange service: it holds your ${sym} mid-trade, then pays out to your address. dpay is not a party to this trade and is paid nothing.`,
     stillWaitingDeposit: 'Still watching for your deposit — this page updates on its own.',
+    depositSolFeeNote: 'Sending the deposit also pays a small network fee in SOL — keep a little SOL in this wallet.',
+    solInsufficientLine: (needed, balance) =>
+      `This deposit sends exactly ${needed} and this wallet holds ${balance}. Lower the amount, or receive more first.`,
   },
 
   /** The cross-rail family (Routes B/C, 2026-09-16): everything past the five IC legs —

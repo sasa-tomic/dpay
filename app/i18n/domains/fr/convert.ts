@@ -218,6 +218,9 @@ export const convertFr: ConvertMessages = {
     depositNote: (venue, sym) =>
       `Envoie ${sym} depuis ton portefeuille vers l'adresse de dépôt de ${venue} ci-dessus — exactement le montant indiqué. ${venue} est un service d'échange automatisé : il détient ton ${sym} pendant l'échange, puis paie vers ton adresse. dpay n'est pas partie à cet échange et ne touche rien.`,
     stillWaitingDeposit: 'Toujours en attente de ton dépôt — cet écran se met à jour tout seul.',
+    depositSolFeeNote: 'L\u2019envoi du dépôt paie aussi de petits frais de réseau en SOL — garde un peu de SOL dans ce portefeuille.',
+    solInsufficientLine: (needed, balance) =>
+      `Ce dépôt envoie exactement ${needed} et ce portefeuille détient ${balance}. Réduis le montant ou reçois d\u2019abord davantage.`,
   },
 
   /** La famille cross-rail (routes B/C, 2026-09-16) : tout ce qui suit les cinq jambes IC —
