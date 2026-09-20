@@ -1,10 +1,12 @@
 /**
  * cctp — the Circle CCTP V2 Ethereum burn leg's calldata builder, as PURE functions.
  *
- * Dependency-free (no react-native, no fetch, no keccak lib) so it runs under jest on the
+ * Dependency-free (no react-native, no keccak lib) so it runs under jest on the
  * fast inner loop — the `cketh.ts` pattern: every byte produced here is pinned byte-exact
  * against the LIVE Ethereum contract, so a unit test proves the external interface is
- * represented accurately with zero network.
+ * represented accurately with zero network. (ONE exception since the gas-fund widening:
+ * `fetchEthBalance` dials the global `fetch` against the publicnode staging — still no
+ * import, still jest-mockable via the global.)
  *
  * WHAT IT BUILDS (the cross-rail leg of Routes B/C, docs/specs/2026-09-14-swap-venue-
  * feasibility.md §Multi-step routes; the EVM signing boundary: dpay NEVER holds EVM keys —
@@ -261,4 +263,47 @@ export function parseCctpMessageStatus(body: unknown): CctpMessageStatus {
     return {state: 'complete', forwardTxHash: hash};
   }
   return {state: 'attested'};
+}
+
+// ── the publicnode Ethereum JSON-RPC staging ────────────────────────────────────────────────────
+// The module stays import-free (the header's dependency-free promise): the ONE network read
+// below dials the global `fetch` against the same publicnode endpoint the 2026-09-15 live
+// eth_call/eth_getCode verification staged through. Keyless, read-only, no dpay credential.
+
+/** The Ethereum mainnet JSON-RPC origin used for every read-only staging probe (2026-09-15)
+ *  and — since the gas-fund widening — for the EXTERNAL wallet's own ETH balance read. */
+export const ETHEREUM_RPC_URL = 'https://ethereum-rpc.publicnode.com';
+
+/**
+ * The user's OWN external Ethereum wallet's ETH balance, in wei (DECIMAL string — the
+ * codebase's money-string convention, JSON-safe for the state screens), via `eth_getBalance`
+ * ("latest") on the publicnode staging. This is the gas-fund offer's honest "have" line for
+ * the wallet the burn legs deliver INTO.
+ *
+ * Fail-open by contract: an unreachable RPC, a non-2xx, a malformed JSON-RPC body, or a
+ * malformed address ALL read as `null` — an unmeasurable balance is UNKNOWN, never zero,
+ * and the gas-fund UI stays offered with an unknown-have rather than blocked on a flaky
+ * read. (The gas the burn legs themselves spend is the IN-WALLET ckETH — `railBalanceOf`
+ * territory — never this number.)
+ */
+export async function fetchEthBalance(address: string, timeoutMs = 8000): Promise<string | null> {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(ETHEREUM_RPC_URL, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [address, 'latest']}),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const body = await res.json().catch(() => null) as {result?: unknown} | null;
+    if (body == null || typeof body.result !== 'string' || !/^0x[0-9a-f]+$/i.test(body.result)) return null;
+    return BigInt(body.result).toString();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }

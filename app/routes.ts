@@ -287,3 +287,50 @@ export function hubRoutes(
   }
   return toLedger == null ? routes : routes.filter(r => r.dest.ledger === toLedger);
 }
+
+// --- gas-fund routes (2026-09-20, the cross-rail gas widening) ---------------------------------------
+
+/** ONE route that can move value from a source IC ledger INTO the gas ledger (ckETH) —
+ *  the funding path the cross-rail gas-fund offer prepends ahead of a route's own legs.
+ *  1 leg = a direct ic_amm venue pairing src↔gas; 2 legs = a hub composition (hubRoutes).
+ *  Every leg reuses the hub leg's exact shape (venue + pool + ordered pair) so the signed
+ *  args are the SAME approve+swap pair every other route signs — zero new leg vocabulary. */
+export type GasFundRoute = {
+  routeId: string;
+  legs: HubLeg[];
+  from: HubEndpoint;
+  hub: HubEndpoint | null;
+  dest: HubEndpoint;
+};
+
+/** The funding routes from `srcLedger` INTO `gasLedger`, in registry order: a DIRECT venue
+ *  first (1 hop — preferred by construction, the short route with the fewest floors), then
+ *  the hub compositions (2 hops). Same posture as hubRoutes: walk the registry (ic_amm,
+ *  non-testnet), fail closed on any endpoint the catalog cannot fully price — a funding leg
+ *  that cannot be priced cannot be signed. `srcLedger === gasLedger` is not a route (there
+ *  is nothing to swap). Pure; the caller ranks candidates by quoted net (never here). */
+export function gasFundRoutes(
+  catalog: CurrencyDescriptor[],
+  srcLedger: string,
+  gasLedger: string,
+): GasFundRoute[] {
+  const dest = hubEndpointOf(catalog, gasLedger);
+  if (dest == null || srcLedger === gasLedger) return [];
+  const from = hubEndpointOf(catalog, srcLedger);
+  if (from == null) return [];
+  const out: GasFundRoute[] = [];
+  for (const v of registeredVenues()) {
+    if (v.kind !== 'ic_amm' || v.testnet) continue;
+    if (!v.pair_ledgers.includes(srcLedger) || !v.pair_ledgers.includes(gasLedger)) continue;
+    out.push({
+      routeId: `gasfund:${v.venue_id}`,
+      legs: [{venueId: v.venue_id, pool: v.endpoint, fromLedger: srcLedger, toLedger: gasLedger}],
+      from, hub: null, dest,
+    });
+  }
+  if (out.length > 0) return out; // direct beats hub for this source — the 1-hop else-2-hop rule
+  for (const hr of hubRoutes(catalog, srcLedger, gasLedger)) {
+    out.push({routeId: hr.routeId, legs: [...hr.legs], from: hr.from, hub: hr.hub, dest: hr.dest});
+  }
+  return out;
+}
