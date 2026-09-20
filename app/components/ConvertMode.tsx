@@ -41,7 +41,7 @@
 // machine lives in app/convert.ts; the DRIVERS live in app/convertResume.ts (the engine Wallet
 // mounts once per session, V6) — this screen only RENDERS records (a view onto the engine: it
 // subscribes for updates and hands freshly-prepared records to it, never running a private copy).
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {Fragment, useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Linking, Pressable, Text, TextInput, View} from 'react-native';
 import {isValidDestinationAddress, icpCatalogOf, BUNDLED_NETWORKS, type CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
@@ -2399,6 +2399,13 @@ type SolDestGroup = {key: string; testID: string; label: string; mechs: SolDestM
 const solDestTestKey = (sym: string): string =>
   sym === WRAPPED_SOL_TOKEN ? 'sol' : `sol-${sym.toLowerCase()}`;
 
+/** The venue sub-picker's key for one mechanism: the venue id for cefi (each venue is
+ *  its own service), 'amm' for the in-wallet route (single-mech groups never show a
+ *  picker). Module-level so every reader above its definition still hoists it. */
+function solMechKeyOf(m: SolDestMech): string {
+  return m.kind === 'cefi' ? m.venue.venue_id : 'amm';
+}
+
 function resolveSolDestinations(
   asset: Extract<SelectableAsset, {protocol: 'solana'}>,
   catalog: CurrencyDescriptor[],
@@ -2450,6 +2457,15 @@ function resolveSolDestinations(
       label: M.convert.cefi.destRow(outSym, 'Internet Computer', venue.display_name),
       mechs: [mech],
     });
+  }
+  // A merged group (several venues on ONE landing spot — the trocador aggregator beside
+  // sideshift since 2026-09-20) names the SPOT only; "via <venue>" moves to the mech
+  // sub-picker rows. A label naming one venue would be a lie about a two-venue slot.
+  for (const g of groups) {
+    const first = g.mechs[0];
+    if (g.mechs.length > 1 && first?.kind === 'cefi') {
+      g.label = M.convert.cefi.destRowMulti(first.outSym, 'Internet Computer');
+    }
   }
   return {inMint, groups};
 }
@@ -2525,19 +2541,23 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
   const inMint = asset.mint ?? WRAPPED_SOL_MINT_ADDRESS;
   const [destKey, setDestKey] = useState<string | null>(null);
   const [destMintKey, setDestMintKey] = useState<string | null>(null);
+  const [destMechKey, setDestMechKey] = useState<string | null>(null);
   if (destMintKey !== inMint) {
     // The pick is per-mint state — a different asset re-derives the default (render-phase
     // adjustment: set during render when a prop changed the fact the state is keyed on).
     setDestMintKey(inMint);
     setDestKey(null);
+    setDestMechKey(null);
   }
   const solDests = resolveSolDestinations(asset, catalog);
   const destGroups: SolDestGroup[] = solDests?.groups ?? [];
   const activeGroup = destGroups.find(g => g.key === destKey) ?? destGroups[0] ?? null;
-  // Groups are single-mechanism today (an amm venue and a cefi venue never land the same
-  // asset on this surface yet); the group object keeps the merged-slot shape so widening to
-  // multi-mechanism sub-pickers is additive. A group with no mechanism cannot exist.
-  const activeMech = activeGroup?.mechs[0] ?? null;
+  // A group can hold SEVERAL mechanisms since 2026-09-20 (the trocador aggregator beside
+  // sideshift on the IC landing spot). The sub-pick defaults to the FIRST — the registry's
+  // order, never a ranking — and an explicit pick wins. A group with no mechanism cannot exist.
+  const activeMech = activeGroup != null
+    ? activeGroup.mechs.find(m => solMechKeyOf(m) === destMechKey) ?? activeGroup.mechs[0] ?? null
+    : null;
   const venue = activeMech?.venue ?? null;
   const legs = activeMech != null ? resolveSolLegs(asset, activeMech) : null;
   const cefiMode = activeMech?.kind === 'cefi';
@@ -2548,6 +2568,7 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
     // late setQuote/setQuoteChanged must never land under the newly picked pair's heading.
     if (key === destKey || confirmBusy) return;
     setDestKey(key);
+    setDestMechKey(null); // the new group re-derives its default mechanism
     setQuote(null); setQuoteErr(null); setQuoteChanged(null); setQuoteBusy(false); setConfirmErr(null);
   };
   const balanceRaw = legs == null ? null : legs.inMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.inMint] ?? null;
@@ -2959,8 +2980,8 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
             const on = activeGroup?.key === g.key;
             const slowCefi = g.mechs[0]?.kind === 'cefi' ? g.mechs[0] : null;
             return (
+              <Fragment key={g.key}>
               <Pressable
-                key={g.key}
                 testID={g.testID}
                 style={[S.convertVenueRow, on && S.convertVenueRowOn]}
                 onPress={() => pickDest(g.key)}
@@ -2980,6 +3001,47 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
                   ) : null}
                 </View>
               </Pressable>
+              {/* The venue sub-picker for a merged group (the IC surface's convert-dest-mechs,
+                  same shape): which SERVICE executes the spot the row names. Registry order,
+                  never ranked; the default is the first. */}
+              {on && g.mechs.length > 1 ? (
+                <View testID="convert-sol-dest-mechs" style={S.convertMechGroup}>
+                  {g.mechs.map(m => {
+                    const id = solMechKeyOf(m);
+                    const mechOn = activeMech != null && solMechKeyOf(activeMech) === id;
+                    const mechLabel = m.kind === 'cefi'
+                      ? M.convert.multihop.mechViaVenue(m.venue.display_name)
+                      : M.convert.multihop.destDirect('SOL');
+                    return (
+                      <Pressable
+                        key={id}
+                        testID={`convert-sol-dest-mech-${id}`}
+                        style={[S.convertVenueRow, mechOn && S.convertVenueRowOn]}
+                        onPress={() => {
+                          if (confirmBusy || mechOn) return;
+                          setDestMechKey(id);
+                          setQuote(null); setQuoteErr(null); setQuoteChanged(null); setQuoteBusy(false); setConfirmErr(null);
+                        }}
+                        accessibilityRole="radio"
+                        accessibilityState={{checked: mechOn}}
+                        accessibilityLabel={mechLabel}>
+                        <View style={[S.convertVenueRadio, mechOn && S.convertVenueRadioOn]}>
+                          {mechOn ? <View style={S.convertVenueRadioDot} /> : null}
+                        </View>
+                        <View style={S.convertVenueRowText}>
+                          <Text style={[S.convertVenueName, mechOn && S.convertVenueNameOn]}>{mechLabel}</Text>
+                          {m.kind === 'cefi' && m.venue.health?.status === 'degraded' ? (
+                            <Text testID={`convert-sol-dest-mech-slow-${m.venue.venue_id}`} style={S.convertMetaLine}>
+                              {M.convert.venueSlow}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+              </Fragment>
             );
           })}
         </View>

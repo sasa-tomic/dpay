@@ -284,6 +284,7 @@ export type ConvertMessages = {
   cefi: {
     /** Destination-picker row: what arrives, on which rail, through which venue. */
     destRow: (sym: string, network: string, venue: string) => string;
+    destRowMulti: (sym: string, network: string) => string;
     /** The derived payout address line (read-only display — never typed free-hand). */
     settleAddressLabel: string;
     depositAddressLabel: string;
@@ -617,6 +618,7 @@ export const convertEn: ConvertMessages = {
    *  signed by dpay. Every address/amount shown is the venue's own, verbatim. */
   cefi: {
     destRow: (sym, network, venue) => `${sym} on ${network} — via ${venue} (exchange service)`,
+    destRowMulti: (sym, network) => `${sym} on ${network}`,
     settleAddressLabel: 'Payout lands at your own address on the destination network',
     depositAddressLabel: 'Deposit address',
     depositAmountLabel: 'Exact deposit amount',

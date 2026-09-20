@@ -212,6 +212,7 @@ export const convertDe: ConvertMessages = {
    *  eigene der Venue, unverändert. */
   cefi: {
     destRow: (sym, network, venue) => `${sym} auf ${network} — über ${venue} (Tauschdienst)`,
+    destRowMulti: (sym, network) => `${sym} auf ${network}`,
     settleAddressLabel: 'Die Auszahlung landet an deiner eigenen Adresse im Zielnetzwerk',
     depositAddressLabel: 'Einzahlungs-Adresse',
     depositAmountLabel: 'Genauer Einzahlungsbetrag',

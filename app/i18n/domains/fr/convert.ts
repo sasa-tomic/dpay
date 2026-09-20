@@ -211,6 +211,7 @@ export const convertFr: ConvertMessages = {
    *  tel quel. */
   cefi: {
     destRow: (sym, network, venue) => `${sym} sur ${network} — via ${venue} (service d'échange)`,
+    destRowMulti: (sym, network) => `${sym} sur ${network}`,
     settleAddressLabel: 'Le paiement arrive sur ta propre adresse sur le réseau de destination',
     depositAddressLabel: 'Adresse de dépôt',
     depositAmountLabel: 'Montant exact à déposer',
