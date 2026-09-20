@@ -547,6 +547,102 @@ pub(crate) fn venue_servable(v: &VenueEntry, knob_armed: bool) -> bool {
         || (cfg!(all(feature = "test-helpers", not(feature = "agent"))) && knob_armed)
 }
 
+// ---------------------------------------------------------------------------
+// Venue settlement health (founder escalation 2026-09-20: the first live EURC→ICP SideShift
+// shift sat in `settling` 6+ hours — deposit swept, payout pending — while the venue was
+// advertised as healthy the whole time). The MEASUREMENT lives in `dfx/venue_health.json`,
+// written by the opt-in settlement probe (`just swap-venue-probe`,
+// `sideshift_settlement_sla` in tests/swap_venue_mainnet.rs) and committed like any other
+// measured fact. The relay compiles the file in; `GET /api/v1/venues` derives each row's
+// verdict AT SERVE TIME via [`settlement_verdict`] and demotes degraded venues to the TAIL
+// of the served list (the app never ranks — V5 — so relay order IS the demotion) until a
+// passing probe run rewrites the file. A health flag + an order, nothing more: not a routing
+// engine, not a price signal.
+// ---------------------------------------------------------------------------
+
+/// The settlement SLA a cefi venue must meet: payout within 30 minutes of the order.
+/// Pinned to the literal in tests/swap_venue_mainnet.rs (update both together).
+#[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
+pub(crate) const SETTLEMENT_SLA_SECONDS: u64 = 30 * 60;
+
+/// The gate over one raw settlement measurement: degraded = the payout did not settle, or
+/// settled slower than [`SETTLEMENT_SLA_SECONDS`]. A settled-fast measurement clears it.
+/// Applied at SERVE time (never stored), so the probe is a pure instrument and this reader
+/// is the only place the threshold lives.
+#[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
+pub(crate) fn settlement_verdict(settled: bool, settle_seconds: Option<u64>) -> &'static str {
+    match (settled, settle_seconds) {
+        (true, Some(s)) if s <= SETTLEMENT_SLA_SECONDS => "ok",
+        _ => "degraded",
+    }
+}
+
+/// One venue's settlement verdict as served on the wire (`health` on a VenueBody).
+#[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
+pub(crate) struct VenueHealth {
+    /// `"ok" | "degraded"` — derived from the raw measurement by [`settlement_verdict`].
+    pub status: &'static str,
+    /// Measured order→settle latency in seconds; `None` = observed without a settle.
+    pub settle_seconds: Option<u64>,
+    /// When the probe measured (unix seconds).
+    pub measured_at: u64,
+}
+
+/// The venue's last measured settlement health — `None` when the probe never measured it.
+/// Absence is served as NO health object: never-measured is healthy-by-default, never invented.
+#[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
+pub(crate) fn venue_health(venue_id: &str) -> Option<VenueHealth> {
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+    static ROWS: OnceLock<HashMap<String, (bool, Option<u64>, u64)>> = OnceLock::new();
+    let rows = ROWS.get_or_init(|| {
+        let raw: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../dfx/venue_health.json"
+        ))
+        .expect(
+            "dfx/venue_health.json must be valid JSON (probe-written; the venue_truth_tests \
+             alarm parses it in every test run, so a malformed file cannot reach here)",
+        );
+        raw["venues"]
+            .as_object()
+            .expect("venue_health.venues is an object")
+            .clone()
+            .into_iter()
+            .map(|(id, row)| {
+                let settled = row["settled"]
+                    .as_bool()
+                    .unwrap_or_else(|| panic!("venue_health[{id}].settled must be a bool"));
+                let settle_seconds = if row["settle_seconds"].is_null() {
+                    None
+                } else {
+                    Some(row["settle_seconds"].as_u64().unwrap_or_else(|| {
+                        panic!("venue_health[{id}].settle_seconds must be a number or null")
+                    }))
+                };
+                let measured_at = row["measured_at"].as_u64().unwrap_or_else(|| {
+                    panic!("venue_health[{id}].measured_at must be a unix-seconds number")
+                });
+                (id, (settled, settle_seconds, measured_at))
+            })
+            .collect()
+    });
+    rows.get(venue_id).map(|(settled, settle_seconds, measured_at)| VenueHealth {
+        status: settlement_verdict(*settled, *settle_seconds),
+        settle_seconds: *settle_seconds,
+        measured_at: *measured_at,
+    })
+}
+
+/// Stable demotion: rows whose `degraded` predicate holds move to the TAIL, each group
+/// keeping its relative order. This is the WHOLE demotion — a flag and an order, never a
+/// ranking (the app renders relay order verbatim and never sorts — V5 red line).
+#[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
+pub(crate) fn degraded_last<T>(rows: Vec<T>, degraded: impl Fn(&T) -> bool) -> Vec<T> {
+    let mut rows = rows;
+    rows.sort_by_key(|r| degraded(r)); // stable sort: healthy first in order, degraded follow in order
+    rows
+}
+
 /// The IC section rows of the catalog — the wallet's runtime source of truth for which assets
 /// exist and how to display/fund them. REAL prod rows, fetched live from the prod relay's
 /// `/api/v1/currencies` on 2026-08-28 and transplanted VERBATIM (every field, null vs value):
@@ -1912,6 +2008,73 @@ mod venue_truth_tests {
                     u128::from(tf["fee_millionths"].as_u64().unwrap())
                 );
             }
+        }
+    }
+
+    #[test]
+    fn settlement_gate_flags_slow_or_unsettled_and_clears_on_a_passing_probe() {
+        // A fast settle is ok; the boundary is pinned exactly (30:00 passes, 30:01 does not).
+        assert_eq!(settlement_verdict(true, Some(0)), "ok");
+        assert_eq!(settlement_verdict(true, Some(60)), "ok");
+        assert_eq!(settlement_verdict(true, Some(SETTLEMENT_SLA_SECONDS)), "ok");
+        assert_eq!(
+            settlement_verdict(true, Some(SETTLEMENT_SLA_SECONDS + 1)),
+            "degraded"
+        );
+        // No settle observed — stuck in `settling` (the 2026-09-20 live incident), refunded,
+        // expired — is degraded at ANY age, never charitably "still probably fine".
+        assert_eq!(settlement_verdict(false, None), "degraded");
+        assert_eq!(settlement_verdict(false, Some(10)), "degraded");
+        // A settled verdict without a measurable latency cannot be certified ok either.
+        assert_eq!(settlement_verdict(true, None), "degraded");
+        // The probe (tests/swap_venue_mainnet.rs) hardcodes the same 30-minute threshold when
+        // it decides a still-pending order is old enough to prove slowness — keep them equal.
+        assert_eq!(SETTLEMENT_SLA_SECONDS, 1800);
+    }
+
+    #[test]
+    fn degraded_venues_demote_to_the_tail_stably() {
+        assert_eq!(
+            degraded_last(vec!["a-ok", "b-bad", "c-ok", "d-bad"], |r| r.ends_with("-bad")),
+            vec!["a-ok", "c-ok", "b-bad", "d-bad"],
+            "degraded rows move to the tail; BOTH groups keep their registry order"
+        );
+        // Uniform registries are byte-identical under demotion — no reordering side effect.
+        assert_eq!(degraded_last(vec!["a", "b"], |_| false), vec!["a", "b"]);
+        assert_eq!(degraded_last(vec!["a", "b"], |_| true), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn venue_health_rows_are_real_venues_and_the_reader_derives_the_served_verdict() {
+        let raw: Value = serde_json::from_str(include_str!("../../../dfx/venue_health.json"))
+            .expect("dfx/venue_health.json must be valid JSON");
+        let rows = raw["venues"]
+            .as_object()
+            .expect("venue_health.venues is an object");
+        let registry: Vec<&str> = venues().iter().map(|v| v.venue_id).collect();
+        for (id, row) in rows {
+            assert!(
+                registry.contains(&id.as_str()),
+                "venue_health row {id} must name a compiled registry venue — a renamed venue's \
+                 stale row is deleted, never tolerated"
+            );
+            assert!(row["settled"].is_boolean(), "venue_health[{id}].settled must be a bool");
+            assert!(
+                row["settle_seconds"].is_null() || row["settle_seconds"].is_u64(),
+                "venue_health[{id}].settle_seconds must be a number or null"
+            );
+            assert!(
+                row["measured_at"].is_u64(),
+                "venue_health[{id}].measured_at must be unix seconds"
+            );
+            // The serving reader derives the verdict from the raw measurement — assert the
+            // round-trip so a reader/parse change cannot silently diverge from the file.
+            let settled = row["settled"].as_bool().unwrap();
+            let seconds = row["settle_seconds"].as_u64();
+            let served = venue_health(id).expect("the row above exists, so the reader must see it");
+            assert_eq!(served.status, settlement_verdict(settled, seconds));
+            assert_eq!(served.settle_seconds, seconds);
+            assert_eq!(served.measured_at, row["measured_at"].as_u64().unwrap());
         }
     }
 

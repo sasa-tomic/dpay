@@ -418,3 +418,195 @@ fn probe_real_venue(venue: &Value) {
         }
     });
 }
+
+// ---------------------------------------------------------------------------
+// SETTLEMENT-SLA probe (2026-09-20, founder escalation: the first live EURC→ICP shift sat in
+// `settling` 6+ hours — deposit swept, payout pending — while the registry advertised the
+// venue healthy). Measures REAL shift ids the operator names in DPAY_SIDESHIFT_PROBE_SHIFTS
+// ("venue_id=shiftId", comma-separated) through the venue's own KEYLESS status surface and
+// persists one raw-measurement row per venue into dfx/venue_health.json — the relay compiles
+// that file in and derives the ok/degraded verdict AT SERVE TIME (catalog::settlement_verdict,
+// 30-minute SLA), then GET /api/v1/venues demotes degraded rows to the tail until a passing
+// probe run rewrites the file. The probe is a pure instrument: it NEVER creates orders (that
+// spends funds — founder rule), never holds the threshold itself (the reader does), and the
+// file write IS its product — commit + redeploy ships the demotion/clearing.
+// ---------------------------------------------------------------------------
+
+/// Parse the venue's fixed ISO-8601 UTC instant ("2026-09-20T12:34:56.000Z") to unix seconds.
+/// No chrono dep in this probe: the keyless status surface exposes `createdAt`, never a
+/// settled-at, so settle latency is measured createdAt→probe-run (an UPPER bound — run the
+/// probe soon after an order settles and the bound is tight).
+fn iso8601_utc_to_unix(s: &str) -> Option<u64> {
+    let b = s.as_bytes();
+    if b.len() < 19
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || (b[10] != b'T' && b[10] != b' ')
+        || b[13] != b':'
+        || b[16] != b':'
+    {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (h, mi, sec) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+    // days-from-civil (Howard Hinnant) → days since 1970-01-01
+    let y = y - i64::from(mo <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = (i64::from(mo) + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    u64::try_from(days * 86_400 + h * 3_600 + mi * 60 + sec).ok()
+}
+
+#[test]
+fn sideshift_settlement_sla_measured_and_persisted() {
+    if std::env::var("DPAY_IC_MAINNET").is_err() {
+        eprintln!("skipped: set DPAY_IC_MAINNET=1 (opt-in mainnet probe, needs network)");
+        return;
+    }
+    let spec = match std::env::var("DPAY_SIDESHIFT_PROBE_SHIFTS") {
+        Ok(s) if !s.trim().is_empty() => s,
+        _ => {
+            eprintln!(
+                "skipped: set DPAY_SIDESHIFT_PROBE_SHIFTS=venue_id=shiftId[,venue2=id2] — the \
+                 REAL shift ids to measure. The probe NEVER creates orders (that spends \
+                 funds); it measures the shifts the operator already has."
+            );
+            return;
+        }
+    };
+    let truth = venues_truth();
+    let cefi_ids: Vec<&str> = truth
+        .iter()
+        .filter(|t| t["kind"].as_str() == Some("cefi"))
+        .filter_map(|t| t["venue_id"].as_str())
+        .collect();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let client = rt.block_on(async {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .expect("probe client builds")
+    });
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock is past the epoch")
+        .as_secs();
+    let mut measured: Vec<(String, bool, Option<u64>)> = Vec::new();
+    for pair in spec.split(',') {
+        let (venue_id, shift_id) = pair
+            .trim()
+            .split_once('=')
+            .unwrap_or_else(|| {
+                panic!(
+                    "DPAY_SIDESHIFT_PROBE_SHIFTS entries are venue_id=shiftId, got {pair:?}"
+                )
+            });
+        let (venue_id, shift_id) = (venue_id.trim(), shift_id.trim());
+        assert!(
+            cefi_ids.contains(&venue_id),
+            "{venue_id} is not a cefi registry row — the SLA gate measures cefi venues (rows: \
+             {cefi_ids:?})"
+        );
+
+        let body: Value = rt.block_on(async {
+            let resp = client
+                .get(format!("https://sideshift.ai/api/v2/shifts/{shift_id}"))
+                .send()
+                .await
+                .expect("the venue's keyless status surface answers (the CURRENT host)");
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "shift {shift_id} must be readable keylessly (HTTP {})",
+                resp.status()
+            );
+            resp.json().await.expect("the status reply is JSON")
+        });
+        let status = body["status"]
+            .as_str()
+            .unwrap_or_else(|| panic!("shift {shift_id} carries a status: {body}"));
+        let created = body["createdAt"]
+            .as_str()
+            .and_then(iso8601_utc_to_unix)
+            .unwrap_or_else(|| {
+                panic!("shift {shift_id} carries a parseable createdAt ISO instant: {body}")
+            });
+        let age = now.saturating_sub(created);
+        // settled → measured (createdAt→now, upper bound). refund/refunded/expired → this
+        // order's payout never happened: NOT settled. Anything still pending → only a verdict
+        // once the SLA itself has passed: a young order proves nothing (the live 2026-09-20
+        // incident became EVIDENCE exactly when it crossed 30 minutes without a payout).
+        let (settled, settle_seconds) = match status {
+            "settled" => (true, Some(now.saturating_sub(created))),
+            "refund" | "refunded" | "expired" => (false, None),
+            other => {
+                if age <= 1800 {
+                    eprintln!(
+                        "swap-venue mainnet probe [settlement SLA]: shift {shift_id} is {age}s \
+                         into status {other:?} — below the 30-minute SLA it proves nothing, no \
+                         verdict persisted; re-run once it settles or crosses 30 min"
+                    );
+                    continue;
+                }
+                (false, None)
+            }
+        };
+        eprintln!(
+            "swap-venue mainnet probe [settlement SLA]: shift {shift_id} status={status:?} \
+             age={age}s → venue {venue_id} verdict={}",
+            if settled { "ok" } else { "degraded" }
+        );
+        measured.push((venue_id.to_string(), settled, settle_seconds));
+    }
+    assert!(
+        !measured.is_empty(),
+        "no venue produced a verdict — nothing to persist (see the skips above)"
+    );
+
+    // Persist: merge into dfx/venue_health.json keeping every other row verbatim. The relay
+    // compiles this file in, so COMMIT + REDEPLOY ships the demotion (or the clearing).
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../dfx/venue_health.json");
+    let raw: Value = serde_json::from_str(
+        &std::fs::read_to_string(&path).expect("dfx/venue_health.json exists"),
+    )
+    .expect("dfx/venue_health.json is valid JSON");
+    let mut merged = raw["venues"]
+        .as_object()
+        .expect("venue_health.venues is an object")
+        .clone();
+    for (venue_id, settled, settle_seconds) in &measured {
+        merged.insert(
+            venue_id.clone(),
+            serde_json::json!({
+                "settled": settled,
+                "settle_seconds": settle_seconds,
+                "measured_at": now,
+            }),
+        );
+    }
+    let mut out = raw.clone();
+    out["venues"] = Value::Object(merged);
+    std::fs::write(
+        &path,
+        format!("{}\n", serde_json::to_string_pretty(&out).expect("serializes")),
+    )
+    .expect("write dfx/venue_health.json");
+    eprintln!(
+        "PASS: sideshift settlement SLA — {} verdict row(s) persisted to dfx/venue_health.json \
+         (commit + redeploy to ship the demotion/clearing)",
+        measured.len()
+    );
+}

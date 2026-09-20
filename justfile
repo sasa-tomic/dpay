@@ -238,6 +238,10 @@ ic-index-probe:
 # behind a fully green suite while live production quoted every ICP→VCHF trade at the
 # VCHF→ICP rate (~5.9x against the user). Run it after any change to the conversion quote path,
 # and whenever the venue itself may have changed.
+# SETTLEMENT SLA (2026-09-20): to also measure cefi payout latency, run with
+# DPAY_SIDESHIFT_PROBE_SHIFTS=venue_id=shiftId[,…] — real shift ids only (never creates
+# orders). One verdict row per venue lands in dfx/venue_health.json; commit + redeploy ships
+# the demotion (or clears it) via GET /api/v1/venues row order.
 swap-venue-probe:
     DPAY_IC_MAINNET=1 cargo nextest run -p dpay-relay --features agent -E 'binary(swap_venue_mainnet)' --no-capture
 

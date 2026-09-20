@@ -1921,14 +1921,22 @@ async fn currencies() -> Response {
 /// inputs — the pair ORDER and fee tier are always read off the venue itself at quote time,
 /// never out of this table. The fee tier is deliberately absent: the venue's own quote echoes
 /// it. ROW ORDER is the compiled registry's own order — stable and quote-independent; the
-/// app's chooser renders it verbatim and never ranks.
+/// app's chooser renders it verbatim and never ranks. (One demotion exception, 2026-09-20: a
+/// venue whose last measured settlement blew the 30-minute SLA — `dfx/venue_health.json`,
+/// verdict from `catalog::settlement_verdict` — is flagged on its row and moved to the TAIL
+/// until a passing probe run clears it; `catalog::degraded_last` keeps both groups' order.)
 #[cfg(any(feature = "agent", feature = "test-helpers"))]
 async fn venues(State(state): State<AppState>) -> Response {
-    let body = VenuesBody {
-        venues: crate::catalog::venues()
-            .into_iter()
-            .filter(|v| crate::catalog::venue_servable(v, fixture_venue_armed(&state, v)))
-            .map(|v| VenueBody {
+    let rows: Vec<VenueBody> = crate::catalog::venues()
+        .into_iter()
+        .filter(|v| crate::catalog::venue_servable(v, fixture_venue_armed(&state, v)))
+        .map(|v| {
+            let health = crate::catalog::venue_health(v.venue_id).map(|h| VenueHealthBody {
+                status: h.status.to_string(),
+                settle_seconds: h.settle_seconds,
+                measured_at: h.measured_at,
+            });
+            VenueBody {
                 venue_id: v.venue_id.to_string(),
                 display_name: v.display_name.to_string(),
                 kind: match v.kind {
@@ -1940,8 +1948,14 @@ async fn venues(State(state): State<AppState>) -> Response {
                 pair_ledgers: v.pair_ledgers.iter().map(|p| p.to_string()).collect(),
                 testnet: v.testnet,
                 disclosure_key: v.disclosure_key.to_string(),
-            })
-            .collect(),
+                health,
+            }
+        })
+        .collect();
+    let body = VenuesBody {
+        venues: crate::catalog::degraded_last(rows, |v| {
+            v.health.as_ref().is_some_and(|h| h.status == "degraded")
+        }),
     };
     (StatusCode::OK, Json(body)).into_response()
 }
@@ -2461,6 +2475,26 @@ struct VenueBody {
     pair_ledgers: Vec<String>,
     testnet: bool,
     disclosure_key: String,
+    /// The venue's last measured settlement health (probe result file `dfx/venue_health.json`,
+    /// verdict derived relay-side by `catalog::settlement_verdict` — degraded = payout not
+    /// settled or slower than 30 min). ABSENT when never measured: absence is
+    /// healthy-by-default, never invented. The app renders a "recently slow" line on a
+    /// degraded row; the DEMOTION is this route's row order, nothing else.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    health: Option<VenueHealthBody>,
+}
+
+/// The settlement-health block on one served venue row (see [`VenueBody::health`]). Named
+/// `VenueHealthBody`, NOT `HealthBody`: the relay's own liveness route already owns that name.
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+#[derive(Serialize)]
+struct VenueHealthBody {
+    /// `"ok" | "degraded"` — the gate's verdict over the raw measurement below.
+    status: String,
+    /// Measured order→settle latency (seconds); `null` = observed without a settle.
+    settle_seconds: Option<u64>,
+    /// When the probe measured (unix seconds).
+    measured_at: u64,
 }
 
 /// `GET /api/v1/venues` response. Kept SEPARATE from `/api/v1/currencies` on purpose:

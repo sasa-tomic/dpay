@@ -5845,6 +5845,17 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
         v.get("fee_millionths").is_none(),
         "the fee tier is NOT registry data — the venue's own quote echoes it"
     );
+    // Settlement health (2026-09-20 SLA gate): with an empty dfx/venue_health.json (nothing
+    // measured yet) every row serves NO health object and the order is the pure registry
+    // order pinned above. The populated case (flag set/cleared + tail demotion) is proven by
+    // the pure-gate tests in catalog.rs venue_truth_tests — demotion is THIS route's order
+    // via catalog::degraded_last, so the wiring here only has to preserve the pin when no
+    // row is degraded, and the probe writes the file that flips the rest.
+    assert!(
+        v.get("health").is_none(),
+        "a never-measured venue carries NO health object — absence is healthy-by-default, \
+         never invented (dfx/venue_health.json is empty until the probe measures)"
+    );
     assert!(
         !body.to_string().contains(FIXTURE_POOL),
         "an invented fixture venue must never appear in a served list un-asked-for"
