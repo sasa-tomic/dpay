@@ -254,7 +254,7 @@ function cmdReconcile() {
       const scale = Math.max(fracLen(e.gen), ...e.moves.map(x => fracLen(x.amount)), fracLen(r.value));
       for (const x of e.moves) sum += scaled(x.amount, scale) * (x.direction === 'in' ? 1n : -1n);
       const want = (scaled(e.gen, scale) + sum).toString().padStart(scale + 1, '0');
-      const computedStr = `${want.slice(0, -scale)}.${want.slice(-scale)}`;
+      const computedStr = scale ? `${want.slice(0, -scale)}.${want.slice(-scale)}` : want; // scale 0 (integer wei rows): no dot
       pairs++;
       if (eq(computedStr, r.value)) console.log(`  ${r.label.padEnd(6)} OK       computed ${computedStr}  measured ${r.value}`);
       else fail(`  ${r.label.padEnd(6)} DRIFT    computed ${computedStr}  measured ${r.value} — a movement has no ledger row; record it (scripts/funds.mjs add) and re-run`);
