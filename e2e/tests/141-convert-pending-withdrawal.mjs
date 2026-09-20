@@ -20,6 +20,7 @@ import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency,
 } from '../harness/lib.mjs';
+import {startRelay} from '../harness/relay.mjs';
 
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
@@ -54,8 +55,22 @@ export async function run() {
   const start = Date.now();
   console.log('[141-convert-pending-withdrawal] setup (relay + web + browser)…');
   const env = await setup();
+  // OWN relay — the same isolation flows 189/194/197 opted into for their server-side stub
+  // state, and THE root-cause fix for this flow's first-wave flake (three signatures when it
+  // seeded a full-journey filter run: panel-missing ×2, ledger 0.0002 off, solo-green ×4):
+  // `fail_withdrawal` is a GLOBAL mutation of the shared fake pool the app quotes against.
+  // Seeded simultaneously with sibling convert flows, the armed window corrupted THEIR
+  // swaps/quotes (and theirs corrupted this flow's executedGross between the read and the
+  // settle, and tripped the confirm re-quote loop past its rounds). An own relay makes the
+  // pool private to this flow: the knobs arm THIS relay's pool, every sibling stays on the
+  // shared relay untouched, and no leaked knob survives into the watch-mode re-run seam.
+  const r2 = await startRelay();
   try {
-    const { relayBaseURL, driver } = env;
+    const { driver, webBaseURL } = env;
+    const relayBaseURL = r2.baseURL;
+    const page = `/?relay=${encodeURIComponent(relayBaseURL)}`;
+    await driver.navigate(webBaseURL, page, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    await driver.waitReady({timeoutMs: 8_000});
 
     console.log('[141-convert-pending-withdrawal] onboarding + funding 3 ICP…');
     await onboardWallet(driver, 'e2e-convert-pending');
@@ -127,6 +142,7 @@ export async function run() {
     console.log(`[141-convert-pending-withdrawal] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {
     await env.stop();
+    await r2.stop();
   }
 }
 
