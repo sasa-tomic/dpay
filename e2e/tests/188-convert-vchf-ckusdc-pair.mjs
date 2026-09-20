@@ -10,7 +10,7 @@
 //     app-reachable path through it is the VCHF → USDC(Ethereum) multihop route whose SWAP HOP
 //     is this pool; the DIRECT pair itself is asserted through the production route as oracle
 //     quotes in BOTH directions.
-//   * the served registry: GET /api/v1/venues lists all ELEVEN real venues in registry order
+//   * the served registry: GET /api/v1/venues lists all THIRTEEN real venues in registry order
 //     (six IC pools + two Jupiter + two SideShift) — the expansion is visible on the wire.
 //   * VCHF → ckUSDC DIRECT quote: venue_id icpswap-vchf-ckusdc, zero_for_one TRUE (the pool's
 //     token0 is VCHF), the venue's own 0.30% tier, a 6-decimal ckUSDC amount_out shape.
@@ -44,7 +44,7 @@ export const meta = {
   name: 'convert-vchf-ckusdc-pair',
   journey: 'convert',
   covers: ['convert', 'venues', 'icpswap', 'vchf', 'ckusdc', 'decimal-pairs', '8-decimal', '6-decimal', 'registry-order', 'multihop', 'route-a', 'destination-address', 'quote-only'],
-  verifies: 'The 2026-09-16 VCHF ↔ ckUSDC ICPSwap pool is live: the served registry lists all twelve real venues in registry order, the DIRECT pair quotes both directions through the production route (VCHF in → zero_for_one true with a 6-decimal USDC out; ckUSDC in → zero_for_one false with an 8-decimal VCHF out), the app\'s VCHF direct form still resolves the row-0 VCHF ↔ ICP venue untouched, and the new pool surfaces as the VCHF → USDC(Ethereum) multihop route whose hop quotes through the SAME pool — the min-you\'ll-receive is the hop quote\'s 1% floor, and nothing executes.',
+  verifies: 'The 2026-09-16 VCHF ↔ ckUSDC ICPSwap pool is live: the served registry lists all thirteen real venues in registry order, the DIRECT pair quotes both directions through the production route (VCHF in → zero_for_one true with a 6-decimal USDC out; ckUSDC in → zero_for_one false with an 8-decimal VCHF out), the app\'s VCHF direct form still resolves the row-0 VCHF ↔ ICP venue untouched, and the new pool surfaces as the VCHF → USDC(Ethereum) multihop route whose hop quotes through the SAME pool — the min-you\'ll-receive is the hop quote\'s 1% floor, and nothing executes.',
   timeoutMs: 90000,
 };
 
@@ -80,8 +80,8 @@ export async function run() {
     assertEq(served.join('|'), [
       'icpswap', 'icpswap-ckusdc', 'icpswap-cketh', 'icpswap-ckbtc', 'icpswap-ckbtc-cketh',
       'icpswap-vchf-ckusdc', 'jupiter', 'jupiter-eurc', 'jupiter-usdc-eurc', 'sideshift',
-      'sideshift-usdc', 'sideshift-eurc',
-    ].join('|'), 'the private relay serves all twelve real venues in registry order');
+      'sideshift-usdc', 'sideshift-eurc', 'trocador',
+    ].join('|'), 'the private relay serves all thirteen real venues in registry order');
 
     // --- the DIRECT pair: production-route oracle quotes, both directions -----------------------
     // VCHF in (the pool's token0 → zero_for_one TRUE): 8-decimal in, 6-decimal USDC out.
