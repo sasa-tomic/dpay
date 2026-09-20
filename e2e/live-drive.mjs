@@ -96,7 +96,13 @@ async function startApp() {
   await buildWeb({});
   const web = await serveWeb(process.env.DPAY_LIVE_WEB ? {port: Number(process.env.DPAY_LIVE_WEB)} : {});
   const {browser, stop: stopBrowser} = await Driver.launchBrowser();
-  const driver = await Driver.create(browser);
+  // solRpcUrl:'derive' — the e2e env (injectTestGlobals) DISABLES the SOL rail by default
+  // (globalThis.__DPAY_TEST_SOLANA_RPC_URL = '' → "no RPC endpoint configured" on any SOL
+  // convert submit). 'derive' deletes that override so the app derives the RPC list from the
+  // App-installed relay bases (+/api/v1/solana/rpc) — the exact production path. Found live
+  // 2026-09-20: op-C submits died instantly with SolanaRelayPathDown despite the relay's
+  // solana pipe being enabled and healthy.
+  const driver = await Driver.create(browser, {solRpcUrl: 'derive'});
   return {driver, web, stopBrowser};
 }
 
@@ -357,7 +363,9 @@ async function cmdA() {
   // OP A — ckUSDC→VCHF through pool hx7nb (completes every IC pool in BOTH directions).
   await withApp(async (driver) => {
     await openConvert(driver, 'ckusdc');
-    await driver.type('convert-amount', '0.1');
+    // 0.099 not 0.1: the fund gate needs amount + two ledger fees (0.12) and the
+    // float holds 0.11961 ckUSDC after yesterday's 0.01 approve-fee burn — 0.1 no longer clears.
+    await driver.type('convert-amount', '0.099');
     await pickDest(driver, 'vchf');
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
@@ -407,10 +415,9 @@ async function cmdB(icpAmount) {
     const body = await driver.bodyText();
     log('CEFI SURFACE:', body.replace(/\s+/g, ' ').slice(0, 600));
     await driver.screenshot('live-b-quote');
-    await driver.click('btn-convert-confirm');
-
-    // The shift order is created, then the panel waits for the deposit.
-    const facts = await readDepositFacts(driver, {timeoutMs: 90_000});
+    // Confirm with re-quote retries (shared helper — see confirmWithRequote below).
+    const facts = await confirmWithRequote(driver, 'B', {cefi: true});
+    if (!facts) throw new Error('OP B: awaiting-deposit panel never appeared after 30 rapid confirm attempts');
     log('DEPOSIT FACTS:', JSON.stringify(facts, null, 2));
     await driver.screenshot('live-b-awaiting-deposit');
     const m = facts.depositAmountLine.match(/([\d.]+)\s*ICP/);
@@ -464,13 +471,18 @@ async function cmdC1(solAmount) {
   await withApp(async (driver) => {
     await openConvert(driver, 'sol');
     await driver.type('convert-amount', solAmount);
-    await pickDest(driver, 'usdc');
+    // USDC — in this wallet is the DEFAULT selected destination on the SOL rail
+    // (rows carry no convert-dest-* testIDs; nothing to click).
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
     await driver.screenshot('live-c1-quote');
-    await driver.click('btn-convert-confirm');
+    await confirmWithRequote(driver, 'C1');
     const res = await watchConvert(driver, 'c1', {timeoutMs: 6 * 60_000});
     log(`OP C1 result: ${res.ended}: ${res.text}`);
+    if (res.ended === 'convert-stuck' || res.ended === 'convert-failed') {
+      await driver.dumpDiagnostics('c1-stuck', null);
+      log('C1 diagnostics dumped');
+    }
     console.log('--- agent-funds after ---');
     console.log(agentFunds());
   });
@@ -478,13 +490,13 @@ async function cmdC1(solAmount) {
 
 async function cmdC2(usdcAmount) {
   await withApp(async (driver) => {
-    await openConvert(driver, 'sol'); // USDC/EURC are SOL-rail assets
+    await openConvert(driver, 'sol-usdc'); // SOURCE is the SOL rail's USDC token (from C1)
     await driver.type('convert-amount', usdcAmount);
-    await pickDest(driver, 'eurc');
+    await clickByText(driver, 'EURC — in this wallet');
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
     await driver.screenshot('live-c2-quote');
-    await driver.click('btn-convert-confirm');
+    await confirmWithRequote(driver, 'C2');
     const res = await watchConvert(driver, 'c2', {timeoutMs: 6 * 60_000});
     log(`OP C2 result: ${res.ended}: ${res.text}`);
     console.log('--- agent-funds after ---');
@@ -494,18 +506,63 @@ async function cmdC2(usdcAmount) {
 
 async function cmdC3(eurcAmount) {
   await withApp(async (driver) => {
-    await openConvert(driver, 'sol');
+    await openConvert(driver, 'sol-eurc'); // the SOURCE is the SOL rail's EURC token row
     await driver.type('convert-amount', eurcAmount);
-    await pickDest(driver, 'usdc');
+    await clickByText(driver, 'USDC — in this wallet');
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
     await driver.screenshot('live-c3-quote');
-    await driver.click('btn-convert-confirm');
+    await confirmWithRequote(driver, 'C3');
     const res = await watchConvert(driver, 'c3', {timeoutMs: 6 * 60_000});
     log(`OP C3 result: ${res.ended}: ${res.text}`);
     console.log('--- agent-funds after ---');
     console.log(agentFunds());
   });
+}
+
+// clickByText — the SOL-rail destination rows ("USDC — in this wallet") carry no
+// convert-dest-* testIDs (SolConvertMode renders its own picker); click by visible text.
+async function clickByText(driver, text) {
+  const ok = await driver.eval((t) => {
+    const els = [...document.querySelectorAll('div,span,button')];
+    const hit = els.filter((e) => e.textContent && e.textContent.includes(t) && e.textContent.length < t.length + 30).pop();
+    if (hit == null) return false;
+    hit.click();
+    return true;
+  }, text);
+  if (!ok) throw new Error(`clickByText: no row containing ${JSON.stringify(text)}`);
+  log(`clicked row by text: ${text}`);
+}
+
+// confirmWithRequote — shared confirm loop for live venue quotes. The app's confirm
+// re-quotes and refuses on ANY out-amount delta (exact string compare); a live venue's
+// rate ticks constantly, so consecutive fetches almost never match. Rapid re-clicks
+// shrink the fetch-to-fetch window so two quotes can land inside one venue tick.
+// Findings (recorded 2026-09-20, op B): this is a real-user-facing defect — a human
+// cannot confirm a live CeFi/AMM quote in a moving market without luck; the confirm
+// path needs a drift tolerance. Offline e2e cannot see it (static fake quotes).
+// opts.cefi: returns the deposit facts once the awaiting-deposit panel renders (CeFi);
+// otherwise returns true once the engine view (convert-state) takes over.
+async function confirmWithRequote(driver, label, opts = {}) {
+  for (let attempt = 1; attempt <= 30; attempt++) {
+    await driver.click('btn-convert-confirm');
+    for (let i = 0; i < 4; i++) {
+      await sleep(600);
+      if (opts.cefi && await driver.isPresent('convert-awaiting-deposit')) {
+        return await readDepositFacts(driver, {timeoutMs: 90_000});
+      }
+      if (!opts.cefi && await driver.isPresent('convert-state')) return true;
+      if (await driver.isPresent('convert-failed')) return opts.cefi ? null : true;
+    }
+    const bodyNow = await driver.bodyText();
+    if (/Quote changed/i.test(bodyNow)) {
+      log(`[${label}] confirm attempt ${attempt}: quote drifted — rapid re-confirm`);
+    } else {
+      log(`[${label}] confirm attempt ${attempt}: no progress, no drift notice — retrying`);
+      await sleep(1_500);
+    }
+  }
+  return null;
 }
 
 async function cmdWatch() {
@@ -515,6 +572,38 @@ async function cmdWatch() {
     await driver.click('btn-accounts-convert');
     const res = await watchConvert(driver, 'watch', {timeoutMs: 20 * 60_000});
     log(`watch result: ${res.ended}: ${res.text}`);
+  });
+}
+
+// b-send <address> <amount> — complete op B's CeFi deposit handoff: the app's own
+// Pay▸Send surface (destination = the venue's deposit account, exact amount from the
+// awaiting-deposit panel). The facts come from the app's own panel — this command
+// refuses a destination that is not a 64-hex ICP account id (venue ICP deposits).
+async function cmdBSend(address, amount) {
+  if (!/^[0-9a-f]{64}$/.test(address ?? '')) throw new Error(`b-send: destination is not a 64-hex ICP account id: ${address}`);
+  if (!/^\d+(\.\d+)?$/.test(amount ?? '')) throw new Error(`b-send: bad amount ${amount}`);
+  log(`b-send: ${amount} ICP -> ${address}`);
+  await withApp(async (driver) => {
+    await openBalances(driver);
+    await selectCurrency(driver, 'icp');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    await driver.type('send-address-input', address);
+    await driver.type('send-amount-input', amount);
+    const reviewTo = await driver.readText('send-review-to');
+    log(`send-review-to: ${reviewTo}`);
+    if (!reviewTo.includes(address.slice(0, 12))) {
+      await driver.screenshot('live-b-send-review');
+      throw new Error(`b-send: review does not echo the destination — refusing (${reviewTo})`);
+    }
+    await driver.screenshot('live-b-send-review');
+    await driver.click('btn-send-confirm');
+    await driver.waitForText('send-outcome', {timeoutMs: 90_000});
+    const outcome = await driver.readText('send-outcome');
+    let block = '';
+    try { block = await driver.readText('send-block'); } catch {}
+    log(`SEND OUTCOME: ${outcome} | ${block}`);
+    await driver.screenshot('live-b-sent');
   });
 }
 
@@ -530,6 +619,13 @@ try {
   else if (cmd === 'conv-c2') await cmdC2(args[0]);
   else if (cmd === 'conv-c3') await cmdC3(args[0]);
   else if (cmd === 'watch') await cmdWatch();
+  else if (cmd === 'b-send') await cmdBSend(args[0], args[1]);
+  else if (cmd === 'assets') await withApp(async (driver) => {
+    await openBalances(driver);
+    await sleep(1_500);
+    const ids = await driver.eval(() => [...document.querySelectorAll('[data-testid^="asset-"]')].map((e) => e.getAttribute('data-testid')));
+    log('asset rows:', JSON.stringify(ids));
+  });
   else {
     console.error('unknown command — see header comment');
     process.exit(2);
