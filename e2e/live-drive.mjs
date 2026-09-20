@@ -407,36 +407,8 @@ async function cmdB(icpAmount) {
     const body = await driver.bodyText();
     log('CEFI SURFACE:', body.replace(/\s+/g, ' ').slice(0, 600));
     await driver.screenshot('live-b-quote');
-    // Confirm with re-quote retries: the venue's live rate moves between fetch and
-    // confirm, and the app honestly refuses to sign a stale quote ("Quote changed:
-    // X → Y. Review and confirm again." + the button flips to "Re-quote and confirm").
-    // Each retry re-quotes and confirms again; give up only after several drifted rounds.
-    let facts = null;
-    for (let attempt = 1; attempt <= 30 && !facts; attempt++) {
-      await driver.click('btn-convert-confirm');
-      // RAPID re-confirm: the app's confirm re-quotes and refuses on ANY settle delta
-      // (exact string compare — SideShift's SOL rate ticks constantly, so consecutive
-      // fetches almost never match). Clicking again quickly shrinks the fetch-to-fetch
-      // window so the two quotes can land inside one venue tick. Findings: (1) this is
-      // a real-user-facing defect (a human cannot confirm a live CeFi quote in a moving
-      // market) — needs a drift tolerance in the confirm path, NOT a driver hack;
-      // (2) flow 187 cannot see it (offline fake returns a static quote).
-      for (let i = 0; i < 2 && !facts; i++) {
-        await sleep(600);
-        if (await driver.isPresent('convert-awaiting-deposit')) {
-          facts = await readDepositFacts(driver, {timeoutMs: 90_000});
-        }
-      }
-      if (!facts) {
-        const bodyNow = await driver.bodyText();
-        if (/Quote changed/i.test(bodyNow)) {
-          log(`confirm attempt ${attempt}: quote drifted — rapid re-confirm`);
-        } else {
-          log(`confirm attempt ${attempt}: no deposit panel, no drift notice — retrying`);
-          await sleep(1_500);
-        }
-      }
-    }
+    // Confirm with re-quote retries (shared helper — see confirmWithRequote below).
+    const facts = await confirmWithRequote(driver, 'B', {cefi: true});
     if (!facts) throw new Error('OP B: awaiting-deposit panel never appeared after 30 rapid confirm attempts');
     log('DEPOSIT FACTS:', JSON.stringify(facts, null, 2));
     await driver.screenshot('live-b-awaiting-deposit');
@@ -495,7 +467,7 @@ async function cmdC1(solAmount) {
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
     await driver.screenshot('live-c1-quote');
-    await driver.click('btn-convert-confirm');
+    await confirmWithRequote(driver, 'C1');
     const res = await watchConvert(driver, 'c1', {timeoutMs: 6 * 60_000});
     log(`OP C1 result: ${res.ended}: ${res.text}`);
     console.log('--- agent-funds after ---');
@@ -511,7 +483,7 @@ async function cmdC2(usdcAmount) {
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
     await driver.screenshot('live-c2-quote');
-    await driver.click('btn-convert-confirm');
+    await confirmWithRequote(driver, 'C2');
     const res = await watchConvert(driver, 'c2', {timeoutMs: 6 * 60_000});
     log(`OP C2 result: ${res.ended}: ${res.text}`);
     console.log('--- agent-funds after ---');
@@ -527,12 +499,43 @@ async function cmdC3(eurcAmount) {
     const q = await readQuote(driver);
     log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
     await driver.screenshot('live-c3-quote');
-    await driver.click('btn-convert-confirm');
+    await confirmWithRequote(driver, 'C3');
     const res = await watchConvert(driver, 'c3', {timeoutMs: 6 * 60_000});
     log(`OP C3 result: ${res.ended}: ${res.text}`);
     console.log('--- agent-funds after ---');
     console.log(agentFunds());
   });
+}
+
+// confirmWithRequote — shared confirm loop for live venue quotes. The app's confirm
+// re-quotes and refuses on ANY out-amount delta (exact string compare); a live venue's
+// rate ticks constantly, so consecutive fetches almost never match. Rapid re-clicks
+// shrink the fetch-to-fetch window so two quotes can land inside one venue tick.
+// Findings (recorded 2026-09-20, op B): this is a real-user-facing defect — a human
+// cannot confirm a live CeFi/AMM quote in a moving market without luck; the confirm
+// path needs a drift tolerance. Offline e2e cannot see it (static fake quotes).
+// opts.cefi: returns the deposit facts once the awaiting-deposit panel renders (CeFi);
+// otherwise returns true once the engine view (convert-state) takes over.
+async function confirmWithRequote(driver, label, opts = {}) {
+  for (let attempt = 1; attempt <= 30; attempt++) {
+    await driver.click('btn-convert-confirm');
+    for (let i = 0; i < 4; i++) {
+      await sleep(600);
+      if (opts.cefi && await driver.isPresent('convert-awaiting-deposit')) {
+        return await readDepositFacts(driver, {timeoutMs: 90_000});
+      }
+      if (!opts.cefi && await driver.isPresent('convert-state')) return true;
+      if (await driver.isPresent('convert-failed')) return opts.cefi ? null : true;
+    }
+    const bodyNow = await driver.bodyText();
+    if (/Quote changed/i.test(bodyNow)) {
+      log(`[${label}] confirm attempt ${attempt}: quote drifted — rapid re-confirm`);
+    } else {
+      log(`[${label}] confirm attempt ${attempt}: no progress, no drift notice — retrying`);
+      await sleep(1_500);
+    }
+  }
+  return null;
 }
 
 async function cmdWatch() {
@@ -542,6 +545,38 @@ async function cmdWatch() {
     await driver.click('btn-accounts-convert');
     const res = await watchConvert(driver, 'watch', {timeoutMs: 20 * 60_000});
     log(`watch result: ${res.ended}: ${res.text}`);
+  });
+}
+
+// b-send <address> <amount> — complete op B's CeFi deposit handoff: the app's own
+// Pay▸Send surface (destination = the venue's deposit account, exact amount from the
+// awaiting-deposit panel). The facts come from the app's own panel — this command
+// refuses a destination that is not a 64-hex ICP account id (venue ICP deposits).
+async function cmdBSend(address, amount) {
+  if (!/^[0-9a-f]{64}$/.test(address ?? '')) throw new Error(`b-send: destination is not a 64-hex ICP account id: ${address}`);
+  if (!/^\d+(\.\d+)?$/.test(amount ?? '')) throw new Error(`b-send: bad amount ${amount}`);
+  log(`b-send: ${amount} ICP -> ${address}`);
+  await withApp(async (driver) => {
+    await openBalances(driver);
+    await selectCurrency(driver, 'icp');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    await driver.type('send-address-input', address);
+    await driver.type('send-amount-input', amount);
+    const reviewTo = await driver.readText('send-review-to');
+    log(`send-review-to: ${reviewTo}`);
+    if (!reviewTo.includes(address.slice(0, 12))) {
+      await driver.screenshot('live-b-send-review');
+      throw new Error(`b-send: review does not echo the destination — refusing (${reviewTo})`);
+    }
+    await driver.screenshot('live-b-send-review');
+    await driver.click('btn-send-confirm');
+    await driver.waitForText('send-outcome', {timeoutMs: 90_000});
+    const outcome = await driver.readText('send-outcome');
+    let block = '';
+    try { block = await driver.readText('send-block'); } catch {}
+    log(`SEND OUTCOME: ${outcome} | ${block}`);
+    await driver.screenshot('live-b-sent');
   });
 }
 
@@ -557,6 +592,7 @@ try {
   else if (cmd === 'conv-c2') await cmdC2(args[0]);
   else if (cmd === 'conv-c3') await cmdC3(args[0]);
   else if (cmd === 'watch') await cmdWatch();
+  else if (cmd === 'b-send') await cmdBSend(args[0], args[1]);
   else {
     console.error('unknown command — see header comment');
     process.exit(2);
