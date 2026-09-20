@@ -3572,9 +3572,16 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
                 </Text>
               ) : null}
               {record.providerRef != null ? (
-                <Text testID="convert-cefi-settling-note" style={S.convertStateMeta}>
-                  {M.convert.cefi.settlingNote}
-                </Text>
+                <>
+                  {/* The calming PAIR (founder escalation 2026-09-20): what is already true,
+                      then dpay's commitment — never a "contact support" deflection. */}
+                  <Text testID="convert-cefi-settling-note" style={S.convertStateMeta}>
+                    {M.convert.cefi.settlingFundsLine}
+                  </Text>
+                  <Text testID="convert-cefi-settling-watch" style={S.convertStateMeta}>
+                    {M.convert.cefi.settlingWatchLine}
+                  </Text>
+                </>
               ) : null}
             </View>
           ) : null}

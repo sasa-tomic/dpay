@@ -207,7 +207,8 @@ export const convertFr: ConvertMessages = {
     depositMemoLabel: 'Memo (obligatoire)',
     depositExpiryLine: at => `L'ordre expire ${at}`,
     shiftId: id => `Shift ${id}`,
-    settlingNote: `Fonds confirmés auprès de la plateforme. Le règlement prend généralement quelques minutes — dpay surveille ce shift et escalade auprès de la plateforme en cas de blocage.`,
+    settlingFundsLine: `Fonds confirmés auprès de la plateforme — votre versement est verrouillé au montant coté.`,
+    settlingWatchLine: `La plupart des conversions sont réglées en quelques minutes. dpay surveille chaque shift et intervient auprès de la plateforme si l'un bloque — rien à faire de votre côté.`,
     counterparty: venue =>
       `Exécuté par ${venue} — un service d'échange automatisé, pas un prestataire agréé et pas dpay.`,
     checklistSigns:
