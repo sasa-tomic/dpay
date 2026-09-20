@@ -87,33 +87,21 @@
 
 ## NEXT SESSION — work order
 
-## THIS SESSION, before the merge (founder, 2026-09-20 — must not be forgotten)
+**State — not issues (recorded 2026-09-20; no action without the founder):**
 
-- [ ] **Delete the deprecated `just` alias recipes entirely** (`agent-principal`, `agent-balance`,
-  `agent-history`, `agent-seed`, `agent-key-init`, `agent-sol-principal`, `agent-sol-init`,
-  `agent-funds`, `funds-reconcile`, `funds-doc`) once the live-proof agent has landed — they are
-  one-line forwards to the `just funds …` surface added in `0621b99`, kept ONLY because that agent
-  still invokes the old names mid-spend. Repoint every reference (CLAUDE.md, docs/AGENT-FUNDS.md,
-  e2e/live-drive.mjs, scripts comments) in the same change. One way exactly.
-
-
-
-**1.5 CeFi (SideShift) live ops — RESOLVED 2026-09-20 (`end_user_ip` in sideshift.rs): the relay
-honors `X-Forwarded-For` (leftmost PUBLIC entry) when the TCP peer is private/loopback — the
-reverse-proxy deployment shape; a public peer still wins outright and a public peer's XFF is
-ignored (spoofable).** Pinned by three tests (loopback+XFF forwarded, public-peer-ignores-XFF,
-absent-XFF-keeps-today's-fallback). Live history: the first CeFi order attempt (FX-matrix phase 1,
-2026-09-20, driver `e2e/live-drive.mjs` op B) reached the full CeFi surface but the venue quote
-never rendered — upstream SideShift refuses every partner request whose `x-user-ip` is not a
-PUBLIC end-user IP (verbatim: `{"error":{"message":"The x-user-ip header must be set to the
-end-user IP address"}}`), and the relay forwarded its TCP peer only (`ClientIp`), which is
-loopback/LAN in any local or proxied deployment (a trycloudflare tunnel does NOT help —
-cloudflared connects over loopback). Prod still needs the partner key wired per docs/OPS.md §3
-(checked 2026-09-20, prod `44762b3` answered `sideshift-unconfigured`). The in-app shift settles
-at the APP-derived SOL rail `BzFNJywhJYtPKNZN8fefuiKetSCD8Uotw1ibuP8MkZgX` (SLIP-10 of the IC
-float seed, `app/solana/identity.ts`) — NOT the registered `sol-float` `4Cuacz…` no app code
-signs from (docs/AGENT-FUNDS.md § funding path). Op C (Jupiter SOL rail) is unfundable until a
-shift lands (both SOL wallets measured 0 by design).
+- **Prod-relay deploy incl. the partner key** — founder-run per `docs/OPS.md` §3, DO NOT NAG; the
+  full unshipped list (2026-09-19 conversion-recovery wave + the 2026-09-20 CeFi live-ops wave)
+  is the FOUNDER-OWNED row below.
+- **EVM gas + the CCTP burn are USER-side by design** — dpay holds no EVM key, never pays and
+  never quotes gas; the burn's ETH is the user wallet's own. Since 2026-09-20 the in-intent
+  gas-fund offer funds that slice from the user's OWN holdings (fund-from-wallet prepends the
+  gas legs, or self-fund with recheck) — still nothing dpay pays, holds, or custodies.
+- **SideShift RETURN shift (EURC→ICP, the SOL-side CeFi op's reverse leg) — payout PENDING.**
+  9.284071 EURC left the app-derived SOL rail on-chain (venue deposit address `7nY7…ZsSpQ`); the
+  settle target is the float's own IC principal `vloyo-…-5ae`. As of the 2026-09-20 `just funds
+  history` measure NO payout row had landed (last IN at block 38489263, the founder top-up).
+  Venue settlement is asynchronous — re-measure with `just funds history` before treating it as
+  lost; a failed/expired shift refunds to the user's own refundAddress by construction.
 
 **1. Objective 3 (card/bank funding) — HARD-BLOCKED on founder/legal; NOTHING is offline-buildable
 until the blockers land. THE thing that unblocks it:**
@@ -437,11 +425,15 @@ single RED alone before believing it.
 - **Conversion PoC → officials confirmation** (post-PoC, founder-run): carry the built screen +
   the spec to the counsel/officials ask (`docs/REGULATORY.md` §7); the founder also owns the
   live-ship decision (`just up` ships the quote route).
-- **Relay deploy of the 2026-09-19 conversion-recovery wave** (founder-run, `docs/OPS.md` §3):
-  HEAD carries five prod-visible fixes the live testing proved necessary — the ICRC-2 approve
+- **Relay deploy of the 2026-09-19 conversion-recovery + 2026-09-20 CeFi live-ops waves**
+  (founder-run, `docs/OPS.md` §3): HEAD carries five prod-visible fixes the 2026-09-19 live
+  testing proved necessary — the ICRC-2 approve
   arg/decoder fix (conversions wedged at "Approving" forever), the stale-destination-quote guard,
   the ICP-index ICRC-3 mirror (`/api/v1/transactions` 503s prod-wide), the settlement-probe
-  timestamp floor, and the fake-IC approve fidelity + flow 191. Until deploy, prod `/wallet`
+  timestamp floor, and the fake-IC approve fidelity + flow 191 — plus the 2026-09-20 CeFi
+  live-ops wave: `end_user_ip` XFF honoring (the reverse-proxy deployment shape — without it
+  SideShift refuses every partner request), rail-scoped refundAddress validation on
+  `shifts_fixed`, and the fee-pin/catalog rows ahead of prod. Until deploy, prod `/wallet`
   still wedges conversions at "Approving" and the stuck watch cannot self-flip. LIVE-PROVEN on
   the agent float: all SIX registered IC pools convert forward end-to-end through the real UI
   (65mrh ICP→VCHF, hx7nb VCHF→ckUSDC, mohjv ckUSDC→ICP, xmiu5 ICP→ckBTC, akhru ckBTC→ckETH,

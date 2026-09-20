@@ -1,5 +1,18 @@
 # Multi-hop conversion as a single user intent — spec (2026-09-14)
 
+> **ADDENDUM 2026-09-20 — in-intent gas funding SHIPPED (reverses the §9/§10 "ckETH gas slice"
+> non-goal).** The cross-rail gas-fund offer now buys the destination gas slice in-intent from
+> the USER's own holdings, under the same guardrails this spec fixed for every other leg: the §6
+> fail-closed ckETH-gas preflight stays the gate; the offer renders only on a MEASURED short
+> (publicnode `eth_getBalance` of the external wallet — null hides the card, never a fabricated
+> zero) and only after the destination passed the EIP-55 checksum + one-time re-type gate;
+> fund-from-wallet prepends the gas legs (`gasFundRoutes` / the engine's `gasPre` widening) so
+> ONE confirm signs the whole prepended plan under identical-envelope discipline — or the user
+> self-funds their own destination address and Recheck re-measures; abort / decline / `gas_short`
+> remain honest exits; dpay still holds no EVM key and pays nothing. Details:
+> `CODEBASE_ANALYSIS.md` § delegated conversion (the gas-funder paragraph); coverage = the jest
+> matrix + e2e flow 196.
+
 **Status:** wave 1 (Route A) implemented. **Supersedes** the 2026-09-07 delegated-conversion
 spec's `multi-hop` non-goal — founder decision 2026-09-14 (swap-venue feasibility deep pass,
 "Multi-step routes" / "Founder decisions" §2): *a multi-hop conversion is ONE user intent that
@@ -154,8 +167,9 @@ of `done` (a seen ckUSDC row is NOT route completion). Acknowledge semantics unc
 
 ## 9. Non-goals (wave 1)
 
-Route B/C (CCTP v2, Jupiter/Solana legs — wave 3), buying the ckETH gas slice inside the
-intent (ICP↔ckETH gas pre-conversion — future work), a route CHOOSER (needs a second route to
+Route B/C (CCTP v2, Jupiter/Solana legs — wave 3), ~~buying the ckETH gas slice inside the
+intent (ICP↔ckETH gas pre-conversion — future work)~~ (SHIPPED 2026-09-20 — see the addendum
+above), a route CHOOSER (needs a second route to
 choose between), native-ETH burn routes (`withdraw_eth` leg set), per-leg manual re-signing
 (the intent is one confirm), any dpay fee, any change to the payment flow.
 
@@ -218,7 +232,8 @@ in for the user's wallet) including the mid-CCTP reload (engine resumes from the
 IC legs never re-signed) and the stalled-attestation dead-end.
 
 **Non-goals (updated):** WalletConnect in-session signing (above), Route B/C on the CeFi
-provider rail, buying the ckETH gas slice in-intent, per-leg manual re-sign, any dpay fee.
+provider rail, ~~buying the ckETH gas slice in-intent~~ (SHIPPED 2026-09-20 — the gas-fund
+offer; see the addendum above), per-leg manual re-sign, any dpay fee.
 
 ## 11. IC hub 2-hop widening (2026-09-18)
 
