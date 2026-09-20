@@ -1219,6 +1219,83 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     }
   };
 
+  // --- the destination/gas offer derivations + effects (2026-09-20) ---------------------------
+  // PLACEMENT RULE (the 196 lesson): every hook in ConvertMode must sit ABOVE the early
+  // returns below (the fund gate, the terminal-record panel) — a render that takes one of
+  // those doors skips any hook declared after it and React kills the tree with "Rendered
+  // fewer hooks than expected". These consts are the hooks' dependency closure.
+  const destShapeValid = isValidDestinationAddress('CkEthErc20', destAddress);
+  // EIP-55 at entry (2026-09-20): a MIXED-CASE EVM address must verify against its own
+  // checksum — one flipped case in a hand-copied address verifies as a DIFFERENT address.
+  // No-case-information forms (all-lower / all-upper) stay valid: they carry no checksum.
+  const destChecksumBad = eip55ChecksumBad(destAddress);
+  const destValid = destShapeValid && !destChecksumBad;
+  // The gas-fund gate: the offer renders only after the address was re-typed once.
+  const destConfirmed = destReentered != null && destReentered === destAddress.toLowerCase();
+  const gasBalRaw = activeRoute != null ? assetBalances[activeRoute.burn.gasCurrency] : undefined;
+  const gasNeededN = routeGas != null ? BigInt(routeGas.feeWei) + BigInt(routeGas.gasLedgerFee) : null;
+  const gasShort = activeRoute != null && gasNeededN != null && gasBalRaw != null && gasBalRaw.length > 0 && BigInt(gasBalRaw) < gasNeededN;
+  const gasNeededStr = gasNeededN != null && activeRoute != null
+    ? fmtAssetCompact(gasNeededN.toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
+    : null;
+  // --- the cross-rail gas-fund offer (2026-09-20): the gasShort warn upgraded from a dead end
+  //     into the two honest paths out. NEED is the minter's live feeWei plus the engine's own
+  //     20% forward-fee headroom convention; HAVE is the destination wallet's measured ETH
+  //     (eth_getBalance, publicnode). No measured have → no card: a need-vs-have offer without
+  //     a measured have is not honest, and today's fail-open warn stands instead.
+  const gasFundCardWanted = routeMode && gasShort && destConfirmed && activeRoute?.crossRail != null;
+  // NEED per the engine's own derivation (feeWei + its 20% headroom convention) — the card's
+  // number is the same arithmetic prepare freezes, never a UI-local re-derivation.
+  const gasFundNeedStr = routeGas != null && activeRoute != null
+    ? fmtAssetCompact(gasFundNeededWei(routeGas.feeWei).toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
+    : null;
+  const gasFundHaveStr = destEthWei != null && activeRoute != null
+    ? fmtAssetCompact(destEthWei, activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
+    : null;
+  const gasFundShortStr = gasFundNeedStr != null && destEthWei != null && routeGas != null && activeRoute != null
+    ? (() => {
+        const need = gasFundNeededWei(routeGas.feeWei);
+        const have = BigInt(destEthWei);
+        return have >= need ? null : fmtAssetCompact((need - have).toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol);
+      })()
+    : null;
+  const gasFundCardShown = gasFundCardWanted && destEthWei != null && gasFundNeedStr != null && gasFundHaveStr != null;
+  // Fresh NEED the moment the offer is first wanted (the effect order makes this a no-op
+  // until the card's conditions hold; leaving the offer re-arms it for the next entry).
+  const gasFundFreshRef = useRef(false);
+  useEffect(() => {
+    if (gasFundCardWanted && !gasFundFreshRef.current) {
+      gasFundFreshRef.current = true;
+      setGasNonce(n => n + 1);
+    } else if (!gasFundCardWanted) {
+      gasFundFreshRef.current = false;
+    }
+  }, [gasFundCardWanted]);
+  // The measured HAVE: eth_getBalance on the destination wallet, only while the offer is
+  // wanted. Unknown (null) keeps the card hidden — the passive warn stands, fail-open.
+  useEffect(() => {
+    if (!gasFundCardWanted) {
+      setDestEthWei(ethWei => (ethWei === undefined ? ethWei : undefined));
+      return;
+    }
+    const addr = destAddress;
+    setDestEthWei(undefined); // measuring
+    let cancelled = false;
+    void (async () => {
+      const wei = await fetchEthBalance(addr);
+      if (!cancelled && mountedRef.current && destAddress === addr) setDestEthWei(wei);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gasFundCardWanted, destAddress, ethRecheckNonce]);
+  // A recheck that finds the wallet funded closes the self-fund instruction — the offer card
+  // returns with the fresh numbers (the shortfall line is its own unblock signal).
+  useEffect(() => {
+    if (selfFundOpen && ethRecheckNonce > 0 && destEthWei != null && gasFundShortStr == null) setSelfFundOpen(false);
+  }, [selfFundOpen, ethRecheckNonce, destEthWei, gasFundShortStr]);
+
   if (legs == null) return <UnavailablePanel selectedAsset={selectedAsset} onBack={onBack} />;
   if (record != null && (isLiveRecord(record) || TERMINAL_CONVERT_STEPS.has(record.step))) {
     // A CROSS-RAIL record has its own surface — the IC leg list PLUS the handoff / crossing /
@@ -1538,20 +1615,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
   // In route mode the confirm additionally requires a validated destination address, the gas
   // census to be complete, and — when the wallet's ckETH balance is KNOWN — to cover the gas
   // (an unknown balance stays fail-open, per spec §6; prepare re-queries everything anyway).
-  const destShapeValid = isValidDestinationAddress('CkEthErc20', destAddress);
-  // EIP-55 at entry (2026-09-20): a MIXED-CASE EVM address must verify against its own
-  // checksum — one flipped case in a hand-copied address verifies as a DIFFERENT address.
-  // No-case-information forms (all-lower / all-upper) stay valid: they carry no checksum.
-  const destChecksumBad = eip55ChecksumBad(destAddress);
-  const destValid = destShapeValid && !destChecksumBad;
-  // The gas-fund gate: the offer renders only after the address was re-typed once.
-  const destConfirmed = destReentered != null && destReentered === destAddress.toLowerCase();
-  const gasBalRaw = activeRoute != null ? assetBalances[activeRoute.burn.gasCurrency] : undefined;
-  const gasNeededN = routeGas != null ? BigInt(routeGas.feeWei) + BigInt(routeGas.gasLedgerFee) : null;
-  const gasShort = activeRoute != null && gasNeededN != null && gasBalRaw != null && gasBalRaw.length > 0 && BigInt(gasBalRaw) < gasNeededN;
-  const gasNeededStr = gasNeededN != null && activeRoute != null
-    ? fmtAssetCompact(gasNeededN.toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
-    : null;
+  // The dest/gas derivations themselves live ABOVE the early returns (the 196 hooks rule).
   // Hub mode replaces the quote pair entirely: the confirm needs BOTH hops' quotes and math
   // on the table (a half-quoted conversion is not confirmable), and hub mode adds no address,
   // gas, or cross-fee requirements — the destination is the user's own account.
@@ -1561,67 +1625,10 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
     && (!routeMode || (destValid && routeGas != null && routeGasErr == null && !gasShort))
     // Cross-rail routes also need Circle's fee on the table before confirm (fail-closed).
     && (activeRoute == null || activeRoute.crossRail == null || crossFee != null);
-  // --- the cross-rail gas-fund offer (2026-09-20): the gasShort warn upgraded from a dead end
-  //     into the two honest paths out. NEED is the minter's live feeWei plus the engine's own
-  //     20% forward-fee headroom convention; HAVE is the destination wallet's measured ETH
-  //     (eth_getBalance, publicnode). No measured have → no card: a need-vs-have offer without
-  //     a measured have is not honest, and today's fail-open warn stands instead.
-  const gasFundCardWanted = routeMode && gasShort && destConfirmed && activeRoute?.crossRail != null;
   // [Fund from this wallet] is enabled iff a funding path exists — the engine's own enumeration
   // over the registry (direct venue first, else hub), from this conversion's input ledger.
   const gasFundRouteOk = legs != null && activeRoute != null
     && gasFundRoutes(catalog, legs.inDesc.ledger, activeRoute.burn.gasLedger).length > 0;
-  // NEED per the engine's own derivation (feeWei + its 20% headroom convention) — the card's
-  // number is the same arithmetic prepare freezes, never a UI-local re-derivation.
-  const gasFundNeedStr = routeGas != null && activeRoute != null
-    ? fmtAssetCompact(gasFundNeededWei(routeGas.feeWei).toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
-    : null;
-  const gasFundHaveStr = destEthWei != null && activeRoute != null
-    ? fmtAssetCompact(destEthWei, activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
-    : null;
-  const gasFundShortStr = gasFundNeedStr != null && destEthWei != null && routeGas != null && activeRoute != null
-    ? (() => {
-        const need = BigInt(routeGas.feeWei) + BigInt(routeGas.feeWei) / 5n;
-        const have = BigInt(destEthWei);
-        return have >= need ? null : fmtAssetCompact((need - have).toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol);
-      })()
-    : null;
-  const gasFundCardShown = gasFundCardWanted && destEthWei != null && gasFundNeedStr != null && gasFundHaveStr != null;
-  // Fresh NEED the moment the offer is first wanted (the effect order makes this a no-op
-  // until the card's conditions hold; leaving the offer re-arms it for the next entry).
-  const gasFundFreshRef = useRef(false);
-  useEffect(() => {
-    if (gasFundCardWanted && !gasFundFreshRef.current) {
-      gasFundFreshRef.current = true;
-      setGasNonce(n => n + 1);
-    } else if (!gasFundCardWanted) {
-      gasFundFreshRef.current = false;
-    }
-  }, [gasFundCardWanted]);
-  // The measured HAVE: eth_getBalance on the destination wallet, only while the offer is
-  // wanted. Unknown (null) keeps the card hidden — the passive warn stands, fail-open.
-  useEffect(() => {
-    if (!gasFundCardWanted) {
-      setDestEthWei(ethWei => (ethWei === undefined ? ethWei : undefined));
-      return;
-    }
-    const addr = destAddress;
-    setDestEthWei(undefined); // measuring
-    let cancelled = false;
-    void (async () => {
-      const wei = await fetchEthBalance(addr);
-      if (!cancelled && mountedRef.current && destAddress === addr) setDestEthWei(wei);
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gasFundCardWanted, destAddress, ethRecheckNonce]);
-  // A recheck that finds the wallet funded closes the self-fund instruction — the offer card
-  // returns with the fresh numbers (the shortfall line is its own unblock signal).
-  useEffect(() => {
-    if (selfFundOpen && ethRecheckNonce > 0 && destEthWei != null && gasFundShortStr == null) setSelfFundOpen(false);
-  }, [selfFundOpen, ethRecheckNonce, destEthWei, gasFundShortStr]);
   // Route-mode quote-derived figures describe the HOP asset (ckUSDC), not the direct pair's
   // other side — the destination's own figure is the min-you'll-receive line in the checklist.
   // CeFi mode likewise describes the VENUE's settle asset (SOL via the registry mint), not
