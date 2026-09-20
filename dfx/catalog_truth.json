@@ -218,6 +218,19 @@
       ],
       "testnet": false,
       "disclosure_key": "sideshift"
+    },
+    {
+      "_doc": "The FOURTH CeFi venue and FIRST aggregator venue (registered 2026-09-20): Trocador, an exchange AGGREGATOR fronting 20+ backends with automatic failover — the venue's own product is choosing the provider, so one quote attributed to Trocador is one venue fact (the same standing as Jupiter for the solana AMM rail; dpay never ranks beneath it). Cross-rail pair ICP ↔ SOL — the registry row is the SIDE-SHIFT-FIRST precedent (ICP↔SOL before any USDC/EURC rows); which further pairs to register is measured once the key exists. Identifier semantics match the cefi rows: `pair_ledgers` are RAIL-CANONICAL ids (IC ledger principal / wrapped-SOL mint), the VENUE's own ticker/network codes live with the integration (crates/dpay-relay/src/trocador.rs), `endpoint` is the venue's https API base (https://api.trocador.app — verified live 2026-09-20 answering the venue's own {\"error\":\"Missing API key\"}; the docs page also names the equivalent https://trocador.app/api/ prefix host). EVERY Trocador method is key-gated (header `API-Key`) — unlike SideShift there is NO keyless status read, so the relay proxies rate, trade creation AND trade status; the API key does NOT exist yet (requested from commercial@trocador.app by the founder), so all routes 503 naming DPAY_TROCADOR_API_KEY until it lands (the SideShift 503-until-key tripwire, unchanged). Relay-pinned integration constants, never request-suppliable: markup=0 (dpay takes no cut — a nonzero markup RAISES THE USER'S PRICE to pay it; note Trocador's own terms still accrue half of TROCADOR's commission to the partner account at markup=0, which no API flag can refuse — founder OPEN item), min_kycrating=A (only non-KYC backends), fixed=True (the venue's documented fixed-rate trade — the TRADE is the rate lock and the consent point, exactly the SideShift order doctrine). NO FIXTURE (ic_amm-only by rule); the offline stand-in is the relay's /api/v1/test/trocador-upstream stub (harness/relay.mjs points DPAY_TROCADOR_API_BASE at it).",
+      "venue_id": "trocador",
+      "display_name": "Trocador",
+      "kind": "cefi",
+      "endpoint": "https://api.trocador.app",
+      "pair_ledgers": [
+        "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        "So11111111111111111111111111111111111111112"
+      ],
+      "testnet": false,
+      "disclosure_key": "trocador"
     }
    ]
 }

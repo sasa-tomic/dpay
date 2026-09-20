@@ -519,6 +519,41 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
             test_helpers_served: false,
             fixture: None,
         },
+        VenueEntry {
+            // The FOURTH CeFi venue and FIRST aggregator venue (registered 2026-09-20):
+            // Trocador, an exchange AGGREGATOR fronting 20+ backends with automatic failover
+            // (the research verdict that replaces SideShift as the primary CeFi rail once the
+            // key arrives). The venue's own product is choosing the provider, so ONE quote
+            // attributed to Trocador is ONE venue fact — the same standing as Jupiter for the
+            // solana AMM rail; dpay never ranks beneath the aggregate. Cross-rail pair ICP ↔
+            // SOL: the SIDE-SHIFT-FIRST precedent (which further pairs — USDC/EURC — deserve
+            // rows is measured once the key exists, the sideshift-usdc/-eurc coverage-expansion
+            // pattern). Identifier semantics for a cefi row hold verbatim: `pair_ledgers` are
+            // RAIL-CANONICAL ids, the VENUE's own ticker/network codes live with the
+            // integration (`crate::trocador`), `endpoint` is the venue's https API base
+            // (api.trocador.app — verified live 2026-09-20 answering the venue's own
+            // {"error":"Missing API key"}; the docs also name the equivalent
+            // trocador.app/api/ prefix host). UNLIKE SideShift there is NO keyless surface:
+            // every Trocador method is key-gated (header `API-Key`), so the relay proxies
+            // rate, trade creation AND trade status. The key does NOT exist yet (requested
+            // from commercial@trocador.app by the founder): all routes 503 naming
+            // DPAY_TROCADOR_API_KEY until it lands — the 503-until-key tripwire, unchanged.
+            // Founder pins, relay-side constants never read from a request: markup "0"
+            // (dpay is paid nothing a nonzero markup would raise the USER'S price for),
+            // min_kycrating "A" (non-KYC backends only), fixed "True" (the venue's documented
+            // fixed-rate trade — the TRADE is the rate lock and the consent point, the
+            // SideShift order doctrine). `fixture` None like every non-ic_amm row; the
+            // offline stand-in is the relay's test stub upstream (DPAY_TROCADOR_API_BASE).
+            venue_id: "trocador",
+            display_name: "Trocador",
+            kind: VenueKind::Cefi,
+            endpoint: "https://api.trocador.app",
+            pair_ledgers: [ICP_LEDGER_PRINCIPAL, WRAPPED_SOL_MINT],
+            testnet: false,
+            disclosure_key: "trocador",
+            test_helpers_served: false,
+            fixture: None,
+        },
     ]
 }
 
@@ -2150,16 +2185,17 @@ mod venue_truth_tests {
         // SERVED-by-default (the knob un-armed — the agent build's permanent state, and every
         // build's state before a test opts in): never a fixture venue. Jupiter IS served — it is
         // a real venue (kind solana_amm), just not an IC-servable one: the count includes it and
-        // the IC-quote allowlist above excludes it, by design. So is SideShift (kind cefi).
+        // the IC-quote allowlist above excludes it, by design. So are SideShift and Trocador
+        // (kind cefi).
         let served: Vec<_> = venues()
             .into_iter()
             .filter(|v| venue_servable(v, false))
             .collect();
         assert_eq!(
             served.len(),
-            12,
-            "exactly twelve real venues are served today (six IC pools + three Jupiter + \
-             three SideShift, one row per pair)"
+            13,
+            "exactly thirteen real venues are served today (six IC pools + three Jupiter + \
+             three SideShift + one Trocador aggregator, one row per pair)"
         );
         assert_eq!(
             served
@@ -2179,6 +2215,7 @@ mod venue_truth_tests {
                 "sideshift",
                 "sideshift-usdc",
                 "sideshift-eurc",
+                "trocador",
             ],
             "registry order is the stable wire order"
         );

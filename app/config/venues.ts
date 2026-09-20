@@ -241,6 +241,29 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
     testnet: false,
     disclosure_key: 'sideshift',
   },
+  {
+    // The FOURTH CeFi venue and FIRST aggregator venue (registered 2026-09-20): Trocador,
+    // an exchange AGGREGATOR fronting 20+ backends with automatic failover — the venue's
+    // own product is choosing the provider, so one quote attributed to Trocador is one
+    // venue fact (the Jupiter standing for the cross-rail surface; dpay never ranks
+    // beneath the aggregate). Cross-rail pair ICP ↔ SOL — the SideShift-first precedent
+    // (further pairs are measured once the key exists). Identifier semantics per kind hold
+    // verbatim (https API base as the endpoint identity, rail-canonical pair ids). UNLIKE
+    // SideShift there is NO keyless surface: every Trocador method is key-gated (header
+    // `API-Key`), so quote, trade creation AND trade status all ride the relay proxy
+    // (app/services/trocador.ts; the record's statusUrl points at the relay's status
+    // route). The key does NOT exist yet (requested from commercial@trocador.app by the
+    // founder) — the routes 503 naming DPAY_TROCADOR_API_KEY until it lands, so the venue
+    // is simply absent (the 503 tripwire, unchanged). No fixture for this kind; the
+    // offline stand-in is the relay's test stub upstream.
+    venue_id: 'trocador',
+    display_name: 'Trocador',
+    kind: 'cefi',
+    endpoint: 'https://api.trocador.app',
+    pair_ledgers: [mainnetIcLedger(8), WRAPPED_SOL_MINT_ADDRESS],
+    testnet: false,
+    disclosure_key: 'trocador',
+  },
 ];
 
 // The RUNTIME overlay — what THIS relay's `GET /api/v1/venues` actually serves (multi-venue
