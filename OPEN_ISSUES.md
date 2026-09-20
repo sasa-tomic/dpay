@@ -107,6 +107,21 @@
   ship the flag for real), find its shift id on the founder's SideShift account and run
   `DPAY_SIDESHIFT_PROBE_SHIFTS=sideshift-eurc=<shiftId> just swap-venue-probe`, then commit
   the `dfx/venue_health.json` row it writes and redeploy the relay.
+- **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
+  adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`, `/trade`
+  POST+GET status) are registered on every build and answer 503 naming `DPAY_TROCADOR_API_KEY`
+  until the founder sets it (key requested from commercial@trocador.app; no shape to validate —
+  the upstream 401 is the honest refusal). On key arrival, BEFORE the venue serves a real trade:
+  (1) re-pin the coin/network codes against the venue's own key-gated `GET /coins` (the adapter's
+  `icp`/`sol` on `Mainnet` rows are BEST-EFFORT, following the docs' example vocabulary — a wrong
+  code fails at the venue, never silently); (2) pin the trade-status vocabulary the same way (the
+  docs enumerate NO status values; the resume engine keeps unknown words honest-`unknown` and
+  never guesses). Trocador is the venue family slated to replace SideShift as the PRIMARY CeFi
+  rail once its with-key coverage probe shows ICP↔SOL partner coverage; if it shows none,
+  ChangeNOW is the documented fallback venue #2 (same relay-held-key pattern). Founder note (no
+  API flag refuses it): Trocador's `markup=0` pin keeps the USER's price at the venue's own
+  baseline, but Trocador still accrues half of ITS own commission to the partner account — what
+  happens to that accrual is a founder decision, outside code.
 
 **1. Objective 3 (card/bank funding) — HARD-BLOCKED on founder/legal; NOTHING is offline-buildable
 until the blockers land. THE thing that unblocks it:**

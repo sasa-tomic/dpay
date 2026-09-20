@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **188 flows**
-> (187 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **189 flows**
+> (188 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (25) · nfc (12) · system (35) · tour (6)
+wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (26) · nfc (12) · system (35) · tour (6)
 
 ---
 
@@ -196,6 +196,7 @@ wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw
 | 195 | convert-crossrail-icp-eurc | Route C generalizes to a registered USDC-pair SPL token — one intent ICP→EURC: the EURC route composes beside the SOL one in registry order with the same signer warning, the census names the external ETH gas and Circle's own fee with the mint floor (USDC-denominated), the five IC legs execute device-signed, the CCTP burn is wallet-signed via the handoff (no dpay keys), a stalled attestation parks and never fails falsely, a reload resumes from the mint watch without re-signing the IC legs, and the final Jupiter leg quotes USDC→EURC on the verified credit, pins the device's own EURC ATA as the beneficiary, and lands realized EURC at the user's Solana address — same surfaces, same copy, EURC units. | convert, multihop, route-c, cross-rail, cctp, circle, handoff, external-signature, mint-watch, jupiter, eurc, solana-rail, reload-recovery, fee-census, per-leg-status, dead-end-honesty |
 | 196 | convert-crossrail-gas-fund | A gasShort cross-rail conversion offers to fund the gas from the wallet — but only behind a checksummed, re-typed destination. The card shows Need ≈ and Your wallet: one number per line (the passive warn stands down), the self path rechecks against the live balance and names the shortfall, the funded path prepends the gas legs into the same checklist, and the decline card says where BOTH the USDC and the gas funding sit. | convert, multihop, route-c, cross-rail, cctp, gas-fund, eip55, checksum, re-entry, eth_getBalance, honest-exit |
 | 197 | convert-sol-cefi-sideshift-eurc | With the cefi venue sideshift-eurc registered (ICP<->EURC(Solana)) the SOL convert surface for EURC offers BOTH destination groups: the in-wallet SPL USDC row and the cefi ICP row (same surfaces as the IC side). Picking the cefi row shows the user's OWN derived IC principal as the payout address BEFORE any order, quotes verbatim through the relay partner-key proxy (estimate, SideShift attribution, no slippage axis — the rate is locked at order), confirms to a fixed ORDER without an exact-match gate against the ticking venue quote, and lands at the deposit handoff: the venue's own deposit address verbatim, the exact deposit amount, the SOL-side network-fee note, nothing signed or broadcast on the SOL rail. The provider lifecycle then drives awaiting_deposit → processing → done with the realized settle and the payout-at-own-address line, surviving a page reload on the persisted record. | convert, solana-rail, venue:sideshift-eurc, cefi, same-surfaces, deposit-handoff, derived-payout-address, order-locks-quote, reload-recovery, cross-rail |
+| 198 | convert-sol-cefi-trocador | With the trocador aggregator row registered (ICP<->SOL, same pair as sideshift) the SOL convert surface merges both venues under one ICP landing spot whose row names the spot and whose sub-picker chooses the service (registry order, never ranked, default first). Picking the Trocador mechanism quotes verbatim through the relay proxy (estimate, Trocador attribution), shows the user's OWN derived IC principal as the payout target BEFORE any order, and confirms to the venue's fixed-rate ORDER without broadcasting anything on the SOL rail. Every venue call — rate, trade AND the key-gated status read — rides the relay (zero bare upstream calls, the API-Key attaches server-side, the refund address rides every trade request), and the provider lifecycle awaiting_deposit → processing → done runs through the relay status route, surviving a page reload on the persisted record. | convert, solana-rail, venue:trocador, cefi, aggregator, same-surfaces, deposit-handoff, derived-payout-address, order-locks-quote, reload-recovery, cross-rail |
 
 ### NFC (tap-to-pay)
 

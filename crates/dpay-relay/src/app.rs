@@ -1440,6 +1440,12 @@ static TROCADOR_STUB_STATUS_CALLS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 #[cfg(feature = "test-helpers")]
 static TROCADOR_STUB_LAST_QUERY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// The last NEW_TRADE query specifically — status polls overwrite the generic slot within
+/// seconds of a confirm, and the e2e audit reads the TRADE's own query string (the refund
+/// address ride) long after. (Flow 198.)
+#[cfg(feature = "test-helpers")]
+static TROCADOR_STUB_LAST_TRADE_QUERY: std::sync::Mutex<Option<String>> =
+    std::sync::Mutex::new(None);
 /// The scripted trade status (default the venue's waiting word) + settle figures.
 #[cfg(feature = "test-helpers")]
 static TROCADOR_STUB_STATE: std::sync::Mutex<(String, String, Option<String>)> =
@@ -1509,6 +1515,7 @@ async fn trocador_stub_new_trade(
         .collect::<Vec<_>>()
         .join("&");
     trocador_stub_record(&headers, &query);
+    *TROCADOR_STUB_LAST_TRADE_QUERY.lock().unwrap() = Some(query.clone());
     TROCADOR_STUB_TRADE_CALLS.fetch_add(1, Ordering::Relaxed);
     (
         StatusCode::OK,
@@ -1602,6 +1609,7 @@ async fn trocador_stub_hits() -> Response {
             "tradeCalls": TROCADOR_STUB_TRADE_CALLS.load(Ordering::Relaxed),
             "statusCalls": TROCADOR_STUB_STATUS_CALLS.load(Ordering::Relaxed),
             "lastQuery": TROCADOR_STUB_LAST_QUERY.lock().unwrap().clone(),
+            "lastTradeQuery": TROCADOR_STUB_LAST_TRADE_QUERY.lock().unwrap().clone(),
         })),
     )
         .into_response()

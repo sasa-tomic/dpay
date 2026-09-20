@@ -247,6 +247,13 @@ async function spawnOnce(opts = {}) {
     DPAY_SIDESHIFT_SECRET: 'e2e-stub-partner-secret',
     DPAY_SIDESHIFT_AFFILIATE_ID: 'e2e-stub-affiliate-id',
     DPAY_SIDESHIFT_API_BASE: `http://127.0.0.1:${port}/api/v1/test/sideshift-upstream`,
+    // Flow 198 (2026-09-20): the Trocador aggregator proxy's upstream — the relay's own
+    // test-helpers stub on this same server, plus a FAKE partner key (no key exists yet;
+    // the real one is a founder step via commercial@trocador.app). Same deliberate-per-spawn
+    // rule as every DPAY_* knob above: named HERE so a shell-exported DPAY_TROCADOR_*
+    // can never leak into the harness relay.
+    DPAY_TROCADOR_API_KEY: 'e2e-stub-trocador-key',
+    DPAY_TROCADOR_API_BASE: `http://127.0.0.1:${port}/api/v1/test/trocador-upstream`,
     // Flow 185/186/189 (2026-09-16): the Jupiter proxy's upstream — the relay's own
     // test-helpers stub on this same server (keyless venue, so no credential vars). Same
     // deliberate-per-spawn rule as the two blocks above: named HERE so a shell-exported

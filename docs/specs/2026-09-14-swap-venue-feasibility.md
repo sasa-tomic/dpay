@@ -274,3 +274,19 @@ reload-resume → dead-ends. Opt-in keyless mainnet tripwire:
 Regulatory posture is unchanged: officials/counsel confirmation of the delegated-conversion
 frame remains founder-owned (spec §After PoC) — this research adds venues inside that same
 frame, it does not alter it.
+
+---
+
+## Addendum 2026-09-20 — the Trocador aggregator (second relay-held key surface)
+
+The Partner-key infrastructure pattern above is now GENERALIZED to a second venue family and an
+aggregator shape: `trocador` (registered 2026-09-20, ICP↔SOL; crate `crates/dpay-relay/src/trocador.rs`,
+client `app/services/trocador.ts`, e2e flow 198). Every Trocador method is GET and key-gated via the
+`API-Key` header (measured live: 401 `{"error":"Missing API key"}` keyless), so unlike SideShift the
+STATUS read is relay-proxied too. Founder pins, server-side: `min_kycrating=A` (non-KYC backends
+only), `markup=0` (dpay takes no cut; a nonzero markup would RAISE the user's price), `fixed=True`
+(the trade is the rate lock + consent point; the docs document no quote-lock window, so the UI
+makes no floor claim). Attribution follows the venue's own aggregated pick (`best_only=True`) — dpay
+never ranks beneath the aggregate. See `trocador.rs`'s module doc for the pinned API shapes
+(https://trocador.app/en/docs/, fetched 2026-09-20) and the OPEN items (coin/network codes + status
+vocabulary re-pin on key arrival; the partner-commission accrual question is founder-owned).
