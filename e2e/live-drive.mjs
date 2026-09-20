@@ -488,7 +488,7 @@ async function cmdC1(solAmount) {
 
 async function cmdC2(usdcAmount) {
   await withApp(async (driver) => {
-    await openConvert(driver, 'sol'); // USDC/EURC are SOL-rail assets
+    await openConvert(driver, 'usdc'); // SOURCE is the SOL rail's USDC token (from C1)
     await driver.type('convert-amount', usdcAmount);
     await clickByText(driver, 'EURC — in this wallet');
     const q = await readQuote(driver);
