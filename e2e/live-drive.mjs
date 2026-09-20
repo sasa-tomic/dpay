@@ -96,7 +96,13 @@ async function startApp() {
   await buildWeb({});
   const web = await serveWeb(process.env.DPAY_LIVE_WEB ? {port: Number(process.env.DPAY_LIVE_WEB)} : {});
   const {browser, stop: stopBrowser} = await Driver.launchBrowser();
-  const driver = await Driver.create(browser);
+  // solRpcUrl:'derive' — the e2e env (injectTestGlobals) DISABLES the SOL rail by default
+  // (globalThis.__DPAY_TEST_SOLANA_RPC_URL = '' → "no RPC endpoint configured" on any SOL
+  // convert submit). 'derive' deletes that override so the app derives the RPC list from the
+  // App-installed relay bases (+/api/v1/solana/rpc) — the exact production path. Found live
+  // 2026-09-20: op-C submits died instantly with SolanaRelayPathDown despite the relay's
+  // solana pipe being enabled and healthy.
+  const driver = await Driver.create(browser, {solRpcUrl: 'derive'});
   return {driver, web, stopBrowser};
 }
 
@@ -471,6 +477,10 @@ async function cmdC1(solAmount) {
     await confirmWithRequote(driver, 'C1');
     const res = await watchConvert(driver, 'c1', {timeoutMs: 6 * 60_000});
     log(`OP C1 result: ${res.ended}: ${res.text}`);
+    if (res.ended === 'convert-stuck' || res.ended === 'convert-failed') {
+      await driver.dumpDiagnostics('c1-stuck', null);
+      log('C1 diagnostics dumped');
+    }
     console.log('--- agent-funds after ---');
     console.log(agentFunds());
   });
