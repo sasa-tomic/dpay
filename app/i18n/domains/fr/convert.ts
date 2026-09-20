@@ -115,7 +115,7 @@ export const convertFr: ConvertMessages = {
     'L’échange a été envoyé, mais la réponse du pool n’est pas arrivée. Ne lance pas un second échange avec les mêmes fonds. Si le versement arrive, cet écran passera tout seul à « Converti ».',
   stuckSigned: (amount, minAmount, venue) =>
     `Ce qui a été signé : approuver ${amount} au pool ${venue} ; échanger pour un minimum de ${minAmount}.`,
-  expiryLine: at => `L'autorisation inutilisée expire au plus tard à ${at} — après, le pool ne peut plus rien prélever.`,
+  expiryLine: at => `Les instructions signées expirent au plus tard à ${at} — après, plus rien ne peut bouger.`,
 
   awaitingAuthTitle: 'Autorisation requise',
   awaitingAuthBody: venue =>
@@ -148,6 +148,7 @@ export const convertFr: ConvertMessages = {
     mechViaVenue: venue => `Via ${venue}`,
     mechNoneSelected: 'Choisis un moyen ci-dessus pour voir le devis.',
     viaHub: hubSym => `via ${hubSym} · 2 échanges`,
+    hubShape: () => '2 échanges',
     routeMinWalletLine: (amount, pct) => `Au moins ${amount} restent dans ce portefeuille (plancher de glissement ${pct})`,
     hubQuoteSource: (venue1, venue2, at) => `Devis de ${venue1} et ${venue2}, obtenus ${at}`,
     hubCensusHeading: 'Deux échanges, détaillés un par un',
@@ -183,7 +184,7 @@ export const convertFr: ConvertMessages = {
     failedLegBody: (sym, reason) =>
       `L\u2019échange a bien eu lieu — tes fonds sont en ${sym} dans ce portefeuille, rien de perdu ni de bloqué. Le retrait a été refusé${reason ? ` : ${reason}` : ''}.`,
     failedLegExit: 'Pour retirer, ouvre Payer, choisis Vers une adresse et colle n\u2019importe quelle adresse de destination — l\u2019étape de retrait part de là.',
-    stuckRouteBody: 'Une étape a été envoyée mais son issue reste inconnue. dpay continue de surveiller les registres en arrière-plan ; cet écran changera tout seul quand la route se résout.',
+    stuckRouteBody: 'Une étape a été envoyée mais son issue reste inconnue. dpay continue de surveiller les registres en arrière-plan ; dès que le paiement ou le remboursement arrive, cet écran changera tout seul.',
     failedHop2Title: 'Le second échange a été refusé',
     failedHop2Body: (hubSym, outSym, reason) =>
       `Le premier échange est passé — tu détiens ${hubSym} dans ce portefeuille, rien n\u2019est perdu ni bloqué. L\u2019échange ${hubSym} → ${outSym} a été refusé${reason ? ` : ${reason}` : ''}.`,
@@ -241,8 +242,8 @@ export const convertFr: ConvertMessages = {
     externalGasLine: 'Le gaz Ethereum de ces deux transactions est payé par l\u2019ETH de ton propre portefeuille. dpay ne peut ni le payer ni le chiffrer exactement.',
     circleFeeLine: fee => `Frais du pont de Circle (son propre chiffre, déduit du montant) : au plus ${fee}`,
     mintFloorLine: floor => `Au moins ${floor} arrivent à ton adresse Solana`,
-    burnTxLabel: 'Hash de la transaction de burn',
-    burnTxPlaceholder: '0x… (de ton portefeuille, après signature)',
+    burnTxLabel: 'Hash de la transaction de burn (de ton portefeuille, après signature)',
+    burnTxPlaceholder: '0x…',
     attachButton: 'Je l\u2019ai signé — surveiller la traversée',
     burnTxInvalid: 'Ça ne ressemble pas à un hash de transaction Ethereum.',
     declineButton: 'Je ne signe pas ça',

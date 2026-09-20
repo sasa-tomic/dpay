@@ -208,6 +208,9 @@ export type ConvertMessages = {
     mechNoneSelected: string;
     /** The route chip under the headline (D8): which hub, how many swaps. */
     viaHub: (hubSym: string) => string;
+    /** The unpicked-hub mech row's shape line — the row label already names the hub
+     *  ("Via USDC"), so this carries ONLY the new fact (the swap count). */
+    hubShape: () => string;
     /** Hub-mode promise line (D9): the floor the SECOND swap signs is an in-wallet amount —
      *  routeMinLine's "at your address" would be false here. */
     routeMinWalletLine: (amount: string, pct: string) => string;
@@ -481,7 +484,7 @@ export const convertEn: ConvertMessages = {
     'The swap was submitted, but the pool\u2019s answer did not arrive. Do not start a second swap with the same funds. If the payout arrives, this screen flips to done on its own.',
   stuckSigned: (amount, minAmount, venue) =>
     `What was signed: approve ${amount} to the ${venue} pool; swap for a minimum of ${minAmount}.`,
-  expiryLine: at => `Unused approval expires by ${at} — after that, the pool can pull nothing.`,
+  expiryLine: at => `The signed instructions expire by ${at} — after that, nothing can move.`,
 
   awaitingAuthTitle: 'Authorization needed',
   awaitingAuthBody: venue =>
@@ -528,6 +531,7 @@ export const convertEn: ConvertMessages = {
     mechViaVenue: venue => `Via ${venue}`,
     mechNoneSelected: 'Pick a mechanism above to see the quote.',
     viaHub: hubSym => `via ${hubSym} · 2 swaps`,
+    hubShape: () => '2 swaps',
     routeMinWalletLine: (amount, pct) => `At least ${amount} stays in this wallet (slippage floor ${pct})`,
     hubQuoteSource: (venue1, venue2, at) => `Quotes from ${venue1} and ${venue2}, fetched ${at}`,
     hubCensusHeading: 'Two swaps, itemized',
@@ -549,7 +553,7 @@ export const convertEn: ConvertMessages = {
     failedLegBody: (sym, reason) =>
       `The swap went through — your funds are ${sym} in this wallet, nothing lost and nothing stuck. The cash-out refused${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'To cash out, open Pay, choose Send to address, and paste any destination address — the withdrawal step runs from there.',
-    stuckRouteBody: 'A leg was sent but its outcome is unknown yet. dpay keeps watching the ledgers in the background; this screen flips on its own when the route resolves.',
+    stuckRouteBody: 'A leg was sent but its outcome is unknown yet. dpay keeps watching the ledgers in the background — when the payout or refund lands, this screen flips on its own.',
     failedHop2Title: 'The second swap was refused',
     failedHop2Body: (hubSym, outSym, reason) =>
       `The first swap went through — you hold ${hubSym} in this wallet, nothing lost and nothing stuck. The ${hubSym} → ${outSym} swap was refused${reason ? `: ${reason}` : ''}.`,
@@ -605,8 +609,8 @@ export const convertEn: ConvertMessages = {
     externalGasLine: 'Ethereum gas for these two transactions is paid by your wallet\u2019s own ETH. dpay cannot pay it or quote it exactly.',
     circleFeeLine: fee => `Circle\u2019s bridge fee (its own number, taken from the amount): at most ${fee}`,
     mintFloorLine: floor => `At least ${floor} arrives at your Solana address`,
-    burnTxLabel: 'Burn transaction hash',
-    burnTxPlaceholder: '0x… (from your wallet, after signing)',
+    burnTxLabel: 'Burn transaction hash (from your wallet, after signing)',
+    burnTxPlaceholder: '0x…',
     attachButton: 'I signed it — watch the crossing',
     burnTxInvalid: 'That does not look like an Ethereum transaction hash.',
     declineButton: 'I am not signing this',

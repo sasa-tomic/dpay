@@ -298,7 +298,7 @@ export async function run() {
       'the sub-picker defaults to the direct pool (a hub mechanism is an explicit switch away, UX §6 red line 9; radio-dot probe)');
     const hubRow = await driver.readText(CKUSDC_HUB_MECH);
     assertIncludes(hubRow, 'Via ICP', 'the unpicked hub row names its mechanism');
-    assertIncludes(hubRow, 'via ICP · 2 swaps', 'the unpicked hub row carries its static shape line (D5)');
+    assertIncludes(hubRow, '2 swaps', 'the unpicked hub row carries its static shape line (D5; the hub is already the row label — no repeated via-ICP)');
     assert(await driver.findByTestID('convert-route-via', {timeoutMs: 1_000}).catch(() => null) == null,
       'no hub surface is armed while the direct mechanism is the pick');
     // Pick `Via ICP` → the SAME composed surface arms for ckUSDC. Selection-surface assertions

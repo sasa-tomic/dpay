@@ -1458,7 +1458,6 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           </Text>
           {record.acknowledgedStuckAtMs == null ? (
             <>
-              <Text style={S.convertStateMeta}>{M.convert.stuckWatching}</Text>
               <Pressable
                 testID="btn-convert-stuck-ack"
                 style={S.linkBtn}
@@ -1493,7 +1492,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
               <Text style={S.convertChecklistLine}>{label}</Text>
               <Text
                 testID={`convert-leg-${i}-state`}
-                style={lp.state === 'failed' ? S.err : S.convertStateMeta}>
+                style={lp.state === 'failed' ? [S.convertStateMeta, S.convertLegStateBad] : S.convertStateMeta}>
                 {fee != null ? `${legStateText(lp.state)} · ${fee}` : legStateText(lp.state)}
               </Text>
             </View>
@@ -1608,7 +1607,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           until a mechanism is picked (the venue chooser's red lines, one level down). */}
       {destGroups.length > 0 ? (
         <View testID="convert-dest">
-          <Text style={S.convertSlippageLabel}>{M.convert.multihop.destLabel}</Text>
+          <Text style={S.convertDestLabel}>{M.convert.multihop.destLabel}</Text>
           {destGroups.map(g => {
             const groupOn = selGroup != null && selGroup.key === g.key;
             const single = g.mechs.length === 1;
@@ -1665,7 +1664,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
                             {/* D5: an UNPICKED mechanism carries its label + a static shape
                                 line, never another mechanism's live number. */}
                             {!on && m.kind === 'hub' ? (
-                              <Text style={S.convertMetaLine}>{M.convert.multihop.viaHub(m.route.hub.symbol)}</Text>
+                              <Text style={S.convertMetaLine}>{M.convert.multihop.hubShape()}</Text>
                             ) : null}
                           </View>
                         </Pressable>
@@ -1692,7 +1691,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           <View style={S.amountRow}>
             <TextInput
               testID="convert-dest-address"
-              style={S.amountInput}
+              style={S.monoInput}
               value={destAddress}
               onChangeText={setDestAddress}
               autoCorrect={false}
@@ -2498,7 +2497,7 @@ function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDeposi
           a fact of the pair, not an option, and renders no chrome. */}
       {destVenues.length > 1 ? (
         <View testID="convert-sol-dest">
-          <Text style={S.convertSlippageLabel}>{M.convert.multihop.destLabel}</Text>
+          <Text style={S.convertDestLabel}>{M.convert.multihop.destLabel}</Text>
           {destVenues.map(x => {
             const on = venue?.venue_id === x.venue.venue_id;
             return (
@@ -3483,7 +3482,7 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
               <View style={S.amountRow}>
                 <TextInput
                   testID="crossrail-burn-tx"
-                  style={S.amountInput}
+                  style={S.monoInput}
                   value={burnTxText}
                   onChangeText={setBurnTxText}
                   autoCorrect={false}
@@ -3665,7 +3664,6 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
           </Text>
           {record.acknowledgedStuckAtMs == null ? (
             <>
-              <Text style={S.convertStateMeta}>{M.convert.stuckWatching}</Text>
               <Pressable
                 testID="btn-convert-stuck-ack"
                 style={S.linkBtn}
@@ -3694,7 +3692,7 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
               <Text style={S.convertChecklistLine}>{plannedLegLabel(record, lp, canister, venueName)}</Text>
               <Text
                 testID={`convert-leg-${i}-state`}
-                style={lp.state === 'failed' ? S.err : S.convertStateMeta}>
+                style={lp.state === 'failed' ? [S.convertStateMeta, S.convertLegStateBad] : S.convertStateMeta}>
                 {fee != null ? `${legStateText(lp.state)} · ${fee}` : legStateText(lp.state)}
               </Text>
             </View>

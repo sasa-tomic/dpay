@@ -319,6 +319,9 @@ function buildStyles(p: Palette) {
   // reads as one copyable artifact rather than prose.
   convertCalldata: {fontSize: 11, color: p.ink, lineHeight: 16, fontFamily: FONT.mono, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, borderRadius: 10, padding: 10, marginBottom: 6, flexWrap: 'wrap'},
   convertSlippageLabel: {fontSize: 11, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, fontFamily: FONT.mono, marginBottom: 6},
+  // Same section-heading shape as the slippage label, plus top spacing: the balance/Max row
+  // sits directly above the DESTINATION heading and collapsed against it (2026-09-20 shot).
+  convertDestLabel: {fontSize: 11, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, fontFamily: FONT.mono, marginTop: 18, marginBottom: 6},
   // The minimum is a term, but it is the term that bounds the trade — one weight above its siblings.
   convertMinOutLine: {fontSize: 14, color: p.ink, lineHeight: 20, marginBottom: 9, fontFamily: FONT.sansMedium},
   convertSlippageRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap'},
@@ -380,6 +383,9 @@ function buildStyles(p: Palette) {
   centerTop: MODE_SURFACE,
   label: {fontSize: 15, color: p.sub, marginBottom: 10, textAlign: 'center', fontFamily: FONT.sans},
   err: {color: p.bad, fontSize: 14, textAlign: 'center', marginTop: 10, fontFamily: FONT.sansMedium},
+  // A failed leg state INSIDE a checklist keeps the list's left alignment — S.err centers,
+  // which is right for standalone form errors and wrong inside the leg list (2026-09-20).
+  convertLegStateBad: {color: p.bad},
   // TRANSIENT dimming — a busy button while its spinner runs, and the header account block while
   // a payment holds it locked. NOT the disabled-button state (that is `disabledFlat` +
   // `disabledText`, which swaps the fill instead of fading it; see the note there).
@@ -482,6 +488,10 @@ function buildStyles(p: Palette) {
   // renders with its left edge cut off (measured on Convert, 2026-09-08; every amount row shares
   // this style, so every one of them had it).
   amountInput: {flex: 1, minWidth: 0, fontSize: 34, fontWeight: '700', color: p.ink, marginLeft: 6, fontFamily: FONT.sansBold, letterSpacing: -0.5},
+  // Long opaque strings (EVM addresses, tx hashes) — no display-sized font can hold 42+ hex
+  // chars on one line, so these render at body size in the mono face instead. Same overflow
+  // guard as amountInput (flex:1 + minWidth:0; measured clipping at 34px, 2026-09-20).
+  monoInput: {flex: 1, minWidth: 0, fontSize: 15, color: p.ink, marginLeft: 6, fontFamily: FONT.mono, paddingVertical: 10},
   // Tappable amount-prefix (Receive): wraps the currency glyph + chevron that signals it opens the
   // currency picker. The right border separates it from the typed amount.
   prefixBtn: {flexDirection: 'row', alignItems: 'center', paddingRight: 12, borderRightWidth: 1, borderRightColor: p.line2},

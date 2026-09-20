@@ -116,7 +116,7 @@ export const convertDe: ConvertMessages = {
     'Der Tausch wurde übermittelt, aber die Antwort des Pools kam nicht an. Starte keinen zweiten Tausch mit denselben Mitteln. Wenn die Auszahlung eintrifft, springt dieser Bildschirm von selbst auf „Getauscht".',
   stuckSigned: (amount, minAmount, venue) =>
     `Was signiert wurde: Freigabe von ${amount} an den ${venue}-Pool; Tausch auf mindestens ${minAmount}.`,
-  expiryLine: at => `Die ungenutzte Freigabe läuft spätestens um ${at} ab — danach kann der Pool nichts mehr abziehen.`,
+  expiryLine: at => `Die signierten Anweisungen laufen spätestens um ${at} ab — danach kann sich nichts mehr bewegen.`,
 
   awaitingAuthTitle: 'Freigabe erforderlich',
   awaitingAuthBody: venue =>
@@ -149,6 +149,7 @@ export const convertDe: ConvertMessages = {
     mechViaVenue: venue => `Über ${venue}`,
     mechNoneSelected: 'Wähle oben einen Weg, um das Angebot zu sehen.',
     viaHub: hubSym => `über ${hubSym} · 2 Tauschgeschäfte`,
+    hubShape: () => '2 Tauschgeschäfte',
     routeMinWalletLine: (amount, pct) => `Mindestens ${amount} bleiben in dieser Wallet (Slippage-Untergrenze ${pct})`,
     hubQuoteSource: (venue1, venue2, at) => `Angebote von ${venue1} und ${venue2}, abgerufen ${at}`,
     hubCensusHeading: 'Zwei Tauschgeschäfte, einzeln aufgeschlüsselt',
@@ -184,7 +185,7 @@ export const convertDe: ConvertMessages = {
     failedLegBody: (sym, reason) =>
       `Der Tausch ist durch — deine Mittel liegen als ${sym} in dieser Wallet, nichts verloren und nichts blockiert. Die Auszahlung wurde abgelehnt${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Zum Auszahlen öffne Bezahlen, wähle An Adresse senden und füge eine beliebige Ziel-Adresse ein — der Auszahlungsschritt läuft von dort.',
-    stuckRouteBody: 'Ein Schritt wurde gesendet, aber sein Ergebnis ist noch unbekannt. dpay beobachtet die Ledgers weiter im Hintergrund; dieser Bildschirm wechselt von selbst, sobald die Route sich auflöst.',
+    stuckRouteBody: 'Ein Schritt wurde gesendet, aber sein Ergebnis ist noch unbekannt. dpay beobachtet die Ledgers weiter im Hintergrund — sobald die Auszahlung oder Rückerstattung ankommt, wechselt dieser Bildschirm von selbst.',
     failedHop2Title: 'Der zweite Tausch wurde abgelehnt',
     failedHop2Body: (hubSym, outSym, reason) =>
       `Der erste Tausch ist durch — du hältst ${hubSym} in dieser Wallet, nichts verloren und nichts steckengeblieben. Der Tausch ${hubSym} → ${outSym} wurde abgelehnt${reason ? `: ${reason}` : ''}.`,
@@ -242,8 +243,8 @@ export const convertDe: ConvertMessages = {
     externalGasLine: 'Das Ethereum-Gas für diese beiden Transaktionen zahlt das ETH deiner eigenen Wallet. dpay kann es weder zahlen noch exakt beziffern.',
     circleFeeLine: fee => `Circle\u2019s Bridge-Gebühr (seine eigene Zahl, vom Betrag abgezogen): höchstens ${fee}`,
     mintFloorLine: floor => `Mindestens ${floor} kommen an deiner Solana-Adresse an`,
-    burnTxLabel: 'Burn-Transaktions-Hash',
-    burnTxPlaceholder: '0x… (aus deiner Wallet, nach dem Signieren)',
+    burnTxLabel: 'Burn-Transaktions-Hash (aus deiner Wallet, nach dem Signieren)',
+    burnTxPlaceholder: '0x…',
     attachButton: 'Ich habe signiert — den Transfer beobachten',
     burnTxInvalid: 'Das sieht nicht nach einem Ethereum-Transaktions-Hash aus.',
     declineButton: 'Ich signiere das nicht',

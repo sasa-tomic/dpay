@@ -115,7 +115,7 @@ export const convertEs: ConvertMessages = {
     'El intercambio se envió, pero la respuesta del pool no llegó. No inicies un segundo intercambio con los mismos fondos. Si el pago llega, esta pantalla pasará a «Convertido» por sí sola.',
   stuckSigned: (amount, minAmount, venue) =>
     `Lo firmado: autorizar ${amount} al pool de ${venue}; intercambiar por un mínimo de ${minAmount}.`,
-  expiryLine: at => `La autorización sin usar caduca a más tardar a las ${at} — después, el pool no puede retirar nada.`,
+  expiryLine: at => `Las instrucciones firmadas caducan a más tardar a las ${at} — después, nada puede moverse.`,
 
   awaitingAuthTitle: 'Falta tu autorización',
   awaitingAuthBody: venue =>
@@ -148,6 +148,7 @@ export const convertEs: ConvertMessages = {
     mechViaVenue: venue => `Vía ${venue}`,
     mechNoneSelected: 'Elige un mecanismo arriba para ver la cotización.',
     viaHub: hubSym => `vía ${hubSym} · 2 canjes`,
+    hubShape: () => '2 canjes',
     routeMinWalletLine: (amount, pct) => `Al menos ${amount} se quedan en esta cartera (piso de deslizamiento ${pct})`,
     hubQuoteSource: (venue1, venue2, at) => `Cotizaciones de ${venue1} y ${venue2}, obtenidas ${at}`,
     hubCensusHeading: 'Dos canjes, desglosados uno por uno',
@@ -183,7 +184,7 @@ export const convertEs: ConvertMessages = {
     failedLegBody: (sym, reason) =>
       `El canje se completó — tus fondos están en ${sym} en esta cartera, nada perdido ni bloqueado. El retiro fue rechazado${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Para retirar, abre Pagar, elige Enviar a dirección y pega cualquier dirección de destino — el paso de retiro corre desde ahí.',
-    stuckRouteBody: 'Se envió un tramo pero su resultado aún se desconoce. dpay sigue vigilando los libros en segundo plano; esta pantalla cambiará sola cuando la ruta se resuelva.',
+    stuckRouteBody: 'Se envió un tramo pero su resultado aún se desconoce. dpay sigue vigilando los libros en segundo plano; cuando llegue el pago o el reembolso, esta pantalla cambiará sola.',
     failedHop2Title: 'El segundo canje fue rechazado',
     failedHop2Body: (hubSym, outSym, reason) =>
       `El primer canje pasó — tienes ${hubSym} en esta cartera, nada perdido y nada atascado. El canje ${hubSym} → ${outSym} fue rechazado${reason ? `: ${reason}` : ''}.`,
@@ -241,8 +242,8 @@ export const convertEs: ConvertMessages = {
     externalGasLine: 'El gas Ethereum de estas dos transacciones lo paga el ETH de tu propia cartera. dpay no puede pagarlo ni cotizarlo con exactitud.',
     circleFeeLine: fee => `Comisión del puente de Circle (su propia cifra, descontada del importe): como máximo ${fee}`,
     mintFloorLine: floor => `Llegan como mínimo ${floor} a tu dirección Solana`,
-    burnTxLabel: 'Hash de la transacción de burn',
-    burnTxPlaceholder: '0x… (de tu cartera, tras firmar)',
+    burnTxLabel: 'Hash de la transacción de burn (de tu cartera, tras firmar)',
+    burnTxPlaceholder: '0x…',
     attachButton: 'Ya lo firmé — vigilar el cruce',
     burnTxInvalid: 'Eso no parece un hash de transacción Ethereum.',
     declineButton: 'No voy a firmar esto',
