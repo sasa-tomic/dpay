@@ -5115,9 +5115,9 @@ async fn venue_surface_is_query_only_in_the_agent_build() {
     assert_eq!(v1, v2, "GET /venues is a pure read in the agent build");
     assert_eq!(
         v1["venues"].as_array().map(Vec::len),
-        Some(12),
-        "exactly twelve real venues (six IC pools + three Jupiter + three SideShift) are \
-         served in the agent build"
+        Some(13),
+        "exactly thirteen real venues (six IC pools + three Jupiter + three SideShift \
+         + one Trocador aggregator) are served in the agent build"
     );
     assert_eq!(v1["venues"][0]["venue_id"], "icpswap");
     assert!(
@@ -5799,9 +5799,9 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
     let served = body["venues"].as_array().expect("venues is an array");
     assert_eq!(
         served.len(),
-        12,
-        "exactly twelve real venues are served today (six IC pools + three Jupiter + \
-         three SideShift)"
+        13,
+        "exactly thirteen real venues are served today (six IC pools + three Jupiter + \
+         three SideShift + one Trocador aggregator)"
     );
     assert_eq!(
         served
@@ -5821,6 +5821,7 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
             "sideshift",
             "sideshift-usdc",
             "sideshift-eurc",
+            "trocador",
         ],
         "registry order is the stable wire order"
     );
@@ -6031,13 +6032,13 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
 async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
     let (state, _led, _fake) = state_with_fake(ledger()).await;
 
-    // Default (nothing armed): exactly the twelve real venues (six IC pools + three Jupiter
-    // + three SideShift).
+    // Default (nothing armed): exactly the thirteen real venues (six IC pools + three Jupiter
+    // + three SideShift + one Trocador aggregator).
     let (status, body) = call(&state, get_req("/api/v1/venues")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         body["venues"].as_array().map(Vec::len),
-        Some(12),
+        Some(13),
         "the default experience is one venue per PAIR, like prod"
     );
 
@@ -6062,9 +6063,9 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
     let venues = body["venues"].as_array().expect("venues is an array");
     assert_eq!(
         venues.len(),
-        13,
-        "thirteen served rows with the knob armed: six real IC + three Jupiter + three \
-         SideShift + the fixture on its pair"
+        14,
+        "fourteen served rows with the knob armed: six real IC + three Jupiter + three \
+         SideShift + one Trocador aggregator + the fixture on its pair"
     );
     // The served list is REGISTRY order (the stable wire order) with the knob arming the
     // fixture venue into it — the fixture row sits where the registry puts it, second.
@@ -6087,6 +6088,7 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
             "sideshift",
             "sideshift-usdc",
             "sideshift-eurc",
+            "trocador",
         ],
         "registry order is the stable wire order"
     );
@@ -6097,13 +6099,13 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
         "the fixture venue is labelled the invented stand-in it is"
     );
 
-    // Disarm: back to the twelve-real-venue default (teardown parity — e2e flows share one relay).
+    // Disarm: back to the thirteen-real-venue default (teardown parity — e2e flows share one relay).
     let (status, body) = call(&state, post_venue(false, "icpswap-fixture-b")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["served"], false);
     let (status, body) = call(&state, get_req("/api/v1/venues")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["venues"].as_array().map(Vec::len), Some(12));
+    assert_eq!(body["venues"].as_array().map(Vec::len), Some(13));
     assert!(!body.to_string().contains(FIXTURE_POOL));
 
     // The knob can neither gate a REAL venue nor invent an unknown one — routing is a
