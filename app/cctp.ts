@@ -280,10 +280,10 @@ export const ETHEREUM_RPC_URL = 'https://ethereum-rpc.publicnode.com';
  * ("latest") on the publicnode staging. This is the gas-fund offer's honest "have" line for
  * the wallet the burn legs deliver INTO.
  *
- * Fail-open by contract: an unreachable RPC, a non-2xx, a malformed JSON-RPC body, or a
- * malformed address ALL read as `null` — an unmeasurable balance is UNKNOWN, never zero,
- * and the gas-fund UI stays offered with an unknown-have rather than blocked on a flaky
- * read. (The gas the burn legs themselves spend is the IN-WALLET ckETH — `railBalanceOf`
+ * Hidden by contract: an unreachable RPC, a non-2xx, a malformed JSON-RPC body, or a
+ * malformed address ALL read as `null` — an unmeasurable balance is UNKNOWN, never zero.
+ * The gas-fund offer card renders only on a MEASURED have (null keeps the card hidden and
+ * the plain shortfall warn standing): a need-vs-have offer without a have is not honest. (The gas the burn legs themselves spend is the IN-WALLET ckETH — `railBalanceOf`
  * territory — never this number.)
  */
 export async function fetchEthBalance(address: string, timeoutMs = 8000): Promise<string | null> {

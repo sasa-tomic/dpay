@@ -1119,10 +1119,18 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       setConfirmErr(null);
       setQuoteChanged(null);
       try {
-        // Same re-quote-at-confirm discipline, on the venue's own quote — but the fresh
-        // fetch here returns the QUOTE ID too: the fixed order must be created from the
-        // exact quote the reviewed settleAmount came from (SideShift pins quoteId ↔
-        // affiliateId ↔ rate together). A moved market is reviewed, never silently ordered.
+        // Re-quote at the confirm gesture — but ONLY to mint a FRESH QUOTE ID: the fixed
+        // order must be created from a live quote (SideShift pins quoteId ↔ affiliateId ↔
+        // rate together). There is deliberately NO exact-match gate against the reviewed
+        // quote: a fixed shift LOCKS its rate at order creation, not at the earlier review
+        // quote, and a venue rate that ticks between the two fetches can never be matched
+        // exactly — the old equality gate livelocked the confirm live (review → moved →
+        // review → moved …). The user fixes the DEPOSIT (identical in both quotes); the
+        // settle figure is the venue's own number locked on the ORDER, and the
+        // awaiting-deposit panel renders the order's own depositAmount/settle verbatim —
+        // the order is both the lock and the consent point: the user sends exactly its
+        // deposit figure, or nothing (prepare still refuses an order whose depositAmount
+        // is not the quoted deposit).
         let freshRes: SideShiftQuoteResult;
         try {
           freshRes = await fetchSideShiftQuote(
@@ -1135,11 +1143,6 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         const fresh = ceFiQuoteFromResult(
           activeCefiVenue, legs.inDesc.ledger, cefiOutMint, reviewed.amountIn, freshRes, cefiOut.decimals,
         );
-        if (fresh.amountOutGross !== reviewed.amountOutGross) {
-          setQuote(fresh);
-          setQuoteChanged({oldAmt: reviewed.amountOutGross, newAmt: fresh.amountOutGross});
-          return;
-        }
         // Order creation is CeFi: the DEVICE posts the order body to the relay proxy (the
         // relay attaches the partner credential server-side); the venue answers with its
         // OWN deposit address. The user sends the deposit to the VENUE, never to dpay —
