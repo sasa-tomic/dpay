@@ -52,12 +52,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {DpayCore} from './services/native';
 import {relayFetch} from './services/relay';
-import {submitTransfer as railSubmitTransfer, fetchGasFeeWei, fetchLedgerFee} from './services/rail';
+import {submitTransfer as railSubmitTransfer, fetchGasFeeWei, fetchLedgerFee, railBalanceOf} from './services/rail';
 import {icStampExpiry} from './services/icp';
 import {randNonceHex, rawToDecimal, toUnits} from './lib/format';
-import {isValidDestinationAddress, type CurrencyDescriptor} from './config/catalog';
-import type {HubRoute, MultihopRoute} from './routes';
-import {
+import {isValidDestinationAddress, BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from './config/catalog';
+import {gasFundRoutes, type GasFundRoute, type HubRoute, type MultihopRoute} from './routes';import {
   CONVERT_APPROVE_LIFETIME_S,
   CONVERT_LEGACY_STORAGE_KEY,
   CONVERT_PROBE_WINDOW_ROWS,
@@ -514,6 +513,37 @@ export type CrossRailInfo = {
   solExpectedSubunits?: string;
 };
 
+/** ONE gas-FUNDING pre-leg (2026-09-20, the cross-rail gas widening): the frozen facts of
+ *  the ordinary approve+swap pair that moves an in-wallet IC asset INTO the gas ledger
+ *  (ckETH) ahead of the route's own legs. Exactly the hub-leg shape plus the two signed
+ *  amounts — no new leg kind, no new arg builder (the mandate's red line). */
+export type GasFundPreLeg = {
+  venueId: string;
+  pool: string;
+  fromLedger: string;
+  toLedger: string;
+  /** The raw amount the pre-swap pulls (the approve covers this + the from-ledger fee). */
+  inAmount: string;
+  /** The leg's own slippage floor (raw out-units of `toLedger`) — leg i+1 is QUOTED on
+   *  leg i's minOut, the same compounding-floor rule the hub record freezes. */
+  minOut: string;
+};
+
+/** The record's frozen `gasPre` block: the funding target (fresh feeWei + 20% headroom at
+ *  prepare, the CCTP forward-fee buffer convention) and the pre-legs IN ORDER — leg i's
+ *  toLedger is leg i+1's fromLedger, the last lands on the burn route's gasLedger. */
+export type GasFundPlan = {
+  neededWei: string;
+  legs: GasFundPreLeg[];
+};
+
+/** What resolution hands the SIGNER, on top of the frozen record shape: each pre-leg's
+ *  live direction flag (read per quote, never assumed) and the two ledger fees the
+ *  approve/swap args carry. The record stores only the frozen `GasFundPlan` subset. */
+export type ResolvedGasFundPlan = GasFundPlan & {
+  legs: Array<GasFundPreLeg & {zeroForOne: boolean; fromFee: string; toFee: string}>;
+};
+
 export type ConvertRecord = {
   id: string;
   createdAtMs: number;
@@ -617,10 +647,21 @@ export type ConvertRecord = {
    *  a CCTP leg; extends the five IC legs with the external-signature burn and (Route C)
    *  the final Jupiter leg. */
   crossRail?: CrossRailInfo;
+  /** The gas-fund widening (2026-09-20): present iff the intent was prepared WITH gas
+   *  funding — the pre-legs are the FIRST entries of `legs`/`legPlan` (two per pre-leg,
+   *  approve then swap), and the executor re-checks the ACTUAL in-wallet gas-ledger
+   *  balance against `neededWei` before the approve_gas leg may run. Hydration pins the
+   *  whole shape (legs.length === pre-legs×2 + 5, the approve/swap rhythm, the ledger
+   *  chain). Absent on every record this build wrote before it — byte-identical history. */
+  gasPre?: GasFundPlan;
   failureCode?: 'approve_refused' | 'swap_refused' | 'refunded' | 'withdraw_refused' | 'unknown'
     // The cross-rail additions: the user declined/abandoned the external signing step
     // (funds sit as USDC at their OWN EVM address — the copy names it).
-    | 'external_declined';
+    | 'external_declined'
+    // The gas-fund addition: the funding did not deliver (a pre-leg refused, or the
+    // post-pre-leg balance re-check came up short) — the MAIN conversion has not started
+    // and every source value sits in-wallet. The failed card names the shortfall.
+    | 'gas_short';
   failureDetail?: string;
 };
 
@@ -807,7 +848,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   }
   if (typeof r.inDecimals === 'number') rec.inDecimals = r.inDecimals;
   if (typeof r.outDecimals === 'number') rec.outDecimals = r.outDecimals;
-  if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'withdraw_refused', 'unknown', 'external_declined'].includes(r.failureCode as string)) return null;
+  if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'withdraw_refused', 'unknown', 'external_declined', 'gas_short'].includes(r.failureCode as string)) return null;
   if (r.failureCode != null) rec.failureCode = r.failureCode as ConvertRecord['failureCode'];
   // The legs: every signed update must be complete. An EMPTY legs list is the CeFi shape and
   // requires a providerRef with an orderId — a legless, providerless record is meaningless.
@@ -966,7 +1007,41 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     if (typeof r.gasDecimals === 'number') rec.gasDecimals = r.gasDecimals;
     if (typeof r.hopTx === 'string') rec.hopTx = r.hopTx;
     if (typeof r.feeMillionths === 'number') rec.feeMillionths = r.feeMillionths;
+    // The GAS-FUND block (2026-09-20), fail-closed: digit strings only, every leg's six
+    // facts non-empty, the ledger chain unbroken, and the plan/legs rhythm pinned — the
+    // pre-legs are approve+swap PAIRS ahead of the route's five IC legs. A legacy record
+    // carries no gasPre at all (byte-identical history); a gasPre without a plan (or any
+    // malformed shape) is a shape this build never wrote — dropped below.
+    if (r.gasPre != null) {
+      const g = r.gasPre as Record<string, unknown>;
+      if (g == null || typeof g !== 'object' || Array.isArray(g)) return null;
+      if (typeof g.neededWei !== 'string' || !/^\d+$/.test(g.neededWei)) return null;
+      if (!Array.isArray(g.legs) || g.legs.length === 0) return null;
+      const preLegs: GasFundPreLeg[] = [];
+      for (const pl of g.legs) {
+        if (pl == null || typeof pl !== 'object' || Array.isArray(pl)) return null;
+        const p = pl as Record<string, unknown>;
+        for (const k of ['venueId', 'pool', 'fromLedger', 'toLedger', 'inAmount', 'minOut']) {
+          if (typeof p[k] !== 'string' || (p[k] as string).length === 0) return null;
+        }
+        if (!/^\d+$/.test(p.inAmount as string) || !/^\d+$/.test(p.minOut as string)) return null;
+        preLegs.push({
+          venueId: p.venueId as string, pool: p.pool as string,
+          fromLedger: p.fromLedger as string, toLedger: p.toLedger as string,
+          inAmount: p.inAmount as string, minOut: p.minOut as string,
+        });
+      }
+      for (let pi = 0; pi < preLegs.length - 1; pi += 1) {
+        if (preLegs[pi]!.toLedger !== preLegs[pi + 1]!.fromLedger) return null;
+      }
+      if (legs.length !== preLegs.length * 2 + 5) return null;
+      for (let pi = 0; pi < preLegs.length; pi += 1) {
+        if (parsed[pi * 2]?.kind !== 'approve' || parsed[pi * 2 + 1]?.kind !== 'swap') return null;
+      }
+      rec.gasPre = {neededWei: g.neededWei, legs: preLegs};
+    }
   } else if (legs.length > 0 && legs.length !== 2) return null;
+  if (r.gasPre != null && rec.gasPre == null) return null; // gasPre rides a PLANNED record only
   // The SOLANA WIDENING (2026-09-15): `solanaLeg` — ONE signed Solana transaction. Mutually
   // exclusive with legs>0, legPlan, and providerRef (a record is exactly ONE of the three
   // shapes); when present, `legs` must be empty and the step must be in the Solana driver's
@@ -1447,6 +1522,132 @@ export function prepareCeFiConvertRecord(args: {
  *  cannot deliver its floor should refuse at its own leg, not fail designed-to-fail at the
  *  burn. Any surplus above the floor stays in-wallet as the hop asset — the confirm screen
  *  says so before anything is signed. */
+
+// --- the gas-fund resolution (2026-09-20, the cross-rail gas widening) -------------------------------
+
+/** The funding target: the minter's LIVE feeWei + 20% headroom — the SAME buffer convention
+ *  `cctpMaxFee` applies to Circle's forward fee. The pre-leg chain's final floor must reach
+ *  THIS number, and the executor's post-pre-leg re-check compares the ACTUAL in-wallet
+ *  gas-ledger balance against the frozen copy of it. */
+export function gasFundNeededWei(gasFeeWei: string): bigint {
+  return (BigInt(gasFeeWei) * 120n) / 100n;
+}
+
+/** Quote + size ONE candidate funding route. Legs chain exactly like the hub record:
+ *  leg i+1 is QUOTED on leg i's minOut (the compounding floor — `icpSwapMinOut`, the same
+ *  machinery `convertRecordMinOut` re-derives from), and the final leg's floor must cover
+ *  `neededWei`. Sizing starts at the whole spendable budget and SHRINKS toward the smallest
+ *  input that still covers (≤4 re-quotes, +5% margin) — never up past the budget. Every
+ *  quote must name its route leg exactly (venue, pool, pair, live direction) or the route
+ *  is unusable. Null = this route cannot fund the target (or cannot be quoted at all). */
+async function resolveGasFundRoute(args: {
+  relayUrl: string;
+  route: GasFundRoute;
+  slippageBps: number;
+  budget: bigint;
+  neededWei: bigint;
+}): Promise<ResolvedGasFundPlan | null> {
+  const {relayUrl, route: r, slippageBps, budget, neededWei} = args;
+  const endpoints = r.hub != null ? [r.from, r.hub, r.dest] : [r.from, r.dest];
+  const chainOnce = async (input: bigint): Promise<ResolvedGasFundPlan['legs'] | null> => {
+    const legs: ResolvedGasFundPlan['legs'] = [];
+    let carry = input;
+    for (let li = 0; li < r.legs.length; li += 1) {
+      const leg = r.legs[li]!;
+      const fromEp = endpoints[li]!;
+      const toEp = endpoints[li + 1]!;
+      if (leg.fromLedger !== fromEp.ledger || leg.toLedger !== toEp.ledger) return null;
+      const venue = venueOfId(leg.venueId);
+      if (venue == null || venue.endpoint !== leg.pool) return null;
+      let q: ConvertQuote;
+      try {
+        q = await fetchConvertQuote(relayUrl, leg.fromLedger, leg.toLedger, carry.toString(), {venue});
+      } catch {
+        return null; // an unquotable leg is not a funding route — try the next candidate
+      }
+      if (q.venueId !== leg.venueId || q.pool !== leg.pool
+        || q.tokenInLedger !== leg.fromLedger || q.tokenOutLedger !== leg.toLedger
+        || q.zeroForOne == null) return null;
+      const minOut = await DpayCore.icpSwapMinOut(q.amountOutGross, slippageBps);
+      if (typeof minOut !== 'string' || !/^\d+$/.test(minOut) || BigInt(minOut) <= 0n) return null;
+      legs.push({
+        venueId: leg.venueId, pool: leg.pool, fromLedger: leg.fromLedger, toLedger: leg.toLedger,
+        inAmount: carry.toString(), minOut,
+        zeroForOne: q.zeroForOne, fromFee: fromEp.fee, toFee: toEp.fee,
+      });
+      carry = BigInt(minOut);
+    }
+    return legs;
+  };
+  let best: ResolvedGasFundPlan | null = null;
+  let input = budget;
+  for (let k = 0; k < 4; k += 1) {
+    const legs = await chainOnce(input);
+    if (legs == null) break;
+    const floor = BigInt(legs[legs.length - 1]!.minOut);
+    if (floor < neededWei) break; // under target — a smaller input never covers either
+    best = {neededWei: neededWei.toString(), legs};
+    const scaled = (input * neededWei * 105n) / (floor * 100n) + 1n; // shrink toward the target
+    if (scaled >= input) break; // converged at the floor's own resolution
+    input = scaled;
+  }
+  return best;
+}
+
+/** Resolve the gas-fund plan for one cross-rail intent (2026-09-20): which in-wallet IC
+ *  asset funds the ckETH the burn legs will spend, over WHICH route, at WHAT size. The
+ *  candidate walk is the contract's: every catalog asset with a MEASURED balance is a
+ *  source (1-hop direct venue else 2-hop hub into the gas ledger); the MAIN route's own
+ *  input ledger is a source ONLY if its measured balance covers the main amount + both
+ *  flows' fees + the target — the ONE shared balance rule — so the main amount is never
+ *  silently shrunk to make room for gas. Among fundable routes the LARGEST net ckETH floor
+ *  wins (the contract's explicit pick; this is routing for one intent, not venue display).
+ *  Null = nothing in the wallet can fund the target — the caller refuses to sign a
+ *  gas-less intent rather than build a record designed to strand. */
+export async function resolveGasFundPlan(args: {
+  secretHex: string;
+  relayUrl: string;
+  route: MultihopRoute;
+  /** Raw spendable balances by CATALOG CURRENCY id (the wallet's assetBalances, verbatim).
+   *  A currency nobody measured is NOT a candidate — an unmeasured balance funds nothing. */
+  balances: Record<number, string>;
+  mainAmountIn: string;
+  slippageBps: number;
+  catalog?: CurrencyDescriptor[];
+}): Promise<ResolvedGasFundPlan | null> {
+  const {secretHex, relayUrl, route, balances, mainAmountIn, slippageBps} = args;
+  const catalog = args.catalog ?? icpCatalogOf(BUNDLED_NETWORKS);
+  const feeWei = await fetchGasFeeWei(secretHex, route.burn.minter, route.hop.ledger);
+  if (feeWei == null) throw new Error(M.convert.errors.gasUnavailable);
+  const neededWei = gasFundNeededWei(feeWei);
+  if (neededWei <= 0n) return null;
+  const mainIn = BigInt(mainAmountIn);
+  const mainInFee = BigInt(route.from.fee);
+  let best: {plan: ResolvedGasFundPlan; floor: bigint} | null = null;
+  for (const row of catalog) {
+    if (row.testnet || row.ledger == null) continue;
+    if (row.currency === route.burn.gasCurrency) continue; // the gas asset is not a source
+    const balRaw = balances[row.currency];
+    if (balRaw == null || !/^\d+$/.test(balRaw)) continue;
+    const bal = BigInt(balRaw);
+    if (bal <= 0n) continue;
+    const sameLedger = row.ledger === route.from.ledger;
+    if (sameLedger && bal < mainIn + mainInFee * 2n + neededWei) continue; // the squeeze gate
+    for (const r of gasFundRoutes(catalog, row.ledger, route.burn.gasLedger)) {
+      // Spendable for the funding flow: the balance minus the funding approve's own fee,
+      // and for the shared source minus the main intent's own draw (amount + its fee).
+      let budget = bal - BigInt(r.from.fee);
+      if (sameLedger) budget -= mainIn + mainInFee;
+      if (budget <= 0n) continue;
+      const plan = await resolveGasFundRoute({relayUrl, route: r, slippageBps, budget, neededWei});
+      if (plan == null) continue;
+      const floor = BigInt(plan.legs[plan.legs.length - 1]!.minOut);
+      if (best == null || floor > best.floor) best = {plan, floor};
+    }
+  }
+  return best?.plan ?? null;
+}
+
 export async function prepareMultihopConvertRecord(args: {
   secretHex: string;
   /** The re-quoted SWAP-hop quote (input ledger → hop ledger), verbatim from the venue. */
@@ -1456,6 +1657,12 @@ export async function prepareMultihopConvertRecord(args: {
   route: MultihopRoute;
   /** The user's own self-custodial destination address (validated — never signed blind). */
   destAddress: string;
+  /** The gas-fund widening (2026-09-20): the wallet's measured IC balances by catalog
+   *  currency id + the relay to quote the funding legs on. When present, prepare FIRST
+   *  re-measures the gas-ledger balance (the double-gas guard) and only prepends funding
+   *  legs when the wallet is STILL short — an earlier abandoned intent that already funded
+   *  the gas yields a record byte-identical to the unfunded shape. */
+  gasFund?: {relayUrl: string; balances: Record<number, string>};
 }): Promise<ConvertRecord> {
   const {secretHex, quote, math, route, destAddress} = args;
   // Same signing-boundary red lines as the direct record, extended to EVERY leg target this
@@ -1484,6 +1691,34 @@ export async function prepareMultihopConvertRecord(args: {
   const gasFeeWei = await fetchGasFeeWei(secretHex, route.burn.minter, route.hop.ledger);
   if (gasFeeWei == null) throw new Error(M.convert.errors.gasUnavailable);
   const gasLedgerFee = await fetchLedgerFee(secretHex, route.burn.gasLedger);
+
+  // The GAS-FUND WIDENING (2026-09-20): a wallet short on ckETH funds its OWN gas by
+  // PREPENDING ordinary device-signed approve+swap legs (in-wallet asset → ckETH) ahead
+  // of the route's legs. Order of guards, both re-run at EVERY prepare:
+  //   1. DOUBLE-GAS guard — a fresh signed balance read on the gas ledger; at or above the
+  //      fresh target (feeWei + 20%) there is nothing to fund (an abandoned intent's gas
+  //      already landed) → no gasPre, byte-identical to the unfunded record.
+  //   2. An unmeasurable balance NEVER triggers funding (never sign a sizing blind) — the
+  //      unfunded record proceeds and the on-chain refusal, if any, is the honest verdict.
+  //   3. Still short → resolve the plan fresh (neededWei re-derivation + live quotes).
+  //      Requested but unresolvable → THROW, nothing signed: an unfunded record here would
+  //      run the main conversion into the gas-less dead end.
+  let gasPre: ResolvedGasFundPlan | undefined;
+  if (args.gasFund != null) {
+    const haveRaw = await railBalanceOf(secretHex, route.burn.gasLedger);
+    const neededMin = gasFundNeededWei(gasFeeWei);
+    if (haveRaw == null || !/^\d+$/.test(haveRaw)) {
+      console.warn('gas-fund: gas-ledger balance unreadable — refusing to prepend funding legs');
+    } else if (BigInt(haveRaw) >= neededMin) {
+      // The double-gas guard: already funded, nothing to prepend.
+    } else {
+      gasPre = (await resolveGasFundPlan({
+        secretHex, relayUrl: args.gasFund.relayUrl, route,
+        balances: args.gasFund.balances, mainAmountIn: math.amountIn, slippageBps: math.slippageBps,
+      })) ?? undefined;
+      if (gasPre == null) throw new Error(M.convert.errors.gasUnavailable);
+    }
+  }
 
   const amountIn = quote.amountIn;
   const pool = quote.pool;
@@ -1533,6 +1768,31 @@ export async function prepareMultihopConvertRecord(args: {
   const envExpiry = await icStampExpiry(secretHex);
   const expiresAtMs = Number(BigInt(envExpiry) / 1_000_000n);
 
+  // Legs 0a: the GAS-FUND pre-legs (2026-09-20) — ordinary approve+swap pairs, signed FIRST
+  // so the funding completes before the route's own legs run. Same signing-boundary red
+  // lines per leg: the venue registered with its endpoint AS the pool, and no dpay-owned
+  // canister anywhere in the pre-leg target set. The approve sizes on inAmount + the
+  // from-ledger's fee (the direct flow's exact convention); the swap's floor is the
+  // resolution's own minOut, leg i+1 quoted on leg i's floor.
+  const preSigned: {canister: string; method: 'icrc2_approve' | 'depositFromAndSwap'; argHex: string; envelopeHex: string; requestIdHex: string; expiresAtMs: number}[] = [];
+  const prePlan: LegPlan[] = [];
+  for (const leg of gasPre?.legs ?? []) {
+    const pv = venueOfId(leg.venueId);
+    if (pv == null || pv.endpoint !== leg.pool) throw new Error(M.convert.errors.quoteUnavailable('pool'));
+    for (const target of [leg.pool, leg.fromLedger, leg.toLedger]) {
+      if (DPAY_CANISTER_PRINCIPALS.includes(target)) throw new Error(M.convert.errors.quoteUnavailable('venue'));
+    }
+    const preApproveAmount = (BigInt(leg.inAmount) + BigInt(leg.fromFee)).toString();
+    const preApproveArg = await DpayCore.icpApproveArg(leg.pool, '', '', preApproveAmount, '', allowanceExpiryNs, '', leg.fromFee);
+    const preApproveSigned = await DpayCore.icpSignUpdate(secretHex, leg.fromLedger, 'icrc2_approve', preApproveArg, envExpiry);
+    preSigned.push({canister: leg.fromLedger, method: 'icrc2_approve', argHex: preApproveArg, envelopeHex: preApproveSigned.envelopeHex, requestIdHex: preApproveSigned.requestIdHex, expiresAtMs});
+    prePlan.push({kind: 'approve', canister: leg.fromLedger, fee: leg.fromFee, state: 'pending'});
+    const preSwapArg = await DpayCore.icpDepositAndSwapArg(leg.inAmount, leg.minOut, leg.fromFee, leg.toFee, leg.zeroForOne);
+    const preSwapSigned = await DpayCore.icpSignUpdate(secretHex, leg.pool, 'depositFromAndSwap', preSwapArg, envExpiry);
+    preSigned.push({canister: leg.pool, method: 'depositFromAndSwap', argHex: preSwapArg, envelopeHex: preSwapSigned.envelopeHex, requestIdHex: preSwapSigned.requestIdHex, expiresAtMs});
+    prePlan.push({kind: 'swap', canister: leg.pool, fee: '', state: 'pending'});
+  }
+
   // Legs 1–2: the direct flow's exact approve+swap pair (spender/pull semantics identical).
   // Same absent expected_allowance rule as the direct flow above.
   const approveInArgHex = await DpayCore.icpApproveArg(
@@ -1577,6 +1837,7 @@ export async function prepareMultihopConvertRecord(args: {
     outFee: route.hop.fee,
     slippageBps: math.slippageBps,
     legs: [
+      ...preSigned.map(s => ({canister: s.canister, method: s.method, argHex: s.argHex, envelopeHex: s.envelopeHex, requestIdHex: s.requestIdHex, expiresAtMs: s.expiresAtMs})),
       {canister: route.from.ledger, method: 'icrc2_approve', argHex: approveInArgHex, envelopeHex: approveInSigned.envelopeHex, requestIdHex: approveInSigned.requestIdHex, expiresAtMs},
       {canister: pool, method: 'depositFromAndSwap', argHex: swapArgHex, envelopeHex: swapSigned.envelopeHex, requestIdHex: swapSigned.requestIdHex, expiresAtMs},
       {canister: route.hop.ledger, method: 'icrc2_approve', argHex: approveHopArgHex, envelopeHex: approveHopSigned.envelopeHex, requestIdHex: approveHopSigned.requestIdHex, expiresAtMs},
@@ -1584,6 +1845,7 @@ export async function prepareMultihopConvertRecord(args: {
       {canister: route.burn.minter, method: 'withdraw_erc20', argHex: withdrawArgHex, envelopeHex: withdrawSigned.envelopeHex, requestIdHex: withdrawSigned.requestIdHex, expiresAtMs},
     ],
     legPlan: [
+      ...prePlan,
       {kind: 'approve', canister: route.from.ledger, fee: math.inFee, state: 'pending'},
       {kind: 'swap', canister: pool, fee: '', state: 'pending'},
       {kind: 'approve', canister: route.hop.ledger, fee: route.hop.fee, state: 'pending'},
@@ -1606,6 +1868,9 @@ export async function prepareMultihopConvertRecord(args: {
     gasDecimals: route.burn.gasDecimals,
     gasFeeWei,
     feeMillionths: quote.feeMillionths,
+    // The frozen gas-fund block (the FROZEN record shape — venue/pool/ledgers/amounts only;
+    // the signing-side extras live only on the in-memory resolution, never serialized).
+    ...(gasPre != null ? {gasPre: {neededWei: gasPre.neededWei, legs: gasPre.legs.map(l => ({venueId: l.venueId, pool: l.pool, fromLedger: l.fromLedger, toLedger: l.toLedger, inAmount: l.inAmount, minOut: l.minOut}))} satisfies GasFundPlan} : {}),
     ...(crossRail != null ? {crossRail} : {}),
   };
 }
@@ -2152,8 +2417,16 @@ async function executePlannedConvert(
   const firstIncomplete = () => (rec.legPlan ?? []).findIndex(l => l.state !== 'confirmed' && l.kind !== 'cctp_burn' && l.kind !== 'sol_swap');
   // A swap leg's ordinal among the plan's swap entries (0-based): 0 = the record's own hop
   // swap (the record's out*/hop* facts), 1 = a HUB record's SECOND swap (the dest* facts).
+  // The gas-fund widening (2026-09-20): the PRE-LEGS (gasPre.legs as approve+swap pairs)
+  // sit AHEAD of the route's legs, so ordinals count only POST-pre entries — the main swap
+  // stays ordinal 0 no matter how many funding legs precede it. A pre-swap itself reads as
+  // -1: it is never the record's hop/dest swap (its payout has no out*/hop* facts to probe).
+  const preLegCount = rec.gasPre != null ? rec.gasPre.legs.length * 2 : 0;
+  const isPreLeg = (idx: number): boolean => idx < preLegCount;
   const swapOrdinalOf = (idx: number): number =>
-    (rec.legPlan ?? []).slice(0, idx).filter(l => l.kind === 'swap').length;
+    idx < preLegCount
+      ? -1
+      : (rec.legPlan ?? []).slice(preLegCount, idx).filter(l => l.kind === 'swap').length;
 
   // Parked mid-route on the hop watch: resolve the row FIRST — it is the swap leg's
   // confirmation and the gate every later leg waits behind. The hub widening (2026-09-18):
@@ -2211,13 +2484,36 @@ async function executePlannedConvert(
     const plan = rec.legPlan?.[i];
     if (leg == null || plan == null) return rec; // hydration guarantees parallelism; refuse to improvise
     if (convertAborted(rec.id)) return tools.advance(rec); // the user's Stop: freeze, never sign or submit another leg
+    // The POST-PRE-LEG RE-CHECK (2026-09-20): before the approve_gas envelope may leave,
+    // the ACTUAL in-wallet gas-ledger balance must cover the frozen neededWei. This read is
+    // also the funding pre-legs' settlement evidence — a pre-swap #ok only means the pool
+    // accepted at its own floor; the BALANCE is what the burn legs will actually spend.
+    // Short → the terminal failed card names the shortfall and NOTHING further is
+    // submitted: every unit of value sits in-wallet (the funded ckETH included), the hop
+    // swap never ran. An UNREADABLE balance is not a pass — the leg stays unsubmitted and
+    // the record stays live; the engine's next re-arm re-runs this gate.
+    if (plan.kind === 'approve_gas' && rec.gasPre != null) {
+      const balRaw = await railBalanceOf(deps.secretHex, leg.canister);
+      if (balRaw == null || !/^\d+$/.test(balRaw)) {
+        console.warn('gas-fund re-check: gas-ledger balance unreadable — holding the burn legs');
+        return rec;
+      }
+      const needed = BigInt(rec.gasPre.neededWei);
+      if (BigInt(balRaw) < needed) {
+        return tools.advance({...rec, step: 'failed_leg', failureCode: 'gas_short',
+          failureDetail: `gas-fund short: have ${balRaw} need ${rec.gasPre.neededWei}`});
+      }
+    }
     rec = await tools.advance(withLegState(rec, i, 'sent'));
     // Device-saved annotation for the swap-side legs only — the burn-side legs are the
     // Withdraw flow's own calls and carry no venue row to name (parity with WithdrawSheet).
     // On a hub record legs 3–4 are venue2's business (their ordinal ≥ 1); a Route A record
-    // has no venue2Id, so the ?? falls back to the same venue it always named.
+    // has no venue2Id, so the ?? falls back to the same venue it always named. A gas-fund
+    // pre-leg names its OWN venue (pair k = floor(i/2) in the pre-leg list).
     if (plan.kind === 'approve' || plan.kind === 'swap') {
-      const venue = swapOrdinalOf(i) >= 1 ? (rec.venue2Id ?? rec.venueId) : rec.venueId;
+      const venue = isPreLeg(i)
+        ? rec.gasPre!.legs[Math.floor(i / 2)]!.venueId
+        : swapOrdinalOf(i) >= 1 ? (rec.venue2Id ?? rec.venueId) : rec.venueId;
       void saveTxNote(deps.publicHex, {k: leg.requestIdHex, who: venueDisplayName(venue)}, opts.nowMs);
     }
     let legBlockIndex: string | null = null;
@@ -2244,6 +2540,13 @@ async function executePlannedConvert(
     }
     if (outcome !== 'settled') {
       const detail = outcome.rejected.detail || outcome.rejected.variant || '';
+      if (isPreLeg(i)) {
+        // A GAS-FUND leg refused: the funding did not deliver, the main conversion has NOT
+        // started, and the source asset never left the wallet. The honest dead-end is the
+        // gas_short failed card naming the refusal — never a phantom refund of a main flow
+        // that never ran, and never a push into the gas-less dead end.
+        return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'gas_short', failureDetail: detail}));
+      }
       if (plan.kind === 'approve' && leg.canister === rec.inLedger) {
         // The FIRST leg refused: nothing moved, no allowance exists — the direct flow's own
         // dead-end, verbatim.
@@ -2267,6 +2570,15 @@ async function executePlannedConvert(
       return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'withdraw_refused', failureDetail: detail}));
     }
     if (plan.kind === 'swap') {
+      if (isPreLeg(i)) {
+        // The funding swap's #ok: the pool accepted the trade atomically AT its own signed
+        // floor — the ckETH is in the wallet or the leg would have refused. The row-watch's
+        // settlement question is answered STRONGER by the balance re-check gate before
+        // approve_gas (an actual spendable read), so no hop-watch runs here and no
+        // pending_withdrawal can park on a funding leg.
+        rec = await tools.advance(withLegState(rec, i, 'confirmed'));
+        continue;
+      }
       // #ok: input spent, output owed — NOT confirmed. Watch the payout ledger before any
       // later leg may run; exhaustion parks on pending_withdrawal (the pool DID accept).
       // The hub widening: WHICH ledger follows the swap's ordinal — leg 1 watches the hub
