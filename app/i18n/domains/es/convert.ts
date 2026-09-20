@@ -44,6 +44,15 @@ export const convertEs: ConvertMessages = {
       // no cobra nada (el relay fija commissionRate «0»).
       sideshift: venue =>
         `${venue} es un servicio de intercambio automatizado — no un proveedor con licencia ni un banco. Retiene tus fondos durante el intercambio y luego paga a tu propia dirección; sus términos, incluidas las verificaciones de identidad según su política, están publicados en sideshift.ai/terms. Este monedero te muestra la cotización propia de ${venue} y la dirección de depósito, y dpay no firma nada. dpay no es parte del intercambio y no cobra nada.`,
+
+      // disclosure_key 'trocador' (la clave del registro para la primera fila CeFi de
+      // AGREGADOR, 2026-09-20): las mismas verdades CeFi que sideshift — un servicio de
+      // intercambio automatizado que retiene fondos durante el intercambio, términos
+      // nombrados, dpay no es parte y no cobra nada — más el hecho del agregador: la venue
+      // elige entre sus propios servicios (dpay nunca clasifica debajo de esa elección) y
+      // solo se le piden servicios sin verificación de identidad.
+      trocador: venue =>
+        `${venue} es un agregador de intercambio automatizado — dirige tu intercambio a uno de sus propios servicios de intercambio y retiene tus fondos durante el intercambio, y luego paga a tu propia dirección; sus términos, incluidas las verificaciones de identidad que un servicio pueda aplicar, están publicados en trocador.app/terms. dpay pide a ${venue} servicios sin verificación de identidad. Este monedero te muestra la cotización propia de ${venue} y la dirección de depósito, y dpay no firma nada. dpay no es parte del intercambio y no cobra nada.`,
     },
     generic: venue => `Esta conversión la ejecuta ${venue}.`,
   },

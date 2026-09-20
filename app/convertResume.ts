@@ -103,13 +103,24 @@ const PROVIDER_STATUS_MAP: Record<string, ProviderStatusReading['kind']> = {
   reversed: 'refunded',
 };
 
-/** Read a provider order status once (device-direct, https-only). Failures are outcomes, not
- *  exceptions — the caller advances nothing on 'unreachable' | 'unknown'. */
-export async function fetchProviderStatus(ref: {orderId: string; statusUrl?: string}): Promise<ProviderStatusReading> {
+/** Read a provider order status once (device-direct). Failures are outcomes, not
+ *  exceptions — the caller advances nothing on 'unreachable' | 'unknown'.
+ *
+ *  The URL gate: https always; a NON-https URL is refused UNLESS it is this session's own
+ *  relay origin — the one honest exception, added with the Trocador family (2026-09-20):
+ *  Trocador has NO keyless venue surface, so its status read is the relay's key-gated
+ *  proxy and the offline loop runs that relay on plain http. A hostile record cannot
+ *  smuggle an arbitrary http host past this: the origin must equal the relay's. */
+export async function fetchProviderStatus(
+  ref: {orderId: string; statusUrl?: string},
+  relayUrl?: string,
+): Promise<ProviderStatusReading> {
   const url = ref.statusUrl;
-  // Same guard as services/opencryptopay: a provider URL that is not https is never fetched.
-  if (url == null || !/^https:\/\//i.test(url)) {
-    console.warn('convert provider status: no https statusUrl, refusing to poll');
+  const isHttp = url != null && /^http:\/\//i.test(url);
+  const isRelayOrigin = isHttp && relayUrl != null && url.length > 0
+    && new URL(url).origin === new URL(relayUrl).origin;
+  if (url == null || (!/^https:\/\//i.test(url) && !isRelayOrigin)) {
+    console.warn('convert provider status: no https (or relay-origin) statusUrl, refusing to poll');
     return {kind: 'unreachable'};
   }
   try {
@@ -122,15 +133,26 @@ export async function fetchProviderStatus(ref: {orderId: string; statusUrl?: str
     if (kind === 'completed') {
       // SideShift's camelCase fields (settleAmount/settleHash) join the snake_case
       // precedents — the FIRST adapter's vocabulary, added additively.
+      // Trocador's `amount_to` (2026-09-20) joins additively — the SECOND adapter's
+      // settle-figure field, same rule: named off the venue's own documented body.
       const amount = typeof j.settled_amount === 'string' ? j.settled_amount
         : typeof j.amount_out === 'string' ? j.amount_out
         : typeof j.out_amount === 'string' ? j.out_amount
         : typeof j.settleAmount === 'string' ? j.settleAmount
+        : typeof j.amount_to === 'string' ? j.amount_to
+        : undefined;
+      // Trocador carries its payout hash NESTED (details.hashout) — read defensively,
+      // never assuming the wrapper exists.
+      const details = (j as {details?: unknown}).details;
+      const hashout = details != null && typeof details === 'object'
+        && typeof (details as {hashout?: unknown}).hashout === 'string'
+        ? (details as {hashout: string}).hashout
         : undefined;
       const tx = typeof j.tx_id === 'string' ? j.tx_id
         : typeof j.transaction_id === 'string' ? j.transaction_id
         : typeof j.tx === 'string' ? j.tx
         : typeof j.settleHash === 'string' ? j.settleHash
+        : hashout !== undefined ? hashout
         : undefined;
       return {kind: 'completed', amount, tx};
     }
@@ -159,10 +181,13 @@ export async function advanceProviderRecord(
    *  poll that outlived an identity switch persists NOTHING — the stale drive's record must
    *  never land in the new identity's scoped store. Direct callers omit it (always live). */
   stillMine: () => boolean = () => true,
+  /** The session's relay URL — the fetchProviderStatus http-exception's origin anchor
+   *  (the Trocador family's status read rides the relay's key-gated proxy). */
+  relayUrl?: string,
 ): Promise<ConvertRecord> {
   const ref = record.providerRef;
   if (ref == null) return record; // hydrate guarantees this cannot happen; the guard is for honesty
-  const reading = await fetchProviderStatus(ref);
+  const reading = await fetchProviderStatus(ref, relayUrl);
   const from = record.step;
   const inAwaiting = from === 'awaiting_user_authorization' || from === 'awaiting_deposit';
   const apply = async (next: ConvertRecord): Promise<ConvertRecord> => {
@@ -514,7 +539,7 @@ async function driveOne(id: string): Promise<void> {
           notify();
         }
       } else if (rec.providerRef != null) {
-        next = await advanceProviderRecord(rec, mine);
+        next = await advanceProviderRecord(rec, mine, ctx.relayUrl);
         if (!mine()) return; // stale drive — no post-run write, no re-arm
         if (next !== rec) {
           const before = state.records.get(id)?.step;

@@ -68,6 +68,7 @@ import {gasFundRoutes, type GasFundRoute, type HubRoute, type MultihopRoute} fro
 import {
   BUNDLED_VENUES,
   DPAY_CANISTER_PRINCIPALS,
+  cefiFamilyOf,
   cefiOtherSide,
   icAmmVenueForPair,
   registeredVenues,
@@ -80,11 +81,17 @@ import {
 import {saveTxNote} from './services/txNotes';
 import {fetchJupiterQuote, fetchJupiterSwapTx, type JupiterQuote} from './services/jupiter';
 import {
+  createSideShiftFixedShift,
   fetchSideShiftQuote,
   sideShiftStatusUrl,
   type SideShiftFixedShift,
-  type SideShiftQuoteResult,
 } from './services/sideshift';
+import {
+  createTrocadorTrade,
+  fetchTrocadorQuote,
+  trocadorStatusUrl,
+  type TrocadorTrade,
+} from './services/trocador';
 import {deriveSolanaKeypair} from './solana/identity';
 import {deriveAta} from './solana/spl';
 import {
@@ -260,7 +267,7 @@ export function ceFiQuoteFromResult(
   tokenInLedger: string,
   tokenOutLedger: string,
   amountIn: string,
-  result: SideShiftQuoteResult,
+  result: {settleAmount: string; fetchedAtMs: number},
   outDecimals: number,
 ): ConvertQuote {
   return {
@@ -274,6 +281,103 @@ export function ceFiQuoteFromResult(
     feeMillionths: 0,
     fetchedAtMs: result.fetchedAtMs,
   };
+}
+
+/** The raw quote a cefi family's service returned, normalized for the confirm path:
+ *  `quoteId` is SideShift's order-creation key; `rateId` + `provider` are Trocador's
+ *  (the aggregator names the backend the trade must name back). Exactly one family's
+ *  key is non-null — the dispatchers below guarantee it. */
+export type CeFiQuoteResult = {
+  readonly settleAmount: string;
+  readonly rate: string | null;
+  readonly fetchedAtMs: number;
+  readonly quoteId: string | null;
+  readonly rateId: string | null;
+  readonly provider: string | null;
+};
+
+/** Fetch ONE cefi quote through the family's own service — the ONE dispatch point for
+ *  the confirm-time re-quote (the review quote flows through fetchCeFiConvertQuote).
+ *  Unknown cefi family: refused, never defaulted. */
+export async function fetchCeFiQuoteResult(
+  relayUrl: string,
+  venue: VenueEntry,
+  depositLedger: string,
+  settleLedger: string,
+  depositAmountDecimal: string,
+  timeoutMs?: number,
+): Promise<CeFiQuoteResult> {
+  switch (cefiFamilyOf(venue)) {
+    case 'sideshift': {
+      const r = await fetchSideShiftQuote(
+        relayUrl, venue, depositLedger, settleLedger, depositAmountDecimal, timeoutMs,
+      );
+      return {
+        settleAmount: r.settleAmount,
+        rate: r.rate,
+        fetchedAtMs: r.fetchedAtMs,
+        quoteId: r.quoteId,
+        rateId: null,
+        provider: null,
+      };
+    }
+    case 'trocador': {
+      const r = await fetchTrocadorQuote(
+        relayUrl, venue, depositLedger, settleLedger, depositAmountDecimal, timeoutMs,
+      );
+      return {
+        settleAmount: r.settleAmount,
+        rate: null,
+        fetchedAtMs: r.fetchedAtMs,
+        quoteId: null,
+        rateId: r.rateId,
+        provider: r.provider,
+      };
+    }
+    default:
+      throw new Error('refused');
+  }
+}
+
+/** Create ONE cefi order through the family's own service — the ONE dispatch point for
+ *  the confirm path. Both families refuse an order without the user's OWN refund
+ *  address (the relay re-validates it rail-scoped; the fund-loss guard). */
+export async function createCeFiOrder(
+  relayUrl: string,
+  venue: VenueEntry,
+  quote: CeFiQuoteResult,
+  args: {
+    settleAddress: string;
+    refundAddress: string;
+    depositLedger: string;
+    settleLedger: string;
+    depositAmountDecimal: string;
+  },
+  timeoutMs?: number,
+): Promise<SideShiftFixedShift | TrocadorTrade> {
+  switch (cefiFamilyOf(venue)) {
+    case 'sideshift':
+      return createSideShiftFixedShift(relayUrl, venue, {
+        quoteId: quote.quoteId ?? '',
+        settleAddress: args.settleAddress,
+        refundAddress: args.refundAddress,
+        depositLedger: args.depositLedger,
+      }, timeoutMs);
+    case 'trocador': {
+      if (quote.rateId == null || quote.provider == null) throw new Error('shape');
+      return createTrocadorTrade(relayUrl, venue, {
+        rateId: quote.rateId,
+        provider: quote.provider,
+        settleAddress: args.settleAddress,
+        refundAddress: args.refundAddress,
+        depositLedger: args.depositLedger,
+        settleLedger: args.settleLedger,
+        depositAmount: args.depositAmountDecimal,
+      }, timeoutMs);
+    }
+    default:
+      throw new Error('refused');
+  }
 }
 
 export async function fetchCeFiConvertQuote(
@@ -291,7 +395,7 @@ export async function fetchCeFiConvertQuote(
   }
   let result;
   try {
-    result = await fetchSideShiftQuote(
+    result = await fetchCeFiQuoteResult(
       relayUrl, venue, tokenInLedger, tokenOutLedger,
       rawToDecimal(amountIn, opts.inDecimals), opts.timeoutMs,
     );
@@ -1465,7 +1569,13 @@ export async function prepareConvertRecord(args: {
  *  path, so a relay outage cannot blind an in-flight order. */
 export function prepareCeFiConvertRecord(args: {
   quote: ConvertQuote;
-  order: SideShiftFixedShift;
+  /** The family's own order — SideShiftFixedShift (id) or TrocadorTrade (tradeId);
+   *  normalized below. */
+  order: SideShiftFixedShift | TrocadorTrade;
+  /** The relay this phone talks to — the TROCADOR family's statusUrl points AT the relay
+   *  (its status read is key-gated; there is no keyless venue host to poll). Unused for
+   *  the sideshift family (its status host is keyless device-direct). */
+  relayUrl: string;
   settleAddress: string;
   /** The IC catalog currency of the INPUT — null when the input lives on ANOTHER rail
    *  (the SOL-side cefi surface converts a SPL asset; hydration's cefi exemption covers
@@ -1493,7 +1603,13 @@ export function prepareCeFiConvertRecord(args: {
   if (order.depositAmount !== quotedDeposit) {
     throw new Error(M.convert.errors.quoteUnavailable('deposit'));
   }
-  if (settleAddress.length === 0 || order.id.length === 0) {
+  const orderId = 'id' in order ? order.id : order.tradeId;
+  if (settleAddress.length === 0 || orderId.length === 0) {
+    throw new Error(M.convert.errors.quoteUnavailable('order'));
+  }
+  if (cefiFamilyOf(venue) === 'trocador' && args.relayUrl.length === 0) {
+    // A trocador record without a relay to poll can never advance: refuse at birth
+    // rather than strand the user in awaiting_deposit forever.
     throw new Error(M.convert.errors.quoteUnavailable('order'));
   }
   const expiresAtMs = order.expiresAt != null ? Date.parse(order.expiresAt) : NaN;
@@ -1521,8 +1637,14 @@ export function prepareCeFiConvertRecord(args: {
     slippageBps: 0, // a fixed shift is a locked rate — there is no slippage axis
     legs: [],
     providerRef: {
-      orderId: order.id,
-      statusUrl: sideShiftStatusUrl(order.id),
+      orderId,
+      // The sideshift family's status read is the venue's own KEYLESS device-direct GET
+      // (the relay is not in the status path). The trocador family has NO keyless surface
+      // — its status rides the relay's key-gated proxy, so the URL points there; the
+      // resume engine allows that one http shape only when it matches the relay origin.
+      statusUrl: cefiFamilyOf(venue) === 'trocador'
+        ? trocadorStatusUrl(args.relayUrl, orderId)
+        : sideShiftStatusUrl(orderId),
     },
     providerDeposit: {
       depositAddress: order.depositAddress,

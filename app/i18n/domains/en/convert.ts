@@ -451,6 +451,14 @@ export const convertEn: ConvertMessages = {
       // commissionRate "0"). The venue row detail renders this in full.
       sideshift: venue =>
         `${venue} is an automated exchange service — not a licensed provider and not a bank. It holds your funds mid-trade, then pays out to your own address; its terms, including any identity checks under its policy, are published at sideshift.ai/terms. This wallet shows you ${venue}'s own quote and deposit address and nothing is signed by dpay. dpay is not a party to the trade and is paid nothing.`,
+
+      // disclosure_key 'trocador' (the registry's key for the first AGGREGATOR CeFi venue,
+      // 2026-09-20): the same CeFi truths as sideshift — an automated exchange service
+      // holding funds mid-trade, terms named, dpay a non-party paid nothing — plus the
+      // aggregate fact: the venue picks among its own backends (dpay never ranks beneath
+      // that pick), and dpay asks it for non-KYC backends only.
+      trocador: venue =>
+        `${venue} is an automated exchange aggregator — it routes your trade to one of its own exchange backends and holds your funds mid-trade, then pays out to your own address; its terms, including any identity checks a backend may apply, are published at trocador.app/terms. dpay asks ${venue} for backends that require no identity verification. This wallet shows you ${venue}'s own quote and deposit address and nothing is signed by dpay. dpay is not a party to the trade and is paid nothing.`,
     },
     generic: venue => `This conversion is executed by ${venue}.`,
   },

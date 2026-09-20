@@ -355,6 +355,19 @@ export function cefiVenuesForLedger(depositLedger: string): readonly VenueEntry[
   );
 }
 
+/** Which cefi ADAPTER serves this row — the key that dispatches the device-side service
+ *  calls (quote/order creation/status-URL building) and the record's statusUrl shape.
+ *  Keyed on the venue_id prefix (the registry's own naming convention: rows of one venue
+ *  family share it — sideshift, sideshift-usdc, … / trocador, trocador-usdc, …), because
+ *  the PAIR no longer disambiguates a cefi row (the trocador row trades the same ICP↔SOL
+ *  pair as the sideshift row). Null = not a cefi row this app can drive. */
+export function cefiFamilyOf(v: VenueEntry): 'sideshift' | 'trocador' | null {
+  if (v.kind !== 'cefi') return null;
+  if (v.venue_id === 'sideshift' || v.venue_id.startsWith('sideshift-')) return 'sideshift';
+  if (v.venue_id === 'trocador' || v.venue_id.startsWith('trocador-')) return 'trocador';
+  return null;
+}
+
 function samePair(pair: readonly string[], other: readonly string[]): boolean {
   return (
     pair.length === other.length &&

@@ -56,6 +56,9 @@ import {BUNDLED_VENUES, cefiOtherSide, cefiVenuesForLedger, venueDisplayName, ve
 import {
   buildCctpHandoff,
   ceFiQuoteFromResult,
+  createCeFiOrder,
+  fetchCeFiQuoteResult,
+  type CeFiQuoteResult,
   ceFiServiceError,
   convertAbortFlavor,
   convertRecordMinOut,
@@ -90,7 +93,6 @@ import {
 } from '../convertResume';
 import {cctpMaxFee, cctpMintFloor, fetchEthBalance} from '../cctp';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
-import {createSideShiftFixedShift, fetchSideShiftQuote, type SideShiftQuoteResult} from '../services/sideshift';
 import {DpayCore} from '../services/native';
 import {deriveSolanaAddress} from '../solana/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
@@ -1159,9 +1161,9 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         // the order is both the lock and the consent point: the user sends exactly its
         // deposit figure, or nothing (prepare still refuses an order whose depositAmount
         // is not the quoted deposit).
-        let freshRes: SideShiftQuoteResult;
+        let freshRes: CeFiQuoteResult;
         try {
-          freshRes = await fetchSideShiftQuote(
+          freshRes = await fetchCeFiQuoteResult(
             relayUrl, activeCefiVenue, legs.inDesc.ledger, cefiOutMint,
             rawToDecimal(reviewed.amountIn, legs.inDecimals),
           );
@@ -1180,11 +1182,12 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         // address, and the relay refuses an order that omits it.
         let order;
         try {
-          order = await createSideShiftFixedShift(relayUrl, activeCefiVenue, {
-            quoteId: freshRes.quoteId,
+          order = await createCeFiOrder(relayUrl, activeCefiVenue, freshRes, {
             settleAddress: cefiSettleAddress,
             refundAddress: cefiRefundAddress,
             depositLedger: legs.inDesc.ledger,
+            settleLedger: cefiOutMint,
+            depositAmountDecimal: rawToDecimal(reviewed.amountIn, legs.inDecimals),
           });
         } catch (e) {
           throw ceFiServiceError(e, activeCefiVenue.display_name);
@@ -1192,6 +1195,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         const rec = prepareCeFiConvertRecord({
           quote: fresh,
           order,
+          relayUrl,
           settleAddress: cefiSettleAddress,
           inCurrency: legs.inDesc.currency,
           inSymbol: legs.inSym,
@@ -2755,7 +2759,7 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
       try {
         let freshRes;
         try {
-          freshRes = await fetchSideShiftQuote(relayUrl, venue, legs.inMint, legs.outLedger, rawToDecimal(amountRaw, legs.inDecimals));
+          freshRes = await fetchCeFiQuoteResult(relayUrl, venue, legs.inMint, legs.outLedger, rawToDecimal(amountRaw, legs.inDecimals));
         } catch (e) {
           throw ceFiServiceError(e, venueName);
         }
@@ -2765,11 +2769,12 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
           // SOL-side cefi: the DEPOSIT rail is Solana, so the refund address — where the
           // venue returns the funds on a failed deposit or expiry — is this wallet's own
           // derived Solana address. The relay refuses any order without a well-formed one.
-          order = await createSideShiftFixedShift(relayUrl, venue, {
-            quoteId: freshRes.quoteId,
+          order = await createCeFiOrder(relayUrl, venue, freshRes, {
             settleAddress: icSettleAddress,
             refundAddress: solRefundAddress,
             depositLedger: legs.inMint,
+            settleLedger: legs.outLedger,
+            depositAmountDecimal: rawToDecimal(amountRaw, legs.inDecimals),
           });
         } catch (e) {
           throw ceFiServiceError(e, venueName);
@@ -2777,6 +2782,7 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
         const rec = prepareCeFiConvertRecord({
           quote: fresh,
           order,
+          relayUrl,
           settleAddress: icSettleAddress,
           inCurrency: null, // the INPUT is a Solana-rail asset — no IC catalog currency
           inSymbol: legs.inSym,

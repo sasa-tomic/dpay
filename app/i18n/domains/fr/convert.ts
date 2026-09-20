@@ -44,6 +44,15 @@ export const convertFr: ConvertMessages = {
       // et ne touche rien (le relay épinglé commissionRate « 0 »).
       sideshift: venue =>
         `${venue} est un service d'échange automatisé — ni un prestataire agréé, ni une banque. Il détient tes fonds pendant l'échange, puis paie vers ta propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité selon sa politique, sont publiées sur sideshift.ai/terms. Ce portefeuille t'affiche le devis propre de ${venue} et l'adresse de dépôt, et dpay ne signe rien. dpay n'est pas partie à l'échange et ne touche rien.`,
+
+      // disclosure_key 'trocador' (la clé du registre pour la première ligne CeFI
+      // d'AGRÉGATEUR, 2026-09-20) : les mêmes vérités CeFi que sideshift — un service
+      // d'échange automatisé détenant les fonds pendant l'échange, conditions nommées,
+      // dpay n'est pas partie et ne touche rien — plus le fait d'agrégateur : la venue
+      // choisit parmi ses propres services (dpay ne classe jamais en dessous de ce choix)
+      // et on ne lui demande que des services sans vérification d'identité.
+      trocador: venue =>
+        `${venue} est un agrégateur d'échange automatisé — il dirige ton échange vers l'un de ses propres services d'échange et détient tes fonds pendant l'échange, puis paie vers ta propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité qu'un service peut appliquer, sont publiées sur trocador.app/terms. dpay demande à ${venue} des services sans vérification d'identité. Ce portefeuille t'affiche le devis propre de ${venue} et l'adresse de dépôt, et dpay ne signe rien. dpay n'est pas partie à l'échange et ne touche rien.`,
     },
     generic: venue => `Cette conversion est exécutée par ${venue}.`,
   },

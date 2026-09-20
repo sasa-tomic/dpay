@@ -195,10 +195,7 @@ describe('services/sideshift — the relay-proxied client', () => {
 describe('convert.ts — the cefi mapping helpers', () => {
   test('ceFiQuoteFromResult scales the venue DECIMAL into raw units exactly once, verbatim otherwise', () => {
     const quote = ceFiQuoteFromResult(VENUE, ICP_LEDGER, WRAPPED_SOL_MINT_ADDRESS, '200000000', {
-      venueId: 'sideshift',
-      quoteId: 'q-1',
       settleAmount: '0.0495',
-      rate: '0.02475',
       fetchedAtMs: 5,
     }, 9);
     expect(quote).toEqual({
@@ -254,7 +251,7 @@ describe('convert.ts — the cefi mapping helpers', () => {
 describe('config/venues — the cefi registry surface', () => {
   test('the bundled sideshift rows are the cross-rail shape: IC principal + Solana mint, https base', () => {
     const rows = BUNDLED_VENUES.filter(v => v.kind === 'cefi');
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4); // three SideShift rows + the trocador aggregator (2026-09-20)
     const ss = rows[0]!;
     expect(ss.venue_id).toBe('sideshift');
     expect(ss.endpoint).toBe('https://sideshift.ai/api/v2');
@@ -280,6 +277,16 @@ describe('config/venues — the cefi registry surface', () => {
     expect(ssEurc.testnet).toBe(false);
     expect(ssEurc.disclosure_key).toBe('sideshift');
     expect([...ssEurc.pair_ledgers].sort()).toEqual([ICP_LEDGER, EURC_MINT_ADDRESS].sort());
+    // The FOURTH cefi row (2026-09-20, the first AGGREGATOR): Trocador — a DIFFERENT venue
+    // trading the SAME ICP ↔ SOL pair as the first sideshift row (the pair no longer
+    // disambiguates a cefi row; cefiFamilyOf keys the adapter dispatch).
+    const troc = rows[3]!;
+    expect(troc.venue_id).toBe('trocador');
+    expect(troc.display_name).toBe('Trocador');
+    expect(troc.endpoint).toBe('https://api.trocador.app');
+    expect(troc.testnet).toBe(false);
+    expect(troc.disclosure_key).toBe('trocador');
+    expect([...troc.pair_ledgers].sort()).toEqual([ICP_LEDGER, WRAPPED_SOL_MINT_ADDRESS].sort());
   });
 
   test('cefiOtherSide answers only the registered pair, either direction; cefiVenuesForLedger finds the row', () => {
@@ -287,8 +294,9 @@ describe('config/venues — the cefi registry surface', () => {
     expect(cefiOtherSide(VENUE, WRAPPED_SOL_MINT_ADDRESS)).toBe(ICP_LEDGER);
     expect(cefiOtherSide(VENUE, 'ly36x-wiaaa-aaaai-aqj7q-cai')).toBeNull();
     expect(cefiVenuesForLedger(ICP_LEDGER).map(v => v.venue_id))
-      .toEqual(['sideshift', 'sideshift-usdc', 'sideshift-eurc']);
-    expect(cefiVenuesForLedger(WRAPPED_SOL_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['sideshift']);
+      .toEqual(['sideshift', 'sideshift-usdc', 'sideshift-eurc', 'trocador']);
+    expect(cefiVenuesForLedger(WRAPPED_SOL_MINT_ADDRESS).map(v => v.venue_id))
+      .toEqual(['sideshift', 'trocador']); // two VENUES on one pair — the aggregator joins the list
     expect(cefiVenuesForLedger(USDC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['sideshift-usdc']);
     expect(cefiVenuesForLedger(EURC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['sideshift-eurc']);
     expect(cefiVenuesForLedger('ly36x-wiaaa-aaaai-aqj7q-cai')).toEqual([]);
@@ -321,6 +329,7 @@ describe('prepareCeFiConvertRecord — red lines, then the handoff record', () =
   const args = {
     quote,
     order,
+    relayUrl: 'https://relay.example',
     settleAddress: 'SolSettleAddr',
     inCurrency: 8,
     inSymbol: 'ICP',
@@ -386,6 +395,7 @@ describe('prepareCeFiConvertRecord — red lines, then the handoff record', () =
 // --- hydration: the cefi widening -------------------------------------------------------------------
 describe('hydrateConvertStore — the cefi record survives without numeric currencies', () => {
   const cefiRecord = prepareCeFiConvertRecord({
+    relayUrl: 'https://relay.example',
     quote: {
       venueId: 'sideshift',
       pool: 'https://sideshift.ai/api/v2',

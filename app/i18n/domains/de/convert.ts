@@ -45,6 +45,15 @@ export const convertDe: ConvertMessages = {
       // wird nicht bezahlt (das Relay pinnt commissionRate „0").
       sideshift: venue =>
         `${venue} ist ein automatisierter Tauschdienst — kein lizenzierter Anbieter und keine Bank. Er hält deine Mittel während des Tauschs und zahlt dann an deine eigene Adresse aus; seine Bedingungen, einschließlich etwaiger Identitätsprüfungen nach seiner Policy, sind unter sideshift.ai/terms veröffentlicht. Diese Wallet zeigt dir ${venue}s eigenen Kurs und die Einzahlungs-Adresse, und von dpay wird nichts signiert. dpay ist keine Partei des Tauschs und wird nicht bezahlt.`,
+
+      // disclosure_key 'trocador' (der Registry-Schlüssel der ersten AGGREGATOR-CeFi-Zeile,
+      // 2026-09-20): dieselben CeFi-Wahrheiten wie sideshift — ein automatisierter
+      // Tauschdienst, der Mittel während des Tauschs hält, genannte Bedingungen, dpay ist
+      // keine Partei und wird nicht bezahlt — plus die Aggregator-Tatsache: Die Venue wählt
+      // unter ihren eigenen Anbietern (dpay rangiert darunter nie) und wird nur um Anbieter
+      // ohne Identitätsprüfung gebeten.
+      trocador: venue =>
+        `${venue} ist ein automatisierter Tausch-Aggregator — er leitet deinen Tausch an einen seiner eigenen Tausch-Anbieter weiter, hält deine Mittel während des Tauschs und zahlt dann an deine eigene Adresse aus; seine Bedingungen, einschließlich etwaiger Identitätsprüfungen eines Anbieters, sind unter trocador.app/terms veröffentlicht. dpay bittet ${venue} um Anbieter ohne Identitätsprüfung. Diese Wallet zeigt dir ${venue}s eigenen Kurs und die Einzahlungs-Adresse, und von dpay wird nichts signiert. dpay ist keine Partei des Tauschs und wird nicht bezahlt.`,
     },
     generic: venue => `Diese Umwandlung wird von ${venue} ausgeführt.`,
   },
