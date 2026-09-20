@@ -488,7 +488,7 @@ async function cmdB(icpAmount) {
 
     // Was the deposit already sent by the app's confirm flow? (CeFi handoff design says the user
     // sends it — but measure, never assume.) agent-history shows recent ICP ledger transfers.
-    const histBefore = agentHistory();
+    const histBefore = await agentHistory();
     if (histBefore.split('\n').filter(Boolean).length === 0) throw new Error('agent-history empty?');
 
     // Send the deposit through the app's OWN send surface (Pay ▸ Send to address) — a signed
@@ -566,6 +566,137 @@ async function cmdC2(usdcAmount) {
   });
 }
 
+async function cmdBSendSol(address, amount) {
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address ?? '')) throw new Error(`b-send-sol: destination is not a base58 SOL address: ${address}`);
+  if (!/^\d+(\.\d+)?$/.test(amount ?? '')) throw new Error(`b-send-sol: bad amount ${amount}`);
+  log(`b-send-sol: ${amount} EURC -> ${address}`);
+  await withApp(async (driver) => {
+    await openBalances(driver);
+    await selectCurrency(driver, 'sol-eurc');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    await driver.type('send-address-input', address);
+    await driver.type('send-amount-input', amount);
+    await sleep(1_000);
+    const reviewTo = await driver.readText('send-review-to');
+    log(`send review → ${reviewTo}`);
+    if (!reviewTo.includes(address.slice(0, 8))) {
+      await driver.screenshot('live-c4-send-review');
+      throw new Error(`b-send-sol: review does not echo the destination — refusing (${reviewTo})`);
+    }
+    await driver.screenshot('live-c4-send-review');
+    await driver.click('btn-send-confirm');
+    await driver.waitForText('send-outcome', {timeoutMs: 90_000});
+    const outcome = await driver.readText('send-outcome');
+    log(`SEND OUTCOME: ${outcome}`);
+    await driver.screenshot('live-c4-sent');
+  });
+}
+
+  // OP 1c — the RETURN shift: EURC(SOL)→ICP through the SOL-side cefi destination group
+  // (convert-sol-dest-cefi-sideshift-eurc — the merge's new surface). Deposit = the SPL
+  // transfer the UI instructs (self-send handoff to the shift's deposit address); payout
+  // lands at the float's OWN derived IC principal.
+async function cmdC4(eurcAmount) {
+  await withApp(async (driver) => {
+    await openConvert(driver, 'sol-eurc'); // SOURCE is the SOL rail's EURC token row
+    await driver.type('convert-amount', eurcAmount);
+    const cefiRow = 'convert-sol-dest-cefi-sideshift-eurc';
+    await driver.click(cefiRow);
+    log(`dest picked: ${cefiRow}`);
+    await driver.findByTestID('convert-settle-address', {timeoutMs: 30_000});
+    const settle = await driver.readText('convert-settle-address');
+    log(`settle address: ${settle}`);
+    if (!settle.includes('vloyo-oihno-j4uba-nhhke-zyh34-s2r4g-kwgx3-qkzzk-4svfu-focgr-5ae')) {
+      await driver.screenshot('live-c4-settle');
+      throw new Error(`OP 1c: settle address is not the float's own IC principal — refusing (${settle})`);
+    }
+    for (let i = 0; i < 30; i++) {
+      if (await driver.isPresent('convert-quote-source')) break;
+      await sleep(1_000);
+    }
+    const qsrc = await driver.readText('convert-quote-source');
+    log(`quote source: ${qsrc}`);
+    if (!/SideShift/i.test(qsrc)) {
+      await driver.screenshot('live-c4-quote-failure');
+      throw new Error(`OP 1c: quote source is not SideShift — refusing`);
+    }
+    await driver.screenshot('live-c4-quote');
+    const facts = await confirmWithRequote(driver, 'C4', {cefi: true});
+    if (facts == null) throw new Error('OP 1c: confirm did not reach awaiting-deposit');
+    log(`DEPOSIT FACTS: ${JSON.stringify(facts, null, 2)}`);
+    await driver.screenshot('live-c4-awaiting-deposit');
+    const m = facts.depositAmountLine.match(/([\d.]+)\s*EURC/);
+    if (!m) throw new Error(`OP 1c: cannot parse EURC deposit amount from "${facts.depositAmountLine}"`);
+    const depositAmount = m[1];
+    // The handoff: send the venue's exact deposit via the app's own Pay▸Send (SPL transfer).
+    await openBalances(driver);
+    await selectCurrency(driver, 'sol-eurc');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    // The send form can be gated by a transient offline state (the balance poll's online flag
+    // flips false on one failed IC read) — click the panel's recheck until the form renders.
+    for (let i = 0; i < 10; i++) {
+      if (await driver.isPresent('sol-send-address-input')) break;
+      if (await driver.isPresent('sol-send-offline-check')) {
+        log('offline gate up — rechecking');
+        await driver.click('sol-send-offline-check');
+      }
+      await sleep(1_500);
+    }
+    try {
+      await driver.type('sol-send-address-input', facts.depositAddress);
+      await driver.type('sol-send-amount-input', depositAmount);
+    } catch (e) {
+      log(`OP 1c send form failure: ${e.message}`);
+      log(`SEND SURFACE: ${(await driver.bodyText()).replace(/\s+/g, ' ').slice(0, 1200)}`);
+      await driver.screenshot('live-c4-send-form');
+      throw e;
+    }
+    await sleep(1_000);
+    // Echo check: the sheet's review card prints the destination as TEXT — poll the body for
+    // the deposit address prefix (input-value reads race AddressField remounts).
+    let echoed = false;
+    for (let i = 0; i < 20; i++) {
+      if ((await driver.bodyText()).includes(facts.depositAddress.slice(0, 10))) { echoed = true; break; }
+      await sleep(500);
+    }
+    log(`send review echo: ${echoed ? 'ok' : 'MISSING'}`);
+    if (!echoed) {
+      await driver.screenshot('live-c4-send-review');
+      throw new Error('OP 1c: send form never echoed the venue deposit address — refusing');
+    }
+    await driver.screenshot('live-c4-send-review');
+    try {
+      await driver.click('btn-sol-send-confirm');
+    } catch (e) {
+      log(`confirm click failed: ${e.message}`);
+      log(`POST-ECHO SURFACE: ${(await driver.bodyText()).replace(/\s+/g, ' ').slice(0, 1200)}`);
+      await driver.screenshot('live-c4-confirm-gone');
+      // DOM-level click fallback (probe-confirm lesson: React synthetic events receive it).
+      const clicked = await (await driver.page.$('body')).evaluate(() => {
+        const btn = document.querySelector('[data-testid="btn-sol-send-confirm"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      });
+      log(`DOM fallback click: ${clicked}`);
+      if (!clicked) throw e;
+    }
+    const outcome = await driver.readText('sol-send-outcome', {timeoutMs: 120_000});
+    let sig = '';
+    try { sig = await driver.readText('sol-send-signature', {timeoutMs: 5_000}); } catch {}
+    log(`DEPOSIT SENT: ${outcome} | sig ${sig}`);
+    await driver.screenshot('live-c4-sent');
+    // Back to Convert: the persisted record adopts and the watch follows it to done.
+    await selectCurrency(driver, 'sol-eurc');
+    await driver.click('btn-accounts-convert');
+    const res = await watchConvert(driver, 'c4', {timeoutMs: 25 * 60_000});
+    log(`OP 1c result: ${res.ended}: ${res.text}`);
+  });
+}
+
+
 async function cmdC3(eurcAmount) {
   await withApp(async (driver) => {
     await openConvert(driver, 'sol-eurc'); // the SOURCE is the SOL rail's EURC token row
@@ -637,7 +768,7 @@ async function confirmWithRequote(driver, label, opts = {}) {
       // No recognized state — dump the surface so the actual post-click state is evidence,
       // not guesswork (verbatim errors are findings).
       log(`[${label}] confirm attempt ${attempt}: no recognized state — SURFACE NOW: ${bodyNow.slice(0, 1400)}`);
-      await driver.shot(`live-${label.toLowerCase()}-after-confirm-${attempt}`);
+      await driver.screenshot(`live-${label.toLowerCase()}-after-confirm-${attempt}`);
       await sleep(1_500);
     }
   }
@@ -698,6 +829,8 @@ try {
   else if (cmd === 'conv-c1') await cmdC1(args[0]);
   else if (cmd === 'conv-c2') await cmdC2(args[0]);
   else if (cmd === 'conv-c3') await cmdC3(args[0]);
+  else if (cmd === 'conv-c4') await cmdC4(args[0]);
+  else if (cmd === 'b-send-sol') await cmdBSendSol(args[0], args[1]);
   else if (cmd === 'watch') await cmdWatch();
   else if (cmd === 'b-send') await cmdBSend(args[0], args[1]);
   else if (cmd === 'assets') await withApp(async (driver) => {

@@ -11,4 +11,8 @@ export DPAY_SIDESHIFT_SECRET="$(node -e 'console.log(JSON.parse(require("fs").re
 unset CREDS
 export DPAY_LEDGER=ic DPAY_CANISTER_ID=ssqti-wiaaa-aaaab-qhdia-cai DPAY_IC_URL=https://icp-api.io
 export DPAY_RELAY_ADDR=127.0.0.1:8899
+# SOL RPC proxy — without this the relay answers /api/v1/solana/rpc 503 and every device-side
+# submit/balance read on the SOL rail dies (found live 2026-09-20: c1 submit parked
+# convert-stuck, nothing on-chain). The app derives its RPC list from the relay bases.
+export DPAY_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 exec ./target/debug/dpay-relay

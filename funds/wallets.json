@@ -22,6 +22,17 @@
       "purpose": "Solana-side float (native SOL + USDC/EURC SPL); funded via the SideShift partner key (secrets/sideshift.sops.json) or a direct founder drip"
     },
     {
+      "id": "evm-float",
+      "chain": "evm",
+      "address": "0x6B1C4D33832ba8B21Fa454C1F16E332D4c1183b9",
+      "status": "live",
+      "custody": "sops key only (secrets/agent-evm.sops.json; no signing script yet — gas funder sends IN, spends need the key imported into standard tooling)",
+      "secret": "secrets/agent-evm.sops.json",
+      "rpc": "https://ethereum-rpc.publicnode.com",
+      "created": "2026-09-20",
+      "purpose": "Dust EVM wallet — the OP2 gas-funder live proof: native-ETH gas destination for cross-rail converts (CCTP burns user-side to Ethereum; USDC lands at this address). Keyed by a fresh secp256k1 keypair; EIP-55 address committed plaintext in secrets/agent-evm.pub.json"
+    },
+    {
       "id": "icp-float-old",
       "chain": "icp",
       "address": "lrdna-ain6m-ja6ko-ac4j2-jqk3t-nqs22-4irws-bsm3b-trzzq-3yfz6-mqe",

@@ -216,7 +216,10 @@ function computed() {
  *  implementation per chain; the abandoned principal needs no key at all). */
 function measure(w) {
   const script = w.status === 'abandoned-never-fund' ? [KEY, 'balance', w.address, '--json']
-    : w.chain === 'icp' ? [KEY, 'balance', '--json'] : [SOL, 'balance', '--json'];
+    : w.chain === 'icp' ? [KEY, 'balance', '--json']
+    : w.chain === 'solana' ? [SOL, 'balance', '--json'] : null;
+  if (script == null && w.chain !== 'evm') { /* unknown chain falls through to null */ }
+  if (w.chain === 'evm') return measureEvm(w);
   try {
     const out = execFileSync(process.execPath, script, {
       encoding: 'utf8', cwd: ROOT, timeout: 300_000, stdio: ['ignore', 'pipe', 'inherit'],
@@ -224,6 +227,23 @@ function measure(w) {
     return JSON.parse(out);
   } catch (e) {
     return null; // every pair of this wallet becomes UNKNOWN — never zero
+  }
+}
+
+/** EVM measurement — keyless read-only, publicnode eth_getBalance (native ETH only; ERC-20s
+ *  would each need a contract call, added when a wallet actually holds one). ~15 lines by
+ *  design (founder note 2026-09-20): a fuller `funds balance` EVM command waits for need. */
+function measureEvm(w) {
+  try {
+    const res = JSON.parse(execFileSync('curl', [
+      '-s', '--max-time', '20', w.rpc ?? 'https://ethereum-rpc.publicnode.com',
+      '-X', 'POST', '-H', 'content-type: application/json',
+      '-d', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [w.address, 'latest'] }),
+    ], { encoding: 'utf8', timeout: 30_000 }));
+    if (typeof res.result !== 'string') throw new Error(res.error?.message ?? 'no result');
+    return { rows: [{ label: 'ETH', value: BigInt(res.result).toString() }] };
+  } catch (e) {
+    return null; // UNKNOWN — never zero
   }
 }
 
@@ -275,6 +295,11 @@ function cmdBalance() {
   const w = resolveWallet(process.argv[3]);
   if (w.chain === 'icp') run(KEY, ['balance', w.address]); // explicit principal: keyless, byte-identical
   else if (w.chain === 'solana') run(SOL, ['balance']);
+  else if (w.chain === 'evm') { // keyless read-only census (measureEvm shares it)
+    const m = measureEvm(w);
+    if (!m) die(`evm-float: eth_getBalance failed (rpc ${w.rpc}) — UNKNOWN, never zero`);
+    for (const r of m.rows) console.log(`${r.label.padEnd(6)} ${r.value}`);
+  }
   else die(`wallet ${w.id} has unknown chain "${w.chain}"`);
 }
 
@@ -292,6 +317,7 @@ function cmdAddress() {
   }
   if (w.chain === 'icp') run(KEY, ['principal']);
   else if (w.chain === 'solana') run(SOL, ['principal']);
+  else if (w.chain === 'evm') console.log(w.address); // public, committed in secrets/agent-evm.pub.json
   else die(`wallet ${w.id} has unknown chain "${w.chain}"`);
 }
 
