@@ -133,9 +133,9 @@ async function plannedRecord(over: Partial<ConvertRecord> = {}): Promise<Convert
 }
 
 describe('multihopRoutesFrom — the pure registry walk', () => {
-  test('ICP walks to exactly THREE routes: A (ckUSDC burn-withdraw), B (+CCTP), C (+CCTP+Jupiter)', () => {
+  test('ICP walks to exactly FOUR routes: A (ckUSDC burn-withdraw), B (+CCTP), C (+CCTP+Jupiter), C\u2032 (+CCTP+Jupiter-EURC)', () => {
     const routes = multihopRoutesFrom(BUNDLED, 8);
-    expect(routes).toHaveLength(3);
+    expect(routes).toHaveLength(4);
     const r = routes[0];
     expect(r.swapVenueId).toBe(VENUE_ID);
     expect(r.pool).toBe(POOL);
@@ -169,7 +169,19 @@ describe('multihopRoutesFrom — the pure registry walk', () => {
       outDecimals: 9,
     });
     expect(c.dest).toEqual({symbol: 'SOL', network: 'Solana'});
-    // The IC facts are identical across the three — cross-rail routes EXTEND A, never fork it.
+    // Route C′: B + the registered Jupiter leg USDC(SOL) → EURC (the 2026-09-16 generalization:
+    // ANY registered USDC-pair Solana token is a Route C out, not just wrapped SOL).
+    const cp = routes[3];
+    expect(cp.routeId).toBe('multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc');
+    expect(cp.crossRail!.cctp).toEqual(b.crossRail!.cctp);
+    expect(cp.crossRail!.sol).toEqual({
+      venueId: 'jupiter-usdc-eurc',
+      outMint: 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr',
+      outSymbol: 'EURC',
+      outDecimals: 6,
+    });
+    expect(cp.dest).toEqual({symbol: 'EURC', network: 'Solana'});
+    // The IC facts are identical across all of them — cross-rail routes EXTEND A, never fork it.
     for (const x of routes.slice(1)) {
       expect(x.from).toEqual(r.from);
       expect(x.hop).toEqual(r.hop);

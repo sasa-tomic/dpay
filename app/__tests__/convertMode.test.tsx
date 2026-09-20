@@ -35,6 +35,9 @@ jest.mock('../convert', () => ({
     ['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded'].includes(step),
   TERMINAL_CONVERT_STEPS: new Set(['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded']),
   convertAbortFlavor: () => 'clean',
+  // The gas-fund NEED derivation: the real arithmetic (fee + the engine's 20% headroom), so a
+  // test asserting the card's numbers reads the same digits the engine freezes into the record.
+  gasFundNeededWei: (feeWei: string) => ((BigInt(feeWei) * 120n) / 100n).toString(),
   convertRecordMinOut: jest.fn(async () => null),
   loadVenueRegistry: jest.fn(async () => []),
   fetchConvertQuote: jest.fn(),
