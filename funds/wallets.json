@@ -12,6 +12,17 @@
       "purpose": "The mainnet test float itself — `just funds` measures EVERY ICRC ledger in the bundled catalog (currently ICP / VCHF / ckUSDC / ckBTC / ckETH); rules in CLAUDE.md, record in funds/ledger.jsonl"
     },
     {
+      "id": "sol-rail",
+      "chain": "solana",
+      "address": "BzFNJywhJYtPKNZN8fefuiKetSCD8Uotw1ibuP8MkZgX",
+      "status": "live",
+      "custody": "scripts/agent-key.mjs (the IC float seed) + e2e/harness/jupiter.mjs deriveSolanaKeypair (no key of its own)",
+      "secret": "secrets/agent-icp.sops.json + SLIP-10 m/44'/501'/0'/0'",
+      "derived_from": {"wallet": "icp-float", "path": "m/44'/501'/0'/0'", "code": "e2e/harness/jupiter.mjs deriveSolanaKeypair (mirror of app/solana/identity.ts)"},
+      "created": "2026-09-20",
+      "purpose": "The app's OWN Solana rail — the address every in-app SOL/USDC/EURC action signs from and every CeFi shift settles at (derived from the IC float seed, so ONE backup recovers both rails); all SOL-rail movements record under THIS id, never icp-float"
+    },
+    {
       "id": "sol-float",
       "chain": "solana",
       "address": "4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU",
@@ -19,7 +30,7 @@
       "custody": "scripts/agent-sol.mjs",
       "secret": "secrets/agent-sol.sops.json",
       "created": "2026-09-19",
-      "purpose": "Solana-side float (native SOL + USDC/EURC SPL); funded via the SideShift partner key (secrets/sideshift.sops.json) or a direct founder drip"
+      "purpose": "Independent raw-seed SOL key created before the app's derived rail (sol-rail) was known — unused, no app code can sign from it; kept measured so it can never silently hold value"
     },
     {
       "id": "evm-float",

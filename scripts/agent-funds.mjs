@@ -31,7 +31,11 @@ import {dirname, join} from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WALLETS = join(ROOT, 'funds/wallets.json'); // committed registry — the single source
 
-const SCRIPT_OF = {icp: 'scripts/agent-key.mjs', solana: 'scripts/agent-sol.mjs'};
+const SCRIPT_OF = {icp: 'scripts/agent-key.mjs', solana: 'scripts/agent-sol.mjs', evm: 'scripts/agent-evm.mjs'};
+
+/** Chains whose `balance` takes an explicit public address (keyless). The IC census instead
+ *  measures EVERY catalog ledger for its own key's principal and takes no address here. */
+const TAKES_ADDRESS = new Set(['solana', 'evm']);
 
 function die(msg) {
   console.error(`agent-funds: ${msg}`);
@@ -54,7 +58,8 @@ function runBalance(entry) {
   const script = SCRIPT_OF[entry.chain];
   if (!script) { console.log(`  UNREADABLE (registry entry has unknown chain "${entry.chain}")`); return false; }
   try {
-    const out = execFileSync(process.execPath, [join(ROOT, script), 'balance'], {
+    const out = execFileSync(process.execPath,
+      [join(ROOT, script), 'balance', ...(TAKES_ADDRESS.has(entry.chain) ? [entry.address] : [])], {
       encoding: 'utf8', cwd: ROOT, timeout: 300_000,
       stdio: ['ignore', 'pipe', 'inherit'], // the child's own die() guidance must reach the user
     });
@@ -126,7 +131,7 @@ for (const w of wallets) {
     continue; // never funded, but always WATCHED
   }
   if (!SCRIPT_OF[w.chain] || !runBalance(w)) failed = true;
-  if (seedFlag && w.chain === 'solana' && !seedShown) {
+  if (seedFlag && w.chain === 'solana' && !w.derived_from && !seedShown) {
     seedShown = true;
     try {
       const seed = execFileSync(process.execPath, [join(ROOT, SCRIPT_OF.solana), 'seed'], {

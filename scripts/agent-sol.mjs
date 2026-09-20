@@ -22,10 +22,11 @@
 //    failed lookup.
 //
 // Usage:
-//   node scripts/agent-sol.mjs init        generate the key (once); prints the address only
-//   node scripts/agent-sol.mjs principal   print the funding address (no decryption)
-//   node scripts/agent-sol.mjs balance     query live mainnet balances (no decryption)
-//   node scripts/agent-sol.mjs seed        print the seed hex — DECRYPTS; only for a spend
+//   node scripts/agent-sol.mjs init          generate the key (once); prints the address only
+//   node scripts/agent-sol.mjs principal [A] print the funding address, or A (no decryption)
+//   node scripts/agent-sol.mjs balance [A]   live mainnet balances (no decryption); A measures ANY
+//                                            address — the app-derived sol-rail is keyless here
+//   node scripts/agent-sol.mjs seed          print the seed hex — DECRYPTS; only for a spend
 import {readFileSync, writeFileSync, existsSync, mkdirSync} from 'node:fs';
 import {createPrivateKey, createPublicKey, generateKeyPairSync} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -143,8 +144,14 @@ async function cmdInit() {
   console.log(address);
 }
 
+/** Optional positional address (everything in argv except flags) — lets the funds tooling measure
+ *  or name ANY public address keylessly, the way agent-key.mjs balance takes any principal. */
+function positional() {
+  return process.argv.slice(3).filter(a => a !== '--json')[0];
+}
+
 async function cmdPrincipal() {
-  console.log(readPub().address);
+  console.log(positional() ?? readPub().address);
 }
 
 async function cmdSeed() {
@@ -160,9 +167,12 @@ async function cmdSeed() {
 
 async function cmdBalance() {
   // `--json` is the machine-readable form of the exact same measures (for scripts/funds.mjs
-  // reconcile); the human-readable shape is unchanged.
+  // reconcile); the human-readable shape is unchanged. An explicit address measures that address
+  // keylessly (the app-derived sol-rail has no key file of its own — its secret IS the IC seed).
   const json = process.argv.slice(3).includes('--json');
-  const {address} = readPub();
+  const addr = positional();
+  if (addr && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) die(`not a base58 Solana address: ${addr}`);
+  const {address} = {address: addr ?? readPub().address};
   const rows = [];
   if (!json) console.log(`address   ${address}`);
   try {

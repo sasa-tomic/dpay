@@ -675,10 +675,12 @@ cleanup wipe='': stop
 
 # THE one entry point for the test float (founder ask 2026-09-20: a single way to do all of it).
 #   just funds                  overview: every wallet + every live balance + the abandoned watch
-#   just funds address [W]      the funding address, no decryption (W: icp-float | sol-float)
+#   just funds address [W]      the funding address, no decryption
+#                               (W: icp-float | sol-rail | sol-float | evm-float)
 #   just funds balance [W]      live census for one wallet, measured (UNREADABLE is never 0)
 #   just funds history [W]      what the money DID: ICP transfers + block indexes (IC wallets)
 #   just funds seed <W>         the seed hex — DECRYPTS; only immediately before an approved spend
+#                               (a derived wallet — sol-rail — has no seed of its own and refuses)
 #   just funds init <W>         generate a NEW key for that wallet (refuses if one exists)
 #   just funds reconcile        ledger vs MEASURED — drift = an unrecorded movement (exit 1)
 #   just funds doc              re-render the GENERATED tables in docs/AGENT-FUNDS.md from funds/
