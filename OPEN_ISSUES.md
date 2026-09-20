@@ -96,12 +96,17 @@
   never quotes gas; the burn's ETH is the user wallet's own. Since 2026-09-20 the in-intent
   gas-fund offer funds that slice from the user's OWN holdings (fund-from-wallet prepends the
   gas legs, or self-fund with recheck) — still nothing dpay pays, holds, or custodies.
-- **SideShift RETURN shift (EURC→ICP, the SOL-side CeFi op's reverse leg) — payout PENDING.**
-  9.284071 EURC left the app-derived SOL rail on-chain (venue deposit address `7nY7…ZsSpQ`); the
+- **SideShift RETURN shift (EURC→ICP, the SOL-side CeFi op's reverse leg) — payout PENDING.**  9.284071 EURC left the app-derived SOL rail on-chain (venue deposit address `7nY7…ZsSpQ`); the
   settle target is the float's own IC principal `vloyo-…-5ae`. As of the 2026-09-20 `just funds
   history` measure NO payout row had landed (last IN at block 38489263, the founder top-up).
   Venue settlement is asynchronous — re-measure with `just funds history` before treating it as
   lost; a failed/expired shift refunds to the user's own refundAddress by construction.
+  SYSTEMIC FIX LANDED 2026-09-20 (`cefi-settling` branch): a venue whose measured payout
+  misses the 30-minute SLA (or never settles) is now flagged `degraded` and demoted to the
+  tail of `GET /api/v1/venues` until a passing probe clears it. To MEASURE this shift (and
+  ship the flag for real), find its shift id on the founder's SideShift account and run
+  `DPAY_SIDESHIFT_PROBE_SHIFTS=sideshift-eurc=<shiftId> just swap-venue-probe`, then commit
+  the `dfx/venue_health.json` row it writes and redeploy the relay.
 
 **1. Objective 3 (card/bank funding) — HARD-BLOCKED on founder/legal; NOTHING is offline-buildable
 until the blockers land. THE thing that unblocks it:**
