@@ -99,6 +99,7 @@ import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
 import {fmtAssetCompact, parseUserAmount, rawToDecimal, toUnits} from '../lib/format';
 import {copyToClipboard} from '../lib/clipboard';
+import {eip55ChecksumBad} from '../lib/eip55';
 import type {AssetId, Identity} from '../lib/types';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -393,6 +394,11 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   const [destSel, setDestSel] = useState<string | null>(null);
   const [destMech, setDestMech] = useState<DestMechPick | null>(null);
   const [destAddress, setDestAddress] = useState('');
+  // The gas-fund re-entry gate (2026-09-20): the offer below moves value to the destination
+  // string, so the address is confirmed by re-typing it once — keyed to the normalized
+  // address, so any later edit re-locks the gate.
+  const [destRetype, setDestRetype] = useState('');
+  const [destReentered, setDestReentered] = useState<string | null>(null);
   // The minter's live gas quote for the census + preflight — refreshed per route, re-queried
   // fresh inside prepare at confirm (the signed number is never this cached one).
   const [routeGas, setRouteGas] = useState<{feeWei: string; gasLedgerFee: string} | null>(null);
@@ -1054,8 +1060,10 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     // record's venueId and the signed legs all follow that one pick (Wave-1 pool-keyed legs).
     const venueOpt = chooserMode ? {venue: selectedVenue ?? undefined} : {};
     const reviewed = activeQuote;
-    // Route mode: the destination address is part of the intent — never signed unvalidated.
-    if (activeRoute != null && !isValidDestinationAddress('CkEthErc20', destAddress)) return;
+    // Route mode: the destination address is part of the intent — never signed unvalidated,
+    // and a mixed-case EVM address must verify its own EIP-55 checksum (one flipped case
+    // verifies as a DIFFERENT address; this guard closes that exposure on EVERY route).
+    if (activeRoute != null && (!isValidDestinationAddress('CkEthErc20', destAddress) || eip55ChecksumBad(destAddress))) return;
     if (activeRoute != null) {
       setConfirmBusy(true);
       setConfirmErr(null);
@@ -1512,7 +1520,14 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
   // In route mode the confirm additionally requires a validated destination address, the gas
   // census to be complete, and — when the wallet's ckETH balance is KNOWN — to cover the gas
   // (an unknown balance stays fail-open, per spec §6; prepare re-queries everything anyway).
-  const destValid = isValidDestinationAddress('CkEthErc20', destAddress);
+  const destShapeValid = isValidDestinationAddress('CkEthErc20', destAddress);
+  // EIP-55 at entry (2026-09-20): a MIXED-CASE EVM address must verify against its own
+  // checksum — one flipped case in a hand-copied address verifies as a DIFFERENT address.
+  // No-case-information forms (all-lower / all-upper) stay valid: they carry no checksum.
+  const destChecksumBad = eip55ChecksumBad(destAddress);
+  const destValid = destShapeValid && !destChecksumBad;
+  // The gas-fund gate: the offer renders only after the address was re-typed once.
+  const destConfirmed = destReentered != null && destReentered === destAddress.toLowerCase();
   const gasBalRaw = activeRoute != null ? assetBalances[activeRoute.burn.gasCurrency] : undefined;
   const gasNeededN = routeGas != null ? BigInt(routeGas.feeWei) + BigInt(routeGas.gasLedgerFee) : null;
   const gasShort = activeRoute != null && gasNeededN != null && gasBalRaw != null && gasBalRaw.length > 0 && BigInt(gasBalRaw) < gasNeededN;
@@ -1684,7 +1699,9 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
       ) : null}
 
       {/* The route's destination address — a required input, validated live (the Withdraw
-          destination's own rule: an address is never signed unvalidated). */}
+          destination's own rule: an address is never signed unvalidated). Since 2026-09-20 a
+          MIXED-CASE EVM address must additionally verify its own EIP-55 checksum, and the
+          gas-fund offer can never render before the address was re-typed once. */}
       {routeMode ? (
         <View>
           <Text style={S.convertAmountLabel}>{M.convert.multihop.destAddressLabel}</Text>
@@ -1693,14 +1710,45 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
               testID="convert-dest-address"
               style={S.monoInput}
               value={destAddress}
-              onChangeText={setDestAddress}
+              onChangeText={t => {
+                setDestAddress(t);
+                // Any edit to the address re-locks the re-entry gate and clears the copy.
+                setDestRetype('');
+                setDestReentered(null);
+              }}
               autoCorrect={false}
-              autoCapitalize="characters"
+              autoCapitalize="none"
               placeholderTextColor={C.sub}
             />
           </View>
-          {destAddress.length > 0 && !isValidDestinationAddress('CkEthErc20', destAddress) ? (
+          {destAddress.length > 0 && !destShapeValid ? (
             <Text testID="convert-dest-address-invalid" style={S.err}>{M.convert.multihop.destAddressInvalid}</Text>
+          ) : destChecksumBad ? (
+            <Text testID="convert-dest-checksum" style={S.err}>{M.convert.crossrail.checksumMismatch}</Text>
+          ) : null}
+          {/* One-time re-entry: the gate the gas-fund offer sits behind — the address moves
+              value, so it is confirmed as typed, not just pasted. */}
+          {destShapeValid && !destChecksumBad && !destConfirmed ? (
+            <View>
+              <Text style={S.convertAmountLabel}>{M.convert.crossrail.retypeAddress}</Text>
+              <View style={S.amountRow}>
+                <TextInput
+                  testID="convert-dest-reenter"
+                  style={S.monoInput}
+                  value={destRetype}
+                  onChangeText={t => {
+                    setDestRetype(t);
+                    if (t.toLowerCase() === destAddress.toLowerCase()) setDestReentered(t.toLowerCase());
+                  }}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  placeholderTextColor={C.sub}
+                />
+              </View>
+              {destRetype.length >= destAddress.length && destAddress.length > 0 && !destConfirmed ? (
+                <Text testID="convert-dest-reenter-mismatch" style={S.err}>{M.convert.crossrail.retypeMismatch}</Text>
+              ) : null}
+            </View>
           ) : null}
           {/* Cross-rail routes (B/C): the SAME address is also the signer of the crossing —
               the user must paste one they control, not an exchange deposit address. */}

@@ -360,6 +360,23 @@ export type ConvertMessages = {
     legCctpBurn: (sym: string, network: string) => string;
     legSolSwap: (venue: string, sym: string) => string;
     destAddressCrossNote: string;
+    /** Gas-fund offer (2026-09-20): shown only when the wallet's ckETH cannot cover the
+     *  route's gas AND the destination address is checksum-verified AND re-typed once.
+     *  One number per line; the offer is the engine's composed fund route or self-funding. */
+    checksumMismatch: string;
+    retypeAddress: string;
+    retypeMismatch: string;
+    gasFundTitle: string;
+    gasFundNeed: (eth: string) => string;
+    gasFundHave: (eth: string) => string;
+    gasFundWalletButton: string;
+    gasFundSelfButton: string;
+    gasFundSelfMin: (eth: string) => string;
+    gasFundRecheck: string;
+    gasFundShort: (short: string) => string;
+    gasLegsNote: string;
+    abortedGasBody: (eth: string, address: string) => string;
+    declinedWithGasBody: (address: string) => string;
   };
 
   // --- module-thrown errors (app/convert.ts) ----------------------------------------------------
@@ -640,6 +657,20 @@ export const convertEn: ConvertMessages = {
     legCctpBurn: (sym, network) => `Cross ${sym} to ${network} via Circle (you sign this in your wallet)`,
     legSolSwap: (venue, sym) => `Swap for ${sym} on ${venue}`,
     destAddressCrossNote: 'This Ethereum address is also the wallet that signs the crossing — paste an address you control.',
+    checksumMismatch: 'Checksum mismatch',
+    retypeAddress: 'Re-type the address',
+    retypeMismatch: 'Does not match',
+    gasFundTitle: 'This conversion needs ETH gas you don\u2019t have',
+    gasFundNeed: eth => `Need \u2248 ${eth}`,
+    gasFundHave: eth => `Your wallet: ${eth}`,
+    gasFundWalletButton: 'Fund from this wallet',
+    gasFundSelfButton: 'I\u2019ll fund it myself',
+    gasFundSelfMin: eth => `Send \u2265 ${eth} to:`,
+    gasFundRecheck: 'Check again',
+    gasFundShort: short => `Still ${short} short`,
+    gasLegsNote: 'The first legs fund the gas.',
+    abortedGasBody: (eth, address) => `${eth} is at your Ethereum address ${address}. The conversion never ran.`,
+    declinedWithGasBody: address => `Nothing crossed. Your USDC and the gas ETH are at your Ethereum address ${address}.`,
   },
 
   errors: {
