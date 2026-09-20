@@ -207,6 +207,7 @@ export const convertEs: ConvertMessages = {
     depositMemoLabel: 'Memo (obligatorio)',
     depositExpiryLine: at => `La orden caduca ${at}`,
     shiftId: id => `Shift ${id}`,
+    settlingNote: `Fondos confirmados con la plataforma. La liquidación suele tardar minutos: dpay supervisa este shift y escala con la plataforma si se demora.`,
     counterparty: venue =>
       `Ejecutado por ${venue}: un servicio de intercambio automatizado, no un proveedor con licencia y no dpay.`,
     checklistSigns:

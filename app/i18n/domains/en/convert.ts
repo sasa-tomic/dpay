@@ -302,6 +302,8 @@ export type ConvertMessages = {
     payoutAt: (address: string) => string;
     depositExpiryLine: (at: string) => string;
     shiftId: (id: string) => string;
+    /** Shown while the venue holds/settles the deposit: dpay owns the escalation, not the user. */
+    settlingNote: string;
     /** The CeFi fact itself: the user sends to the VENUE's address; the venue holds mid-trade. */
     depositNote: (venue: string, sym: string) => string;
     /** The awaiting_deposit tail line: watches the DEPOSIT (the payout lines belong to the
@@ -615,6 +617,7 @@ export const convertEn: ConvertMessages = {
     payoutAt: address => `Paid out to your own address: ${address}`,
     depositExpiryLine: at => `Order expires ${at}`,
     shiftId: id => `Shift ${id}`,
+    settlingNote: `Funds confirmed with the venue. Settling usually takes minutes \u2014 dpay watches this shift and escalates with the venue if it stalls.`,
     depositNote: (venue, sym) =>
       `Send ${sym} from your wallet to ${venue}\u2019s deposit address above — exactly the deposit amount. ${venue} is an automated exchange service: it holds your ${sym} mid-trade, then pays out to your address. dpay is not a party to this trade and is paid nothing.`,
     stillWaitingDeposit: 'Still watching for your deposit — this page updates on its own.',

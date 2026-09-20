@@ -3571,6 +3571,11 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
                   {M.convert.cefi.shiftId(record.providerRef.orderId)}
                 </Text>
               ) : null}
+              {record.providerRef != null ? (
+                <Text testID="convert-cefi-settling-note" style={S.convertStateMeta}>
+                  {M.convert.cefi.settlingNote}
+                </Text>
+              ) : null}
             </View>
           ) : null}
           {/* Deposit context says "deposit", never "payout" — the generic watching line belongs

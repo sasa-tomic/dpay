@@ -208,6 +208,7 @@ export const convertDe: ConvertMessages = {
     depositMemoLabel: 'Memo (erforderlich)',
     depositExpiryLine: at => `Bestellung läuft um ${at} ab`,
     shiftId: id => `Shift ${id}`,
+    settlingNote: `Fonds bei der Plattform bestätigt. Die Abwicklung dauert meist Minuten — dpay überwacht diesen Shift und eskaliert bei Verzögerung gegenüber der Plattform.`,
     counterparty: venue =>
       `Ausgeführt von ${venue} — ein automatisierter Tauschdienst, kein lizenzierter Anbieter und nicht dpay.`,
     checklistSigns:
