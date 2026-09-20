@@ -321,6 +321,21 @@ describe('loadVenueRegistry — cache + bundled fallback (V5)', () => {
     expect(await loadVenueRegistry('http://venues-err4')).toEqual([...BUNDLED_VENUES]);
     expect(venuesForPair('i', 'o')).toEqual([]);
   });
+
+  test('settlement health (2026-09-20 SLA gate): a well-formed block is carried, a malformed one is stripped; the served row order is NEVER re-sorted', async () => {
+    // The relay itself demotes degraded rows to the tail; the app carries health as optional
+    // data and renders the rows in EXACTLY the served order (V5 red line).
+    const base = {display_name: 'SideShift', kind: 'cefi', endpoint: 'https://sideshift.ai/api/v2', testnet: false, disclosure_key: 'sideshift'};
+    jest.mocked(relayFetch).mockResolvedValueOnce(fakeRes({venues: [
+      {...base, venue_id: 'sideshift-eurc', pair_ledgers: [ICP_LEDGER, 'eurc-mint'], health: {status: 'degraded', settle_seconds: 7200, measured_at: 1758000000}},
+      {...base, venue_id: 'sideshift', pair_ledgers: [ICP_LEDGER, 'wsol-mint'], health: {status: 'lightning'}},
+    ]}) as never);
+    const list = await loadVenueRegistry('http://venues-health');
+    expect(list.map(v => v.venue_id)).toEqual(['sideshift-eurc', 'sideshift']);
+    expect(list[0].health).toEqual({status: 'degraded', settle_seconds: 7200, measured_at: 1758000000});
+    // A health block the gate cannot read is "never measured" — never invented, never fatal.
+    expect(list[1].health).toBeUndefined();
+  });
 });
 
 describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => {

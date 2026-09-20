@@ -304,6 +304,21 @@ export async function fetchCeFiConvertQuote(
 /** One load per relay per session — venue identity is not per-keystroke data. */
 const VENUE_REGISTRY_CACHE = new Map<string, readonly VenueEntry[]>();
 
+/** Settlement health (2026-09-20 SLA gate) is optional relay data: only a well-formed block
+ *  is carried — absent or malformed is "never measured" (healthy by default, never invented). */
+function sanitizeVenueHealth(h: unknown): VenueEntry['health'] {
+  if (h == null || typeof h !== 'object') return undefined;
+  const status = (h as {status?: unknown}).status;
+  if (status !== 'ok' && status !== 'degraded') return undefined;
+  const o = h as Record<string, unknown>;
+  return {
+    status,
+    settle_seconds: typeof o.settle_seconds === 'number' ? o.settle_seconds : undefined,
+    measured_at:
+      typeof o.measured_at === 'number' || typeof o.measured_at === 'string' ? o.measured_at : undefined,
+  };
+}
+
 /** `GET /api/v1/venues` — the venues THIS relay serves, in the relay's own ROW ORDER (the
  *  chooser renders that order verbatim and never ranks — V5 red line). On success the list
  *  becomes the runtime overlay (./config/venues lookups consult it) and is cached per relay
@@ -320,19 +335,23 @@ export async function loadVenueRegistry(
     if (r.ok) {
       const j = await r.json().catch(() => null) as {venues?: unknown} | null;
       if (j && Array.isArray(j.venues)) {
-        const venues = j.venues.filter(
-          (v): v is VenueEntry =>
-            v != null && typeof v === 'object'
-              && typeof (v as VenueEntry).venue_id === 'string'
-              && typeof (v as VenueEntry).display_name === 'string'
-              && ((v as VenueEntry).kind === 'ic_amm' || (v as VenueEntry).kind === 'cefi' || (v as VenueEntry).kind === 'solana_amm')
-              && typeof (v as VenueEntry).endpoint === 'string'
-              && Array.isArray((v as VenueEntry).pair_ledgers)
-              && (v as VenueEntry).pair_ledgers.length === 2
-              && (v as VenueEntry).pair_ledgers.every(p => typeof p === 'string')
-              && typeof (v as VenueEntry).testnet === 'boolean'
-              && typeof (v as VenueEntry).disclosure_key === 'string',
-        );
+      const rows = j.venues.filter(
+        (v): v is VenueEntry =>
+          v != null && typeof v === 'object'
+            && typeof (v as VenueEntry).venue_id === 'string'
+            && typeof (v as VenueEntry).display_name === 'string'
+            && ((v as VenueEntry).kind === 'ic_amm' || (v as VenueEntry).kind === 'cefi' || (v as VenueEntry).kind === 'solana_amm')
+            && typeof (v as VenueEntry).endpoint === 'string'
+            && Array.isArray((v as VenueEntry).pair_ledgers)
+            && (v as VenueEntry).pair_ledgers.length === 2
+            && (v as VenueEntry).pair_ledgers.every(p => typeof p === 'string')
+            && typeof (v as VenueEntry).testnet === 'boolean'
+            && typeof (v as VenueEntry).disclosure_key === 'string',
+      );
+        // Health is OPTIONAL relay data (2026-09-20 settlement-SLA gate): only a well-formed
+        // block is carried — anything else is "never measured". The demotion itself is the
+        // relay's ROW ORDER (V5: the app never re-sorts); this flag feeds the slow line only.
+        const venues = rows.map(v => ({...v, health: sanitizeVenueHealth((v as {health?: unknown}).health)}));
         if (venues.length > 0) {
           VENUE_REGISTRY_CACHE.set(relayUrl, venues);
           setRuntimeVenues(venues);

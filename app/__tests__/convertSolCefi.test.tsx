@@ -44,6 +44,7 @@ import {ConvertMode} from '../components/ConvertMode';
 import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config/catalog';
 import {EURC_MINT_ADDRESS} from '../solana/tokens';
+import {BUNDLED_VENUES, setRuntimeVenues} from '../config/venues';
 import {deriveSolanaAddress} from '../solana/identity';
 import {fetchSideShiftQuote, createSideShiftFixedShift} from '../services/sideshift';
 import {adoptConvertRecord} from '../convertResume';
@@ -123,6 +124,30 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     const label = textOf(cefi[0]);
     expect(label).toContain('ICP');
     expect(label).toContain('SideShift');
+  });
+
+  test('a relay-demoted (settlement-degraded) cefi row says so honestly: the slow line renders', () => {
+    jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
+    // The relay serves the degraded venue flagged and demoted to the tail; the overlay here
+    // carries exactly that row — the app renders the honest slow line on it (2026-09-20 SLA gate).
+    setRuntimeVenues(BUNDLED_VENUES.map(v => v.venue_id === 'sideshift-eurc'
+      ? {...v, health: {status: 'degraded', settle_seconds: 7200, measured_at: 1758000000}}
+      : v));
+    const tree = mount();
+    // RN's Pressable mirrors testIDs onto internal wrapper layers (the rowOrder precedent):
+    // what matters is the line EXISTS once the row renders, carrying the honest copy.
+    const slow = present(tree, 'convert-sol-dest-cefi-slow-sideshift-eurc');
+    expect(slow.length).toBeGreaterThan(0);
+    expect(textOf(slow[0])).toContain('Recently slow to settle.');
+    setRuntimeVenues(null);
+  });
+
+  test('a healthy (never-demoted) cefi row carries NO slow line — absence is never invented', () => {
+    jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
+    setRuntimeVenues(BUNDLED_VENUES);
+    const tree = mount();
+    expect(present(tree, 'convert-sol-dest-cefi-slow-sideshift-eurc').length).toBe(0);
+    setRuntimeVenues(null);
   });
 
   test('picked cefi group: venue quote verbatim, derived IC payout address, no slippage axis', async () => {

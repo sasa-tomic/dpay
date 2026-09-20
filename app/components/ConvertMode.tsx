@@ -1798,6 +1798,12 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
                           </View>
                           <View style={S.convertVenueRowText}>
                             <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{mechLabel}</Text>
+                            {/* Same settlement-SLA honesty as the venue chooser (2026-09-20). */}
+                            {m.kind === 'cefi' && m.venue.health?.status === 'degraded' ? (
+                              <Text testID={`convert-dest-mech-cefi-slow-${m.venue.venue_id}`} style={S.convertMetaLine}>
+                                {M.convert.venueSlow}
+                              </Text>
+                            ) : null}
                             {/* D5: an UNPICKED mechanism carries its label + a static shape
                                 line, never another mechanism's live number. */}
                             {!on && m.kind === 'hub' ? (
@@ -1926,6 +1932,13 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
                 </View>
                 <View style={S.convertVenueRowText}>
                   <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{v.display_name}</Text>
+                  {/* Settlement-SLA demotion (2026-09-20): the relay put a recently-slow venue
+                      at the tail — this line is the honest WHY. Never a ranking, never hidden. */}
+                  {v.health?.status === 'degraded' ? (
+                    <Text testID={`convert-venue-${v.venue_id}-slow`} style={S.convertMetaLine}>
+                      {M.convert.venueSlow}
+                    </Text>
+                  ) : null}
                   {vq != null ? (
                     <Text testID={`convert-venue-${v.venue_id}-quote`} style={S.convertVenueAmount}>
                       {fmtAssetCompact(vq.amountOutGross, outDecimals, outSym)}
@@ -2938,6 +2951,7 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
           <Text style={S.convertDestLabel}>{M.convert.multihop.destLabel}</Text>
           {destGroups.map(g => {
             const on = activeGroup?.key === g.key;
+            const slowCefi = g.mechs[0]?.kind === 'cefi' ? g.mechs[0] : null;
             return (
               <Pressable
                 key={g.key}
@@ -2952,6 +2966,12 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
                 </View>
                 <View style={S.convertVenueRowText}>
                   <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{g.label}</Text>
+                  {/* Settlement-SLA honesty (2026-09-20), same as the IC chooser. */}
+                  {slowCefi != null && slowCefi.venue.health?.status === 'degraded' ? (
+                    <Text testID={`convert-sol-dest-cefi-slow-${slowCefi.venue.venue_id}`} style={S.convertMetaLine}>
+                      {M.convert.venueSlow}
+                    </Text>
+                  ) : null}
                 </View>
               </Pressable>
             );

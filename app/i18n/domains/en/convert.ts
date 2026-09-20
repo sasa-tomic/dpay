@@ -85,6 +85,9 @@ export type ConvertMessages = {
   /** Shown while NO venue is selected — the only initial state: nothing is preselected, and
    *  the checklist + confirm stay withheld until the user picks a row (V5 red line). */
   venueNoneSelected: string;
+  /** Shown on a venue row whose last measured settlement blew the SLA (2026-09-20 gate):
+   *  the relay demoted the row to the tail — this line is the honest why, nothing more. */
+  venueSlow: string;
 
   // --- fail closed BEFORE the confirm (a swap that can only fail is never offered) ---------------
   /** Zero balance: the Pay tab's fund-gate shape, routed at the surface that can actually fund an
@@ -461,6 +464,7 @@ export const convertEn: ConvertMessages = {
   quoteChanged: (oldAmt, newAmt) => `Quote changed: ${oldAmt} → ${newAmt}. Review and confirm again.`,
   venueChooserLabel: 'Venue',
   venueNoneSelected: 'Select a venue to see its full quote and continue.',
+  venueSlow: 'Recently slow to settle.',
 
   sol: {
     heading: (inSym, outSym) => `Convert ${inSym} to ${outSym} (Solana)`,

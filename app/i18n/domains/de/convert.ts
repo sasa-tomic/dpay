@@ -58,6 +58,7 @@ export const convertDe: ConvertMessages = {
   quoteChanged: (oldAmt, newAmt) => `Kurs geändert: ${oldAmt} → ${newAmt}. Prüfe und bestätige erneut.`,
   venueChooserLabel: 'Handelsplatz',
   venueNoneSelected: 'Wähle einen Handelsplatz, um seinen vollständigen Kurs zu sehen und fortzufahren.',
+  venueSlow: 'Kürzlich langsam bei der Abwicklung.',
 
   sol: {
     heading: (inSym, outSym) => `${inSym} in ${outSym} umwandeln (Solana)`,

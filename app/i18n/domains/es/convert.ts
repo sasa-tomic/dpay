@@ -57,6 +57,7 @@ export const convertEs: ConvertMessages = {
   quoteChanged: (oldAmt, newAmt) => `La cotización cambió: ${oldAmt} → ${newAmt}. Revisa y confirma de nuevo.`,
   venueChooserLabel: 'Sede',
   venueNoneSelected: 'Elige una sede para ver su cotización completa y continuar.',
+  venueSlow: 'Recientemente lento para liquidar.',
 
   sol: {
     heading: (inSym, outSym) => `Convertir ${inSym} en ${outSym} (Solana)`,

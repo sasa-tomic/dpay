@@ -57,6 +57,7 @@ export const convertFr: ConvertMessages = {
   quoteChanged: (oldAmt, newAmt) => `Le devis a changé : ${oldAmt} → ${newAmt}. Vérifie et confirme à nouveau.`,
   venueChooserLabel: 'Plateforme',
   venueNoneSelected: 'Choisis une plateforme pour voir son devis complet et continuer.',
+  venueSlow: 'Récemment lent à régler.',
 
   sol: {
     heading: (inSym, outSym) => `Convertir ${inSym} en ${outSym} (Solana)`,

@@ -529,6 +529,19 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     jest.mocked(convertResumeSnapshot).mockReturnValue({});
   });
 
+  test('a relay-demoted (settlement-degraded) row renders the honest slow line — the app keeps the served order verbatim', async () => {
+    // The relay serves a flagged venue demoted to the tail; the app NEVER re-sorts (V5) —
+    // it renders the order exactly as served and marks the degraded row with the slow line.
+    setRuntimeVenues([
+      {...VENUE_B, health: {status: 'degraded', settle_seconds: 7200, measured_at: 1758000000}},
+      VENUE_A,
+    ]);
+    const tree = await mountConvert('250000000', '1');
+    expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_B.venue_id}`, `convert-venue-${VENUE_A.venue_id}`]);
+    expect(textOf(tree, `convert-venue-${VENUE_B.venue_id}-slow`)).toContain('Recently slow to settle.');
+    expect(present(tree, `convert-venue-${VENUE_A.venue_id}-slow`)).toBe(false);
+  });
+
   test('two rows render, in registry order, NONE preselected; confirm + headline stay withheld', async () => {
     const tree = await mountConvert('250000000', '1');
     expect(present(tree, 'convert-venues')).toBe(true);

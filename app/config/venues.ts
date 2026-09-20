@@ -22,6 +22,15 @@ import {
 // schema break (`kind` stays a plain string on the wire).
 export type VenueKind = 'ic_amm' | 'cefi' | 'solana_amm';
 
+/** One venue's settlement verdict block (relay probe result, verdict derived relay-side —
+ *  see VenueEntry.health). settle_seconds is the measured order→settle latency; measured_at
+ *  is unix seconds (or the relay's ISO string — opaque here, display never needs it). */
+export type VenueHealth = {
+  readonly status: 'ok' | 'degraded';
+  readonly settle_seconds?: number;
+  readonly measured_at?: number | string;
+};
+
 export type VenueEntry = {
   readonly venue_id: string;
   readonly display_name: string;
@@ -36,6 +45,11 @@ export type VenueEntry = {
   readonly testnet: boolean;
   // Key into the legal/disclosure copy (app/i18n) — locale text is never in this table.
   readonly disclosure_key: string;
+  // OPTIONAL settlement health from GET /api/v1/venues (2026-09-20 SLA gate): 'degraded' =
+  // the last measured payout missed the 30-minute SLA or never settled. Absent = never
+  // measured — healthy by default, never invented. The DEMOTION is the relay's row order
+  // (V5 red line: the app never ranks); the app only renders the honest slow line.
+  readonly health?: VenueHealth;
 };
 
 // The dpay-OWNED canister principals (multi-venue readiness V9, spec §0 red line 1: funds
