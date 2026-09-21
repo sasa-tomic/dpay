@@ -533,7 +533,13 @@ export async function prepareErc20Withdrawal(
     steps.push({ledger: ckethLedger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, label: 'approve-gas'});
   }
   {
-    const argHex = await DpayCore.icpApproveArg(minter, '', '', amount, '', '', '', erc20LedgerFee);
+    // ICRC-2 transfer_from draws the ledger fee from the allowance ON TOP of the amount —
+    // the minter's async burn of `amount` needs allowance >= amount + fee. An exact-amount
+    // approve fails the whole withdrawal AFTER acceptance (live 2026-09-21:
+    // FailedErc20WithdrawalRequest + gas-toll reimbursement, twice). Mirror prepareEthWithdrawal's
+    // amount+fee approve.
+    const totalApprove = (BigInt(amount) + BigInt(erc20LedgerFee)).toString();
+    const argHex = await DpayCore.icpApproveArg(minter, '', '', totalApprove, '', '', '', erc20LedgerFee);
     const signed = await DpayCore.icpSignUpdate(secretHex, ckerc20Ledger, 'icrc2_approve', argHex, expiry);
     steps.push({ledger: ckerc20Ledger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, label: 'approve-amount'});
   }
