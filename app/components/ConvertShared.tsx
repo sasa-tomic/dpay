@@ -17,7 +17,8 @@ import {fmtAssetCompact} from '../lib/format';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconChevronDown, IconSwap} from './icons';
-import {REGISTERED_VENUE_NAME, solAssetOfMint} from './ConvertMode';
+import {REGISTERED_VENUE_NAME} from './ConvertMode';
+import {solAssetOfMint} from './ConvertSolDest';
 
 /** Everything the quote panel needs about the two legs, resolved + validated from the bundled catalog. */
 export type ConvertLegs = {

@@ -77,7 +77,6 @@ import {
   type ConvertRecord,
 } from '../convert';
 import {
-  acknowledgeStuckRecord,
   adoptConvertRecord,
   convertResumeSnapshot,
   subscribeConvertRecords,
@@ -88,8 +87,7 @@ import {DpayCore} from '../services/native';
 import {deriveSolanaAddress} from '../solana/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {hubRoutes, multihopRoutesFrom, gasFundRoutes, type HubRoute, type MultihopRoute} from '../routes';
-import {solanaVenuesForMint} from '../config/venues';
-import {SOLANA_TOKENS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
+import {WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 import {M} from '../i18n';
 import {fmtAssetCompact, parseUserAmount, rawToDecimal} from '../lib/format';
 import {eip55ChecksumBad} from '../lib/eip55';
@@ -120,6 +118,8 @@ import {
 import {StatePanel} from './ConvertStatePanel';
 import {RouteStatePanel} from './ConvertRouteStatePanel';
 import {CrossRailStatePanel} from './ConvertCrossRailStatePanel';
+import {resolveSolDestinations, resolveSolLegs, solAssetOfMint, solMechKeyOf, type SolDestGroup} from './ConvertSolDest';
+import {SolStatePanel} from './SolStatePanel';
 
 type Props = {
   identity: Identity;
@@ -1946,145 +1946,6 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   );
 }
 
-// --- the SOLANA convert surface (multi-venue readiness V11, 2026-09-15) -------------------------
-// The rail-local pair SOL ↔ USDC(Solana) through the registered solana_amm venue (Jupiter). The
-// IC surface's rules carry over one-for-one: one venue today so no chooser chrome; quote fetched
-// per keystroke DEVICE-DIRECT (no relay hop — keyless https, the opencryptopay shape), rendered
-// VERBATIM (Jupiter's own outAmount/priceImpact/threshold digits, V8: no deriving, no blending);
-// the pre-sign checklist names the venue + its https endpoint + the disclosure; nothing is
-// preselected; the confirm re-quotes and shows a moved-quote review line before adopting a
-// record. What differs is the execution shape: ONE venue-built transaction, signed by the
-// device AFTER the beneficiary check (app/solana/tx.ts), submitted through the same Solana RPC
-// proxy the SOL payment rail uses — the engine (convertResume) drives the record through
-// swapping → settling → done; this component only renders it.
-
-/** Mint → {symbol, decimals} for venue-pair mints: the wrapped-SOL identifier resolves to SOL
- *  itself (the registry's stable id for the native side), everything else reverse-looks-up the
- *  SPL registry. Null for unknown mints — the branch fails closed on it. */
-export function solAssetOfMint(mint: string): {symbol: string; decimals: number} | null {
-  if (mint === WRAPPED_SOL_MINT_ADDRESS) {
-    return {symbol: WRAPPED_SOL_TOKEN, decimals: SOLANA_TOKENS.SOL.decimals};
-  }
-  const found = Object.entries(SOLANA_TOKENS).find(([, info]) => info.mint === mint);
-  return found != null ? {symbol: found[0], decimals: found[1].decimals} : null;
-}
-
-/** Every registered out-destination for a SOL asset's input mint: the solana_amm registry rows
- *  that serve it, folded to the OTHER side of each pair and deduped by out mint, in REGISTRY
- *  ORDER (the registry's order is the display order — never sorted, never ranked). Null for a
- *  mint the SPL registry does not know; an empty `dests` for a mint no venue serves — both
- *  fail closed on the unavailable panel. */
-/** One MECHANISM the Solana surface offers toward a destination: a solana_amm (Jupiter) pair,
- *  or — since 2026-09-20 (live-sweep defect 1, founder rule: every currency through the SAME
- *  surfaces) — a registered cefi venue whose pair carries this mint as the DEPOSIT side. A
- *  cefi mechanism's output lives on the IC rail: `outLedger` is the catalog ledger it settles. */
-type SolDestMech =
-  | {kind: 'amm'; venue: VenueEntry; outMint: string; outSym: string; outDecimals: number}
-  | {kind: 'cefi'; venue: VenueEntry; outLedger: string; outSym: string; outDecimals: number};
-
-/** One DESTINATION row (where the money LANDS) with its mechanisms — the IC-side D4 group
- *  shape mirrored: in-wallet SPL destinations keyed by mint, IC destinations keyed by the
- *  settling catalog ledger (two venues landing the same asset merge into ONE group). */
-type SolDestGroup = {key: string; testID: string; label: string; mechs: SolDestMech[]};
-
-/** The e2e asset testKeys ('sol', 'sol-usdc', 'sol-eurc') — the dest-row testID contract,
- *  the same keys HomeAccounts/Ledger/AssetPicker pin (never derived from metadata). */
-const solDestTestKey = (sym: string): string =>
-  sym === WRAPPED_SOL_TOKEN ? 'sol' : `sol-${sym.toLowerCase()}`;
-
-/** The venue sub-picker's key for one mechanism: the venue id for cefi (each venue is
- *  its own service), 'amm' for the in-wallet route (single-mech groups never show a
- *  picker). Module-level so every reader above its definition still hoists it. */
-function solMechKeyOf(m: SolDestMech): string {
-  return m.kind === 'cefi' ? m.venue.venue_id : 'amm';
-}
-
-function resolveSolDestinations(
-  asset: Extract<SelectableAsset, {protocol: 'solana'}>,
-  catalog: CurrencyDescriptor[],
-): {inMint: string; groups: SolDestGroup[]} | null {
-  // Native SOL is mint:null in the asset model but WRAPPED-sol in the venue registry — the two
-  // identifiers for the same asset, translated here and only here.
-  const inMint = asset.mint ?? WRAPPED_SOL_MINT_ADDRESS;
-  if (solAssetOfMint(inMint) == null) return null;
-  const groups: SolDestGroup[] = [];
-  const byKey = new Map<string, SolDestGroup>();
-  const push = (g: SolDestGroup): void => {
-    groups.push(g);
-    byKey.set(g.key, g);
-  };
-  for (const venue of solanaVenuesForMint(inMint)) {
-    const outMint = venue.pair_ledgers.find(m => m !== inMint);
-    if (outMint == null || byKey.has(outMint)) continue;
-    const outTok = solAssetOfMint(outMint);
-    if (outTok == null) continue;
-    push({
-      key: outMint,
-      testID: `convert-sol-dest-${solDestTestKey(outTok.symbol)}`,
-      label: M.convert.multihop.destDirect(outTok.symbol),
-      mechs: [{kind: 'amm', venue, outMint, outSym: outTok.symbol, outDecimals: outTok.decimals}],
-    });
-  }
-  // The CeFi half: registered cefi venues whose pair carries this mint as the deposit side —
-  // the SAME rows the IC surface offers in the other direction, merged by landing spot. A
-  // settle ledger the catalog doesn't know is registry/catalog drift: fail closed, no row.
-  for (const venue of cefiVenuesForLedger(inMint)) {
-    const outLedger = cefiOtherSide(venue, inMint);
-    if (outLedger == null) continue;
-    const row = catalog.find(c => c.ledger === outLedger);
-    // The pricing gate's own red lines (same as resolveConvertDestinations): a settle side
-    // without a catalog row or without decimals cannot be priced honestly — no row.
-    if (row == null || row.decimals == null) continue;
-    const outSym = row.backing_symbol ?? row.symbol ?? '';
-    if (outSym === '') continue;
-    const key = `ic:${outLedger}`;
-    const mech: SolDestMech = {kind: 'cefi', venue, outLedger, outSym, outDecimals: row.decimals};
-    const existing = byKey.get(key);
-    if (existing != null) {
-      existing.mechs.push(mech);
-      continue;
-    }
-    push({
-      key,
-      testID: `convert-sol-dest-cefi-${venue.venue_id}`,
-      label: M.convert.cefi.destRow(outSym, 'Internet Computer', venue.display_name),
-      mechs: [mech],
-    });
-  }
-  // A merged group (several venues on ONE landing spot — the trocador aggregator beside
-  // sideshift since 2026-09-20) names the SPOT only; "via <venue>" moves to the mech
-  // sub-picker rows. A label naming one venue would be a lie about a two-venue slot.
-  for (const g of groups) {
-    const first = g.mechs[0];
-    if (g.mechs.length > 1 && first?.kind === 'cefi') {
-      g.label = M.convert.cefi.destRowMulti(first.outSym, 'Internet Computer');
-    }
-  }
-  return {inMint, groups};
-}
-
-/** The Solana analog of `resolveLegs`: the legs the SELECTED mechanism serves — an amm
- *  venue's other mint, or a cefi venue's settle ledger on the IC rail. Null when nothing is
- *  selected (zero destinations — the fail-closed panel renders). */
-type SolLegs =
-  | {kind: 'amm'; inMint: string; outMint: string; inSym: string; outSym: string; inDecimals: number; outDecimals: number}
-  | {kind: 'cefi'; inMint: string; outLedger: string; inSym: string; outSym: string; inDecimals: number; outDecimals: number};
-
-function resolveSolLegs(
-  asset: Extract<SelectableAsset, {protocol: 'solana'}>,
-  mech: SolDestMech | null,
-): SolLegs | null {
-  const inMint = asset.mint ?? WRAPPED_SOL_MINT_ADDRESS;
-  const inTok = solAssetOfMint(inMint);
-  if (mech == null || inTok == null) return null;
-  if (mech.kind === 'amm') {
-    const outTok = solAssetOfMint(mech.outMint);
-    if (outTok == null) return null;
-    return {kind: 'amm', inMint, outMint: mech.outMint, inSym: inTok.symbol, outSym: outTok.symbol, inDecimals: inTok.decimals, outDecimals: outTok.decimals};
-  }
-  return {kind: 'cefi', inMint, outLedger: mech.outLedger, inSym: inTok.symbol, outSym: mech.outSym, inDecimals: inTok.decimals, outDecimals: mech.outDecimals};
-}
-
 type SolConvertProps = {
   identity: Identity;
   /** The active relay — the Jupiter quote/swap dials go through it (2026-09-16). */
@@ -2809,106 +2670,6 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
           <Text style={[S.primaryText, !canConfirm && S.disabledText]}>{M.convert.confirmButton}</Text>
         )}
       </Pressable>
-      <View style={S.convertFooting}>
-        <IconSwap size={20} color={C.sub} />
-      </View>
-    </View>
-  );
-}
-
-/** The Solana record view: the §4 machine's Solana-shaped states only (swapping → settling →
- *  done, with pending_withdrawal/failed_refunded/stuck for the honest edges). Same rules as
- *  StatePanel: it renders the engine's record — the numbers are the venue's own digits, the
- *  payout shown on done is the REALIZED chain credit (never the estimate). */
-function SolStatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void}) {
-  const [, forceTick] = useState(0);
-  useEffect(() => {
-    if (record.step === 'stuck' || record.step === 'pending_withdrawal') {
-      const t = setInterval(() => forceTick(n => n + 1), 30_000);
-      return () => clearInterval(t);
-    }
-    return;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [record.step]);
-
-  const venueName = venueDisplayName(record.venueId);
-  const outDec = record.outDecimals ?? 8;
-  const fmtOut = (raw: string) => fmtAssetCompact(raw, outDec, record.outSymbol);
-  const fmtIn = (raw: string) => fmtAssetCompact(raw, record.inDecimals ?? 8, record.inSymbol);
-  const solFeeLine = record.solFeeLamports != null
-    ? M.convert.sol.solFeeLine(fmtAssetCompact(record.solFeeLamports, SOLANA_TOKENS.SOL.decimals, WRAPPED_SOL_TOKEN))
-    : null;
-
-  return (
-    <View testID="convert-state" style={S.convertWrap}>
-      <ConvertHeader title={M.convert.sol.heading(record.inSymbol, record.outSymbol)} onBack={onBack} />
-
-      {record.step === 'swapping' ? (
-        <View testID="convert-swapping">
-          <ActivityIndicator size="large" color={C.brandText} />
-          <Text style={S.convertStateTitle}>{M.convert.swappingTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.swappingBody(venueName)}</Text>
-        </View>
-      ) : null}
-      {record.step === 'settling' ? (
-        <View testID="convert-settling">
-          <ActivityIndicator size="large" color={C.brandText} />
-          <Text style={S.convertStateTitle}>{M.convert.settlingTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.settlingBody(record.outSymbol)}</Text>
-        </View>
-      ) : null}
-      {record.step === 'done' ? (
-        <View testID="convert-done">
-          <Text style={S.convertStateTitle}>{M.convert.doneTitle}</Text>
-          {/* The realized chain credit — the record's outAmountNet (filled by the driver from
-              the transaction's own token-balance delta), the venue floor only as the fallback. */}
-          <Text style={S.convertStateBody}>{M.convert.doneBody(fmtOut(record.outAmountNet ?? record.expectedNet))}</Text>
-          {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
-        </View>
-      ) : null}
-      {record.step === 'pending_withdrawal' ? (
-        <View testID="convert-pending">
-          <Text style={S.convertStateTitle}>{M.convert.pendingTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.sol.pendingBody}</Text>
-          <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
-        </View>
-      ) : null}
-      {record.step === 'failed_refunded' ? (
-        <View testID="convert-failed">
-          <Text style={S.convertStateTitle}>{M.convert.failedTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.sol.failedBody(record.inSymbol, venueName, record.failureDetail ?? '')}</Text>
-        </View>
-      ) : null}
-      {record.step === 'stuck' ? (
-        <View testID="convert-stuck">
-          <Text style={S.convertStateTitle}>{M.convert.stuckTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.stuckBody}</Text>
-          {/* What was signed, restated: the amount in and the VENUE'S own floor (expectedNet is
-              Jupiter's otherAmountThreshold frozen at prepare — not a re-derived figure). */}
-          <Text style={S.convertStateBody}>{M.convert.stuckSigned(fmtIn(record.amountIn), fmtOut(record.expectedNet), venueName)}</Text>
-          <Text style={S.convertStateMeta}>{M.convert.stuckWatching}</Text>
-          {record.acknowledgedStuckAtMs == null ? (
-            <Pressable
-                testID="btn-convert-stuck-ack"
-                style={S.primary}
-                onPress={() => {
-                  acknowledgeStuckRecord(record.id);
-                }}
-                accessibilityRole="button"
-              >
-                <Text style={S.primaryText}>{M.convert.stuckAcknowledge}</Text>
-              </Pressable>
-            ) : (
-              <Text style={S.convertStateMeta}>{M.convert.stuckAcknowledged}</Text>
-            )}
-        </View>
-      ) : null}
-      {/* The fee census on every state panel (the IC stuck panel's rule): the realized network
-          fee quoted by the chain before signing. dpay's nothing-charged line is GONE everywhere
-          (10x-verbosity pass 2026-09-16). */}
-      {solFeeLine != null ? (
-        <Text testID="convert-sol-fee" style={S.convertMetaLine}>{solFeeLine}</Text>
-      ) : null}
       <View style={S.convertFooting}>
         <IconSwap size={20} color={C.sub} />
       </View>
