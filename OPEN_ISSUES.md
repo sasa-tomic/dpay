@@ -150,6 +150,28 @@
   risk (ledger row 97). APP-SIDE FIX SHIPPED 2026-09-21 (branch `sol-send-hang-fix`, commit `9c7a138`, inner-loop green: `just typecheck` + 28 SOL jest suites/670 tests): the seam now GUARANTEES the send promise settles the moment the caller's 60s signal fires even if a lower layer ignores the abort (`abortable()` in `app/solana.ts`, wrapping sendSol/sendSpl/sendSolanaPay/createTokenAta — the spinner-forever ending is gone); `sendSpl` gained `sendSol`'s `onBroadcast`; the sheet splits the outcome three ways — a 2xx-with-JSON-RPC-error-body broadcast answer (the Helius shape the prime suspect named) was ALREADY a thrown refusal with the venue's own message and never reaches the confirm poll (now fetch-level pinned), a post-broadcast deadline/abort lands on the honest unknown panel (signature kept, "may still land", four-locale copy), an on-chain failure stays a definite error. NOT yet shipped to the surface the founder drives (the fix rides the next app deploy) — until then the hang can recur; after it ships, ONE more attempt is available (the venue order machinery is proven good; the settle-format fix is confirmed live at order level). To MEASURE any shift (incl. the expired one) for the
   SLA gate: `DPAY_SIDESHIFT_PROBE_SHIFTS=sideshift-eurc=b4f0dd3e0ad88d4b1617 just
   swap-venue-probe`, then commit the `dfx/venue_health.json` row it writes and redeploy.
+  CORRECTED-PATH ATTEMPT 2026-09-21 ~15:04 UTC (the fix verified LIVE in the served bundle —
+  marker grep on the built JS): shift `fd69ad57fd6bb988e235` created (settleAddress again the
+  64-hex identifier verbatim — order-level fix proof twice; live min 8.717468; settleAmount
+  3.53031389 ICP). Send-sheet fields now verify in-DOM (the first attempt's `type()` raced the
+  field remounts — empty form, echo gate refused pre-click, driver-side fix: type-and-verify
+  with re-type on remount). The second submit: click landed, then NO terminal surface within
+  240s — the spinner-forever SEAM ending is gone, but the app's balance poll tripped the
+  3-strike offline threshold MID-SEND and the offline gate ("Sending to an address needs a
+  connection") REPLACED the sheet body, destroying the in-flight send's outcome/unknown/error
+  UI. NO transfer broadcast (3rd consecutive UI attempt, zero on-chain writes across all of
+  them; EURC measured 9.284071 unchanged; shift expired unexercised 15:19:47Z, row 116). RPC
+  verified healthy before/during/after (direct Helius 200 ~150ms; relay pipe 200 single-digit
+  ms) — the flip is the app's jitter threshold, not the pipe. REMAINING (two, both app-side):
+  (1) an in-flight send must own its terminal surface — the offline gate must not tear the
+  sheet down mid-submit (defer the poll-flip until the send settles); (2) the send still never
+  BROADCASTS — with the 2xx-error-body refusal fetch-level pinned and the deadline fix live,
+  the failing await is still unidentified: next diagnostic is seam-level logging or a local
+  stub-RPC drive. ONE more attempt available after those land. Ledger note (founder eye):
+  rows 98-115 (the cross-branch union arbitration, commit `763699b`) computed every icp-float
+  asset NEGATIVE (-1.381 ICP, -0.064 VCHF, -0.4595 ckUSDC, …) and row 111 carries a NEGATIVE
+  amount `funds.mjs validate()` rejects — rows 117-121 net the union to the MEASURED census;
+  `just funds reconcile` 18 pairs CLEAN @ this commit.
 - **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
   adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`, `/trade`
   POST+GET status) are registered on every build and answer 503 naming `DPAY_TROCADOR_API_KEY`
