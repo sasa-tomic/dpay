@@ -110,6 +110,21 @@
   is not backed by the partner API. Its schema remains the best adapter template in the class
   (`refund_address` at create, network-aware routes, fixed+floating with `rate_id`).
 - **SideShift return shift: REFUNDED in full (2026-09-21).** The 9.284071 EURC deposit came back to the sol-rail on-chain; ledgered (row 81 + dedupe correction 82), reconcile CLEAN. SideShift confirmed their technical issue and will provide transfer-procedure details — the EURC→ICP return leg is therefore NOT yet live-proven; retry with their corrected procedure when it arrives (float holds the EURC ready).
+- **Route-B / CCTP USD leg (2026-09-21, cctp-live session): live-driven; the ckERC20 withdraw
+  FAILED-and-was-refunded — value recovered, cause uninvestigated.** Real-app legs that worked:
+  ckBTC→ckETH probe swap (pool akhru: 0.0000096 + 2×0.0000001 fees → 0.000291876642414143
+  ckETH) and the fuel swap — the DIRECT VCHF/ckUSDC pool hx7nb, single swap, no ICP hop
+  (0.1445 VCHF + 2×0.0001 fees → 0.167977 ckUSDC). The withdraw of 0.158587 ckUSDC → evm-float
+  0x6B1C…83b9: attempt #1 paid its approve fees (0.000002 ckETH + 0.01 ckUSDC), the ckETH minter
+  gas-burned 0.00013176308327 ckETH then minted it back minus the 2e12 ledger fee ~3 min later —
+  it aborted BEFORE pulling the ckUSDC (ckUSDC never left; allowance unspent); attempt #2 halted
+  at REVIEW, no burn. Net cost of the failed leg: 2×(0.000002 ckETH + 0.01 ckUSDC) in fees.
+  **LEDGER DUPLICATION WARNING:** main rows 83–92 (@ `3d5bc71`, reconstructed from the ledgers'
+  own `get_transactions` tails) and branch `cctp-live` rows 83–89 (@ `f27aba0`, same movements,
+  coarser split) record the SAME on-chain events — at merge keep ONE set and let
+  `just funds reconcile` arbitrate; never double-apply. Next: diagnose the minter abort (ckETH
+  minter `sv3dd` withdraw status), then resume the `evm-sign`/`cctp-claim` fallback lane
+  (branch `cctp-live`; unproven until first live burn).
 - **Prod-relay deploy incl. the partner key** — founder-run per `docs/OPS.md` §3, DO NOT NAG; the
   full unshipped list (2026-09-19 conversion-recovery wave + the 2026-09-20 CeFi live-ops wave)
   is the FOUNDER-OWNED row below. On 2026-09-20 ~22:26 the founder ran `just deploy-ic`: the
