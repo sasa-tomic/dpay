@@ -104,6 +104,7 @@
   direction (icp↔sol, icp↔usdc@sol, icp↔eurc@sol, both ways) — the site's ICP↔SOL pair page
   is not backed by the partner API. Its schema remains the best adapter template in the class
   (`refund_address` at create, network-aware routes, fixed+floating with `rate_id`).
+- **SideShift return shift: REFUNDED in full (2026-09-21).** The 9.284071 EURC deposit came back to the sol-rail on-chain; ledgered (row 81 + dedupe correction 82), reconcile CLEAN. SideShift confirmed their technical issue and will provide transfer-procedure details — the EURC→ICP return leg is therefore NOT yet live-proven; retry with their corrected procedure when it arrives (float holds the EURC ready).
 - **Prod-relay deploy incl. the partner key** — founder-run per `docs/OPS.md` §3, DO NOT NAG; the
   full unshipped list (2026-09-19 conversion-recovery wave + the 2026-09-20 CeFi live-ops wave)
   is the FOUNDER-OWNED row below. On 2026-09-20 ~22:26 the founder ran `just deploy-ic`: the
