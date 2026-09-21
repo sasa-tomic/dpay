@@ -94,7 +94,9 @@
   `https://api.changenow.io/v2`); the key-authenticated catalog (1281 entries) lists
   `usdc@sol` and `eurc@sol` (both `supportsFixedRate: true`) but `icp` is ABSENT — the site's
   ICP hub page is not backed by the API. ChangeNOW is therefore NOT an ICP-bridge candidate;
-  it remains an optional EUR↔USD-on-Solana redundancy rail (adapter unstarted).
+  it remains an optional EUR↔USD-on-Solana redundancy rail (adapter unstarted). Final probe:
+  the v2 estimate endpoint rejects `sol→icp` outright (`"Currency sol is not supported"`) —
+  the site page renders off their internal surface, not the partner API.
 - **Prod-relay deploy incl. the partner key** — founder-run per `docs/OPS.md` §3, DO NOT NAG; the
   full unshipped list (2026-09-19 conversion-recovery wave + the 2026-09-20 CeFi live-ops wave)
   is the FOUNDER-OWNED row below. On 2026-09-20 ~22:26 the founder ran `just deploy-ic`: the
