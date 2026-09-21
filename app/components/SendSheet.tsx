@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -54,12 +54,16 @@ const IC_NETWORK = 'Internet Computer';
  */
 export function SendSheet({
   identity, catalog, desc, balance, family, display, tokenContract,
-  homeRail = null, prefillAddress = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose, onSendActiveChange,
+  homeRail = null, prefillAddress = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose, onSendActiveChange, online = true, onReviewShown,
 }: {
   identity: Identity;
   catalog: CurrencyDescriptor[];
   desc: CurrencyDescriptor;
-  balance: string;
+  /** The LAST-KNOWN balance in raw units — null when no balance was EVER known. Stale-ok
+   *  gating (2026-09-21, the SOL twin's live attempt #7): the gate compares against the
+   *  last-known figure WITHOUT demanding a fresh poll, so an aborted-poll season can never
+   *  disable a review that checks out; an honest unknown (null) still gates. */
+  balance: string | null;
   /** The chain-key family, when this asset has one — enables the NATIVE route. */
   family: MinterFamily | null;
   display: FamilyDisplay | null;
@@ -85,6 +89,12 @@ export function SendSheet({
    *  poll's 3-strike offline flip would otherwise REPLACE an in-flight send's sheet, so no
    *  terminal surface ever rendered. The same teardown class, fixed on both rails. */
   onSendActiveChange?: (active: boolean) => void;
+  /** The device's connectivity as the parent's balance polls see it — only shapes the in-sheet
+   *  offline notice, never a gate (a genuinely-offline send fails honestly at submit). */
+  online?: boolean;
+  /** Fired ONCE per mount, the first time this sheet renders its review card (surface ownership,
+   *  2026-09-21): the parent's offline strike gate must then stop replacing this sheet. */
+  onReviewShown?: (shown: boolean) => void;
 }) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
@@ -204,7 +214,12 @@ export function SendSheet({
   }, [address, desc, selfAccount]);
 
   const raw = toUnits(amountStr, decimals);
-  const overBalance = cmpRaw(raw, balance) > 0;
+  // STALE-OK BALANCE GATING (the IC twin of the SOL sheet's 2026-09-21 fix): both comparisons
+  // read the LAST-KNOWN balance — never a fresh-poll demand — and a NEVER-known balance (null)
+  // gates the confirm without claiming a zero. An aborted-poll season must not disable a review
+  // that checks out against the last-known figure.
+  const balanceKnown = balance != null;
+  const overBalance = balanceKnown && cmpRaw(raw, balance!) > 0;
   // Fee is charged ON TOP of the amount by the ledger, so the spendable maximum is balance − fee.
   // Only computable once the ledger has told us its fee. Without it, "Max" would fill the entire
   // balance and the transfer would be rejected for amount+fee — a doomed action offered as a
@@ -221,7 +236,7 @@ export function SendSheet({
     () => (feeKnown ? (BigInt(raw || '0') + BigInt(feeRaw)).toString() : null),
     [raw, feeRaw, feeKnown],
   );
-  const overTotal = cmpRaw(total ?? raw, balance) > 0;
+  const overTotal = balanceKnown && cmpRaw(total ?? raw, balance!) > 0;
   // Our own MAIN account in either namespace. A subaccount of ours never reaches here — the
   // resolver refuses it outright — so comparing the one destination string against our principal is
   // the whole test on the ICRC side.
@@ -231,7 +246,18 @@ export function SendSheet({
   );
   // The native route is confirmed by WithdrawSheet's own button, not this one.
   const directRoute = resolved?.ok === true && resolved.kind !== 'native';
-  const canSend = directRoute && raw !== '0' && !overTotal && phase === 'form';
+  const canSend = directRoute && raw !== '0' && balanceKnown && !overTotal && phase === 'form';
+
+  // Surface ownership (the offline-gate half, same 2026-09-21 live attempt): the FIRST rendered
+  // review reports up, sticky for this mount — the parent's 3-strike offline gate then stops
+  // replacing this sheet and may only show a notice inside it.
+  const reviewVisible = phase === 'form' && raw !== '0' && resolved?.ok === true;
+  const reviewShownRef = useRef(false);
+  useEffect(() => {
+    if (!reviewVisible || reviewShownRef.current) return;
+    reviewShownRef.current = true;
+    onReviewShown?.(true);
+  }, [reviewVisible, onReviewShown]);
 
   // The one status line under the address field: route disclosure when usable, the specific reason
   // when not. Never a bare "invalid address" — every branch names what the address IS.
@@ -379,7 +405,7 @@ export function SendSheet({
   return (
     <View style={S.sheetBody}>
       <Text style={S.label}>{M.withdraw.send.sendAmount(assetName)}</Text>
-      <Text style={S.dim2}>{M.withdraw.sol.available(fmt(balance))}</Text>
+      {balance != null ? <Text style={S.dim2}>{M.withdraw.sol.available(fmt(balance))}</Text> : null}
 
       <AddressField
         value={address}
@@ -420,7 +446,10 @@ export function SendSheet({
           display={display}
           family={family}
           tokenContract={tokenContract}
-          balance={balance}
+          // The chain-key offramp keeps its own fail-closed shape: an unknown balance coerces to
+          // a known zero THERE (it gates — the honest-unknown rule) without this sheet ever
+          // rendering a fabricated "Available: 0" line above.
+          balance={balance ?? '0'}
           address={resolved.destination}
           onResumeAddress={setAddress}
           onSaveAddress={a => { void rememberAddress(assetKey, a, saveName.trim(), Date.now()).then(setSaved); }}
@@ -491,6 +520,10 @@ export function SendSheet({
       ) : null}
 
       {err ? <Text testID="send-err" style={S.err}>{err}</Text> : null}
+
+      {/* Offline while the review is up: a NOTICE inside the sheet, never a teardown — the
+          strike gate defers (see onReviewShown). A genuinely-offline send fails at submit. */}
+      {!online ? <Text testID="send-offline-note" style={S.warnNote}>{M.withdraw.offlineReviewNote}</Text> : null}
 
       <Pressable
         testID="btn-send-confirm"

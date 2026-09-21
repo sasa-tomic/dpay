@@ -538,3 +538,61 @@ describe('SendSheet — the route line names the rail for home-currency rails (O
     act(() => { tree.unmount(); });
   });
 });
+
+// --- stale-ok balance gating + surface ownership (the IC twin of the 2026-09-21 SOL fix) ---------
+
+describe('SendSheet — stale-ok balance gating (2026-09-21 live EURC attempt #7, IC side)', () => {
+  test('amount + fee ≤ LAST-KNOWN balance → confirm ENABLED without a fresh poll', async () => {
+    const tree = await mountSend({balance: '500000000'}); // 5 VCHF last-known, fee 0.0001
+    await typeAddress(tree, K2);
+    await typeAmount(tree, '4');
+    expect(confirm(tree).disabled).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('amount + fee > LAST-KNOWN balance → still gated (a real over-spend, stated against the real figure)', async () => {
+    const tree = await mountSend({balance: '500000000'});
+    await typeAddress(tree, K2);
+    await typeAmount(tree, '5.5'); // 5.5 + fee > 5
+    expect(confirm(tree).disabled).toBe(true);
+    expect(confirm(tree).accessibilityState.disabled).toBe(true);
+    expect(present(tree, 'send-overbalance')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('balance NEVER known (null) → the confirm gates and the screen claims no zero balance', async () => {
+    const tree = await mountSend({balance: null});
+    await typeAddress(tree, K2);
+    await typeAmount(tree, '1');
+    expect(confirm(tree).disabled).toBe(true);
+    expect(confirm(tree).accessibilityState.disabled).toBe(true);
+    await act(async () => { await confirm(tree).onPress(); });
+    expect(prepareTransfer).not.toHaveBeenCalled(); // the blind press submits nothing
+    // No fabricated "Available: 0" — an unknown is not a zero.
+    const availableLine = tree.root.findAll(n => n.props != null && typeof n.props.children === 'string' && String(n.props.children).startsWith('Available:'));
+    expect(availableLine.length).toBe(0);
+    act(() => { tree.unmount(); });
+  });
+
+  test('offline with the review up → the in-sheet notice renders (surface ownership; the gate itself defers in PayMode)', async () => {
+    const tree = await mountSend({balance: '500000000', online: false, onReviewShown: () => {}});
+    await typeAddress(tree, K2);
+    await typeAmount(tree, '1');
+    expect(present(tree, 'send-review')).toBe(true);
+    expect(present(tree, 'send-offline-note')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a rendered review reports up ONCE (sticky), and never before there is a review', async () => {
+    const onReviewShown = jest.fn();
+    const tree = await mountSend({balance: '500000000', onReviewShown});
+    expect(onReviewShown).not.toHaveBeenCalled();
+    await typeAddress(tree, K2);
+    await typeAmount(tree, '1'); // amount + destination resolved → the review card renders
+    expect(onReviewShown).toHaveBeenCalledTimes(1);
+    expect(onReviewShown).toHaveBeenCalledWith(true);
+    await typeAmount(tree, '2');
+    expect(onReviewShown).toHaveBeenCalledTimes(1); // once per mount, not per keystroke
+    act(() => { tree.unmount(); });
+  });
+});
