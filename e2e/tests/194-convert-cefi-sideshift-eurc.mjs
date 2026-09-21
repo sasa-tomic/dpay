@@ -191,6 +191,16 @@ export async function run() {
     assertEq(shiftsAfter, shiftsBefore, 'the order was NEVER re-created across the reload');
     assertEq(BigInt(await getBalance(r2.baseURL, account.publicHex, 8)), icpBefore,
       'ICP ledger UNCHANGED across the reload — nothing was ever signed or sent');
+    // Let the resumed record poll AT LEAST TWICE while the venue still says 'multiple',
+    // BEFORE the 'settled' verdict flips: the harness poll cadence is fast (500ms), so
+    // this is bounded and quick — but without it the flip could land on the SECOND
+    // post-reload poll, the record reaches done (terminal: the poller retires) after
+    // only 2 recorded reads, and the §7 count assert would measure phase timing instead
+    // of poller behavior (the exact flake class 0dbac56 fixed in flow 197; observed live
+    // 2026-09-21: 1 RED in 2 solo runs at 2 GETs). Sequencing, not sleeping. The stub's
+    // counter resets with the page (reinstall above), so these are all post-reload reads.
+    await driver.waitForFunction(() => globalThis.__E2E_SIDESHIFT.statusCalls.length >= 2,
+      {timeoutMs: 15_000, label: 'post-reload: >=2 keyed status polls observed'});
 
     // --- §6 settled: the venue's own figures complete the record (EURC settle leg)
     await setSideShiftStatus(driver, 'settled', {settleAmount: '0.0495', settleHash: SETTLE_HASH});
@@ -204,7 +214,7 @@ export async function run() {
     const st = await sideShiftStubState(driver);
     assert(st != null, 'sideshift page-stub state present');
     assertEq(st.unexpected.length, 0, `status stub saw no unexpected origins (${st.unexpected.join(', ')})`);
-    assert(st.statusCalls.length >= 3, `the provider path polled status (${st.statusCalls.length} GETs)`);
+    assert(st.statusCalls.length >= 3, `the provider path polled status (${st.statusCalls.length} GETs: >=2 post-reload multiple-phase polls, then the settled verdict)`);
     for (const c of st.statusCalls) {
       assertEq(c.id, SHIFT_ID, 'every status poll was keyed by the ONE shift id the venue issued');
     }
