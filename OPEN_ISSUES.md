@@ -114,17 +114,13 @@
   never quotes gas; the burn's ETH is the user wallet's own. Since 2026-09-20 the in-intent
   gas-fund offer funds that slice from the user's OWN holdings (fund-from-wallet prepends the
   gas legs, or self-fund with recheck) — still nothing dpay pays, holds, or custodies.
-- **SideShift RETURN shift (EURC→ICP, the SOL-side CeFi op's reverse leg) — payout PENDING.**  9.284071 EURC left the app-derived SOL rail on-chain (venue deposit address `7nY7…ZsSpQ`); the
-  settle target is the float's own IC principal `vloyo-…-5ae`. As of the 2026-09-20 `just funds
-  history` measure NO payout row had landed (last IN at block 38489263, the founder top-up).
-  Venue settlement is asynchronous — re-measure with `just funds history` before treating it as
-  lost; a failed/expired shift refunds to the user's own refundAddress by construction.
-  SYSTEMIC FIX LANDED 2026-09-20 (`cefi-settling` branch): a venue whose measured payout
-  misses the 30-minute SLA (or never settles) is now flagged `degraded` and demoted to the
-  tail of `GET /api/v1/venues` until a passing probe clears it. To MEASURE this shift (and
-  ship the flag for real), find its shift id on the founder's SideShift account and run
-  `DPAY_SIDESHIFT_PROBE_SHIFTS=sideshift-eurc=<shiftId> just swap-venue-probe`, then commit
-  the `dfx/venue_health.json` row it writes and redeploy the relay.
+- **SideShift RETURN shift (EURC→ICP, the SOL-side CeFi op's reverse leg) — REFUNDED 2026-09-20.**  9.284071 EURC left the app-derived SOL rail on-chain (venue deposit address `7nY7…ZsSpQ`); the venue swept it but never paid the ICP out (their payout layer rejected our settle-address format — bare ICRC-1 principal). SideShift support refunded the full 9.284071 EURC to the SOL rail (ledger row 80, reconcile CLEAN; founder filed the support ticket). OPEN with SideShift engineering: the exact ICP settle-address format they accept — on answer, dpay pins its sideshift settle-address validation to it (test-pinned) and retries the round trip ONCE at the venue minimum.
+  Settle side was our IC principal — valid ICRC-1, rejected by their payout layer; the exact
+  format they accept is pending from SideShift engineering. On answer: pin dpay's sideshift
+  settle-address validation to it (test-pinned) and retry the round trip ONCE at the venue
+  minimum. To MEASURE this shift for the SLA gate, find its shift id on the founder's SideShift
+  account and run `DPAY_SIDESHIFT_PROBE_SHIFTS=sideshift-eurc=<shiftId> just swap-venue-probe`,
+  then commit the `dfx/venue_health.json` row it writes and redeploy the relay.
 - **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
   adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`, `/trade`
   POST+GET status) are registered on every build and answer 503 naming `DPAY_TROCADOR_API_KEY`
