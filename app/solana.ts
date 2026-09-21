@@ -753,9 +753,10 @@ export async function sendSpl(
       ixs.push(buildSplTransferInstruction(senderAta, recipientAta, publicKey, amount));
 
       // Broadcast through the one helper: it fetches the blockhash, signs with THAT exact value,
-      // and owns the diagnosed blockhash-refresh-retry (the tracer reads blockhash → sign →
+      // and broadcasts with the skipPreflight posture (the tracer reads blockhash → sign →
       // broadcast — the pre-2026-09-21 labels read sign → blockhash, a mislabel that made the
-      // first clean live failure LOOK like a stale-hash send).
+      // first clean live failure LOOK like a stale-hash send; the old refresh it used to own is
+      // retired — see the module comment at the helper).
       const signature = await broadcastSignedWithFreshBlockhash(
         {getLatestBlockhash, sendTransaction}, signal, at,
         (bh) => signTransaction(assembleMessage(publicKey, ixs, base58Decode32(bh)), seed),

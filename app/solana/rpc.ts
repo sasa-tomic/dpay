@@ -377,10 +377,11 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
         // the answering node's send-preflight STATE, not a verdict on the bytes — proven live
         // by the byte-exact replay of the refused signed tx to the next endpoint (accepted +
         // finalized). The signature is valid on any endpoint, so the SAME bytes walk to the
-        // next candidate; NO re-sign here — the seam's one refresh-and-resign owns re-signing,
-        // and fires only when EVERY candidate has refused (exhaustion, below). Every OTHER
-        // JSON-RPC error (an instruction error, insufficient funds, …) is a verdict on the
-        // transaction itself: refused in place, never walked, never refreshed.
+        // next candidate; NO re-sign anywhere in the walk, and the seam above it re-signs
+        // nothing either (the payment seam's refresh-and-resign is retired — skipPreflight
+        // posture; see the sendTransaction doc). Every OTHER JSON-RPC error (an instruction
+        // error, insufficient funds, …) is a verdict on the transaction itself: refused in
+        // place, never walked.
         const rawMsg = typeof j.error.message === 'string' ? j.error.message : String(j.error.message ?? 'error');
         if (walkBlockhash && isSolBlockhashNotFound(rawMsg)) {
           if (blockhashRefusal === null) blockhashRefusal = {url: candidate, message: rawMsg};
