@@ -172,6 +172,22 @@
   asset NEGATIVE (-1.381 ICP, -0.064 VCHF, -0.4595 ckUSDC, …) and row 111 carries a NEGATIVE
   amount `funds.mjs validate()` rejects — rows 117-121 net the union to the MEASURED census;
   `just funds reconcile` 18 pairs CLEAN @ this commit.
+  CORRECTED-PATH ATTEMPT #3 2026-09-21 ~16:34 UTC (bounded-load + tracer verified in the
+  served bundle pre-flight): the failure moved UPSTREAM of the send — the sheet was never
+  submitted (the tracer stayed silent), and the CONFIRM loop locked instead: 30 re-confirm
+  attempts alternating "Could not reach SideShift" (the confirm's fresh-quote fetch failing
+  client-side within its 8s timeout while the venue answered curl fine) with "Quote changed";
+  exactly ONE shifts/fixed 201 landed (the order EXISTS venue-side, requested 9.284071 EURC,
+  unfunded, expired ~16:51Z, id uncapturable — the awaiting panel never rendered) and the
+  record never adopted. Deposit leg never started; zero funds moved (ledger row 132). NEXT
+  DIAGNOSTIC (dev-side, no funds): instrument or stub-drive the SOL-side cefi CONFIRM path —
+  the quote-fetch timeout profile against the real venue + the record-adoption step after a
+  201 order — and re-run offline flow 197, which is RED at HEAD on its FINAL assert ("status
+  poll keyed every read by the order id", >=3 statusCalls; the lifecycle otherwise reaches
+  done; the poller is untouched by the merge wave — flake or indirect). ONE more attempt
+  after those. Rows 122-131 (the concurrent session's counter-corrections of its own
+  763699b rows) + the evm-float USDC 0.1285 discovery mesh with rows 117-121; reconcile
+  18 pairs CLEAN with both sets.
 - **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
   adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`, `/trade`
   POST+GET status) are registered on every build and answer 503 naming `DPAY_TROCADOR_API_KEY`
