@@ -53,8 +53,22 @@ async function main() {
     else console.log(`address   ${addr}\n  ${'ETH'.padEnd(6)} UNREADABLE (${why})`);
     process.exit(1);
   }
-  if (json) console.log(JSON.stringify({address: addr, rows: [{label: 'ETH', value: wei.toString()}]}));
-  else console.log(`address   ${addr}\n  ${'ETH'.padEnd(6)} ${fmt(wei)}  (${wei} wei)`);
+  // USDC census (the CCTP-burned USDC lands here) — one eth_call; a failed call is UNKNOWN, never 0.
+  let usdc;
+  try {
+    const data = '0x70a08231' + addr.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+    const res2 = await fetch(RPC, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({jsonrpc: '2.0', id: 2, method: 'eth_call', params: [{to: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', data}, 'latest']}),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const j2 = await res2.json();
+    if (!j2.error) usdc = BigInt(j2.result);
+  } catch { usdc = undefined; }
+  const usdcDec = usdc === undefined ? undefined : (() => { const s = usdc.toString().padStart(7, '0'); return `${s.slice(0, -6)}.${s.slice(-6)}`; })();
+  if (json) console.log(JSON.stringify({address: addr, rows: [{label: 'ETH', value: wei.toString()}, ...(usdcDec !== undefined ? [{label: 'USDC', value: usdcDec}] : [{label: 'USDC', unreadable: 'eth_call failed'}])]}));
+  else console.log(`address   ${addr}\n  ${'ETH'.padEnd(6)} ${fmt(wei)}  (${wei} wei)` + (usdc !== undefined ? `\n  ${'USDC'.padEnd(6)} ${(Number(usdc) / 1e6).toFixed(6)}  (${usdc} subunits)` : ''));
 }
 
 await main();
