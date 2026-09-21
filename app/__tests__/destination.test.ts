@@ -52,6 +52,20 @@ describe('detectAddressShape', () => {
     expect(detectAddressShape(SOL_ADDR)).toBe('base58');
   });
 
+  it('separates 1…/3…-prefixed SOLANA pubkeys from BTC base58 by decoded byte length (attempt-#9 regression)', () => {
+    // REAL venue deposit addresses (SideShift EURC, live 2026-09-21/22) that start with the BTC
+    // P2SH leading char. They decode to 32 bytes — Solana pubkeys — and MUST route as base58;
+    // the old prefix-only rule read them as Bitcoin and gated the real funding send.
+    expect(detectAddressShape('3ytbGFZQuNi2wojC9ootG3QWwNzomFLVzGmRvcuzGurJ')).toBe('base58'); // #9 deposit
+    expect(detectAddressShape('4kGizwhsGRdn2grXsUQsDLaBcwwcuzViLArwDRMM7WcW')).toBe('base58'); // #8 deposit
+    expect(detectAddressShape('2f3WrCR93g3hYp6rC8Hk5Nz472Eb9XdthyUGpuj3jzn1')).toBe('base58'); // the rail's own EURC ATA
+    expect(detectAddressShape('FvTFxUcD1M1NiNCVHJjw3f2QchXdERoR1Zxm4s1YvrWY')).toBe('base58');
+    // A REAL Bitcoin P2SH address decodes to 25 bytes and stays BTC even in the same band.
+    expect(detectAddressShape('3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy')).toBe('btc');
+    expect(routeForSolana('base58')).toEqual({ok: true});
+    expect(routeForSolana('btc')).toEqual({ok: false, refusal: {reason: 'wrong-chain', shape: 'btc'}});
+  });
+
   it('trims surrounding whitespace and reports empty/garbage as unknown', () => {
     expect(detectAddressShape(`  ${OISY_VCHF}\n`)).toBe('ic-account');
     expect(detectAddressShape('')).toBe('unknown');

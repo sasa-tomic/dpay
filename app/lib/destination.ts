@@ -1,5 +1,6 @@
 import type {CurrencyDescriptor, MinterFamily} from '../config/catalog';
 import {ICP_LEDGER_PRINCIPAL} from '../config/constants';
+import bs58 from 'bs58';
 
 // --- send-to-address destination routing ----------------------------------------------------------
 // ONE destination field, whatever the user pastes or scans. This module decides WHICH rail moves the
@@ -74,21 +75,47 @@ const RE_IC_ACCOUNT = /^[a-z2-7]{1,7}(-[a-z2-7]{1,7})+(\.[0-9a-f]+)?$/i;
 const RE_BTC = /^(bc1[02-9ac-hj-np-z]{6,87}|[13][a-km-zA-HJ-NP-Z1-9]{24,})$/;
 const RE_BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
+/** True when `t` (already matched against RE_BASE58's alphabet/length band) decodes to exactly
+ *  32 bytes — a Solana ed25519 pubkey. Shape-only still: no checksum is verified, the decode is
+ *  pure base58. Total by construction: bs58.decode can throw only on characters outside the
+ *  alphabet, which RE_BASE58 has already excluded — the catch is belt-and-braces for totalness. */
+function isSolanaPubkeyShape(t: string): boolean {
+  try {
+    return bs58.decode(t).length === 32;
+  } catch {
+    return false;
+  }
+}
+
 /** Recognise a destination's address NAMESPACE by shape. Pure, total, checksum-free.
  *
  *  Order matters where two namespaces could both match a string:
  *  • 64-hex is tested BEFORE base58 — a 64-char hex string is also valid base58 alphabet, but no
  *    Solana address is 64 characters, so the legacy-ICP reading is the only sensible one.
  *  • `ic-account` requires a dash, which no other namespace here permits, so it cannot collide.
- *  • BTC is tested before the generic base58 catch-all, since `1…`/`3…` addresses are base58 too. */
+ *  • BTC is tested before the generic base58 catch-all, since `1…`/`3…` addresses are base58 too —
+ *    BUT the base58 branch is tested FIRST when the string decodes to 32 bytes, because the
+ *    leading-character rule CANNOT separate the namespaces: a BTC base58 address is 25 bytes
+ *    (26–35 chars) while a Solana pubkey is 32 bytes (usually 43–44 chars), and venue deposit
+ *    addresses DO start with `1`/`3` (live 2026-09-22: SideShift's EURC deposit address
+ *    `3ytbGFZ…GurJ` — a pure `[13]…` prefix rule misread it as Bitcoin and gated the real
+ *    funding send; attempt #9). The byte-length decode is the only honest disambiguator. */
 export function detectAddressShape(text: string): AddressShape {
   const t = text.trim();
   if (t.length === 0) return 'unknown';
   if (RE_EVM.test(t)) return 'evm';
   if (RE_ICP_ACCOUNT_ID.test(t)) return 'icp-account-id';
   if (RE_IC_ACCOUNT.test(t)) return 'ic-account';
+  if (RE_BASE58.test(t)) {
+    // The ambiguous band: 32–44 base58 chars could be a Solana pubkey OR a long BTC base58
+    // address. The decoded byte length decides — 32 = Solana, anything else falls through to
+    // the BTC namespace (which ownes the `1…`/`3…` prefixes for its own 25-byte addresses) and
+    // finally to `unknown` for strings no namespace can claim.
+    if (isSolanaPubkeyShape(t)) return 'base58';
+    if (RE_BTC.test(t)) return 'btc';
+    return 'unknown';
+  }
   if (RE_BTC.test(t)) return 'btc';
-  if (RE_BASE58.test(t)) return 'base58';
   return 'unknown';
 }
 
