@@ -190,6 +190,39 @@
   blind. Deposit-tooling note: the driver's amount-entry needs transient-render tolerance
   (the 5s selector wait died once on a sheet re-render; fixed driver-side with catch-and-
   retry — worth one assert in the harness).
+    ATTEMPT #6 2026-09-21 ~19:06-19:24 UTC (blockhash-refresh seam 0eac6c8 — SEAM PROVEN
+  LIVE, REFUSAL ROOT-CAUSED TO THE PROVIDER; leg still open, one attempt remains after the
+  failover fix). Rig note first: the drive MUST dial the XFF front (`e2e/live-xff-proxy.mjs`,
+  8898→8899) — a direct 8899 dial from loopback makes the venue refuse EVERY partner call
+  with 400 "x-user-ip" (the relay honors leftmost public XFF only when its peer is loopback);
+  found and fixed pre-money this attempt. Order creation re-validated a THIRD time first-try:
+  shift `698052efd0e0a70ef267` (exact 8.8 EURC, settle = the 64-hex identifier verbatim — the
+  app's live derivation matches the harness oracle byte-for-byte; refund = the rail; live min
+  8.718447). The funding handoff was blocked ONCE driver-side (a resume-engine poll re-render
+  remounted the sheet mid-keystroke — empty fields + a phantom amount; the echo gate refused
+  pre-click, zero movement; driver now sets values via React's native setter + verify). The
+  money path then produced THE capture this attempt exists for — the 0eac6c8 seam live,
+  tracer verbatim: blockhash → sign → broadcast → (classified Blockhash-not-found refusal)
+  → blockhash-refresh-retry → sign → broadcast → honest refused-twice ("sol broadcast refused
+  twice (fresh block re-signed once)"). NOTHING was accepted (preflight refusals are provably
+  unsent). The refusal repeated on every press (4 sends, 8 refusals, all identical —
+  systematic). ROOT-CAUSE PROOF: harness-side wire capture (request interception, zero app
+  changes) grabbed the exact sendTransaction bodies; they parse as perfectly-formed legacy
+  txs (fee payer `BzFNJ…`, sender ATA `2f3WrCR…`, Token program, SPL transfer; embedded hash
+  fresh at signing — relay cache ≤4s, Helius reads fresh); the SAME base64 body replayed to
+  api.mainnet-beta.solana.com was ACCEPTED and FINALIZED (sig `5HCVuLRv…`, slot 449148468,
+  Ok — ledger rows 134-136: the 0.01 EURC self-send discriminator, net EURC zero +
+  0.000005 SOL fee; reconcile 18 pairs CLEAN). VERDICT: app correct, seam fix correct, bytes
+  valid — Helius's sendTransaction preflight state is the fault (its own read path answers
+  isBlockhashValid TRUE for a hash its send path refuses). Shift `698052ef…` expired
+  19:20:59Z unfunded — zero value at risk, no refund owed (nothing deposited). REMAINING
+  (one gap, then the leg closes): the endpoint walk treats a 2xx-wrapped RPC refusal as a
+  completed call, so a head-candidate sendTransaction refusal never tries the NEXT candidate
+  — and the rig/prod list carries exactly one candidate. Fix: classify Blockhash-not-found
+  on sendTransaction as walk-worthy (failover to the next candidate, on top of the proven
+  refresh-once) + add a second RPC candidate (the public RPC already proven to accept our
+  bytes) to the rig and prod lists. ONE more attempt then closes the EURC→ICP return leg
+  (order machinery 3× proven; deposit bytes proven valid end-to-end).
 - **Trocador adapter- **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
   adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`, `/trade`
   POST+GET status) are registered on every build and answer 503 naming `DPAY_TROCADOR_API_KEY`

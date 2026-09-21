@@ -707,6 +707,334 @@ async function cmdC4(eurcAmount) {
 }
 
 
+/** OP 1c-v2 (attempt #6, 2026-09-21) — the RETURN shift: EURC(SOL)→ICP via the SOL-side cefi
+ *  destination, on the 0eac6c8 broadcast-seam fix. Differences from cmdC4 (attempt-#4-era):
+ *  1. The settle assertion is the 64-hex ICRC-1 ACCOUNT IDENTIFIER (principal text is REJECTED
+ *     by SideShift's ICP payout layer — confirmed in writing 2026-09-21; a shift naming the
+ *     principal sat `settling` for hours and refunded). The expected value here is the
+ *     independently recomputed identifier of the float principal (oracle: harness/wire.mjs
+ *     maths re-derived in THIS file's header note + cross-pinned goldens; matches the app's
+ *     own icpAccountIdFromPrincipal(p, '') the surface renders at convert-settle-address).
+ *  2. Full money-tracer capture: every `money: sol send` console line is mirrored to the log —
+ *     the attempt-#5 refusal signature reads `… step blockhash → step sign → step broadcast`
+ *     FAIL; on 0eac6c8 the acceptable outcomes are a clean `blockhash → sign → broadcast →
+ *     confirm → confirmed sig=…` OR the diagnosed refresh `… broadcast FAILED → step
+ *     blockhash-refresh-retry → sign → broadcast → confirm …`. Any other shape = the finding.
+ *  ONE attempt: exactly one confirm press creates the order (#5-validated first-press), and the
+ *  SPL funding send gets exactly one press (DOM fallback only if the synthetic click throws —
+ *  a click-delivery fallback, never a money retry). */
+const FLOAT_ACCOUNT_ID = '9fac39d1ffbd746a5a6e18ad812d053ef2fbebeacd28a4e236d3cca052692279';
+// NO-MONEY probe: reproduce the c6 send-form step and READ what the fields actually hold
+// after typing (attempt #6 finding: the review echo failed with address='' and amount='1.5'
+// on the screenshot — neither typed value landed as expected). Never presses confirm.
+async function probeSendSheet() {
+  await withApp(async (driver) => {
+    driver.page.on('pageerror', (e) => log(`[pageerror] ${String(e).slice(0, 300)}`));
+    await openBalances(driver);
+    await selectCurrency(driver, 'sol-eurc');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    for (let i = 0; i < 10; i++) {
+      if (await driver.isPresent('sol-send-address-input')) break;
+      if (await driver.isPresent('sol-send-offline-check')) await driver.click('sol-send-offline-check');
+      await sleep(1_500);
+    }
+    const addr = 'FvTFxUcD1M1NiNCVHJjw3f2QchXdERoR1Zxm4s1YvrWY';
+    await driver.type('sol-send-address-input', addr);
+    await sleep(1_500);
+    let vals = await driver.page.evaluate(() => ({
+      addr: document.querySelector('[data-testid="sol-send-address-input"]')?.value ?? '(no node)',
+      amt: document.querySelector('[data-testid="sol-send-amount-input"]')?.value ?? '(no node)',
+      focused: document.activeElement?.getAttribute?.('data-testid') ?? document.activeElement?.tagName ?? '(none)',
+    }));
+    log(`after addr type: ${JSON.stringify(vals)}`);
+    await driver.type('sol-send-amount-input', '8.8');
+    await sleep(1_500);
+    vals = await driver.page.evaluate(() => ({
+      addr: document.querySelector('[data-testid="sol-send-address-input"]')?.value ?? '(no node)',
+      amt: document.querySelector('[data-testid="sol-send-amount-input"]')?.value ?? '(no node)',
+      focused: document.activeElement?.getAttribute?.('data-testid') ?? document.activeElement?.tagName ?? '(none)',
+      body: (document.body?.innerText ?? '').replace(/\s+/g, ' ').slice(0, 700),
+    }));
+    log(`after amt type: ${JSON.stringify(vals)}`);
+    await driver.screenshot('live-probe-send-sheet');
+  });
+}
+
+/** RN-web controlled-input SET: drive React's own value setter + one bubbling input event, then
+ *  READ BACK. Immune to the resume-engine remount race that ate the keystrokes (attempt #6:
+ *  a global record poll re-rendered the sheet mid-type; per-key events landed on a dead node).
+ *  Returns the post-set value so the caller can verify-and-retry instead of trusting the click. */
+async function setInputValue(driver, testID, text) {
+  return driver.page.evaluate((tid, val) => {
+    const node = document.querySelector(`[data-testid="${tid}"]`);
+    if (!node) return '(no node)';
+    const proto = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) setter.call(node, val);
+    else node.value = val;
+    node.dispatchEvent(new Event('input', {bubbles: true}));
+    return node.value;
+  }, testID, text);
+}
+
+/** FUND the c6 shift (attempt #6 continuation): boot → Pay▸Send → race-proof inputs → echo
+ *  check → EXACTLY ONE confirm press → outcome + signature. The shift/order already exists
+ *  venue-side (698052efd0e0a70ef267); this is its deposit leg and nothing else. */
+async function cmdCaptureSend(destAddress, amount, outPath) {
+  await withApp(async (driver) => {
+    driver.page.on('pageerror', (e) => log(`[pageerror] ${String(e).slice(0, 300)}`));
+    driver.page.on('console', (m) => {
+      const t = m.text();
+      if (/money: sol send/.test(t)) log(`[tracer] ${t}`);
+      else if (m.type() === 'error') log(`[console.error] ${t.slice(0, 300)}`);
+    });
+    // HARNESS-side wire capture: every solana-pipe POST body (method + params), no app changes.
+    const captured = [];
+    await driver.page.setRequestInterception(true);
+    driver.page.on('request', (req) => {
+      const url = req.url();
+      if (req.method() === 'POST' && url.includes('/api/v1/solana/rpc')) {
+        try {
+          const body = JSON.parse(req.postData() ?? '{}');
+          captured.push({method: body.method, params: body.params});
+        } catch { /* non-JSON body — ignore */ }
+      }
+      req.continue();
+    });
+    await openBalances(driver);
+    await selectCurrency(driver, 'sol-eurc');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    for (let i = 0; i < 10; i++) {
+      if (await driver.isPresent('sol-send-address-input')) break;
+      if (await driver.isPresent('sol-send-offline-check')) {
+        log('offline gate up — rechecking');
+        await driver.click('sol-send-offline-check');
+      }
+      await sleep(1_500);
+    }
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await setInputValue(driver, 'sol-send-address-input', destAddress);
+      await setInputValue(driver, 'sol-send-amount-input', amount);
+      await sleep(1_200);
+      const vals = await driver.page.evaluate(() => ({
+        addr: document.querySelector('[data-testid="sol-send-address-input"]')?.value ?? '',
+        amt: document.querySelector('[data-testid="sol-send-amount-input"]')?.value ?? '',
+      }));
+      if (vals.addr === destAddress && vals.amt === amount) break;
+      if (attempt === 2) throw new Error(`capture-send: form never accepted the values: ${JSON.stringify(vals)}`);
+    }
+    let echoed = false;
+    for (let i = 0; i < 20; i++) {
+      if ((await driver.bodyText()).includes(destAddress.slice(0, 10))) { echoed = true; break; }
+      await sleep(500);
+    }
+    if (!echoed) throw new Error('capture-send: review never echoed the destination — refusing');
+    try {
+      await driver.click('btn-sol-send-confirm');
+    } catch (e) {
+      const clicked = await (await driver.page.$('body')).evaluate(() => {
+        const btn = document.querySelector('[data-testid="btn-sol-send-confirm"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      });
+      if (!clicked) throw e;
+    }
+    // Wait for the sheet's terminal phase (outcome or error), then dump the wire.
+    for (let i = 0; i < 40; i++) {
+      const body = await driver.bodyText();
+      if (/sent|signature|failed|error/i.test(body) && captured.some(c => c.method === 'sendTransaction')) break;
+      await sleep(1_000);
+    }
+    log(`captured ${captured.length} pipe calls: ${captured.map(c => c.method).join(', ')}`);
+    const {writeFileSync} = await import('node:fs');
+    writeFileSync(outPath, JSON.stringify(captured, null, 2));
+    log(`wire dump written: ${outPath}`);
+    await driver.screenshot('live-capture-send-final');
+  });
+}
+async function cmdFundC6(destAddress, amount) {
+  await withApp(async (driver) => {
+    driver.page.on('pageerror', (e) => log(`[pageerror] ${String(e).slice(0, 300)}`));
+    driver.page.on('console', (m) => {
+      const t = m.text();
+      if (/money: sol send/.test(t)) log(`[tracer] ${t}`);
+      else if (m.type() === 'error') log(`[console.error] ${t.slice(0, 300)}`);
+    });
+    await openBalances(driver);
+    await selectCurrency(driver, 'sol-eurc');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    for (let i = 0; i < 10; i++) {
+      if (await driver.isPresent('sol-send-address-input')) break;
+      if (await driver.isPresent('sol-send-offline-check')) {
+        log('offline gate up — rechecking');
+        await driver.click('sol-send-offline-check');
+      }
+      await sleep(1_500);
+    }
+    // Set + verify + one bounded redo (a redo re-SETs the same value — it is not a send retry;
+    // nothing has been signed or broadcast at this point).
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await setInputValue(driver, 'sol-send-address-input', destAddress);
+      await setInputValue(driver, 'sol-send-amount-input', amount);
+      await sleep(1_200);
+      const vals = await driver.page.evaluate(() => ({
+        addr: document.querySelector('[data-testid="sol-send-address-input"]')?.value ?? '',
+        amt: document.querySelector('[data-testid="sol-send-amount-input"]')?.value ?? '',
+      }));
+      log(`form values (attempt ${attempt}): ${JSON.stringify(vals)}`);
+      if (vals.addr === destAddress && vals.amt === amount) break;
+      if (attempt === 2) throw new Error(`fund-c6: form never accepted the values: ${JSON.stringify(vals)}`);
+    }
+    // Echo: the review card must name the destination in TEXT before any press.
+    let echoed = false;
+    for (let i = 0; i < 20; i++) {
+      if ((await driver.bodyText()).includes(destAddress.slice(0, 10))) { echoed = true; break; }
+      await sleep(500);
+    }
+    log(`send review echo: ${echoed ? 'ok' : 'MISSING'}`);
+    if (!echoed) {
+      await driver.screenshot('live-fundc6-send-review');
+      throw new Error('fund-c6: review card never echoed the destination — refusing');
+    }
+    await driver.screenshot('live-fundc6-send-review');
+    try {
+      await driver.click('btn-sol-send-confirm');
+    } catch (e) {
+      log(`confirm click failed: ${e.message}`);
+      const clicked = await (await driver.page.$('body')).evaluate(() => {
+        const btn = document.querySelector('[data-testid="btn-sol-send-confirm"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      });
+      log(`DOM fallback click: ${clicked}`);
+      if (!clicked) throw e;
+    }
+    const outcome = await driver.readText('sol-send-outcome', {timeoutMs: 120_000});
+    let sig = '';
+    try { sig = await driver.readText('sol-send-signature', {timeoutMs: 5_000}); } catch {}
+    log(`DEPOSIT SENT: ${outcome} | sig ${sig}`);
+    await driver.screenshot('live-fundc6-sent');
+  });
+}
+async function cmdC6(eurcAmount) {
+  await withApp(async (driver) => {
+    driver.page.on('pageerror', (e) => log(`[pageerror] ${String(e).slice(0, 300)}`));
+    driver.page.on('console', (m) => {
+      const t = m.text();
+      if (/money: sol send/.test(t)) log(`[tracer] ${t}`);
+      else if (m.type() === 'error') log(`[console.error] ${t.slice(0, 300)}`);
+    });
+    await openConvert(driver, 'sol-eurc'); // SOURCE is the SOL rail's EURC token row
+    await driver.type('convert-amount', eurcAmount);
+    const cefiRow = 'convert-sol-dest-cefi-sideshift-eurc';
+    await driver.click(cefiRow);
+    log(`dest picked: ${cefiRow}`);
+    await driver.findByTestID('convert-settle-address', {timeoutMs: 30_000});
+    const settle = (await driver.readText('convert-settle-address')).trim();
+    log(`settle address: ${settle}`);
+    if (!/^[0-9a-f]{64}$/.test(settle)) {
+      await driver.screenshot('live-c6-settle');
+      throw new Error(`OP 1c-v2: settle address is not a 64-hex account identifier — refusing (${settle})`);
+    }
+    if (settle !== FLOAT_ACCOUNT_ID) {
+      await driver.screenshot('live-c6-settle');
+      throw new Error(`OP 1c-v2: settle identifier is not the float's own — refusing (${settle})`);
+    }
+    for (let i = 0; i < 30; i++) {
+      if (await driver.isPresent('convert-quote-source')) break;
+      await sleep(1_000);
+    }
+    const qsrc = await driver.readText('convert-quote-source');
+    log(`quote source: ${qsrc}`);
+    if (!/SideShift/i.test(qsrc)) {
+      await driver.screenshot('live-c6-quote-failure');
+      throw new Error(`OP 1c-v2: quote source is not SideShift — refusing`);
+    }
+    await driver.screenshot('live-c6-quote');
+    const facts = await confirmWithRequote(driver, 'C6', {cefi: true});
+    if (facts == null) throw new Error('OP 1c-v2: confirm did not reach awaiting-deposit');
+    log(`DEPOSIT FACTS: ${JSON.stringify(facts, null, 2)}`);
+    const shiftId = await driver.isPresent('convert-shift-id')
+      ? (await driver.readText('convert-shift-id')).trim() : '(no shift id rendered)';
+    log(`SHIFT ID LINE: ${shiftId}`);
+    await driver.screenshot('live-c6-awaiting-deposit');
+    const m = facts.depositAmountLine.match(/([\d.]+)\s*EURC/);
+    if (!m) throw new Error(`OP 1c-v2: cannot parse EURC deposit amount from "${facts.depositAmountLine}"`);
+    const depositAmount = m[1];
+    // The handoff: send the venue's exact deposit via the app's own Pay▸Send (SPL transfer) —
+    // the path that carries broadcastSignedWithFreshBlockhash (0eac6c8).
+    await openBalances(driver);
+    await selectCurrency(driver, 'sol-eurc');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    // The send form can be gated by a transient offline state (the balance poll's online flag
+    // flips false on one failed IC read) — click the panel's recheck until the form renders.
+    for (let i = 0; i < 10; i++) {
+      if (await driver.isPresent('sol-send-address-input')) break;
+      if (await driver.isPresent('sol-send-offline-check')) {
+        log('offline gate up — rechecking');
+        await driver.click('sol-send-offline-check');
+      }
+      await sleep(1_500);
+    }
+    try {
+      await driver.type('sol-send-address-input', facts.depositAddress);
+      await driver.type('sol-send-amount-input', depositAmount);
+    } catch (e) {
+      log(`OP 1c-v2 send form failure: ${e.message}`);
+      log(`SEND SURFACE: ${(await driver.bodyText()).replace(/\s+/g, ' ').slice(0, 1200)}`);
+      await driver.screenshot('live-c6-send-form');
+      throw e;
+    }
+    await sleep(1_000);
+    // Echo check: the sheet's review card prints the destination as TEXT — poll the body for
+    // the deposit address prefix (input-value reads race AddressField remounts).
+    let echoed = false;
+    for (let i = 0; i < 20; i++) {
+      if ((await driver.bodyText()).includes(facts.depositAddress.slice(0, 10))) { echoed = true; break; }
+      await sleep(500);
+    }
+    log(`send review echo: ${echoed ? 'ok' : 'MISSING'}`);
+    if (!echoed) {
+      await driver.screenshot('live-c6-send-review');
+      throw new Error('OP 1c-v2: send form never echoed the venue deposit address — refusing');
+    }
+    await driver.screenshot('live-c6-send-review');
+    try {
+      await driver.click('btn-sol-send-confirm');
+    } catch (e) {
+      log(`confirm click failed: ${e.message}`);
+      log(`POST-ECHO SURFACE: ${(await driver.bodyText()).replace(/\s+/g, ' ').slice(0, 1200)}`);
+      await driver.screenshot('live-c6-confirm-gone');
+      // DOM-level click fallback (probe-confirm lesson: React synthetic events receive it).
+      const clicked = await (await driver.page.$('body')).evaluate(() => {
+        const btn = document.querySelector('[data-testid="btn-sol-send-confirm"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      });
+      log(`DOM fallback click: ${clicked}`);
+      if (!clicked) throw e;
+    }
+    const outcome = await driver.readText('sol-send-outcome', {timeoutMs: 120_000});
+    let sig = '';
+    try { sig = await driver.readText('sol-send-signature', {timeoutMs: 5_000}); } catch {}
+    log(`DEPOSIT SENT: ${outcome} | sig ${sig}`);
+    await driver.screenshot('live-c6-sent');
+    // Back to Convert: the persisted record adopts and the watch follows it to done.
+    await selectCurrency(driver, 'sol-eurc');
+    await driver.click('btn-accounts-convert');
+    const res = await watchConvert(driver, 'c6', {timeoutMs: 25 * 60_000});
+    log(`OP 1c-v2 result: ${res.ended}: ${res.text}`);
+  });
+}
+
+
 /** OP 2 — gas-funder core mechanic, live: 0.5 ICP → USDC at OUR Ethereum address (EVM-float),
  *  WITH the gas-fund card (the wallet's ckETH is far short of gas; the app prepends gas legs and
  *  funds ckETH from the input). The CCTP burn itself stays user-side by design — the record parks
@@ -1260,6 +1588,10 @@ try {
   else if (cmd === 'conv-c2') await cmdC2(args[0]);
   else if (cmd === 'conv-c3') await cmdC3(args[0]);
   else if (cmd === 'conv-c4') await cmdC4(args[0]);
+  else if (cmd === 'conv-c6') await cmdC6(args[0]);
+  else if (cmd === 'probe-send-sheet') await probeSendSheet();
+  else if (cmd === 'fund-c6') await cmdFundC6(args[0], args[1]);
+  else if (cmd === 'capture-send') await cmdCaptureSend(args[0], args[1], args[2] ?? '/tmp/opencode/tx-capture.json');
   else if (cmd === 'conv-gas') await cmdGas(args[0], args[1]);
   else if (cmd === 'conv-evm') await cmdEvm(args[0], args[1], args.includes('--confirm'));
   else if (cmd === 'conv-inwallet') await cmdInwallet(args[0], args[1], args[2], args.includes('--confirm'));
