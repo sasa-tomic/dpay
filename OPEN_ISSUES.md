@@ -96,7 +96,10 @@
   ICP hub page is not backed by the API. ChangeNOW is therefore NOT an ICP-bridge candidate;
   it remains an optional EUR↔USD-on-Solana redundancy rail (adapter unstarted). Final probe:
   the v2 estimate endpoint rejects `sol→icp` outright (`"Currency sol is not supported"`) —
-  the site page renders off their internal surface, not the partner API.
+  the site page renders off their internal surface, not the partner API. ChangeNOW support
+  confirmed it definitively (2026-09-21): ICP is not integrated in-house; the website renders
+  it via external "backup liquidity providers" while the API only carries in-house assets
+  (they also corrected the param naming: `fromNetwork` takes `sol`, not `solana`).
 - **StealthEX verified live (2026-09-21): DISQUALIFIED as an ICP-bridge candidate.** The
   partner key is sops-encrypted (`secrets/stealthex.sops.json`, Bearer auth, v4 base
   `https://api.stealthex.io`); `icp/mainnet` IS listed (fixed + floating) but the decisive
