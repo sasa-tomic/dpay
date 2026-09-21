@@ -543,6 +543,43 @@ async fn shift_creation_forwards_and_passes_back_verbatim() {
     assert!(sent.get("settleMemo").is_none(), "absent memo is not forwarded");
 }
 
+/// The venue payout layer's own constraint (SideShift engineering, 2026-09-21): IC
+/// payouts can be addressed ONLY to 32-byte account identifiers — 64-hex texts. The
+/// device now EMITS the wallet's account identifier for every IC payout target (the
+/// principal-text settle address is what refunded the first EURC→ICP return shift on
+/// 2026-09-20). The refund gate must therefore accept the hex form on an ICP deposit
+/// rail and ride it through verbatim — this is the shape the device actually sends;
+/// principal/account texts stay accepted too (until SideShift ships principal support),
+/// which the forwards-verbatim test above still pins.
+#[tokio::test]
+async fn shift_creation_accepts_the_64hex_account_identifier_refund_the_device_emits() {
+    use dpay_icp::principal::{AccountIdentifier, Principal};
+    let (stub, base) = spawn_stub().await;
+    let state = state_with(configured(&base));
+
+    let refund = AccountIdentifier::from_principal(&Principal::from_text(ICP).unwrap(), &[0u8; 32]).to_text();
+    let body = serde_json::json!({
+        "quoteId": "stub-quote-1",
+        "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "refundAddress": refund,
+        "depositLedger": ICP,
+    })
+    .to_string();
+    let (status, _h, _got) = post_json(&state, "/api/v1/sideshift/shifts/fixed", &body).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the device-emitted 64-hex refund passes the well-formedness gate"
+    );
+    assert_eq!(stub.shifts_hits(), 1);
+    let (_seen_headers, seen_body) = stub.last();
+    let sent: serde_json::Value = serde_json::from_str(&seen_body).unwrap();
+    assert_eq!(
+        sent["refundAddress"], refund,
+        "the 64-hex account identifier rides through to the venue, untouched"
+    );
+}
+
 /// An order without a refund address, a refund address malformed FOR ITS DEPOSIT RAIL,
 /// or an unknown deposit rail is refused — 400 house error, ZERO upstream calls. This is
 /// the fund-loss guard: an order the venue could only keep the funds on must never exist.

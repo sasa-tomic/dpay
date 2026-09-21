@@ -36,6 +36,17 @@
 //!   sends the deposit to SIDESHIFT's address; that is what CeFi means and the app's
 //!   disclosure says so.
 //!
+//! # The IC payout-target form (SideShift's own constraint)
+//!
+//! SideShift's ICP payout layer can deliver ONLY to 32-byte account identifiers —
+//! 64-hex texts (their engineering, confirmed 2026-09-21; the first EURC→ICP return
+//! shift refunded 2026-09-20 because the device had named a principal-text). The device
+//! therefore EMITS the wallet's account identifier (`icpAccountIdFromPrincipal`) for
+//! every IC payout target it names — settle AND refund — and the relay's refund
+//! validation (`crate::addrcheck`) accepts all three IC texts (principal, ICRC-1
+//! account, account identifier): principal/account stay valid here until SideShift
+//! ships principal support, but nothing dpay sends should name one anymore.
+//!
 //! Everything else stays DEVICE-DIRECT by SideShift's own design: shift status reads
 //! (`GET /api/v2/shifts/{id}`) are keyless (verified live), so the resume engine's
 //! provider poller (`app/convertResume.ts`) reads them over https without this relay
@@ -461,7 +472,8 @@ pub async fn shifts_fixed_proxy(
         return err(
             StatusCode::BAD_REQUEST,
             "`refundAddress` must be a well-formed address on the DEPOSIT rail — an Internet \
-             Computer principal or account text for icp, a base58 32-byte pubkey for solana",
+             Computer principal, ICRC-1 account text, or 64-hex account identifier for icp, \
+             a base58 32-byte pubkey for solana",
         );
     }
     let mut upstream_body = json!({

@@ -7,9 +7,15 @@
 //!
 //! Structural only — the venue still owns reachability/ownership; this refuses the orders
 //! that could never be refunded to the stated address before they exist.
-//! `icp`: an IC principal (CRC-checked) or a full ICRC-1 account text, both via the shared
-//! `dpay-icp` codec (the exact parser the ledgers speak). `solana`: base58 that decodes to
-//! exactly 32 bytes (the same check the transaction builder applies).
+//! `icp`: an IC principal (CRC-checked), a full ICRC-1 account text, or the 64-hex account
+//! identifier — all three via the shared `dpay-icp` codec (the exact parser the ledgers
+//! speak). The account identifier is the form the venue payout layer REQUIRES: SideShift's
+//! ICP payouts cannot be addressed to principal-format texts (their engineering, confirmed
+//! 2026-09-21; the first EURC→ICP return shift refunded 2026-09-20 for exactly this), so
+//! the device now EMITS the hex identifier everywhere it names an IC payout target, and
+//! principal/account texts stay accepted here until SideShift ships principal support.
+//! `solana`: base58 that decodes to exactly 32 bytes (the same check the transaction
+//! builder applies).
 
 /// Is this a well-formed address on the given venue NETWORK code (the deposit rail of the
 /// order)? The venue's own network vocabulary maps onto the two rails both integrations
@@ -17,8 +23,10 @@
 pub(crate) fn refund_address_wellformed(network: &str, s: &str) -> bool {
     match network {
         "icp" => {
-            use dpay_icp::principal::{Account, Principal};
-            Principal::from_text(s).is_ok() || Account::from_text(s).is_ok()
+            use dpay_icp::principal::{Account, AccountIdentifier, Principal};
+            Principal::from_text(s).is_ok()
+                || Account::from_text(s).is_ok()
+                || AccountIdentifier::from_text(s).is_ok()
         }
         "solana" => bs58_decode(s).is_some_and(|b| b.len() == 32),
         // A network code this integration does not serve cannot be refunded-to: refuse.
@@ -58,20 +66,32 @@ mod tests {
 
     #[test]
     fn refund_address_wellformedness_is_rail_scoped() {
-        use dpay_icp::principal::{Account, Principal};
+        use dpay_icp::principal::{Account, AccountIdentifier, Principal};
         // IC rail: a valid principal passes…
         let principal = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
         assert!(refund_address_wellformed("icp", &principal.to_text()));
         // …and so does the full ICRC-1 account text (owner + 7-char checksum + subaccount).
         let mut subaccount = [0u8; 32];
         subaccount[31] = 0xa0;
-        let account_text = Account { owner: principal, subaccount }.text();
+        let account_text = Account { owner: principal.clone(), subaccount }.text();
         assert_eq!(
             account_text,
             Account::from_text(&account_text).unwrap().text(),
             "the fixture is the codec's own canonical text"
         );
         assert!(refund_address_wellformed("icp", &account_text));
+        // …and so does the 64-hex account identifier — the form SideShift's ICP payout
+        // layer requires (its engineering cannot pay principals; 2026-09-21). The CRC
+        // embedded in the hex is what refuses a typo'd venue payout address.
+        let acct_id = AccountIdentifier::from_principal(&principal, &[0u8; 32]);
+        assert!(refund_address_wellformed("icp", &acct_id.to_text()));
+        let mut corrupted = acct_id.to_text();
+        let last = corrupted.pop().unwrap();
+        corrupted.push(if last == '0' { '1' } else { '0' });
+        assert!(
+            !refund_address_wellformed("icp", &corrupted),
+            "a one-digit hex flip breaks the embedded CRC — refused"
+        );
         // …and the CRC/alphabet check refuses a malformed principal outright.
         assert!(!refund_address_wellformed("icp", "not-a-principal"));
         assert!(!refund_address_wellformed("icp", ""));

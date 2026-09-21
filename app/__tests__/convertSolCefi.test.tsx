@@ -1,8 +1,9 @@
 // The SOL-side CeFi surface (2026-09-20, live-sweep defect 1): a registered cefi venue whose
 // pair carries a SPL mint as the DEPOSIT side must be offered on the SOL convert screen exactly
 // as the IC surface offers it in the other direction — one destination group, the venue's own
-// quote figures, the user's own derived IC principal as the payout target, and the order as the
-// lock. Founder rule: every currency through the SAME UI surfaces — per-rail divergence is a bug.
+// quote figures, the user's own derived IC account identifier as the payout target, and the
+// order as the lock. Founder rule: every currency through the SAME UI surfaces — per-rail
+// divergence is a bug.
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {beforeEach, describe, expect, jest, test} from '@jest/globals';
@@ -10,6 +11,14 @@ import {beforeEach, describe, expect, jest, test} from '@jest/globals';
 jest.mock('../services/native', () => ({
   DpayCore: {
     icpPrincipalFromPubkey: jest.fn(async () => 'myprinc-ipay'),
+    // The payout-target derivation CHAIN: principal → the 64-hex account identifier (the
+    // form the venue's ICP payout layer can deliver to — SideShift cannot pay
+    // principal-format addresses; the 2026-09-20 return-shift refund proved it). The mock
+    // mirrors the core's contract: refuse an owner that is not its own intermediate.
+    icpAccountIdFromPrincipal: jest.fn(async (owner: string) =>
+      owner === 'myprinc-ipay'
+        ? 'ab'.repeat(32)
+        : Promise.reject(new Error(`unexpected owner: ${owner}`))),
   },
   DpayNfc: {},
   DpaySolNfc: {},
@@ -46,6 +55,7 @@ import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config
 import {EURC_MINT_ADDRESS} from '../solana/tokens';
 import {BUNDLED_VENUES, setRuntimeVenues} from '../config/venues';
 import {deriveSolanaAddress} from '../solana/identity';
+import {DpayCore} from '../services/native';
 import {fetchSideShiftQuote, createSideShiftFixedShift} from '../services/sideshift';
 import {adoptConvertRecord} from '../convertResume';
 
@@ -159,14 +169,18 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     expect(present(tree, 'convert-headline').length).toBeGreaterThan(0);
     expect(textOf(present(tree, 'convert-headline')[0])).toContain('0.0495');
     expect(textOf(present(tree, 'convert-quote-source')[0])).toContain('SideShift');
-    // The payout target is the wallet's OWN derived IC principal (DpayCore, never typed).
-    expect(textOf(present(tree, 'convert-settle-address')[0])).toContain('myprinc-ipay');
+    // The payout target is the wallet's OWN derived IC account identifier (the 64-hex
+    // account hash of the wallet's principal — the form the venue's ICP payout layer can
+    // actually deliver to; SideShift cannot pay principal-format addresses).
+    expect(textOf(present(tree, 'convert-settle-address')[0])).toBe('ab'.repeat(32));
+    expect(jest.mocked(DpayCore.icpPrincipalFromPubkey)).toHaveBeenCalledWith(IDENTITY.publicHex);
+    expect(jest.mocked(DpayCore.icpAccountIdFromPrincipal)).toHaveBeenCalledWith('myprinc-ipay', '');
     // A locked-rate order has NO slippage axis and NO floor line (the IC cefi rule).
     expect(present(tree, 'convert-slippage').length).toBe(0);
     expect(present(tree, 'convert-min-out').length).toBe(0);
   });
 
-  test('confirm locks the ORDER: payout at the derived principal, handoff names the venue deposit', async () => {
+  test('confirm locks the ORDER: payout at the derived account identifier, handoff names the venue deposit', async () => {
     jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
     jest.mocked(createSideShiftFixedShift).mockResolvedValue(ORDER);
     const tree = mount();
@@ -181,7 +195,7 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     expect(createSideShiftFixedShift).toHaveBeenCalledTimes(1);
     expect(jest.mocked(createSideShiftFixedShift).mock.calls[0][2]).toMatchObject({
       quoteId: 'q1',
-      settleAddress: 'myprinc-ipay',
+      settleAddress: 'ab'.repeat(32),
       refundAddress: deriveSolanaAddress(IDENTITY.secretHex),
       depositLedger: EURC_MINT_ADDRESS,
     });
@@ -217,7 +231,7 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     expect(createSideShiftFixedShift).toHaveBeenCalledTimes(1);
     expect(jest.mocked(createSideShiftFixedShift).mock.calls[0][2]).toMatchObject({
       quoteId: 'q-confirm',
-      settleAddress: 'myprinc-ipay',
+      settleAddress: 'ab'.repeat(32),
       refundAddress: deriveSolanaAddress(IDENTITY.secretHex),
       depositLedger: EURC_MINT_ADDRESS,
     });
