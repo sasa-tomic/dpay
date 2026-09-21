@@ -7,7 +7,7 @@ import {fmtAssetCompact, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
-import {detectAddressShape, routeForSolana, chainNameOfShape} from '../lib/destination';
+import {detectAddressShape, routeForSolana, chainNameOfShape, isBase58NearMiss} from '../lib/destination';
 import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT, deriveSolanaAddress, isValidSolanaAddress} from '../solana/identity';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
@@ -158,6 +158,12 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
     if (text.length === 0) return null;
     const routed = routeForSolana(detectAddressShape(text));
     if (!routed.ok) {
+      // A base58-band string no namespace claimed is an ALMOST address (band-true, pubkey-false):
+      // in this unambiguously-Solana field it is a malformed Solana address — name that problem
+      // (the rail's own validity refusal below) rather than the generic "can't tell" shrug.
+      if (routed.refusal.reason === 'unrecognised' && isBase58NearMiss(text)) {
+        return {ok: false, message: M.withdraw.badAddress(SOL_NETWORK)};
+      }
       return routed.refusal.reason === 'wrong-chain'
         ? {ok: false, message: M.withdraw.send.refuseWrongChain(chainNameOfShape(routed.refusal.shape) ?? '', unit, SOL_NETWORK)}
         : {ok: false, message: M.withdraw.send.refuseUnrecognised(unit)};

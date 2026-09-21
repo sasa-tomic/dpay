@@ -1,5 +1,5 @@
 import {describe, it, expect} from '@jest/globals';
-import {detectAddressShape, routeForShape, routeForSolana, isNativeIcpLedger, chainNameOfShape} from '../lib/destination';
+import {detectAddressShape, routeForShape, routeForSolana, isNativeIcpLedger, chainNameOfShape, isBase58NearMiss} from '../lib/destination';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {CurrencyDescriptor} from '../config/catalog';
 
@@ -196,5 +196,19 @@ describe('routeForSolana — the rail with exactly one way to move money', () =>
 
   it('text that belongs to no namespace is unrecognised, not wrong-chain', () => {
     expect(routeForSolana(detectAddressShape('send it to dave'))).toEqual({ok: false, refusal: {reason: 'unrecognised'}});
+  });
+
+  it('isBase58NearMiss separates a band-true/pubkey-false almost-address from junk and real pubkeys', () => {
+    // The live regression class (2026-09-22): the attempt-#9 byte-length disambiguation pushed a
+    // 33-char/24-byte probe from the Solana refusal into the unrecognised shrug. The near-miss
+    // test is what lets a SOL-only field restore the named refusal.
+    expect(isBase58NearMiss(SOL_ADDR.slice(0, 33))).toBe(true); // band-true, decodes 24 bytes
+    expect(isBase58NearMiss(SOL_ADDR)).toBe(false); // a real 32-byte pubkey
+    expect(isBase58NearMiss('send it to dave')).toBe(false); // not even base58 alphabet
+    expect(isBase58NearMiss(SOL_ADDR.slice(0, 31))).toBe(false); // band-short: RE_BASE58's 32-char floor
+    // BTC_LEGACY (34 chars) IS band-true and pubkey-false — but it is claimed by the BTC
+    // namespace inside detectAddressShape, so a caller only reaches the near-miss test after an
+    // `unrecognised` routing, which BTC-shaped strings never produce. The helper is deliberately
+    // the second question, not the classifier.
   });
 });

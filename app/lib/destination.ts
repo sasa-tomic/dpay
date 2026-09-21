@@ -87,6 +87,18 @@ function isSolanaPubkeyShape(t: string): boolean {
   }
 }
 
+/** True when `t` sits in the bare-base58 band (RE_BASE58's alphabet and 32–44-char length) but is
+ *  NOT a 32-byte Solana pubkey — an "almost address": it claims the Solana-shaped band and fails
+ *  its validity. Only meaningful AFTER `routeForSolana` has refused with `unrecognised` (a band
+ *  string that decodes to 25 bytes was already claimed by the BTC namespace there): in a SOL-only
+ *  destination field such a string is a malformed Solana address, and the caller should name that
+ *  problem instead of the generic "unrecognised" shrug (pinned 2026-09-22, the 33-char/24-byte
+ *  probe the attempt-#9 byte-length disambiguation pushed out of the Solana refusal). */
+export function isBase58NearMiss(t: string): boolean {
+  const s = t.trim();
+  return RE_BASE58.test(s) && !isSolanaPubkeyShape(s);
+}
+
 /** Recognise a destination's address NAMESPACE by shape. Pure, total, checksum-free.
  *
  *  Order matters where two namespaces could both match a string:
