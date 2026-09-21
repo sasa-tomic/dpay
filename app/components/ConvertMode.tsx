@@ -2577,8 +2577,12 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
     : null; // a cefi settle side lives on the IC rail — this wallet's other SOL token is irrelevant
 
   // --- the CeFi payout target (IC-side twin: the cefiSettleAddress memo): the user's OWN
-  //     address ON THE DESTINATION RAIL — the wallet's derived IC principal, from the same
-  //     key that derives the Solana address. Nothing typed, nothing entrusted.
+  //     address ON THE DESTINATION RAIL — the wallet's IC account identifier (the 32-byte
+  //     account hash as 64-hex, the exchange-style address form), from the same key that
+  //     derives the Solana address. Nothing typed, nothing entrusted. NOT the principal
+  //     text: the venue's ICP payout layer cannot send to principals (a shift sat
+  //     `settling` for hours and was refunded — SideShift engineering, 2026-09-20), so the
+  //     core derives the account identifier for the principal's default subaccount.
   const [icSettleAddress, setIcSettleAddress] = useState<string | null>(null);
   useEffect(() => {
     if (!cefiMode) {
@@ -2587,8 +2591,9 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
     }
     let alive = true;
     DpayCore.icpPrincipalFromPubkey(identity.publicHex)
-      .then(p => {
-        if (alive) setIcSettleAddress(p);
+      .then(p => DpayCore.icpAccountIdFromPrincipal(p, ''))
+      .then(id => {
+        if (alive) setIcSettleAddress(id);
       })
       .catch(() => {
         if (alive) setIcSettleAddress(null);

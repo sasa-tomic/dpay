@@ -1,27 +1,37 @@
 //! The rail-scoped refund/settle address well-formedness gate — shared by BOTH cefi venue
 //! adapters (`crate::sideshift`, `crate::trocador`) because both trade the SAME two rails
-//! and a refund address that cannot receive must be refused before an order exists, by ONE
+//! and an address that cannot receive must be refused before an order exists, by ONE
 //! validator that cannot drift between venues. This is PROD code (the fund-loss guard:
 //! without a well-formed refund address the venue keeps the user's funds on a failed
-//! deposit), so it lives in its own auditable module rather than a copy per venue.
+//! deposit; without a well-formed settle address the payout dead-ends and the order sits
+//! `settling` until it is refunded — the 2026-09-20 principal-text incident), so it lives
+//! in its own auditable module rather than a copy per venue.
 //!
 //! Structural only — the venue still owns reachability/ownership; this refuses the orders
-//! that could never be refunded to the stated address before they exist.
-//! `icp`: an IC principal (CRC-checked) or a full ICRC-1 account text, both via the shared
-//! `dpay-icp` codec (the exact parser the ledgers speak). `solana`: base58 that decodes to
-//! exactly 32 bytes (the same check the transaction builder applies).
+//! that could never be paid out or refunded before they exist.
+//! `icp`: an IC principal (CRC-checked), a full ICRC-1 account text, or the 32-byte account
+//! identifier as 64-hex — all via the shared `dpay-icp` codec (the exact parser the ledgers
+//! speak; the 64-hex form's embedded CRC32 is checked, so a decode to exactly 32 bytes is
+//! by construction). `solana`: base58 that decodes to exactly 32 bytes (the same check the
+//! transaction builder applies).
 
-/// Is this a well-formed address on the given venue NETWORK code (the deposit rail of the
-/// order)? The venue's own network vocabulary maps onto the two rails both integrations
-/// serve (`icp`, `solana`).
-pub(crate) fn refund_address_wellformed(network: &str, s: &str) -> bool {
+/// Is this a well-formed address on the given venue NETWORK code (the rail an address must
+/// live on — the DEPOSIT rail for a refund, the SETTLE rail for a payout)? The venue's own
+/// network vocabulary maps onto the two rails both integrations serve (`icp`, `solana`).
+pub(crate) fn address_wellformed(network: &str, s: &str) -> bool {
     match network {
         "icp" => {
-            use dpay_icp::principal::{Account, Principal};
-            Principal::from_text(s).is_ok() || Account::from_text(s).is_ok()
+            use dpay_icp::principal::{Account, AccountIdentifier, Principal};
+            Principal::from_text(s).is_ok()
+                || Account::from_text(s).is_ok()
+                // The 32-byte account identifier as 64-hex — the exchange-style address
+                // SideShift's ICP payout layer speaks (it cannot send to principal text:
+                // the 2026-09-20 refund incident). `from_text` verifies the embedded
+                // CRC32, so the 32-byte length is by construction.
+                || AccountIdentifier::from_text(s).is_ok()
         }
         "solana" => bs58_decode(s).is_some_and(|b| b.len() == 32),
-        // A network code this integration does not serve cannot be refunded-to: refuse.
+        // A network code this integration does not serve cannot be paid/refunded-to: refuse.
         _ => false,
     }
 }
@@ -57,11 +67,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn refund_address_wellformedness_is_rail_scoped() {
-        use dpay_icp::principal::{Account, Principal};
+    fn address_wellformedness_is_rail_scoped() {
+        use dpay_icp::principal::{Account, AccountIdentifier, Principal};
         // IC rail: a valid principal passes…
         let principal = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-        assert!(refund_address_wellformed("icp", &principal.to_text()));
+        assert!(address_wellformed("icp", &principal.to_text()));
         // …and so does the full ICRC-1 account text (owner + 7-char checksum + subaccount).
         let mut subaccount = [0u8; 32];
         subaccount[31] = 0xa0;
@@ -71,23 +81,47 @@ mod tests {
             Account::from_text(&account_text).unwrap().text(),
             "the fixture is the codec's own canonical text"
         );
-        assert!(refund_address_wellformed("icp", &account_text));
+        assert!(address_wellformed("icp", &account_text));
+        // …and so does the 32-byte ACCOUNT IDENTIFIER as 64-hex — the exchange-style
+        // address SideShift's ICP payout layer pays to. Pinned by the derivation vector
+        // (the principal's default subaccount; the same value `scripts/agent-key.mjs
+        // balance` prints as `account`), re-derived here through the shared codec.
+        let vector = AccountIdentifier::from_principal(
+            &Principal::from_text("vloyo-oihno-j4uba-nhhke-zyh34-s2r4g-kwgx3-qkzzk-4svfu-focgr-5ae")
+                .unwrap(),
+            &[0u8; 32],
+        )
+        .to_text();
+        assert_eq!(
+            vector,
+            "9fac39d1ffbd746a5a6e18ad812d053ef2fbebeacd28a4e236d3cca052692279",
+            "the SideShift payout vector is the real derivation"
+        );
+        assert!(address_wellformed("icp", &vector));
+        // Malformed 64-hex is refused: a flipped character breaks the embedded CRC32…
+        let mut bad_crc = vector.clone();
+        let flipped = if bad_crc.ends_with('0') { "1" } else { "0" };
+        bad_crc.replace_range(63..64, flipped);
+        assert!(!address_wellformed("icp", &bad_crc));
+        // …and a wrong length or non-hex text never decodes at all.
+        assert!(!address_wellformed("icp", &vector[..62]));
+        assert!(!address_wellformed("icp", &"g".repeat(64)));
         // …and the CRC/alphabet check refuses a malformed principal outright.
-        assert!(!refund_address_wellformed("icp", "not-a-principal"));
-        assert!(!refund_address_wellformed("icp", ""));
+        assert!(!address_wellformed("icp", "not-a-principal"));
+        assert!(!address_wellformed("icp", ""));
         // Solana rail: base58 that decodes to exactly 32 bytes (a real mainnet address).
-        assert!(refund_address_wellformed(
+        assert!(address_wellformed(
             "solana",
             "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
         ));
         // Not 32 bytes / not base58 at all.
-        assert!(!refund_address_wellformed("solana", "111"));
-        assert!(!refund_address_wellformed(
+        assert!(!address_wellformed("solana", "111"));
+        assert!(!address_wellformed(
             "solana",
             "0OIl-not-base58-safe"
         ));
-        // An unknown network code is refused structurally (cannot be refunded-to).
-        assert!(!refund_address_wellformed("ethereum", "0xabc"));
+        // An unknown network code is refused structurally (cannot be paid/refunded-to).
+        assert!(!address_wellformed("ethereum", "0xabc"));
     }
 
     #[test]

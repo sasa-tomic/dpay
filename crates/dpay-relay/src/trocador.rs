@@ -404,7 +404,7 @@ pub async fn trade_proxy(State(state): State<AppState>, body: Bytes) -> Response
         );
     };
     if refund_address.is_empty()
-        || !crate::addrcheck::refund_address_wellformed(refund_network, refund_address)
+        || !crate::addrcheck::address_wellformed(refund_network, refund_address)
     {
         return err(
             StatusCode::BAD_REQUEST,

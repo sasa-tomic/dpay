@@ -398,7 +398,9 @@ pub async fn quotes_proxy(
 /// user-owned address (the non-custodial red line), never a dpay-controlled one. A
 /// missing or malformed field is a client bug: the 400 house error, refused BEFORE any
 /// upstream call (the file's failure-semantics convention — this is a device error, not
-/// a 503-class relay fact).
+/// a 503-class relay fact). The settle address is gated the same way, on the SETTLE rail
+/// (the deposit rail's complement): an order whose payout address could never receive
+/// dead-ends `settling` until it is refunded — refused before it exists.
 pub async fn shifts_fixed_proxy(
     State(state): State<AppState>,
     ClientIp(ip): ClientIp,
@@ -456,12 +458,39 @@ pub async fn shifts_fixed_proxy(
         );
     };
     if refund_address.is_empty()
-        || !crate::addrcheck::refund_address_wellformed(refund_network, refund_address)
+        || !crate::addrcheck::address_wellformed(refund_network, refund_address)
     {
         return err(
             StatusCode::BAD_REQUEST,
             "`refundAddress` must be a well-formed address on the DEPOSIT rail — an Internet \
              Computer principal or account text for icp, a base58 32-byte pubkey for solana",
+        );
+    }
+    // The settle address gets the SAME structural gate, on the SETTLE rail. Every
+    // registered cefi row pairs exactly one icp rail with one solana rail (the registry's
+    // own rule; the asset table above names only those two networks), so the settle
+    // network is the deposit network's complement. The icp settle accepts BOTH address
+    // forms for now — the 64-hex 32-byte account identifier (what the venue's payout
+    // layer requires today; the 2026-09-20 principal-text refund incident) and the
+    // principal text itself (the venue ships principal support) — while garbage that
+    // could never be paid out (malformed hex, a wrong-length blob) is refused BEFORE an
+    // order exists, so no shift can sit `settling` for hours on a dead address.
+    let settle_network = match refund_network {
+        "solana" => "icp",
+        "icp" => "solana",
+        other => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                format!("unsupported deposit rail network `{other}`: no settle rail to validate against"),
+            );
+        }
+    };
+    if !crate::addrcheck::address_wellformed(settle_network, settle_address) {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "`settleAddress` must be a well-formed address on the SETTLE rail — a base58 \
+             32-byte pubkey for solana; an Internet Computer principal, ICRC-1 account \
+             text, or 64-hex account identifier for icp",
         );
     }
     let mut upstream_body = json!({

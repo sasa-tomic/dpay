@@ -56,6 +56,13 @@ const STUB_AFFILIATE: &str = "stub-affiliate-id";
 const ICP: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 const SOL: &str = "So11111111111111111111111111111111111111112";
 const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const EURC: &str = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
+/// A real 32-byte base58 pubkey (well-formed solana settle/refund fixture).
+const SOL_ADDR: &str = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+/// The pinned derivation vector — the 32-byte account identifier as 64-hex for the
+/// vector principal's default subaccount (SideShift's ICP payout vocabulary; the same
+/// vector the app-side jest suites and `addrcheck`'s unit test pin).
+const ACCOUNT_ID_VECTOR: &str = "9fac39d1ffbd746a5a6e18ad812d053ef2fbebeacd28a4e236d3cca052692279";
 
 // ---- the stub upstream ----
 
@@ -496,7 +503,7 @@ async fn shift_creation_forwards_and_passes_back_verbatim() {
 
     let with_memo = serde_json::json!({
         "quoteId": "stub-quote-1",
-        "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "settleAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
         "refundAddress": ICP,
         "depositLedger": ICP,
         "settleMemo": "optional-memo",
@@ -508,7 +515,7 @@ async fn shift_creation_forwards_and_passes_back_verbatim() {
     let (_seen_headers, seen_body) = stub.last();
     let sent: serde_json::Value = serde_json::from_str(&seen_body).unwrap();
     assert_eq!(sent["quoteId"], "stub-quote-1");
-    assert_eq!(sent["settleAddress"], "UserSolAddr1111111111111111111111111111111111");
+    assert_eq!(sent["settleAddress"], "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM");
     assert_eq!(
         sent["refundAddress"], ICP,
         "the refund address rides through to the venue, untouched"
@@ -531,7 +538,7 @@ async fn shift_creation_forwards_and_passes_back_verbatim() {
     // Without a memo, the field is simply absent upstream (ICP settles need none).
     let no_memo = serde_json::json!({
         "quoteId": "stub-quote-1",
-        "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "settleAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
         "refundAddress": ICP,
         "depositLedger": ICP,
     })
@@ -553,30 +560,30 @@ async fn shift_creation_refuses_missing_or_malformed_refund_before_any_upstream_
 
     // Missing / empty / malformed refundAddress, unknown depositLedger.
     let missing = serde_json::json!({
-        "quoteId": "q", "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "quoteId": "q", "settleAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
     })
     .to_string();
     let empty = serde_json::json!({
-        "quoteId": "q", "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "quoteId": "q", "settleAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
         "refundAddress": "", "depositLedger": ICP,
     })
     .to_string();
     let wrong_rail = serde_json::json!({
         // A Solana base58 pubkey offered as the refund on an ICP deposit: not an IC
         // principal, so the rail-scoped check refuses it.
-        "quoteId": "q", "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "quoteId": "q", "settleAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
         "refundAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
         "depositLedger": ICP,
     })
     .to_string();
     let malformed_solana = serde_json::json!({
         // A Solana deposit wants a base58 32-byte pubkey; this text is neither.
-        "quoteId": "q", "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "quoteId": "q", "settleAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
         "refundAddress": "not-a-solana-address", "depositLedger": SOL,
     })
     .to_string();
     let unknown_ledger = serde_json::json!({
-        "quoteId": "q", "settleAddress": "UserSolAddr1111111111111111111111111111111111",
+        "quoteId": "q", "settleAddress": "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
         "refundAddress": ICP, "depositLedger": "ly36x-wiaaa-aaaai-aqj7q-cai",
     })
     .to_string();
@@ -591,6 +598,76 @@ async fn shift_creation_refuses_missing_or_malformed_refund_before_any_upstream_
         stub.shifts_hits(),
         0,
         "no order the venue could hold funds on was ever created"
+    );
+}
+
+/// The settle address is gated on the SETTLE rail — the deposit rail's complement — the
+/// same way the refund is gated on the deposit. For an icp settle BOTH accepted forms
+/// pass through (the 64-hex 32-byte account identifier — the venue's payout vocabulary
+/// since the 2026-09-20 principal-text refund incident — and, until the venue ships
+/// principal support, the principal text); a 64-hex blob with a broken CRC32, a
+/// wrong-length blob, or garbage on a solana settle is a 400 house error with ZERO
+/// upstream calls — no order that could only sit `settling` is ever created.
+#[tokio::test]
+async fn shift_creation_settle_address_is_gated_on_the_settle_rail() {
+    let (stub, base) = spawn_stub().await;
+    let state = state_with(configured(&base));
+
+    // Solana-EURC deposit ⇒ icp settle: the 64-hex account identifier passes through…
+    let hex_settle = serde_json::json!({
+        "quoteId": "q", "settleAddress": ACCOUNT_ID_VECTOR,
+        "refundAddress": SOL_ADDR, "depositLedger": EURC,
+    })
+    .to_string();
+    let (status, _h, _body) = post_json(&state, "/api/v1/sideshift/shifts/fixed", &hex_settle).await;
+    assert_eq!(status, StatusCode::CREATED);
+    // …and so does the principal text for now — the venue's payout layer is the reason
+    // the app sends the account identifier; the relay stays form-agnostic until the
+    // venue's principal support lands and the door can close.
+    let principal_settle = serde_json::json!({
+        "quoteId": "q", "settleAddress": ICP,
+        "refundAddress": SOL_ADDR, "depositLedger": EURC,
+    })
+    .to_string();
+    let (status, _h, _body) =
+        post_json(&state, "/api/v1/sideshift/shifts/fixed", &principal_settle).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(stub.shifts_hits(), 2, "both well-formed settles reached the venue");
+
+    // Malformed settles never create an order: a 64-hex blob whose CRC32 does not check,
+    // a wrong-length hex blob, and garbage where a solana settle belongs (icp deposit
+    // ⇒ solana settle) are all 400 house errors.
+    let bad_crc = {
+        let mut v = ACCOUNT_ID_VECTOR.to_string();
+        v.replace_range(63..64, if v.ends_with('0') { "1" } else { "0" });
+        v
+    };
+    let wrong_len = format!("{ACCOUNT_ID_VECTOR}aa");
+    for settle in [bad_crc, wrong_len] {
+        let body = serde_json::json!({
+            "quoteId": "q", "settleAddress": settle,
+            "refundAddress": SOL_ADDR, "depositLedger": EURC,
+        })
+        .to_string();
+        let (status, _h, got) = post_json(&state, "/api/v1/sideshift/shifts/fixed", &body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "settle {settle}");
+        let v: serde_json::Value = serde_json::from_slice(&got).unwrap();
+        assert!(v["error"].is_string(), "house error shape for settle {settle}");
+    }
+    let solana_settle_garbage = serde_json::json!({
+        "quoteId": "q", "settleAddress": "not-an-address",
+        "refundAddress": ICP, "depositLedger": ICP,
+    })
+    .to_string();
+    let (status, _h, got) =
+        post_json(&state, "/api/v1/sideshift/shifts/fixed", &solana_settle_garbage).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let v: serde_json::Value = serde_json::from_slice(&got).unwrap();
+    assert!(v["error"].is_string());
+    assert_eq!(
+        stub.shifts_hits(),
+        2,
+        "no order with an unpayoutable settle address was ever created"
     );
 }
 
