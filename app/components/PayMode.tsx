@@ -162,6 +162,14 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   // is usable for this asset — and what it is when it is not — is the place that says so.
   const [scannedAddress, setScannedAddress] = useState<string | null>(null);
 
+  // Whether the IC send sheet holds an in-flight (or unresolved-terminal) transfer — reported up
+  // by SendSheet itself (onSendActiveChange). While true, the send branch's offline panel DEFERS:
+  // the balance poll's 3-strike offline flip must not REPLACE an in-flight send's sheet (the SOL
+  // twin's live 2026-09-21 defect — same teardown class, fixed on both rails). Declared with the
+  // other hooks, ABOVE the sub-mode early return, so the Rules of Hooks hold across a Send detour.
+  const [sendActive, setSendActive] = useState(false);
+  useEffect(() => { if (subMode !== 'send') setSendActive(false); }, [subMode]);
+
   // An OpenCryptoPay merchant till the camera read. The payment itself rides the SAME `intent` +
   // review + sign path as every other payment (source 'ocp'); this holds the part no other payment
   // has — the live quote, the provider host, and the method/asset spelling the submission must echo
@@ -1240,7 +1248,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
           left={{label: M.pay.scanToPay, value: 'scan', testID: 'btn-pay-scan'}}
           right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
         />
-        {offlinePanel ?? (selectedUnfunded ? <>{fundInstruction}{fundedElsewhere('send')}</> : (
+        {/* An in-flight send OWNS its surface (2026-09-21, the SOL twin's live defect): the offline
+            panel — the balance poll's 3-strike flip — must not REPLACE a sheet mid-send, so the
+            gate defers while SendSheet reports an active send and applies again once it is over. */}
+        {(!sendActive && offlinePanel) ? offlinePanel : (selectedUnfunded ? <>{fundInstruction}{fundedElsewhere('send')}</> : (
           <SendSheet
             identity={identity}
             catalog={catalog}
@@ -1255,6 +1266,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
             onOpenAddressBook={onOpenAddressBook}
             onSent={onSettled}
             onClose={() => onSubModeChange('scan')}
+            onSendActiveChange={setSendActive}
           />
         ))}
       </View>

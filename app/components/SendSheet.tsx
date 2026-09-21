@@ -54,7 +54,7 @@ const IC_NETWORK = 'Internet Computer';
  */
 export function SendSheet({
   identity, catalog, desc, balance, family, display, tokenContract,
-  homeRail = null, prefillAddress = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose,
+  homeRail = null, prefillAddress = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose, onSendActiveChange,
 }: {
   identity: Identity;
   catalog: CurrencyDescriptor[];
@@ -80,6 +80,11 @@ export function SendSheet({
   onOpenAddressBook?: () => void;
   onSent: () => void;
   onClose: () => void;
+  /** Whether this sheet is off the form — submitting, or holding a terminal outcome. The Pay tab
+   *  DEFERS its offline gate while true (2026-09-21, the SOL twin's live defect): the balance
+   *  poll's 3-strike offline flip would otherwise REPLACE an in-flight send's sheet, so no
+   *  terminal surface ever rendered. The same teardown class, fixed on both rails. */
+  onSendActiveChange?: (active: boolean) => void;
 }) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
@@ -101,6 +106,15 @@ export function SendSheet({
   const {journey} = useJourney();
 
   useEscapeToClose(onClose);
+
+  // The send OWNS its surface while it is off the form (the SOL twin SolanaWithdrawSheet, same
+  // 2026-09-21 live defect fixed here too). `submitting` and the terminal phases report active;
+  // the unmount cleanup clears the flag so a mid-send detour cannot leave it stuck.
+  const sendActive = phase !== 'form';
+  useEffect(() => {
+    onSendActiveChange?.(sendActive);
+  }, [sendActive, onSendActiveChange]);
+  useEffect(() => () => onSendActiveChange?.(false), []);
 
   const decimals = desc.decimals ?? 0;
   const displayDecimals = desc.display_decimals ?? decimals;

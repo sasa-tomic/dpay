@@ -54,9 +54,17 @@ jest.mock('../components/NfcTap', () => ({
 }));
 // The send-to-address body is exercised in SendSheet.test.tsx; here it is stubbed so this suite
 // stays a pure PayMode test (SendSheet queries the ledger fee and derives the self-account), while
-// the props PayMode hands it — the scanned-address prefill — stay assertable.
+// the props PayMode hands it — the scanned-address prefill and the in-flight report — stay
+// assertable. The stub RECORDS its props (mockSendSheetProps) and renders a probe node, so the
+// in-flight-send tests can drive `onSendActiveChange` and assert which surface the parent rendered.
+let mockSendSheetProps: Record<string, unknown> | null = null;
 jest.mock('../components/SendSheet', () => ({
-  SendSheet: (_props: {prefillAddress?: string | null}) => null,
+  SendSheet: (props: Record<string, unknown>) => {
+    mockSendSheetProps = props;
+    const {createElement} = jest.requireActual('react') as {createElement: (t: unknown, p: unknown) => unknown};
+    const {View} = jest.requireActual('react-native') as {View: unknown};
+    return createElement(View, {testID: 'stub-send-sheet'});
+  },
 }));
 // The provider calls are exercised for real in opencryptopayClient.test.ts (recorded bodies, no
 // network). Here they are stubbed so this stays a component test: what it pins is the WIRING — that
@@ -871,6 +879,24 @@ describe('PayMode — what the camera does with a code that is not a payment req
     const tree = mountPay({...sendCapableProps(), online: true, subMode: 'send'});
     expect(hasTestID(tree, 'pay-send-offline')).toBe(false);
     expect(tree.root.findAll(node => node.props && 'prefillAddress' in node.props)).toHaveLength(1);
+    act(() => { tree.unmount(); });
+  });
+
+  // The IC twin of the SOL rail's 2026-09-21 live defect: an in-flight send OWNS its surface — the
+  // balance poll's 3-strike offline flip must not REPLACE the sheet mid-send.
+  test('the offline flip MID-SEND does NOT replace the IC send sheet — the terminal surface gets its moment', () => {
+    mockSendSheetProps = null;
+    const tree = mountPay({...sendCapableProps(), online: true, subMode: 'send'});
+    const sheet = tree.root.find(node => node.props && 'onSendActiveChange' in node.props) as unknown as {props: {onSendActiveChange: (a: boolean) => void}};
+    expect(hasTestID(tree, 'stub-send-sheet')).toBe(true);
+    act(() => { sheet.props.onSendActiveChange(true); });           // the send goes in flight
+    act(() => { tree.update(payElement({...sendCapableProps(), online: false, subMode: 'send'})); });
+    expect(hasTestID(tree, 'pay-send-offline')).toBe(false);        // the offline panel NEVER replaces it
+    expect(hasTestID(tree, 'stub-send-sheet')).toBe(true);          // the sheet stays mounted
+    // And once the send is over (the user read the terminal surface), the gate applies again.
+    act(() => { sheet.props.onSendActiveChange(false); });
+    act(() => { tree.update(payElement({...sendCapableProps(), online: false, subMode: 'send'})); });
+    expect(hasTestID(tree, 'pay-send-offline')).toBe(true);
     act(() => { tree.unmount(); });
   });
 });
