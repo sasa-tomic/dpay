@@ -172,48 +172,25 @@
   asset NEGATIVE (-1.381 ICP, -0.064 VCHF, -0.4595 ckUSDC, …) and row 111 carries a NEGATIVE
   amount `funds.mjs validate()` rejects — rows 117-121 net the union to the MEASURED census;
   `just funds reconcile` 18 pairs CLEAN @ this commit.
-  CORRECTED-PATH ATTEMPT #3 2026-09-21 ~16:34 UTC (bounded-load + tracer verified in the
-  served bundle pre-flight): the failure moved UPSTREAM of the send — the sheet was never
-  submitted (the tracer stayed silent), and the CONFIRM loop locked instead: 30 re-confirm
-  attempts alternating "Could not reach SideShift" (the confirm's fresh-quote fetch failing
-  client-side within its 8s timeout while the venue answered curl fine) with "Quote changed";
-  exactly ONE shifts/fixed 201 landed (the order EXISTS venue-side, requested 9.284071 EURC,
-  unfunded, expired ~16:51Z, id uncapturable — the awaiting panel never rendered) and the
-  record never adopted. Deposit leg never started; zero funds moved (ledger row 132).
-  DIAGNOSED + FIXED 2026-09-21 (dev-side, no funds; branch `sol-cefi-confirm-fix`, three
-  commits + test pins): the livelock decomposed into three app-side defects. (1) THE SOL
-  SURFACE'S STALE REFRESH HAD NO SINGLE-FLIGHT (the divergence point: `ConvertMode.tsx` IC
-  stale effect guards every tick with `staleRefreshing`, the SOL effect checked staleness
-  only) — a quote that stayed stale re-fired a quote fetch EVERY SECOND, up to 8 concurrent
-  8s-budget calls hammering the relay's partner-key proxy and throttling the shared
-  credential until the confirm's own re-quote could not answer ("Could not reach SideShift"
-  alternating with the refresh's own "Quote changed" banner — the alternation was these two
-  surfaces fighting over one credential). Both SOL branches (cefi + jupiter) now carry the
-  IC guard verbatim. (2) THE CONFIRM'S QUOTE + ORDER CALLS RODE AN 8s BUDGET, BELOW the
-  relay's own 15s upstream bound (`sideshift.rs DEFAULT_TIMEOUT`) — a venue answer reaching
-  the relay at 8-15s meant the phone had already aborted; for ORDER creation that orphans a
-  real venue-side 201 (the app shows an error, the record is never adopted, the awaiting
-  panel never renders — exactly attempt #3's one-201-no-adoption outcome).
-  `CONVERT_CEFI_CONFIRM_TIMEOUT_MS = 20s` now covers both confirm-path calls on BOTH rails.
-  (3) `prepareCeFiConvertRecord`'s depositAmount red line compared STRINGS — a venue echo
-  that reformats the same amount ('1' → '1.00000000') was refused AFTER the venue 201'd:
-  the same orphaned-order class one seam later. `sameDecimalAmount` compares decimal VALUES
-  (a different amount still refuses; malformed fails closed). Pinned: jest
-  `convertSolStaleSingleFlight.test.tsx` (4s of ticks add zero fetches while one hangs),
-  `convertSolCefi.test.tsx` (slow-venue confirm completes to the panel, both budgets pinned
-  20s — the attempt-#3 replay — + reformatted-echo adoption), `convert.test.ts` (guard
-  matrix). FLOW 197 root cause (measured, not flake): the harness provider poll runs at
-  500ms and the flow reached done after only TWO post-reload polls, so the final `>= 3
-  statusCalls` assert measured phase timing, not the poller; keying was never wrong (both
-  recorded reads carried the order id — and the assert never checked that directly). Fixed
-  by sequencing (wait bounded until >=2 post-reload polls, THEN flip settled — the
-  completed read is >=#3 deterministically) + the explicit per-call keying assert (the
-  check 187/194 always had). GREEN solo x4 + the full convert family 30/30. ONE more live
-  attempt after this ships (founder-run; the venue order machinery is proven good).
-  Rows 122-131 (the concurrent session's counter-corrections of its own
-  763699b rows) + the evm-float USDC 0.1285 discovery mesh with rows 117-121; reconcile
-  18 pairs CLEAN with both sets.
-- **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
+    ATTEMPT #5 2026-09-21 ~18:04 UTC (confirm fix 5801964 LIVE — VALIDATED): the confirm fix
+  WORKED end-to-end — first-try order, zero livelock: shift `004c5d8c60918dc27b93` created
+  18:04:38Z (exact 8.8 EURC deposit per the creep policy, settle 3.41897546 ICP at the 64-hex
+  identifier verbatim, refund = the rail; live min 8.716579). The deposit leg then produced
+  the FIRST clean terminal send failure, with the tracer naming every await:
+  sender-ata-check → recipient-ata-check (createIdempotent joins) → sender-balance-check →
+  sign → blockhash → broadcast FAILED "Transaction simulation failed: Blockhash not found";
+  sheet ERROR (nothing accepted) — no spinner, no hang, the deadline/ownership fixes hold.
+  A FRESH blockhash rejected at simulation ~1s later exonerates the relay cache
+  (getLatestBlockhash TTL 4s; on-chain validity ~60-90s) and points at a HELIUS-side
+  simulation anomaly or endpoint-shard race. Shift expired unexercised 18:19:30Z, zero value
+  at risk (ledger row 133). NEXT (fixer, no repeat until diagnosed): capture the failing tx
+  bytes at the seam and replay the broadcast against a second endpoint (or Helius support
+  with the signature of a good-path send); the seam could also classify this error and
+  refresh-once — the founder rules forbid blind retries, a diagnosed single refresh is not
+  blind. Deposit-tooling note: the driver's amount-entry needs transient-render tolerance
+  (the 5s selector wait died once on a sheet re-render; fixed driver-side with catch-and-
+  retry — worth one assert in the harness).
+- **Trocador adapter- **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
   adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`, `/trade`
   POST+GET status) are registered on every build and answer 503 naming `DPAY_TROCADOR_API_KEY`
   until the founder sets it (key requested from commercial@trocador.app; no shape to validate —
