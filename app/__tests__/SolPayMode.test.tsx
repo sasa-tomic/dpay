@@ -37,9 +37,18 @@ jest.mock('../services/native', () => ({
   DpaySolNfc: {},
 }));
 // The send-to-address body has its own suite (SolanaWithdrawSheet.test.tsx); stubbed here so this
-// suite stays a pure SolPayMode test while the prefill prop it is handed stays assertable.
+// suite stays a pure SolPayMode test while the prefill prop it is handed stays assertable. The
+// stub RECORDS its props (mockSheetProps) and renders a probe node, so the in-flight-send tests
+// below can drive the sheet's `onSendActiveChange` report and assert which surface the parent
+// rendered while a send was active.
+let mockSheetProps: Record<string, unknown> | null = null;
 jest.mock('../components/SolanaWithdrawSheet', () => ({
-  SolanaWithdrawSheet: (_props: {prefill?: {address: string; amount: string} | null}) => null,
+  SolanaWithdrawSheet: (props: Record<string, unknown>) => {
+    mockSheetProps = props;
+    const {createElement} = jest.requireActual('react') as {createElement: (t: unknown, p: unknown) => unknown};
+    const {View} = jest.requireActual('react-native') as {View: unknown};
+    return createElement(View, {testID: 'stub-sol-send-sheet'});
+  },
 }));
 // The signer is real by default (the U-F1 tests sign genuinely); the U-F5 suite swaps in a
 // throwing implementation to park the read-only sign surface with its honest error terminal.
@@ -486,6 +495,78 @@ describe('SolPayMode — what the camera does with a code that is not a payment 
     const tree = mountSolPay({online: true, subMode: 'send'});
     expect(hasTestID(tree, 'sol-send-offline')).toBe(false);
     expect(tree.root.findAll(node => node.props && 'prefill' in node.props)).toHaveLength(1);
+    act(() => { tree.unmount(); });
+  });
+});
+
+// The 2026-09-21 live EURC attempt (zero movement, funds safe): the balance poll's 3-strike
+// offline threshold tripped MID-SEND and the offline gate REPLACED the send sheet — no terminal
+// surface (sent/unknown/error) ever rendered, so the send became undiagnosable. The contract now:
+// an in-flight send OWNS its surface — the sheet reports `sendActive` up (onSendActiveChange) and
+// the parent defers its offline AND fund gates until the sheet reports the send over.
+describe('SolPayMode — an in-flight send owns its surface (the gates defer, 2026-09-21)', () => {
+  function mountSend(props: Partial<SolPayModeProps> = {}) {
+    mockSheetProps = null;
+    return mountSolPay({online: true, subMode: 'send', ...props});
+  }
+  function sheetOf(tree: renderer.ReactTestRenderer): {props: {onSendActiveChange: (a: boolean) => void}} {
+    return tree.root.find(node => node.props && 'onSendActiveChange' in node.props) as unknown as {props: {onSendActiveChange: (a: boolean) => void}};
+  }
+
+  test('the offline flip MID-SEND does NOT replace the sheet — the terminal surface gets its moment', () => {
+    const tree = mountSend();
+    const sheet = sheetOf(tree);
+    expect(hasTestID(tree, 'sol-send-offline')).toBe(false);
+    expect(hasTestID(tree, 'stub-sol-send-sheet')).toBe(true);
+    // The send goes in flight: the sheet reports active.
+    act(() => { sheet.props.onSendActiveChange(true); });
+    // The balance poll's 3-strike threshold flips the wallet offline MID-SEND.
+    act(() => { tree.update(solPayElement({online: false, subMode: 'send'})); });
+    expect(hasTestID(tree, 'sol-send-offline')).toBe(false);      // the offline panel NEVER replaces it
+    expect(hasTestID(tree, 'stub-sol-send-sheet')).toBe(true);    // the sheet (and its terminal surface) stays
+    act(() => { tree.unmount(); });
+  });
+
+  test('once the sheet reports the send OVER while still offline, the offline gate applies again', () => {
+    const tree = mountSend();
+    const sheet = sheetOf(tree);
+    act(() => { sheet.props.onSendActiveChange(true); });
+    act(() => { tree.update(solPayElement({online: false, subMode: 'send'})); });
+    expect(hasTestID(tree, 'stub-sol-send-sheet')).toBe(true);
+    // The send resolved (the user read the terminal surface and left it): form phase again.
+    act(() => { sheet.props.onSendActiveChange(false); });
+    expect(hasTestID(tree, 'sol-send-offline')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('offline BEFORE submit still gates exactly as today — the defer is in-flight only', () => {
+    mockSheetProps = null;
+    const tree = mountSolPay({online: false, subMode: 'send'});
+    expect(hasTestID(tree, 'sol-send-offline')).toBe(true);
+    expect(hasTestID(tree, 'stub-sol-send-sheet')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a fund-gate flip MID-SEND (a known-zero landing from a poll) defers too — same teardown class', () => {
+    const tree = mountSend({payGate: 'none'});
+    const sheet = sheetOf(tree);
+    act(() => { sheet.props.onSendActiveChange(true); });
+    act(() => { tree.update(solPayElement({online: true, subMode: 'send', payGate: 'token-zero'})); });
+    expect(hasTestID(tree, 'sol-send-fund')).toBe(false);
+    expect(hasTestID(tree, 'stub-sol-send-sheet')).toBe(true);
+    act(() => { sheet.props.onSendActiveChange(false); });
+    expect(hasTestID(tree, 'sol-send-fund')).toBe(true);          // and it applies once the send is over
+    act(() => { tree.unmount(); });
+  });
+
+  test('an in-flight send locks the idle asset selection — an asset switch would tear the sheet down too', () => {
+    const locks: boolean[] = [];
+    const tree = mountSend({onLockChange: (l: boolean) => locks.push(l)});
+    const sheet = sheetOf(tree);
+    act(() => { sheet.props.onSendActiveChange(true); });
+    expect(locks).toContain(true);
+    act(() => { sheet.props.onSendActiveChange(false); });
+    expect(locks[locks.length - 1]).toBe(false);
     act(() => { tree.unmount(); });
   });
 });

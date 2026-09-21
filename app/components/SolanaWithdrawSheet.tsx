@@ -55,7 +55,7 @@ const SOL_NETWORK = 'Solana';
  * Bitcoin address pasted into the wrong wallet, and which offered neither a scanner nor an address
  * book that the IC surface had. CLAUDE.md's same-surfaces rule calls that divergence a bug.
  */
-export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; balance: string; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string; label?: string; memo?: string} | null; onPrefillConsumed?: () => void; onOpenAddressBook?: () => void; onSent: () => void; onClose: () => void}) {
+export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose, onSendActiveChange}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; balance: string; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string; label?: string; memo?: string} | null; onPrefillConsumed?: () => void; onOpenAddressBook?: () => void; onSent: () => void; onClose: () => void; onSendActiveChange?: (active: boolean) => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'unknown' | 'error'>('form');
@@ -75,6 +75,20 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
   const {copied, copy: doCopy} = useCopyFeedback();
 
   useEscapeToClose(onClose);
+
+  // The send OWNS its surface while it is off the form (2026-09-21, live EURC attempt #3): the
+  // parent's connectivity/fund gates would otherwise tear THIS sheet down mid-send — the balance
+  // poll's 3-strike offline flip replaced the whole sheet with the offline panel while a transfer
+  // was in flight, so no terminal surface (sent/unknown/error) ever rendered and the failure was
+  // undiagnosable. While active, the parent must keep this sheet mounted; the honest
+  // unknown-outcome panel gets its moment, and the offline panel returns only after the user
+  // leaves the send. `submitting` and every terminal phase count; the unmount cleanup clears the
+  // flag so a mid-send sub-mode flip cannot leave it stuck.
+  const sendActive = phase !== 'form';
+  useEffect(() => {
+    onSendActiveChange?.(sendActive);
+  }, [sendActive, onSendActiveChange]);
+  useEffect(() => () => onSendActiveChange?.(false), []);
 
   // A shared payment link resolved to this rail: fill the form with its destination + amount and
   // let the payer confirm. It ONLY pre-fills — the Review/Send presses below are still the consent,

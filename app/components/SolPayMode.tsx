@@ -117,6 +117,16 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   const [scanArmed, setScanArmed] = useState(false);
   useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
 
+  // Whether the send sheet holds an in-flight (or unresolved-terminal) transfer — reported up by
+  // SolanaWithdrawSheet itself (onSendActiveChange). While true, the send sub-mode's offline and
+  // fund gates DEFER: the 2026-09-21 live EURC attempt had the balance poll's 3-strike offline
+  // flip REPLACE the sheet mid-send, so no terminal surface ever rendered and the send became
+  // undiagnosable. An in-flight send owns its surface (CLAUDE.md founder requirement) — the gates
+  // return the moment the sheet reports the send over. Reset when the sub-mode is left, so a
+  // mid-send detour cannot pin a stale flag onto a fresh sheet.
+  const [sendActive, setSendActive] = useState(false);
+  useEffect(() => { if (subMode !== 'send') setSendActive(false); }, [subMode]);
+
   // The TILL entry's SOL twin (same-surfaces rule): an OS-delivered till code
   // (`…/pl/?lightning=<LNURL…>`, the OpenCryptoPay QR a till prints) arrives as a prefilled SCAN —
   // it enters onNotARequest, the SAME classification a camera scan takes, so the SOL rail offers
@@ -159,8 +169,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
 
   // Lock the idle asset selection while a SOL payment is in flight. Every non-scan phase holds a
   // captured, immutable snapshot the user must not lose to an asset switch (which unmounts this
-  // component): the SolReqV2 of an offline pay, or the live quote of a merchant till.
-  const locked = phase !== 'scan';
+  // component): the SolReqV2 of an offline pay, or the live quote of a merchant till — and, the
+  // same rule, an in-flight send sheet's terminal surface (`sendActive`, 2026-09-21): an asset
+  // switch would tear the sheet down exactly like the offline gate did.
+  const locked = phase !== 'scan' || sendActive;
   useReportLock(onLockChange, locked);
 
   // Resolve a till transfer this rail left indefinite. IC twin: PayMode's claim effect — same
@@ -285,7 +297,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     // to a Solana RPC from THIS phone, so airplane mode blocks an address send outright while
     // scan-to-pay keeps working (the payer signs offline against the merchant's blockhash and the
     // merchant broadcasts). Checked BEFORE the funds gate: a balance read while offline is stale.
-    if (!online) {
+    // `sendActive` defers BOTH gates while a transfer is in flight or its terminal surface is up
+    // (2026-09-21): a mid-send offline flip used to REPLACE this sheet — no terminal surface, an
+    // undiagnosable send. The gates apply again the moment the sheet reports the send over.
+    if (!online && !sendActive) {
       return (
         <View style={S.centerTop}>
           {toggle}
@@ -304,7 +319,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     // Zero-funds gate (2026-08-16): the send form is replaced by the fund-first panel while the
     // active token is KNOWN unfunded — no amount entry against a zero balance. Same panel, same
     // copy family as the scan branch (only "…to send" instead of "…to pay"), per the spec.
-    if (payGate !== 'none' && payGate !== 'token-absent') {
+    // Deferred while `sendActive`, like the offline gate above — a poll that lands a known-zero
+    // fact (or flips `online`) mid-send must not replace the sheet's terminal surface.
+    if (!sendActive && payGate !== 'none' && payGate !== 'token-absent') {
       const isSol = payGate === 'sol-zero';
       return (
         <View style={S.centerTop}>
@@ -348,6 +365,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
           onOpenAddressBook={onOpenAddressBook}
           onSent={sendOnSent}
           onClose={() => onSubModeChange('scan')}
+          onSendActiveChange={setSendActive}
         />
       </View>
     );
