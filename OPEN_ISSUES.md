@@ -118,8 +118,11 @@
   0x6B1C…83b9: attempt #1 paid its approve fees (0.000002 ckETH + 0.01 ckUSDC), the ckETH minter
   gas-burned 0.00013176308327 ckETH then minted it back minus the 2e12 ledger fee ~3 min later —
   it aborted BEFORE pulling the ckUSDC (ckUSDC never left; allowance unspent); attempt #2 halted
-  at REVIEW, no burn. Net cost of the failed leg: 2×(0.000002 ckETH + 0.01 ckUSDC) in fees.
-  **LEDGER DUPLICATION WARNING:** main rows 83–92 (@ `3d5bc71`, reconstructed from the ledgers'
+  at REVIEW, no burn. Attempt #3 (send-usdc rounds 12–15) paid a third approve pair at 13:20 UTC
+  (allowances 0.00018052378682 ckETH + 0.1385 ckUSDC to the ckETH minter) and failed at the
+  withdraw form — still no minter burn; all three allowances live-unspent. Net cost of the
+  failed leg: 3×(0.000002 ckETH + 0.01 ckUSDC) in fees.
+  **LEDGER DUPLICATION WARNING:** main rows 83–94 (@ `38d8405`, reconstructed from the ledgers'
   own `get_transactions` tails) and branch `cctp-live` rows 83–89 (@ `f27aba0`, same movements,
   coarser split) record the SAME on-chain events — at merge keep ONE set and let
   `just funds reconcile` arbitrate; never double-apply. Next: diagnose the minter abort (ckETH
