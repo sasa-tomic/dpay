@@ -45,6 +45,16 @@ const {buildWeb, serveWeb} = await import('./harness/web.mjs');
 const {Driver} = await import('./harness/driver.mjs');
 const {openBalances, selectCurrency, accountOf, railPrincipalText} = await import('./harness/lib.mjs');
 const {icpPrincipalBytes, principalToText} = await import('./harness/wire.mjs');
+const {keccak_256} = await import('@noble/hashes/sha3');
+
+/** EIP-55 mixed-case checksum form of a 0x address. */
+function eip55(addr) {
+  const lower = addr.toLowerCase().replace(/^0x/, '');
+  const h = keccak_256(lower).toString('hex');
+  let out = '0x';
+  for (let i = 0; i < 40; i++) out += parseInt(h[i], 16) >= 8 ? lower[i].toUpperCase() : lower[i];
+  return out;
+}
 
 const log = (...a) => console.log(`[live ${new Date().toISOString().slice(11, 19)}]`, ...a);
 
@@ -834,6 +844,10 @@ async function confirmWithRequote(driver, label, opts = {}) {
       // not guesswork (verbatim errors are findings).
       log(`[${label}] confirm attempt ${attempt}: no recognized state — SURFACE NOW: ${bodyNow.slice(0, 1400)}`);
       await driver.screenshot(`live-${label.toLowerCase()}-after-confirm-${attempt}`);
+      // FAST mode (live route quotes): quotes go stale at 30s and the surface collapses —
+      // blind re-clicks found nothing (2026-09-21 live finding: 16 no-op clicks against a
+      // closed surface). Stop immediately so the caller can re-quote fresh.
+      if (opts.fast) throw new Error(`[${label}] convert surface gone right after confirm click (quote staleness) — re-quote and retry fast`);
       await sleep(1_500);
     }
   }
@@ -882,6 +896,357 @@ async function cmdBSend(address, amount) {
   });
 }
 
+/** OP 3 — Route B prep, live: <src> (vchf|icp) → USDC at the evm-float address via the
+ *  registered mohjv/hx7nb pool + ckERC20 minter. Drives to the CONFIRM GATE and dumps the
+ *  full quote checklist (pool fee, minter gasFeeWei, floors) — real money only moves when
+ *  --confirm is passed. This is the IC half of CCTP Route B: the USDC principal (and the
+ *  ckETH the minter burns as its fee) must LAND at the user's EVM address before the
+ *  user-side burn can be signed. */
+async function cmdEvm(src, amount, confirm) {
+  const {readFileSync} = await import('node:fs');
+  const evmAddress = JSON.parse(readFileSync('secrets/agent-evm.pub.json', 'utf8')).address;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(evmAddress)) throw new Error(`conv-evm: bad evm address: ${evmAddress}`);
+  const venueRow = src === 'icp' ? 'convert-dest-route-multihop:icpswap-ckusdc:2'
+    : src === 'vchf' ? 'convert-dest-route-multihop:icpswap-vchf-ckusdc:2'
+    : src === 'ckbtc' ? 'icpswap-ckbtc-cketh'
+    : null;
+  if (venueRow == null) throw new Error(`conv-evm: src must be icp|vchf|ckbtc, got ${src}`);
+  // EVM destination entry + checksum gate (same human-facing double-type gate as OP 2).
+  // NOTE: the evm-float address's EIP-55 form is ALL-LOWERCASE (every alpha nibble of its
+  // keccak is < 8 — rare but real), so the lowercase form IS the checksummed form and the
+  // mismatch gate must NOT fire. Assert the gate only when EIP-55 ≠ lowercase.
+  const checksummed = eip55(evmAddress);
+  const typeEvmDest = async (driver) => {
+    if (checksummed !== evmAddress.toLowerCase()) {
+      await driver.type('convert-dest-address', evmAddress.toLowerCase());
+      const bad = await driver.waitForText('Checksum mismatch', {timeoutMs: 8_000});
+      if (!bad) throw new Error('conv-evm: lowercase address did NOT trip the checksum gate');
+      log('checksum gate: lowercase refused ✓');
+    } else {
+      log('checksum: address EIP-55 form is all-lowercase — typing it directly (gate skip is CORRECT)');
+    }
+    await driver.type('convert-dest-address', checksummed);
+    if (await driver.isPresent('convert-dest-reenter')) {
+      log('re-enter gate up — typing the address again');
+      await driver.type('convert-dest-reenter', evmAddress);
+    }
+  };
+  await withApp(async (driver) => {
+    log(`OP 3 — ${amount} ${src.toUpperCase()} → USDC at ${evmAddress}${confirm ? ' (CONFIRM)' : ' (quote only)'}`);
+    await openConvert(driver, src);
+    await driver.type('convert-amount', amount);
+    await pickDest(driver, venueRow);
+    await typeEvmDest(driver);
+    // Quote + gas card state — READ EVERYTHING before any confirm.
+    const q = await readQuote(driver, {timeoutMs: 45_000}).catch((e) => ({err: String(e)}));
+    log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
+    // Open the Details disclosure — the minter's live gasFeeWei and the route's fee
+    // census fold behind it. Read BEFORE any confirm: this is the gas budget.
+    await driver.click('convert-details').catch(() => log('no details toggle'));
+    await sleep(1_000);
+    const body = (await driver.bodyText()).replace(/\s+/g, ' ');
+    const gasCard = await driver.isPresent('convert-gas-fund-card');
+    log(`GAS CARD PRESENT: ${gasCard}`);
+    if (gasCard) log(`GAS CARD: ${(await driver.readText('convert-gas-fund-card')).replace(/\s+/g, ' ')}`);
+    const details = body.match(/Details.{0,1400}/i);
+    log(`DETAILS SLICE: ${details ? details[0].slice(0, 1400) : '(details not found) ' + body.slice(0, 600)}`);
+    await driver.screenshot('live-evm-quote');
+    if (!confirm) {
+      log('quote-only run — NOT confirming (pass --confirm to move real money)');
+      return;
+    }
+    if (gasCard) {
+      // Short wallet → the gas-funder gesture (fund ckETH from what the wallet has).
+      await driver.click('btn-gas-fund-wallet');
+      await sleep(1_500);
+      await driver.screenshot('live-evm-gas-funded');
+    }
+    // Live venue quotes go stale at 30s — confirm within seconds of the quote (2026-09-21
+    // finding), with one fresh re-quote retry if the surface collapsed mid-flow.
+    let done;
+    try {
+      done = await confirmWithRequote(driver, 'EVM', {cefi: false, fast: true});
+    } catch (e) {
+      if (!/surface gone/.test(String(e))) throw e;
+      log('surface collapsed (stale quote) — re-quoting fresh and confirming fast');
+      await openConvert(driver, src);
+      await driver.type('convert-amount', amount);
+      await pickDest(driver, venueRow);
+      await typeEvmDest(driver, evmAddress);
+      await readQuote(driver, {timeoutMs: 45_000});
+      done = await confirmWithRequote(driver, 'EVM', {cefi: false, fast: true});
+    }
+    log(`conv-evm confirm → ${done === true ? 'submitted' : JSON.stringify(done)?.slice(0, 300)}`);
+    await watchConvert(driver, 'evm', {timeoutMs: 25 * 60_000});
+    log(`FINAL SURFACE: ${(await driver.bodyText()).replace(/\s+/g, ' ').slice(0, 1200)}`);
+    await driver.screenshot('live-evm-final');
+    await agentFunds();
+  });
+}
+
+/** OP 3b — IN-WALLET pool convert via a registered ic_amm venue (e.g. ckBTC → ckETH on
+ *  akhru). No external destination, no burn — the dest row is picked by VISIBLE TEXT
+ *  (in-wallet rows carry no stable route testID). Quote-gated like conv-evm. */
+// Instrumented confirm probe (2026-09-21): the in-wallet confirm clicks were landing on a
+// DISABLED button while driver bodyText() mis-reported the surface as bare '∂pay'. This probe
+// reads the REAL DOM state (disabled attr, testIDs, body length), clicks via the element's own
+// .click(), captures console/page errors, and screenshots the seconds right after the click.
+// A successful confirm MOVES REAL MONEY — call only for an intended live record.
+async function cmdProbeConfirm2(src, amount, destText) {
+  await withApp(async (driver) => {
+    driver.page.on('pageerror', (e) => log(`[pageerror] ${String(e).slice(0, 300)}`));
+    driver.page.on('console', (m) => {
+      if (m.type() === 'error' || m.type() === 'warning') log(`[console.${m.type()}] ${m.text().slice(0, 300)}`);
+    });
+    const snap = async (label) => {
+      const st = await driver.page.evaluate(() => {
+        const btn = document.querySelector('[data-testid="btn-convert-confirm"]');
+        const ids = [...document.querySelectorAll('[data-testid]')].map((e) => e.getAttribute('data-testid'));
+        return {
+          found: btn != null,
+          disabled: btn?.getAttribute('disabled'),
+          ariaDisabled: btn?.getAttribute('aria-disabled'),
+          btnClass: btn?.getAttribute('class')?.slice(0, 60) ?? null,
+          btnText: btn?.textContent?.slice(0, 40) ?? null,
+          bodyLen: (document.body?.innerText ?? '').length,
+          destIds: ids.filter((t) => t && (t.startsWith('convert-dest') || t.startsWith('convert-gas') || t.startsWith('convert-state') || t.startsWith('convert-failed') || t.startsWith('convert-done'))).slice(0, 40),
+        };
+      });
+      log(`[${label}] ${JSON.stringify(st)}`);
+      return st;
+    };
+    log(`PROBE-CONFIRM — ${amount} ${src} → "${destText}"`);
+    await openConvert(driver, src);
+    await driver.type('convert-amount', amount);
+    await clickByText(driver, destText);
+    // Multi-mechanism dests keep the confirm DISABLED (mechUnpicked) until a mech row is
+    // picked (2026-09-21 live finding — three no-op confirm runs before this was seen).
+    try {
+      await driver.findByTestID('convert-dest-mechs', {timeoutMs: 4_000});
+      await driver.click('convert-dest-mech-direct');
+      log('mechanism picked: direct');
+    } catch (e) { log(`mech pick skipped: ${String(e).slice(0, 140)}`); }
+    await readQuote(driver, {timeoutMs: 45_000});
+    await snap('pre-details');
+    await driver.click('convert-details').catch(() => {});
+    await sleep(600);
+    let st = await snap('pre-click');
+    if (st.disabled === 'true' || st.ariaDisabled === 'true') {
+      log('button disabled — polling up to 30s for it to enable (quote fetch / mech state)…');
+      let enabled = false;
+      for (let i = 0; i < 30; i++) {
+        await sleep(1_000);
+        st = await snap(`poll-${i + 1}`);
+        if (st.ariaDisabled !== 'true' && st.disabled !== 'true') { enabled = true; break; }
+      }
+      if (!enabled) {
+        log('button NEVER enabled in 30s — dumping surface + screenshot for the reason');
+        await driver.screenshot('live-probeconfirm-disabled');
+        const body = await driver.page.evaluate(() => (document.body?.innerText ?? '').slice(0, 900));
+        log(`SURFACE TEXT: ${body.replace(/\s+/g, ' ')}`);
+        return;
+      }
+    }
+    await driver.page.evaluate(() => document.querySelector('[data-testid="btn-convert-confirm"]')?.click());
+    // The record surface announces itself with the leg checklist (convert-leg-N). A
+    // quote-drift between review and click makes onConfirm refuse with its own
+    // 'Review and confirm again' instruction — clicking once more then is the app's
+    // documented user path, not a blind retry. Cap: one re-click.
+    const recordUp = async () => await driver.isPresent('convert-leg-0');
+    let clicked = 1;
+    for (let i = 0; i < 12; i++) {
+      await sleep(1_000);
+      if (await recordUp()) break;
+      const body = await driver.page.evaluate(() => document.body?.innerText ?? '');
+      if (/Quote changed/i.test(body) && clicked === 1) {
+        log('quote drifted post-click — re-reviewing and confirming once more (app-instructed)');
+        await driver.page.evaluate(() => document.querySelector('[data-testid="btn-convert-confirm"]')?.click());
+        clicked += 1;
+      }
+    }
+    log(`record surface up: ${await recordUp()} (clicks: ${clicked})`);
+    // Watch the record to completion (IC legs: approve + swap, ~1-3 min).
+    for (let i = 0; i < 48; i++) {
+      await sleep(10_000);
+      const body = await driver.page.evaluate(() => document.body?.innerText ?? '');
+      const done = /completed|Convert complete|convert-done/i.test(body) || await driver.isPresent('convert-done');
+      const failed = await driver.isPresent('convert-failed');
+      const stuck = await driver.isPresent('convert-stuck');
+      const legs = await driver.page.evaluate(() =>
+        [...document.querySelectorAll('[data-testid^="convert-leg-"][data-testid$="-state"]')]
+          .map((e) => `${e.getAttribute('data-testid')}=${(e.textContent ?? '').trim().slice(0, 40)}`));
+      log(`watch ${i}: done=${done} failed=${failed} stuck=${stuck} legs=[${legs.join('; ')}]`);
+      if (i % 6 === 5) await driver.screenshot(`live-probeconfirm-watch-${i}`);
+      if (done || failed || stuck) break;
+    }
+    await driver.screenshot('live-probeconfirm-final');
+    const finalBody = await driver.page.evaluate(() => (document.body?.innerText ?? '').slice(0, 1200));
+    log(`FINAL: ${finalBody.replace(/\s+/g, ' ')}`);
+  });
+}
+
+async function cmdInwallet(src, amount, destText, confirm) {  await withApp(async (driver) => {
+    log(`OP 3b — in-wallet: ${amount} ${src} → "${destText}"${confirm ? ' (CONFIRM)' : ' (quote only)'}`);
+    await openConvert(driver, src);
+    await driver.type('convert-amount', amount);
+    await clickByText(driver, destText);
+    try {
+      await driver.findByTestID('convert-dest-mechs', {timeoutMs: 4_000});
+      await driver.click('convert-dest-mech-direct');
+      log('mechanism picked: direct');
+    } catch { /* single mechanism */ }
+    const q = await readQuote(driver, {timeoutMs: 45_000}).catch((e) => ({err: String(e)}));
+    log('QUOTE (verbatim):', JSON.stringify(q, null, 2));
+    await driver.click('convert-details').catch(() => {});
+    await sleep(800);
+    const body = (await driver.bodyText()).replace(/\s+/g, ' ');
+    const details = body.match(/Details.{0,800}/i);
+    log(`DETAILS SLICE: ${details ? details[0].slice(0, 800) : body.slice(0, 400)}`);
+    await driver.screenshot('live-inwallet-quote');
+    if (!confirm) {
+      log('quote-only run — NOT confirming');
+      return;
+    }
+    // Live venue quotes go stale at 30s (route quote nulls out, surface collapses) — the
+    // confirm click must land within seconds of the quote appearing. One retry cycle max:
+    // if the surface died mid-flow, re-quote fresh and confirm FAST (2026-09-21 finding).
+    let done;
+    try {
+      done = await confirmWithRequote(driver, 'INW', {cefi: false, fast: true});
+    } catch (e) {
+      if (!/surface gone/.test(String(e))) throw e;
+      log('surface collapsed (stale quote) — re-quoting fresh and confirming fast');
+      await openConvert(driver, src);
+      await driver.type('convert-amount', amount);
+      await clickByText(driver, destText);
+      await readQuote(driver, {timeoutMs: 45_000});
+      done = await confirmWithRequote(driver, 'INW', {cefi: false, fast: true});
+    }
+    log(`conv-inwallet confirm → ${done === true ? 'submitted' : JSON.stringify(done)?.slice(0, 300)}`);
+    await watchConvert(driver, 'inw', {timeoutMs: 15 * 60_000});
+    log(`FINAL SURFACE: ${(await driver.bodyText()).replace(/\s+/g, ' ').slice(0, 900)}`);
+    await driver.screenshot('live-inwallet-final');
+    await agentFunds();
+  });
+}
+
+/** OP 3c — the standalone ckETH native-withdraw (the minter's withdraw_eth): ckETH → ETH at
+ *  the user's own EVM address. This is how the CCTP burn's GAS gets to the EVM address — the
+ *  multihop record only pays the minter's ckUSDC toll, it delivers no ETH. */
+async function cmdSendCkerc20(assetKey, amount) {
+  const {readFileSync} = await import('node:fs');
+  const evmAddress = JSON.parse(readFileSync('secrets/agent-evm.pub.json', 'utf8')).address;
+  log(`SEND ckERC20 — ${amount} ${assetKey} -> USDC at ${evmAddress}`);
+  await withApp(async (driver) => {
+    await openBalances(driver);
+    await selectCurrency(driver, assetKey);
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    await sleep(2_500);
+    {
+      const b0 = (await driver.bodyText()).replace(/\s+/g, ' ');
+      log(`SHEET OPEN: ${b0.slice(0, 450)}`);
+      await driver.screenshot('live-ckerc20-sheet-open');
+    }
+    // Offline gate: address sends refuse while the app sees no connection ('Check again'
+    // re-runs the probe). Same pattern as the SOL send driver.
+    for (let i = 0; i < 6; i++) {
+      const ok = await driver.isPresent('send-address-input') || await driver.isPresent('withdraw-resume');
+      if (ok) break;
+      log(`offline gate (round ${i + 1}) — Check again, waiting out the full balance refresh`);
+      try { await clickByText(driver, 'Check again'); } catch {}
+      await sleep(20_000);
+    }
+    // A retained offramp (approvals already signed, submit leg pending) reopens straight
+    // into the withdraw sheet with withdraw-resume + retry enabled — no address/amount
+    // steps. Fresh sends go SendSheet address -> withdraw form.
+    let resumed = false;
+    try {
+      await driver.findByTestID('withdraw-resume', {timeoutMs: 3_000});
+      resumed = true;
+      log('RETAINED offramp found — resuming pre-signed withdrawal');
+    } catch {}
+    if (!resumed) {
+      await driver.type('send-address-input', evmAddress);
+      await sleep(2_000);
+      const bodyA = (await driver.bodyText()).replace(/\s+/g, ' ');
+      log(`AFTER ADDRESS: ${bodyA.slice(0, 400)}`);
+      // The withdraw form can take a while to hydrate (slow boundary reads) and the
+      // connection gate can reassert — wait patiently, re-checking the gate.
+      let amtOk = false;
+      for (let i = 0; i < 12; i++) {
+        try { await driver.findByTestID('withdraw-amount-input', {timeoutMs: 4_000}); amtOk = true; break; }
+        catch {
+          log(`withdraw form not up (round ${i + 1})`);
+          try { await clickByText(driver, 'Check again'); } catch {}
+        }
+      }
+      if (!amtOk) throw new Error('withdraw-amount-input never appeared');
+      await driver.type('withdraw-amount-input', amount);
+    }
+    await sleep(2_000);
+    const body = (await driver.bodyText()).replace(/\s+/g, ' ');
+    log(`REVIEW${resumed ? ' (RESUME)' : ''}: ${body.slice(0, 500)}`);
+    await driver.screenshot('live-ckerc20-send-review');
+    // The connection gate can also reassert itself over the review (the relay hiccups
+    // mid-flow) — re-run the gate loop if the confirm button vanished.
+    for (let i = 0; i < 8; i++) {
+      const ok = await driver.isPresent('btn-withdraw-confirm');
+      if (ok) break;
+      log(`gate over review (round ${i + 1}) — Check again, waiting out the refresh`);
+      try { await clickByText(driver, 'Check again'); } catch {}
+      await sleep(15_000);
+    }
+    await driver.click('btn-withdraw-confirm');
+    // NOTE: waitForText matches BODY TEXT, not testIDs, and takes {timeoutMs} — the two
+    // 12:19-era runs closed the app mid-withdrawal because of exactly this misuse.
+    await driver.findByTestID('withdraw-status', {timeoutMs: 180_000});
+    const outcome = await driver.readText('withdraw-status');
+    let block = '';
+    try { block = await driver.readText('withdraw-destination'); } catch {}
+    log(`SEND OUTCOME: ${outcome} | ${block}`);
+    await driver.screenshot('live-ckerc20-sent');
+  });
+}
+
+async function cmdSendEth(amount) {
+  const {readFileSync} = await import('node:fs');
+  const evmAddress = JSON.parse(readFileSync('secrets/agent-evm.pub.json', 'utf8')).address;
+  log(`OP 3c — withdraw: ${amount} ckETH → ETH at ${evmAddress}`);
+  await withApp(async (driver) => {
+    await openBalances(driver);
+    await selectCurrency(driver, 'cketh');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    await driver.type('send-address-input', evmAddress);
+    // ckETH -> 0x is the native minter burn: it routes into the WITHDRAW sheet's testIDs.
+    let up = false;
+    for (let i = 0; i < 12; i++) {
+      if (await driver.isPresent('withdraw-amount-input')) { up = true; break; }
+      log(`withdraw form not up (round ${i + 1})`);
+      try { await clickByText(driver, 'Check again'); } catch {}
+      await sleep(4_000);
+    }
+    if (!up) throw new Error('withdraw-amount-input never appeared');
+    await driver.type('withdraw-amount-input', amount);
+    await sleep(2_000);
+    const body = (await driver.bodyText()).replace(/\s+/g, ' ');
+    log(`REVIEW: ${body.slice(0, 420)}`);
+    await driver.screenshot('live-eth-send-review');
+    for (let i = 0; i < 8; i++) {
+      if (await driver.isPresent('btn-withdraw-confirm')) break;
+      log(`gate over review (round ${i + 1})`);
+      try { await clickByText(driver, 'Check again'); } catch {}
+      await sleep(15_000);
+    }
+    await driver.click('btn-withdraw-confirm');
+    try { await driver.findByTestID('withdraw-status', {timeoutMs: 240_000}); } catch {}
+    const outcome = await driver.readText('withdraw-status').catch(() => '(no receipt yet — legs in flight)');
+    log(`SEND OUTCOME: ${outcome}`);
+    await driver.screenshot('live-eth-sent');
+  });
+}
+
 // ---------------------------------------------------------------------------
 
 const [cmd, ...args] = process.argv.slice(2);
@@ -896,6 +1261,31 @@ try {
   else if (cmd === 'conv-c3') await cmdC3(args[0]);
   else if (cmd === 'conv-c4') await cmdC4(args[0]);
   else if (cmd === 'conv-gas') await cmdGas(args[0], args[1]);
+  else if (cmd === 'conv-evm') await cmdEvm(args[0], args[1], args.includes('--confirm'));
+  else if (cmd === 'conv-inwallet') await cmdInwallet(args[0], args[1], args[2], args.includes('--confirm'));
+  else if (cmd === 'probe-confirm') await cmdProbeConfirm();
+  else if (cmd === 'probe-confirm2') await cmdProbeConfirm2(args[0], args[1], args[2]);
+  else if (cmd === 'dump-convert') await withApp(async (driver) => {
+    await openConvert(driver, args[0] || 'vchf');
+    for (let i = 0; i < 20; i++) {
+      await sleep(3_000);
+      const body = await driver.page.evaluate(() => (document.body?.innerText ?? '').slice(0, 1100));
+      log(`CONVERT t+${(i + 1) * 3}s: ` + body.replace(/\s+/g, ' ').slice(0, 700));
+    }
+    await driver.screenshot('live-dump-convert');
+  });
+  else if (cmd === 'dump') await withApp(async (driver) => {
+    const holdMs = (Number(args[0]) || 0) * 1000;
+    if (holdMs > 0) log(`holding app open ${args[0]}s for the resume engine…`);
+    await sleep(4_000 + holdMs);
+    const body = await driver.page.evaluate(() => (document.body?.innerText ?? '').slice(0, 1500));
+    log('DUMP SURFACE: ' + body.replace(/\s+/g, ' '));
+    const ids = await driver.page.evaluate(() => [...document.querySelectorAll('[data-testid]')].map((e) => e.getAttribute('data-testid')).slice(0, 60));
+    log('DUMP TESTIDS: ' + JSON.stringify(ids));
+    await driver.screenshot('live-dump');
+  });
+  else if (cmd === 'b-send-eth') await cmdSendEth(args[0]);
+  else if (cmd === 'b-send-ckerc20') await cmdSendCkerc20(args[0], args[1]);
   else if (cmd === 'b-send-sol') await cmdBSendSol(args[0], args[1]);
   else if (cmd === 'watch') await cmdWatch();
   else if (cmd === 'b-send') await cmdBSend(args[0], args[1]);
