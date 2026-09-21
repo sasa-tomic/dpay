@@ -690,6 +690,173 @@ describe('solana seam — isSolanaRpcAvailable (independent of relay online)', (
 });
 
 // ============================================================================
+// The money path never awaits an UNBOUNDED module load (2026-09-21 root cause, blocker 2).
+//
+// Three live EURC sends sat down BEFORE any RPC fired and never broadcast: the first await inside
+// sendSol/sendSpl is `await import('./solana/rpc')` — a lazy chunk in the served web build
+// (`rpc-*.js`) — and a module load carries NO abort signal and NO timeout, so the caller's 60s
+// deadline could not cut it and the sheet hung in `submitting` forever. These pin the fix: the
+// send path's load is BOUNDED (an honest, classified, retryable failure), the failure renders as
+// actionable copy, and every send step TRACES itself so the last `money:` line names the exact
+// dead await on any future live attempt.
+// ============================================================================
+describe('solana seam — the send path\u2019s module load is bounded and traced', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('loadRpcForSend rejects with the engine-load class when the chunk never arrives', async () => {
+    jest.useFakeTimers();
+    const {loadRpcForSend} = require('../solana') as {loadRpcForSend: (d: number, load?: () => Promise<unknown>) => Promise<unknown>};
+    const p = loadRpcForSend(50, () => new Promise(() => { /* the chunk fetch hangs — the live shape */ }));
+    const settled = expect(p).rejects.toThrow(/rpc module failed to load/);
+    await jest.advanceTimersByTimeAsync(51);
+    await settled;
+  });
+
+  test('the bound is a RACE, not a cap — a loader that answers in time is honored', async () => {
+    jest.useFakeTimers();
+    const {loadRpcForSend} = require('../solana') as {loadRpcForSend: (d: number, load?: () => Promise<unknown>) => Promise<unknown>};
+    const marker = {rpc: true};
+    const p = loadRpcForSend(5000, () => Promise.resolve(marker));
+    await jest.advanceTimersByTimeAsync(1);
+    await expect(p).resolves.toBe(marker);
+  });
+
+  test('friendlySolError maps the engine-load class to the actionable reopen instruction', () => {
+    const {friendlySolError} = require('../solana/errors') as {friendlySolError: (m: string) => string};
+    const {M} = require('../i18n') as {M: {sol: {engineLoad: string; timedOut: string}}};
+    expect(friendlySolError('solana rpc module failed to load within 10000ms (the payment engine chunk never arrived)')).toBe(M.sol.engineLoad);
+    // ...and the mapping does NOT swallow the timeout class into it (distinct copies).
+    expect(friendlySolError('sol send aborted (deadline)')).toBe(M.sol.timedOut);
+  });
+
+  test('every send step traces itself — the last `money:` line names the dead await', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
+      getLatestBlockhash: () => { throw new Error('origin connection stalled'); },
+    };
+    await expect(withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n, USDC_MINT);
+    })).rejects.toThrow('origin connection stalled');
+    const lines = warn.mock.calls.map(c => String(c[0]));
+    expect(lines.some(l => /money: sol send SPL\(USDC\) start/.test(l))).toBe(true);
+    expect(lines.some(l => /FAILED at step=blockhash: origin connection stalled/.test(l))).toBe(true);
+    // The steps BEFORE the failure are on the record too — the trace is a story, not a verdict.
+    expect(lines.some(l => /sender-ata-check|module-load/.test(l))).toBe(true);
+    warn.mockRestore();
+  });
+
+  test('a send that survives to the chain traces the broadcast + confirmation signatures', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: () => 'SigSolBase58',
+      getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
+    };
+    await withStubUrl(async () => {
+      const {sendSol} = require('../solana');
+      return (sendSol as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000n);
+    });
+    const lines = warn.mock.calls.map(c => String(c[0]));
+    expect(lines.some(l => /BROADCAST accepted.*SigSolBase58/.test(l))).toBe(true);
+    expect(lines.some(l => /money: sol send confirmed sig=SigSolBase58/.test(l))).toBe(true);
+    warn.mockRestore();
+  });
+
+  test('every MONEY send routes its module load through the bounded loader — never a raw import (wiring pin)', () => {
+    // The 2026-09-21 root cause was a RAW `await import('./solana/rpc')` as a send's first await:
+    // a chunk fetch carries no abort signal and no timeout, so the sheet hung in `submitting`
+    // forever with nothing broadcast. The bounded loader is only real if the send paths USE it —
+    // this pin fails if a send path ever reverts to a raw dynamic import.
+    const fs = require('fs') as {readFileSync: (p: string) => string};
+    const path = require('path') as {join: (...a: string[]) => string};
+    const src = fs.readFileSync(path.join(__dirname, '../solana.ts'), 'utf8');
+    const moneyPaths = [
+      'export async function sendSol(',
+      'export async function sendSpl(',
+      'export async function sendSolanaPay(',
+      'export async function submitRawSolTx(',
+      'export async function getSolSignatureStatus(',
+      'export async function createTokenAta(',
+    ];
+    for (const fn of moneyPaths) {
+      const start = src.indexOf(fn);
+      expect(start).toBeGreaterThanOrEqual(0);
+      // A top-level function body ends at the first `}` in column 0 (nested braces are indented).
+      const body = src.slice(start, src.indexOf('\n}', start));
+      expect(body).toContain('loadRpcForSend(');
+      expect(body).not.toContain("await import('./solana/rpc')");
+    }
+  });
+});
+
+// ============================================================================
+// The 2026-09-21 never-broadcast repro, OFFLINE (the live EURC→ICP driver's shape): the send
+// sheet submits 9.284071 EURC to a fresh venue deposit address through the REAL seam against a
+// RECORDING stub RPC. Three live attempts produced zero on-chain writes with the RPC healthy,
+// and no test pinned the whole click→broadcast chain in one piece. This does: every await the
+// send makes is recorded in order, the broadcast IS reached, and the transfer instruction rides
+// the signed bytes. If a silent guard return, a wrong method, or an unbounded await ever enters
+// this chain, this test names it.
+// ============================================================================
+describe('solana seam — the send reaches the broadcast (recording-stub repro, EURC shape)', () => {
+  /** The 2026-09-21 live facts, verbatim: the app-derived rail, Circle's EURC mint, and the
+   *  venue deposit address the refund came back to (funds ledger row 71). */
+  const EURC_MINT = 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr';
+  const VENUE_DEPOSIT = '7nY7Xmo9TA85ZNQTJFw9rFGggKjK63vpD8QykDgZsSpQ';
+  const LIVE_AMOUNT = 9_284_071n; // 9.284071 EURC at 6 decimals
+
+  afterEach(() => {
+    delete (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB;
+  });
+
+  test('the full await chain, recorded: ata×2 → balance → blockhash → BROADCAST → confirm', async () => {
+    const calls: {method: string; params: unknown[]}[] = [];
+    const record = <T,>(method: string, answer: (params: unknown[], n: number) => T): ((params: unknown[]) => T) => {
+      let n = 0;
+      return (params: unknown[]) => {
+        calls.push({method, params});
+        return answer(params, n++);
+      };
+    };
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      // 1st call = the sender's ATA (exists — the rail holds the EURC); 2nd = the venue's (fresh
+      // order → fresh address → absent), which puts the createIdempotent ix in the tx.
+      getAccountInfo: record('getAccountInfo', (_p, n) => (n === 0
+        ? {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2_039_280}}
+        : {value: null})),
+      getBalance: record('getBalance', () => ({value: 4_699_835})), // the rail's measured SOL
+      getLatestBlockhash: record('getLatestBlockhash', () => ({context: {slot: 449_102_443}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 427_143_204}})),
+      sendTransaction: record('sendTransaction', () => '5ig'.repeat(10)),
+      getSignatureStatuses: record('getSignatureStatuses', () => ({value: [{confirmationStatus: 'finalized', err: null}]})),
+    };
+    const sig = await withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, VENUE_DEPOSIT, LIVE_AMOUNT, EURC_MINT);
+    });
+    expect(sig).toBe('5ig'.repeat(10));
+    // THE sequence — no other await, no silent guard between click and broadcast.
+    expect(calls.map(c => c.method)).toEqual([
+      'getAccountInfo', // sender ATA (fail-closed check)
+      'getAccountInfo', // venue ATA (missing → the create joins the tx)
+      'getBalance', // the honest rent pre-check for the create
+      'getLatestBlockhash',
+      'sendTransaction', // ← the broadcast, REACHED
+      'getSignatureStatuses', // confirm poll
+    ]);
+    // The broadcast's bytes carry the createIdempotent + transfer instructions over the venue's
+    // derived ATA — the transaction the three live attempts never produced.
+    const sent = calls[4].params[0] as string;
+    const bytes = Uint8Array.from(Buffer.from(sent, 'base64'));
+    expect(countInstructions(bytes)).toBe(2);
+    expect(indexOfBytes(bytes, deriveAta(VENUE_DEPOSIT, EURC_MINT))).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ============================================================================
 // Phase 3 — v2 recent-blockhash payment seam. The lifecycle is: ONLINE merchant creates a request
 // carrying a fresh blockhash → OFFLINE payer signs → ONLINE merchant strictly verifies +
 // freshness-checks + broadcasts + confirms → returns a SolReceiptV2. These tests exercise every

@@ -117,6 +117,7 @@ export const es: Messages = {
     noRecordOfCredit:
       'Esta cuenta no tiene SOL, o la red aún no ha sincronizado tu saldo. Si acabas de depositar, espera un momento y reinténtalo; si no, deposita primero SOL en tu dirección.',
     timedOut: 'Se agotó el tiempo de espera. Revisa tu conexión e inténtalo de nuevo.',
+    engineLoad: 'El motor de pagos no cargó. Revisa tu conexión, vuelve a abrir esta pantalla e inténtalo de nuevo — tu dinero sigue donde estaba.',
     insufficient: 'No tienes SOL suficiente para este envío más la comisión de red.',
     rentExempt: 'Después de este envío, tu cuenta quedaría por debajo del saldo mínimo. Envía un importe menor.',
     blockhash: 'La red estaba demasiado ocupada. Inténtalo de nuevo.',

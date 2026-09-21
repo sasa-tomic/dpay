@@ -395,6 +395,15 @@ export function setIcGatewayUrl(url: string): void {
 // CONFIRM_TIMEOUT_MS=30s). 60s gives headroom over the full confirm path so a slow-but-finalising
 // transfer is never reported as a false failure.
 export const SOL_SEND_TIMEOUT_MS = 60000;
+// The send path's module-load deadline (solana.ts `loadRpcForSend`). The network module is a lazy
+// chunk in the served web build (`rpc-*.js`), and a module load carries NO abort signal — the one
+// await in the send chain the caller's deadline cannot cut. 2026-09-21: three live EURC sends died
+// exactly there (stalled origin fetches stalled the chunk; the sheet hung in `submitting`, nothing
+// broadcast), so the money path now races the import against this bound and fails with honest,
+// actionable copy (`M.sol.engineLoad`) instead of hanging. Generous over the slowest real 3G load —
+// the normal path never sees it, because the sheet preloads the module at mount (minutes before a
+// click) and the balance poll loads it at boot.
+export const SOL_RPC_IMPORT_DEADLINE_MS = 10000;
 // SOL merchant broadcast: getLatestBlockhash + sendTransaction + confirmTransaction, with headroom
 // for the merchant↔payer round trip. 2× the native send timeout. Single source — the offline-pay
 // broadcast path (solana.ts) and the merchant NFC path (SolNfcTap) reference this instead of

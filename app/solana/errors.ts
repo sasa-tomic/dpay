@@ -118,6 +118,13 @@ export function friendlySolError(msg: string): string {
   if (/no record of a prior credit|found no record/i.test(msg)) {
     return M.sol.noRecordOfCredit;
   }
+  // The send path's lazily-loaded network module never arrived (loadRpcForSend's bound — the
+  // served web build fetches `rpc-*.js` as a chunk, and a stalled origin fetch stalled three live
+  // sends there in 2026-09-21). Checked BEFORE the timeout class: this failure needs its own
+  // instruction (reopen the screen — the reload re-fetches the chunk), not generic "timed out".
+  if (/rpc module failed to load/i.test(msg)) {
+    return M.sol.engineLoad;
+  }
   if (/abort|timed out|timeout|confirmation timeout/i.test(msg)) {
     return M.sol.timedOut;
   }

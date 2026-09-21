@@ -86,6 +86,7 @@ export const en: Messages = {
     noRecordOfCredit:
       "This account has no SOL, or the network hasn't synced your balance yet. If you just deposited, wait a moment and retry — otherwise deposit SOL to your address first.",
     timedOut: 'Timed out. Check your connection and try again.',
+    engineLoad: "The payment engine didn't load. Check your connection, then reopen this screen and try again — your money is still where it was.",
     insufficient: 'Not enough SOL for this send plus the network fee.',
     rentExempt: 'After this send, your account would fall below the minimum balance. Send a smaller amount.',
     blockhash: 'The network was too busy. Try again.',

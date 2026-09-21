@@ -122,6 +122,7 @@ export const de: Messages = {
     noRecordOfCredit:
       'Dieses Konto hat kein SOL, oder das Netzwerk hat dein Guthaben noch nicht synchronisiert. Wenn du gerade eingezahlt hast, warte kurz und versuche es erneut — zahle sonst zuerst SOL an deine Adresse ein.',
     timedOut: 'Zeitüberschreitung. Prüfe deine Verbindung und versuche es erneut.',
+    engineLoad: 'Die Zahlungs-Engine wurde nicht geladen. Prüfe deine Verbindung, öffne diesen Bildschirm erneut und versuche es — dein Geld ist noch da, wo es war.',
     insufficient: 'Nicht genug SOL für diese Überweisung plus Netzwerkgebühr.',
     rentExempt: 'Nach dieser Überweisung läge dein Konto unter dem Mindestguthaben. Sende einen kleineren Betrag.',
     blockhash: 'Das Netzwerk war zu ausgelastet. Versuche es erneut.',

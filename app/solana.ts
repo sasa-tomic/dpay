@@ -15,7 +15,7 @@
 // (The v1 durable-nonce reclaim tool was removed 2026-08-14: no user ever held v1 nonce funds.)
 
 import bs58 from 'bs58';
-import {solanaRpcUrl, solanaRpcUrls, icGatewayUrl, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
+import {solanaRpcUrl, solanaRpcUrls, icGatewayUrl, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS, SOL_RPC_IMPORT_DEADLINE_MS} from './config/constants';
 import {solanaTokenAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
 import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
@@ -69,6 +69,76 @@ function abortable<T>(p: Promise<T>, signal: AbortSignal | undefined, what: stri
 // Same reason: `getSolSignatureStatus` hands its caller the chain's verdict verbatim, so the shape
 // of that verdict has to be nameable without importing the network module.
 export type {SolanaSignatureStatus} from './solana/rpc';
+
+// ============================================================================
+// The send path's module load — bounded, preloaded, traced (2026-09-21 root cause).
+//
+// THE DIAGNOSIS. Three live EURC sends (2026-09-21) sat down BEFORE any RPC fired and never
+// broadcast: the first await inside sendSol/sendSpl is `await import('./solana/rpc')` — a LAZY
+// CHUNK in the served web build (`rpc-*.js`, fetched from the relay origin) — and a module load
+// carries NO abort signal and NO timeout. It is the one await in the send chain the caller's 60s
+// deadline cannot cut from below and the one that ignores `abortable` from above: attempts 1-2
+// hung the sheet in `submitting` FOREVER (every RPC honors the signal; the import does not), and
+// when the same stalled origin connection failed the IC balance poll 3× (attempt 3's offline
+// flip) the gate then ate the sheet's error surface too. Nothing broadcast; curl from the host
+// stayed healthy because the stall was in the page's own origin connections.
+//
+// So the money path now: (1) PRELOADS the module when the send sheet mounts (minutes before any
+// click — the normal click-time import is already resolved); (2) races the click-time import
+// against a bound (`SOL_RPC_IMPORT_DEADLINE_MS`) and fails with classified, actionable copy
+// (`M.sol.engineLoad`) instead of hanging; (3) TRACES each step to console.warn — the on-device
+// log mirror (services/log.ts installLogSink) captures warn, so the last traced line names the
+// exact hung step on any future live attempt. The prefix matches `logMoney`'s so the file reads
+// as one story; the services layer itself is NOT imported from here (it pulls the native module,
+// which this seam must never do under jest/e2e).
+// ============================================================================
+
+/** One warn line in the money-log's own dialect. console.warn is the transport because the
+ *  on-device log mirror already captures it — never a services import from this seam. */
+function traceSend(msg: string): void {
+  console.warn(`money: sol send ${msg}`);
+}
+
+let rpcPreloadStarted = false;
+
+/** Warm the network module OFF the money path. Fired when the send sheet mounts (and re-armable
+ *  after a failed load): by the time a user has typed a destination and an amount the chunk is
+ *  loaded, so the click-time import in `loadRpcForSend` resolves instantly. A no-op when the rail
+ *  is off (`solanaRpcUrl()` empty — the jest/e2e isolation contract: the offline loop never
+ *  imports the network module) and when a preload already started. */
+export function preloadSolanaRpc(): void {
+  if (rpcPreloadStarted || !solanaRpcUrl()) return;
+  rpcPreloadStarted = true;
+  void import('./solana/rpc').catch(() => {
+    // A failed warm must be retryable — the send path's bounded load re-imports on demand.
+    rpcPreloadStarted = false;
+  });
+}
+
+/** The bounded module load for every MONEY path that awaits the network module. Races the import
+ *  against `SOL_RPC_IMPORT_DEADLINE_MS`; on expiry throws the engine-load class (friendlySolError
+ *  → `M.sol.engineLoad`: check your connection, reopen, retry) instead of hanging the send for
+ *  the caller's whole deadline on a stalled chunk. The underlying import keeps loading and its
+ *  eventual resolution warms the module map — the RETRY then succeeds without re-fetching. The
+ *  loader is injectable for tests. */
+export async function loadRpcForSend(
+  deadlineMs: number = SOL_RPC_IMPORT_DEADLINE_MS,
+  load: () => Promise<typeof import('./solana/rpc')> = () => import('./solana/rpc'),
+): Promise<typeof import('./solana/rpc')> {
+  preloadSolanaRpc(); // in the normal case the sheet's mount preload already resolved this
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      rpcPreloadStarted = false; // a timed-out load must be retryable
+      reject(new Error(`solana rpc module failed to load within ${deadlineMs}ms (the payment engine chunk never arrived — check the connection to the relay and retry)`));
+    }, deadlineMs);
+  });
+  try {
+    return await Promise.race([load(), deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
 
 // --- existing exports (unchanged) ----------------------------------------------
 
@@ -350,14 +420,31 @@ export async function sendSol(
 ): Promise<string> {
   if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
   return abortable((async () => {
-    const {seed, publicKey} = deriveSolanaKeypair(secretHex);
-    const {getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
-    const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
-    const raw = buildSignedTransfer(seed, publicKey, toAddress, lamports, base58Decode32(blockhash));
-    const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
-    onBroadcast?.(signature);
-    await confirmTransaction(solanaRpcUrls(), signature, {signal});
-    return signature;
+    let step = 'module-load';
+    // Step-ENTRY tracing: a STALL never reaches the catch below (the abortable deadline rejects
+    // the OUTER promise), so the last traced line is the only witness to which await hung —
+    // exactly the diagnostic the three 2026-09-21 live sends could not produce.
+    const at = (s: string) => { step = s; traceSend(`step ${s}`); };
+    traceSend(`SOL start to=${toAddress} amount=${lamports}`);
+    try {
+      const {seed, publicKey} = deriveSolanaKeypair(secretHex);
+      const {getLatestBlockhash, sendTransaction, confirmTransaction} = await loadRpcForSend();
+      at('blockhash');
+      const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
+      at('sign');
+      const raw = buildSignedTransfer(seed, publicKey, toAddress, lamports, base58Decode32(blockhash));
+      at('broadcast');
+      const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
+      traceSend(`BROADCAST accepted sig=${signature}`);
+      onBroadcast?.(signature);
+      at('confirm');
+      await confirmTransaction(solanaRpcUrls(), signature, {signal});
+      traceSend(`confirmed sig=${signature}`);
+      return signature;
+    } catch (e: unknown) {
+      traceSend(`FAILED at step=${step}: ${e instanceof Error ? e.message : String(e)}`);
+      throw e;
+    }
   })(), signal, 'sol send');
 }
 
@@ -379,7 +466,7 @@ export async function getSolSignatureStatus(
   signal?: AbortSignal,
 ): Promise<SolanaSignatureStatus | null> {
   if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
-  const {getSignatureStatusesForSig} = await import('./solana/rpc');
+  const {getSignatureStatusesForSig} = await loadRpcForSend();
   const {status} = await getSignatureStatusesForSig(solanaRpcUrls(), signature, {signal});
   return status;
 }
@@ -400,8 +487,16 @@ export async function getSolSignatureStatus(
  *  re-signs, and resubmits only the IDENTICAL bytes, which the chain dedups by signature). */
 export async function submitRawSolTx(raw: Uint8Array, signal?: AbortSignal): Promise<string> {
   if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
-  const {sendTransaction} = await import('./solana/rpc');
-  return sendTransaction(solanaRpcUrls(), raw, {signal});
+  const {sendTransaction} = await loadRpcForSend();
+  let step = 'broadcast';
+  try {
+    const sig = await sendTransaction(solanaRpcUrls(), raw, {signal});
+    traceSend(`raw submit (convert) BROADCAST accepted sig=${sig}`);
+    return sig;
+  } catch (e: unknown) {
+    traceSend(`raw submit (convert) FAILED at step=${step}: ${e instanceof Error ? e.message : String(e)}`);
+    throw e;
+  }
 }
 
 /** The chain's current height — the death clock for a swap tx's recent-blockhash. */
@@ -538,38 +633,57 @@ export async function sendSpl(
 ): Promise<string> {
   if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
   return abortable((async () => {
-    const token = solanaTokenOfMint(mint);
-    const {seed, publicKey} = deriveSolanaKeypair(secretHex);
-    const senderAddress = bs58.encode(publicKey);
-    const senderAta = deriveAta(senderAddress, mint);
-    const recipientAta = deriveAta(destAddress, mint);
-    const {accountExists, getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
+    let step = 'module-load';
+    // Step-ENTRY tracing (see sendSol): the last traced line names a stalled await.
+    const at = (s: string) => { step = s; traceSend(`step ${s}`); };
+    traceSend(`SPL(${solanaTokenOfMint(mint) ?? mint}) start to=${destAddress} amount=${amount}`);
+    try {
+      const token = solanaTokenOfMint(mint);
+      const {seed, publicKey} = deriveSolanaKeypair(secretHex);
+      const senderAddress = bs58.encode(publicKey);
+      const senderAta = deriveAta(senderAddress, mint);
+      const recipientAta = deriveAta(destAddress, mint);
+      const {accountExists, getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await loadRpcForSend();
 
-    // Sender ATA first — the device must hold the token account to debit from (fail-closed).
-    if (!(await accountExists(solanaRpcUrls(), bs58.encode(senderAta), {signal}))) {
-      throw new Error(M.errors.solana.senderNoTokenAccount(token ?? mint));
-    }
-    // Recipient ATA — if missing, create it in the same tx (sender pays the one-time rent, disclosed
-    // upstream on the review screen; idempotent so a race with another creator is harmless).
-    const ixs: Instruction[] = [];
-    if (!(await accountExists(solanaRpcUrls(), bs58.encode(recipientAta), {signal}))) {
-      // Honest cost pre-check (mirrors createTokenAta): without it the send passes review and dies at
-      // broadcast with a raw "custom program error: 0x1" that no friendlySolError pattern matches.
-      const lamports = await getBalance(solanaRpcUrls(), senderAddress, {signal});
-      if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-        throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
+      // Sender ATA first — the device must hold the token account to debit from (fail-closed).
+      at('sender-ata-check');
+      if (!(await accountExists(solanaRpcUrls(), bs58.encode(senderAta), {signal}))) {
+        throw new Error(M.errors.solana.senderNoTokenAccount(token ?? mint));
       }
-      ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(destAddress), base58Decode32(mint)));
-    }
-    ixs.push(buildSplTransferInstruction(senderAta, recipientAta, publicKey, amount));
+      // Recipient ATA — if missing, create it in the same tx (sender pays the one-time rent, disclosed
+      // upstream on the review screen; idempotent so a race with another creator is harmless).
+      at('recipient-ata-check');
+      const ixs: Instruction[] = [];
+      if (!(await accountExists(solanaRpcUrls(), bs58.encode(recipientAta), {signal}))) {
+        traceSend('recipient ATA missing — createIdempotent joins the tx');
+        // Honest cost pre-check (mirrors createTokenAta): without it the send passes review and dies at
+        // broadcast with a raw "custom program error: 0x1" that no friendlySolError pattern matches.
+        at('sender-balance-check');
+        const lamports = await getBalance(solanaRpcUrls(), senderAddress, {signal});
+        if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
+          throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
+        }
+        ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(destAddress), base58Decode32(mint)));
+      }
+      at('sign');
+      ixs.push(buildSplTransferInstruction(senderAta, recipientAta, publicKey, amount));
 
-    const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
-    const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
-    const raw = signTransaction(message, seed);
-    const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
-    onBroadcast?.(signature);
-    await confirmTransaction(solanaRpcUrls(), signature, {signal});
-    return signature;
+      at('blockhash');
+      const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
+      const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
+      const raw = signTransaction(message, seed);
+      at('broadcast');
+      const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
+      traceSend(`BROADCAST accepted sig=${signature}`);
+      onBroadcast?.(signature);
+      at('confirm');
+      await confirmTransaction(solanaRpcUrls(), signature, {signal});
+      traceSend(`confirmed sig=${signature}`);
+      return signature;
+    } catch (e: unknown) {
+      traceSend(`FAILED at step=${step}: ${e instanceof Error ? e.message : String(e)}`);
+      throw e;
+    }
   })(), signal, 'spl send');
 }
 
@@ -622,47 +736,65 @@ export async function sendSolanaPay(
     }
   }
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
-  const {accountExists, getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
-  return abortable((async () => {
-    const referenceKeys = transfer.references.map(base58Decode32);
-    const ixs: Instruction[] = [];
-    if (transfer.memo !== null) ixs.push(buildMemoInstruction(utf8ToBytes(transfer.memo)));
-    if (transfer.splToken === null) {
-      ixs.push(buildSolTransferInstruction(publicKey, base58Decode32(transfer.recipient), transfer.amount, referenceKeys));
-    } else {
-      const senderAddress = bs58.encode(publicKey);
-      const senderAta = deriveAta(senderAddress, transfer.splToken);
-      const recipientAta = deriveAta(transfer.recipient, transfer.splToken);
-      const token = solanaTokenOfMint(transfer.splToken) ?? transfer.splToken;
-      // Sender ATA first — the device must hold the token account to debit from (fail-closed, same
-      // as sendSpl).
-      if (!(await accountExists(solanaRpcUrls(), bs58.encode(senderAta), {signal}))) {
-        throw new Error(M.errors.solana.senderNoTokenAccount(token));
-      }
-      if (!(await accountExists(solanaRpcUrls(), bs58.encode(recipientAta), {signal}))) {
-        // Same honest cost pre-check as sendSpl: without it the payment passes review and dies at
-        // broadcast with a raw program error no friendlySolError pattern matches.
-        const lamports = await getBalance(solanaRpcUrls(), senderAddress, {signal});
-        if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-          throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token));
+  const {accountExists, getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await loadRpcForSend();
+  let step = 'build';
+  // Step-ENTRY tracing (see sendSol): the last traced line names a stalled await.
+  const at = (s: string) => { step = s; traceSend(`step ${s}`); };
+  traceSend(`solana-pay(${transfer.splToken === null ? 'SOL' : solanaTokenOfMint(transfer.splToken) ?? transfer.splToken}) start to=${transfer.recipient} amount=${transfer.amount}`);
+  try {
+    return await abortable((async () => {
+      const referenceKeys = transfer.references.map(base58Decode32);
+      const ixs: Instruction[] = [];
+      if (transfer.memo !== null) ixs.push(buildMemoInstruction(utf8ToBytes(transfer.memo)));
+      if (transfer.splToken === null) {
+        ixs.push(buildSolTransferInstruction(publicKey, base58Decode32(transfer.recipient), transfer.amount, referenceKeys));
+      } else {
+        const senderAddress = bs58.encode(publicKey);
+        const senderAta = deriveAta(senderAddress, transfer.splToken);
+        const recipientAta = deriveAta(transfer.recipient, transfer.splToken);
+        const token = solanaTokenOfMint(transfer.splToken) ?? transfer.splToken;
+        // Sender ATA first — the device must hold the token account to debit from (fail-closed, same
+        // as sendSpl).
+        at('sender-ata-check');
+        if (!(await accountExists(solanaRpcUrls(), bs58.encode(senderAta), {signal}))) {
+          throw new Error(M.errors.solana.senderNoTokenAccount(token));
         }
-        ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(transfer.recipient), base58Decode32(transfer.splToken)));
+        at('recipient-ata-check');
+        if (!(await accountExists(solanaRpcUrls(), bs58.encode(recipientAta), {signal}))) {
+          // Same honest cost pre-check as sendSpl: without it the payment passes review and dies at
+          // broadcast with a raw program error no friendlySolError pattern matches.
+          at('sender-balance-check');
+          const lamports = await getBalance(solanaRpcUrls(), senderAddress, {signal});
+          if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
+            throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token));
+          }
+          ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(transfer.recipient), base58Decode32(transfer.splToken)));
+        }
+        // The registry's decimals for this mint — transferChecked commits to mint + decimals, so a
+        // foreign/wrong decimals can never satisfy the payment.
+        const decimals = solanaTokenInfo(solanaTokenOfMint(transfer.splToken) ?? '')?.decimals;
+        if (decimals == null) throw new Error(`unsupported spl-token mint for Solana Pay: ${transfer.splToken}`);
+        ixs.push(buildTransferCheckedInstruction(senderAta, base58Decode32(transfer.splToken), recipientAta, publicKey, transfer.amount, decimals, referenceKeys));
       }
-      // The registry's decimals for this mint — transferChecked commits to mint + decimals, so a
-      // foreign/wrong decimals can never satisfy the payment.
-      const decimals = solanaTokenInfo(solanaTokenOfMint(transfer.splToken) ?? '')?.decimals;
-      if (decimals == null) throw new Error(`unsupported spl-token mint for Solana Pay: ${transfer.splToken}`);
-      ixs.push(buildTransferCheckedInstruction(senderAta, base58Decode32(transfer.splToken), recipientAta, publicKey, transfer.amount, decimals, referenceKeys));
-    }
 
-    const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
-    const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
-    const raw = signTransaction(message, seed);
-    const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
-    onBroadcast?.(signature);
-    await confirmTransaction(solanaRpcUrls(), signature, {signal});
-    return signature;
-  })(), signal, 'solana pay send');
+      at('blockhash');
+      const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
+      at('sign');
+      const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
+      const raw = signTransaction(message, seed);
+      at('broadcast');
+      const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
+      traceSend(`BROADCAST accepted sig=${signature}`);
+      onBroadcast?.(signature);
+      at('confirm');
+      await confirmTransaction(solanaRpcUrls(), signature, {signal});
+      traceSend(`confirmed sig=${signature}`);
+      return signature;
+    })(), signal, 'solana pay send');
+  } catch (e: unknown) {
+    traceSend(`FAILED at step=${step}: ${e instanceof Error ? e.message : String(e)}`);
+    throw e;
+  }
 }
 
 /** One-time token account (ATA) setup for THIS device's wallet — the receiver-side onboarding for
@@ -682,22 +814,34 @@ export async function createTokenAta(secretHex: string, mint: string, signal?: A
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const ownerAddress = bs58.encode(publicKey);
   const ata = deriveAta(ownerAddress, mint);
-  const {getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
+  const {getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await loadRpcForSend();
 
-  const lamports = await getBalance(solanaRpcUrls(), ownerAddress, {signal});
-  if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-    throw new Error(M.errors.solana.ownTokenAccountRent(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
+  let step = 'balance-check';
+  try {
+    const lamports = await getBalance(solanaRpcUrls(), ownerAddress, {signal});
+    if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
+      throw new Error(M.errors.solana.ownTokenAccountRent(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
+    }
+
+    const ix = buildCreateAtaIdempotentInstruction(publicKey, ata, publicKey, base58Decode32(mint));
+    return await abortable((async () => {
+      step = 'blockhash';
+      const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
+      step = 'sign';
+      const message = assembleMessage(publicKey, [ix], base58Decode32(blockhash));
+      const raw = signTransaction(message, seed);
+      step = 'broadcast';
+      const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
+      traceSend(`ATA setup BROADCAST accepted sig=${signature}`);
+      step = 'confirm';
+      await confirmTransaction(solanaRpcUrls(), signature, {signal});
+      traceSend(`ATA setup confirmed sig=${signature}`);
+      return signature;
+    })(), signal, 'ata setup');
+  } catch (e: unknown) {
+    traceSend(`ATA setup FAILED at step=${step}: ${e instanceof Error ? e.message : String(e)}`);
+    throw e;
   }
-
-  const ix = buildCreateAtaIdempotentInstruction(publicKey, ata, publicKey, base58Decode32(mint));
-  return abortable((async () => {
-    const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
-    const message = assembleMessage(publicKey, [ix], base58Decode32(blockhash));
-    const raw = signTransaction(message, seed);
-    const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
-    await confirmTransaction(solanaRpcUrls(), signature, {signal});
-    return signature;
-  })(), signal, 'ata setup');
 }
 
 // --- existing exports (unchanged) ----------------------------------------------

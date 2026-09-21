@@ -12,7 +12,7 @@ import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT, deriveSolanaAddress, isValidSolanaAddress} from '../solana/identity';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {solanaTokenInfo} from '../solana/tokens';
-import {sendSol, sendSpl} from '../solana';
+import {sendSol, sendSpl, preloadSolanaRpc} from '../solana';
 import {friendlySolError, isSolTransactionFailed} from '../solana/errors';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
 import {saveTxNote} from '../services/txNotes';
@@ -75,6 +75,12 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
   const {copied, copy: doCopy} = useCopyFeedback();
 
   useEscapeToClose(onClose);
+
+  // Warm the network module at mount, OFF the money path (2026-09-21 root cause): the send chain's
+  // first await is the lazy `rpc-*.js` chunk load, which no deadline can cut from below — a
+  // user who types destination+amount gives this preload minutes to land, so the click-time
+  // import resolves instantly (and the bounded loadRpcForSend covers the pathological case).
+  useEffect(() => { preloadSolanaRpc(); }, []);
 
   // The send OWNS its surface while it is off the form (2026-09-21, live EURC attempt #3): the
   // parent's connectivity/fund gates would otherwise tear THIS sheet down mid-send — the balance
@@ -167,9 +173,13 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
 
   async function confirm() {
     if (!canReview || !resolved?.ok) {
+      // SILENT-guard trace (2026-09-21): this return used to be invisible — a press that landed
+      // with a stale `canReview` looked exactly like a hung send. Now the money log names it.
+      console.warn(`money: sol send confirm pressed but NOT sendable (canReview=${canReview}, resolved=${resolved?.ok === true})`);
       return;
     }
     const destination = resolved.destination;
+    console.warn(`money: sol send sheet submit ${isSpl ? token : 'SOL'} to=${destination} amount=${raw}`);
     setPhase('submitting');
     setErr(null);
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
@@ -217,11 +227,13 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
         }
         setSignature(broadcast.sig);
         setPhase('unknown');
+        console.warn(`money: sol send sheet UNKNOWN outcome — broadcast accepted, confirmation missed, sig kept: ${broadcast.sig}`);
         onSent(); // the balance may already reflect it — refresh rather than claim either way
       } else {
         // A Solana RPC error (insufficient funds / rent-exempt violation / network / missing ATA),
         // the venue's own broadcast rejection (a 2xx JSON-RPC error body — thrown before anything
         // was accepted), or an on-chain failure (`transaction failed:` — definite, fee only).
+        console.warn(`money: sol send sheet ERROR (nothing accepted): ${msg}`);
         setErr(friendlySolError(msg));
         setPhase('error');
       }

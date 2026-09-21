@@ -127,6 +127,10 @@ export type Messages = {
   sol: {
     noRecordOfCredit: string;
     timedOut: string;
+    /** The send path's lazily-loaded network module never arrived within its deadline
+     *  (solana.ts loadRpcForSend — the served web build fetches `rpc-*.js` as a chunk, and a
+     *  stalled origin fetch stalled three live sends there). Actionable: connection + reopen. */
+    engineLoad: string;
     insufficient: string;
     rentExempt: string;
     blockhash: string;

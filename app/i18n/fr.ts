@@ -123,6 +123,7 @@ export const fr: Messages = {
     noRecordOfCredit:
       'Ce compte n’a pas de SOL, ou le réseau n’a pas encore synchronisé votre solde. Si vous venez de déposer, patientez un instant et réessayez — sinon, déposez d’abord des SOL à votre adresse.',
     timedOut: 'Délai dépassé. Vérifiez votre connexion et réessayez.',
+    engineLoad: "Le moteur de paiement ne s'est pas chargé. Vérifiez votre connexion, rouvrez cet écran puis réessayez — votre argent est resté à sa place.",
     insufficient: 'Pas assez de SOL pour cet envoi et les frais de réseau.',
     rentExempt: 'Après cet envoi, votre compte passerait sous le solde minimum. Envoyez un montant plus petit.',
     blockhash: 'Le réseau était trop chargé. Réessayez.',
