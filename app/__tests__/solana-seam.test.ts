@@ -771,7 +771,7 @@ describe('solana seam — the send path\u2019s module load is bounded and traced
     // a chunk fetch carries no abort signal and no timeout, so the sheet hung in `submitting`
     // forever with nothing broadcast. The bounded loader is only real if the send paths USE it —
     // this pin fails if a send path ever reverts to a raw dynamic import.
-    const fs = require('fs') as {readFileSync: (p: string) => string};
+    const fs = require('fs') as {readFileSync: (p: string, enc?: string) => string};
     const path = require('path') as {join: (...a: string[]) => string};
     const src = fs.readFileSync(path.join(__dirname, '../solana.ts'), 'utf8');
     const moneyPaths = [

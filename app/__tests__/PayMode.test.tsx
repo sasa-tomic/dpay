@@ -54,13 +54,10 @@ jest.mock('../components/NfcTap', () => ({
 }));
 // The send-to-address body is exercised in SendSheet.test.tsx; here it is stubbed so this suite
 // stays a pure PayMode test (SendSheet queries the ledger fee and derives the self-account), while
-// the props PayMode hands it — the scanned-address prefill and the in-flight report — stay
-// assertable. The stub RECORDS its props (mockSendSheetProps) and renders a probe node, so the
-// in-flight-send tests can drive `onSendActiveChange` and assert which surface the parent rendered.
-let mockSendSheetProps: Record<string, unknown> | null = null;
+// the props PayMode hands it stay assertable on the sheet's own fiber — the in-flight-send test
+// below finds the fiber (`'onSendActiveChange' in node.props`) and drives the report directly.
 jest.mock('../components/SendSheet', () => ({
-  SendSheet: (props: Record<string, unknown>) => {
-    mockSendSheetProps = props;
+  SendSheet: () => {
     const {createElement} = jest.requireActual('react') as {createElement: (t: unknown, p: unknown) => unknown};
     const {View} = jest.requireActual('react-native') as {View: unknown};
     return createElement(View, {testID: 'stub-send-sheet'});
@@ -885,7 +882,6 @@ describe('PayMode — what the camera does with a code that is not a payment req
   // The IC twin of the SOL rail's 2026-09-21 live defect: an in-flight send OWNS its surface — the
   // balance poll's 3-strike offline flip must not REPLACE the sheet mid-send.
   test('the offline flip MID-SEND does NOT replace the IC send sheet — the terminal surface gets its moment', () => {
-    mockSendSheetProps = null;
     const tree = mountPay({...sendCapableProps(), online: true, subMode: 'send'});
     const sheet = tree.root.find(node => node.props && 'onSendActiveChange' in node.props) as unknown as {props: {onSendActiveChange: (a: boolean) => void}};
     expect(hasTestID(tree, 'stub-send-sheet')).toBe(true);
