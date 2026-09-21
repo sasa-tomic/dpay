@@ -179,13 +179,38 @@
   client-side within its 8s timeout while the venue answered curl fine) with "Quote changed";
   exactly ONE shifts/fixed 201 landed (the order EXISTS venue-side, requested 9.284071 EURC,
   unfunded, expired ~16:51Z, id uncapturable — the awaiting panel never rendered) and the
-  record never adopted. Deposit leg never started; zero funds moved (ledger row 132). NEXT
-  DIAGNOSTIC (dev-side, no funds): instrument or stub-drive the SOL-side cefi CONFIRM path —
-  the quote-fetch timeout profile against the real venue + the record-adoption step after a
-  201 order — and re-run offline flow 197, which is RED at HEAD on its FINAL assert ("status
-  poll keyed every read by the order id", >=3 statusCalls; the lifecycle otherwise reaches
-  done; the poller is untouched by the merge wave — flake or indirect). ONE more attempt
-  after those. Rows 122-131 (the concurrent session's counter-corrections of its own
+  record never adopted. Deposit leg never started; zero funds moved (ledger row 132).
+  DIAGNOSED + FIXED 2026-09-21 (dev-side, no funds; branch `sol-cefi-confirm-fix`, three
+  commits + test pins): the livelock decomposed into three app-side defects. (1) THE SOL
+  SURFACE'S STALE REFRESH HAD NO SINGLE-FLIGHT (the divergence point: `ConvertMode.tsx` IC
+  stale effect guards every tick with `staleRefreshing`, the SOL effect checked staleness
+  only) — a quote that stayed stale re-fired a quote fetch EVERY SECOND, up to 8 concurrent
+  8s-budget calls hammering the relay's partner-key proxy and throttling the shared
+  credential until the confirm's own re-quote could not answer ("Could not reach SideShift"
+  alternating with the refresh's own "Quote changed" banner — the alternation was these two
+  surfaces fighting over one credential). Both SOL branches (cefi + jupiter) now carry the
+  IC guard verbatim. (2) THE CONFIRM'S QUOTE + ORDER CALLS RODE AN 8s BUDGET, BELOW the
+  relay's own 15s upstream bound (`sideshift.rs DEFAULT_TIMEOUT`) — a venue answer reaching
+  the relay at 8-15s meant the phone had already aborted; for ORDER creation that orphans a
+  real venue-side 201 (the app shows an error, the record is never adopted, the awaiting
+  panel never renders — exactly attempt #3's one-201-no-adoption outcome).
+  `CONVERT_CEFI_CONFIRM_TIMEOUT_MS = 20s` now covers both confirm-path calls on BOTH rails.
+  (3) `prepareCeFiConvertRecord`'s depositAmount red line compared STRINGS — a venue echo
+  that reformats the same amount ('1' → '1.00000000') was refused AFTER the venue 201'd:
+  the same orphaned-order class one seam later. `sameDecimalAmount` compares decimal VALUES
+  (a different amount still refuses; malformed fails closed). Pinned: jest
+  `convertSolStaleSingleFlight.test.tsx` (4s of ticks add zero fetches while one hangs),
+  `convertSolCefi.test.tsx` (slow-venue confirm completes to the panel, both budgets pinned
+  20s — the attempt-#3 replay — + reformatted-echo adoption), `convert.test.ts` (guard
+  matrix). FLOW 197 root cause (measured, not flake): the harness provider poll runs at
+  500ms and the flow reached done after only TWO post-reload polls, so the final `>= 3
+  statusCalls` assert measured phase timing, not the poller; keying was never wrong (both
+  recorded reads carried the order id — and the assert never checked that directly). Fixed
+  by sequencing (wait bounded until >=2 post-reload polls, THEN flip settled — the
+  completed read is >=#3 deterministically) + the explicit per-call keying assert (the
+  check 187/194 always had). GREEN solo x4 + the full convert family 30/30. ONE more live
+  attempt after this ships (founder-run; the venue order machinery is proven good).
+  Rows 122-131 (the concurrent session's counter-corrections of its own
   763699b rows) + the evm-float USDC 0.1285 discovery mesh with rows 117-121; reconcile
   18 pairs CLEAN with both sets.
 - **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The

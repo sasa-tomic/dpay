@@ -873,6 +873,27 @@ export async function convertRecordMinOut(record: ConvertRecord, swapLeg: 1 | 2 
   return DpayCore.icpSwapMinOut(gross, record.slippageBps);
 }
 
+/** Do two decimal STRINGS name the same number? Pure string normalization — never float math
+ *  on money. Shapes outside `/^\d*\.?\d+$/` (a venue echoing garbage) never compare equal
+ *  unless the raw strings do — fail-closed. The prepare guard uses this so a venue that
+ *  reformats ITS OWN echo of the quoted deposit ('1' vs '1.00000000') still adopts the order:
+ *  refusing it after the venue already 201'd would orphan a real order and leave the record
+ *  unadopted (the live attempt-#3 non-adoption class). A DIFFERENT amount still refuses. */
+function sameDecimalAmount(a: string, b: string): boolean {
+  if (a === b) return true;
+  const norm = (s: string): string | null => {
+    const m = /^\d*\.?\d+$/.exec(s.trim());
+    if (m == null) return null;
+    const [intRaw, fracRaw = ''] = s.trim().split('.');
+    const int = (intRaw.replace(/^0+(?=\d)/, '') || '0');
+    const frac = fracRaw.replace(/0+$/, '');
+    return frac.length > 0 ? `${int}.${frac}` : int;
+  };
+  const na = norm(a);
+  const nb = norm(b);
+  return na != null && nb != null && na === nb;
+}
+
 /** Migrate a pre-legs (v1 store) record to the legs schema: the two old envelope pairs become
  *  two SignedLegs against the venue the record's pair resolves to. The founder's device holds
  *  REAL v1 records — they must survive this, byte-frozen, never rebuilt. */
@@ -1598,9 +1619,12 @@ export function prepareCeFiConvertRecord(args: {
   // (2) The order the venue issued must price the SAME deposit the quote carried (the
   // relay already refused pair drift upstream; this is the phone-side twin — the fixed
   // shift settles only its exact depositAmount, so a mismatch is a different trade than
-  // the one the user approved).
+  // the one the user approved). Compared as DECIMAL VALUES (sameDecimalAmount): a venue
+  // that reformats its own echo ('1' → '1.00000000') must still ADOPT the order it
+  // already created — a string-spelling refusal here would orphan a real venue-side
+  // order and leave the record unadopted (the live attempt-#3 non-adoption class).
   const quotedDeposit = rawToDecimal(quote.amountIn, args.inDecimals ?? 8);
-  if (order.depositAmount !== quotedDeposit) {
+  if (!sameDecimalAmount(order.depositAmount, quotedDeposit)) {
     throw new Error(M.convert.errors.quoteUnavailable('deposit'));
   }
   const orderId = 'id' in order ? order.id : order.tradeId;

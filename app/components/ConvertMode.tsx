@@ -46,6 +46,7 @@ import {ActivityIndicator, Linking, Pressable, Text, TextInput, View} from 'reac
 import {isValidDestinationAddress, icpCatalogOf, BUNDLED_NETWORKS, type CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
 import {
+  CONVERT_CEFI_CONFIRM_TIMEOUT_MS,
   CONVERT_SLIPPAGE_BPS_DEFAULT,
   CONVERT_SLIPPAGE_BPS_OPTIONS,
   resolveConvertDestinations,
@@ -1167,9 +1168,12 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         // is not the quoted deposit).
         let freshRes: CeFiQuoteResult;
         try {
+          // The 20s confirm budget (CONVERT_CEFI_CONFIRM_TIMEOUT_MS), not the 8s review
+          // default: the client must never abort below the relay's own 15s upstream bound —
+          // an abort there orphans a venue-side order (the live attempt-#3 signature).
           freshRes = await fetchCeFiQuoteResult(
             relayUrl, activeCefiVenue, legs.inDesc.ledger, cefiOutMint,
-            rawToDecimal(reviewed.amountIn, legs.inDecimals),
+            rawToDecimal(reviewed.amountIn, legs.inDecimals), CONVERT_CEFI_CONFIRM_TIMEOUT_MS,
           );
         } catch (e) {
           throw ceFiServiceError(e, activeCefiVenue.display_name);
@@ -1192,7 +1196,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             depositLedger: legs.inDesc.ledger,
             settleLedger: cefiOutMint,
             depositAmountDecimal: rawToDecimal(reviewed.amountIn, legs.inDecimals),
-          });
+          }, CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
         } catch (e) {
           throw ceFiServiceError(e, activeCefiVenue.display_name);
         }
@@ -2711,12 +2715,19 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
   }, [amountText, legs?.inMint, legs != null && legs.kind === 'amm' ? legs.outMint : null, legs != null && legs.kind === 'cefi' ? legs.outLedger : null, slippageBps, showRecord]);
 
   // --- stale refresh (same 30s clock + test seam as IC; keeps the OLD quote on failure).
+  // SINGLE-FLIGHT, the IC surface's exact guard (ConvertMode IC stale effect): a tick may fire
+  // a refresh ONLY when none is in flight. Without the `staleRefreshing` check, a quote that
+  // stays stale (venue slow or unreachable) re-fires the fetch EVERY SECOND — up to 8
+  // concurrent 8s-budget calls hammering the relay's partner-key proxy. That stampede is the
+  // live 2026-09-21 attempt-#3 signature: the venue throttled the shared partner credential,
+  // so the CONFIRM's own re-quote could not answer inside its budget ("Could not reach
+  // SideShift" alternating with the refresh's own "Quote changed" banner).
   useEffect(() => {
     if (legs == null || venue == null || showRecord) return;
     if (legs.kind === 'cefi') {
       if (cefiQuote == null) return;
       const tick = setInterval(() => {
-        if (!isQuoteStale(cefiQuote)) return;
+        if (!mountedRef.current || staleRefreshing || !isQuoteStale(cefiQuote)) return;
         setStaleRefreshing(true);
         fetchCeFiConvertQuote(relayUrl, venue, legs.inMint, legs.outLedger, cefiQuote.amountIn, {
           inDecimals: legs.inDecimals,
@@ -2739,7 +2750,7 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
     }
     if (quote == null) return;
     const tick = setInterval(() => {
-      if (!isQuoteStale(quote)) return;
+      if (!mountedRef.current || staleRefreshing || !isQuoteStale(quote)) return;
       setStaleRefreshing(true);
       fetchJupiterQuote(relayUrl, venue, legs.inMint, legs.outMint, quote.inAmount, slippageBps)
         .then(res => {
@@ -2757,7 +2768,7 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
     }, 1000);
     return () => clearInterval(tick);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quote, cefiQuote, slippageBps, showRecord]);
+  }, [quote, cefiQuote, staleRefreshing, slippageBps, showRecord]);
 
   const parsedAmount = parseUserAmount(amountText, legs != null ? legs.inDecimals : 0);
   const amountRaw = parsedAmount.ok ? parsedAmount.raw : null;
@@ -2792,7 +2803,11 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
       try {
         let freshRes;
         try {
-          freshRes = await fetchCeFiQuoteResult(relayUrl, venue, legs.inMint, legs.outLedger, rawToDecimal(amountRaw, legs.inDecimals));
+          // The 20s confirm budget, NOT the 8s review default (CONVERT_CEFI_CONFIRM_TIMEOUT_MS):
+          // an abort below the relay's own 15s upstream bound means the phone gives up while
+          // the venue is still answering — the order 201s venue-side, the record is never
+          // adopted, and the deposit handoff never begins (the live attempt-#3 signature).
+          freshRes = await fetchCeFiQuoteResult(relayUrl, venue, legs.inMint, legs.outLedger, rawToDecimal(amountRaw, legs.inDecimals), CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
         } catch (e) {
           throw ceFiServiceError(e, venueName);
         }
@@ -2808,7 +2823,7 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
             depositLedger: legs.inMint,
             settleLedger: legs.outLedger,
             depositAmountDecimal: rawToDecimal(amountRaw, legs.inDecimals),
-          });
+          }, CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
         } catch (e) {
           throw ceFiServiceError(e, venueName);
         }

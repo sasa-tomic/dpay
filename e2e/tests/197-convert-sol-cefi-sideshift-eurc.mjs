@@ -187,6 +187,13 @@ export async function run() {
     assert(await driver.findByTestID('convert-provider-processing', {timeoutMs: 45_000}) != null, 'the record resumes from storage');
     const shiftsAfter = (await relayHits(r2.baseURL)).shiftCalls;
     assertEq(shiftsAfter, 1, 'the resume created NO second order');
+    // Let the resumed record poll AT LEAST TWICE before the venue's verdict flips: the
+    // harness poll cadence is fast (500ms), so this is bounded and quick — but without it
+    // the 'settled' flip could land on the FIRST post-reload poll, the record reaches done
+    // (terminal: the poller retires) after only 2 recorded reads, and the §7 count assert
+    // would measure phase timing instead of poller behavior. Sequencing, not sleeping.
+    await driver.waitForFunction(() => globalThis.__E2E_SIDESHIFT.statusCalls.length >= 2,
+      {timeoutMs: 15_000, label: 'post-reload: >=2 keyed status polls observed'});
 
     // --- §7 settle → done with the realized figures at the user's own address
     await setSideShiftStatus(driver, 'settled', {settleAmount: '0.0495', settleHash: SETTLE_HASH});
@@ -197,7 +204,10 @@ export async function run() {
     assertIncludes(done, settle.slice(0, 12), 'the payout address IS the derived IC account identifier');
     const stub = await sideShiftStubState(driver);
     assert(stub != null && stub.unexpected.length === 0, 'no unexpected status origins (the status never touched the relay)');
-    assert((stub.statusCalls ?? []).length >= 3, 'the status poll keyed every read by the order id');
+    assert((stub.statusCalls ?? []).length >= 3, `the status poll keyed every read by the order id (${(stub.statusCalls ?? []).length} GETs: waiting-phase read, >=2 post-reload polls, then the settled verdict)`);
+    for (const c of stub.statusCalls ?? []) {
+      assertEq(c.id, SHIFT_ID, 'every status poll was keyed by the ONE shift id the venue issued');
+    }
     await driver.screenshot('197-sol-cefi-eurc-done');
 
     console.log(`GREEN 197 — EURC(Solana)→ICP via sideshift-eurc from the SOL surface: both dest groups offered, payout at the derived IC account identifier, order locked the figures (no exact-match gate), deposit handoff only (0 broadcasts), lifecycle waiting→processing→done with reload resume`);

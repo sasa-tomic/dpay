@@ -92,6 +92,19 @@ export const CONVERT_ENGINE_PROVIDER_POLL_MS = CONVERT_ENGINE_TEST_OPTS?.provide
 /** One provider status read's transport budget. */
 export const CONVERT_PROVIDER_TIMEOUT_MS = 8_000;
 
+/**
+ * The CONFIRM-time CeFi quote + order-creation transport budget (both rails). It MUST cover
+ * the relay's own per-upstream budget (crates/dpay-relay/src/sideshift.rs DEFAULT_TIMEOUT,
+ * 15 s): a client abort BELOW the relay's bound means the phone gives up while the relay is
+ * still mid-venue-call — for ORDER creation that orphans a real venue-side order (the venue
+ * 201s; the app shows "Could not reach SideShift"; the record is never adopted; the deposit
+ * handoff never begins). That is exactly the live 2026-09-21 attempt-#3 signature: one
+ * shifts/fixed 201 in the relay proxy log, no awaiting-deposit panel, 30 dead confirms.
+ * 20 s = the DepositSheet precedent for a slow value-adjacent call (8 s above the relay's
+ * bound; the confirm UI holds `confirmBusy` for the whole wait — honest, and adoption of a
+ * created order is worth more than snappiness). */
+export const CONVERT_CEFI_CONFIRM_TIMEOUT_MS = 20_000;
+
 /** The settlement probe's indexed window: how many newest rows of each ledger it scans
  *  (V6; the relay caps `limit` at 100). 10 was the PoC window; 50 tolerates a busy wallet
  *  between submit and payout without paying for the relay's full page. Fail-closed posture
