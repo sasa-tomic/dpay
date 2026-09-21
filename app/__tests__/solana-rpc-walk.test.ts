@@ -10,6 +10,10 @@
  *     today, no walk;
  *   • 2xx is the answer — a return, never walked past (sendTransaction's one forbidden move)
  *     — EXCEPT a 2xx body carrying the relay marker (a broken/hostile relay), which walks;
+ *   • (attempt-#6) a Blockhash-not-found refusal on sendTransaction — however wrapped (2xx
+ *     JSON-RPC error object or HTTP error body) — WALKS, re-sending the SAME signed bytes;
+ *     every other refusal refuses in place, and reads never walk on it (see the last
+ *     describe below);
  *   • a multi-candidate walk arms EVERY attempt with its own deadline (attempt 0 = the FULL
  *     timeoutMs, attempt i = timeoutMs>>i floored at 1 s, total ≈2×timeoutMs); an armed
  *     expiry is transport-dead. A single-candidate list keeps the caller-owns-deadline
@@ -61,6 +65,9 @@ function res(status: number, body: string, headers: Record<string, string> = {})
 
 const A = 'https://a.example/api/v1/solana/rpc';
 const B = 'https://b.example/api/v1/solana/rpc';
+const C2 = 'https://c.example/api/v1/solana/rpc';
+const D2 = 'https://d.example/api/v1/solana/rpc';
+const E2 = 'https://e.example/api/v1/solana/rpc';
 
 /** Install a fetch mock that answers per-URL: `routes` maps an exact URL to either a
  *  Response, a function producing one, the string 'transport' (the fetch itself throws —
@@ -371,8 +378,7 @@ describe('attempt deadlines — a hung home is failover fuel, and the walk is bo
   });
 });
 
-describe('the SEAM — marker exhaustion classifies unreachable with NO IC probe', () => {
-  test('readSolanaBalances over a marker-504 home → error/unreachable, fetch called exactly once', async () => {
+describe('the SEAM — marker exhaustion classifies unreachable with NO IC probe', () => {  test('readSolanaBalances over a marker-504 home → error/unreachable, fetch called exactly once', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string};
     const prev = g.__DPAY_TEST_SOLANA_RPC_URL;
@@ -398,5 +404,157 @@ describe('the SEAM — marker exhaustion classifies unreachable with NO IC probe
       if (prev === undefined) delete g.__DPAY_TEST_SOLANA_RPC_URL;
       else g.__DPAY_TEST_SOLANA_RPC_URL = prev;
     }
+  });
+});
+
+// ============================================================================
+// THE SEND-PREFLIGHT WALK (attempt-#6, 2026-09-21). The headline client defect: the head
+// (Helius via the relay's pipe) refused a VALID signed deposit 8/8 with a 2xx-wrapped
+// "Blockhash not found" JSON-RPC error, the walk treated that 2xx as a completed call, and the
+// list had one entry — while the byte-exact replay of the SAME signed tx to
+// api.mainnet-beta.solana.com was ACCEPTED and FINALIZED. Pins, at the rpc layer:
+//   • sendTransaction (and ONLY sendTransaction) walks a blockhash-not-found refusal — however
+//     wrapped — to the next candidate with the SAME signed bytes (byte-identity re-pinned);
+//   • every OTHER JSON-RPC/HTTP refusal refuses in place (a genuinely invalid tx would be
+//     refused everywhere; failover homes are not hammered);
+//   • reads NEVER walk on it (the tail is broadcast-only);
+//   • exhaustion is the UNANIMOUS refusal: any transport death, provider 5xx or relay marker
+//     outranks it (the strict all-refused rule keeps the seam's refresh bound honest);
+//   • each advance traces `money: sol send step rpc-failover <host> → <host> (why)`.
+// ============================================================================
+describe('the send-preflight walk — blockhash-not-found is walk-worthy for sendTransaction only', () => {
+  const BH_ERR = JSON.stringify({error: {code: -32002, message: 'Blockhash not found'}});
+  const IX_ERR = JSON.stringify({error: {code: -32002, message: 'Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1'}});
+
+  test('a 2xx-wrapped blockhash refusal walks the SAME signed bytes to the next home', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const bodies: string[] = [];
+    globalThis.fetch = (async (url: unknown, init?: {body?: string}) => {
+      const u = String(url);
+      if (init?.body !== undefined) bodies.push(String(init.body));
+      if (u === A) return res(200, BH_ERR);
+      if (u === B) return res(200, JSON.stringify({result: 'SigFromB'}));
+      throw new Error(`unexpected fetch to ${u}`);
+    }) as unknown as typeof fetch;
+    const rpc = freshRpc();
+    await expect(rpc.sendTransaction([A, B], new Uint8Array([1, 2, 3]))).resolves.toBe('SigFromB');
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toBe(bodies[0]); // the SAME bytes — no re-sign, no re-encode
+    // The advance is on the money log, hosts only.
+    expect(warn.mock.calls.map(c => String(c[0]))).toContain(
+      'money: sol send step rpc-failover a.example → b.example (blockhash-not-found)',
+    );
+    warn.mockRestore();
+  });
+
+  test('exhaustion on the UNANIMOUS refusal throws the refusal verbatim — the class the seam\u2019s refresh reads', async () => {
+    installRoutes({[A]: res(200, BH_ERR), [B]: res(200, BH_ERR)});
+    const rpc = freshRpc();
+    const err: unknown = await rpc.sendTransaction([A, B], new Uint8Array([1])).then(
+      () => { throw new Error('expected the walk to exhaust with the refusal class'); },
+      (e: unknown) => e,
+    );
+    expect((err as {dpayEndpointRefused?: boolean}).dpayEndpointRefused).toBe(true);
+    expect((err as {status?: number | null}).status).toBeNull();
+    expect((err as Error).message).toMatch(/sendTransaction → a\.example: Blockhash not found$/);
+    const {isSolBlockhashNotFound} = require('../solana/errors') as typeof import('../solana/errors');
+    // The whole point: the seam's ONE refresh classifies from THIS message.
+    expect(isSolBlockhashNotFound((err as Error).message)).toBe(true);
+  });
+
+  test('single-candidate list: the refusal still lands in the seam-readable class (the operator shape)', async () => {
+    installRoutes({[A]: res(200, BH_ERR)});
+    const rpc = freshRpc();
+    await expect(rpc.sendTransaction([A], new Uint8Array([1]))).rejects.toMatchObject({
+      dpayEndpointRefused: true,
+      status: null,
+    });
+  });
+
+  test('a transport death breaks the unanimity — the last transport error outranks the refusal', async () => {
+    installRoutes({[A]: res(200, BH_ERR), [B]: 'transport'});
+    const rpc = freshRpc();
+    await expect(rpc.sendTransaction([A, B], new Uint8Array([1]))).rejects.toThrow('fetch failed');
+  });
+
+  test('a provider 5xx outranks the refusal at exhaustion (strict all-refused rule)', async () => {
+    installRoutes({[A]: res(200, BH_ERR), [B]: res(500, 'provider exploded')});
+    const rpc = freshRpc();
+    await expect(rpc.sendTransaction([A, B], new Uint8Array([1]))).rejects.toMatchObject({
+      dpayEndpointRefused: true,
+      status: 500,
+    });
+  });
+
+  test('a relay marker outranks the refusal at exhaustion (marker stays rung 1)', async () => {
+    installRoutes({
+      [A]: res(200, BH_ERR),
+      [B]: res(504, JSON.stringify({dpayRelayError: 'solana-upstream-unreachable'})),
+    });
+    const rpc = freshRpc();
+    await expect(rpc.sendTransaction([A, B], new Uint8Array([1]))).rejects.toMatchObject({
+      dpayRelayPathDown: true,
+    });
+  });
+
+  test('an instruction-error refusal does NOT walk — one home asked, refused in place', async () => {
+    let calls = installRoutes({[A]: res(200, IX_ERR), [B]: res(200, JSON.stringify({result: 'SigFromB'}))});
+    const rpc = freshRpc();
+    await expect(rpc.sendTransaction([A, B], new Uint8Array([1]))).rejects.toThrow(/custom program error: 0x1/);
+    expect(calls).toEqual([A]); // B never saw a genuinely invalid transaction
+  });
+
+  test('an HTTP-400 body naming the blockhash state walks too — however wrapped; an HTTP-400 ix body does not', async () => {
+    let calls = installRoutes({
+      [A]: res(400, '{"error":"Blockhash not found"}'),
+      [B]: res(200, JSON.stringify({result: 'SigFromB'})),
+    });
+    const rpc = freshRpc();
+    await expect(rpc.sendTransaction([A, B], new Uint8Array([1]))).resolves.toBe('SigFromB');
+    expect(calls).toEqual([A, B]);
+
+    calls = installRoutes({
+      [A]: res(400, '{"error":"Transaction simulation failed: InstructionError"}'),
+      [B]: res(200, JSON.stringify({result: 'SigFromB'})),
+    });
+    await expect(rpc.sendTransaction([A, B], new Uint8Array([2]))).rejects.toMatchObject({
+      dpayEndpointRefused: true,
+      status: 400,
+    });
+    expect(calls).toEqual([A]);
+  });
+
+  test('READS never walk on a blockhash refusal — the tail is broadcast-only', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    let calls = installRoutes({[A]: res(200, BH_ERR), [B]: res(200, JSON.stringify({result: {value: 7}}))});
+    const rpc = freshRpc();
+    await expect(rpc.getBalance([A, B], 'Owner')).rejects.toThrow(/Blockhash not found/);
+    expect(calls).toEqual([A]); // no walk, no failover tracer on a read
+    expect(warn.mock.calls.map(c => String(c[0]))).toEqual([]);
+    warn.mockRestore();
+  });
+
+  test('every advance names its reason — cooldown, transport, marker, 5xx, blockhash', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    installRoutes({[A]: res(429, 'slow down', {'Retry-After': '60'})});
+    const rpc = freshRpc();
+    await rpc.getBalance(A, 'Owner').catch(() => undefined); // opens A's cooldown (60 s)
+    // A gated, B transport-dead, C marker-504, D 500 — all walked past; E answers.
+    installRoutes({
+      [A]: res(429, 'slow down', {'Retry-After': '60'}),
+      [B]: 'transport',
+      [C2]: res(504, JSON.stringify({dpayRelayError: 'solana-upstream-unreachable'})),
+      [D2]: res(500, 'provider exploded'),
+      [E2]: res(200, JSON.stringify({result: '1'})),
+    });
+    await expect(rpc.sendTransaction([A, B, C2, D2, E2], new Uint8Array([1]))).resolves.toBe('1');
+    const lines = warn.mock.calls.map(c => String(c[0]));
+    expect(lines).toContain('money: sol send step rpc-failover a.example → b.example (cooldown)');
+    expect(lines).toContain('money: sol send step rpc-failover b.example → c.example (transport)');
+    expect(lines).toContain('money: sol send step rpc-failover c.example → d.example (relay-marker)');
+    expect(lines).toContain('money: sol send step rpc-failover d.example → e.example (http 500)');
+    // NO advance is traced from the LAST candidate — the move is the event, not the exhaustion.
+    expect(lines.some(l => l.includes('→ e.example (') && l.includes('rpc-failover e.example'))).toBe(false);
+    warn.mockRestore();
   });
 });

@@ -150,13 +150,22 @@ export function friendlySolError(msg: string): string {
 
 /** Is this the preflight simulation's Blockhash-not-found refusal — the ONE broadcast failure
  *  the diagnosed single refresh owns (both the prose and the enum spellings; RPC versions
- *  differ)? The message names the state itself: the simulating node's blockhash queue does not
+ *  differ)? The message names the state itself: the answering node's blockhash queue does not
  *  hold the message's recent blockhash — a provider-side state anomaly on a fresh
  *  'confirmed'-commitment hash (the 2026-09-21 attempt-#5 live signature), never a bytes
  *  problem. Anything else (an instruction error, insufficient funds, …) must NOT refresh: there
- *  a re-sign on a new block would be a blind retry, which the founder rules forbid. */
+ *  a re-sign on a new block would be a blind retry, which the founder rules forbid.
+ *
+ *  ATTEMPT-#6 WIDENING (2026-09-21): this predicate is now the ONE classifier for the refusal —
+ *  the candidate walk (`solana/rpc.ts`) and the broadcast seam's refresh both read it — and the
+ *  wrappers differ by provider. The composed rpcFetch message carries the
+ *  "Transaction simulation failed: " prefix; Helius's 2xx-wrapped JSON-RPC body carries the
+ *  BARE node message ("Blockhash not found" — the attempt-#6 live shape, refused 8/8 while the
+ *  byte-exact replay to the public endpoint was accepted); some nodes emit `BlockhashNotFound`
+ *  without the space. All name the same state, so the match is on the state's own words
+ *  wherever they appear, prefix or not. */
 export function isSolBlockhashNotFound(msg: string): boolean {
-  return /transaction simulation failed.*(?:blockhash not found|blockhashnotfound)/i.test(msg);
+  return /blockhash\s*not\s*found|blockhashnotfound/i.test(msg);
 }
 
 /** Did the network INCLUDE this transaction and then fail it? `confirmTransaction` (`solana/rpc.ts`)

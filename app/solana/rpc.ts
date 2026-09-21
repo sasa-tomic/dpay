@@ -17,6 +17,21 @@
 //     and STOP — 4xx never fails over (it says something about THIS request, not the home);
 //   2xx → the answer; cooldown cleared; RETURN — a 2xx is never walked past.
 //
+// THE SEND-PREFLIGHT EXCEPTION (attempt-#6, 2026-09-21 — sendTransaction ONLY): a
+// Blockhash-not-found refusal is the answering node's preflight STATE, not a verdict on the
+// bytes — proven live when the head refused the same signed deposit 8/8 while a byte-exact
+// replay to the public endpoint was ACCEPTED and FINALIZED. So for sendTransaction (and only
+// sendTransaction, via `walkBlockhashRefusal`), that one refusal — however wrapped (a 2xx body
+// carrying the JSON-RPC `error` object, or an HTTP-level error body naming the state) — WALKS:
+// the SAME signed bytes go to the next candidate, no re-sign (the signature is valid on any
+// endpoint; Solana dedups identical bytes by signature). Every OTHER refusal — an instruction
+// error, insufficient funds — is a verdict on the transaction itself and refuses in place: a
+// genuinely invalid tx would be refused everywhere, and hammering failover homes with it buys
+// nothing. At exhaustion, when EVERY answering home refused with that state and no home died
+// silently, the walk throws the refusal verbatim (host + raw message) so the seam's ONE
+// refresh-and-resign (`solana.ts` broadcastSignedWithFreshBlockhash) classifies it and owns
+// the retry — the walk itself never re-signs.
+//
 // EXHAUSTION precedence (what the walk throws when no candidate answered):
 //   1. any candidate answered with the relay's marker → SolanaRelayPathDown (transport-class:
 //      the relay answered HTTP, so the phone is online — its Solana leg is what is dead);
@@ -68,7 +83,9 @@ import {bytesToBase64} from '../lib/base64';
 import {SOL_PAYMENT_COMMITMENT} from '../config/constants';
 // The two thrown-error SHAPES live in the pure module (`solana/errors.ts`) because the offline
 // seam and the sign gates branch on them and neither may statically import this network module.
-import {SolanaEndpointRefused, SolanaRateLimited, SolanaRelayPathDown} from './errors';
+// `isSolBlockhashNotFound` is the attempt-#6 walk's classifier — the SAME predicate the seam's
+// refresh branches on, so walk and seam can never disagree about what the state is.
+import {SolanaEndpointRefused, SolanaRateLimited, SolanaRelayPathDown, isSolBlockhashNotFound} from './errors';
 
 /** A fetched recent blockhash + its validity window + the context slot it was observed at. The v2
  *  payment rail threads `contextSlot` as the `minContextSlot` for every downstream freshness call
@@ -91,6 +108,17 @@ export interface SolanaRpcOpts {
   /** minContextSlot for RPC methods that support it (getBlockHeight, isBlockhashValid,
    *  getFeeForMessage, sendTransaction). Threads the request's context slot for reorg-awareness. */
   minContextSlot?: number;
+  /** SEND-ONLY (set by `sendTransaction`, never by a caller): a Blockhash-not-found refusal is
+   *  walk-worthy preflight state (module header, "The send-preflight exception") instead of a
+   *  stop-the-walk answer. Every other method/classifies-refusal-in-place behavior is unchanged. */
+  walkBlockhashRefusal?: boolean;
+  /** Send-walk tracer, wired by `sendTransaction` to the money log: fired each time the walk
+   *  ADVANCES to the next candidate (transport death, relay marker, provider 5xx, cooldown
+   *  skip, or the blockhash walk), NEVER at exhaustion (the thrown error is that story) and
+   *  never for a last candidate. `from`/`to` are HOSTS — never URLs: the shipped RPC URL
+   *  carries the provider key as a query parameter, and a log line is exactly where a key
+   *  must not appear. */
+  onFailover?: (from: string, to: string, why: string) => void;
 }
 
 export interface SolanaSignatureStatus {
@@ -214,6 +242,8 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
   }
   const candidates = candidatesOf(url);
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const walkBlockhash = opts?.walkBlockhashRefusal === true;
+  const onFailover = opts?.onFailover;
   // The exhaustion facts, first-seen wins (the FIRST relay to say its leg is down, the FIRST
   // provider status to arrive — earlier candidates are the preferred homes; their verdict
   // describes the world more faithfully than a later failover's echo).
@@ -221,12 +251,24 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
   let upstreamStatus: {url: string; status: number; body: string} | null = null;
   let cooldownGate: {url: string; remainingMs: number} | null = null;
   let lastTransport: unknown = null;
+  // The attempt-#6 send-preflight fact: the FIRST Blockhash-not-found refusal, verbatim. Only
+  // ever set when `walkBlockhashRefusal` is on (sendTransaction) — reads classify in place.
+  let blockhashRefusal: {url: string; message: string} | null = null;
   let asked = 0; // candidates that actually got a request out (not cooldown-skipped)
   // ONE id per LOGICAL request: every failover attempt of this call reuses it, so the resubmit
   // carries byte-identical bytes (Solana dedups by tx signature; the relay's canonical-body
   // cache key matches across attempts too).
   const requestId = nextId++;
-  for (const candidate of candidates) {
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const candidate = candidates[ci];
+    // The walk ADVANCED to the next candidate — the tracer event (`onFailover`, sendTransaction
+    // only). Fired only when a NEXT candidate exists: the move is the event, exhaustion is the
+    // thrown error's story. Hosts only, never URLs — the URL carries the provider key.
+    const failover = (why: string) => {
+      if (onFailover !== undefined && ci + 1 < candidates.length) {
+        onFailover(hostOf(candidate), hostOf(candidates[ci + 1]), why);
+      }
+    };
     // The cooldown gate is PER CANDIDATE: an open one on A skips A (no packet leaves the
     // device toward A) while B — a different endpoint with its own limit state — still gets
     // its chance. Only when EVERY candidate is gated does the gate answer (below).
@@ -235,6 +277,7 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
       const remaining = cooling.until - Date.now();
       if (remaining > 0) {
         if (cooldownGate === null) cooldownGate = {url: candidate, remainingMs: remaining};
+        failover('cooldown');
         continue;
       }
     }
@@ -269,6 +312,7 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
       cancel();
       if (opts?.signal?.aborted) throw e;
       lastTransport = e;
+      failover('transport');
       continue;
     }
     try {
@@ -283,6 +327,7 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
           // dpay's OWN failure body (module header): this home's Solana leg is down. The next
           // home may be healthy; exhaustion remembers the marker with top precedence.
           if (relayMarker === null) relayMarker = {url: candidate, code: marker.dpayRelayError, detail: marker.detail};
+          failover('relay-marker');
           continue;
         }
         if (r.status >= 500) {
@@ -290,6 +335,16 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
           // next home fronts a different provider instance), and exhaustion reports it as the
           // provider-side refusal it is.
           if (upstreamStatus === null) upstreamStatus = {url: candidate, status: r.status, body: body.slice(0, 200)};
+          failover(`http ${r.status}`);
+          continue;
+        }
+        // A 4xx body naming the blockhash state is the send-preflight exception (module header,
+        // "The send-preflight exception"): an HTTP-wrapped refusal of the SAME preflight state
+        // the 2xx JSON-RPC `error` shape carries — walk-worthy for sendTransaction, in place
+        // for everything else.
+        if (walkBlockhash && isSolBlockhashNotFound(body)) {
+          if (blockhashRefusal === null) blockhashRefusal = {url: candidate, message: body.slice(0, 200)};
+          failover('blockhash-not-found');
           continue;
         }
         // 4xx is an ANSWER about this request: no walk, today's brand, today's message shape.
@@ -309,15 +364,34 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
         if (relayMarker === null) {
           relayMarker = {url: candidate, code: j.dpayRelayError, detail: typeof j.detail === 'string' ? j.detail : undefined};
         }
+        failover('relay-marker');
         continue;
       }
-      if (j.error) throw new SolanaEndpointRefused(`solana rpc: ${j.error.message ?? 'error'}`, null);
+      if (j.error) {
+        // THE ATTEMPT-#6 WALK (sendTransaction only): a Blockhash-not-found JSON-RPC error is
+        // the answering node's send-preflight STATE, not a verdict on the bytes — proven live
+        // by the byte-exact replay of the refused signed tx to the next endpoint (accepted +
+        // finalized). The signature is valid on any endpoint, so the SAME bytes walk to the
+        // next candidate; NO re-sign here — the seam's one refresh-and-resign owns re-signing,
+        // and fires only when EVERY candidate has refused (exhaustion, below). Every OTHER
+        // JSON-RPC error (an instruction error, insufficient funds, …) is a verdict on the
+        // transaction itself: refused in place, never walked, never refreshed.
+        const rawMsg = typeof j.error.message === 'string' ? j.error.message : String(j.error.message ?? 'error');
+        if (walkBlockhash && isSolBlockhashNotFound(rawMsg)) {
+          if (blockhashRefusal === null) blockhashRefusal = {url: candidate, message: rawMsg};
+          failover('blockhash-not-found');
+          continue;
+        }
+        throw new SolanaEndpointRefused(`solana rpc: ${j.error.message ?? 'error'}`, null);
+      }
       return j.result;
     } finally {
       cancel();
     }
   }
   // EXHAUSTED — no candidate returned an answer. The precedence (module header):
+  //   1. MARKER, 2. UPSTREAM STATUS, then 3. the send-preflight blockhash refusal (send-only,
+  // unanimous), 4. ALL-GATED, 5. TRANSPORT, 6. the no-candidate guard.
   if (relayMarker !== null) {
     throw new SolanaRelayPathDown(
       `solana rpc ${method}: dpay's relay ${hostOf(relayMarker.url)} could not reach Solana ` +
@@ -329,6 +403,19 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
     throw new SolanaEndpointRefused(
       `solana rpc ${method} → ${hostOf(upstreamStatus.url)}: HTTP ${upstreamStatus.status}: ${upstreamStatus.body}`,
       upstreamStatus.status,
+    );
+  }
+  if (blockhashRefusal !== null && lastTransport === null) {
+    // THE SEND-PREFLIGHT REFUSAL, UNANIMOUS (sendTransaction only — the fact is only recorded
+    // under `walkBlockhashRefusal`): every home that ANSWERED refused this broadcast with the
+    // blockhash-not-found state, and no home died silently — a transport death would make the
+    // agreement unreadable, so the strict all-refused rule defers to it (the seam's refresh
+    // bound stays honest: refreshed ONLY on a unanimous state refusal). The message carries
+    // the raw refusal verbatim so the seam's `isSolBlockhashNotFound` classifies it and its
+    // ONE refresh-and-resign owns the retry — exactly the attempt-#5/attempt-#6 composition.
+    throw new SolanaEndpointRefused(
+      `solana rpc ${method} → ${hostOf(blockhashRefusal.url)}: ${blockhashRefusal.message}`,
+      null,
     );
   }
   if (asked === 0 && cooldownGate !== null) {
@@ -397,14 +484,27 @@ export async function getLatestBlockhash(url: string | readonly string[], opts?:
  *  bytes, at home B. That is safe by Solana's own dedup: identical signed transactions are
  *  idempotent by signature, so the worst case across homes is a second "already processed/
  *  known" answer. A 2xx is NEVER walked past — it returns immediately, so a broadcast that
- *  any home accepted is sent exactly once as far as this client can tell. */
+ *  any home accepted is sent exactly once as far as this client can tell.
+ *
+ *  THE ATTEMPT-#6 WALK (2026-09-21, the one behavioral addition): this method sets
+ *  `walkBlockhashRefusal`, so a Blockhash-not-found refusal — however wrapped — walks the
+ *  SAME signed bytes to the next candidate instead of refusing in place (module header, "The
+ *  send-preflight exception"; the signature is valid on any endpoint — the live replay
+ *  proved it). Each advance traces `money: sol send step rpc-failover <from> → <to> (why)`
+ *  — hosts only — so the money log's step story stays unbroken on device. Exhaustion on a
+ *  unanimous blockhash refusal throws the refusal verbatim; the seam's ONE
+ *  refresh-and-resign (`broadcastSignedWithFreshBlockhash`) classifies and owns the retry. */
 export async function sendTransaction(url: string | readonly string[], rawBytes: Uint8Array, opts?: SolanaRpcOpts & {
   config?: {commitment?: 'confirmed' | 'processed' | 'finalized'; minContextSlot?: number; skipPreflight?: boolean};
 }): Promise<string> {
   const params: unknown[] = opts?.config
     ? [bytesToBase64(rawBytes), {encoding: 'base64', ...opts.config}]
     : [bytesToBase64(rawBytes), {encoding: 'base64'}];
-  const result = (await rpcFetch(url, 'sendTransaction', params, opts)) as string;
+  const result = (await rpcFetch(url, 'sendTransaction', params, {
+    ...opts,
+    walkBlockhashRefusal: true,
+    onFailover: (from, to, why) => console.warn(`money: sol send step rpc-failover ${from} → ${to} (${why})`),
+  })) as string;
   return result;
 }
 
