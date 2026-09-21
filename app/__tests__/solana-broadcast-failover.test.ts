@@ -1,20 +1,30 @@
 /**
- * THE ATTEMPT-#6 RPC FAILOVER PROOFS (2026-09-21, EURC→ICP deposit refused 8/8 live).
+ * THE RPC FAILOVER PROOFS UNDER THE SKIP-PREFLIGHT BROADCAST POSTURE (2026-09-21).
  *
- * The live root cause: the derived head (the relay's Solana proxy fronting Helius) answered the
+ * The live history: the derived head (the relay's Solana proxy fronting Helius) answered the
  * broadcast with HTTP 200 + a JSON-RPC error object carrying the BARE "Blockhash not found"
- * message, and the walk treated that 2xx as a completed call — so the refusal was final and the
- * candidate list had exactly one entry. A byte-exact replay of the SAME signed transaction to
- * https://api.mainnet-beta.solana.com was ACCEPTED and FINALIZED (sig 5HCV…, slot 449148468):
- * the bytes were always valid; the head's send-preflight STATE was at fault.
+ * message, 9+ consecutive attempts (#5/#6/#8) — while a byte-exact replay of the SAME signed
+ * transaction to https://api.mainnet-beta.solana.com was ACCEPTED and FINALIZED (sig 5HCV…,
+ * slot 449148468): the bytes were always valid; the head's send-preflight STATE was at fault.
+ * THE POSTURE FIX: the payment seam (`broadcastSignedWithFreshBlockhash`) now broadcasts with
+ * `skipPreflight: true, maxRetries: 0` — the provider's preflight simulation layer is bypassed
+ * entirely and the chain is the referee — and the attempt-#5 blockhash-refresh-retry (plus the
+ * `refused twice` class + copy) is RETIRED: its safety proof ("a preflight refusal is dropped
+ * BEFORE acceptance") lived in the simulation layer skipPreflight removes, so no re-sign path
+ * remains in the seam.
  *
- * The fix under test (42d94ac walk + ba9ef4d list), proven OFFLINE over recorded per-URL
- * JSON-RPC fetch mocks in the solana-seam.test.ts style — no @solana/*, no network:
- *   (a) head refuses 2xx-wrapped blockhash-not-found → the SAME signed bytes replay down the
- *       list in deterministic order → the public tail accepts; tracer shows `rpc-failover`;
- *       ONE blockhash fetch, ONE sign, NO refresh;
- *   (b) every candidate refuses → the seam's ONE refresh fires → every candidate refuses again
- *       → the honest refused-twice class; exactly two signs, nothing accepted;
+ * The proofs, OFFLINE over recorded per-URL JSON-RPC fetch mocks in the solana-seam.test.ts
+ * style — no @solana/*, no network:
+ *   (a) a blockhash-shaped refusal (defensive parity — no layer should emit one under
+ *       skipPreflight, the walk stays armed) → the SAME signed bytes replay down the list in
+ *       deterministic order → the public tail accepts; every payload carries skipPreflight +
+ *       maxRetries: 0; tracer shows `rpc-failover`; ONE blockhash fetch, ONE sign, NO refresh;
+ *   (b) every candidate refuses → the walk EXHAUSTS on the unanimous refusal → the seam
+ *       surfaces it VERBATIM: exactly one walk, ONE sign, nothing accepted, no refresh;
+ *   (b2) transport death on EVERY candidate → the last transport error, honest, one sign,
+ *       zero acceptances;
+ *   (b3) accepted then FAILED on-chain → the definite `transaction failed:` class (the chain
+ *       is the referee; classification intact);
  *   (c) an instruction-error refusal does NOT walk — one endpoint, no failover, no refresh
  *       (a genuinely invalid tx would be refused everywhere);
  *   (d) the candidate list + order pin: derived = relay homes in order then the public tail;
@@ -124,7 +134,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-describe('attempt-#6 proof (a): head refuses blockhash → SAME bytes walk → public tail accepts', () => {
+describe('proof (a): a blockhash-shaped refusal (defensive parity) → SAME bytes walk → public tail accepts', () => {
   test('walk order a → b → public, byte-identical bodies, ONE blockhash fetch, ONE sign, rpc-failover traced', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     // Reads (ATA/balance pre-checks + blockhash fetch + confirm) walk the READ list → A answers.
@@ -155,7 +165,11 @@ describe('attempt-#6 proof (a): head refuses blockhash → SAME bytes walk → p
     expect(sends).toHaveLength(3);
     expect(sends[1].body).toBe(sends[0].body);
     expect(sends[2].body).toBe(sends[0].body);
-    // ONE sign: one blockhash fetch, no refresh — the once-only seam bound untouched.
+    // THE POSTURE ON THE WIRE: every candidate received skipPreflight (the broken preflight
+    // layer bypassed) + maxRetries: 0 (retry policy app-owned).
+    const wire = JSON.parse(sends[0].body) as {params: unknown[]};
+    expect(wire.params[1]).toEqual({encoding: 'base64', skipPreflight: true, maxRetries: 0});
+    // ONE sign: one blockhash fetch, no refresh — nothing re-signs anywhere in the walk.
     expect(bhCalls(recorded)).toHaveLength(1);
     // THE TRACER: the walk's advances are on the money log, in order, hosts only (no
     // key-bearing URL ever prints).
@@ -176,41 +190,121 @@ describe('attempt-#6 proof (a): head refuses blockhash → SAME bytes walk → p
   });
 });
 
-describe('attempt-#6 proof (b): every candidate refuses → ONE refresh → refuses again → honest refused-twice', () => {
-  test('two full walks, exactly two blockhash fetches/signs, the refused-twice class verbatim', async () => {
+describe('proof (b): every candidate refuses → the walk exhausts on the UNANIMOUS refusal → the seam surfaces it verbatim', () => {
+  test('one walk a → b → public, exactly ONE sign, nothing accepted, no refresh, the refusal + its brand honest', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const recorded = installRpc({
       [A]: headThatServesReads({error: BH_REFUSAL}),
       [B]: {sendTransaction: {error: BH_REFUSAL}},
-      [PUBLIC]: {sendTransaction: {error: BH_REFUSAL}}, // even the tail refuses — twice
+      [PUBLIC]: {sendTransaction: {error: BH_REFUSAL}}, // even the tail refuses
     });
-    await expect(withDerivedList(solana => sendEurc(solana, MERCHANT_ADDRESS, 8_800_000n)))
-      .rejects.toThrow(/sol broadcast refused twice \(fresh block re-signed once\): .*Blockhash not found/);
-    // Two FULL walks of the same list, in order — then the seam stopped (never a third).
-    expect(sendCalls(recorded).map(c => c.url)).toEqual([A, B, PUBLIC, A, B, PUBLIC]);
-    // The single refresh: exactly TWO blockhash fetches (one per attempt) — i.e. exactly TWO
-    // signs. The once-only bound held with the walk underneath it.
-    expect(bhCalls(recorded)).toHaveLength(2);
-    expect(recorded.filter(c => c.method === 'getAccountInfo')).toHaveLength(2); // pre-checks ran ONCE
-    // Nothing was ever accepted — the error class is the honest outcome, not a false success.
+    let refusedBrand = false;
+    await expect(withDerivedList(async solana => {
+      try {
+        return await sendEurc(solana, MERCHANT_ADDRESS, 8_800_000n);
+      } catch (e) {
+        refusedBrand = isEndpointRefusal(e);
+        throw e;
+      }
+    })).rejects.toThrow(/sendTransaction → a\.example: Blockhash not found$/);
+    expect(refusedBrand).toBe(true); // the answering node's verdict, branded as a refusal
+    // ONE walk of the list, in order — the seam STOPPED there (the refresh is retired; a
+    // re-sign under skipPreflight has no dropped-before-acceptance proof).
+    expect(sendCalls(recorded).map(c => c.url)).toEqual([A, B, PUBLIC]);
+    // Exactly ONE blockhash fetch/sign. Nothing was ever accepted — the honest outcome.
+    expect(bhCalls(recorded)).toHaveLength(1);
+    // Pre-checks ran ONCE: sender ATA + recipient ATA — no refresh's second pair.
+    expect(recorded.filter(c => c.method === 'getAccountInfo')).toHaveLength(2);
     expect(warnLines(warn).some(l => /BROADCAST accepted/.test(l))).toBe(false);
-    // The tracer tells both walks + the diagnosed refresh, in order.
+    // The tracer tells the single walk; no refresh step exists anymore.
     expect(stepLines(warnLines(warn))).toEqual([
       'sender-ata-check', 'recipient-ata-check', 'sender-balance-check',
       'blockhash', 'sign', 'broadcast',
       'rpc-failover a.example → b.example (blockhash-not-found)',
       'rpc-failover b.example → api.mainnet-beta.solana.com (blockhash-not-found)',
-      'blockhash-refresh-retry',
-      'sign', 'broadcast',
-      'rpc-failover a.example → b.example (blockhash-not-found)',
-      'rpc-failover b.example → api.mainnet-beta.solana.com (blockhash-not-found)',
     ]);
-    expect(warnLines(warn).some(l => /FAILED at step=broadcast: sol broadcast refused twice/.test(l))).toBe(true);
+    expect(warnLines(warn).some(l => /FAILED at step=broadcast: solana rpc sendTransaction/.test(l))).toBe(true);
     warn.mockRestore();
   });
 });
 
-describe('attempt-#6 proof (c): an instruction-error refusal does NOT walk', () => {
+describe('proof (b2): transport death on EVERY candidate → the last transport error, honest, zero acceptances', () => {
+  test('the walk exhausts transport-dead, one sign, no refresh, the seam rethrows the transport truth', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    // Reads answer at A (the pre-checks + blockhash are reads); every sendTransaction attempt
+    // dies at the fetch — the walk-worthy class that remains under skipPreflight.
+    const sends: string[] = [];
+    let ataChecks = 0;
+    globalThis.fetch = (async (url: unknown, init?: {body?: string}) => {
+      const u = String(url);
+      const req = JSON.parse(String(init?.body)) as {method: string};
+      if (req.method === 'sendTransaction') {
+        sends.push(u);
+        throw new TypeError('fetch failed');
+      }
+      if (u !== A) throw new Error(`unexpected read fetch: ${req.method} → ${u}`);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({jsonrpc: '2.0', id: 1, result:
+          req.method === 'getLatestBlockhash'
+            ? {context: {slot: 449_102_443}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 427_143_204}}
+            : req.method === 'getAccountInfo'
+              ? {value: ++ataChecks === 1
+                ? {data: ['', 'base64'], owner: TOKEN_PROGRAM, lamports: 2_039_280} // sender ATA exists
+                : null} // recipient ATA missing → createIdempotent joins
+              : {value: 1_000_000_000}, // getBalance covers rent+fee
+        }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+    await expect(withDerivedList(solana => sendEurc(solana, MERCHANT_ADDRESS, 8_800_000n)))
+      .rejects.toThrow('fetch failed'); // the LAST transport error, verbatim — R3's oracle case
+    // Every candidate was tried with the same bytes; nothing answered; nothing was accepted.
+    expect(sends).toEqual([A, B, PUBLIC]);
+    expect(warnLines(warn).some(l => /BROADCAST accepted/.test(l))).toBe(false);
+    expect(stepLines(warnLines(warn))).toEqual([
+      'sender-ata-check', 'recipient-ata-check', 'sender-balance-check',
+      'blockhash', 'sign', 'broadcast',
+      'rpc-failover a.example → b.example (transport)',
+      'rpc-failover b.example → api.mainnet-beta.solana.com (transport)',
+    ]);
+    warn.mockRestore();
+  });
+});
+
+describe('proof (b3): accepted then FAILED on-chain → the definite transaction-failed class (the chain is the referee)', () => {
+  test('the tail accepts, the status poll reports err, the definite class surfaces — classification intact', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const CHAIN_FAIL = {result: {value: [{confirmationStatus: 'confirmed', err: {InstructionError: [0, {Custom: 1}]}}]}};
+    const recorded = installRpc({
+      // The confirm poll rides the READ list, so A carries the chain's verdict; the broadcast
+      // walk lands on the public tail (the live replay shape).
+      [A]: {...headThatServesReads({error: BH_REFUSAL}), getSignatureStatuses: CHAIN_FAIL},
+      [B]: {sendTransaction: {error: BH_REFUSAL}},
+      [PUBLIC]: {sendTransaction: SIG_OK},
+    });
+    let raw = '';
+    await expect(withDerivedList(async solana => {
+      try {
+        return await sendEurc(solana, MERCHANT_ADDRESS, 8_800_000n);
+      } catch (e) {
+        raw = e instanceof Error ? e.message : String(e);
+        throw e;
+      }
+    })).rejects.toThrow(/^transaction failed: /);
+    // The definite class: the network INCLUDED the tx and failed it — never the honest-unknown
+    // timeout story, never a re-send.
+    const {isSolTransactionFailed} = require('../solana/errors') as {isSolTransactionFailed: (m: string) => boolean};
+    expect(isSolTransactionFailed(raw)).toBe(true);
+    expect(sendCalls(recorded).map(c => c.url)).toEqual([A, B, PUBLIC]); // the walk, once
+    expect(bhCalls(recorded)).toHaveLength(1);
+    expect(warnLines(warn).some(l => /BROADCAST accepted sig=5HCVuLRv/.test(l))).toBe(true);
+    expect(warnLines(warn).some(l => /FAILED at step=confirm: transaction failed:/.test(l))).toBe(true);
+    warn.mockRestore();
+  });
+});
+
+describe('proof (c): an instruction-error refusal does NOT walk', () => {
   test('single endpoint, no failover, no refresh — the venue message surfaces with the refusal brand', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const recorded = installRpc({
@@ -258,7 +352,7 @@ function freshConfig(baked?: string): typeof import('../config/constants') {
   return mod;
 }
 
-describe('attempt-#6 proof (d): the broadcast candidate list — deterministic head + public tail', () => {
+describe('proof (d): the broadcast candidate list — deterministic head + public tail', () => {
   test('the tail is the public mainnet endpoint, exported and constant', () => {
     const c = freshConfig();
     expect(c.SOLANA_RPC_PUBLIC_FAILOVER_URL).toBe('https://api.mainnet-beta.solana.com');

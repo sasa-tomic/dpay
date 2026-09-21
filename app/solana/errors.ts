@@ -134,31 +134,34 @@ export function friendlySolError(msg: string): string {
   if (/rent\s*exempt|rent-exempt|not exempt/i.test(msg)) {
     return M.sol.rentExempt;
   }
-  // The broadcast seam's refused-twice class (attempt-#5 fix): the network's preflight
-  // simulation refused the transfer on Blockhash-not-found, the ONE diagnosed refresh
-  // (re-fetch + re-sign + broadcast once) ALSO came back refused, and nothing was accepted.
-  // Checked BEFORE the plain blockhash class: this message contains "Blockhash not found" too,
-  // but the copy must name the double refusal + the nothing-sent fact, not a busy network.
-  if (/refused twice/i.test(msg)) {
-    return M.sol.blockhashTwice;
-  }
+  // The blockhash class: a node whose blockhash queue missed the message's recent blockhash.
+  // Still REAL on the paths that run preflight (the merchant rail's `broadcastSolPayment`,
+  // `submitRawSolTx`'s venue hand-off); the payer-facing payment seam broadcasts
+  // skipPreflight (2026-09-21 posture) so its provider should never answer with it — if one
+  // ever does, the walk has already tried every home with the same bytes and this is the
+  // honest residual. The old `refused twice` sub-class and its copy are RETIRED with the
+  // seam's refresh (the safety proof lived in the preflight layer skipPreflight removes).
   if (/blockhash/i.test(msg)) {
     return M.sol.blockhash;
   }
   return msg;
 }
 
-/** Is this the preflight simulation's Blockhash-not-found refusal — the ONE broadcast failure
- *  the diagnosed single refresh owns (both the prose and the enum spellings; RPC versions
- *  differ)? The message names the state itself: the answering node's blockhash queue does not
- *  hold the message's recent blockhash — a provider-side state anomaly on a fresh
- *  'confirmed'-commitment hash (the 2026-09-21 attempt-#5 live signature), never a bytes
- *  problem. Anything else (an instruction error, insufficient funds, …) must NOT refresh: there
- *  a re-sign on a new block would be a blind retry, which the founder rules forbid.
+/** Is this the preflight simulation's Blockhash-not-found refusal — the state the candidate
+ *  walk (`solana/rpc.ts` sendTransaction's `walkBlockhashRefusal`) fails over on (both the
+ *  prose and the enum spellings; RPC versions differ)? The message names the state itself: the
+ *  answering node's blockhash queue does not hold the message's recent blockhash — a
+ *  provider-side state anomaly on a fresh 'confirmed'-commitment hash (the 2026-09-21
+ *  attempt-#5 live signature), never a bytes problem.
  *
- *  ATTEMPT-#6 WIDENING (2026-09-21): this predicate is now the ONE classifier for the refusal —
- *  the candidate walk (`solana/rpc.ts`) and the broadcast seam's refresh both read it — and the
- *  wrappers differ by provider. The composed rpcFetch message carries the
+ *  POSTURE (attempts #5/#6/#8 resolution, same day): the payment seam broadcasts
+ *  `skipPreflight: true`, so its provider should never produce this state — the payer-facing
+ *  refresh that used to consume this predicate (`broadcastSignedWithFreshBlockhash`'s
+ *  refresh-and-resign) is RETIRED, because its safety proof ("a preflight refusal is dropped
+ *  BEFORE acceptance") lived in the simulation layer skipPreflight removes. The predicate
+ *  stays LIVE where preflight still runs (`submitRawSolTx`, `broadcastSolPayment`) — there it
+ *  is the walk's ONE classifier, and the walk re-sends the SAME signed bytes, never re-signs.
+ *  Wrappers differ by provider: the composed rpcFetch message carries the
  *  "Transaction simulation failed: " prefix; Helius's 2xx-wrapped JSON-RPC body carries the
  *  BARE node message ("Blockhash not found" — the attempt-#6 live shape, refused 8/8 while the
  *  byte-exact replay to the public endpoint was accepted); some nodes emit `BlockhashNotFound`

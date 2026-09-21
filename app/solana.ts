@@ -22,7 +22,7 @@ import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
 import {fmtAssetCompact} from './lib/format';
 import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts, buildMemoInstruction, buildSolTransferInstruction, type Instruction} from './solana/tx';
 import {buildSplTransferInstruction, buildTransferCheckedInstruction, buildCreateAtaIdempotentInstruction, buildCanonicalSplMessage, deriveAta, decodeSplTokenAmount, decodeSplMintDecimals, SOL_ATA_SETUP_MIN_LAMPORTS} from './solana/spl';
-import {isEndpointRefusal, isRelayPathDown, isSolBlockhashNotFound} from './solana/errors';
+import {isEndpointRefusal, isRelayPathDown} from './solana/errors';
 import {base64ToBytes} from './lib/base64';
 import {solanaTokenInfo, solanaTokenOfMint} from './solana/tokens';
 import {utf8ToBytes} from './lib/base64url';
@@ -141,98 +141,85 @@ export async function loadRpcForSend(
 }
 
 // ============================================================================
-// The broadcast seam's diagnosed blockhash refresh (the 2026-09-21 attempt-#5 live signature).
+// The broadcast posture — skipPreflight, the 2026-09-21 attempts #5/#6/#8 resolution.
 //
-// The first clean live send failure died mid-broadcast with the preflight simulation's
-// "Transaction simulation failed: Blockhash not found" ~1s after a fresh
-// 'confirmed'-commitment fetch (tracer: … → sign → blockhash → broadcast FAILED). The code
-// exonerates every client-side suspect: the signed tx carries the EXACT blockhash from the one
-// `getLatestBlockhash` on the path (no earlier fetch exists — quote/fee/ATA preflight fetch
-// nothing), the fetch commitment is SOL_PAYMENT_COMMITMENT='confirmed', the relay forwards
-// `sendTransaction` as a pure uncached pipe (crates/dpay-relay/src/solana.rs READ_METHOD_TTLS),
-// and the ATA-create instruction is assembled once, before the fetch, never rebuilt. The
-// remaining mechanism is the provider's own preflight node missing a FRESH blockhash from its
-// queue — a load-balanced shard lagging the confirmed tip, a provider-side state anomaly, not
-// a bytes problem. That refusal is also SAFE to recover from: a preflight-simulation refusal is
-// returned as an error and the tx is dropped BEFORE acceptance/forwarding, so nothing was
-// broadcast and re-signing on a fresh blockhash cannot double-send.
+// THE DIAGNOSIS BEING ROUTED AROUND. Every live send died at the provider's PREFLIGHT
+// SIMULATION layer: "Transaction simulation failed: Blockhash not found", 9+ consecutive
+// refusals (attempts #5/#6/#8) on blockhashes fetched fresh at 'confirmed' commitment seconds
+// earlier — while the BYTE-EXACT refused signed bytes replayed to the public mainnet endpoint
+// were ACCEPTED and FINALIZED (attempt #6: sig 5HCV…, slot 449148468). The blockhash was
+// always valid; the simulating node was broken/lagging. A provider-side preflight STATE is not
+// a verdict on the transaction, and the app cannot fix the provider's node — so the seam stops
+// asking it: payment sendTransactions broadcast with `skipPreflight: true` and the CHAIN is
+// the referee (a tx either lands — the confirm poll sees it — or never lands — the caller's
+// honest-unknown path, unchanged).
 //
-// So every money path broadcasts through ONE helper: fetch the blockhash ONCE, at the right
-// point, and sign with THAT exact value — the tracer reads blockhash → sign → broadcast
-// (sendSpl's labels used to read sign → blockhash, a mislabel that sent the attempt-#5
-// diagnosis hunting a stale hash). On a CLASSIFIED blockhash-not-found refusal it refreshes +
-// re-signs + re-broadcasts EXACTLY ONCE (tracer: `step blockhash-refresh-retry`) — a diagnosed
-// state refresh, never a blind loop (founder rule). A second refusal throws the refused-twice
-// class the sheet renders as its own honest copy; any OTHER error never refreshes.
+// What skipPreflight does NOT remove: the app's own pre-checks (sender/recipient ATA reads,
+// the balance pre-check) run BEFORE sign exactly as before; the blockhash is still fetched
+// fresh at the sign moment. skipPreflight removes only the provider's DUPLICATE simulation.
 //
-// ATTEMPT-#6 COMPOSITION (2026-09-21): each broadcast attempt is now a full CANDIDATE WALK over
-// `solanaBroadcastRpcUrls()` — the relay-derived homes + the public mainnet tail. The walk
-// re-sends the SAME signed bytes to the next home on a blockhash-not-found refusal (no re-sign;
-// the signature is valid on any endpoint — the live replay proved it), so the refresh below
-// fires only when EVERY candidate refused: the once-only refresh bound is untouched, and the
-// refused-twice class + its honest copy are untouched. The tracer gains one inner step per
-// advance (`rpc-failover`, emitted by the walk itself), so the story reads
-// broadcast → rpc-failover → [accepted | blockhash-refresh-retry → …].
+// FEE honesty (a real posture change, owned here): a tx that LANDS and fails on-chain pays
+// the base fee (~0.000005 SOL); a tx DROPPED for a dead blockhash pays nothing. The app signs
+// on a freshly fetched hash (proven valid in practice) and pre-checks affordability first.
+//
+// maxRetries: 0 — the app owns retry policy. The provider's silent node-side retry loop is
+// off; re-attempts happen where the app can see and bound them (the candidate walk below, the
+// callers' re-submit seams, the deposit watcher).
+//
+// RETIRED with the preflight world: the attempt-#5 blockhash-refresh-retry (refresh + re-sign
+// + re-broadcast EXACTLY ONCE on a classified preflight refusal) and its `refused twice`
+// class + `M.sol.blockhashTwice` copy. That refresh was SAFE for one reason: a preflight
+// refusal is returned as an error and the tx is dropped BEFORE acceptance/forwarding, so
+// re-signing could not double-send. skipPreflight removes the layer that guarantee lived in —
+// a provider answer under skipPreflight carries no dropped-before-acceptance proof — so the
+// refresh is retired rather than kept as machinery whose safety argument no longer holds
+// (founder rule: never a blind re-sign). A provider that STILL answers a blockhash-shaped
+// error (no layer should) first meets the candidate walk — the SAME bytes walk to the next
+// home, harmless, no re-sign — and at unanimous exhaustion the seam surfaces the refusal
+// VERBATIM: an honest failure whose outcome the caller's existing post-broadcast vocabulary
+// owns (a silently-dropped tx is the shift-deposit watcher's timeout, unchanged).
+//
+// THE WALK (rpc-failover, attempt-#6) IS UNCHANGED AND STILL LIVE. Walk-worthy classes for
+// this seam are now TRANSPORT errors (429/5xx/network/relay-marker). The blockhash-refusal
+// classifier inside `sendTransaction` keeps REAL callers: `submitRawSolTx` (the venue deposit
+// hand-off) and `broadcastSolPayment` (the merchant rail) still run preflight, so the walk's
+// blockhash branch is live there and defensive parity here — no half-dead code either way.
 // ============================================================================
 
 /** The structural RPC subset the broadcast helper needs — satisfied by solana/rpc.ts's
  *  `getLatestBlockhash`/`sendTransaction` as every send path already destructures them. */
 interface BroadcastRpc {
   getLatestBlockhash: (url: string[], opts?: {signal?: AbortSignal}) => Promise<{blockhash: string}>;
-  sendTransaction: (url: string[], raw: Uint8Array, opts?: {signal?: AbortSignal}) => Promise<string>;
+  sendTransaction: (url: string[], raw: Uint8Array, opts?: {
+    signal?: AbortSignal;
+    config?: {skipPreflight?: boolean; maxRetries?: number};
+  }) => Promise<string>;
 }
 
-/** The classified refusal → whether the diagnosed refresh owns it. Kept as a named predicate so
- *  the refresh condition reads as the decision it is (see `isSolBlockhashNotFound` for why this
- *  failure class and no other). */
-function isBlockhashNotFoundRefusal(e: unknown): boolean {
-  return e instanceof Error && isSolBlockhashNotFound(e.message);
-}
-
-/** Fetch a fresh blockhash, sign with THAT exact value, broadcast — refreshing ONCE on a
- *  classified blockhash-not-found preflight refusal (module comment above). `sign` receives the
- *  base58 blockhash and returns the signed raw bytes; it must depend ONLY on its input, so the
- *  refresh re-signs the SAME transaction over the NEW blockhash. Returns the signature of the
- *  attempt the network accepted — `confirm` and `onBroadcast` stay the caller's. */
+/** Fetch a fresh blockhash, sign with THAT exact value, broadcast with the skipPreflight
+ *  posture across the candidate list (module comment above). `sign` receives the base58
+ *  blockhash and returns the signed raw bytes; it must depend ONLY on its input. Returns the
+ *  signature of the attempt the network accepted — `confirm` and `onBroadcast` stay the
+ *  caller's. No retry, no refresh lives here: the walk below owns candidate failover (same
+ *  bytes), and every higher re-attempt belongs to the caller, which can see it. */
 async function broadcastSignedWithFreshBlockhash(
   rpc: BroadcastRpc,
   signal: AbortSignal | undefined,
   at: (step: string) => void,
   sign: (blockhashB58: string) => Uint8Array,
 ): Promise<string> {
-  // The broadcast walk's candidate list — derived homes + the public tail (attempt-#6). The
-  // blockhash fetch rides the SAME list: the tail is same-cluster mainnet, so a relay leg
-  // that is down no longer kills the send at the first await.
+  // The broadcast walk's candidate list — derived homes + the public tail. The blockhash fetch
+  // rides the SAME list: the tail is same-cluster mainnet, so a relay leg that is down no
+  // longer kills the send at the first await.
   const urls = solanaBroadcastRpcUrls();
   at('blockhash');
   const {blockhash} = await rpc.getLatestBlockhash(urls, {signal});
   at('sign');
   const raw = sign(blockhash);
   at('broadcast');
-  try {
-    return await rpc.sendTransaction(urls, raw, {signal});
-  } catch (e: unknown) {
-    if (!isBlockhashNotFoundRefusal(e)) throw e;
-    // The one diagnosed refresh: the error names the state (the simulating node's blockhash
-    // queue missed a fresh hash), the remedy is that state's refresh, and attempt one is
-    // provably unsent (preflight refusal = dropped before acceptance). Exactly once — a second
-    // refusal is the honest refused-twice class, never a loop. (With the attempt-#6 walk this
-    // fires only after EVERY candidate refused the SAME state — the walk already re-sent the
-    // identical bytes down the list first.)
-    at('blockhash-refresh-retry');
-    const {blockhash: fresh} = await rpc.getLatestBlockhash(urls, {signal});
-    at('sign');
-    const reRaw = sign(fresh);
-    at('broadcast');
-    try {
-      return await rpc.sendTransaction(urls, reRaw, {signal});
-    } catch (e2: unknown) {
-      if (isBlockhashNotFoundRefusal(e2)) {
-        throw new Error(`sol broadcast refused twice (fresh block re-signed once): ${e2 instanceof Error ? e2.message : String(e2)}`);
-      }
-      throw e2;
-    }
-  }
+  // THE POSTURE (module comment): skipPreflight bypasses the provider's broken/lagging
+  // preflight simulation layer entirely; maxRetries: 0 keeps re-attempts app-owned.
+  return rpc.sendTransaction(urls, raw, {signal, config: {skipPreflight: true, maxRetries: 0}});
 }
 
 // --- existing exports (unchanged) ----------------------------------------------
