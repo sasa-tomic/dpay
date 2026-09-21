@@ -120,14 +120,16 @@
   it aborted BEFORE pulling the ckUSDC (ckUSDC never left; allowance unspent); attempt #2 halted
   at REVIEW, no burn. Attempt #3 (send-usdc rounds 12–15) paid a third approve pair at 13:20 UTC
   (allowances 0.00018052378682 ckETH + 0.1385 ckUSDC to the ckETH minter) and failed at the
-  withdraw form — still no minter burn; all three allowances live-unspent. Net cost of the
-  failed leg: 3×(0.000002 ckETH + 0.01 ckUSDC) in fees.
-  **LEDGER DUPLICATION WARNING:** main rows 83–94 (@ `38d8405`, reconstructed from the ledgers'
-  own `get_transactions` tails) and branch `cctp-live` rows 83–89 (@ `f27aba0`, same movements,
-  coarser split) record the SAME on-chain events — at merge keep ONE set and let
-  `just funds reconcile` arbitrate; never double-apply. Next: diagnose the minter abort (ckETH
-  minter `sv3dd` withdraw status), then resume the `evm-sign`/`cctp-claim` fallback lane
-  (branch `cctp-live`; unproven until first live burn).
+  withdraw form. ARBITRATED 2026-09-21 (reconcile vs MEASURED): attempt #3's allowances were
+  NOT live-unspent — tokens LEFT the float in exactly the allowance amounts (0.1385 ckUSDC
+  pulled + a net 0.000179157567210 ckETH kept, corrections rows 95–96); the earlier "no minter
+  burn" reading was wrong for #3. WHERE the 0.1385 ckUSDC sits now is UNVERIFIED (evm-float
+  `0x6B1C…83b9` as ERC20 is the candidate; the evm-float reconcile measures only ETH).
+  **LEDGER DUPLICATION resolved:** main rows 83–94 and branch `cctp-live` rows 83–89 described
+  the same events; main's set kept (finer), the two correction rows reconcile the remainder —
+  `just funds reconcile` 17 pairs CLEAN @ this commit. Next: locate the pulled 0.1385 ckUSDC
+  (evm-float ERC20 balance read), then the `evm-sign`/`cctp-claim` fallback lane (branch
+  `cctp-live`; unproven until first live burn).
 - **Prod-relay deploy incl. the partner key** — founder-run per `docs/OPS.md` §3, DO NOT NAG; the
   full unshipped list (2026-09-19 conversion-recovery wave + the 2026-09-20 CeFi live-ops wave)
   is the FOUNDER-OWNED row below. On 2026-09-20 ~22:26 the founder ran `just deploy-ic`: the
@@ -138,10 +140,22 @@
   never quotes gas; the burn's ETH is the user wallet's own. Since 2026-09-20 the in-intent
   gas-fund offer funds that slice from the user's OWN holdings (fund-from-wallet prepends the
   gas legs, or self-fund with recheck) — still nothing dpay pays, holds, or custodies.
-- **SideShift RETURN shift (EURC→ICP, the SOL-side CeFi op's reverse leg) — REFUNDED 2026-09-20, ROOT CAUSE FIXED 2026-09-21.**  9.284071 EURC left the app-derived SOL rail on-chain (venue deposit address `7nY7…ZsSpQ`); the venue swept it but never paid the ICP out (their payout layer rejected our settle-address format — bare ICRC-1 principal). SideShift support refunded the full 9.284071 EURC to the SOL rail (ledger row 80, reconcile CLEAN; founder filed the support ticket). SideShift engineering answered: their ICP payout layer takes ONLY the 32-byte account identifier as 64-hex (e.g. `0ef12aae…0a41`), not principal text; principal support is "this week" but undated. Fix SHIPPED: the SOL-side CeFi settle slot derives the account identifier from the wallet's own principal via the core (`icpPrincipalFromPubkey` → `icpAccountIdFromPrincipal(p, '')`, vector-pinned jest `convertSolCefi`), and the relay's settle/refund well-formedness gate accepts BOTH forms for now (64-hex must be exactly 32 bytes with a valid CRC32; vector-pinned `sideshift_proxy` + `addrcheck` tests) — flip the relay to hex-only when the venue's principal support lands. REMAINING (founder): redeploy the relay + retry the round trip ONCE at the venue minimum.
-  To MEASURE the retry shift for the SLA gate, find its shift id on the founder's SideShift
-  account and run `DPAY_SIDESHIFT_PROBE_SHIFTS=sideshift-eurc=<shiftId> just swap-venue-probe`,
-  then commit the `dfx/venue_health.json` row it writes and redeploy the relay.
+- **SideShift RETURN shift (EURC→ICP, the SOL-side CeFi op's reverse leg) — REFUNDED 2026-09-20, ROOT CAUSE FIXED 2026-09-21.**  9.284071 EURC left the app-derived SOL rail on-chain (venue deposit address `7nY7…ZsSpQ`); the venue swept it but never paid the ICP out (their payout layer rejected our settle-address format — bare ICRC-1 principal). SideShift support refunded the full 9.284071 EURC to the SOL rail (ledger row 80, reconcile CLEAN; founder filed the support ticket). SideShift engineering answered: their ICP payout layer takes ONLY the 32-byte account identifier as 64-hex (e.g. `0ef12aae…0a41`), not principal text; principal support is "this week" but undated. Fix SHIPPED: the SOL-side CeFi settle slot derives the account identifier from the wallet's own principal via the core (`icpPrincipalFromPubkey` → `icpAccountIdFromPrincipal(p, '')`, vector-pinned jest `convertSolCefi`), and the relay's settle/refund well-formedness gate accepts BOTH forms for now (64-hex must be exactly 32 bytes with a valid CRC32; vector-pinned `sideshift_proxy` + `addrcheck` tests) — flip the relay to hex-only when the venue's principal support lands. RETRIED ONCE 2026-09-21 (the single permitted attempt — DONE, blocked app-side): the order
+  leg PROVED the fix live — shift `b4f0dd3e0ad88d4b1617` was created through the real Convert
+  UI with settleAddress = the 64-hex identifier `9fac39d1…030a41` VERBATIM (the venue accepted
+  it at order level; settleAmount 3.5819747 ICP; live pair min 8.72264 < our 9.284071) — but
+  BOTH send-sheet submits hung in `submitting` (no outcome, no error phase, past the 60s
+  SOL_SEND_TIMEOUT) and NO transfer ever left the rail (on-chain: no new signature; EURC
+  measured unchanged at 9.284071); the shift expired unexercised 14:23:25Z with zero value at
+  risk (ledger row 97). NEW BLOCKER (app-side, fix before the next attempt): the SOL withdraw
+  path can hang past its own timeout — prime suspect: the seam treats a 200-with-JSON-RPC-
+  error-body broadcast answer as success (Helius answers `{"error":{…}}` with HTTP 200;
+  reproduced through the relay's solana pipe with a garbage payload) and then polls
+  confirmation forever; the 60s withTimeout signal is not honored on that path. Fix that, then
+  ONE more attempt is available (the venue order machinery is proven good; the settle-format
+  fix is confirmed live at order level). To MEASURE any shift (incl. the expired one) for the
+  SLA gate: `DPAY_SIDESHIFT_PROBE_SHIFTS=sideshift-eurc=b4f0dd3e0ad88d4b1617 just
+  swap-venue-probe`, then commit the `dfx/venue_health.json` row it writes and redeploy.
 - **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
   adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`, `/trade`
   POST+GET status) are registered on every build and answer 503 naming `DPAY_TROCADOR_API_KEY`
