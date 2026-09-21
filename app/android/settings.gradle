@@ -1,5 +1,20 @@
 pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
+// Drop a stale autolinking cache before the settings plugin reads it: build/generated/autolinking/
+// autolinking.json bakes ABSOLUTE node_modules paths, and @react-native/gradle-plugin regenerates
+// it only when the lockfile hashes change (its isCacheDirty never checks that the baked paths
+// still exist). After this tree MOVES to a different absolute path (clone elsewhere, directory
+// rename), the stale cache silently includes every autolinked library at a nonexistent dir, and
+// :app:assembleRelease fails on all of them with "No matching variant … No variants exist"
+// (hit for real 2026-09-21: the cache predated the move to ~/projects/dpay/dpay-main). Deleting
+// the json when its baked root no longer matches this tree makes the plugin regenerate it this
+// run. app/ — rootDir's parent — is the root the CLI bakes.
+def autolinkingCache = new File(rootDir, "build/generated/autolinking/autolinking.json")
+if (autolinkingCache.isFile()) {
+  def cachedRoot = null
+  try { cachedRoot = new groovy.json.JsonSlurper().parse(autolinkingCache)?.root } catch (Exception ignored) {}
+  if (cachedRoot != rootDir.canonicalFile.parentFile.path) autolinkingCache.delete()
+}
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
 rootProject.name = 'dpay'
 include ':app'
