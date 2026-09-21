@@ -259,4 +259,66 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     expect(present(tree, 'convert-confirm-err').length).toBeGreaterThan(0);
     expect(adoptConvertRecord).not.toHaveBeenCalled();
   });
+
+  test('a SLOW venue answer still lands the order — the confirm budget covers the relay (attempt-#3 replay)', async () => {
+    // The live 2026-09-21 attempt-#3 signature: the venue answered the RELAY inside its
+    // 15s upstream budget, but the phone's confirm fetches rode an 8s budget — the client
+    // aborted mid-round-trip, so the one shifts/fixed 201 that DID land was never adopted
+    // (no awaiting-deposit panel, the deposit handoff never began). The fix is the 20s
+    // confirm budget (CONVERT_CEFI_CONFIRM_TIMEOUT_MS > the relay's 15s): a slow-but-
+    // successful quote AND a slow-but-successful order must both complete to the panel.
+    const slow = <T,>(v: T): Promise<T> => new Promise((res) => setTimeout(() => res(v), 80));
+    jest.mocked(fetchSideShiftQuote)
+      .mockResolvedValueOnce({venueId: 'sideshift-eurc', quoteId: 'q-review', settleAmount: '0.0495', rate: null, fetchedAtMs: Date.now()})
+      .mockImplementationOnce(() => slow({venueId: 'sideshift-eurc', quoteId: 'q-confirm', settleAmount: '0.0400', rate: null, fetchedAtMs: Date.now()}));
+    jest.mocked(createSideShiftFixedShift).mockImplementationOnce(() => slow({...ORDER, settleAmount: '0.0400'}));
+    const tree = mount();
+    mountWithCefiPicked(tree);
+    await act(async () => {});
+    await act(async () => {
+      present(tree, 'btn-convert-confirm')[0].props.onPress();
+    });
+    // The confirm chain crosses two real 80ms timers (quote, then order) — wait until the
+    // chain has fully settled (the record ADOPTED) before asserting anything.
+    for (let i = 0; i < 50 && jest.mocked(adoptConvertRecord).mock.calls.length === 0; i++) {
+      await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    }
+    await act(async () => {});
+    // Both confirm-path calls carry the 20s budget, NOT the 8s review default — the pin
+    // that keeps a client abort from orphaning a venue-side order ever again.
+    expect(jest.mocked(fetchSideShiftQuote).mock.calls[1][5]).toBe(20000);
+    expect(jest.mocked(createSideShiftFixedShift).mock.calls[0][3]).toBe(20000);
+    expect(fetchSideShiftQuote).toHaveBeenCalledTimes(2);
+    expect(createSideShiftFixedShift).toHaveBeenCalledTimes(1);
+    // The venue's own locked figures adopted; the handoff panel renders; no error line.
+    const rec = jest.mocked(adoptConvertRecord).mock.calls[0][0];
+    expect(rec.step).toBe('awaiting_deposit');
+    expect(rec.providerRef?.orderId).toBe('shift-sol-e2e-1');
+    expect(rec.expectedNet).toBe('4000000');
+    expect(present(tree, 'convert-awaiting-deposit').length).toBeGreaterThan(0);
+    expect(textOf(present(tree, 'convert-deposit-address')[0])).toContain('icp-deposit-address-e2e');
+    expect(present(tree, 'convert-confirm-err').length).toBe(0);
+    // Drain BEFORE ending: an in-flight confirm chain that resolves inside the NEXT test
+    // double-counts its mocks (the cross-test leak). Unmount detaches the effects.
+    await act(async () => { tree.unmount(); });
+  });
+
+  test('a venue echo that reformats (not changes) the deposit amount still adopts the order', async () => {
+    // prepareCeFiConvertRecord's red line compares decimal VALUES (sameDecimalAmount): the
+    // venue echoing '1.00000000' for the quoted '1' must adopt the order it already
+    // created — a spelling refusal would orphan a real venue-side order. A DIFFERENT
+    // amount is still refused (the value line below flips the adoption off).
+    jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
+    jest.mocked(createSideShiftFixedShift).mockResolvedValue({...ORDER, depositAmount: '1.00000000'});
+    const tree = mount();
+    mountWithCefiPicked(tree);
+    await act(async () => {});
+    await act(async () => {
+      present(tree, 'btn-convert-confirm')[0].props.onPress();
+    });
+    await act(async () => {});
+    expect(adoptConvertRecord).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(adoptConvertRecord).mock.calls[0][0].providerDeposit?.depositAmount).toBe('1.00000000');
+    expect(present(tree, 'convert-awaiting-deposit').length).toBeGreaterThan(0);
+  });
 });

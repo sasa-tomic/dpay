@@ -39,6 +39,7 @@ import {
   isTerminalConvertStep,
   loadConvertRecords,
   loadVenueRegistry,
+  prepareCeFiConvertRecord,
   prepareConvertRecord,
   probeConvertSettlement,
   requestConvertAbort,
@@ -1108,5 +1109,66 @@ describe('executeConvert — the user\'s Stop (abort) during the settle watch', 
     expect((await loadConvertRecords('pub'))[rec.id]?.step).toBe('aborted');
     jest.mocked(relayFetch).mockReset();
     jest.mocked(submitTransfer).mockReset();
+  });
+});
+
+describe('prepareCeFiConvertRecord — the deposit-amount red line compares VALUES, not spellings', () => {
+  // The SOL-side shape (2026-09-20): a SPL mint deposits into a cefi venue that pays the
+  // user's own IC account identifier. The venue ECHOES the deposit amount it accepted —
+  // sameDecimalAmount must adopt a reformatted echo ('1' → '1.00000000') and still refuse
+  // a different amount or a malformed one (a refusal here orphans a REAL venue-side order:
+  // the live 2026-09-21 attempt-#3 non-adoption class).
+  const EURC_VENUE = BUNDLED_VENUES.find(v => v.venue_id === 'sideshift-eurc')!;
+  const EURC_MINT = EURC_VENUE.pair_ledgers.find(l => l !== ICP_LEDGER)!;
+  const cefiQuote = (): ConvertQuote => ({
+    venueId: EURC_VENUE.venue_id,
+    pool: EURC_VENUE.endpoint,
+    tokenInLedger: EURC_MINT,
+    tokenOutLedger: ICP_LEDGER,
+    amountIn: '1000000', // 1 EURC raw (6 decimals)
+    amountOutGross: '4950000',
+    zeroForOne: null,
+    feeMillionths: 0,
+    fetchedAtMs: 1_000,
+  });
+  const order = (depositAmount: string) => ({
+    id: 'shift-guard-1',
+    depositAddress: 'venue-deposit-address',
+    depositMemo: null,
+    depositAmount,
+    settleAmount: '0.0495',
+    expiresAt: null,
+  });
+  const prepare = (depositAmount: string) => prepareCeFiConvertRecord({
+    quote: cefiQuote(),
+    order: order(depositAmount),
+    relayUrl: 'http://relay.test',
+    settleAddress: 'settle-account-id',
+    inCurrency: null,
+    inSymbol: 'EURC',
+    outSymbol: 'ICP',
+    inDecimals: 6,
+    outDecimals: 8,
+  });
+
+  test('the quoted deposit ("1") and the venue echo agree — record carries the echo verbatim', () => {
+    expect(prepare('1').providerDeposit?.depositAmount).toBe('1');
+  });
+
+  test('a reformatted echo of the SAME amount adopts ("1.00000000") — never an orphaned order', () => {
+    const rec = prepare('1.00000000');
+    expect(rec.step).toBe('awaiting_deposit');
+    expect(rec.providerDeposit?.depositAmount).toBe('1.00000000');
+    expect(rec.providerRef?.orderId).toBe('shift-guard-1');
+  });
+
+  test('a DIFFERENT amount still refuses — the red line is a value line, not a spelling line', () => {
+    expect(() => prepare('0.99999999')).toThrow(convertEn.errors.quoteUnavailable('deposit'));
+    expect(() => prepare('1.00000001')).toThrow(convertEn.errors.quoteUnavailable('deposit'));
+  });
+
+  test('a malformed echo fails closed (never compares equal by accident)', () => {
+    expect(() => prepare('')).toThrow(convertEn.errors.quoteUnavailable('deposit'));
+    expect(() => prepare('1 EURC')).toThrow(convertEn.errors.quoteUnavailable('deposit'));
   });
 });
