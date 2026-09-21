@@ -57,7 +57,7 @@ const OCP_IC_SEQUENCE_MS =
   + IC_SUBMIT_TIMEOUT_MS
   + IC_POLL_BUDGET.attempts * (IC_READ_STATE_TIMEOUT_MS + IC_POLL_BUDGET.intervalMs);
 
-export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail, onOpenAddressBook}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail, onOpenAddressBook}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string | null; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp-choose'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
@@ -168,7 +168,13 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   // twin's live 2026-09-21 defect — same teardown class, fixed on both rails). Declared with the
   // other hooks, ABOVE the sub-mode early return, so the Rules of Hooks hold across a Send detour.
   const [sendActive, setSendActive] = useState(false);
-  useEffect(() => { if (subMode !== 'send') setSendActive(false); }, [subMode]);
+  // …and whether the sheet has RENDERED ITS REVIEW (sticky per send entry, reported up by
+  // SendSheet's onReviewShown). Once true, the OFFLINE panel below defers: the 2026-09-21
+  // attempt-#7 teardown class — the 3-strike flip replacing a review the user was mid-flow on —
+  // is a both-rails bug, so the IC surface gets the same rule as the SOL one. Offline may then
+  // only speak INSIDE the sheet (its own note); a genuinely-offline send fails at submit.
+  const [reviewShown, setReviewShown] = useState(false);
+  useEffect(() => { if (subMode !== 'send') { setSendActive(false); setReviewShown(false); } }, [subMode]);
 
   // An OpenCryptoPay merchant till the camera read. The payment itself rides the SAME `intent` +
   // review + sign path as every other payment (source 'ocp'); this holds the part no other payment
@@ -1250,8 +1256,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
         />
         {/* An in-flight send OWNS its surface (2026-09-21, the SOL twin's live defect): the offline
             panel — the balance poll's 3-strike flip — must not REPLACE a sheet mid-send, so the
-            gate defers while SendSheet reports an active send and applies again once it is over. */}
-        {(!sendActive && offlinePanel) ? offlinePanel : (selectedUnfunded ? <>{fundInstruction}{fundedElsewhere('send')}</> : (
+            gate defers while SendSheet reports an active send and applies again once it is over.
+            A RENDERED REVIEW extends the deferral to the offline gate alone (attempt #7): offline
+            may only speak inside the sheet from its first rendered review on. */}
+        {(!sendActive && !reviewShown && offlinePanel) ? offlinePanel : (selectedUnfunded ? <>{fundInstruction}{fundedElsewhere('send')}</> : (
           <SendSheet
             identity={identity}
             catalog={catalog}
@@ -1264,6 +1272,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
             prefillAddress={scannedAddress}
             onPrefillConsumed={() => setScannedAddress(null)}
             onOpenAddressBook={onOpenAddressBook}
+            online={online}
+            onReviewShown={setReviewShown}
             onSent={onSettled}
             onClose={() => onSubModeChange('scan')}
             onSendActiveChange={setSendActive}

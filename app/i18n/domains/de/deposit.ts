@@ -253,6 +253,7 @@ export const withdrawDe: WithdrawMessages = {
   badAddress: asset => `Das sieht nicht nach einer gültigen ${asset}-Adresse aus.`,
   toDestination: destination => `an ${destination}`,
   enterAmount: 'Betrag eingeben',
+  offlineReviewNote: 'Du bist offline — du kannst diesen Send noch prüfen. Er verlässt dein Wallet erst, wenn das Netzwerk ihn annimmt; offline schlägt das Bestätigen fehl und es bewegt sich nichts.',
 
   ic: {
     resumed:

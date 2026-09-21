@@ -584,6 +584,10 @@ export type WithdrawMessages = {
   badAddress: (asset: string) => string;
   toDestination: (destination: string) => string;
   enterAmount: string;
+  /** The offline NOTICE rendered INSIDE a send sheet once its review is up (surface ownership,
+   *  2026-09-21): the strike gate defers, the review stays interactive, and this line says what
+   *  offline honestly means for the action — the send only moves funds once the network accepts. */
+  offlineReviewNote: string;
 
   /** IC user-principal rail (WithdrawSheet): ckBTC → BTC, ckETH → ETH, ckERC20 → the token. */
   ic: {
@@ -721,6 +725,7 @@ export const withdrawEn: WithdrawMessages = {
   badAddress: asset => `That doesn't look like a valid ${asset} address.`,
   toDestination: destination => `to ${destination}`,
   enterAmount: 'Enter an amount',
+  offlineReviewNote: 'You are offline — you can still review this send. It only leaves your wallet once the network accepts it; while offline, confirming will fail and nothing moves.',
 
   ic: {
     resumed:

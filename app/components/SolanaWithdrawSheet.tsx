@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -55,7 +55,7 @@ const SOL_NETWORK = 'Solana';
  * Bitcoin address pasted into the wrong wallet, and which offered neither a scanner nor an address
  * book that the IC surface had. CLAUDE.md's same-surfaces rule calls that divergence a bug.
  */
-export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose, onSendActiveChange}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; balance: string; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string; label?: string; memo?: string} | null; onPrefillConsumed?: () => void; onOpenAddressBook?: () => void; onSent: () => void; onClose: () => void; onSendActiveChange?: (active: boolean) => void}) {
+export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose, onSendActiveChange, online = true, onReviewShown}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; /** The LAST-KNOWN balance in raw units — null when no balance was EVER known. Deliberately NOT a fresh-poll demand: a poll that is currently aborting/timing out must never gate a review that checks out against the last-known figure (the stale-ok rule, 2026-09-21 live EURC attempt #7). */ balance: string | null; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string; label?: string; memo?: string} | null; onPrefillConsumed?: () => void; onOpenAddressBook?: () => void; onSent: () => void; onClose: () => void; onSendActiveChange?: (active: boolean) => void; /** The device's connectivity as the parent's balance polls see it — only shapes the in-sheet notice, never a gate. */ online?: boolean; /** Fired ONCE per mount, the first time this sheet renders its review card (surface ownership, 2026-09-21): the parent's offline strike gate must then stop replacing this sheet — offline may only speak inside it. */ onReviewShown?: (shown: boolean) => void;}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'unknown' | 'error'>('form');
@@ -134,7 +134,19 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
   // Convert the entered amount to base units at the selected token's decimals. `cmpRaw` (BigInt) for
   // presence — never `>` on strings (lexicographic trap).
   const raw = toUnits(amountStr, decimals);
-  const overBalance = cmpRaw(raw, balance) > 0;
+  // STALE-OK BALANCE GATING (2026-09-21, live EURC attempt #7): `balance` is the LAST-KNOWN
+  // figure — by hook contract it survives degraded polls (useSolanaBalances keeps the prior
+  // amount on every abort/timeout and re-seeds the persisted fact at mount). The gate reads it
+  // WITHOUT demanding a fresh poll:
+  //   - known + amount ≤ known  → the confirm is ENABLED even while every poll is failing —
+  //     a rendered review must be able to complete;
+  //   - known + amount > known  → gated (a real over-spend, stated against the real figure);
+  //   - never known (null)      → gated — an honest unknown never enables a blind send.
+  // The old `?? '0'` coercion at the caller erased exactly the first case: one aborted-poll
+  // season gated a funded wallet's review behind "More than your available 0" (four blind
+  // presses on attempt #7).
+  const balanceKnown = balance != null;
+  const overBalance = balanceKnown && cmpRaw(raw, balance!) > 0;
 
   // What the typed destination IS. Two stages, exactly as the IC rail: `detectAddressShape` names
   // the NAMESPACE and `routeForSolana` says whether this rail can reach it, then the rail's own
@@ -162,7 +174,21 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
     return {text: M.withdraw.send.routeSolana(SOL_NETWORK), tone: 'ok'};
   }, [resolved, selfAddress]);
 
-  const canReview = resolved?.ok === true && raw !== '0' && !overBalance;
+  const canReview = resolved?.ok === true && raw !== '0' && balanceKnown && !overBalance;
+
+  // Surface ownership (the offline-gate half of the same live attempt): the FIRST rendered
+  // review reports up, sticky for this mount. The parent's 3-strike offline gate then stops
+  // replacing this sheet — offline may only show a notice inside it (below) — so the review
+  // surface a user is mid-flow on can never be torn down out from under them. A
+  // genuinely-offline send still fails honestly at the broadcast boundary (no funds move until
+  // the network accepts — the architecture's own safe failure).
+  const reviewVisible = (phase === 'form' || phase === 'error') && raw !== '0';
+  const reviewShownRef = useRef(false);
+  useEffect(() => {
+    if (!reviewVisible || reviewShownRef.current) return;
+    reviewShownRef.current = true;
+    onReviewShown?.(true);
+  }, [reviewVisible, onReviewShown]);
 
   // The link's claimed name, live only while the destination is still the link's recipient — the
   // same claim window the address-book name would have (PaymentReview's PayeeLine presentation:
@@ -316,7 +342,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
       ) : (
         <>
           <Text style={S.label}>{M.withdraw.sol.sendToSolana(unit)}</Text>
-          <Text style={S.dim2}>{M.withdraw.sol.available(fmt(balance))}</Text>
+          {balance != null ? <Text style={S.dim2}>{M.withdraw.sol.available(fmt(balance))}</Text> : null}
 
           <AddressField
             value={address}
@@ -395,6 +421,11 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
           ) : null}
 
           {err ? <Text testID="sol-send-err" style={S.err}>{err}</Text> : null}
+
+          {/* Offline while the review is up: a NOTICE inside the sheet, never a teardown. The
+              strike gate defers (see onReviewShown) — the honest statement of what offline means
+              for THIS action lives here, and a genuinely-offline send fails at broadcast. */}
+          {!online ? <Text testID="sol-send-offline-note" style={S.warnNote}>{M.withdraw.offlineReviewNote}</Text> : null}
 
           <Pressable
             testID="btn-sol-send-confirm"

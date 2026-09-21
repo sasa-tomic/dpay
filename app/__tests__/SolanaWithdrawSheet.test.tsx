@@ -34,7 +34,7 @@ jest.mock('../solana', () => ({
   preloadSolanaRpc: () => {},
 }));
 
-import {sendSol} from '../solana';
+import {sendSol, sendSpl} from '../solana';
 import {deriveSolanaAddress} from '../solana/identity';
 import {hasStamp, loadJourney} from '../lib/journey';
 import {loadAddressBook} from '../services/addressBook';
@@ -94,6 +94,80 @@ describe('SolanaWithdrawSheet — sol-send-needs-sol (USDC fees are paid in SOL)
   test('SOL token → never the USDC fee warning', async () => {
     const tree = await mount({token: 'SOL', balance: '2044280', solBalance: '0', solChecking: false});
     expect(has(tree, 'sol-send-needs-sol')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('SolanaWithdrawSheet — stale-ok balance gating (2026-09-21 live EURC attempt #7)', () => {
+  /** Fill destination + amount and return the confirm control's disabled state. */
+  async function fill(tree: renderer.ReactTestRenderer, amount: string): Promise<{disabled: boolean; aria: boolean}> {
+    await act(async () => {
+      tree.root.findByProps({testID: 'sol-send-address-input'}).props.onChangeText(SOL_DEST);
+      tree.root.findByProps({testID: 'sol-send-amount-input'}).props.onChangeText(amount);
+    });
+    const btn = tree.root.findByProps({testID: 'btn-sol-send-confirm'}).props;
+    return {disabled: btn.disabled as boolean, aria: (btn.accessibilityState as {disabled: boolean}).disabled};
+  }
+
+  test('amount ≤ LAST-KNOWN balance → confirm ENABLED (no fresh-poll demand; the attempt-#7 case: 8.8 ≤ 9.28 EURC)', async () => {
+    const tree = await mount({token: 'EURC', balance: '9280000'}); // 9.28 EURC last-known
+    const st = await fill(tree, '8.8');
+    expect(st.disabled).toBe(false);
+    expect(st.aria).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('amount > LAST-KNOWN balance → still gated, warned against the real figure, and a press submits nothing', async () => {
+    const tree = await mount({token: 'EURC', balance: '9280000'});
+    const st = await fill(tree, '9.5'); // 9.5 > 9.28
+    expect(st.disabled).toBe(true);
+    expect(st.aria).toBe(true);
+    expect(has(tree, 'sol-send-review')).toBe(true); // the review renders — gated, not hidden
+    await act(async () => { await tree.root.findByProps({testID: 'btn-sol-send-confirm'}).props.onPress(); });
+    expect(sendSpl).not.toHaveBeenCalled(); // the blind press is refused
+    act(() => { tree.unmount(); });
+  });
+
+  test('balance NEVER known (null) → still gated (an honest unknown never enables a blind send) and no fabricated "Available: 0"', async () => {
+    const tree = await mount({token: 'EURC', balance: null});
+    const st = await fill(tree, '0.5');
+    expect(st.disabled).toBe(true);
+    expect(st.aria).toBe(true);
+    await act(async () => { await tree.root.findByProps({testID: 'btn-sol-send-confirm'}).props.onPress(); });
+    expect(sendSpl).not.toHaveBeenCalled();
+    // The available line must NOT claim a zero the wallet never read.
+    const texts = tree.root.findAll(n => n.props && n.props.testID === undefined && typeof n.props.children === 'string').map(n => n.props.children as string);
+    expect(texts.some(t => t.startsWith('Available:'))).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a rendered review reports up ONCE (sticky) — the parent’s offline strike gate then defers', async () => {
+    const onReviewShown = jest.fn();
+    const tree = await mount({balance: '9280000', onReviewShown});
+    expect(onReviewShown).not.toHaveBeenCalled(); // empty form: no review, no report
+    await act(async () => {
+      tree.root.findByProps({testID: 'sol-send-address-input'}).props.onChangeText(SOL_DEST);
+      tree.root.findByProps({testID: 'sol-send-amount-input'}).props.onChangeText('8.8');
+    });
+    expect(onReviewShown).toHaveBeenCalledTimes(1);
+    expect(onReviewShown).toHaveBeenCalledWith(true);
+    // More typing keeps the review up; the report stays a once-per-mount latch.
+    await act(async () => { tree.root.findByProps({testID: 'sol-send-amount-input'}).props.onChangeText('8.9'); });
+    expect(onReviewShown).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('offline (poll strike-flip) with the review up → the in-sheet notice renders, the form is untouched', async () => {
+    const tree = await mount({balance: '9280000', online: false});
+    await fill(tree, '8.8');
+    expect(has(tree, 'sol-send-offline-note')).toBe(true);
+    expect(has(tree, 'sol-send-review')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('online → no offline note', async () => {
+    const tree = await mount({balance: '9280000', online: true});
+    expect(has(tree, 'sol-send-offline-note')).toBe(false);
     act(() => { tree.unmount(); });
   });
 });
