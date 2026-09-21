@@ -255,6 +255,7 @@ export const withdrawFr: WithdrawMessages = {
   badAddress: asset => `Cette adresse ${asset} ne semble pas valide.`,
   toDestination: destination => `vers ${destination}`,
   enterAmount: 'Saisissez un montant',
+  offlineReviewNote: 'Vous êtes hors ligne — vous pouvez encore vérifier cet envoi. Il ne quitte votre portefeuille qu’une fois accepté par le réseau ; hors ligne, la confirmation échoue et rien ne bouge.',
 
   ic: {
     resumed:

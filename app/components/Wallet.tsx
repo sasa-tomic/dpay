@@ -610,7 +610,13 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   const activeSolAsset = selectedAsset?.protocol === 'solana' ? selectedAsset : null;
   const selectedSolToken = activeSolAsset?.token ?? 'SOL';
   const selectedTokenState = activeSolAsset?.mint != null ? tokenStates[activeSolAsset.mint] : undefined;
-  const selectedTokenBalance = selectedTokenState?.amount ?? '0';
+  // STALE-OK (2026-09-21 live EURC attempt #7): the amount is the LAST-KNOWN figure — it
+  // survives aborted/timing-out polls by hook contract (facts are never downgraded, and the
+  // persisted store re-seeds at mount). `?? null`, never `?? '0'`: coercing an unknown to a
+  // known-zero turned poll ill-health into "More than your available 0" and gated a funded
+  // wallet's rendered send review across four presses. Null reaches the sheet as an honest
+  // unknown, which gates the confirm WITHOUT claiming a zero balance.
+  const selectedTokenBalance = selectedTokenState?.amount ?? null;
   const selectedTokenAbsent = selectedTokenState?.status === 'absent';
   // One-tap account setup for the SELECTED token — the only one whose gates ever render the setup
   // card. Creates that token's ATA (device-key-signed createIdempotent tx); on success both rails
@@ -1457,7 +1463,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
                   withdrawCurrency={selectedCurrency}
                   withdrawDisplay={depositDisplay} withdrawFamily={depositFamily}
                   withdrawTokenContract={selectedDesc?.token_contract ?? null}
-                  withdrawBalance={displayAssetBalances[selectedCurrency] ?? '0'}
+                  withdrawBalance={displayAssetBalances[selectedCurrency] ?? null}
                   subMode={paySubMode} onSubModeChange={setPaySubMode}
                   prefillIntent={prefillIntent} onPrefillConsumed={() => setPrefillIntent(null)}
                   prefillScan={pendingTill} onPrefillScanConsumed={() => setPendingTill(null)}

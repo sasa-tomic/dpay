@@ -72,7 +72,7 @@ import {M} from '../i18n';
  * `reference` pubkeys as instruction account keys and the optional `memo` as an SPL Memo
  * instruction — the matching mechanism the standard is built on (`sendSolanaPay`).
  */
-export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, tokenBalance, tokenAtaAbsent, tokenBalances, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentToken, onShowSolAddress, onShowTokenAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onSwitchRail, onOpenAddressBook}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; tokenBalance: string; tokenAtaAbsent: boolean; /** Per-mint token states for every visible SPL asset (the Wallet's per-mint hook states) — a scanned Solana Pay request names its OWN mint, which need not be the selected asset's. */ tokenBalances: SolMintStates; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: string; onSent: () => void; /** Refreshes the token account that moved — names the request's mint when the sender knows it, else repolls every visible mint. */ onSentToken: (mint?: string | null) => void; onShowSolAddress: () => void; onShowTokenAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string; label?: string; memo?: string} | null; onSendPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void}) {
+export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, tokenBalance, tokenAtaAbsent, tokenBalances, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentToken, onShowSolAddress, onShowTokenAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onSwitchRail, onOpenAddressBook}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; /** The SELECTED token's LAST-KNOWN balance — null when no balance was ever known (the send sheet gates an honest unknown; a known figure gates only a real over-spend, stale-ok, 2026-09-21). */ tokenBalance: string | null; tokenAtaAbsent: boolean; /** Per-mint token states for every visible SPL asset (the Wallet's per-mint hook states) — a scanned Solana Pay request names its OWN mint, which need not be the selected asset's. */ tokenBalances: SolMintStates; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: string; onSent: () => void; /** Refreshes the token account that moved — names the request's mint when the sender knows it, else repolls every visible mint. */ onSentToken: (mint?: string | null) => void; onShowSolAddress: () => void; onShowTokenAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string; label?: string; memo?: string} | null; onSendPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done' | 'spay-review' | 'spay-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
@@ -125,7 +125,15 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   // return the moment the sheet reports the send over. Reset when the sub-mode is left, so a
   // mid-send detour cannot pin a stale flag onto a fresh sheet.
   const [sendActive, setSendActive] = useState(false);
-  useEffect(() => { if (subMode !== 'send') setSendActive(false); }, [subMode]);
+  // …and whether the sheet has RENDERED ITS REVIEW (sticky per send entry, reported up by
+  // SolanaWithdrawSheet's onReviewShown). Once true, the OFFLINE strike gate below defers: the
+  // 2026-09-21 attempt-#7 teardown had the 3-strike flip REPLACE a rendered review with "Sending
+  // to an address needs a connection", destroying the surface the user was mid-flow on. Offline
+  // may then only speak INSIDE the sheet (its own note); a genuinely-offline send fails honestly
+  // at broadcast. The zero-funds gate keeps its own deferral rule (sendActive) — a KNOWN-zero
+  // fact is a real fact about the money, not poll health.
+  const [reviewShown, setReviewShown] = useState(false);
+  useEffect(() => { if (subMode !== 'send') { setSendActive(false); setReviewShown(false); } }, [subMode]);
 
   // The TILL entry's SOL twin (same-surfaces rule): an OS-delivered till code
   // (`…/pl/?lightning=<LNURL…>`, the OpenCryptoPay QR a till prints) arrives as a prefilled SCAN —
@@ -300,7 +308,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     // `sendActive` defers BOTH gates while a transfer is in flight or its terminal surface is up
     // (2026-09-21): a mid-send offline flip used to REPLACE this sheet — no terminal surface, an
     // undiagnosable send. The gates apply again the moment the sheet reports the send over.
-    if (!online && !sendActive) {
+    // `reviewShown` extends the deferral to the OFFLINE gate only, from the first rendered
+    // review: a rendered review must be able to complete (attempt #7 — the strike gate tore the
+    // sheet down across 4 blind presses). The offline state shows as the sheet's own note.
+    if (!online && !sendActive && !reviewShown) {
       return (
         <View style={S.centerTop}>
           {toggle}
@@ -353,6 +364,8 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
           token={selectedToken}
           mint={selectedMint}
           balance={sendBalance}
+          online={online}
+          onReviewShown={setReviewShown}
           prefill={scannedAddress != null ? {address: scannedAddress, amount: ''} : sendPrefill}
           onPrefillConsumed={() => { if (scannedAddress != null) setScannedAddress(null); else onSendPrefillConsumed?.(); }}
           ataAbsent={tokenAtaAbsent}

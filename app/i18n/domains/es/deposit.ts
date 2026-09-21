@@ -254,6 +254,7 @@ export const withdrawEs: WithdrawMessages = {
   badAddress: asset => `Esto no parece una dirección de ${asset} válida.`,
   toDestination: destination => `a ${destination}`,
   enterAmount: 'Introduce un importe',
+  offlineReviewNote: 'Estás sin conexión — aún puedes revisar este envío. Solo sale de tu cartera cuando la red lo acepta; sin conexión, confirmar falla y nada se mueve.',
 
   ic: {
     resumed:
