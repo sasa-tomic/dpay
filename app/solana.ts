@@ -22,7 +22,7 @@ import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
 import {fmtAssetCompact} from './lib/format';
 import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts, buildMemoInstruction, buildSolTransferInstruction, type Instruction} from './solana/tx';
 import {buildSplTransferInstruction, buildTransferCheckedInstruction, buildCreateAtaIdempotentInstruction, buildCanonicalSplMessage, deriveAta, decodeSplTokenAmount, decodeSplMintDecimals, SOL_ATA_SETUP_MIN_LAMPORTS} from './solana/spl';
-import {isEndpointRefusal, isRelayPathDown} from './solana/errors';
+import {isEndpointRefusal, isRelayPathDown, isSolBlockhashNotFound} from './solana/errors';
 import {base64ToBytes} from './lib/base64';
 import {solanaTokenInfo, solanaTokenOfMint} from './solana/tokens';
 import {utf8ToBytes} from './lib/base64url';
@@ -137,6 +137,86 @@ export async function loadRpcForSend(
     return await Promise.race([load(), deadline]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+// ============================================================================
+// The broadcast seam's diagnosed blockhash refresh (the 2026-09-21 attempt-#5 live signature).
+//
+// The first clean live send failure died mid-broadcast with the preflight simulation's
+// "Transaction simulation failed: Blockhash not found" ~1s after a fresh
+// 'confirmed'-commitment fetch (tracer: … → sign → blockhash → broadcast FAILED). The code
+// exonerates every client-side suspect: the signed tx carries the EXACT blockhash from the one
+// `getLatestBlockhash` on the path (no earlier fetch exists — quote/fee/ATA preflight fetch
+// nothing), the fetch commitment is SOL_PAYMENT_COMMITMENT='confirmed', the relay forwards
+// `sendTransaction` as a pure uncached pipe (crates/dpay-relay/src/solana.rs READ_METHOD_TTLS),
+// and the ATA-create instruction is assembled once, before the fetch, never rebuilt. The
+// remaining mechanism is the provider's own preflight node missing a FRESH blockhash from its
+// queue — a load-balanced shard lagging the confirmed tip, a provider-side state anomaly, not
+// a bytes problem. That refusal is also SAFE to recover from: a preflight-simulation refusal is
+// returned as an error and the tx is dropped BEFORE acceptance/forwarding, so nothing was
+// broadcast and re-signing on a fresh blockhash cannot double-send.
+//
+// So every money path broadcasts through ONE helper: fetch the blockhash ONCE, at the right
+// point, and sign with THAT exact value — the tracer reads blockhash → sign → broadcast
+// (sendSpl's labels used to read sign → blockhash, a mislabel that sent the attempt-#5
+// diagnosis hunting a stale hash). On a CLASSIFIED blockhash-not-found refusal it refreshes +
+// re-signs + re-broadcasts EXACTLY ONCE (tracer: `step blockhash-refresh-retry`) — a diagnosed
+// state refresh, never a blind loop (founder rule). A second refusal throws the refused-twice
+// class the sheet renders as its own honest copy; any OTHER error never refreshes.
+// ============================================================================
+
+/** The structural RPC subset the broadcast helper needs — satisfied by solana/rpc.ts's
+ *  `getLatestBlockhash`/`sendTransaction` as every send path already destructures them. */
+interface BroadcastRpc {
+  getLatestBlockhash: (url: string[], opts?: {signal?: AbortSignal}) => Promise<{blockhash: string}>;
+  sendTransaction: (url: string[], raw: Uint8Array, opts?: {signal?: AbortSignal}) => Promise<string>;
+}
+
+/** The classified refusal → whether the diagnosed refresh owns it. Kept as a named predicate so
+ *  the refresh condition reads as the decision it is (see `isSolBlockhashNotFound` for why this
+ *  failure class and no other). */
+function isBlockhashNotFoundRefusal(e: unknown): boolean {
+  return e instanceof Error && isSolBlockhashNotFound(e.message);
+}
+
+/** Fetch a fresh blockhash, sign with THAT exact value, broadcast — refreshing ONCE on a
+ *  classified blockhash-not-found preflight refusal (module comment above). `sign` receives the
+ *  base58 blockhash and returns the signed raw bytes; it must depend ONLY on its input, so the
+ *  refresh re-signs the SAME transaction over the NEW blockhash. Returns the signature of the
+ *  attempt the network accepted — `confirm` and `onBroadcast` stay the caller's. */
+async function broadcastSignedWithFreshBlockhash(
+  rpc: BroadcastRpc,
+  signal: AbortSignal | undefined,
+  at: (step: string) => void,
+  sign: (blockhashB58: string) => Uint8Array,
+): Promise<string> {
+  at('blockhash');
+  const {blockhash} = await rpc.getLatestBlockhash(solanaRpcUrls(), {signal});
+  at('sign');
+  const raw = sign(blockhash);
+  at('broadcast');
+  try {
+    return await rpc.sendTransaction(solanaRpcUrls(), raw, {signal});
+  } catch (e: unknown) {
+    if (!isBlockhashNotFoundRefusal(e)) throw e;
+    // The one diagnosed refresh: the error names the state (the simulating node's blockhash
+    // queue missed a fresh hash), the remedy is that state's refresh, and attempt one is
+    // provably unsent (preflight refusal = dropped before acceptance). Exactly once — a second
+    // refusal is the honest refused-twice class, never a loop.
+    at('blockhash-refresh-retry');
+    const {blockhash: fresh} = await rpc.getLatestBlockhash(solanaRpcUrls(), {signal});
+    at('sign');
+    const reRaw = sign(fresh);
+    at('broadcast');
+    try {
+      return await rpc.sendTransaction(solanaRpcUrls(), reRaw, {signal});
+    } catch (e2: unknown) {
+      if (isBlockhashNotFoundRefusal(e2)) {
+        throw new Error(`sol broadcast refused twice (fresh block re-signed once): ${e2 instanceof Error ? e2.message : String(e2)}`);
+      }
+      throw e2;
+    }
   }
 }
 
@@ -429,12 +509,10 @@ export async function sendSol(
     try {
       const {seed, publicKey} = deriveSolanaKeypair(secretHex);
       const {getLatestBlockhash, sendTransaction, confirmTransaction} = await loadRpcForSend();
-      at('blockhash');
-      const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
-      at('sign');
-      const raw = buildSignedTransfer(seed, publicKey, toAddress, lamports, base58Decode32(blockhash));
-      at('broadcast');
-      const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
+      const signature = await broadcastSignedWithFreshBlockhash(
+        {getLatestBlockhash, sendTransaction}, signal, at,
+        (bh) => buildSignedTransfer(seed, publicKey, toAddress, lamports, base58Decode32(bh)),
+      );
       traceSend(`BROADCAST accepted sig=${signature}`);
       onBroadcast?.(signature);
       at('confirm');
@@ -665,15 +743,16 @@ export async function sendSpl(
         }
         ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(destAddress), base58Decode32(mint)));
       }
-      at('sign');
       ixs.push(buildSplTransferInstruction(senderAta, recipientAta, publicKey, amount));
 
-      at('blockhash');
-      const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
-      const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
-      const raw = signTransaction(message, seed);
-      at('broadcast');
-      const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
+      // Broadcast through the one helper: it fetches the blockhash, signs with THAT exact value,
+      // and owns the diagnosed blockhash-refresh-retry (the tracer reads blockhash → sign →
+      // broadcast — the pre-2026-09-21 labels read sign → blockhash, a mislabel that made the
+      // first clean live failure LOOK like a stale-hash send).
+      const signature = await broadcastSignedWithFreshBlockhash(
+        {getLatestBlockhash, sendTransaction}, signal, at,
+        (bh) => signTransaction(assembleMessage(publicKey, ixs, base58Decode32(bh)), seed),
+      );
       traceSend(`BROADCAST accepted sig=${signature}`);
       onBroadcast?.(signature);
       at('confirm');
@@ -777,13 +856,10 @@ export async function sendSolanaPay(
         ixs.push(buildTransferCheckedInstruction(senderAta, base58Decode32(transfer.splToken), recipientAta, publicKey, transfer.amount, decimals, referenceKeys));
       }
 
-      at('blockhash');
-      const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
-      at('sign');
-      const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
-      const raw = signTransaction(message, seed);
-      at('broadcast');
-      const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
+      const signature = await broadcastSignedWithFreshBlockhash(
+        {getLatestBlockhash, sendTransaction}, signal, at,
+        (bh) => signTransaction(assembleMessage(publicKey, ixs, base58Decode32(bh)), seed),
+      );
       traceSend(`BROADCAST accepted sig=${signature}`);
       onBroadcast?.(signature);
       at('confirm');
@@ -825,15 +901,15 @@ export async function createTokenAta(secretHex: string, mint: string, signal?: A
 
     const ix = buildCreateAtaIdempotentInstruction(publicKey, ata, publicKey, base58Decode32(mint));
     return await abortable((async () => {
-      step = 'blockhash';
-      const {blockhash} = await getLatestBlockhash(solanaRpcUrls(), {signal});
-      step = 'sign';
-      const message = assembleMessage(publicKey, [ix], base58Decode32(blockhash));
-      const raw = signTransaction(message, seed);
-      step = 'broadcast';
-      const signature = await sendTransaction(solanaRpcUrls(), raw, {signal});
+      // Same step tracing as the send paths (the ATA setup is a money path too — one broadcast
+      // seam, one tracer dialect).
+      const at = (s: string) => { step = s; traceSend(`step ${s}`); };
+      const signature = await broadcastSignedWithFreshBlockhash(
+        {getLatestBlockhash, sendTransaction}, signal, at,
+        (bh) => signTransaction(assembleMessage(publicKey, [ix], base58Decode32(bh)), seed),
+      );
       traceSend(`ATA setup BROADCAST accepted sig=${signature}`);
-      step = 'confirm';
+      at('confirm');
       await confirmTransaction(solanaRpcUrls(), signature, {signal});
       traceSend(`ATA setup confirmed sig=${signature}`);
       return signature;

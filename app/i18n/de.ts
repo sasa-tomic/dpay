@@ -126,6 +126,7 @@ export const de: Messages = {
     insufficient: 'Nicht genug SOL für diese Überweisung plus Netzwerkgebühr.',
     rentExempt: 'Nach dieser Überweisung läge dein Konto unter dem Mindestguthaben. Sende einen kleineren Betrag.',
     blockhash: 'Das Netzwerk war zu ausgelastet. Versuche es erneut.',
+    blockhashTwice: 'Das Netzwerk hat die Überweisung zweimal abgelehnt — es wurde nichts gesendet. Versuche es erneut.',
     tapFailed: 'Zahlung nicht abgeschlossen — versuche es erneut',
   },
 

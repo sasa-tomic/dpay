@@ -134,10 +134,29 @@ export function friendlySolError(msg: string): string {
   if (/rent\s*exempt|rent-exempt|not exempt/i.test(msg)) {
     return M.sol.rentExempt;
   }
+  // The broadcast seam's refused-twice class (attempt-#5 fix): the network's preflight
+  // simulation refused the transfer on Blockhash-not-found, the ONE diagnosed refresh
+  // (re-fetch + re-sign + broadcast once) ALSO came back refused, and nothing was accepted.
+  // Checked BEFORE the plain blockhash class: this message contains "Blockhash not found" too,
+  // but the copy must name the double refusal + the nothing-sent fact, not a busy network.
+  if (/refused twice/i.test(msg)) {
+    return M.sol.blockhashTwice;
+  }
   if (/blockhash/i.test(msg)) {
     return M.sol.blockhash;
   }
   return msg;
+}
+
+/** Is this the preflight simulation's Blockhash-not-found refusal — the ONE broadcast failure
+ *  the diagnosed single refresh owns (both the prose and the enum spellings; RPC versions
+ *  differ)? The message names the state itself: the simulating node's blockhash queue does not
+ *  hold the message's recent blockhash — a provider-side state anomaly on a fresh
+ *  'confirmed'-commitment hash (the 2026-09-21 attempt-#5 live signature), never a bytes
+ *  problem. Anything else (an instruction error, insufficient funds, …) must NOT refresh: there
+ *  a re-sign on a new block would be a blind retry, which the founder rules forbid. */
+export function isSolBlockhashNotFound(msg: string): boolean {
+  return /transaction simulation failed.*(?:blockhash not found|blockhashnotfound)/i.test(msg);
 }
 
 /** Did the network INCLUDE this transaction and then fail it? `confirmTransaction` (`solana/rpc.ts`)

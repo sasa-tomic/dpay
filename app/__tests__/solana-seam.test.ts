@@ -1649,3 +1649,181 @@ describe('solana seam — getSolanaHistory (classified at the seam, never thrown
     await expect(readHistory('https://hist-abort.example', ctrl.signal)).rejects.toThrow('aborted by test');
   });
 });
+
+// ============================================================================
+// The broadcast seam's diagnosed blockhash refresh (attempt-#5 live signature, 2026-09-21).
+//
+// The first clean live send failure: sender-ata-check → recipient-ata-check (createIdempotent
+// joins) → sender-balance-check → sign → blockhash → broadcast FAILED "Transaction simulation
+// failed: Blockhash not found" ~1s after a fresh 'confirmed'-commitment fetch. The code
+// exonerates the client (the signed tx carries the one fresh fetch; the relay pipe is uncached)
+// — the residual mechanism is the provider's preflight node missing a FRESH blockhash from its
+// queue. These pins: (1) the exact live signature refreshes EXACTLY ONCE and succeeds; (2) a
+// twice-refused broadcast lands on the honest refused-twice copy with nothing accepted; (3) any
+// OTHER refusal never refreshes (the retry is diagnosed, never blind); (4) the signed bytes
+// carry the freshly fetched blockhash — per attempt, for the exact createIdempotent+transfer ix
+// mix; (5) the tracer reads blockhash → sign → broadcast (the pre-fix sendSpl labels read
+// sign → blockhash, which is what sent the live diagnosis hunting a stale hash).
+// ============================================================================
+
+describe('solana seam — the broadcast seam\u2019s diagnosed blockhash refresh (attempt-#5)', () => {
+  // The attempt-#5 deposit shape: EURC to a fresh recipient whose ATA is missing, so the
+  // createIdempotent instruction joins the transfer in ONE signed tx.
+  const EURC_MINT = 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr';
+  // What rpcFetch composes from the node's JSON-RPC error (`solana rpc: ${error.message}`) —
+  // the exact string the attempt-#5 tracer recorded.
+  const LIVE_BLOCKHASH_REFUSAL = 'solana rpc: Transaction simulation failed: Blockhash not found';
+  const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+
+  const senderAddress = bs58.encode(deriveSolanaKeypair(SEED_HEX).publicKey);
+  const senderAta = bs58.encode(deriveAta(senderAddress, EURC_MINT));
+  const recipientAta = bs58.encode(deriveAta(MERCHANT_ADDRESS, EURC_MINT));
+
+  /** The 32 message bytes a signed legacy tx carries as its recent blockhash
+   *  (wire = sigCount(1) + sig(64) + message; message = header(3) + keyCount + keys + blockhash). */
+  function messageBlockhash(bytes: Uint8Array): Uint8Array {
+    const keys = readCompactU16(bytes, 65 + 3);
+    const off = keys.next + keys.value * 32;
+    return bytes.slice(off, off + 32);
+  }
+
+  /** The attempt-#5 stub world: sender ATA exists, recipient ATA missing (createIdempotent
+   *  joins), SOL covers the rent pre-check, and `send` controls the broadcast outcomes.
+   *  `queried` records every account the seam looked up. */
+  function attempt5Stub(send: (base64Tx: string, call: number) => string, makeHash: (call: number) => string, queried?: string[]): SolanaRpcStub {
+    let hashCalls = 0;
+    let sendCalls = 0;
+    return {
+      getAccountInfo: (params: unknown[]) => {
+        const addr = String((params as [string])[0]);
+        queried?.push(addr);
+        return {value: addr === senderAta ? {data: ['', 'base64'], owner: TOKEN_PROGRAM, lamports: 2039280} : null};
+      },
+      getBalance: () => ({value: 1000000000}),
+      getLatestBlockhash: () => {
+        hashCalls++;
+        return {context: {slot: 100 + hashCalls}, value: {blockhash: makeHash(hashCalls), lastValidBlockHeight: 999999}};
+      },
+      sendTransaction: (params: unknown[]) => send(String((params as [string])[0]), ++sendCalls),
+      getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
+    };
+  }
+
+  test('the EXACT live signature: Blockhash-not-found at broadcast refreshes ONCE, re-signs the fresh hash, succeeds', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const hash1 = bs58.encode(new Uint8Array(32).fill(1));
+    const hash2 = bs58.encode(new Uint8Array(32).fill(2));
+    const sends: string[] = [];
+    const queried: string[] = [];
+    let sendCalls = 0;
+    const stub = attempt5Stub(
+      (base64Tx) => {
+        sends.push(base64Tx);
+        sendCalls++;
+        if (sendCalls === 1) throw new Error(LIVE_BLOCKHASH_REFUSAL); // the live refusal
+        return 'SigRefreshedOnce';
+      },
+      (call) => (call === 1 ? hash1 : hash2),
+      queried,
+    );
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = stub;
+    const sig = await withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 8_800_000n, EURC_MINT);
+    });
+    expect(sig).toBe('SigRefreshedOnce');
+    // The live shape held: the recipient's ATA was checked and found MISSING (the createIdempotent
+    // join), the sender's found — exactly the attempt-#5 pre-broadcast world.
+    expect(queried).toEqual([senderAta, recipientAta]);
+    expect(sendCalls).toBe(2); // the refresh fired EXACTLY once — never a loop
+    // The signed tx carries the FRESHLY fetched blockhash, per attempt: attempt one signed
+    // hash1, the refresh re-signed the SAME transfer over hash2 (the sign-input capture).
+    expect(bs58.encode(messageBlockhash(Uint8Array.from(Buffer.from(sends[0], 'base64'))))).toBe(hash1);
+    expect(bs58.encode(messageBlockhash(Uint8Array.from(Buffer.from(sends[1], 'base64'))))).toBe(hash2);
+    // The ix mix is the live one: createIdempotent + transfer over NINE account keys.
+    const tx1 = Uint8Array.from(Buffer.from(sends[0], 'base64'));
+    expect(readCompactU16(tx1, 65 + 3).value).toBe(9); // payer, senderAta, recipientAta, recipient, mint, system, token, rent, ATA prog
+    expect(countInstructions(tx1)).toBe(2);
+    // The tracer tells the story: the steps in order, the refresh named, one acceptance.
+    const lines = warn.mock.calls.map(c => String(c[0]));
+    const steps = lines.filter(l => /^money: sol send step /.test(l)).map(l => l.replace('money: sol send step ', ''));
+    expect(steps).toEqual([
+      'sender-ata-check', 'recipient-ata-check', 'sender-balance-check',
+      'blockhash', 'sign', 'broadcast',
+      'blockhash-refresh-retry', 'sign', 'broadcast',
+      'confirm',
+    ]);
+    expect(lines.some(l => /BROADCAST accepted sig=SigRefreshedOnce/.test(l))).toBe(true);
+    warn.mockRestore();
+  });
+
+  test('a refresh that is ALSO refused: the honest refused-twice class, exactly two broadcasts, nothing accepted', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    let sendCalls = 0;
+    const stub = attempt5Stub(
+      () => {
+        sendCalls++;
+        throw new Error(LIVE_BLOCKHASH_REFUSAL);
+      },
+      () => bs58.encode(new Uint8Array(32).fill(1)),
+    );
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = stub;
+    await expect(withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 8_800_000n, EURC_MINT);
+    })).rejects.toThrow(/sol broadcast refused twice \(fresh block re-signed once\): .*Blockhash not found/);
+    expect(sendCalls).toBe(2); // never a third
+    const lines = warn.mock.calls.map(c => String(c[0]));
+    expect(lines.some(l => /BROADCAST accepted/.test(l))).toBe(false); // nothing was ever accepted
+    // …and the sheet renders the double refusal, not the generic busy-network copy.
+    const {friendlySolError} = require('../solana/errors') as {friendlySolError: (m: string) => string};
+    const {M} = require('../i18n') as {M: {sol: {blockhashTwice: string; blockhash: string}}};
+    const raw = `sol broadcast refused twice (fresh block re-signed once): ${LIVE_BLOCKHASH_REFUSAL}`;
+    expect(friendlySolError(raw)).toBe(M.sol.blockhashTwice);
+    expect(M.sol.blockhashTwice).not.toBe(M.sol.blockhash); // distinct copies — the distinction is the point
+    warn.mockRestore();
+  });
+
+  test('an instruction-error refusal NEVER refreshes — the retry is diagnosed, never blind', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    let sendCalls = 0;
+    const stub = attempt5Stub(
+      () => {
+        sendCalls++;
+        throw new Error('solana rpc: Transaction simulation failed: Error processing Instruction 1: custom program error: 0x1');
+      },
+      () => bs58.encode(new Uint8Array(32).fill(1)),
+    );
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = stub;
+    await expect(withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 8_800_000n, EURC_MINT);
+    })).rejects.toThrow(/custom program error: 0x1/);
+    expect(sendCalls).toBe(1); // a tx-content problem: re-signing on a fresh block would be a BLIND retry
+    const lines = warn.mock.calls.map(c => String(c[0]));
+    expect(lines.some(l => /blockhash-refresh-retry/.test(l))).toBe(false);
+    warn.mockRestore();
+  });
+
+  test('sendSol rides the same seam — the SOL path refreshes exactly once too (wiring pin)', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    let sendCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: bs58.encode(new Uint8Array(32).fill(1)), lastValidBlockHeight: 999999}}),
+      sendTransaction: () => {
+        sendCalls++;
+        if (sendCalls === 1) throw new Error(LIVE_BLOCKHASH_REFUSAL);
+        return 'SigSolRefreshed';
+      },
+      getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
+    };
+    await expect(withStubUrl(async () => {
+      const {sendSol} = require('../solana');
+      return (sendSol as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000n);
+    })).resolves.toBe('SigSolRefreshed');
+    expect(sendCalls).toBe(2);
+    const lines = warn.mock.calls.map(c => String(c[0]));
+    expect(lines.some(l => /money: sol send step blockhash-refresh-retry/.test(l))).toBe(true);
+    warn.mockRestore();
+  });
+});
