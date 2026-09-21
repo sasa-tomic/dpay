@@ -76,7 +76,6 @@ export const convertFr: ConvertMessages = {
     counterparty: venue => `Exécuté par ${venue}.`,
     counterpartySigns: 'Ton téléphone signe la transaction que la venue a construite — personne d\u2019autre ne signe rien.',
     priceImpactLine: (pct, venue) => `Impact sur le prix : ${pct} (chiffre propre de ${venue})`,
-    platformFeeLine: (pct, venue) => `Frais d'intégrateur ${venue} : ${pct}`,
     solFeeLine: fee => `Frais de réseau Solana : ${fee} (payés au réseau, pas à la venue, pas à dpay)`,
     refusalLine: sym =>
       `Si le prix dépasse le minimum, la transaction échoue on-chain : ton ${sym} reste dans ton portefeuille et rien d'autre n'a été signé.`,
@@ -245,9 +244,7 @@ export const convertFr: ConvertMessages = {
       `La partie Internet Computer est faite : ${amount} est arrivé à ton adresse Ethereum. Ton portefeuille l\u2019envoie maintenant de l\u2019autre côté — dpay ne touche jamais à tes clés Ethereum.`,
     stepApproveLabel: 'Étape 1 — autoriser le contrat de Circle à déplacer les USDC',
     stepBurnLabel: 'Étape 2 — brûler les USDC pour le transfer vers Solana',
-    txToLabel: 'Vers',
     txAmountLabel: 'Montant',
-    txCalldataLabel: 'Données de la transaction',
     copy: 'Copier',
     copied: 'Copié',
     approveHint: 'Cela autorise le TokenMessenger de Circle à déplacer exactement les USDC envoyés — rien de plus.',
