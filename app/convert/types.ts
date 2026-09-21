@@ -9,7 +9,7 @@ export type ConvertStep =
   // CeFi-shaped states (multi-venue readiness V2): round-tripped by hydration today; the
   // drivers that move a record INTO them arrive with the CeFi wave. Kept snake_case like
   // the rest of the persisted vocabulary.
-  | 'awaiting_user_authorization' | 'awaiting_deposit' | 'provider_processing'
+  | 'awaiting_deposit' | 'provider_processing'
   | 'quote_expired' | 'provider_refunded'
   // The cross-rail widening (2026-09-16, Routes B/C): the CCTP phases that follow the
   // five IC legs. `awaiting_external` = the user's own EVM wallet must sign approve+burn
@@ -302,7 +302,7 @@ export type LegPlan = {
 export const CONVERT_STEPS: ConvertStep[] = [
   'quote', 'confirming', 'approving', 'approved', 'swapping', 'settling',
   'done', 'pending_withdrawal', 'failed_refunded', 'failed_leg', 'stuck',
-  'awaiting_user_authorization', 'awaiting_deposit', 'provider_processing',
+  'awaiting_deposit', 'provider_processing',
   'quote_expired', 'provider_refunded',
   'awaiting_external', 'crossing', 'sol_ready', 'aborted',
 ];
@@ -323,7 +323,7 @@ export const CROSSRAIL_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
  *  transition matrix can never move it), so hydration refuses it rather than arm the resume
  *  engine's eternal no-op poll. */
 export const PROVIDER_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
-  'awaiting_user_authorization', 'awaiting_deposit', 'provider_processing',
+  'awaiting_deposit', 'provider_processing',
   'done', 'quote_expired', 'provider_refunded',
   'aborted',
 ]);
@@ -331,7 +331,7 @@ export const PROVIDER_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
 /** The provider vocabulary WITHOUT `done` (the one terminal shared by both drivers). A
  *  legs-bearing record parked here is malformed-by-construction — see hydrateOneRecord. */
 export const PROVIDER_ONLY_STEPS: ReadonlySet<ConvertStep> = new Set([
-  'awaiting_user_authorization', 'awaiting_deposit', 'provider_processing',
+  'awaiting_deposit', 'provider_processing',
   'quote_expired', 'provider_refunded',
 ]);
 

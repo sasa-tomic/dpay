@@ -24,7 +24,7 @@
  *         ├→ failed_refunded                       (refused/refunded — user's position named)
  *         └→ stuck                                 (honest unknown — instructions, not a spinner)
  *
- *   CeFi-shaped states (multi-venue readiness V2): awaiting_user_authorization → awaiting_deposit
+ *   CeFi-shaped states (multi-venue readiness V2): awaiting_deposit
  *   → provider_processing → done | quote_expired | provider_refunded. A CeFi record carries NO
  *   legs — an empty `legs` + a `providerRef {orderId}` is valid — because nothing on the IC rail
  *   moves. Their DRIVER (V6) polls the provider's statusUrl; see `convertResume.ts` for the

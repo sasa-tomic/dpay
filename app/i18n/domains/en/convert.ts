@@ -139,9 +139,6 @@ export type ConvertMessages = {
   expiryLine: (at: string) => string;
 
   // --- V6: the provider-held states (convertResume.ts drivers) + the extended stuck watch -----
-  /** A provider order exists and waits on the USER (no providerRef-only driver touches funds). */
-  awaitingAuthTitle: string;
-  awaitingAuthBody: (venue: string) => string;
   awaitingDepositTitle: string;
   awaitingDepositBody: (sym: string, venue: string) => string;
   providerProcessingTitle: string;
@@ -176,8 +173,6 @@ export type ConvertMessages = {
     counterpartySigns: string;
     /** Jupiter publishes a price-impact figure for its route — its own number, verbatim (V8). */
     priceImpactLine: (pct: string, venue: string) => string;
-    /** Jupiter's integrator fee tier when it publishes one (measured null = the none line). */
-    platformFeeLine: (pct: string, venue: string) => string;
     /** The realized Solana network fee for THIS swap's transaction, quoted by the chain itself
      *  before signing — paid to Solana validators, not to the venue, not to dpay. */
     solFeeLine: (fee: string) => string;
@@ -332,9 +327,7 @@ export type ConvertMessages = {
     handoffIntro: (amount: string) => string;
     stepApproveLabel: string;
     stepBurnLabel: string;
-    txToLabel: string;
     txAmountLabel: string;
-    txCalldataLabel: string;
     copy: string;
     copied: string;
     approveHint: string;
@@ -483,7 +476,6 @@ export const convertEn: ConvertMessages = {
     counterparty: venue => `Executed by ${venue}.`,
     counterpartySigns: 'Your phone signs the transaction the venue built — nobody else signs anything.',
     priceImpactLine: (pct, venue) => `Price impact: ${pct} (${venue}'s own figure)`,
-    platformFeeLine: (pct, venue) => `${venue} integrator fee: ${pct}`,
     solFeeLine: fee => `Solana network fee: ${fee} (paid to the network, not the venue, not dpay)`,
     refusalLine: sym =>
       `If the price moves past the minimum, the transaction fails on-chain, your ${sym} stays in your wallet, and nothing else was signed.`,
@@ -535,9 +527,6 @@ export const convertEn: ConvertMessages = {
     `What was signed: approve ${amount} to the ${venue} pool; swap for a minimum of ${minAmount}.`,
   expiryLine: at => `The signed instructions expire by ${at} — after that, nothing can move.`,
 
-  awaitingAuthTitle: 'Authorization needed',
-  awaitingAuthBody: venue =>
-    `This order is open at ${venue} and waits for your authorization. Nothing has moved and nothing will until you approve it — dpay watches the provider's status meanwhile.`,
   awaitingDepositTitle: 'Waiting for the deposit',
   awaitingDepositBody: (sym, venue) =>
     `${venue} issued this order and is waiting for its ${sym} deposit. The swap runs when the provider sees the deposit; dpay keeps watching its status. If no deposit arrives in time, the quote expires and nothing moves.`,
@@ -654,9 +643,7 @@ export const convertEn: ConvertMessages = {
       `The Internet Computer part is done: ${amount} is at your Ethereum address. Your wallet now sends it across — dpay never touches your Ethereum keys.`,
     stepApproveLabel: 'Step 1 — let Circle\u2019s contract move the USDC',
     stepBurnLabel: 'Step 2 — burn the USDC for the Solana transfer',
-    txToLabel: 'To',
     txAmountLabel: 'Amount',
-    txCalldataLabel: 'Transaction data',
     copy: 'Copy',
     copied: 'Copied',
     approveHint: 'This lets Circle\u2019s TokenMessenger move exactly the USDC being sent — nothing more.',

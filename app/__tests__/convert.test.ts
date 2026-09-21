@@ -423,7 +423,7 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     // driver only picks legless records and the IC executor's transition set never visits
     // those steps. Same eternal no-op poll, same refusal. `done` stays legal: it is the one
     // terminal BOTH drivers share (a settled legs>0 record lives there).
-    for (const step of ['awaiting_user_authorization', 'awaiting_deposit', 'provider_processing', 'quote_expired', 'provider_refunded'] as const) {
+    for (const step of ['awaiting_deposit', 'provider_processing', 'quote_expired', 'provider_refunded'] as const) {
       expect(hydrateConvertStore({abc123: record({step})})).toEqual({}); // legs intact (2) → dropped
     }
     const settled = record({step: 'done'});
@@ -459,7 +459,7 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     expect(out).toEqual({abc123: rec});
   });
   test('the CeFi-shaped states all round-trip (hydration today; drivers are a later wave)', () => {
-    for (const step of ['awaiting_user_authorization', 'awaiting_deposit', 'provider_processing', 'quote_expired', 'provider_refunded'] as const) {
+    for (const step of ['awaiting_deposit', 'provider_processing', 'quote_expired', 'provider_refunded'] as const) {
       const rec = record({step, legs: [], providerRef: {orderId: 'ocp-7'}});
       expect(hydrateConvertStore(JSON.parse(JSON.stringify({abc123: rec})))).toEqual({abc123: rec});
     }

@@ -76,7 +76,6 @@ export const convertEs: ConvertMessages = {
     counterparty: venue => `Ejecutado por ${venue}.`,
     counterpartySigns: 'Tu teléfono firma la transacción que construyó la venue — nadie más firma nada.',
     priceImpactLine: (pct, venue) => `Impacto en el precio: ${pct} (cifra propia de ${venue})`,
-    platformFeeLine: (pct, venue) => `Comisión de integrador de ${venue}: ${pct}`,
     solFeeLine: fee => `Comisión de red de Solana: ${fee} (pagada a la red, no a la venue, no a dpay)`,
     refusalLine: sym =>
       `Si el precio pasa del mínimo, la transacción falla on-chain: tu ${sym} se queda en tu monedero y no se firmó nada más.`,
@@ -127,9 +126,6 @@ export const convertEs: ConvertMessages = {
     `Lo firmado: autorizar ${amount} al pool de ${venue}; intercambiar por un mínimo de ${minAmount}.`,
   expiryLine: at => `Las instrucciones firmadas caducan a más tardar a las ${at} — después, nada puede moverse.`,
 
-  awaitingAuthTitle: 'Falta tu autorización',
-  awaitingAuthBody: venue =>
-    `Esta orden está abierta en ${venue} y espera tu autorización. Nada se ha movido y nada se moverá hasta que la apruebes — dpay vigila mientras tanto el estado del proveedor.`,
   awaitingDepositTitle: 'Esperando el depósito',
   awaitingDepositBody: (sym, venue) =>
     `${venue} emitió esta orden y espera su depósito en ${sym}. El intercambio se ejecuta cuando el proveedor ve el depósito; dpay sigue vigilando su estado. Si no llega ningún depósito a tiempo, la cotización caduca y nada se mueve.`,
@@ -248,9 +244,7 @@ export const convertEs: ConvertMessages = {
       `La parte de Internet Computer está hecha: ${amount} está en tu dirección Ethereum. Tu cartera ahora lo envía al otro lado — dpay jamás toca tus claves Ethereum.`,
     stepApproveLabel: 'Paso 1 — permitir que el contrato de Circle mueva los USDC',
     stepBurnLabel: 'Paso 2 — quemar los USDC para el transfer a Solana',
-    txToLabel: 'Para',
     txAmountLabel: 'Importe',
-    txCalldataLabel: 'Datos de la transacción',
     copy: 'Copiar',
     copied: 'Copiado',
     approveHint: 'Permite que el TokenMessenger de Circle mueva exactamente los USDC enviados — nada más.',
