@@ -223,6 +223,41 @@
   refresh-once) + add a second RPC candidate (the public RPC already proven to accept our
   bytes) to the rig and prod lists. ONE more attempt then closes the EURC→ICP return leg
   (order machinery 3× proven; deposit bytes proven valid end-to-end).
+    ATTEMPT #7 2026-09-21 ~20:09-20:24 UTC (rpc-failover ff2f0be served — marker verified in
+  the bundle — but NEVER EXERCISED: no broadcast was reached; the attempt failed pre-money on
+  the send SURFACE, zero movement, reconcile CLEAN). Order creation validated a FOURTH time
+  first-try: shift `447c0c4b85de311e99b4` (exact 8.8 EURC, settle = the 64-hex identifier
+  verbatim, refund = the rail; live min 8.721359). The funding leg then failed on the SHEET,
+  four presses, in three distinct ways — none app-money-path: (1) MY driver patch landed on
+  cmdC4's form-fill (identical oldString, first occurrence) instead of cmdC6's, so run 1 still
+  used the racy per-key typing; the #6 remount race ate the fields; inert click. (2)+(3) The
+  corrected fund op verified the values (native-setter set + read-back) and the echo, but the
+  confirm stayed aria-disabled with the label already reading "Send 8.8 EURC" — canReview was
+  false because the BALANCE STATE WAS STALE: the app's balance polls aborted every tick
+  ("balance poll failed: signal is aborted without reason"; the relay's own IC boundary reads
+  were timing out at 5000ms all day — r6 stderr) so `overBalance` gated a review whose amount
+  is under the true balance; then the 3-strike OFFLINE GATE REPLACED THE SHEET BODY mid-review
+  ("Sending to an address needs a connection", screenshot captured; headline honestly flipped
+  to "~ EURC approx."). (4) Cold-rig restart mid-window (the host tooling restart killed the
+  rig processes; relay + XFF front rebuilt and re-verified). Shift `447c0c4b…` expired
+  20:24:07Z unfunded — zero value at risk, no refund owed (nothing deposited). Ledger rows
+  134-136 from attempt #6 stand; this attempt added ZERO rows (nothing moved);
+  `just funds reconcile` 18 pairs CLEAN @ this commit. EXACT FAILURE SIGNATURE for the next
+  attempt: tracer shows NO `money: sol send` lines at all (the submit handler never fired —
+  the press landed on a disabled button, DOM click succeeded, handler silent); failure dump
+  console is wall-to-wall balance-poll aborts; the confirm gate is `canReview = resolved?.ok
+  && raw>0 && !overBalance` (SolanaWithdrawSheet) with `resolved` synchronous — the gate is
+  the STALE BALANCE, not the resolution. FIX BEFORE RETRY (app, one defect class): a send
+  sheet with a live-looking review must not demand a FRESH balance read to enable the confirm
+  (stale-ok when amount ≤ last-known balance — the headline itself renders "9.284071 approx."),
+  and the offline gate must never tear down an OPEN send sheet mid-review (defer to the send's
+  terminal state — the corrected-path finding, still unfixed for the pre-submit window). The
+  rpc-failover fix is untouched by this failure and still awaits its live proof; rig recipe
+  for the retry: warm relay FIRST (verify balances latency well under the poll budget via a
+  real route probe), XFF front for the partner calls, fund op with the enable-wait (driver
+  now waits ≤40s for the confirm to un-gate and refuses to blind-press). ONE more attempt
+  remains (the one-attempt ledger: #5 broadcast refused once, #6 refused twice + provider
+  proof, #7 never reached a broadcast).
 - **Trocador adapter- **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
   adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`, `/trade`
   POST+GET status) are registered on every build and answer 503 naming `DPAY_TROCADOR_API_KEY`

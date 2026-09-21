@@ -655,8 +655,17 @@ async function cmdC4(eurcAmount) {
       await sleep(1_500);
     }
     try {
-      await driver.type('sol-send-address-input', facts.depositAddress);
-      await driver.type('sol-send-amount-input', depositAmount);
+      await setInputValue(driver, 'sol-send-address-input', facts.depositAddress);
+      await setInputValue(driver, 'sol-send-amount-input', depositAmount);
+      await sleep(1_200);
+      const vals = await driver.page.evaluate(() => ({
+        addr: document.querySelector('[data-testid="sol-send-address-input"]')?.value ?? '',
+        amt: document.querySelector('[data-testid="sol-send-amount-input"]')?.value ?? '',
+      }));
+      log(`form values: ${JSON.stringify(vals)}`);
+      if (vals.addr !== facts.depositAddress || vals.amt !== depositAmount) {
+        throw new Error(`form never accepted the values: ${JSON.stringify(vals)}`);
+      }
     } catch (e) {
       log(`OP 1c send form failure: ${e.message}`);
       log(`SEND SURFACE: ${(await driver.bodyText()).replace(/\s+/g, ' ').slice(0, 1200)}`);
@@ -901,6 +910,22 @@ async function cmdFundC6(destAddress, amount) {
       throw new Error('fund-c6: review card never echoed the destination — refusing');
     }
     await driver.screenshot('live-fundc6-send-review');
+    // The confirm is disabled until canReview (resolved.ok && raw>0 && !overBalance) — after a
+    // COLD relay boot the balance poll lands late and the sheet briefly believes over-balance
+    // (the attempt-#7 inert-click signature: click lands, submit never fires, zero tracer).
+    // WAIT for the disabled state to clear (bounded), then press ONCE.
+    let enabled = false;
+    for (let i = 0; i < 40; i++) {
+      const st = await driver.page.evaluate(() => {
+        const btn = document.querySelector('[data-testid="btn-sol-send-confirm"]');
+        return {found: btn != null, disabled: btn?.getAttribute('disabled'), aria: btn?.getAttribute('aria-disabled'), text: (btn?.textContent ?? '').slice(0, 50)};
+      });
+      if (st.found && st.disabled !== 'true' && st.aria !== 'true') { enabled = true; break; }
+      if (i % 5 === 0) log(`confirm still gated (${i}s): ${JSON.stringify(st)}`);
+      await sleep(1_000);
+    }
+    log(`confirm enabled: ${enabled}`);
+    if (!enabled) throw new Error('fund-c6: confirm never enabled in 40s — refusing to press');
     try {
       await driver.click('btn-sol-send-confirm');
     } catch (e) {
