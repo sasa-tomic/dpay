@@ -97,6 +97,13 @@
   it remains an optional EUR↔USD-on-Solana redundancy rail (adapter unstarted). Final probe:
   the v2 estimate endpoint rejects `sol→icp` outright (`"Currency sol is not supported"`) —
   the site page renders off their internal surface, not the partner API.
+- **StealthEX verified live (2026-09-21): DISQUALIFIED as an ICP-bridge candidate.** The
+  partner key is sops-encrypted (`secrets/stealthex.sops.json`, Bearer auth, v4 base
+  `https://api.stealthex.io`); `icp/mainnet` IS listed (fixed + floating) but the decisive
+  v4 estimate probe returns `NoPair — one or both currencies do not exist` for every needed
+  direction (icp↔sol, icp↔usdc@sol, icp↔eurc@sol, both ways) — the site's ICP↔SOL pair page
+  is not backed by the partner API. Its schema remains the best adapter template in the class
+  (`refund_address` at create, network-aware routes, fixed+floating with `rate_id`).
 - **Prod-relay deploy incl. the partner key** — founder-run per `docs/OPS.md` §3, DO NOT NAG; the
   full unshipped list (2026-09-19 conversion-recovery wave + the 2026-09-20 CeFi live-ops wave)
   is the FOUNDER-OWNED row below. On 2026-09-20 ~22:26 the founder ran `just deploy-ic`: the
