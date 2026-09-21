@@ -239,6 +239,40 @@ export function solanaRpcUrls(): string[] {
   return relayBasesForSolana.map((base) => `${base}${SOLANA_RPC_PROXY_PATH}`);
 }
 
+/** The public Solana mainnet RPC — the broadcast failover TAIL (attempt-#6, 2026-09-21). The
+ *  derived list's HEAD is the relay's Solana proxy, which fronts whatever provider the RELAY's
+ *  deploy environment names — and that provider's send-preflight is what refused a valid
+ *  signed deposit 8/8 while the byte-exact replay to THIS endpoint was accepted + finalized.
+ *  A constant by design: a public, keyless, mainnet-beta endpoint is the one failover home that
+ *  needs no configuration, no key in any bundle, and no trust decision beyond the cluster guard
+ *  the wallet already runs (`SOL_GENESIS_HASH`). Reads never walk here — the 2.5s balance poll
+ *  must not burn a shared public quota the money path may need in the same minute; the tail
+ *  exists for BROADCASTS (see `solanaBroadcastRpcUrls`). */
+export const SOLANA_RPC_PUBLIC_FAILOVER_URL = 'https://api.mainnet-beta.solana.com';
+
+/**
+ * The CANDIDATE LIST every Solana BROADCAST walks — `solanaRpcUrls()` with the public failover
+ * tail appended (the attempt-#6 fix: a head send-preflight refusal must have somewhere to go).
+ * Deterministic order: every derived home in relay-list order, then the tail, always LAST.
+ * The override slots are deliberately NOT extended:
+ *   • the OPERATOR override stays a single candidate — the operator chose ONE home and
+ *     explicitly removed dpay (and every default) from the path; silently adding a third
+ *     party's endpoint to it would betray that choice.
+ *   • the TEST override stays a single candidate — the jest/e2e harness override is the
+ *     offline loop's isolation contract and must never touch the real internet.
+ *   • a devnet/testnet-shaped derivation stays single-homed — a mainnet tail behind a test
+ *     cluster would mix clusters, a fund-loss class (mirrors `setSolanaRpcUrl`'s refusal).
+ */
+export function solanaBroadcastRpcUrls(): string[] {
+  if (operatorSolanaRpc !== null) return [operatorSolanaRpc];
+  if (SOLANA_RPC_TEST_OVERRIDE !== undefined) return [SOLANA_RPC_TEST_OVERRIDE];
+  const list = relayBasesForSolana.map((base) => `${base}${SOLANA_RPC_PROXY_PATH}`);
+  if (!list.includes(SOLANA_RPC_PUBLIC_FAILOVER_URL) && !isSolanaDevnet()) {
+    list.push(SOLANA_RPC_PUBLIC_FAILOVER_URL);
+  }
+  return list;
+}
+
 /** The endpoint every Solana read and broadcast uses RIGHT NOW: the HEAD of the candidate
  *  list — the preferred home, the one availability checks (the seam's rail gate,
  *  `isSolanaRpcAvailable`, `isSolanaDevnet`) read. The walk itself lives in

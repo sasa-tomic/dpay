@@ -15,7 +15,7 @@
 // (The v1 durable-nonce reclaim tool was removed 2026-08-14: no user ever held v1 nonce funds.)
 
 import bs58 from 'bs58';
-import {solanaRpcUrl, solanaRpcUrls, icGatewayUrl, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS, SOL_RPC_IMPORT_DEADLINE_MS} from './config/constants';
+import {solanaRpcUrl, solanaRpcUrls, solanaBroadcastRpcUrls, icGatewayUrl, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS, SOL_RPC_IMPORT_DEADLINE_MS} from './config/constants';
 import {solanaTokenAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
 import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
@@ -164,6 +164,15 @@ export async function loadRpcForSend(
 // re-signs + re-broadcasts EXACTLY ONCE (tracer: `step blockhash-refresh-retry`) — a diagnosed
 // state refresh, never a blind loop (founder rule). A second refusal throws the refused-twice
 // class the sheet renders as its own honest copy; any OTHER error never refreshes.
+//
+// ATTEMPT-#6 COMPOSITION (2026-09-21): each broadcast attempt is now a full CANDIDATE WALK over
+// `solanaBroadcastRpcUrls()` — the relay-derived homes + the public mainnet tail. The walk
+// re-sends the SAME signed bytes to the next home on a blockhash-not-found refusal (no re-sign;
+// the signature is valid on any endpoint — the live replay proved it), so the refresh below
+// fires only when EVERY candidate refused: the once-only refresh bound is untouched, and the
+// refused-twice class + its honest copy are untouched. The tracer gains one inner step per
+// advance (`rpc-failover`, emitted by the walk itself), so the story reads
+// broadcast → rpc-failover → [accepted | blockhash-refresh-retry → …].
 // ============================================================================
 
 /** The structural RPC subset the broadcast helper needs — satisfied by solana/rpc.ts's
@@ -191,26 +200,32 @@ async function broadcastSignedWithFreshBlockhash(
   at: (step: string) => void,
   sign: (blockhashB58: string) => Uint8Array,
 ): Promise<string> {
+  // The broadcast walk's candidate list — derived homes + the public tail (attempt-#6). The
+  // blockhash fetch rides the SAME list: the tail is same-cluster mainnet, so a relay leg
+  // that is down no longer kills the send at the first await.
+  const urls = solanaBroadcastRpcUrls();
   at('blockhash');
-  const {blockhash} = await rpc.getLatestBlockhash(solanaRpcUrls(), {signal});
+  const {blockhash} = await rpc.getLatestBlockhash(urls, {signal});
   at('sign');
   const raw = sign(blockhash);
   at('broadcast');
   try {
-    return await rpc.sendTransaction(solanaRpcUrls(), raw, {signal});
+    return await rpc.sendTransaction(urls, raw, {signal});
   } catch (e: unknown) {
     if (!isBlockhashNotFoundRefusal(e)) throw e;
     // The one diagnosed refresh: the error names the state (the simulating node's blockhash
     // queue missed a fresh hash), the remedy is that state's refresh, and attempt one is
     // provably unsent (preflight refusal = dropped before acceptance). Exactly once — a second
-    // refusal is the honest refused-twice class, never a loop.
+    // refusal is the honest refused-twice class, never a loop. (With the attempt-#6 walk this
+    // fires only after EVERY candidate refused the SAME state — the walk already re-sent the
+    // identical bytes down the list first.)
     at('blockhash-refresh-retry');
-    const {blockhash: fresh} = await rpc.getLatestBlockhash(solanaRpcUrls(), {signal});
+    const {blockhash: fresh} = await rpc.getLatestBlockhash(urls, {signal});
     at('sign');
     const reRaw = sign(fresh);
     at('broadcast');
     try {
-      return await rpc.sendTransaction(solanaRpcUrls(), reRaw, {signal});
+      return await rpc.sendTransaction(urls, reRaw, {signal});
     } catch (e2: unknown) {
       if (isBlockhashNotFoundRefusal(e2)) {
         throw new Error(`sol broadcast refused twice (fresh block re-signed once): ${e2 instanceof Error ? e2.message : String(e2)}`);
@@ -551,8 +566,9 @@ export async function getSolSignatureStatus(
 
 // ---------------------------------------------------------------------------
 // Convert seams (solana_amm venues — Jupiter, 2026-09-15). The submission path is EXACTLY the
-// SOL payment rail's: `sendTransaction` over `solanaRpcUrls()` (which includes the relay's pure
-// RPC proxy — an allowlisted read cache around a verbatim pipe, `solana.rs`). These functions
+// SOL payment rail's: `sendTransaction` over `solanaBroadcastRpcUrls()` (the relay's pure RPC
+// proxy homes — an allowlisted read cache around a verbatim pipe, `solana.rs` — plus the
+// public mainnet failover tail, the attempt-#6 fix). These functions
 // never sign anything — the signed bytes arrive from the convert record (the device signed
 // them against the venue's UNSIGNED tx before the record was written) — and they never invent
 // a verdict: the chain's own status/token-balance replies are the only inputs.
@@ -562,13 +578,17 @@ export async function getSolSignatureStatus(
  *  Returns the node's signature (base58). Throws on refusal/transport failure — a refusal here
  *  is definitive-unless-proven-otherwise: Solana preflight rejections are instruction errors,
  *  but a timeout is NOT a refusal (the caller's recovery path re-reads the status, never
- *  re-signs, and resubmits only the IDENTICAL bytes, which the chain dedups by signature). */
+ *  re-signs, and resubmits only the IDENTICAL bytes, which the chain dedups by signature).
+ *  ATTEMPT-#6: the broadcast walks `solanaBroadcastRpcUrls()` — the attempt-6 live refusal was
+ *  THIS path (the EURC→ICP deposit hand-off): the Helius head refused the same valid signed
+ *  bytes 8/8 on preflight state while the public tail accepted them on replay. The walk now
+ *  re-sends the identical bytes to the tail on exactly that refusal — no re-sign anywhere. */
 export async function submitRawSolTx(raw: Uint8Array, signal?: AbortSignal): Promise<string> {
   if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
   const {sendTransaction} = await loadRpcForSend();
   let step = 'broadcast';
   try {
-    const sig = await sendTransaction(solanaRpcUrls(), raw, {signal});
+    const sig = await sendTransaction(solanaBroadcastRpcUrls(), raw, {signal});
     traceSend(`raw submit (convert) BROADCAST accepted sig=${sig}`);
     return sig;
   } catch (e: unknown) {
@@ -1147,7 +1167,7 @@ export async function broadcastSolPayment(
   //    DIFFERENT transaction than the one we verified (honest unknown; do NOT assume success).
   let broadcastSig: string;
   try {
-    broadcastSig = await rpc.sendTransaction(solanaRpcUrls(), payment.tx, {
+    broadcastSig = await rpc.sendTransaction(solanaBroadcastRpcUrls(), payment.tx, {
       signal,
       minContextSlot: request.slot,
       config: {commitment: SOL_PAYMENT_COMMITMENT, minContextSlot: request.slot, skipPreflight: false},
