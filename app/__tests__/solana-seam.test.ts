@@ -467,7 +467,7 @@ describe('solana seam — sendSpl (Phase 6 SPL direct send — mint passed by th
     const VENUE_MESSAGE = 'Transaction simulation failed: error processing Instruction 0: custom program error: 0x1';
     const methods: string[] = [];
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(async (_url: unknown, init?: {body: string}) => {
-      const req = JSON.parse(init.body) as {id: number; method: string};
+      const req = JSON.parse(init?.body ?? '{}') as {id: number; method: string};
       methods.push(req.method);
       if (req.method === 'sendTransaction') {
         // Helius's rejection shape: HTTP 200, `error` (not `result`).
