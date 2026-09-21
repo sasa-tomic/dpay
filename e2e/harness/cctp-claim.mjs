@@ -12,9 +12,11 @@
 //   node e2e/harness/cctp-claim.mjs balance                    — USDC balance at the rail ATA
 import {execFileSync} from 'node:child_process';
 import {createHash, createHmac} from 'node:crypto';
-import {ed25519} from '@noble/curves/ed25519';
-import {ExtendedPoint} from '@noble/curves/ed25519';
+import {ed25519 as nobleEd25519} from '@noble/curves/ed25519';
 import {bs58Encode} from './soltx.mjs';
+import {deriveSolanaKeypair} from './jupiter.mjs';
+import {getProgramDerivedAddress} from '../../app/node_modules/@solana/addresses/dist/index.node.mjs';
+const sha256b = (...chunks) => { const h = createHash('sha256'); for (const c of chunks) h.update(c); return new Uint8Array(h.digest()); };
 
 const RPC = process.env.DPAY_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const IRIS = 'https://iris-api.circle.com';
@@ -27,6 +29,7 @@ const ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
 const SYSTEM_PROGRAM = '11111111111111111111111111111111';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const USDC_ERC20 = 'A0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+const log = (...a) => console.log('[cctp-claim]', ...a);
 const COMPUTE_BUDGET_PROGRAM = 'ComputeBudget111111111111111111111111111111';
 
 // --- base58 -----------------------------------------------------------------
@@ -54,43 +57,37 @@ async function rpc(method, params) {
     body: JSON.stringify({jsonrpc: '2.0', id: 1, method, params}),
   });
   const j = await r.json();
-  if (j.error) throw new Error(`rpc ${method}: ${JSON.stringify(j.error).slice(0, 400)}`);
+  if (j.error) throw new Error(`rpc ${method}: ${JSON.stringify(j.error).slice(0, 400)} params=${JSON.stringify(params).slice(0, 200)}`);
   return j.result;
 }
-const accountInfo = async (addr) =>
-  (await rpc('getAccountInfo', [addr, {encoding: 'base64'}])).value;
+const accountInfo = async (addr) => {
+  if (addr == null) throw new Error(`accountInfo(null) — caller bug`);
+  log(`lookup ${addr}`);
+  return (await rpc('getAccountInfo', [addr, {encoding: 'base64'}])).value;
+};
 
-// --- PDA derivation (solana findProgramAddress) ------------------------------
-function sha256b(...chunks) {
-  const h = createHash('sha256');
-  for (const c of chunks) h.update(c);
-  return new Uint8Array(h.digest());
-}
-const offCurve = (b32arr) => { try { ExtendedPoint.fromHex(Buffer.from(b32arr).toString('hex')); return false; } catch { return true; } };
-function findPda(programIdB58, seeds) {
-  for (let bump = 255; bump >= 0; bump--) {
-    const h = sha256b(...seeds, new Uint8Array([bump]), b32(programIdB58));
-    if (offCurve(h)) return {address: bs58Encode(h), bump};
-  }
-  throw new Error('no pda found');
+// --- PDA derivation (canonical: @solana/addresses getProgramDerivedAddress — the same
+// dependency the app's SOL rail uses; a hand-rolled sha256+off-curve check disagreed with the
+// chain and was removed) ------------------------------------------------------
+// @solana/addresses lives in the APP's node_modules (the SOL rail's own dependency) — the
+// harness tree does not ship it; import it by the relative package path.
+async function findPda(programIdB58, seeds) {
+  // strings are utf8 seeds, Uint8Arrays pass through as raw bytes
+  const norm = seeds.map(x => typeof x === 'string' ? enc.encode(x) : new Uint8Array(x));
+  const [addr, bump] = await getProgramDerivedAddress({programAddress: programIdB58, seeds: norm});
+  return {address: addr, bump};
 }
 
-// --- sol rail key (SLIP-10 ed25519 m/44'/501'/0'/0' from the IC float seed) --
+// --- sol rail key: CANONICAL derivation (e2e/harness/jupiter.mjs deriveSolanaKeypair — the
+// mirror of app/solana/identity.ts). A hand-rolled SLIP-10 here derived a DIFFERENT key (the
+// first ed25519 level hashes the SERIALIZED key, not the seed); never re-derive what already
+// has one proven implementation. The result is asserted against the registered rail address.
 function loadRail() {
   const env = {...process.env, SOPS_AGE_KEY_FILE: process.env.SOPS_AGE_KEY_FILE || '.dev/age/agent-key.txt'};
   const hex = execFileSync('node', ['scripts/agent-key.mjs', 'seed'], {env, cwd: process.cwd()}).toString().trim();
   if (!/^[0-9a-f]{64}$/i.test(hex)) throw new Error('float seed: unexpected shape from agent-key.mjs seed');
-  const seed = Buffer.from(hex, 'hex');
-  const mac = (key, data) => createHmac('sha512', key).update(data).digest();
-  const I = mac(enc.encode('ed25519 seed'), seed);
-  let k = new Uint8Array(I.slice(0, 32)), c = new Uint8Array(I.slice(32));
-  for (const idx of [44, 501, 0, 0]) {
-    const data = Buffer.concat([Buffer.from([0]), Buffer.from(k), Buffer.from(Uint32Array.of(0x80000000 | idx).buffer)]);
-    const d = mac(c, data);
-    k = new Uint8Array(d.slice(0, 32)); c = new Uint8Array(d.slice(32));
-  }
-  const pub = ed25519.getPublicKey(k);
-  return {secret64: new Uint8Array([...k, ...pub]), pub, address: bs58Encode(pub)};
+  const rail = deriveSolanaKeypair(hex);
+  return {seed: rail.seed, secret64: new Uint8Array([...rail.seed, ...rail.publicKey]), pub: rail.publicKey, address: rail.address};
 }
 
 // --- CCTP message fetch + parse ---------------------------------------------
@@ -118,70 +115,63 @@ function parseMessage(hexMsg) {
   return msg;
 }
 function parseBurnBody(body) {
-  // V1/V2 BurnMessage: version u32 | burnMessageLength u32 | burnToken 32 | mintRecipient 32 | amount u64
-  const v = Buffer.from(body).readUInt32BE(0);
-  const len = Buffer.from(body).readUInt32BE(4);
-  const bb = body.subarray(8, 8 + len);
+  // BurnMessageV2 layout — version u32 @0, then seven bytes32/u256 fields; verified against
+  // REAL mainnet messages AND Circle's documented offsets (messageSender@100, maxFee@132,
+  // feeExecuted@164, expirationBlock@196): burnToken@4 | mintRecipient@36 (a RAW 32-byte
+  // Solana pubkey when dst=5) | amount u256 @68 | messageSender@100 | maxFee@132 |
+  // feeExecuted@164 | expirationBlock@196. Body is exactly 228 bytes when hookData is empty.
+  const b = Buffer.from(body);
+  if (b.length < 100) throw new Error(`burn body too short: ${b.length}`);
   return {
-    version: v,
-    burnToken: Buffer.from(bb.subarray(0, 32)).toString('hex'),
-    mintRecipient: bs58Encode(bb.subarray(32, 64)),
-    amount: BigInt(`0x${Buffer.from(bb.subarray(64, 72)).toString('hex')}`),
+    version: b.readUInt32BE(0),
+    burnToken: b.subarray(4, 36).toString('hex'),
+    mintRecipient: bs58Encode(b.subarray(36, 68)),
+    amount: BigInt(`0x${b.subarray(68, 100).toString('hex')}`),
+    maxFee: BigInt(`0x${b.subarray(132, 164).toString('hex')}`),
   };
 }
 
 // --- claim account census -----------------------------------------------------
-async function resolveAccounts(msg, rail) {
+async function resolveAccounts(msg, rail, userTokenAccount) {
   const owner = rail.pub;
-  const ataSeeds = [owner, b32(TOKEN_PROGRAM), b32(USDC_MINT)];
   const found = {};
   const must = async (name, addr, why) => {
     const info = await accountInfo(addr);
-    if (info == null) throw new Error(`account ${name} (${addr}) NOT FOUND on-chain — ${why}`);
+    if (info == null) throw new Error(`account ${name} (${String(addr)} type=${typeof addr}) NOT FOUND on-chain — ${why}`);
     found[name] = {addr, dataLen: info.data.length, owner: info.owner};
     return addr;
   };
   found.payer = rail.address;
   found.caller = rail.address;
-  const ata = findPda(ATA_PROGRAM, ataSeeds).address;
-  await must('user_token_account', ata, 'the recipient USDC ATA must exist (create it first)');
-  await must('authority_pda', findPda(MT_PROGRAM, [enc.encode('message_transmitter_authority'), b32(TM_PROGRAM)]).address, 'MT authority PDA');
-  // config: try documented seed candidates; fall back to the used_nonce seed for reference.
-  let config = null;
-  for (const seeds of [
-    [enc.encode('message_transmitter')],
-    [enc.encode('message_transmitter'), Buffer.from([5, 0, 0, 0])],
-    [enc.encode('message_transmitter'), Buffer.from([0, 0, 0, 5])],
-    [enc.encode('message_transmitter_config')],
-  ]) {
-    const cand = findPda(MT_PROGRAM, seeds).address;
-    if (await accountInfo(cand) != null) { config = cand; break; }
-  }
-  if (config == null) throw new Error('message_transmitter config not found by any seed candidate');
-  found.message_transmitter = {addr: config};
-  const usedNonce = findPda(MT_PROGRAM, [enc.encode('used_nonce'), msg.nonce]).address;
+  // The recipient token account must exist AND match the burn's own mintRecipient (32B) —
+  // receiveMessage mints into exactly that account. The account need NOT be a canonical ATA:
+  // the dpay sol-rail's USDC lives in a plain token account (22HkLhns…), so the caller passes
+  // whichever account the burn named.
+  const userAta = userTokenAccount ?? findPda(ATA_PROGRAM, [owner, b32(TOKEN_PROGRAM), b32(USDC_MINT)]).address;
+  log(`user_token_account = ${JSON.stringify(userAta)} (param was ${JSON.stringify(userTokenAccount)})`);
+  await must('user_token_account', userAta, 'the burn’s recipient USDC token account must exist');
+  // The authority PDA is an "empty PDA" (receive_message.rs: CHECK empty PDA) — it exists
+  // only for CPI signer verification and may legitimately have NO on-chain account.
+  found.authority_pda = {addr: (await findPda(MT_PROGRAM, [enc.encode('message_transmitter_authority'), b32(TM_PROGRAM)])).address, emptyPda: true};
+  // config: canonical seed per the Circle test client (findProgramAddress('message_transmitter',
+  // null, MT_PROGRAM)).
+  const config = (await findPda(MT_PROGRAM, ['message_transmitter'])).address;
+  await must('message_transmitter', config, 'the MessageTransmitterV2 config PDA');
+  const usedNonce = (await findPda(MT_PROGRAM, [enc.encode('used_nonce'), msg.nonce])).address;
   found.used_nonce = {addr: usedNonce, expectNull: true, exists: (await accountInfo(usedNonce)) != null};
   found.receiver = TM_PROGRAM;
-  await must('token_messenger', findPda(TM_PROGRAM, [enc.encode('token_messenger')]).address, 'TM token_messenger PDA');
-  let remote = null;
-  for (const d of [Buffer.from([0, 0, 0, 0]) /* sourceDomain=0 both orders identical */]) {
-    remote = findPda(TM_PROGRAM, [enc.encode('remote_token_messenger'), d]).address;
-  }
+  await must('token_messenger', (await findPda(TM_PROGRAM, [enc.encode('token_messenger')])).address, 'TM token_messenger PDA');
+  const remote = (await findPda(TM_PROGRAM, ['remote_token_messenger', String(msg.sourceDomain)])).address;
   await must('remote_token_messenger', remote, 'TM remote_token_messenger for source domain 0');
-  await must('token_minter', findPda(TM_PROGRAM, [enc.encode('token_minter')]).address, 'TM token_minter PDA');
-  await must('local_token', findPda(TM_PROGRAM, [enc.encode('local_token'), b32(USDC_MINT)]).address, 'TM local_token PDA for USDC');
-  let pair = null;
-  for (const dom of [Buffer.from([0, 0, 0, 0])]) {
-    for (const tok of [new Uint8Array(Buffer.from(USDC_ERC20.replace(/^0x/, '').padStart(64, '0'), 'hex'))]) {
-      const cand = findPda(TM_PROGRAM, [enc.encode('token_pair'), dom, tok]).address;
-      if (await accountInfo(cand) != null) { pair = cand; break; }
-    }
-  }
-  if (pair == null) throw new Error('token_pair PDA not found (USDC eth->sol pair)');
-  found.token_pair = {addr: pair};
-  await must('custody', findPda(TM_PROGRAM, [enc.encode('custody'), b32(USDC_MINT)]).address, 'TM custody PDA for USDC');
-  found.event_authority = findPda(MT_PROGRAM, [enc.encode('__event_authority')]).address;
-  found.tm_event_authority = findPda(TM_PROGRAM, [enc.encode('__event_authority')]).address;
+  await must('token_minter', (await findPda(TM_PROGRAM, [enc.encode('token_minter')])).address, 'TM token_minter PDA');
+  await must('local_token', (await findPda(TM_PROGRAM, [enc.encode('local_token'), b32(USDC_MINT)])).address, 'TM local_token PDA for USDC');
+  // the remote token seed is the RAW 32 bytes (left-padded EVM address), never its base58 text
+  const remoteTokenBytes = new Uint8Array(Buffer.from(USDC_ERC20.replace(/^0x/, '').padStart(64, '0'), 'hex'));
+  const pair = (await findPda(TM_PROGRAM, ['token_pair', String(msg.sourceDomain), remoteTokenBytes])).address;
+  await must('token_pair', pair, 'TM token_pair PDA for the burned USDC (eth source)');
+  await must('custody', (await findPda(TM_PROGRAM, [enc.encode('custody'), b32(USDC_MINT)])).address, 'TM custody PDA for USDC');
+  found.event_authority = (await findPda(MT_PROGRAM, [enc.encode('__event_authority')])).address;
+  found.tm_event_authority = (await findPda(TM_PROGRAM, [enc.encode('__event_authority')])).address;
   return found;
 }
 
@@ -243,7 +233,7 @@ async function buildAndSign(rail, msg, attestation, a) {
   const roUnsigned = keys.filter((k) => !k.signer && !k.writable).length;
   const header = [keys.length ? keys.filter((k) => k.signer).length : 0, 1, roUnsigned];
   const message = Buffer.concat([
-    Buffer.from(header), Buffer.from(bs58Decode(bh)),
+    Buffer.from(header), Buffer.from(bs58Decode(bh.blockhash)),
     Buffer.from([instructions.length]),
     ...instructions.map((ix) => {
       const idx = ix.accounts.map((acc) => keys.findIndex((k) => k.pubkey === acc.pubkey));
@@ -255,7 +245,7 @@ async function buildAndSign(rail, msg, attestation, a) {
       return Buffer.concat([head, dl, Buffer.from(ix.data, 'base64')]);
     }),
   ]);
-  const sig = ed25519.sign(new Uint8Array(message), rail.secret64);
+  const sig = nobleEd25519.sign(new Uint8Array(message), rail.seed);
   const signers = keys.filter((k) => k.signer).length;
   const tx = Buffer.concat([
     Buffer.from(Uint16Array.of(signers).buffer),
@@ -273,7 +263,7 @@ async function ataBalance(ata) {
 }
 
 // --- main ---------------------------------------------------------------------
-const isMain = process.argv[1] != null && fileURLToPath(import.meta.url) === realpathSync(process.argv[1]);
+const isMain = process.argv[1] != null && import.meta.url === (await import('node:url').then(m => m.pathToFileURL(process.argv[1])).catch(() => null))?.href;
 if (isMain) {
   const [cmd, txHash] = process.argv.slice(2);
   try {
@@ -283,8 +273,8 @@ if (isMain) {
       const ata = findPda(ATA_PROGRAM, [rail.pub, b32(TOKEN_PROGRAM), b32(USDC_MINT)]).address;
       const bal = await ataBalance(ata);
       console.log(JSON.stringify({ata, ...bal}, null, 2));
-    } else if (cmd === 'status' || cmd === 'claim') {
-      if (!/^0x[0-9a-fA-F]{64}$/.test(txHash ?? '')) throw new Error('usage: cctp-claim.mjs status|claim <0xtxhash>');
+    } else if (cmd === 'status' || cmd === 'claim' || cmd === 'dryrun') {
+      if (!/^0x[0-9a-fA-F]{64}$/.test(txHash ?? '')) throw new Error('usage: cctp-claim.mjs status|claim|dryrun <0xtxhash>');
       const m = await fetchMessage(txHash);
       const msg = parseMessage(m.message);
       const att = new Uint8Array(Buffer.from(m.attestation.replace(/^0x/, ''), 'hex'));
@@ -294,15 +284,24 @@ if (isMain) {
       if (msg.sourceDomain !== 0 || msg.destinationDomain !== 5) throw new Error('message is not eth->sol');
       if (msg.recipient.join() !== b32(TM_PROGRAM).join()) throw new Error('recipient is not TokenMessengerMinterV2');
       if (msg.destinationCaller.some((x) => x !== 0)) throw new Error('destinationCaller set — not permissionless');
-      if (burn.burnToken !== USDC_ERC20.toLowerCase().replace(/^0x/, '')) throw new Error('burn token is not mainnet USDC');
+      if (burn.burnToken.replace(/^0x/, '').toLowerCase().padStart(64, '0') !== USDC_ERC20.toLowerCase().replace(/^0x/, '').padStart(64, '0')) throw new Error('burn token is not mainnet USDC');
       if (burn.amount <= 0n) throw new Error('zero amount');
-      const a = await resolveAccounts(msg, rail);
+      const burnRecipient = burn.mintRecipient;
+      const a = await resolveAccounts(msg, rail, burnRecipient);
       log('account census: ' + JSON.stringify(a, null, 2));
-      if (cmd === 'status') {
+      if (cmd === 'dryrun') {
+        // Sign the full claim transaction and STOP — the dry run proves parsing, account
+        // census, tx construction and key derivation against LIVE Circle+Solana data without
+        // broadcasting anything (and without touching anyone's funds: a completed burn's
+        // used_nonce is already consumed, so even an accidental send would fail on-chain).
+        const {txBase64} = await buildAndSign(rail, msg, att, a);
+        log(`DRY RUN signed OK — ${txBase64.length} b64 bytes, NOT sent (burn already claimed/pending by its owner)`);
+        console.log(JSON.stringify({dryRun: true, burnTx: txHash, mintRecipient: burnRecipient, signedTxB64Len: txBase64.length}, null, 2));
+      } else if (cmd === 'status') {
         const ata = a.user_token_account.addr;
-        log(`pre-claim USDC at rail ATA: ${JSON.stringify(await ataBalance(ata))}`);
-        console.log('STATUS OK — ready to claim');
-      } else {
+        log(`pre-claim USDC at recipient account: ${JSON.stringify(await ataBalance(ata))}`);
+        console.log('STATUS OK - ready to claim');
+      } else if (cmd === 'claim') {
         const balBefore = await ataBalance(a.user_token_account.addr);
         const {txBase64, blockhash} = await buildAndSign(rail, msg, att, a);
         log(`signing OK — blockhash ${blockhash}, tx ${txBase64.length} b64 bytes; sending…`);

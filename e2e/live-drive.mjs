@@ -1150,12 +1150,12 @@ async function cmdSendCkerc20(assetKey, amount) {
     }
     // Offline gate: address sends refuse while the app sees no connection ('Check again'
     // re-runs the probe). Same pattern as the SOL send driver.
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 6; i++) {
       const ok = await driver.isPresent('send-address-input') || await driver.isPresent('withdraw-resume');
       if (ok) break;
-      log(`offline gate (round ${i + 1}) — Check again`);
+      log(`offline gate (round ${i + 1}) — Check again, waiting out the full balance refresh`);
       try { await clickByText(driver, 'Check again'); } catch {}
-      await sleep(3_500);
+      await sleep(20_000);
     }
     // A retained offramp (approvals already signed, submit leg pending) reopens straight
     // into the withdraw sheet with withdraw-resume + retry enabled — no address/amount
@@ -1171,12 +1171,32 @@ async function cmdSendCkerc20(assetKey, amount) {
       await sleep(2_000);
       const bodyA = (await driver.bodyText()).replace(/\s+/g, ' ');
       log(`AFTER ADDRESS: ${bodyA.slice(0, 400)}`);
+      // The withdraw form can take a while to hydrate (slow boundary reads) and the
+      // connection gate can reassert — wait patiently, re-checking the gate.
+      let amtOk = false;
+      for (let i = 0; i < 12; i++) {
+        try { await driver.findByTestID('withdraw-amount-input', {timeoutMs: 4_000}); amtOk = true; break; }
+        catch {
+          log(`withdraw form not up (round ${i + 1})`);
+          try { await clickByText(driver, 'Check again'); } catch {}
+        }
+      }
+      if (!amtOk) throw new Error('withdraw-amount-input never appeared');
       await driver.type('withdraw-amount-input', amount);
     }
     await sleep(2_000);
     const body = (await driver.bodyText()).replace(/\s+/g, ' ');
     log(`REVIEW${resumed ? ' (RESUME)' : ''}: ${body.slice(0, 500)}`);
     await driver.screenshot('live-ckerc20-send-review');
+    // The connection gate can also reassert itself over the review (the relay hiccups
+    // mid-flow) — re-run the gate loop if the confirm button vanished.
+    for (let i = 0; i < 8; i++) {
+      const ok = await driver.isPresent('btn-withdraw-confirm');
+      if (ok) break;
+      log(`gate over review (round ${i + 1}) — Check again, waiting out the refresh`);
+      try { await clickByText(driver, 'Check again'); } catch {}
+      await sleep(15_000);
+    }
     await driver.click('btn-withdraw-confirm');
     // NOTE: waitForText matches BODY TEXT, not testIDs, and takes {timeoutMs} — the two
     // 12:19-era runs closed the app mid-withdrawal because of exactly this misuse.
@@ -1199,18 +1219,30 @@ async function cmdSendEth(amount) {
     await driver.click('tab-pay');
     await driver.click('btn-pay-send');
     await driver.type('send-address-input', evmAddress);
-    await driver.type('send-amount-input', amount);
-    await sleep(1_500);
+    // ckETH -> 0x is the native minter burn: it routes into the WITHDRAW sheet's testIDs.
+    let up = false;
+    for (let i = 0; i < 12; i++) {
+      if (await driver.isPresent('withdraw-amount-input')) { up = true; break; }
+      log(`withdraw form not up (round ${i + 1})`);
+      try { await clickByText(driver, 'Check again'); } catch {}
+      await sleep(4_000);
+    }
+    if (!up) throw new Error('withdraw-amount-input never appeared');
+    await driver.type('withdraw-amount-input', amount);
+    await sleep(2_000);
     const body = (await driver.bodyText()).replace(/\s+/g, ' ');
-    const gasLine = body.match(/(gas|minter)[^.]*/i);
-    log(`REVIEW: ${body.match(/Total[^.]*|Review[^.]*/i)?.[0] ?? body.slice(0, 300)}${gasLine ? ' | ' + gasLine[0].slice(0, 200) : ''}`);
+    log(`REVIEW: ${body.slice(0, 420)}`);
     await driver.screenshot('live-eth-send-review');
-    await driver.click('btn-send-confirm');
-    await driver.waitForText('send-outcome', {timeoutMs: 120_000});
-    const outcome = await driver.readText('send-outcome');
-    let block = '';
-    try { block = await driver.readText('send-block'); } catch {}
-    log(`SEND OUTCOME: ${outcome} | ${block}`);
+    for (let i = 0; i < 8; i++) {
+      if (await driver.isPresent('btn-withdraw-confirm')) break;
+      log(`gate over review (round ${i + 1})`);
+      try { await clickByText(driver, 'Check again'); } catch {}
+      await sleep(15_000);
+    }
+    await driver.click('btn-withdraw-confirm');
+    try { await driver.findByTestID('withdraw-status', {timeoutMs: 240_000}); } catch {}
+    const outcome = await driver.readText('withdraw-status').catch(() => '(no receipt yet — legs in flight)');
+    log(`SEND OUTCOME: ${outcome}`);
     await driver.screenshot('live-eth-sent');
   });
 }
