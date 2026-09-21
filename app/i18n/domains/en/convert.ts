@@ -139,9 +139,6 @@ export type ConvertMessages = {
   expiryLine: (at: string) => string;
 
   // --- V6: the provider-held states (convertResume.ts drivers) + the extended stuck watch -----
-  /** A provider order exists and waits on the USER (no providerRef-only driver touches funds). */
-  awaitingAuthTitle: string;
-  awaitingAuthBody: (venue: string) => string;
   awaitingDepositTitle: string;
   awaitingDepositBody: (sym: string, venue: string) => string;
   providerProcessingTitle: string;
@@ -535,9 +532,6 @@ export const convertEn: ConvertMessages = {
     `What was signed: approve ${amount} to the ${venue} pool; swap for a minimum of ${minAmount}.`,
   expiryLine: at => `The signed instructions expire by ${at} — after that, nothing can move.`,
 
-  awaitingAuthTitle: 'Authorization needed',
-  awaitingAuthBody: venue =>
-    `This order is open at ${venue} and waits for your authorization. Nothing has moved and nothing will until you approve it — dpay watches the provider's status meanwhile.`,
   awaitingDepositTitle: 'Waiting for the deposit',
   awaitingDepositBody: (sym, venue) =>
     `${venue} issued this order and is waiting for its ${sym} deposit. The swap runs when the provider sees the deposit; dpay keeps watching its status. If no deposit arrives in time, the quote expires and nothing moves.`,

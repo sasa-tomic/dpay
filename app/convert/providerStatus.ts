@@ -110,7 +110,7 @@ export async function fetchProviderStatus(
 /** ONE provider-poll drive: apply the provider's own verdict to the record, or none. The
  *  transition matrix is deliberately small and never backwards:
  *
- *    from awaiting_user_authorization / awaiting_deposit:
+ *    from awaiting_deposit:
  *      deposit-family → awaiting_deposit · processing-family → provider_processing
  *      expired → quote_expired (the QUOTE died before value moved — never set by leg expiry)
  *      refunded → provider_refunded
@@ -137,7 +137,7 @@ export async function advanceProviderRecord(
   if (ref == null) return record; // hydrate guarantees this cannot happen; the guard is for honesty
   const reading = await fetchProviderStatus(ref, relayUrl);
   const from = record.step;
-  const inAwaiting = from === 'awaiting_user_authorization' || from === 'awaiting_deposit';
+  const inAwaiting = from === 'awaiting_deposit';
   const apply = async (next: ConvertRecord): Promise<ConvertRecord> => {
     if (!stillMine()) return next; // stale drive (identity switched mid-poll) — persist nothing
     await persist(next);
@@ -172,7 +172,7 @@ export async function advanceProviderRecord(
       if (inAwaiting) return apply({...record, step: 'quote_expired'});
       return record;
     case 'refunded':
-      if (from === 'awaiting_user_authorization' || from === 'awaiting_deposit' || from === 'provider_processing') {
+      if (inAwaiting || from === 'provider_processing') {
         return apply({...record, step: 'provider_refunded'});
       }
       return record;

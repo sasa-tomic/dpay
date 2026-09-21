@@ -127,9 +127,6 @@ export const convertFr: ConvertMessages = {
     `Ce qui a été signé : approuver ${amount} au pool ${venue} ; échanger pour un minimum de ${minAmount}.`,
   expiryLine: at => `Les instructions signées expirent au plus tard à ${at} — après, plus rien ne peut bouger.`,
 
-  awaitingAuthTitle: 'Autorisation requise',
-  awaitingAuthBody: venue =>
-    `Cette commande est ouverte chez ${venue} et attend ton autorisation. Rien n'a bougé et rien ne bougera tant que tu ne l'approuves pas — dpay surveille en attendant le statut du prestataire.`,
   awaitingDepositTitle: 'En attente du dépôt',
   awaitingDepositBody: (sym, venue) =>
     `${venue} a émis cette commande et attend son dépôt en ${sym}. L'échange s'exécute quand le prestataire voit le dépôt ; dpay continue de surveiller son statut. Si aucun dépôt n'arrive à temps, le devis expire et rien ne bouge.`,

@@ -128,9 +128,6 @@ export const convertDe: ConvertMessages = {
     `Was signiert wurde: Freigabe von ${amount} an den ${venue}-Pool; Tausch auf mindestens ${minAmount}.`,
   expiryLine: at => `Die signierten Anweisungen laufen spätestens um ${at} ab — danach kann sich nichts mehr bewegen.`,
 
-  awaitingAuthTitle: 'Freigabe erforderlich',
-  awaitingAuthBody: venue =>
-    `Diese Order liegt bei ${venue} und wartet auf deine Freigabe. Es hat sich nichts bewegt und wird sich nichts bewegen, bis du sie freigibst — dpay beobachtet derweil den Status des Anbieters.`,
   awaitingDepositTitle: 'Warten auf die Einzahlung',
   awaitingDepositBody: (sym, venue) =>
     `${venue} hat diese Order ausgestellt und wartet auf die ${sym}-Einzahlung. Der Swap läuft, sobald der Anbieter die Einzahlung sieht; dpay beobachtet weiterhin seinen Status. Kommt rechtzeitig keine Einzahlung, läuft das Angebot ab und es bewegt sich nichts.`,

@@ -199,13 +199,6 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
       {/* The provider-held states (V6 drivers): the CeFi record's own venue is a provider, and
           every panel names it, which asset the user holds, and that dpay only WATCHES the
           provider's status — no fabricated progress, no reversal claims. */}
-      {record.step === 'awaiting_user_authorization' ? (
-        <View testID="convert-awaiting-authorization">
-          <ActivityIndicator size="large" color={C.brandText} />
-          <Text style={S.convertStateTitle}>{M.convert.awaitingAuthTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.awaitingAuthBody(venueName)}</Text>
-        </View>
-      ) : null}
       {record.step === 'awaiting_deposit' ? (
         <View testID="convert-awaiting-deposit">
           <ActivityIndicator size="large" color={C.brandText} />

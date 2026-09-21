@@ -539,16 +539,8 @@ describe('Wave-3 recovery invariant — "probe match ⊆ [net, gross] ∧ ∉ cl
 
 describe('Wave-3 recovery invariant — "provider transitions never move backwards" (the full matrix)', () => {
   // held × reading → the ONE allowed next step (or the same step — never an earlier one).
-  // order: awaiting_user_authorization < awaiting_deposit < provider_processing < terminal.
+  // order: awaiting_deposit < provider_processing < terminal.
   const MATRIX: ReadonlyArray<readonly [ConvertRecord['step'], string, Record<string, unknown> | 'unreachable', ConvertRecord['step']]> = [
-    // from awaiting_user_authorization
-    ['awaiting_user_authorization', 'awaiting_deposit', {status: 'pending_deposit'}, 'awaiting_deposit'],
-    ['awaiting_user_authorization', 'processing', {status: 'processing'}, 'provider_processing'],
-    ['awaiting_user_authorization', 'completed', {status: 'completed'}, 'awaiting_user_authorization'],
-    ['awaiting_user_authorization', 'expired', {status: 'expired'}, 'quote_expired'],
-    ['awaiting_user_authorization', 'refunded', {status: 'refunded'}, 'provider_refunded'],
-    ['awaiting_user_authorization', 'unreachable', 'unreachable', 'awaiting_user_authorization'],
-    ['awaiting_user_authorization', 'unknown', {status: 'weird-word'}, 'awaiting_user_authorization'],
     // from awaiting_deposit
     ['awaiting_deposit', 'awaiting_deposit', {status: 'pending_deposit'}, 'awaiting_deposit'],
     ['awaiting_deposit', 'processing', {status: 'processing'}, 'provider_processing'],

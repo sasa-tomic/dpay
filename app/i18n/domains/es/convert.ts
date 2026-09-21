@@ -127,9 +127,6 @@ export const convertEs: ConvertMessages = {
     `Lo firmado: autorizar ${amount} al pool de ${venue}; intercambiar por un mínimo de ${minAmount}.`,
   expiryLine: at => `Las instrucciones firmadas caducan a más tardar a las ${at} — después, nada puede moverse.`,
 
-  awaitingAuthTitle: 'Falta tu autorización',
-  awaitingAuthBody: venue =>
-    `Esta orden está abierta en ${venue} y espera tu autorización. Nada se ha movido y nada se moverá hasta que la apruebes — dpay vigila mientras tanto el estado del proveedor.`,
   awaitingDepositTitle: 'Esperando el depósito',
   awaitingDepositBody: (sym, venue) =>
     `${venue} emitió esta orden y espera su depósito en ${sym}. El intercambio se ejecuta cuando el proveedor ve el depósito; dpay sigue vigilando su estado. Si no llega ningún depósito a tiempo, la cotización caduca y nada se mueve.`,
