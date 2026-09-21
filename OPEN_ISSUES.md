@@ -147,13 +147,7 @@
   BOTH send-sheet submits hung in `submitting` (no outcome, no error phase, past the 60s
   SOL_SEND_TIMEOUT) and NO transfer ever left the rail (on-chain: no new signature; EURC
   measured unchanged at 9.284071); the shift expired unexercised 14:23:25Z with zero value at
-  risk (ledger row 97). NEW BLOCKER (app-side, fix before the next attempt): the SOL withdraw
-  path can hang past its own timeout — prime suspect: the seam treats a 200-with-JSON-RPC-
-  error-body broadcast answer as success (Helius answers `{"error":{…}}` with HTTP 200;
-  reproduced through the relay's solana pipe with a garbage payload) and then polls
-  confirmation forever; the 60s withTimeout signal is not honored on that path. Fix that, then
-  ONE more attempt is available (the venue order machinery is proven good; the settle-format
-  fix is confirmed live at order level). To MEASURE any shift (incl. the expired one) for the
+  risk (ledger row 97). APP-SIDE FIX SHIPPED 2026-09-21 (branch `sol-send-hang-fix`, commit `9c7a138`, inner-loop green: `just typecheck` + 28 SOL jest suites/670 tests): the seam now GUARANTEES the send promise settles the moment the caller's 60s signal fires even if a lower layer ignores the abort (`abortable()` in `app/solana.ts`, wrapping sendSol/sendSpl/sendSolanaPay/createTokenAta — the spinner-forever ending is gone); `sendSpl` gained `sendSol`'s `onBroadcast`; the sheet splits the outcome three ways — a 2xx-with-JSON-RPC-error-body broadcast answer (the Helius shape the prime suspect named) was ALREADY a thrown refusal with the venue's own message and never reaches the confirm poll (now fetch-level pinned), a post-broadcast deadline/abort lands on the honest unknown panel (signature kept, "may still land", four-locale copy), an on-chain failure stays a definite error. NOT yet shipped to the surface the founder drives (the fix rides the next app deploy) — until then the hang can recur; after it ships, ONE more attempt is available (the venue order machinery is proven good; the settle-format fix is confirmed live at order level). To MEASURE any shift (incl. the expired one) for the
   SLA gate: `DPAY_SIDESHIFT_PROBE_SHIFTS=sideshift-eurc=b4f0dd3e0ad88d4b1617 just
   swap-venue-probe`, then commit the `dfx/venue_health.json` row it writes and redeploy.
 - **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
