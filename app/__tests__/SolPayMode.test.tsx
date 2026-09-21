@@ -37,14 +37,11 @@ jest.mock('../services/native', () => ({
   DpaySolNfc: {},
 }));
 // The send-to-address body has its own suite (SolanaWithdrawSheet.test.tsx); stubbed here so this
-// suite stays a pure SolPayMode test while the prefill prop it is handed stays assertable. The
-// stub RECORDS its props (mockSheetProps) and renders a probe node, so the in-flight-send tests
-// below can drive the sheet's `onSendActiveChange` report and assert which surface the parent
-// rendered while a send was active.
-let mockSheetProps: Record<string, unknown> | null = null;
+// suite stays a pure SolPayMode test. The stub renders nothing, but the sheet's OWN fiber carries
+// the props SolPayMode handed it — the in-flight-send tests below find that fiber
+// (`'onSendActiveChange' in node.props`) and drive the report directly.
 jest.mock('../components/SolanaWithdrawSheet', () => ({
-  SolanaWithdrawSheet: (props: Record<string, unknown>) => {
-    mockSheetProps = props;
+  SolanaWithdrawSheet: () => {
     const {createElement} = jest.requireActual('react') as {createElement: (t: unknown, p: unknown) => unknown};
     const {View} = jest.requireActual('react-native') as {View: unknown};
     return createElement(View, {testID: 'stub-sol-send-sheet'});
@@ -506,7 +503,6 @@ describe('SolPayMode — what the camera does with a code that is not a payment 
 // the parent defers its offline AND fund gates until the sheet reports the send over.
 describe('SolPayMode — an in-flight send owns its surface (the gates defer, 2026-09-21)', () => {
   function mountSend(props: Partial<SolPayModeProps> = {}) {
-    mockSheetProps = null;
     return mountSolPay({online: true, subMode: 'send', ...props});
   }
   function sheetOf(tree: renderer.ReactTestRenderer): {props: {onSendActiveChange: (a: boolean) => void}} {
@@ -540,7 +536,6 @@ describe('SolPayMode — an in-flight send owns its surface (the gates defer, 20
   });
 
   test('offline BEFORE submit still gates exactly as today — the defer is in-flight only', () => {
-    mockSheetProps = null;
     const tree = mountSolPay({online: false, subMode: 'send'});
     expect(hasTestID(tree, 'sol-send-offline')).toBe(true);
     expect(hasTestID(tree, 'stub-sol-send-sheet')).toBe(false);

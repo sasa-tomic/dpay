@@ -26,7 +26,13 @@ import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-jest.mock('../solana', () => ({sendSol: jest.fn(), sendSpl: jest.fn()}));
+jest.mock('../solana', () => ({
+  sendSol: jest.fn(),
+  sendSpl: jest.fn(),
+  // The sheet warms the lazily-loaded network module at mount (the 2026-09-21 engine-load fix);
+  // a no-op here — this suite owns the seam's behavior, not the module load.
+  preloadSolanaRpc: () => {},
+}));
 
 import {sendSol} from '../solana';
 import {deriveSolanaAddress} from '../solana/identity';
