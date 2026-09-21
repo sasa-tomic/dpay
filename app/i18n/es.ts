@@ -121,6 +121,7 @@ export const es: Messages = {
     insufficient: 'No tienes SOL suficiente para este envío más la comisión de red.',
     rentExempt: 'Después de este envío, tu cuenta quedaría por debajo del saldo mínimo. Envía un importe menor.',
     blockhash: 'La red estaba demasiado ocupada. Inténtalo de nuevo.',
+    blockhashTwice: 'La red rechazó la transferencia dos veces — no se envió nada. Inténtalo de nuevo.',
     tapFailed: 'El pago no se completó: inténtalo de nuevo',
   },
 

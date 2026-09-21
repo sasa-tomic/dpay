@@ -134,6 +134,9 @@ export type Messages = {
     insufficient: string;
     rentExempt: string;
     blockhash: string;
+    /** The broadcast seam's refused-twice class: preflight Blockhash-not-found, the diagnosed
+     *  single refresh also refused — nothing was ever accepted (distinct from `blockhash`). */
+    blockhashTwice: string;
     /** Generic tap fallback — the NFC status view never renders a raw exception (A2). */
     tapFailed: string;
   };
