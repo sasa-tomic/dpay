@@ -13,7 +13,7 @@ import {SOL_DECIMALS, SOL_UNIT, deriveSolanaAddress, isValidSolanaAddress} from 
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {solanaTokenInfo} from '../solana/tokens';
 import {sendSol, sendSpl} from '../solana';
-import {friendlySolError} from '../solana/errors';
+import {friendlySolError, isSolTransactionFailed} from '../solana/errors';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
 import {saveTxNote} from '../services/txNotes';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -58,7 +58,7 @@ const SOL_NETWORK = 'Solana';
 export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; balance: string; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string; label?: string; memo?: string} | null; onPrefillConsumed?: () => void; onOpenAddressBook?: () => void; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
-  const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
+  const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'unknown' | 'error'>('form');
   const [err, setErr] = useState<string | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedAddress[]>([]);
@@ -159,15 +159,23 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
     setPhase('submitting');
     setErr(null);
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
+    // The broadcast boundary, captured: the moment the network ACCEPTS the transaction this holds
+    // its signature — the ONLY fact that separates "definitely not sent" (a throw before it) from
+    // "unknown — may still land" (a throw after it). The Solana Pay rail's pattern
+    // (SolPayMode.sendSolanaPay), applied to the send sheet: a timeout must never read as a failed
+    // send (the user would resend and double-pay), and the sheet must never spin past the deadline
+    // (2026-09-21: two live sends hung in `submitting` past SOL_SEND_TIMEOUT).
+    const broadcast: {sig: string | null} = {sig: null};
     try {
       // Branch on token: SOL → System Transfer; a registry token → SPL Token transfer at its own
       // mint (recipient ATA derived + fail-closed checked inside sendSpl; an unchecked Token
       // transfer needs no decimals — the mint fixes them). Both sign locally + broadcast to the RPC.
       const splMint = isSpl ? mint : null;
       if (isSpl && splMint == null) throw new Error(`no mint for token ${token}`);
+      const onBroadcast = (sig: string) => { broadcast.sig = sig; };
       const sig = splMint != null
-        ? await sendSpl(identity.secretHex, destination, BigInt(raw), splMint, signal)
-        : await sendSol(identity.secretHex, destination, BigInt(raw), signal);
+        ? await sendSpl(identity.secretHex, destination, BigInt(raw), splMint, signal, onBroadcast)
+        : await sendSol(identity.secretHex, destination, BigInt(raw), signal, onBroadcast);
       // Device-saved annotation (services/txNotes): a pay link's claimed label + memo, recorded
       // against the signature this send just produced (the SOL join key the settling row will
       // carry) — the same seam as the IC twin's PayMode.approve. Only for the link's own
@@ -181,9 +189,28 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
       onSent(); // trigger an immediate balance refresh (per-token — the parent wires the right one)
       awardPaymentTested(journey);
     } catch (e: unknown) {
-      // A Solana RPC error (insufficient funds / rent-exempt violation / network / missing ATA) or abort.
-      setErr(friendlySolError(e instanceof Error ? e.message : String(e)));
-      setPhase('error');
+      // The honest outcome split. The seam guarantees this catch runs by the caller's deadline
+      // (sendSol/sendSpl settle on abort), so `submitting` can never outlive SOL_SEND_TIMEOUT.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (broadcast.sig !== null && !isSolTransactionFailed(msg)) {
+        // The network ACCEPTED the transaction; only the confirmation is missing (deadline, abort,
+        // transport). Definitively-not-sent is off the table, so this is the honest "may still
+        // land" state with the signature kept — never an error that invites a resend, never a
+        // spinner. The annotation is recorded against the broadcast signature (the join key),
+        // exactly as the settled path does.
+        if (linkNote != null && destination === linkNote.for) {
+          void saveTxNote(identity.publicHex, {k: broadcast.sig, who: linkNote.who || undefined, msg: linkNote.msg || undefined}, Date.now());
+        }
+        setSignature(broadcast.sig);
+        setPhase('unknown');
+        onSent(); // the balance may already reflect it — refresh rather than claim either way
+      } else {
+        // A Solana RPC error (insufficient funds / rent-exempt violation / network / missing ATA),
+        // the venue's own broadcast rejection (a 2xx JSON-RPC error body — thrown before anything
+        // was accepted), or an on-chain failure (`transaction failed:` — definite, fee only).
+        setErr(friendlySolError(msg));
+        setPhase('error');
+      }
     } finally {
       cancel();
     }
@@ -235,6 +262,23 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
             <Text style={S.primaryText}>{copied === 'clipboard' ? M.withdraw.copied : copied === 'shared' ? M.withdraw.shared : M.withdraw.sol.copySignature}</Text>
           </Pressable>
           <Text style={S.dim2}>{M.withdraw.balanceAuto}</Text>
+          <Pressable testID="btn-sol-send-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
+        </View>
+      ) : phase === 'unknown' && signature ? (
+        // The honest unknown outcome (the send's deadline/abort over an ACCEPTED transaction): the
+        // signature is real — the transfer MAY still land — so the panel says exactly that and
+        // names the practical next step (check the balance, do NOT resend). No green check: it is
+        // not a settled send; no spinner: it is not a pending UI promise either.
+        <View style={S.centerAll}>
+          <Text testID="sol-send-unknown-title" style={S.paidText}>{M.withdraw.sol.sentUnknown}</Text>
+          <Text style={S.paidSub}>{fmt(raw)}</Text>
+          <Text testID="sol-send-unknown-note" style={S.dim2}>{M.withdraw.sol.sentUnknownBody}</Text>
+          <Text style={S.dim2}>{M.withdraw.sol.txSignature}</Text>
+          <Text testID="sol-send-signature" selectable={true} style={S.sheetAddr}>{signature}</Text>
+          <Pressable testID="btn-sol-send-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel={M.withdraw.sol.copySignatureLabel}>
+            <IconCopy size={18} color={C.brandInk}/>
+            <Text style={S.primaryText}>{copied === 'clipboard' ? M.withdraw.copied : copied === 'shared' ? M.withdraw.shared : M.withdraw.sol.copySignature}</Text>
+          </Pressable>
           <Pressable testID="btn-sol-send-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
         </View>
       ) : phase === 'submitting' ? (

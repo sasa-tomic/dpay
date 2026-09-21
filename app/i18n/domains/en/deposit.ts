@@ -696,6 +696,10 @@ export type WithdrawMessages = {
     copySignature: string;
     sending: (amount: string) => string;
     confirmingOnSolana: string;
+    /** The honest unknown outcome: the network accepted the send but confirmation never arrived
+     *  within the send deadline. Title + body of the "may still land" panel. */
+    sentUnknown: string;
+    sentUnknownBody: string;
     sendToSolana: (asset: string) => string;
     available: (available: string) => string;
     /** Amount placeholder for a registry token send (SOL's own scale sits beside it). */
@@ -808,6 +812,9 @@ export const withdrawEn: WithdrawMessages = {
     copySignature: 'Copy signature',
     sending: amount => `Sending ${amount}…`,
     confirmingOnSolana: 'Confirming on Solana — this can take up to a minute.',
+    sentUnknown: 'Sent — not confirmed yet',
+    sentUnknownBody:
+      "The network accepted the transfer but confirmation didn't come back in time. It may still land — check your balance in a moment instead of sending again.",
     sendToSolana: asset => `Send your ${asset} to a Solana address`,
     available: available => `Available: ${available}`,
     tokenAmountPlaceholder: '1.5',

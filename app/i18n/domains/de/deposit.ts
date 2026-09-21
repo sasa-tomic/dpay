@@ -340,6 +340,9 @@ export const withdrawDe: WithdrawMessages = {
     copySignature: 'Signatur kopieren',
     sending: amount => `${amount} werden gesendet…`,
     confirmingOnSolana: 'Bestätigung auf Solana — das kann bis zu einer Minute dauern.',
+    sentUnknown: 'Gesendet — noch nicht bestätigt',
+    sentUnknownBody:
+      'Das Netzwerk hat die Übernahme angenommen, aber die Bestätigung kam nicht rechtzeitig zurück. Sie kann noch durchgehen — prüfe gleich deinen Saldo, statt erneut zu senden.',
     sendToSolana: asset => `Sende dein ${asset} an eine Solana-Adresse`,
     available: available => `Verfügbar: ${available}`,
     tokenAmountPlaceholder: '1.5',
