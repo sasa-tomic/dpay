@@ -25,10 +25,19 @@ jest.mock('../services/sideshift', () => ({
   fetchSideShiftQuote: jest.fn(),
   createSideShiftFixedShift: jest.fn(),
 }));
-// The CeFi refund derivation (the user's OWN IC principal) rides the native core; under
-// jest it is the same stubbed principal every IC-surface test can name.
+// The CeFi refund derivation — the user's OWN IC account identifier: the native core
+// derives the principal from the device key, then its 64-hex account hash (the form the
+// venue's ICP payout layer can actually deliver to; SideShift cannot pay principal-format
+// addresses). Under jest the chain stubs to a named principal→identifier pair every
+// IC-surface test can pin.
 jest.mock('../services/native', () => ({
-  DpayCore: {icpPrincipalFromPubkey: jest.fn(async () => 'my-ic-principal-refund')},
+  DpayCore: {
+    icpPrincipalFromPubkey: jest.fn(async () => 'my-ic-principal-refund'),
+    icpAccountIdFromPrincipal: jest.fn(async (owner: string) =>
+      owner === 'my-ic-principal-refund'
+        ? 'cd'.repeat(32)
+        : Promise.reject(new Error(`unexpected owner: ${owner}`))),
+  },
 }));
 jest.mock('../convertResume', () => ({
   convertResumeSnapshot: jest.fn((): Record<string, unknown> => ({})),
@@ -64,6 +73,7 @@ jest.mock('../convert', () => {
 
 import {ConvertMode} from '../components/ConvertMode';
 import {fetchSideShiftQuote, createSideShiftFixedShift} from '../services/sideshift';
+import {DpayCore} from '../services/native';
 import {adoptConvertRecord} from '../convertResume';
 import type {ConvertRecord} from '../convert';
 import type {Identity} from '../lib/types';
@@ -146,7 +156,10 @@ describe('CeFi confirm vs a ticking venue rate', () => {
     jest.mocked(createSideShiftFixedShift).mockImplementation(async (_relayUrl, venue, args) => {
       expect(args.quoteId).toBe('q-confirm'); // the order rides the FRESH quote id
       expect(args.settleAddress.length).toBeGreaterThan(0); // the user's own derived address
-      expect(args.refundAddress).toBe('my-ic-principal-refund'); // the user's own IC principal — refunds land THERE
+      // The user's own IC ACCOUNT IDENTIFIER — refunds land THERE (the venue's payout
+      // layer cannot deliver to principal-format addresses; the hex form is emitted).
+      expect(args.refundAddress).toBe('cd'.repeat(32));
+      expect(jest.mocked(DpayCore.icpAccountIdFromPrincipal)).toHaveBeenCalledWith('my-ic-principal-refund', '');
       expect(args.depositLedger).toBe(CATALOG.find(c => c.currency === 8)!.ledger); // names the deposit rail for the relay's refund check
       return {...ORDER, id: `${ORDER.id}-${venue.venue_id}`};
     });

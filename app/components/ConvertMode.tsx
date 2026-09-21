@@ -518,9 +518,12 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // The CeFi REFUND address — the user's OWN address ON THE DEPOSIT RAIL, where the venue
   // returns the funds if the deposit fails or the order expires (an order without one
   // leaves the funds with the venue: the fund-loss class). IC-side the deposit rail is the
-  // IC: the wallet's own IC principal, derived from the same key that derives the Solana
-  // settle address (async native derivation → state; the confirm gate withholds the order
-  // until it is in). The relay independently refuses an order without a well-formed one.
+  // IC: the wallet's own IC ACCOUNT IDENTIFIER (the 64-hex account hash of the wallet's
+  // principal, default subaccount — the form the venue's payout layer can actually deliver
+  // to; see the SOL surface's icSettleAddress — a refund is an ICP payout too), derived
+  // from the same key that derives the Solana settle address (async native derivation →
+  // state; the confirm gate withholds the order until it is in). The relay independently
+  // refuses an order without a well-formed one.
   const [cefiRefundAddress, setCefiRefundAddress] = useState<string | null>(null);
   useEffect(() => {
     if (!cefiMode) {
@@ -529,8 +532,9 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     }
     let alive = true;
     DpayCore.icpPrincipalFromPubkey(identity.publicHex)
-      .then(p => {
-        if (alive) setCefiRefundAddress(p);
+      .then(p => DpayCore.icpAccountIdFromPrincipal(p, ''))
+      .then(id => {
+        if (alive) setCefiRefundAddress(id);
       })
       .catch(() => {
         if (alive) setCefiRefundAddress(null);
@@ -2577,12 +2581,15 @@ function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBack, onS
     : null; // a cefi settle side lives on the IC rail — this wallet's other SOL token is irrelevant
 
   // --- the CeFi payout target (IC-side twin: the cefiSettleAddress memo): the user's OWN
-  //     address ON THE DESTINATION RAIL — the wallet's IC account identifier (the 32-byte
-  //     account hash as 64-hex, the exchange-style address form), from the same key that
+  //     address ON THE DESTINATION RAIL — the wallet's IC ACCOUNT IDENTIFIER: the 64-hex
+  //     account hash of the wallet's own principal (default subaccount), the SAME
+  //     derivation that mints the wallet's deposit addresses, from the same key that
   //     derives the Solana address. Nothing typed, nothing entrusted. NOT the principal
-  //     text: the venue's ICP payout layer cannot send to principals (a shift sat
-  //     `settling` for hours and was refunded — SideShift engineering, 2026-09-20), so the
-  //     core derives the account identifier for the principal's default subaccount.
+  //     text: the venue's ICP payout layer cannot deliver to principal-format addresses —
+  //     only to these 32-byte identifiers (SideShift engineering, confirmed in writing
+  //     2026-09-21; a shift naming the principal text sat `settling` for hours and was
+  //     refunded 2026-09-20) — so the principal is only the derivation's INTERMEDIATE,
+  //     never the emitted target.
   const [icSettleAddress, setIcSettleAddress] = useState<string | null>(null);
   useEffect(() => {
     if (!cefiMode) {

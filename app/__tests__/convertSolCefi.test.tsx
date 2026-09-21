@@ -56,8 +56,8 @@ import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config
 import {EURC_MINT_ADDRESS} from '../solana/tokens';
 import {BUNDLED_VENUES, setRuntimeVenues} from '../config/venues';
 import {deriveSolanaAddress} from '../solana/identity';
-import {fetchSideShiftQuote, createSideShiftFixedShift} from '../services/sideshift';
 import {DpayCore} from '../services/native';
+import {fetchSideShiftQuote, createSideShiftFixedShift} from '../services/sideshift';
 import {adoptConvertRecord} from '../convertResume';
 
 const CATALOG: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
@@ -171,8 +171,11 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     expect(textOf(present(tree, 'convert-headline')[0])).toContain('0.0495');
     expect(textOf(present(tree, 'convert-quote-source')[0])).toContain('SideShift');
     // The payout target is the wallet's OWN derived IC account identifier (DpayCore,
-    // never typed) — the pinned 64-hex vector, derived from the principal by the core.
+    // never typed) — the pinned 64-hex vector, derived from the principal by the core;
+    // the derivation chain's exact call shapes are pinned too.
     expect(textOf(present(tree, 'convert-settle-address')[0])).toContain(mockSettleAccountId);
+    expect(jest.mocked(DpayCore.icpPrincipalFromPubkey)).toHaveBeenCalledWith(IDENTITY.publicHex);
+    expect(jest.mocked(DpayCore.icpAccountIdFromPrincipal)).toHaveBeenCalledWith(mockIcPrincipal, '');
     // A locked-rate order has NO slippage axis and NO floor line (the IC cefi rule).
     expect(present(tree, 'convert-slippage').length).toBe(0);
     expect(present(tree, 'convert-min-out').length).toBe(0);

@@ -10,9 +10,12 @@
 //   1. THE DESTINATION PICKER OFFERS THE CEFI VENUE BESIDE THE IN-WALLET SPL GROUP —
 //      EURC(Solana) shows the amm USDC row AND 'ICP — via SideShift (exchange service)'.
 //   2. THE DEPOSIT LEG IS A HANDOFF, NOT A SIGNED TX: the payout target is the user's OWN
-//      derived IC principal (nothing typed, nothing entrusted), shown BEFORE the order;
-//      confirming locks the fixed ORDER; the user then sends an SPL transfer THEMSELVES.
-//      Nothing is ever broadcast on the SOL rail by the app (unlike the Jupiter flows).
+//      derived IC account identifier — the 64-hex account hash of the wallet's principal,
+//      the form the venue's ICP payout layer can deliver to (it cannot pay principal-format
+//      addresses; SideShift engineering 2026-09-21) — nothing typed, nothing entrusted,
+//      shown BEFORE the order; confirming locks the fixed ORDER; the user then sends an
+//      SPL transfer THEMSELVES. Nothing is ever broadcast on the SOL rail by the app
+//      (unlike the Jupiter flows).
 //   3. NO EXACT-MATCH GATE: the venue's rate may tick between review and confirm — the
 //      ORDER is the lock (flow 187's static stub was blind to this; the defect that
 //      livelocked the IC confirm).
@@ -22,6 +25,7 @@
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
+import {icpAccountIdentifierHex} from '../harness/wire.mjs';
 import {installSideShiftStub, setSideShiftStatus, sideShiftStubState} from '../harness/sideshift.mjs';
 
 const AMOUNT_TEXT = '2';
@@ -42,7 +46,7 @@ export const meta = {
   journey: 'convert',
   covers: ['convert', 'solana-rail', 'venue:sideshift-eurc', 'cefi', 'same-surfaces', 'deposit-handoff',
     'derived-payout-address', 'order-locks-quote', 'reload-recovery', 'cross-rail'],
-  verifies: 'With the cefi venue sideshift-eurc registered (ICP<->EURC(Solana)) the SOL convert surface for EURC offers BOTH destination groups: the in-wallet SPL USDC row and the cefi ICP row (same surfaces as the IC side). Picking the cefi row shows the user\'s OWN derived IC principal as the payout address BEFORE any order, quotes verbatim through the relay partner-key proxy (estimate, SideShift attribution, no slippage axis — the rate is locked at order), confirms to a fixed ORDER without an exact-match gate against the ticking venue quote, and lands at the deposit handoff: the venue\'s own deposit address verbatim, the exact deposit amount, the SOL-side network-fee note, nothing signed or broadcast on the SOL rail. The provider lifecycle then drives awaiting_deposit → processing → done with the realized settle and the payout-at-own-address line, surviving a page reload on the persisted record.',
+  verifies: 'With the cefi venue sideshift-eurc registered (ICP<->EURC(Solana)) the SOL convert surface for EURC offers BOTH destination groups: the in-wallet SPL USDC row and the cefi ICP row (same surfaces as the IC side). Picking the cefi row shows the user\'s OWN derived IC account identifier (the 64-hex account hash of the wallet\'s principal — the form the venue\'s ICP payout layer requires; it cannot pay principal-format addresses) as the payout address BEFORE any order, quotes verbatim through the relay partner-key proxy (estimate, SideShift attribution, no slippage axis — the rate is locked at order), confirms to a fixed ORDER without an exact-match gate against the ticking venue quote, and lands at the deposit handoff: the venue\'s own deposit address verbatim, the exact deposit amount, the SOL-side network-fee note, nothing signed or broadcast on the SOL rail. The provider lifecycle then drives awaiting_deposit → processing → done with the realized settle and the payout-at-own-address line, surviving a page reload on the persisted record.',
   timeoutMs: 180000,
 };
 
@@ -132,7 +136,9 @@ export async function run() {
     assertIncludes(await driver.readText('convert-quote-source'), 'SideShift', 'attribution names the venue');
     assertIncludes(await driver.readText('convert-quote-source'), 'fetched', 'attribution carries the read instant');
     const settle = await driver.readText('convert-settle-address');
-    assert(settle != null && settle.length >= 20 && settle.includes('-'), `the payout target is the wallet's OWN derived IC principal (${settle.slice(0, 12)}…), shown before any order`);
+    const expectSettleId = icpAccountIdentifierHex(id.publicHex);
+    assertEq(settle, expectSettleId,
+      'the payout target is the wallet\'s OWN derived IC account identifier (the 64-hex form the venue\'s ICP payout layer requires — it cannot pay principal-format addresses), shown before any order');
     assert(await driver.findByTestID('convert-slippage', {timeoutMs: 1_000}).catch(() => null) == null,
       'no slippage axis — a fixed shift locks its rate at order creation (the IC cefi rule)');
     assert(await driver.findByTestID('convert-min-out', {timeoutMs: 1_000}).catch(() => null) == null,
@@ -188,13 +194,13 @@ export async function run() {
     const done = await driver.readText('convert-done');
     assertIncludes(done, SETTLE_TEXT, 'done reports the realized settle figure');
     assertIncludes(done, 'Paid out to your own address', 'done names the payout destination');
-    assertIncludes(done, settle.slice(0, 12), 'the payout address IS the derived IC principal');
+    assertIncludes(done, settle.slice(0, 12), 'the payout address IS the derived IC account identifier');
     const stub = await sideShiftStubState(driver);
     assert(stub != null && stub.unexpected.length === 0, 'no unexpected status origins (the status never touched the relay)');
     assert((stub.statusCalls ?? []).length >= 3, 'the status poll keyed every read by the order id');
     await driver.screenshot('197-sol-cefi-eurc-done');
 
-    console.log(`GREEN 197 — EURC(Solana)→ICP via sideshift-eurc from the SOL surface: both dest groups offered, payout at the derived IC principal, order locked the figures (no exact-match gate), deposit handoff only (0 broadcasts), lifecycle waiting→processing→done with reload resume`);
+    console.log(`GREEN 197 — EURC(Solana)→ICP via sideshift-eurc from the SOL surface: both dest groups offered, payout at the derived IC account identifier, order locked the figures (no exact-match gate), deposit handoff only (0 broadcasts), lifecycle waiting→processing→done with reload resume`);
   } finally {
     await env.stop();
     await r2.stop();

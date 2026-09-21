@@ -18,6 +18,7 @@
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
+import {icpAccountIdentifierHex} from '../harness/wire.mjs';
 
 const AMOUNT_TEXT = '2';
 // The relay stub's deterministic venue figures (src/app.rs trocador_stub_*): the rate is a
@@ -37,7 +38,7 @@ export const meta = {
   journey: 'convert',
   covers: ['convert', 'solana-rail', 'venue:trocador', 'cefi', 'aggregator', 'same-surfaces',
     'deposit-handoff', 'derived-payout-address', 'order-locks-quote', 'reload-recovery', 'cross-rail'],
-  verifies: 'With the trocador aggregator row registered (ICP<->SOL, same pair as sideshift) the SOL convert surface merges both venues under one ICP landing spot whose row names the spot and whose sub-picker chooses the service (registry order, never ranked, default first). Picking the Trocador mechanism quotes verbatim through the relay proxy (estimate, Trocador attribution), shows the user\'s OWN derived IC principal as the payout target BEFORE any order, and confirms to the venue\'s fixed-rate ORDER without broadcasting anything on the SOL rail. Every venue call — rate, trade AND the key-gated status read — rides the relay (zero bare upstream calls, the API-Key attaches server-side, the refund address rides every trade request), and the provider lifecycle awaiting_deposit → processing → done runs through the relay status route, surviving a page reload on the persisted record.',
+  verifies: 'With the trocador aggregator row registered (ICP<->SOL, same pair as sideshift) the SOL convert surface merges both venues under one ICP landing spot whose row names the spot and whose sub-picker chooses the service (registry order, never ranked, default first). Picking the Trocador mechanism quotes verbatim through the relay proxy (estimate, Trocador attribution), shows the user\'s OWN derived IC account identifier (the 64-hex account hash of the wallet\'s principal — the form the venue\'s ICP payout layer requires) as the payout target BEFORE any order, and confirms to the venue\'s fixed-rate ORDER without broadcasting anything on the SOL rail. Every venue call — rate, trade AND the key-gated status read — rides the relay (zero bare upstream calls, the API-Key attaches server-side, the refund address rides every trade request), and the provider lifecycle awaiting_deposit → processing → done runs through the relay status route, surviving a page reload on the persisted record.',
   timeoutMs: 180000,
 };
 
@@ -139,7 +140,8 @@ export async function run() {
     assertIncludes(await driver.readText('convert-quote-source'), 'Trocador', 'attribution names the venue');
     assertIncludes(await driver.readText('convert-quote-source'), 'fetched', 'attribution carries the read instant');
     const settle = await driver.readText('convert-settle-address');
-    assert(settle != null && settle.length >= 20 && settle.includes('-'), `the payout target is the wallet's OWN derived IC principal (${settle.slice(0, 12)}…), shown before any order`);
+    assertEq(settle, icpAccountIdentifierHex(id.publicHex),
+      'the payout target is the wallet\'s OWN derived IC account identifier (the form the venue\'s ICP payout layer requires), shown before any order');
     assert(await driver.findByTestID('convert-slippage', {timeoutMs: 1_000}).catch(() => null) == null,
       'no slippage axis — a fixed trade pins its amount at confirm (the cefi rule)');
     assert(await driver.findByTestID('convert-min-out', {timeoutMs: 1_000}).catch(() => null) == null,

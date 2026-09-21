@@ -409,7 +409,8 @@ pub async fn trade_proxy(State(state): State<AppState>, body: Bytes) -> Response
         return err(
             StatusCode::BAD_REQUEST,
             "`refundAddress` must be a well-formed address on the DEPOSIT rail — an Internet \
-             Computer principal or account text for icp, a base58 32-byte pubkey for solana",
+             Computer principal, ICRC-1 account text, or 64-hex account identifier for icp, \
+             a base58 32-byte pubkey for solana",
         );
     }
     // The venue's `new_trade`: the quote's own rate id + provider, the user's own

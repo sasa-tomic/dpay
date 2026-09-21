@@ -12,8 +12,13 @@
 //! `icp`: an IC principal (CRC-checked), a full ICRC-1 account text, or the 32-byte account
 //! identifier as 64-hex — all via the shared `dpay-icp` codec (the exact parser the ledgers
 //! speak; the 64-hex form's embedded CRC32 is checked, so a decode to exactly 32 bytes is
-//! by construction). `solana`: base58 that decodes to exactly 32 bytes (the same check the
-//! transaction builder applies).
+//! by construction). The identifier is the form the venue payout layer REQUIRES: SideShift's
+//! ICP payouts cannot be addressed to principal-format texts (their engineering, confirmed
+//! in writing 2026-09-21; the first EURC→ICP return shift refunded 2026-09-20 for exactly
+//! this), so the device EMITS the hex identifier everywhere it names an IC payout target,
+//! and principal/account texts stay accepted here until SideShift ships principal support.
+//! `solana`: base58 that decodes to exactly 32 bytes (the same check the transaction
+//! builder applies).
 
 /// Is this a well-formed address on the given venue NETWORK code (the rail an address must
 /// live on — the DEPOSIT rail for a refund, the SETTLE rail for a payout)? The venue's own
@@ -75,7 +80,7 @@ mod tests {
         // …and so does the full ICRC-1 account text (owner + 7-char checksum + subaccount).
         let mut subaccount = [0u8; 32];
         subaccount[31] = 0xa0;
-        let account_text = Account { owner: principal, subaccount }.text();
+        let account_text = Account { owner: principal.clone(), subaccount }.text();
         assert_eq!(
             account_text,
             Account::from_text(&account_text).unwrap().text(),
