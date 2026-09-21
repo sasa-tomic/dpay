@@ -109,7 +109,7 @@
   direction (icp↔sol, icp↔usdc@sol, icp↔eurc@sol, both ways) — the site's ICP↔SOL pair page
   is not backed by the partner API. Its schema remains the best adapter template in the class
   (`refund_address` at create, network-aware routes, fixed+floating with `rate_id`).
-- **SideShift return shift: REFUNDED in full (2026-09-21).** The 9.284071 EURC deposit came back to the sol-rail on-chain; ledgered (row 81 + dedupe correction 82), reconcile CLEAN. SideShift confirmed their technical issue and will provide transfer-procedure details — the EURC→ICP return leg is therefore NOT yet live-proven; retry with their corrected procedure when it arrives (float holds the EURC ready).
+- **SideShift return shift: REFUNDED in full (2026-09-21).** The 9.284071 EURC deposit came back to the sol-rail on-chain; ledgered (row 81 + dedupe correction 82), reconcile CLEAN. SideShift confirmed their technical issue and will provide transfer-procedure details — the EURC→ICP return leg is therefore NOT yet live-proven. UPDATE after attempts #4–#8 (2026-09-21): the venue side is PROVEN — five consecutive first-try orders with the 64-hex settle identifier, the last four refunding to the rail when unfunded (zero value ever at risk). The app side is PROVEN — the stale-ok confirm gate, send-sheet surface ownership, abortable-seam and rpc-failover fixes all validated live (attempt #8: confirm enabled at 0 s, full money tracer, clean terminal error). The leg is blocked ONLY on the broadcast RPC anomaly: the keyed provider refuses sendTransaction with a blockhash-not-found-class simulation failure and the app's failover chain currently ends at the rate-limited public endpoint, which cannot carry writes (attempt #8, ledger row 137). Next lead: a second KEYED failover provider, or provider-side resolution of the blockhash shard-skew with the #8 signature as proof. The float still holds the EURC ready.
 - **Route-B / CCTP USD leg (2026-09-21, cctp-live session): live-driven; the ckERC20 withdraw
   FAILED-and-was-refunded — value recovered, cause uninvestigated.** Real-app legs that worked:
   ckBTC→ckETH probe swap (pool akhru: 0.0000096 + 2×0.0000001 fees → 0.000291876642414143
@@ -258,7 +258,39 @@
   now waits ≤40s for the confirm to un-gate and refuses to blind-press). ONE more attempt
   remains (the one-attempt ledger: #5 broadcast refused once, #6 refused twice + provider
   proof, #7 never reached a broadcast).
-- **Trocador adapter- **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
+    ATTEMPT #8 2026-09-21 ~21:09-21:26 UTC (sheet-gate fix 2790436 served — marker verified
+  in the bundle AND the relay's compile-time embed; the staged last attempt; TWO broadcast
+  presses, both refused PRE-MONEY, zero movement; reconcile 18 pairs CLEAN; ledger row 137).
+  Order creation FIFTH consecutive first-try, this time driven directly through the relay's
+  partner proxy (POST /api/v1/sideshift/quotes 201 → shifts/fixed 201, settle = the float
+  64-hex identifier verbatim, refund = the rail owner; shift `b46a9ac6aa1f8f3ed436`, exact
+  8.8 EURC → 3.34336885 ICP, keylessly re-read from the venue before any press). THE APP-SIDE
+  FIXES ARE NOW ALL LIVE-VALIDATED: the stale-ok confirm enabled at 0 s on BOTH presses (the
+  #7 balance-poll gate is gone); the sheet surface was never torn down (offline appears only
+  as the in-sheet note); native-setter fill verified round 1, echo ok; the full money tracer
+  fired end to end (submit → SPL start → ata checks → createIdempotent joins → balance check
+  → blockhash → sign → broadcast). Press 1 failed on a RIG DEFECT (mine, not the stack's):
+  the relay had been started against the rate-limited PUBLIC RPC
+  (api.mainnet-beta.solana.com) instead of the attempt-#7 recipe's deploy/.env keyed
+  endpoint — a wall of 429s through the sheet's burst, broadcast simulation refused. On-chain
+  zero-movement verified; relay restarted mid-attempt with the documented env. Press 2 on the
+  corrected rig produced THE signature: the KEYED provider itself refused sendTransaction
+  with a blockhash-not-found-class error, and the rpc-failover seam (ff2f0be) FIRED LIVE for
+  the first time — `rpc-failover 127.0.0.1:8898 → api.mainnet-beta.solana.com
+  (blockhash-not-found)` — after which the failover hop refused too (`Transaction simulation
+  failed`). So the #5/#6 provider anomaly REPRODUCES ON THE KEYED ENDPOINT (fresh
+  getLatestBlockhash rejected by its own sendTransaction preflight within ~1 s), and the
+  app's derived failover chain currently ENDS at a write-incapable public endpoint — the seam
+  works, its next hop is the problem. Shift expired unfunded 21:31:46Z (nothing deposited, no
+  refund owed; EURC measured 9.284071 after EACH refusal; newest rail signature still
+  19:24:16Z from #6's discriminator). HARD STOP honored. REMAINING DEFECT CLASS IS THE RPC
+  PROVIDER RELATIONSHIP, not the app and not the venue: the honest leads are (a) a SECOND
+  KEYED failover provider behind the relay (public endpoints can read but cannot carry
+  writes), or (b) provider-side resolution of the blockhash shard-skew, with the #8 signature
+  as the repro proof. The attempt ledger: #5 refused once, #6 refused twice + provider proof,
+  #7 never reached a broadcast, #8 refused twice (once on a since-corrected rig defect) with
+  the failover seam's first live proof — the deposit leg itself has never had a fair broadcast.
+- **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
   adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`, `/trade`
   POST+GET status) are registered on every build and answer 503 naming `DPAY_TROCADOR_API_KEY`
   until the founder sets it (key requested from commercial@trocador.app; no shape to validate —
