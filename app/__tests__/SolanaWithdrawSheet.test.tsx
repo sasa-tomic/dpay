@@ -187,3 +187,79 @@ describe('SolanaWithdrawSheet — the shared destination field', () => {
     act(() => { tree.unmount(); });
   });
 });
+
+// ============================================================================
+// The honest outcome split (2026-09-21, the EURC send-sheet hang). A send that
+// outlives SOL_SEND_TIMEOUT used to have only two endings on this sheet — spinner
+// forever (the live bug) or a generic error that invites a resend (a double-pay
+// risk over a transfer that MAY still land). The seam now guarantees the promise
+// settles by the deadline and hands over the broadcast signature, and the sheet
+// splits the catch three ways: not-sent → error; accepted-but-unconfirmed → the
+// honest "may still land" panel with the signature kept; on-chain failure → error.
+// ============================================================================
+describe('SolanaWithdrawSheet — the honest unknown outcome (accepted send, missed confirmation)', () => {
+  const SIG = '5ig'.repeat(10);
+
+  async function press(tree: renderer.ReactTestRenderer) {
+    await act(async () => {
+      tree.root.findByProps({testID: 'sol-send-address-input'}).props.onChangeText(SOL_DEST);
+      tree.root.findByProps({testID: 'sol-send-amount-input'}).props.onChangeText('0.5');
+    });
+    await act(async () => { await tree.root.findByProps({testID: 'btn-sol-send-confirm'}).props.onPress(); });
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+  }
+
+  test('a deadline abort AFTER the broadcast lands on the unknown panel — signature kept, no error line', async () => {
+    // The exact shape the real seam produces at SOL_SEND_TIMEOUT: onBroadcast fired (the network
+    // ACCEPTED), then the deadline cut the confirmation wait.
+    jest.mocked(sendSol).mockImplementation((_seed, _dest, _amt, _signal, onBroadcast) => {
+      onBroadcast?.(SIG);
+      return Promise.reject(new Error('sol send aborted (deadline)'));
+    });
+    const tree = await mount({token: 'SOL', balance: '2000000000'});
+    await press(tree);
+    expect(has(tree, 'sol-send-unknown-title')).toBe(true);
+    expect(has(tree, 'sol-send-unknown-note')).toBe(true);
+    expect(has(tree, 'sol-send-signature')).toBe(true);
+    expect(has(tree, 'sol-send-err')).toBe(false); // an unknown is NOT a failed send
+    act(() => { tree.unmount(); });
+  });
+
+  test('a broadcast-time refusal (the 200-with-error-body shape) is an ERROR with the venue\'s own message — never the unknown panel', async () => {
+    // Helius's rejection rides HTTP 200 with a JSON-RPC error body; the seam throws it as a
+    // refusal BEFORE anything is accepted (no onBroadcast), so nothing can land and "resend"
+    // is the correct affordance.
+    const venueMessage = 'solana rpc: invalid request: error decoding base64 of transaction';
+    jest.mocked(sendSol).mockRejectedValue(new Error(venueMessage));
+    const tree = await mount({token: 'SOL', balance: '2000000000'});
+    await press(tree);
+    expect(has(tree, 'sol-send-err')).toBe(true);
+    expect(tree.root.findByProps({testID: 'sol-send-err'}).props.children).toContain('error decoding base64');
+    expect(has(tree, 'sol-send-unknown-title')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('an on-chain failure AFTER the broadcast is an ERROR (definitive — nothing moved but the fee), not unknown', async () => {
+    jest.mocked(sendSol).mockImplementation((_seed, _dest, _amt, _signal, onBroadcast) => {
+      onBroadcast?.(SIG);
+      return Promise.reject(new Error('transaction failed: {"InstructionError":[0,{"Custom":1}]}'));
+    });
+    const tree = await mount({token: 'SOL', balance: '2000000000'});
+    await press(tree);
+    expect(has(tree, 'sol-send-err')).toBe(true);
+    expect(has(tree, 'sol-send-unknown-title')).toBe(false);
+    expect(has(tree, 'sol-send-signature')).toBe(false); // no honest-kept signature: the tx is DEFINITELY dead
+    act(() => { tree.unmount(); });
+  });
+
+  test('the happy path is unchanged: a confirmed send renders the done panel and no unknown chrome', async () => {
+    jest.mocked(sendSol).mockResolvedValue(SIG);
+    const tree = await mount({token: 'SOL', balance: '2000000000'});
+    await press(tree);
+    expect(has(tree, 'sol-send-outcome')).toBe(true);
+    expect(has(tree, 'sol-send-signature')).toBe(true);
+    expect(has(tree, 'sol-send-unknown-title')).toBe(false);
+    expect(has(tree, 'sol-send-err')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});

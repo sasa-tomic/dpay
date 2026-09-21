@@ -13,6 +13,7 @@ import {buildCanonicalSolMessage, verifySolPayment, base58Decode32} from '../sol
 import {buildCanonicalSplMessage, deriveAta, ASSOCIATED_TOKEN_PROGRAM_ADDRESS} from '../solana/spl';
 import {USDC_DECIMALS} from '../solana/tokens';
 import {deriveSolanaKeypair} from '../solana/identity';
+import {isEndpointRefusal} from '../solana/errors';
 import {utf8ToBytes} from '../lib/base64url';
 import {bytesToBase64} from '../lib/base64';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE, RECEIPT_MISMATCH} from '../solana/payments';
@@ -435,6 +436,91 @@ describe('solana seam — sendSpl (Phase 6 SPL direct send — mint passed by th
     // The throw says nothing about whether the transfer landed — but the signature is now known,
     // which is what lets the caller answer "unknown" instead of "not sent".
     expect(seen).toEqual(['SigSolBase58']);
+  });
+
+  test('sendSpl hands the signature to onBroadcast the moment the network accepts it — before confirming', async () => {
+    const order: string[] = [];
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: () => { order.push('broadcast'); return 'SigSplBase58'; },
+      getSignatureStatuses: () => { order.push('confirm'); return {value: [{confirmationStatus: 'confirmed'}]}; },
+    };
+    const seen: string[] = [];
+    const sig = await withStubUrl(async () => {
+      const {sendSpl} = require('../solana');
+      return (sendSpl as (s: string, d: string, a: bigint, m: string, sig?: AbortSignal, cb?: (x: string) => void) => Promise<string>)(
+        SEED_HEX, MERCHANT_ADDRESS, 1_000_000n, USDC_MINT, undefined, x => { order.push('onBroadcast'); seen.push(x); },
+      );
+    });
+    expect(sig).toBe('SigSplBase58');
+    expect(seen).toEqual(['SigSplBase58']);
+    expect(order).toEqual(['broadcast', 'onBroadcast', 'confirm']);
+  });
+
+  // THE 2026-09-21 DEFECT (EURC send-sheet hang, twice live): a provider/proxy that answers the
+  // BROADCAST with HTTP 200 and a JSON-RPC error body (Helius's rejection shape, byte-faithful
+  // through the relay's solana pipe). It is a broadcast FAILURE: the venue's own message must
+  // surface immediately and the confirmation poll must NEVER run — a rejected broadcast has no
+  // signature to confirm, so polling would spin forever against a transaction that does not exist.
+  test('a 2xx JSON-RPC error body on sendTransaction is a broadcast FAILURE — venue message surfaced, confirmation never polled', async () => {
+    const VENUE_MESSAGE = 'Transaction simulation failed: error processing Instruction 0: custom program error: 0x1';
+    const methods: string[] = [];
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(async (_url: unknown, init?: {body: string}) => {
+      const req = JSON.parse(init?.body ?? '{}') as {id: number; method: string};
+      methods.push(req.method);
+      if (req.method === 'sendTransaction') {
+        // Helius's rejection shape: HTTP 200, `error` (not `result`).
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({jsonrpc: '2.0', id: req.id, error: {code: -32002, message: VENUE_MESSAGE}}),
+        } as unknown as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({jsonrpc: '2.0', id: req.id, result: {context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}}),
+      } as unknown as Response;
+    });
+    let refusedBrand = false;
+    await expect(withStubUrl(async () => {
+      const {sendSol} = require('../solana');
+      try {
+        return await (sendSol as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000n);
+      } catch (e) {
+        refusedBrand = isEndpointRefusal(e); // the ENDPOINT answered and refused — a rail fact
+        throw e;
+      }
+    })).rejects.toThrow(VENUE_MESSAGE);
+    expect(refusedBrand).toBe(true);
+    // Broadcast refused in place: no second candidate, no resubmit, NO confirmation poll.
+    expect(methods).toEqual(['getLatestBlockhash', 'sendTransaction']);
+  });
+
+  // The seam's deadline GUARANTEE (the other half of the 2026-09-21 hang): the send promise
+  // settles the moment the caller's signal aborts, even when a lower layer never does. The RPC
+  // stub path is the honest stand-in for "a layer that ignores the abort" — it checks no signal
+  // at all — so a confirm poll that never answers is cut off by the seam itself.
+  test('sendSol settles the moment the caller aborts — even when the confirm poll never answers', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: () => 'SigSolBase58',
+      getSignatureStatuses: () => new Promise(() => {}), // never settles — the un-honored abort
+    };
+    const ctrl = new AbortController();
+    const p = withStubUrl(async () => {
+      const {sendSol} = require('../solana');
+      return (sendSol as (s: string, d: string, a: bigint, sig?: AbortSignal) => Promise<string>)(
+        SEED_HEX, MERCHANT_ADDRESS, 1_000n, ctrl.signal,
+      );
+    });
+    // Reach the confirm poll, then fire the deadline exactly as SOL_SEND_TIMEOUT would.
+    await new Promise(r => setTimeout(r, 10));
+    await expect(Promise.race([
+      (async () => { ctrl.abort(); return p; })(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('send outlived its deadline')), 1000)),
+    ])).rejects.toThrow(/sol send aborted/);
   });
 
   test('builds + broadcasts the SPL transfer when both ATAs exist', async () => {
