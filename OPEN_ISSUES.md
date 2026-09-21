@@ -100,6 +100,8 @@
   confirmed it definitively (2026-09-21): ICP is not integrated in-house; the website renders
   it via external "backup liquidity providers" while the API only carries in-house assets
   (they also corrected the param naming: `fromNetwork` takes `sol`, not `solana`).
+  Follow-up (2026-09-21): ChangeNOW confirmed they have **no plans to add ICP support in the
+  near future** — the door is closed, not just slow; revisit only if they ship it.
 - **StealthEX verified live (2026-09-21): DISQUALIFIED as an ICP-bridge candidate.** The
   partner key is sops-encrypted (`secrets/stealthex.sops.json`, Bearer auth, v4 base
   `https://api.stealthex.io`); `icp/mainnet` IS listed (fixed + floating) but the decisive
