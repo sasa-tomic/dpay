@@ -1060,6 +1060,273 @@ async function cmdC6(eurcAmount) {
 }
 
 
+/** OP R10 (attempt #10, 2026-09-22) — the REVERSE cefi leg: ICP → EURC(Solana) via the IC-side
+ *  CeFi destination group (convert-dest-cefi-sideshift-eurc). Mirror of op B (ICP source, IC
+ *  send-sheet funding handoff) with c6's guardrails:
+ *  - settle address on the surface MUST equal the app-derived SOL rail BzFNJ… (the census EURC
+ *    ATA owner — `just funds` sol-rail row) BEFORE any confirm;
+ *  - refund is the wallet's own 64-hex IC account identifier (app-derived, confirm-gated);
+ *    verified POST-hoc on the keyless shift object (refundAddress === FLOAT_ACCOUNT_ID);
+ *  - ONE confirm press creates the order (#5-validated first-press; bounded re-confirm loop);
+ *  - the funding send is the app's own IC Pay▸Send sheet: read-back typing, review-echo gate,
+ *    enable-wait (#7 inert-click lesson), EXACTLY ONE press (DOM fallback only if the
+ *    synthetic click throws — a click-delivery fallback, never a money retry);
+ *  - watch: the resume engine adopts the parked record and polls the venue keylessly.
+ *  Deposit amount is frozen by the order (the panel's verbatim figure); 3.38 ICP typed here is
+ *  the smallest-above-min (venue min 3.3384 at probe time, float 3.39528652). */
+async function cmdReverse(icpAmount) {
+  await withApp(async (driver) => {
+    driver.page.on('pageerror', (e) => log(`[pageerror] ${String(e).slice(0, 300)}`));
+    driver.page.on('console', (m) => {
+      const t = m.text();
+      if (/^money:/.test(t)) log(`[tracer] ${t}`);
+      else if (m.type() === 'error') log(`[console.error] ${t.slice(0, 300)}`);
+    });
+    await openConvert(driver, 'icp');
+    // Amount: type with read-back (two attempts max — a redo re-SETs the same value; nothing
+    // has been quoted or signed at this point).
+    let amtIn = false;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await driver.type('convert-amount', icpAmount);
+      await sleep(1_000);
+      const v = await driver.page.evaluate(() => document.querySelector('[data-testid="convert-amount"]')?.value ?? '(no node)');
+      log(`convert-amount (attempt ${attempt}): ${JSON.stringify(v)}`);
+      if (v === icpAmount) { amtIn = true; break; }
+    }
+    if (!amtIn) throw new Error('R10: convert-amount never accepted the value — refusing');
+    // The IC-side destination for EURC-on-Solana: the composed route group's testID is the
+    // row (`convert-dest-route-multihop:…:jupiter-usdc-eurc`); a registered cefi venue on the
+    // SAME landing spot MERGES under it (buildDestGroups D4) as a MECHANISM — so after the
+    // row pick, the D2 sub-picker offers `convert-dest-mech-sideshift-eurc` (the op-B shape).
+    await pickDest(driver, 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc');
+    let mechPicked = false;
+    for (let i = 0; i < 10 && !mechPicked; i++) {
+      const mechs = await driver.eval(() =>
+        Array.from(document.querySelectorAll('[data-testid^="convert-dest-mech-"]')).map((e) => e.getAttribute('data-testid')),
+      );
+      const cefi = mechs.find((id) => /sideshift/.test(id));
+      if (cefi) {
+        await driver.click(cefi);
+        log(`mechanism picked: ${cefi} (all: ${JSON.stringify(mechs)})`);
+        mechPicked = true;
+        break;
+      }
+      await sleep(1_000);
+    }
+    if (!mechPicked) {
+      // Single-mechanism fallback: the group may render without a sub-picker — then the
+      // route pick already selected the ONLY mechanism (the Jupiter route, NOT cefi).
+      // Distinguish: the cefi surface names SideShift at convert-quote-source; a non-cefi
+      // pick would render convert-headline instead — the quote-source check below refuses.
+      log('no convert-dest-mech-* rows appeared (single-mechanism group?) — continuing to the quote-source gate');
+    }
+    // Settle address MUST be the app-derived SOL rail (the census EURC ATA owner).
+    await driver.findByTestID('convert-settle-address', {timeoutMs: 30_000});
+    const settleShown = (await driver.readText('convert-settle-address')).trim();
+    log(`settle address: ${settleShown}`);
+    if (settleShown !== SOL_SETTLE) {
+      await driver.screenshot('live-r10-settle');
+      throw new Error(`R10: settle address on screen ${JSON.stringify(settleShown)} != census EURC ATA owner — refusing`);
+    }
+    // The venue quote rides the relay's /api/v1/sideshift/* proxy (through the XFF front).
+    let qsrc = '(none)';
+    for (let i = 0; i < 30; i++) {
+      if (await driver.isPresent('convert-quote-source')) { qsrc = await driver.readText('convert-quote-source'); break; }
+      await sleep(1_000);
+    }
+    log(`quote source: ${qsrc}`);
+    if (!/SideShift/i.test(qsrc)) {
+      const errEl = await driver.isPresent('convert-quote-err') ? await driver.readText('convert-quote-err') : '(no convert-quote-err)';
+      log(`quote-err: ${errEl}`);
+      const body = await driver.bodyText();
+      log('SURFACE AT QUOTE FAILURE:', body.replace(/\s+/g, ' ').slice(0, 1200));
+      await driver.screenshot('live-r10-quote-failure');
+      throw new Error('R10: quote source is not SideShift — refusing');
+    }
+    const cparty = await driver.isPresent('convert-counterparty')
+      ? await driver.readText('convert-counterparty') : '(none)';
+    log(`counterparty disclosure: ${cparty.replace(/\s+/g, ' ').slice(0, 300)}`);
+    const body = await driver.bodyText();
+    log('CEFI SURFACE:', body.replace(/\s+/g, ' ').slice(0, 600));
+    await driver.screenshot('live-r10-quote');
+    // ONE order: bounded confirm loop (first press validated in #5-#9; the re-confirm only
+    // fires while NO recognized state rendered — a service-error confirm renders its own
+    // error and the loop's dump makes it visible instead of a blind re-click storm).
+    const facts = await confirmWithRequote(driver, 'R10', {cefi: true});
+    if (!facts) throw new Error('R10: awaiting-deposit panel never appeared — order NOT created or panel lost');
+    log('DEPOSIT FACTS:', JSON.stringify(facts, null, 2));
+    if (facts.depositMemo) log(`deposit memo line (venue ICP deposits embed it in the account id): ${facts.depositMemo}`);
+    const shiftId = await driver.isPresent('convert-shift-id')
+      ? (await driver.readText('convert-shift-id')).trim() : '(no shift id rendered)';
+    log(`SHIFT ID LINE: ${shiftId}`);
+    await driver.screenshot('live-r10-awaiting-deposit');
+    const m = facts.depositAmountLine.match(/([\d.]+)\s*ICP/);
+    if (!m) throw new Error(`R10: cannot parse deposit amount from ${JSON.stringify(facts.depositAmountLine)}`);
+    const depositAmount = m[1];
+    if (depositAmount !== icpAmount) {
+      throw new Error(`R10: order deposit ${depositAmount} != typed ${icpAmount} — refusing (consent point)`);
+    }
+
+    // Funding handoff: the app's own IC Pay▸Send sheet → venue deposit address, exact amount.
+    await openBalances(driver);
+    await selectCurrency(driver, 'icp');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    // Type with read-back (the resume-engine remount race lesson, #6).
+    let sent = false;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await setInputValue(driver, 'send-address-input', facts.depositAddress);
+      await setInputValue(driver, 'send-amount-input', depositAmount);
+      await sleep(1_200);
+      const vals = await driver.page.evaluate(() => ({
+        addr: document.querySelector('[data-testid="send-address-input"]')?.value ?? '',
+        amt: document.querySelector('[data-testid="send-amount-input"]')?.value ?? '',
+      }));
+      log(`send form values (attempt ${attempt}): ${JSON.stringify({addr: vals.addr.slice(0, 12) + '…', amt: vals.amt})}`);
+      if (vals.addr === facts.depositAddress && vals.amt === depositAmount) { sent = true; break; }
+    }
+    if (!sent) throw new Error('R10: send form never accepted the values — refusing');
+    // Echo gate: the review card must name the destination in TEXT before any press.
+    let echoed = false;
+    for (let i = 0; i < 20; i++) {
+      if ((await driver.bodyText()).includes(facts.depositAddress.slice(0, 10))) { echoed = true; break; }
+      await sleep(500);
+    }
+    log(`send review echo: ${echoed ? 'ok' : 'MISSING'}`);
+    if (!echoed) {
+      await driver.screenshot('live-r10-send-review');
+      throw new Error('R10: review never echoed the venue deposit address — refusing');
+    }
+    await driver.screenshot('live-r10-send-review');
+    // Enable-wait (#7 inert-click lesson: a cold balance poll briefly gates the confirm).
+    let enabled = false;
+    for (let i = 0; i < 40; i++) {
+      const st = await driver.page.evaluate(() => {
+        const btn = document.querySelector('[data-testid="btn-send-confirm"]');
+        return {found: btn != null, disabled: btn?.getAttribute('disabled'), aria: btn?.getAttribute('aria-disabled')};
+      });
+      if (st.found && st.disabled !== 'true' && st.aria !== 'true') { enabled = true; break; }
+      if (i % 5 === 0) log(`confirm still gated (${i}s): ${JSON.stringify(st)}`);
+      await sleep(1_000);
+    }
+    log(`confirm enabled: ${enabled}`);
+    if (!enabled) throw new Error('R10: send confirm never enabled in 40s — refusing to press');
+    try {
+      await driver.click('btn-send-confirm');
+    } catch (e) {
+      log(`confirm click failed: ${e.message}`);
+      const clicked = await (await driver.page.$('body')).evaluate(() => {
+        const btn = document.querySelector('[data-testid="btn-send-confirm"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      });
+      log(`DOM fallback click: ${clicked}`);
+      if (!clicked) throw e;
+    }
+    await driver.findByTestID('send-outcome', {timeoutMs: 120_000});
+    const outcome = await driver.readText('send-outcome');
+    const blockLine = await driver.isPresent('send-block') ? await driver.readText('send-block') : '(no block line)';
+    log(`DEPOSIT SENT: ${outcome} — ${blockLine}`);
+    await driver.screenshot('live-r10-sent');
+    await driver.click('btn-send-done');
+
+    // Back to Convert — the resume engine adopts the parked shift and polls it to settlement.
+    await openBalances(driver);
+    await driver.click('btn-accounts-convert');
+    const res = await watchConvert(driver, 'r10', {timeoutMs: 32 * 60_000});
+    log(`R10 result: ${res.ended}: ${res.text}`);
+  });
+}
+
+/** OP R10-fund — fund the ALREADY-CREATED reverse shift c3644b54ba21a36dabd8 (attempt #10:
+ *  the flow driver's send-sheet typing refused pre-money on unmounted inputs — the #6
+ *  remount-race class, this time on the IC sheet). One money movement: the app's own IC
+ *  Pay▸Send sheet → the venue's deposit account, exact order amount, ONE press. */
+async function cmdFundR10(destAddress, amount) {
+  if (!/^[0-9a-f]{64}$/.test(destAddress ?? '')) throw new Error(`fund-r10: destination is not a 64-hex ICP account id: ${destAddress}`);
+  await withApp(async (driver) => {
+    driver.page.on('pageerror', (e) => log(`[pageerror] ${String(e).slice(0, 300)}`));
+    driver.page.on('console', (m) => {
+      const t = m.text();
+      if (/^money:/.test(t)) log(`[tracer] ${t}`);
+      else if (m.type() === 'error') log(`[console.error] ${t.slice(0, 300)}`);
+    });
+    await openBalances(driver);
+    await selectCurrency(driver, 'icp');
+    await driver.click('tab-pay');
+    await driver.click('btn-pay-send');
+    // Existence wait: the sheet can be gated by the offline state or hydrate late — wait for
+    // the input NODE before typing (the exact defect that refused the flow run pre-money).
+    let up = false;
+    for (let i = 0; i < 30; i++) {
+      if (await driver.isPresent('send-address-input')) { up = true; break; }
+      try { await clickByText(driver, 'Check again'); } catch { /* gate not up */ }
+      await sleep(1_500);
+    }
+    if (!up) throw new Error('fund-r10: send-address-input never appeared — refusing');
+    // Set + read-back, two bounded attempts.
+    let ok = false;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await setInputValue(driver, 'send-address-input', destAddress);
+      await setInputValue(driver, 'send-amount-input', amount);
+      await sleep(1_200);
+      const vals = await driver.page.evaluate(() => ({
+        addr: document.querySelector('[data-testid="send-address-input"]')?.value ?? '',
+        amt: document.querySelector('[data-testid="send-amount-input"]')?.value ?? '',
+      }));
+      log(`form values (attempt ${attempt}): ${JSON.stringify({addr: vals.addr.slice(0, 10) + '…', amt: vals.amt})}`);
+      if (vals.addr === destAddress && vals.amt === amount) { ok = true; break; }
+    }
+    if (!ok) throw new Error('fund-r10: form never accepted the values — refusing');
+    // Echo gate: the review card must name the destination in TEXT before any press.
+    let echoed = false;
+    for (let i = 0; i < 20; i++) {
+      if ((await driver.bodyText()).includes(destAddress.slice(0, 10))) { echoed = true; break; }
+      await sleep(500);
+    }
+    log(`send review echo: ${echoed ? 'ok' : 'MISSING'}`);
+    if (!echoed) {
+      await driver.screenshot('live-r10fund-send-review');
+      throw new Error('fund-r10: review never echoed the destination — refusing');
+    }
+    await driver.screenshot('live-r10fund-send-review');
+    // Enable-wait (#7 inert-click lesson), then EXACTLY ONE press.
+    let enabled = false;
+    for (let i = 0; i < 40; i++) {
+      const st = await driver.page.evaluate(() => {
+        const btn = document.querySelector('[data-testid="btn-send-confirm"]');
+        return {found: btn != null, disabled: btn?.getAttribute('disabled'), aria: btn?.getAttribute('aria-disabled'), text: (btn?.textContent ?? '').slice(0, 40)};
+      });
+      if (st.found && st.disabled !== 'true' && st.aria !== 'true') { enabled = true; break; }
+      if (i % 5 === 0) log(`confirm still gated (${i}s): ${JSON.stringify(st)}`);
+      await sleep(1_000);
+    }
+    log(`confirm enabled: ${enabled}`);
+    if (!enabled) throw new Error('fund-r10: confirm never enabled in 40s — refusing to press');
+    try {
+      await driver.click('btn-send-confirm');
+    } catch (e) {
+      log(`confirm click failed: ${e.message}`);
+      const clicked = await (await driver.page.$('body')).evaluate(() => {
+        const btn = document.querySelector('[data-testid="btn-send-confirm"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      });
+      log(`DOM fallback click: ${clicked}`);
+      if (!clicked) throw e;
+    }
+    await driver.findByTestID('send-outcome', {timeoutMs: 120_000});
+    const outcome = await driver.readText('send-outcome');
+    const blockLine = await driver.isPresent('send-block') ? await driver.readText('send-block') : '(no block line)';
+    log(`DEPOSIT SENT: ${outcome} — ${blockLine}`);
+    await driver.screenshot('live-r10fund-sent');
+    // Stay on the surface: the parked record's resume engine can be re-opened, but the
+    // settlement watch happens keylessly + via the shift GET outside this process.
+  });
+}
+
 /** OP 2 — gas-funder core mechanic, live: 0.5 ICP → USDC at OUR Ethereum address (EVM-float),
  *  WITH the gas-fund card (the wallet's ckETH is far short of gas; the app prepends gas legs and
  *  funds ckETH from the input). The CCTP burn itself stays user-side by design — the record parks
@@ -1614,6 +1881,8 @@ try {
   else if (cmd === 'conv-c3') await cmdC3(args[0]);
   else if (cmd === 'conv-c4') await cmdC4(args[0]);
   else if (cmd === 'conv-c6') await cmdC6(args[0]);
+  else if (cmd === 'conv-reverse') await cmdReverse(args[0]);
+  else if (cmd === 'fund-r10') await cmdFundR10(args[0], args[1]);
   else if (cmd === 'probe-send-sheet') await probeSendSheet();
   else if (cmd === 'fund-c6') await cmdFundC6(args[0], args[1]);
   else if (cmd === 'capture-send') await cmdCaptureSend(args[0], args[1], args[2] ?? '/tmp/opencode/tx-capture.json');
