@@ -419,8 +419,12 @@ describe('the SEAM — marker exhaustion classifies unreachable with NO IC probe
 //     refused everywhere; failover homes are not hammered);
 //   • reads NEVER walk on it (the tail is broadcast-only);
 //   • exhaustion is the UNANIMOUS refusal: any transport death, provider 5xx or relay marker
-//     outranks it (the strict all-refused rule keeps the seam's refresh bound honest);
+//     outranks it (the strict all-refused rule keeps the thrown verdict readable);
 //   • each advance traces `money: sol send step rpc-failover <host> → <host> (why)`.
+// POSTURE (the same day, attempts #5/#6/#8 resolution): the payment seam now broadcasts
+// skipPreflight, so ITS provider should never answer with this state — the walk stays LIVE for
+// the preflight-running paths (submitRawSolTx's venue hand-off, broadcastSolPayment's merchant
+// rail) and is defensive parity for the seam; the seam's old refresh-and-resign is retired.
 // ============================================================================
 describe('the send-preflight walk — blockhash-not-found is walk-worthy for sendTransaction only', () => {
   const BH_ERR = JSON.stringify({error: {code: -32002, message: 'Blockhash not found'}});
@@ -447,7 +451,7 @@ describe('the send-preflight walk — blockhash-not-found is walk-worthy for sen
     warn.mockRestore();
   });
 
-  test('exhaustion on the UNANIMOUS refusal throws the refusal verbatim — the class the seam\u2019s refresh reads', async () => {
+  test('exhaustion on the UNANIMOUS refusal throws the refusal verbatim — the class the payment seam surfaces honestly', async () => {
     installRoutes({[A]: res(200, BH_ERR), [B]: res(200, BH_ERR)});
     const rpc = freshRpc();
     const err: unknown = await rpc.sendTransaction([A, B], new Uint8Array([1])).then(
@@ -458,7 +462,8 @@ describe('the send-preflight walk — blockhash-not-found is walk-worthy for sen
     expect((err as {status?: number | null}).status).toBeNull();
     expect((err as Error).message).toMatch(/sendTransaction → a\.example: Blockhash not found$/);
     const {isSolBlockhashNotFound} = require('../solana/errors') as typeof import('../solana/errors');
-    // The whole point: the seam's ONE refresh classifies from THIS message.
+    // The whole point: the message still carries the raw state, classified by the walk's own
+    // predicate (the seam no longer refreshes on it — skipPreflight posture — it surfaces it).
     expect(isSolBlockhashNotFound((err as Error).message)).toBe(true);
   });
 

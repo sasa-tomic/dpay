@@ -28,9 +28,14 @@
 // error, insufficient funds — is a verdict on the transaction itself and refuses in place: a
 // genuinely invalid tx would be refused everywhere, and hammering failover homes with it buys
 // nothing. At exhaustion, when EVERY answering home refused with that state and no home died
-// silently, the walk throws the refusal verbatim (host + raw message) so the seam's ONE
-// refresh-and-resign (`solana.ts` broadcastSignedWithFreshBlockhash) classifies it and owns
-// the retry — the walk itself never re-signs.
+// silently, the walk throws the refusal verbatim (host + raw message) — the seam that called
+// it owns whatever comes next. POSTURE NOTE (the same day, attempts #5/#6/#8 resolution): the
+// PAYMENT seam (`broadcastSignedWithFreshBlockhash`) now broadcasts `skipPreflight: true`, so
+// its provider should never answer with this preflight state at all — this walk stays LIVE for
+// the paths that still run preflight (`submitRawSolTx`'s venue hand-off,
+// `broadcastSolPayment`'s merchant rail) and is defensive parity for the skipPreflight seam
+// (a blockhash-shaped answer, if one ever came, would just walk the same bytes — no re-sign
+// anywhere in the walk).
 //
 // EXHAUSTION precedence (what the walk throws when no candidate answered):
 //   1. any candidate answered with the relay's marker → SolanaRelayPathDown (transport-class:
@@ -372,10 +377,11 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
         // the answering node's send-preflight STATE, not a verdict on the bytes — proven live
         // by the byte-exact replay of the refused signed tx to the next endpoint (accepted +
         // finalized). The signature is valid on any endpoint, so the SAME bytes walk to the
-        // next candidate; NO re-sign here — the seam's one refresh-and-resign owns re-signing,
-        // and fires only when EVERY candidate has refused (exhaustion, below). Every OTHER
-        // JSON-RPC error (an instruction error, insufficient funds, …) is a verdict on the
-        // transaction itself: refused in place, never walked, never refreshed.
+        // next candidate; NO re-sign anywhere in the walk, and the seam above it re-signs
+        // nothing either (the payment seam's refresh-and-resign is retired — skipPreflight
+        // posture; see the sendTransaction doc). Every OTHER JSON-RPC error (an instruction
+        // error, insufficient funds, …) is a verdict on the transaction itself: refused in
+        // place, never walked.
         const rawMsg = typeof j.error.message === 'string' ? j.error.message : String(j.error.message ?? 'error');
         if (walkBlockhash && isSolBlockhashNotFound(rawMsg)) {
           if (blockhashRefusal === null) blockhashRefusal = {url: candidate, message: rawMsg};
@@ -409,10 +415,11 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
     // THE SEND-PREFLIGHT REFUSAL, UNANIMOUS (sendTransaction only — the fact is only recorded
     // under `walkBlockhashRefusal`): every home that ANSWERED refused this broadcast with the
     // blockhash-not-found state, and no home died silently — a transport death would make the
-    // agreement unreadable, so the strict all-refused rule defers to it (the seam's refresh
-    // bound stays honest: refreshed ONLY on a unanimous state refusal). The message carries
-    // the raw refusal verbatim so the seam's `isSolBlockhashNotFound` classifies it and its
-    // ONE refresh-and-resign owns the retry — exactly the attempt-#5/attempt-#6 composition.
+    // agreement unreadable, so the strict all-refused rule defers to it. The message carries
+    // the raw refusal verbatim (host + raw state) for the caller to surface honestly. The
+    // payment seam no longer refresh-and-resigns on it (skipPreflight posture — see the
+    // sendTransaction doc); a tx silently dropped for a dead blockhash stays the caller's
+    // honest unknown, and the walk itself still never re-signs.
     throw new SolanaEndpointRefused(
       `solana rpc ${method} → ${hostOf(blockhashRefusal.url)}: ${blockhashRefusal.message}`,
       null,
@@ -474,10 +481,15 @@ export async function getLatestBlockhash(url: string | readonly string[], opts?:
 /** Broadcast a raw signed transaction (bytes). Base64-encodes internally for the wire. Returns the
  *  transaction signature (base58).
  *
- *  v2: when `opts.config` is provided, its `{commitment, minContextSlot, skipPreflight}` are passed
- *  through as the second RPC param (the v2 freshness state machine sets these for preflight + context
- *  slot binding). Without `opts.config` the original `{encoding:'base64'}`-only shape is sent, so the
- *  v1 callers (sendSol, sendSpl, broadcastSolPayment-v1) stay byte-identical.
+ *  v2: when `opts.config` is provided, its `{commitment, minContextSlot, skipPreflight, maxRetries}`
+ *  are passed through as the second RPC param (the v2 freshness state machine sets these for
+ *  preflight + context slot binding). Without `opts.config` the original `{encoding:'base64'}`-only
+ *  shape is sent, so the v1 callers (submitRawSolTx's venue hand-off) stay byte-identical.
+ *  THE PAYMENT SEAM'S POSTURE (2026-09-21, attempts #5/#6/#8): `broadcastSignedWithFreshBlockhash`
+ *  passes `{skipPreflight: true, maxRetries: 0}` — the provider's preflight simulation layer was the
+ *  proven 9+ refusal source (its "Blockhash not found" STATE, not a bytes verdict), so the payment
+ *  seam bypasses it and the chain is the referee; maxRetries: 0 keeps re-attempts app-owned (the
+ *  walk + the callers' re-submit seams). `broadcastSolPayment` (merchant rail) keeps preflight ON.
  *
  *  WALK SAFETY (module header, "Broadcast safety"): `url` is the candidate LIST and a
  *  broadcast that dies transport-dead or on the relay's marker at home A is re-SENT, same
@@ -486,16 +498,18 @@ export async function getLatestBlockhash(url: string | readonly string[], opts?:
  *  known" answer. A 2xx is NEVER walked past — it returns immediately, so a broadcast that
  *  any home accepted is sent exactly once as far as this client can tell.
  *
- *  THE ATTEMPT-#6 WALK (2026-09-21, the one behavioral addition): this method sets
- *  `walkBlockhashRefusal`, so a Blockhash-not-found refusal — however wrapped — walks the
- *  SAME signed bytes to the next candidate instead of refusing in place (module header, "The
- *  send-preflight exception"; the signature is valid on any endpoint — the live replay
- *  proved it). Each advance traces `money: sol send step rpc-failover <from> → <to> (why)`
- *  — hosts only — so the money log's step story stays unbroken on device. Exhaustion on a
- *  unanimous blockhash refusal throws the refusal verbatim; the seam's ONE
- *  refresh-and-resign (`broadcastSignedWithFreshBlockhash`) classifies and owns the retry. */
+ *  THE ATTEMPT-#6 WALK (2026-09-21): this method sets `walkBlockhashRefusal`, so a
+ *  Blockhash-not-found refusal — however wrapped — walks the SAME signed bytes to the next
+ *  candidate instead of refusing in place (module header, "The send-preflight exception"; the
+ *  signature is valid on any endpoint — the live replay proved it). Each advance traces
+ *  `money: sol send step rpc-failover <from> → <to> (why)` — hosts only — so the money log's
+ *  step story stays unbroken on device. Exhaustion on a unanimous blockhash refusal throws the
+ *  refusal verbatim. LIVE for the preflight-running paths (submitRawSolTx, broadcastSolPayment);
+ *  DEFENSIVE PARITY for the skipPreflight payment seam — there walk-worthy refusals are the
+ *  transport classes, and a blockhash-shaped answer (no layer should emit one) still just walks
+ *  the same bytes; the seam itself re-signs nothing. */
 export async function sendTransaction(url: string | readonly string[], rawBytes: Uint8Array, opts?: SolanaRpcOpts & {
-  config?: {commitment?: 'confirmed' | 'processed' | 'finalized'; minContextSlot?: number; skipPreflight?: boolean};
+  config?: {commitment?: 'confirmed' | 'processed' | 'finalized'; minContextSlot?: number; skipPreflight?: boolean; maxRetries?: number};
 }): Promise<string> {
   const params: unknown[] = opts?.config
     ? [bytesToBase64(rawBytes), {encoding: 'base64', ...opts.config}]

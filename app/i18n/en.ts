@@ -90,7 +90,6 @@ export const en: Messages = {
     insufficient: 'Not enough SOL for this send plus the network fee.',
     rentExempt: 'After this send, your account would fall below the minimum balance. Send a smaller amount.',
     blockhash: 'The network was too busy. Try again.',
-    blockhashTwice: 'The network refused the transfer twice — nothing was sent. Try again.',
     tapFailed: "Payment didn't complete — try again",
   },
 

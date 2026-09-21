@@ -127,7 +127,6 @@ export const fr: Messages = {
     insufficient: 'Pas assez de SOL pour cet envoi et les frais de réseau.',
     rentExempt: 'Après cet envoi, votre compte passerait sous le solde minimum. Envoyez un montant plus petit.',
     blockhash: 'Le réseau était trop chargé. Réessayez.',
-    blockhashTwice: "Le réseau a refusé le transfert deux fois — rien n'a été envoyé. Réessayez.",
     tapFailed: 'Le paiement n’a pas abouti — réessayez',
   },
 
