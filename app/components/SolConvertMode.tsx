@@ -33,7 +33,7 @@ import {DpayCore} from '../services/native';
 import {deriveSolanaAddress} from '../solana/identity';
 import {WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 import {M} from '../i18n';
-import {fmtAssetCompact, parseUserAmount, rawToDecimal} from '../lib/format';
+import {fmtAssetCompact, parseUserAmount, randNonceHex, rawToDecimal} from '../lib/format';
 import type {AssetId, Identity} from '../lib/types';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -267,39 +267,22 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
   }, [amountText, legs?.inMint, legs != null && legs.kind === 'amm' ? legs.outMint : null, legs != null && legs.kind === 'cefi' ? legs.outLedger : null, slippageBps, showRecord]);
 
   // --- stale refresh (same 30s clock + test seam as IC; keeps the OLD quote on failure).
-  // SINGLE-FLIGHT, the IC surface's exact guard (ConvertMode IC stale effect): a tick may fire
-  // a refresh ONLY when none is in flight. Without the `staleRefreshing` check, a quote that
-  // stays stale (venue slow or unreachable) re-fires the fetch EVERY SECOND — up to 8
-  // concurrent 8s-budget calls hammering the relay's partner-key proxy. That stampede is the
-  // live 2026-09-21 attempt-#3 signature: the venue throttled the shared partner credential,
-  // so the CONFIRM's own re-quote could not answer inside its budget ("Could not reach
-  // SideShift" alternating with the refresh's own "Quote changed" banner).
+  //     SINGLE-FLIGHT, the IC surface's exact guard (ConvertMode IC stale effect): a tick may fire
+  //     a refresh ONLY when none is in flight. Without the `staleRefreshing` check, a quote that
+  //     stays stale (venue slow or unreachable) re-fires the fetch EVERY SECOND — up to 8
+  //     concurrent 8s-budget calls hammering the relay's partner-key proxy. That stampede is the
+  //     live 2026-09-21 attempt-#3 signature: the venue throttled the shared partner credential,
+  //     so the CONFIRM's own re-quote could not answer inside its budget ("Could not reach
+  //     SideShift" alternating with the refresh's own "Quote changed" banner).
+  //     The CEFI branch is GONE (2026-09-22 partner agreement, organic-demand discipline): a
+  //     venue rate is fetched when the screen opens and re-fetched when the amount changes (and
+  //     at the confirm gesture, which mints the order's own locked quote) — NEVER on a timer.
+  //     An interval re-quote is machine-generated demand against the partner-key proxy, exactly
+  //     the traffic class the agreement forbids; the confirm-time re-quote remains the user's
+  //     execution protection. Only the Jupiter leg keeps the timed refresh (its public quote
+  //     API is not a partner surface).
   useEffect(() => {
-    if (legs == null || venue == null || showRecord) return;
-    if (legs.kind === 'cefi') {
-      if (cefiQuote == null) return;
-      const tick = setInterval(() => {
-        if (!mountedRef.current || staleRefreshing || !isQuoteStale(cefiQuote)) return;
-        setStaleRefreshing(true);
-        fetchCeFiConvertQuote(relayUrl, venue, legs.inMint, legs.outLedger, cefiQuote.amountIn, {
-          inDecimals: legs.inDecimals,
-          outDecimals: legs.outDecimals,
-        })
-          .then(q => {
-            if (mountedRef.current) {
-              setCefiQuote(q);
-              if (q.amountOutGross !== cefiQuote.amountOutGross) {
-                setQuoteChanged({oldAmt: cefiQuote.amountOutGross, newAmt: q.amountOutGross});
-              }
-            }
-          })
-          .catch(() => {})
-          .finally(() => {
-            if (mountedRef.current) setStaleRefreshing(false);
-          });
-      }, 1000);
-      return () => clearInterval(tick);
-    }
+    if (legs == null || venue == null || showRecord || legs.kind !== 'amm') return;
     if (quote == null) return;
     const tick = setInterval(() => {
       if (!mountedRef.current || staleRefreshing || !isQuoteStale(quote)) return;
@@ -320,7 +303,7 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
     }, 1000);
     return () => clearInterval(tick);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quote, cefiQuote, staleRefreshing, slippageBps, showRecord]);
+  }, [quote, staleRefreshing, slippageBps, showRecord]);
 
   const parsedAmount = parseUserAmount(amountText, legs != null ? legs.inDecimals : 0);
   const amountRaw = parsedAmount.ok ? parsedAmount.raw : null;
@@ -353,6 +336,10 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
       confirmBusyRef.current = true;
       setConfirmBusy(true); setConfirmErr(null);
       try {
+        // The record id is minted BEFORE the order: it is the trade's clientOrderId (the
+        // 2026-09-22 partner agreement's correlation field) AND the persisted record's id —
+        // one id on both ends, so our own store answers for exactly the trade the relay logged.
+        const cefiRecordId = randNonceHex();
         let freshRes;
         try {
           // The 20s confirm budget, NOT the 8s review default (CONVERT_CEFI_CONFIRM_TIMEOUT_MS):
@@ -375,11 +362,13 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
             depositLedger: legs.inMint,
             settleLedger: legs.outLedger,
             depositAmountDecimal: rawToDecimal(amountRaw, legs.inDecimals),
+            clientOrderId: cefiRecordId,
           }, CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
         } catch (e) {
           throw ceFiServiceError(e, venueName);
         }
         const rec = prepareCeFiConvertRecord({
+          id: cefiRecordId,
           quote: fresh,
           order,
           relayUrl,

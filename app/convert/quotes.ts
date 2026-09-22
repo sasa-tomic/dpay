@@ -235,7 +235,10 @@ export async function fetchCeFiQuoteResult(
 
 /** Create ONE cefi order through the family's own service — the ONE dispatch point for
  *  the confirm path. Both families refuse an order without the user's OWN refund
- *  address (the relay re-validates it rail-scoped; the fund-loss guard). */
+ *  address (the relay re-validates it rail-scoped; the fund-loss guard). `clientOrderId`
+ *  is the locally persisted record id minted at confirm — only the TROCADOR family
+ *  carries it (the 2026-09-22 partner agreement's correlation field; the sideshift
+ *  order body has no such field and gains none). */
 export async function createCeFiOrder(
   relayUrl: string,
   venue: VenueEntry,
@@ -246,6 +249,7 @@ export async function createCeFiOrder(
     depositLedger: string;
     settleLedger: string;
     depositAmountDecimal: string;
+    clientOrderId?: string;
   },
   timeoutMs?: number,
 ): Promise<SideShiftFixedShift | TrocadorTrade> {
@@ -267,6 +271,7 @@ export async function createCeFiOrder(
         depositLedger: args.depositLedger,
         settleLedger: args.settleLedger,
         depositAmount: args.depositAmountDecimal,
+        ...(args.clientOrderId != null ? {clientOrderId: args.clientOrderId} : {}),
       }, timeoutMs);
     }
     default:

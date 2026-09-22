@@ -50,6 +50,11 @@ export type TrocadorQuoteResult = {
 export type TrocadorTrade = {
   /** The trade id — the status-read key (and the record's providerRef.orderId). */
   readonly tradeId: string;
+  /** The RELAY's own order id for this trade (the `X-Dpay-Order-Id` response header,
+   *  2026-09-22 partner agreement): the relay records it next to the venue's trade id in
+   *  its order store + compliance log, and keys its webhook push on it. Null when the
+   *  header is absent (an older relay) — the record simply persists nothing. */
+  readonly relayOrderId: string | null;
   /** The VENUE's own deposit address — what the USER sends to (this is the CeFi fact). */
   readonly depositAddress: string;
   /** Present when the venue's deposit address carries a memo/ExtraID requirement. */
@@ -132,7 +137,15 @@ export async function fetchTrocadorQuote(
  *  fixed=True — the venue's documented fixed-rate trade, whose exact amount_from is what
  *  the user was shown and approved. The venue answers with ITS deposit address, which
  *  the record shows to the user verbatim (this screen is the honest CeFi handoff:
- *  nothing is signed, the user sends). */
+ *  nothing is signed, the user sends).
+ *
+ *  Partner-agreement correlation (2026-09-22): `clientOrderId` is the LOCALLY persisted
+ *  conversion record's id, minted by this device BEFORE the order exists — the relay
+ *  records it next to its own order id and the venue's trade id, so a support/retention
+ *  request about one trade can be answered from our own store. Optional on the wire: an
+ *  absent/empty id omits the field rather than sending an empty correlation claim. The
+ *  relay answers with ITS order id in `X-Dpay-Order-Id`, read here (absent → null) and
+ *  persisted on the record beside the trade id. */
 export async function createTrocadorTrade(
   relayUrl: string,
   venue: VenueEntry,
@@ -144,6 +157,7 @@ export async function createTrocadorTrade(
     depositLedger: string;
     settleLedger: string;
     depositAmount: string;
+    clientOrderId?: string;
   },
   timeoutMs = 8000,
 ): Promise<TrocadorTrade> {
@@ -152,6 +166,9 @@ export async function createTrocadorTrade(
     || args.settleAddress.length === 0 || args.refundAddress.length === 0
     || args.depositLedger.length === 0 || args.settleLedger.length === 0
     || args.depositAmount.length === 0) throw new Error('refused');
+  const clientOrderId = args.clientOrderId != null && args.clientOrderId.length > 0
+    ? args.clientOrderId
+    : null;
   let r: Response;
   try {
     r = await relayFetch(relayUrl, '/api/v1/trocador/trade', {
@@ -165,6 +182,7 @@ export async function createTrocadorTrade(
         depositLedger: args.depositLedger,
         settleLedger: args.settleLedger,
         depositAmount: args.depositAmount,
+        ...(clientOrderId != null ? {clientOrderId} : {}),
       }),
     }, timeoutMs);
   } catch {
@@ -173,6 +191,7 @@ export async function createTrocadorTrade(
   if (r.status === 503) throw new Error('unconfigured');
   if (r.status === 400 || r.status === 422) throw new Error('refused');
   if (!r.ok) throw new Error('unavailable');
+  const relayOrderId = headerValue(r, 'x-dpay-order-id');
   const j = await r.json().catch(() => null) as Record<string, unknown> | null;
   if (j == null || typeof j.trade_id !== 'string' || j.trade_id.length === 0
     || typeof j.address_provider !== 'string' || j.address_provider.length === 0
@@ -181,10 +200,23 @@ export async function createTrocadorTrade(
   }
   return {
     tradeId: j.trade_id,
+    relayOrderId,
     depositAddress: j.address_provider,
     depositMemo: typeof j.address_provider_memo === 'string' ? j.address_provider_memo : null,
     depositAmount: j.amount_from,
     settleAmount: typeof j.amount_to === 'string' ? j.amount_to : null,
     expiresAt: null, // the venue documents no expiry field — never invented
   };
+}
+
+/** One response header's value, trimmed, empty → null (Headers.get is already
+ *  case-insensitive; the try guards a mocked/degenerate Response with no headers). */
+function headerValue(r: Response, name: string): string | null {
+  try {
+    const raw = r.headers?.get?.(name) ?? null;
+    const trimmed = raw != null ? raw.trim() : '';
+    return trimmed.length > 0 ? trimmed : null;
+  } catch {
+    return null;
+  }
 }

@@ -1,16 +1,22 @@
 import {CONVERT_PROVIDER_TIMEOUT_MS} from '../config/convert';
 import {fetchWithTimeout} from '../services/relay';
 import {toUnits} from '../lib/format';
+import {cefiFamilyOf, venueOfId} from '../config/venues';
 import {type ConvertRecord} from './types';
 /** What ONE provider status read taught us. 'unreachable' = we learned nothing (transport /
  *  non-2xx / unreadable body / refused non-https URL); 'unknown' = the provider answered a
- *  status this build cannot map. BOTH are no-transition outcomes — never a fabricated one. */
+ *  status this build cannot map. BOTH are no-transition outcomes — never a fabricated one.
+ *  'rate_limited' = the relay answered HTTP 429 (the partner agreement's limiter doing its
+ *  job): ALSO a no-transition outcome and never a user-facing error — the reading carries
+ *  the Retry-After hint (ms from now, null when the header is absent) so the engine's next
+ *  tick waits it out instead of hammering. */
 export type ProviderStatusReading =
   | {kind: 'awaiting_deposit'}
   | {kind: 'processing'}
   | {kind: 'completed'; amount?: string; tx?: string}
   | {kind: 'expired'}
   | {kind: 'refunded'}
+  | {kind: 'rate_limited'; retryAfterMs: number | null}
   | {kind: 'unreachable'}
   | {kind: 'unknown'};
 
@@ -48,6 +54,58 @@ const PROVIDER_STATUS_MAP: Record<string, ProviderStatusReading['kind']> = {
   reversed: 'refunded',
 };
 
+/** Retry-After (the 429 discipline): delay-seconds or an HTTP-date → ms from now, clamped
+ *  to [0, 10 min] so a hostile/garbage header can neither spin the poll nor silence it for
+ *  hours. Absent or unreadable → null (the caller's normal cadence governs). */
+const RETRY_AFTER_MAX_MS = 10 * 60_000;
+function retryAfterMsOf(r: Response): number | null {
+  try {
+    const raw = r.headers?.get?.('retry-after') ?? null;
+    if (raw == null) return null;
+    const trimmed = raw.trim();
+    if (/^\d+$/.test(trimmed)) return Math.min(Number(trimmed) * 1000, RETRY_AFTER_MAX_MS);
+    const at = Date.parse(trimmed);
+    if (Number.isFinite(at)) return Math.min(Math.max(at - Date.now(), 0), RETRY_AFTER_MAX_MS);
+  } catch {
+    // a degenerate Response without headers is just "no hint"
+  }
+  return null;
+}
+
+/** Per-record 429 backoff (the agreement's wait-and-retry): record id → the epoch ms
+ *  before which the ENGINE must not poll this trade again. Set by advanceProviderRecord on
+ *  a rate_limited reading; CONSUMED (cleared) by the engine when it sizes the next tick —
+ *  the same module-level-flag pattern as the abort requests in ./records. */
+const RATE_LIMITED_UNTIL_MS = new Map<string, number>();
+
+/** The engine's read: is this record 429-backed-off, and until when? (Expired entries read
+ *  as null — a stale hint never delays a poll.) */
+export function providerRateLimitedUntilMs(recordId: string): number | null {
+  const at = RATE_LIMITED_UNTIL_MS.get(recordId);
+  return at != null && at > Date.now() ? at : null;
+}
+
+/** Drop one record's 429 backoff (the engine consumes it after sizing one tick; the test
+ *  reset uses it for hygiene). */
+export function clearProviderRateLimit(recordId: string): void {
+  RATE_LIMITED_UNTIL_MS.delete(recordId);
+}
+
+/** Drop EVERY 429 backoff — the engine session's hygiene (backoffs die with the session
+ *  that earned them). */
+export function clearAllProviderRateLimits(): void {
+  RATE_LIMITED_UNTIL_MS.clear();
+}
+
+/** Is this a TROCADOR-family provider record? The partner agreement's poll floor keys on
+ *  the FAMILY, not the whole provider vocabulary — the sideshift family's status read is
+ *  the venue's own keyless host and is not party to the agreement. */
+export function isTrocadorProviderRecord(record: ConvertRecord): boolean {
+  if (record.legs.length > 0 || record.solanaLeg != null) return false;
+  const v = venueOfId(record.venueId);
+  return v != null && cefiFamilyOf(v) === 'trocador';
+}
+
 /** Read a provider order status once (device-direct). Failures are outcomes, not
  *  exceptions — the caller advances nothing on 'unreachable' | 'unknown'.
  *
@@ -70,6 +128,9 @@ export async function fetchProviderStatus(
   }
   try {
     const r = await fetchWithTimeout(url, undefined, CONVERT_PROVIDER_TIMEOUT_MS);
+    // HTTP 429 (the relay's upstream limiter): wait-and-retry on a LATER tick, never a
+    // user-facing error and never a verdict — the trade's state is simply not known yet.
+    if (r.status === 429) return {kind: 'rate_limited', retryAfterMs: retryAfterMsOf(r)};
     if (!r.ok) return {kind: 'unreachable'};
     const j = await r.json().catch(() => null) as Record<string, unknown> | null;
     if (j == null || typeof j.status !== 'string') return {kind: 'unreachable'};
@@ -112,6 +173,10 @@ export async function fetchProviderStatus(
  *
  *    from awaiting_deposit:
  *      deposit-family → awaiting_deposit · processing-family → provider_processing
+ *      completed → done (the FIRST terminal word a poll observes lands the record — under
+ *        the agreement's webhook-first status the relay-side state can already be settled
+ *        the first time the fallback poll looks, and a terminal word must never be polled
+ *        past)
  *      expired → quote_expired (the QUOTE died before value moved — never set by leg expiry)
  *      refunded → provider_refunded
  *    from provider_processing:
@@ -151,7 +216,9 @@ export async function advanceProviderRecord(
       if (inAwaiting || from === 'provider_processing') return apply({...record, step: 'provider_processing'});
       return record;
     case 'completed':
-      if (from === 'provider_processing') {
+      // The FIRST observed terminal word lands the record from either held state (see the
+      // matrix note): a settled trade is never polled again (agreement term 4).
+      if (inAwaiting || from === 'provider_processing') {
         // The cefi widening (2026-09-15): SideShift speaks DECIMAL strings in the out
         // asset's own units ("settleAmount": "0.0495…"), while outAmountNet is raw units
         // like every other record money field. Normalize exactly at this boundary and
@@ -174,6 +241,13 @@ export async function advanceProviderRecord(
     case 'refunded':
       if (inAwaiting || from === 'provider_processing') {
         return apply({...record, step: 'provider_refunded'});
+      }
+      return record;
+    case 'rate_limited':
+      // Wait-and-retry on a LATER tick: register the Retry-After hint for the engine's
+      // next-tick sizing and advance NOTHING (no transition, no error surface).
+      if (reading.retryAfterMs != null && reading.retryAfterMs > 0) {
+        RATE_LIMITED_UNTIL_MS.set(record.id, Date.now() + reading.retryAfterMs);
       }
       return record;
     case 'unreachable':

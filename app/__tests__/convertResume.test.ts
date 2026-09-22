@@ -52,6 +52,7 @@ import {
 } from '../convert';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
+import {providerRateLimitedUntilMs} from '../convert/providerStatus';
 import {
   __resetConvertResumeEngineForTest,
   abortConvertRecord,
@@ -178,6 +179,23 @@ describe('fetchProviderStatus — the provider status read', () => {
     expect(reading.kind).toBe('unreachable');
     expect(fetchWithTimeout).not.toHaveBeenCalled();
   });
+  test('HTTP 429 is rate_limited — never an error, and the Retry-After hint rides the reading', async () => {
+    // The relay's upstream limiter doing its job (partner agreement 2026-09-22): the app
+    // waits, it does not surface an error and it does not re-poll into the 429.
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce({
+      ok: false, status: 429, json: async () => null,
+      headers: {get: (n: string) => (n.toLowerCase() === 'retry-after' ? '1' : null)},
+    } as never);
+    const reading = await fetchProviderStatus({orderId: 'o', statusUrl: 'https://p.example/s/o'});
+    expect(reading).toEqual({kind: 'rate_limited', retryAfterMs: 1000});
+    // no header → no hint (the normal cadence governs)
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce({
+      ok: false, status: 429, json: async () => null,
+      headers: {get: () => null},
+    } as never);
+    expect(await fetchProviderStatus({orderId: 'o', statusUrl: 'https://p.example/s/o'}))
+      .toEqual({kind: 'rate_limited', retryAfterMs: null});
+  });
 });
 
 // --- the provider driver: one honest transition matrix, never backwards ----------------------------
@@ -266,6 +284,42 @@ describe('advanceProviderRecord — the providerRef driver', () => {
     const next = await advanceProviderRecord(rec);
     expect(next).toBe(rec); // untouched, byte-for-byte the same object
     expect(fetchWithTimeout).not.toHaveBeenCalled();
+  });
+  test('completed is TERMINAL from awaiting_deposit too — the first observed terminal word lands (term 4)', async () => {
+    // Webhook-first status: the relay-side state can already be settled the first time the
+    // fallback poll looks. The record must LAND (done) and never poll the trade again — the
+    // old shape (awaiting_deposit ignores completed) polled a settled trade forever.
+    const rec = providerRecord({
+      outSymbol: 'SOL',
+      outDecimals: 9,
+      providerDeposit: {depositAddress: 'e2e-deposit-address-01', depositAmount: '2'},
+    });
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(
+      res({status: 'Completed', amount_to: '0.0496', details: {hashout: 'h-out-1'}}) as never,
+    );
+    const next = await advanceProviderRecord(rec);
+    expect(next.step).toBe('done');
+    expect(next.outAmountNet).toBe('49600000'); // toUnits('0.0496', 9) — the venue's own figure
+    expect(next.outTx).toBe('h-out-1');
+  });
+  test('a 429 advances NOTHING and registers the Retry-After backoff for the engine', async () => {
+    expect(providerRateLimitedUntilMs('cef-1')).toBeNull();
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce({
+      ok: false, status: 429, json: async () => null,
+      headers: {get: (n: string) => (n.toLowerCase() === 'retry-after' ? '1' : null)},
+    } as never);
+    const next = await advanceProviderRecord(providerRecord());
+    expect(next.step).toBe('awaiting_deposit'); // wait-and-retry, not a verdict, not an error
+    const until = providerRateLimitedUntilMs('cef-1');
+    expect(until).not.toBeNull();
+    expect(until!).toBeGreaterThan(Date.now());
+    // an absent Retry-After registers nothing — the normal cadence governs the next tick
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce({
+      ok: false, status: 429, json: async () => null,
+      headers: {get: () => null},
+    } as never);
+    await advanceProviderRecord(providerRecord({id: 'cef-2'}));
+    expect(providerRateLimitedUntilMs('cef-2')).toBeNull();
   });
 });
 
@@ -549,5 +603,60 @@ describe('abortConvertRecord — the user\'s Stop through the resume engine', ()
     expect(jest.mocked(requestConvertAbort)).toHaveBeenCalledWith('no-such-record');
     expect(Object.keys(convertResumeSnapshot())).toEqual([]);
     expect(saveConvertRecord).not.toHaveBeenCalled();
+  });
+});
+
+// --- the TROCADOR poll floor + the 429 wait-and-retry (partner agreement 2026-09-22, term 4) ------
+describe('the TROCADOR poll floor — one status request per trade id per 60 s, never faster', () => {
+  const TROC_URL = 'http://r/api/v1/trocador/trade?id=t-1'; // relay-origin: the allowed http shape
+  const SIDE_URL = 'https://provider.example/o/s-1';
+  const FLOOR_OPTS = {
+    rearmMs: 5,
+    stuckWatchMs: 5,
+    providerPollMs: 20,
+    providerPollFloorMs: 400, // the agreement's floor, shrunk for the test clock
+    executorOpts: {submitAttempts: 1, poll: {attempts: 1, intervalMs: 0}, settleAttempts: 1, settleIntervalMs: 0},
+  };
+  const callsFor = (url: string): number =>
+    jest.mocked(fetchWithTimeout).mock.calls.filter(c => c[0] === url).length;
+
+  test('a trocador-family record polls at the floor; a sideshift record keeps the engine cadence', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({
+      'troc-1': providerRecord({id: 'troc-1', venueId: 'trocador', providerRef: {orderId: 't-1', statusUrl: TROC_URL}}),
+      'side-1': providerRecord({id: 'side-1', venueId: 'sideshift', providerRef: {orderId: 's-1', statusUrl: SIDE_URL}}),
+    });
+    jest.mocked(fetchWithTimeout).mockResolvedValue(res({status: 'waiting'}) as never);
+    const stop = startConvertResumeEngine(CTX, FLOOR_OPTS);
+    try {
+      await sleep(900); // ~45 engine cadences; a floored record may tick only ~3 times
+      const side = callsFor(SIDE_URL);
+      const troc = callsFor(TROC_URL);
+      expect(side).toBeGreaterThanOrEqual(20); // the un-floored family ran at the engine cadence
+      // The floored family is BOUNDED by the floor (first poll at t=0, then ≥400 ms apart:
+      // at most 3 in the window) — an unfloored record would show ~45 here. Lower bound ≥2
+      // proves the record is still LIVE under the floor (not stalled, just slow).
+      expect(troc).toBeLessThanOrEqual(3);
+      expect(troc).toBeGreaterThanOrEqual(2);
+    } finally {
+      stop();
+    }
+  });
+
+  test('a 429 Retry-After pushes the next poll past the hint — wait-and-retry, never an error', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({
+      'cef-1': providerRecord({providerRef: {orderId: 'ocp-7', statusUrl: SIDE_URL}}),
+    });
+    // FIRST poll answers 429 with Retry-After: 1 (1 s) — longer than the observation window.
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce({
+      ok: false, status: 429, json: async () => null,
+      headers: {get: (n: string) => (n.toLowerCase() === 'retry-after' ? '1' : null)},
+    } as never);
+    const stop = startConvertResumeEngine(CTX, FLOOR_OPTS);
+    try {
+      await sleep(250); // ~12 cadences after the 429 — every one must be refused by the hint
+      expect(callsFor(SIDE_URL)).toBe(1);
+    } finally {
+      stop();
+    }
   });
 });

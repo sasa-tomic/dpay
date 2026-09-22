@@ -85,7 +85,7 @@ import {deriveSolanaAddress} from '../solana/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {hubRoutes, multihopRoutesFrom, gasFundRoutes, type HubRoute, type MultihopRoute} from '../routes';
 import {M} from '../i18n';
-import {fmtAssetCompact, parseUserAmount, rawToDecimal} from '../lib/format';
+import {fmtAssetCompact, parseUserAmount, randNonceHex, rawToDecimal} from '../lib/format';
 import {eip55ChecksumBad} from '../lib/eip55';
 import type {AssetId, Identity} from '../lib/types';
 import {C} from '../config/palette';
@@ -661,26 +661,27 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
   // --- stale refresh: >30 s old (test-seam overridable via __DPAY_TEST_CONVERT_STALE_MS) → fetch
   //     a fresh quote in place; a moved amount is surfaced as a review line, never silently kept.
   //     Single-venue mode only — the chooser refreshes each row itself (below).
+  //     CEFI MODE IS EXEMPT (2026-09-22 partner agreement, organic-demand discipline): the
+  //     venue's rate is fetched when the screen opens and re-fetched when the amount changes
+  //     (and again at the confirm gesture, which mints the order's own locked quote) — NEVER
+  //     on a timer. An interval re-quote is machine-generated demand against the partner-key
+  //     proxy, exactly the traffic class the agreement forbids; the confirm-time re-quote
+  //     remains the user's execution protection (a moved market is reviewed THERE).
   useEffect(() => {
-    if (quote == null || legs == null || isLiveRecord(record) || chooserMode) return;
+    if (quote == null || legs == null || isLiveRecord(record) || chooserMode || cefiMode) return;
     const id = setInterval(() => {
       if (!mountedRef.current || staleRefreshing || !isQuoteStale(quote)) return;
       setStaleRefreshing(true);
       void (async () => {
         try {
-          // CeFi mode refreshes through the partner-key proxy with the cefi fetcher — the
-          // ic_amm swap_quote path would refuse the cross-rail pair by construction.
-          const fresh = cefiMode && activeCefiVenue != null && cefiOutMint != null && cefiOut != null
-            ? await fetchCeFiConvertQuote(
-              relayUrl, activeCefiVenue, legs.inDesc.ledger, cefiOutMint, quote.amountIn,
-              {inDecimals: legs.inDecimals, outDecimals: cefiOut.decimals},
-            )
-            : await fetchConvertQuote(
-              relayUrl, legs.inDesc.ledger,
-              activeRoute != null ? activeRoute.hop.ledger : effOut!.ledger,
-              quote.amountIn,
-              activeRoute != null ? {venue: venueOfId(activeRoute.swapVenueId) ?? undefined} : {},
-            );
+          // IC-AMM pairs only now — the cefi surface never reaches this effect (the gate
+          // above); the refresh rides the plain swap_quote path with the route's own venue.
+          const fresh = await fetchConvertQuote(
+            relayUrl, legs.inDesc.ledger,
+            activeRoute != null ? activeRoute.hop.ledger : effOut!.ledger,
+            quote.amountIn,
+            activeRoute != null ? {venue: venueOfId(activeRoute.swapVenueId) ?? undefined} : {},
+          );
           if (mountedRef.current && fresh.amountOutGross !== quote.amountOutGross) {
             setQuoteChanged({oldAmt: quote.amountOutGross, newAmt: fresh.amountOutGross});
           }
@@ -695,7 +696,7 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quote?.fetchedAtMs, quote?.amountIn, staleRefreshing, legs?.inDesc.ledger, effOut?.ledger, relayUrl, record != null && isLiveRecord(record), chooserMode, activeRoute?.routeId, activeRoute?.hop.ledger, destMech, mechUnpicked, selGroup?.key, hubMode]);
+  }, [quote?.fetchedAtMs, quote?.amountIn, staleRefreshing, legs?.inDesc.ledger, effOut?.ledger, relayUrl, record != null && isLiveRecord(record), chooserMode, cefiMode, activeRoute?.routeId, activeRoute?.hop.ledger, destMech, mechUnpicked, selGroup?.key, hubMode]);
 
   // --- stale refresh, CHOOSER MODE: every stale row refreshes its OWN quote (row order and the
   //     user's selection are inputs here, never outputs). A moved SELECTED quote is surfaced as
@@ -956,6 +957,8 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       setConfirmErr(null);
       setQuoteChanged(null);
       try {
+        // The record id is minted BEFORE the order (the trade's clientOrderId — see below).
+        const cefiRecordId = randNonceHex();
         // Re-quote at the confirm gesture — but ONLY to mint a FRESH QUOTE ID: the fixed
         // order must be created from a live quote (SideShift pins quoteId ↔ affiliateId ↔
         // rate together). There is deliberately NO exact-match gate against the reviewed
@@ -998,11 +1001,17 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
             depositLedger: legs.inDesc.ledger,
             settleLedger: cefiOutMint,
             depositAmountDecimal: rawToDecimal(reviewed.amountIn, legs.inDecimals),
+            // The partner agreement's correlation field (Trocador family, 2026-09-22): the
+            // record id is minted NOW, before the order exists, so the locally persisted
+            // record and the relay's logged clientOrderId are the SAME id. The sideshift
+            // family's order body has no such field and ignores it.
+            clientOrderId: cefiRecordId,
           }, CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
         } catch (e) {
           throw ceFiServiceError(e, activeCefiVenue.display_name);
         }
         const rec = prepareCeFiConvertRecord({
+          id: cefiRecordId,
           quote: fresh,
           order,
           relayUrl,

@@ -34,6 +34,13 @@ export type SignedLeg = {
 export type ProviderRef = {
   orderId: string;
   statusUrl?: string;
+  /** The RELAY's own order id for this trade (the `X-Dpay-Order-Id` response header echoed
+   *  at trade creation, 2026-09-22 partner agreement): the correlation key the relay records
+   *  next to the venue's trade id (its order store + compliance log), and the `webhook_key`
+   *  its webhook-first status push is keyed on. Absent on every pre-agreement record and on
+   *  the sideshift family (whose status read never touches the relay) — optional, so legacy
+   *  records hydrate byte-identically. */
+  relayOrderId?: string;
 };
 
 /** The CeFi handoff facts (the SideShift widening, 2026-09-15): what the USER must do

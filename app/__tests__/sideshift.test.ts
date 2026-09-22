@@ -327,6 +327,7 @@ describe('prepareCeFiConvertRecord — red lines, then the handoff record', () =
     expiresAt: '2026-09-16T00:00:00.000Z',
   };
   const args = {
+    id: 'rec-1', // the clientOrderId twin — minted by the confirm path before the order
     quote,
     order,
     relayUrl: 'https://relay.example',
@@ -395,6 +396,7 @@ describe('prepareCeFiConvertRecord — red lines, then the handoff record', () =
 // --- hydration: the cefi widening -------------------------------------------------------------------
 describe('hydrateConvertStore — the cefi record survives without numeric currencies', () => {
   const cefiRecord = prepareCeFiConvertRecord({
+    id: 'rec-hyd-1',
     relayUrl: 'https://relay.example',
     quote: {
       venueId: 'sideshift',

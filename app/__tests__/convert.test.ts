@@ -1140,6 +1140,7 @@ describe('prepareCeFiConvertRecord — the deposit-amount red line compares VALU
     expiresAt: null,
   });
   const prepare = (depositAmount: string) => prepareCeFiConvertRecord({
+    id: 'rec-guard-1',
     quote: cefiQuote(),
     order: order(depositAmount),
     relayUrl: 'http://relay.test',

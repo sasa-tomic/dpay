@@ -34,6 +34,7 @@ import {
   fetchCeFiQuoteResult,
   prepareCeFiConvertRecord,
 } from '../convert';
+import {salvageConvertStore} from '../convert/records';
 import {BUNDLED_VENUES, type VenueEntry} from '../config/venues';
 
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
@@ -136,12 +137,52 @@ describe('services/trocador — trade creation', () => {
     });
     expect(t).toEqual({
       tradeId: 'trade-9',
+      relayOrderId: null, // no X-Dpay-Order-Id header → persisted nothing
       depositAddress: 'venue-deposit-addr',
       depositMemo: null,
       depositAmount: '2',
       settleAmount: '0.0496',
       expiresAt: null,
     });
+  });
+
+  test('the trade body carries clientOrderId (the record id) and the X-Dpay-Order-Id answer is read', async () => {
+    // The partner agreement (2026-09-22, term 2): the app stamps every trade with its
+    // clientOrderId; the relay records it next to ITS OWN order id, echoed in the
+    // X-Dpay-Order-Id response header — which the client reads for the record.
+    relayMock.mockResolvedValue(new Response(JSON.stringify({
+      trade_id: 'trade-10', amount_from: '2', address_provider: 'dep',
+    }), {status: 200, headers: {'X-Dpay-Order-Id': 'ord-77'}}));
+    const t = await createTrocadorTrade(RELAY, VENUE, {
+      rateId: 'rate-1', provider: 'SomeSwap', settleAddress: 's', refundAddress: 'r',
+      depositLedger: ICP_LEDGER, settleLedger: WRAPPED_SOL_MINT_ADDRESS, depositAmount: '2',
+      clientOrderId: 'rec-abc',
+    });
+    const [, , init] = relayMock.mock.calls[0] as [string, string, RequestInit];
+    expect(JSON.parse(String(init.body)).clientOrderId).toBe('rec-abc');
+    expect(t.relayOrderId).toBe('ord-77');
+    // an absent header persists nothing (an older relay must not break the flow)
+    relayMock.mockResolvedValue(new Response(JSON.stringify({
+      trade_id: 'trade-11', amount_from: '2', address_provider: 'dep',
+    }), {status: 200}));
+    const noHeader = await createTrocadorTrade(RELAY, VENUE, {
+      rateId: 'rate-1', provider: 'SomeSwap', settleAddress: 's', refundAddress: 'r',
+      depositLedger: ICP_LEDGER, settleLedger: WRAPPED_SOL_MINT_ADDRESS, depositAmount: '2',
+      clientOrderId: 'rec-abc',
+    });
+    expect(noHeader.relayOrderId).toBeNull();
+  });
+
+  test('clientOrderId is optional: no id sent means the field is absent from the body', async () => {
+    relayMock.mockResolvedValue(new Response(JSON.stringify({
+      trade_id: 'trade-12', amount_from: '2', address_provider: 'dep',
+    }), {status: 200}));
+    await createTrocadorTrade(RELAY, VENUE, {
+      rateId: 'rate-1', provider: 'SomeSwap', settleAddress: 's', refundAddress: 'r',
+      depositLedger: ICP_LEDGER, settleLedger: WRAPPED_SOL_MINT_ADDRESS, depositAmount: '2',
+    });
+    const [, , init] = relayMock.mock.calls[0] as [string, string, RequestInit];
+    expect('clientOrderId' in JSON.parse(String(init.body))).toBe(false);
   });
 
   test('an empty required field refuses BEFORE any network call', async () => {
@@ -214,6 +255,7 @@ describe('prepareCeFiConvertRecord — the trocador record shape', () => {
   };
   const order = {
     tradeId: 'trade-9',
+    relayOrderId: null as string | null,
     depositAddress: 'venue-deposit-addr',
     depositMemo: null as string | null,
     depositAmount: '2',
@@ -221,6 +263,7 @@ describe('prepareCeFiConvertRecord — the trocador record shape', () => {
     expiresAt: null,
   };
   const args = {
+    id: 'rec-1', // the clientOrderId twin — minted by the confirm path before the trade
     quote,
     order,
     relayUrl: RELAY,
@@ -235,6 +278,7 @@ describe('prepareCeFiConvertRecord — the trocador record shape', () => {
   test('the record lands at awaiting_deposit with the RELAY statusUrl and the handoff block', () => {
     const rec = prepareCeFiConvertRecord(args);
     expect(rec.step).toBe('awaiting_deposit');
+    expect(rec.id).toBe('rec-1'); // the record id IS the clientOrderId sent at trade creation
     expect(rec.venueId).toBe('trocador');
     expect(rec.legs).toEqual([]);
     expect(rec.providerRef).toEqual({
@@ -246,6 +290,29 @@ describe('prepareCeFiConvertRecord — the trocador record shape', () => {
       depositAmount: '2',
     });
     expect(rec.expectedNet).toBe(rec.expectedGross); // dpay adds nothing
+  });
+
+  test('the relay\'s X-Dpay-Order-Id order id persists on the providerRef (agreement term 2)', () => {
+    const rec = prepareCeFiConvertRecord({...args, order: {...order, relayOrderId: 'ord-77'}});
+    expect(rec.providerRef).toEqual({
+      orderId: 'trade-9',
+      statusUrl: `${RELAY}/api/v1/trocador/trade?id=trade-9`,
+      relayOrderId: 'ord-77',
+    });
+    // and it survives the store round-trip (hydrate parses it back)
+    const salvaged = salvageConvertStore({[rec.id]: JSON.parse(JSON.stringify(rec))});
+    expect(salvaged.dropped).toBe(0);
+    expect(salvaged.records[rec.id]!.providerRef).toEqual(rec.providerRef);
+  });
+
+  test('a record persisted WITHOUT a relayOrderId (pre-agreement shape) still hydrates byte-identically', () => {
+    const rec = prepareCeFiConvertRecord(args);
+    const raw = JSON.parse(JSON.stringify(rec)) as Record<string, unknown>;
+    const pr = raw.providerRef as Record<string, unknown>;
+    delete pr.relayOrderId;
+    const salvaged = salvageConvertStore({[rec.id]: raw});
+    expect(salvaged.dropped).toBe(0);
+    expect(salvaged.records[rec.id]!.providerRef).toEqual({orderId: 'trade-9', statusUrl: rec.providerRef!.statusUrl});
   });
 
   test('a trocador record without a relay is refused at birth (it could never advance)', () => {

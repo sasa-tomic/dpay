@@ -1,13 +1,16 @@
-// The SOL surface's stale-refresh SINGLE-FLIGHT (2026-09-21): a stale quote must have at
-// most ONE refresh in flight — the IC surface's exact guard. The missing check let the
-// 1s interval fire a fresh quote fetch EVERY SECOND while the venue was slow or
-// unreachable: up to 8 concurrent 8s-budget calls hammering the relay's partner-key
-// proxy — the request storm behind the live attempt-#3 confirm livelock ("Could not
-// reach SideShift" alternating with this refresh's own "Quote changed" banner).
+// The CeFi surface's ORGANIC-DEMAND rate discipline (2026-09-22 partner agreement, term 1):
+// a venue rate is fetched when the conversion screen opens and re-fetched when the user
+// CHANGES THE AMOUNT — never on a timer. This suite used to pin the stale-refresh
+// SINGLE-FLIGHT guard (one refresh in flight, added 2026-09-21 after the unguarded 1s
+// interval stamped the partner-key proxy during the live attempt-#3 livelock); the partner
+// agreement supersedes it: the timed cefi refresh is GONE entirely, so there is nothing to
+// single-flight — a stale CeFi quote simply stands until the user moves the amount or
+// confirms (the confirm-time re-quote mints the order's own locked rate and stays the
+// execution protection). The Jupiter leg keeps the timed refresh (its public quote API is
+// not a partner surface) and its single-flight guard with it.
 //
-// `isQuoteStale` is pinned TRUE for the whole file: the refresh path must be exercised
-// deterministically, without waiting a real 30s staleness window or a real 1s tick
-// (jest fake timers advance the interval; the sibling suite pins the opposite pin).
+// `isQuoteStale` is pinned TRUE for the whole file: even PERPETUALLY STALE, the cefi quote
+// must never re-fetch — the strongest form of the pin, deterministic under jest fake timers.
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {afterEach, beforeEach, describe, expect, jest, test} from '@jest/globals';
@@ -62,16 +65,7 @@ const BALANCES = {[EURC_MINT_ADDRESS]: '2000000'};
 
 const quoteOf = (id: string) => ({venueId: 'sideshift-eurc', quoteId: id, settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
 
-/** A quote fetch that never answers until `release()` — the slow/unreachable venue. */
-function heldQuote(): {promise: Promise<{venueId: string; quoteId: string; settleAmount: string; rate: string; fetchedAtMs: number}>; release: () => void} {
-  let release!: () => void;
-  const promise = new Promise<{venueId: string; quoteId: string; settleAmount: string; rate: string; fetchedAtMs: number}>((res) => {
-    release = () => res(quoteOf('q-held'));
-  });
-  return {promise, release};
-}
-
-describe('SOL stale refresh is single-flight (the IC guard, both rails)', () => {
+describe('CeFi quotes never refresh on a timer (organic-demand, partner agreement term 1)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
@@ -80,7 +74,7 @@ describe('SOL stale refresh is single-flight (the IC guard, both rails)', () => 
     jest.useRealTimers();
   });
 
-  test('a stale quote holds ONE refresh in flight — no 1s stampede against the venue', async () => {
+  test('a PERPETUALLY STALE cefi quote stands: no interval re-fetch, ever', async () => {
     jest.mocked(fetchSideShiftQuote).mockResolvedValue(quoteOf('q-review'));
     let tree!: renderer.ReactTestRenderer;
     act(() => {
@@ -103,31 +97,19 @@ describe('SOL stale refresh is single-flight (the IC guard, both rails)', () => 
       tree.root.findAll(n => n.props != null && n.props.testID === 'convert-sol-dest-cefi-sideshift-eurc')[0].props.onPress();
       tree.root.findAll(n => n.props != null && n.props.testID === 'convert-amount')[0].props.onChangeText('1');
     });
-    // The review quote is in (exactly one fetch so far) and the stale interval is armed.
+    // The review quote is in — exactly one fetch, from opening the screen + typing the amount.
     expect(jest.mocked(fetchSideShiftQuote).mock.calls.length).toBe(1);
 
-    // The venue stops answering: every refresh from here is held in flight.
-    const held = heldQuote();
-    jest.mocked(fetchSideShiftQuote).mockImplementation(() => held.promise);
-
-    // One tick: exactly ONE refresh starts. Three more seconds: STILL one — the 1s
-    // interval kept ticking but the single-flight guard refused every pass. (The defect
-    // this pins: the unguarded effect reached FOUR+ concurrent fetches here.)
+    // The quote is pinned stale (see the header): the old build re-fetched here on a 1s
+    // interval. The agreement forbids machine-generated demand: minutes of wall-clock ticks
+    // and a slow venue answering later must produce NOTHING further.
     await act(() => { jest.advanceTimersByTime(1100); });
-    expect(jest.mocked(fetchSideShiftQuote).mock.calls.length).toBe(2);
-    await act(() => { jest.advanceTimersByTime(3000); });
-    expect(jest.mocked(fetchSideShiftQuote).mock.calls.length).toBe(2);
-
-    // The venue answers: the refresh settles and the guard RELEASES — the next tick may
-    // start exactly one more, held again: still one in flight, never a second.
-    await act(async () => { held.release(); });
-    await act(async () => {});
-    const held2 = heldQuote();
-    jest.mocked(fetchSideShiftQuote).mockImplementation(() => held2.promise);
-    await act(() => { jest.advanceTimersByTime(1100); });
-    expect(jest.mocked(fetchSideShiftQuote).mock.calls.length).toBe(3);
-    await act(() => { jest.advanceTimersByTime(3000); });
-    expect(jest.mocked(fetchSideShiftQuote).mock.calls.length).toBe(3);
+    await act(() => { jest.advanceTimersByTime(60_000); });
+    expect(jest.mocked(fetchSideShiftQuote).mock.calls.length).toBe(1);
+    jest.mocked(fetchSideShiftQuote).mockResolvedValue(quoteOf('q-late'));
+    await act(async () => { await Promise.resolve(); });
+    await act(() => { jest.advanceTimersByTime(60_000); });
+    expect(jest.mocked(fetchSideShiftQuote).mock.calls.length).toBe(1);
     await act(async () => { tree.unmount(); });
   });
 });

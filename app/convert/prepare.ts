@@ -140,6 +140,11 @@ export async function prepareConvertRecord(args: {
  *  statusUrl is the venue's keyless device-direct GET — the relay is not in the status
  *  path, so a relay outage cannot blind an in-flight order. */
 export function prepareCeFiConvertRecord(args: {
+  /** The record id — minted by the CONFIRM PATH before order creation and sent to the
+   *  relay as the trade's `clientOrderId` (2026-09-22 partner agreement): the record that
+   *  persists locally IS the correlation id the relay logs for the trade. Required so the
+   *  compiler pins the two ends of that link — a generated-here id could never match. */
+  id: string;
   quote: ConvertQuote;
   /** The family's own order — SideShiftFixedShift (id) or TrocadorTrade (tradeId);
    *  normalized below. */
@@ -188,8 +193,15 @@ export function prepareCeFiConvertRecord(args: {
     throw new Error(M.convert.errors.quoteUnavailable('order'));
   }
   const expiresAtMs = order.expiresAt != null ? Date.parse(order.expiresAt) : NaN;
+  // The relay's own order id (X-Dpay-Order-Id, the agreement's correlation key) — present
+  // only on a trocador order answered by the agreement-era relay. Persisted on the
+  // providerRef so it survives reload; absent (null / empty / sideshift) persists nothing.
+  const relayOrderId = 'relayOrderId' in order && typeof order.relayOrderId === 'string'
+    && order.relayOrderId.length > 0
+    ? order.relayOrderId
+    : null;
   return {
-    id: randNonceHex(),
+    id: args.id,
     createdAtMs: Date.now(),
     step: 'awaiting_deposit',
     venueId: quote.venueId,
@@ -220,6 +232,7 @@ export function prepareCeFiConvertRecord(args: {
       statusUrl: cefiFamilyOf(venue) === 'trocador'
         ? trocadorStatusUrl(args.relayUrl, orderId)
         : sideShiftStatusUrl(orderId),
+      ...(relayOrderId != null ? {relayOrderId} : {}),
     },
     providerDeposit: {
       depositAddress: order.depositAddress,

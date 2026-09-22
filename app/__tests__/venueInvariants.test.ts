@@ -544,7 +544,10 @@ describe('Wave-3 recovery invariant — "provider transitions never move backwar
     // from awaiting_deposit
     ['awaiting_deposit', 'awaiting_deposit', {status: 'pending_deposit'}, 'awaiting_deposit'],
     ['awaiting_deposit', 'processing', {status: 'processing'}, 'provider_processing'],
-    ['awaiting_deposit', 'completed', {status: 'completed'}, 'awaiting_deposit'],
+    // completed IS terminal from the first observation (2026-09-22 partner agreement, term 4):
+    // webhook-first status means the fallback poll can see the settled word FIRST — the record
+    // lands at done and the trade is never polled again.
+    ['awaiting_deposit', 'completed', {status: 'completed'}, 'done'],
     ['awaiting_deposit', 'expired', {status: 'expired'}, 'quote_expired'],
     ['awaiting_deposit', 'refunded', {status: 'refunded'}, 'provider_refunded'],
     ['awaiting_deposit', 'unreachable', 'unreachable', 'awaiting_deposit'],

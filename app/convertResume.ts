@@ -28,6 +28,7 @@
  * device-direct, https-only, like services/opencryptopay).
  */
 import {
+  CONVERT_ENGINE_PROVIDER_POLL_FLOOR_MS,
   CONVERT_ENGINE_PROVIDER_POLL_MS,
   CONVERT_ENGINE_REARM_MS,
   CONVERT_ENGINE_STUCK_WATCH_MS,
@@ -54,6 +55,12 @@ import {
   type ConvertStep,
 } from './convert';
 import {advanceProviderRecord as advanceProviderRecordPersisted} from './convert/providerStatus';
+import {
+  clearAllProviderRateLimits,
+  clearProviderRateLimit,
+  isTrocadorProviderRecord,
+  providerRateLimitedUntilMs,
+} from './convert/providerStatus';
 export type {ProviderStatusReading} from './convert/providerStatus';
 export {fetchProviderStatus} from './convert/providerStatus';
 
@@ -82,6 +89,9 @@ type EngineOpts = {
   rearmMs?: number;
   stuckWatchMs?: number;
   providerPollMs?: number;
+  /** The TROCADOR poll floor override (jest pins the mechanics with a small floor; prod
+   *  falls to CONVERT_ENGINE_PROVIDER_POLL_FLOOR_MS — 60 s, or 0 in a seamed test world). */
+  providerPollFloorMs?: number;
   executorOpts?: Parameters<typeof executeConvert>[2];
 };
 
@@ -98,7 +108,7 @@ const ENGINE_EXECUTOR_OPTS = {
 
 type EngineState = {
   ctx: EngineCtx | null;
-  opts: Required<Pick<EngineOpts, 'rearmMs' | 'stuckWatchMs' | 'providerPollMs'>> & {executorOpts: NonNullable<EngineOpts['executorOpts']>};
+  opts: Required<Pick<EngineOpts, 'rearmMs' | 'stuckWatchMs' | 'providerPollMs' | 'providerPollFloorMs'>> & {executorOpts: NonNullable<EngineOpts['executorOpts']>};
   records: Map<string, ConvertRecord>;
   inflight: Set<string>;
   timers: Map<string, ReturnType<typeof setTimeout>>;
@@ -108,7 +118,7 @@ type EngineState = {
 
 const state: EngineState = {
   ctx: null,
-  opts: {rearmMs: CONVERT_ENGINE_REARM_MS, stuckWatchMs: CONVERT_ENGINE_STUCK_WATCH_MS, providerPollMs: CONVERT_ENGINE_PROVIDER_POLL_MS, executorOpts: ENGINE_EXECUTOR_OPTS},
+  opts: {rearmMs: CONVERT_ENGINE_REARM_MS, stuckWatchMs: CONVERT_ENGINE_STUCK_WATCH_MS, providerPollMs: CONVERT_ENGINE_PROVIDER_POLL_MS, providerPollFloorMs: CONVERT_ENGINE_PROVIDER_POLL_FLOOR_MS, executorOpts: ENGINE_EXECUTOR_OPTS},
   records: new Map(),
   inflight: new Set(),
   timers: new Map(),
@@ -433,9 +443,24 @@ function scheduleNext(id: string, rec: ConvertRecord): void {
   if (state.ctx == null || state.stopped) return;
   let delay: number | null = null;
   if (!isTerminalConvertStep(rec.step)) {
-    // CeFi provider records poll the provider; IC-legs and Solana records re-arm on the fast
-    // cadence (their drivers own their own bounded waits; the re-arm is the outer safety net).
-    delay = rec.legs.length === 0 && rec.solanaLeg == null ? state.opts.providerPollMs : state.opts.rearmMs;
+    if (rec.legs.length === 0 && rec.solanaLeg == null) {
+      // CeFi provider record. Two bounds stack on the engine cadence (partner agreement,
+      // 2026-09-22 spec term 4): the TROCADOR family's 60 s FLOOR (one status request per
+      // trade id per minute, never faster — the sideshift family polls its own keyless
+      // venue host and is not party to the agreement), and a 429's Retry-After hint,
+      // consumed here: the next tick waits it out (wait-and-retry, never an error).
+      const base = Math.max(
+        state.opts.providerPollMs,
+        isTrocadorProviderRecord(rec) ? state.opts.providerPollFloorMs : 0,
+      );
+      const limitedUntil = providerRateLimitedUntilMs(id);
+      clearProviderRateLimit(id);
+      delay = limitedUntil != null ? Math.max(base, limitedUntil - Date.now()) : base;
+    } else {
+      // IC-legs and Solana records re-arm on the fast cadence (their drivers own their own
+      // bounded waits; the re-arm is the outer safety net).
+      delay = state.opts.rearmMs;
+    }
   } else if (
     rec.step === 'stuck'
     && (rec.legs.length > 0 || rec.solanaLeg != null)
@@ -462,6 +487,9 @@ function stopEngine(): void {
   state.stopped = true;
   for (const id of [...state.timers.keys()]) clearTimer(id);
   state.ctx = null;
+  // The 429 backoffs die with the session that earned them: a new identity's engine sizes
+  // its ticks from its own drives, never a predecessor's hints.
+  clearAllProviderRateLimits();
   // subscribers survive a stop: a still-mounted screen keeps reading the last snapshot until a
   // new engine starts (identity switch / wallet reload).
 }
@@ -490,6 +518,7 @@ export function startConvertResumeEngine(ctx: EngineCtx, opts: EngineOpts = {}):
     rearmMs: opts.rearmMs ?? CONVERT_ENGINE_REARM_MS,
     stuckWatchMs: opts.stuckWatchMs ?? CONVERT_ENGINE_STUCK_WATCH_MS,
     providerPollMs: opts.providerPollMs ?? CONVERT_ENGINE_PROVIDER_POLL_MS,
+    providerPollFloorMs: opts.providerPollFloorMs ?? CONVERT_ENGINE_PROVIDER_POLL_FLOOR_MS,
     executorOpts: opts.executorOpts ?? ENGINE_EXECUTOR_OPTS,
   };
   void (async () => {
@@ -587,5 +616,5 @@ export function __resetConvertResumeEngineForTest(): void {
   stopEngine();
   state.subscribers.clear();
   state.records.clear();
-  state.opts = {rearmMs: CONVERT_ENGINE_REARM_MS, stuckWatchMs: CONVERT_ENGINE_STUCK_WATCH_MS, providerPollMs: CONVERT_ENGINE_PROVIDER_POLL_MS, executorOpts: ENGINE_EXECUTOR_OPTS};
+  state.opts = {rearmMs: CONVERT_ENGINE_REARM_MS, stuckWatchMs: CONVERT_ENGINE_STUCK_WATCH_MS, providerPollMs: CONVERT_ENGINE_PROVIDER_POLL_MS, providerPollFloorMs: CONVERT_ENGINE_PROVIDER_POLL_FLOOR_MS, executorOpts: ENGINE_EXECUTOR_OPTS};
 }

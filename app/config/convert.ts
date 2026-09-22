@@ -89,6 +89,20 @@ export const CONVERT_ENGINE_STUCK_WATCH_MS = CONVERT_ENGINE_TEST_OPTS?.stuckWatc
  *  provider state. A venue that holds funds for hours is watched, not hammered. */
 export const CONVERT_ENGINE_PROVIDER_POLL_MS = CONVERT_ENGINE_TEST_OPTS?.providerPollMs ?? 10_000;
 
+/**
+ * The Trocador partner agreement's poll FLOOR (2026-09-22 spec term 4): a trocador-family
+ * provider record never polls its relay status route faster than ONE request / 60 s per
+ * trade id, and never past the first terminal status word (the provider driver's terminal
+ * steps already retire the timer; the completed-early matrix widening lands the record at
+ * `done` even when `completed` is the FIRST word a poll observes). Like every bound above,
+ * this is a REAL-API compliance bound: an offline test world has no partner budget to
+ * protect, so the engine seam's mere presence stands the floor DOWN (0) — the e2e driver
+ * re-times the whole engine through `__DPAY_TEST_CONVERT_ENGINE` — and a jest suite pins
+ * the floor's mechanics by passing an explicit `providerPollFloorMs` engine opt.
+ */
+export const CONVERT_ENGINE_PROVIDER_POLL_FLOOR_MS =
+  CONVERT_ENGINE_TEST_OPTS != null ? 0 : 60_000;
+
 /** One provider status read's transport budget. */
 export const CONVERT_PROVIDER_TIMEOUT_MS = 8_000;
 

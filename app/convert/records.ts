@@ -394,9 +394,16 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     const pr = r.providerRef;
     if (!pr || typeof pr !== 'object' || typeof (pr as Record<string, unknown>).orderId !== 'string') return null;
     const statusUrl = (pr as Record<string, unknown>).statusUrl;
-    rec.providerRef = statusUrl == null
-      ? {orderId: (pr as Record<string, unknown>).orderId as string}
-      : {orderId: (pr as Record<string, unknown>).orderId as string, statusUrl: String(statusUrl)};
+    // The partner-agreement correlation id (X-Dpay-Order-Id, 2026-09-22): OPTIONAL — every
+    // pre-agreement record (and the sideshift family) carries none — but when present it
+    // must be a non-empty string, like every other durable identity on a record.
+    const relayOrderId = (pr as Record<string, unknown>).relayOrderId;
+    if (relayOrderId != null && (typeof relayOrderId !== 'string' || relayOrderId.length === 0)) return null;
+    rec.providerRef = {
+      orderId: (pr as Record<string, unknown>).orderId as string,
+      ...(statusUrl == null ? {} : {statusUrl: String(statusUrl)}),
+      ...(relayOrderId != null ? {relayOrderId: relayOrderId as string} : {}),
+    };
     // The CeFi handoff block (SideShift widening, 2026-09-15): optional but when present
     // it must be the whole truth — a corrupt or half-written deposit block on a record
     // the deposit screen renders verbatim is a money-adjacent lie, so refuse the record.
