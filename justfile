@@ -245,6 +245,17 @@ ic-index-probe:
 swap-venue-probe:
     DPAY_IC_MAINNET=1 cargo nextest run -p dpay-relay --features agent -E 'binary(swap_venue_mainnet)' --no-capture
 
+# OPT-IN LIVE Trocador partner probe (NEEDS NETWORK + DPAY_TROCADOR_API_KEY, never in check/verify
+# — it makes LIVE key-gated calls to the real venue): GET /coins (the full coin/network vocabulary,
+# printed pretty NEXT TO the adapter's pinned codes from crates/dpay-relay/src/trocador.rs
+# TROCADOR_ASSETS, MISMATCH = exit 2) + ONE new_rate quote for the registered ICP↔SOL pair (fixed,
+# best_only, min_kycrating=A, markup=0, small amount — read-only, commits nothing). This is the
+# partner agreement's step (3): re-pin the codes + the trade-status vocabulary BEFORE the first
+# real trade — docs/specs/2026-09-22-trocador-partner-agreement.md.
+#   DPAY_TROCADOR_API_KEY=… just trocador-probe
+trocador-probe:
+    node scripts/trocador_live_probe.mjs
+
 # OPT-IN live OpenCryptoPay probe (NEEDS NETWORK, never in check/verify): drives the REAL app
 # against the REAL provider's public CHF-1 test till and stops at the review, having signed
 # nothing. Reads only — a quote costs nothing and commits nothing, and the wallet it drives is a

@@ -137,7 +137,7 @@
     <span class="kicker">Your data, clearly explained</span>
     <h1>Privacy Policy<i style="color:var(--brand)">.</i></h1>
     <p class="intro">This policy explains how the Different Pay developer ("Different Pay", "dpay", "we", "us") handles information when you use the Different Pay Android app, website, or web merchant terminal.</p>
-    <p class="date">Effective and last updated: August 15, 2026</p>
+    <p class="date">Effective and last updated: September 22, 2026</p>
     <div class="highlights" aria-label="Privacy highlights">
       <div class="highlight"><b>Your keys stay local</b><span>We do not receive or store your private key.</span></div>
       <div class="highlight"><b>No ads or tracking</b><span>We do not sell data or use it for targeted advertising.</span></div>
@@ -228,24 +228,38 @@
     <p>You may contact us to request access to or deletion of personal information controlled by us. We will verify and respond to the request as required by applicable law, but we cannot delete distributed-ledger records or data controlled independently by a third party.</p>
   </section>
 
+  <section id="conversion-venue-records">
+    <h2>7. Conversion venue request records</h2>
+    <p>When you convert one asset through an external exchange venue (for example an exchange aggregator) from the app, those requests partly ride our relay: a venue's API needs our partner key, so at minimum the rate quote and the trade creation are made from our backend, and the status checks too wherever the venue's API is key-gated. For the requests we proxy, we are the party holding the connection data.</p>
+    <p>For every request we proxy to a venue — the rate quote, the trade creation, and each status check — we log and retain, correlated with the venue's own trade id and our internal order id:</p>
+    <ul>
+      <li>the time of the request;</li>
+      <li>your source IP address;</li>
+      <li>device information (the User-Agent your app or browser sends); and</li>
+      <li>your language preference (the Accept-Language header).</li>
+    </ul>
+    <p>These records are kept for at least 12 months. Once we receive a valid request that relates to a specific trade, the data for that trade is preserved until the request is resolved, and longer where applicable law requires. When the venue forwards a valid information request about a trade, we disclose the records we hold for that trade to the venue and respond promptly.</p>
+    <div class="notice"><strong>What this log is not.</strong> It is not an account, a profile, or a tracking history: it holds the connection facts for the conversion requests we proxy, tied to a trade's ids, and nothing else about you. Different Pay has no server account with your name on it to join to these records.</div>
+  </section>
+
   <section id="children">
-    <h2>7. Children</h2>
+    <h2>8. Children</h2>
     <p>Different Pay is not directed to children under 13, or a higher minimum age where local law requires it. We do not knowingly collect personal information from children. If you believe a child has provided information to dpay, contact us so we can review and take appropriate action for information we control.</p>
   </section>
 
   <section id="international">
-    <h2>8. International and distributed processing</h2>
+    <h2>9. International and distributed processing</h2>
     <p>Different Pay's providers and distributed networks may process information in countries other than yours. Data recorded on a decentralized or distributed network may be replicated across nodes in multiple jurisdictions. Where required, we apply appropriate protections to information under our control.</p>
   </section>
 
   <section id="changes">
-    <h2>9. Changes to this policy</h2>
+    <h2>10. Changes to this policy</h2>
     <p>We may update this policy when Different Pay's features, providers, or legal obligations change. We will post the revised policy here and update the date above. Material changes will be communicated in the app or website when appropriate.</p>
   </section>
 
   <section id="contact">
     <div class="contact">
-      <h2>10. Contact</h2>
+      <h2>11. Contact</h2>
       <p><strong>App and developer:</strong> Different Pay<br /><strong>Android package:</strong> org.kalaj.dpay</p>
       <p>For privacy questions or requests, email <a href="mailto:sato.dpay@kalaj.org">sato.dpay@kalaj.org</a>.</p>
     </div>

@@ -142,21 +142,31 @@
   gas-fund offer funds that slice from the user's OWN holdings (fund-from-wallet prepends the
   gas legs, or self-fund with recheck) — still nothing dpay pays, holds, or custodies.
 - **EURC→ICP return leg (the SOL-side CeFi op's reverse leg): DONE 2026-09-22 (attempt #9) — REMOVED from the open list per the file rule; the running attempts #1–#8 narrative this entry carried is superseded by this disposition.** The FULL chain is now live-proven end to end: the venue's ICP payout layer takes the 64-hex account identifier (six consecutive first-try orders, settle = the float's identifier `9fac39d1…2279` verbatim, refund = the rail owner, every unfunded predecessor expiring with zero value at risk); the app's send surface is sound (stale-ok confirm gate + send-sheet surface ownership + the abortable seam, all live-validated in #8); the broadcast posture is `skipPreflight: true, maxRetries: 0` (817954d — the provider's broken preflight layer is bypassed, the chain is the referee; live-proven by #9's dust probe AND the funding deposit: broadcast accepted → on-chain confirmed in ~3 s); and the destination shape classifier separates `1…`/`3…`-prefixed Solana pubkeys from BTC base58 by DECODED BYTE LENGTH (32 vs 25 bytes — a pure prefix rule misread SideShift's `3ytbGFZ…GurJ` deposit address as Bitcoin mid-attempt-#9 and gated the send; fixed + vector-pinned jest, the #8-era deposit addresses `4kGiz…`/own ATA added as vectors). ATTEMPT #9 MEASURED (ledger rows 138–144): dust probe 0.01 EURC (seam proof; probe-spec error stranded 0.01 EURC + 0.00148844 SOL rent at an off-curve ATA — diagnostics self-sends must name the OWNER, the #6 precedent); the real leg: shift `d61b2eec59d5e5d45d6b`, deposit 8.8 EURC broadcast 22:14:39Z sig `5aU5jrY…kt1` (+0.000005 SOL fee, +0.00148844 SOL one-time venue-ATA rent), venue swept, **SETTLED 22:17:26Z**, and the independent ICRC-1 read shows ICP 0.05235395 → **3.39528652** — EXACTLY the quoted settleAmount 3.34293257 to the last decimal (the venue paid the ledger transfer fee). `just funds reconcile` 18 pairs CLEAN. The EURC rail now has a proven two-way bridge: EURC→ICP settles at the float in ~3 min; the reverse ICP→EURC direction is a DIFFERENT venue pair (registered, unexercised) and carries its own risk profile — exercised and CLOSED by attempt #10 the same day (see the work-order bullet above: shift `c3644b54ba21a36dabd8`, settled ~37 s, reconcile CLEAN).
-- **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue).** The
-  adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`, `/trade`
-  POST+GET status) are registered on every build and answer 503 naming `DPAY_TROCADOR_API_KEY`
-  until the founder sets it (key requested from commercial@trocador.app; no shape to validate —
-  the upstream 401 is the honest refusal). On key arrival, BEFORE the venue serves a real trade:
-  (1) re-pin the coin/network codes against the venue's own key-gated `GET /coins` (the adapter's
-  `icp`/`sol` on `Mainnet` rows are BEST-EFFORT, following the docs' example vocabulary — a wrong
-  code fails at the venue, never silently); (2) pin the trade-status vocabulary the same way (the
-  docs enumerate NO status values; the resume engine keeps unknown words honest-`unknown` and
-  never guesses). Trocador is the venue family slated to replace SideShift as the PRIMARY CeFi
-  rail once its with-key coverage probe shows ICP↔SOL partner coverage; if it shows none,
-  ChangeNOW is the documented fallback venue #2 (same relay-held-key pattern). Founder note (no
-  API flag refuses it): Trocador's `markup=0` pin keeps the USER's price at the venue's own
-  baseline, but Trocador still accrues half of ITS own commission to the partner account — what
-  happens to that accrual is a founder decision, outside code.
+- **Trocador adapter SHIPPED 503-until-key (2026-09-20; the first AGGREGATOR CeFi venue) — key
+  ACCESS ENABLED 2026-09-22 (their proxy may need up to 60 min from the email before the key
+  answers).** The adapter is live-capable on key arrival: the relay routes (`/api/v1/trocador/rate`,
+  `/trade` POST+GET status) are registered on every build and answer 503 naming
+  `DPAY_TROCADOR_API_KEY` until the founder sets it. The founder's signed partner agreement with
+  Trocador's commercial team (2026-09-22 — organic-demand origin with a promised per-transaction
+  budget, webhook-first status keyed on OUR internal order id, the 12-month data-retention
+  commitment, `markup=0`) is recorded in
+  `docs/specs/2026-09-22-trocador-partner-agreement.md`, and its code deliverables — the proxied-
+  request access log + order store (`trocador-access.jsonl`/`trocador-orders.jsonl` behind
+  `DPAY_TROCADOR_LOG_DIR`), the webhook route (`/api/v1/trocador/webhook`, ≤1/min fallback polling
+  stopping at the first terminal state), the upstream limiters, the privacy-policy section
+  (`/privacy` §7), and the live probe — are landing in this branch. STILL OPEN on key arrival,
+  BEFORE the venue serves a real trade, both now executable via `just trocador-probe` (refuses
+  without the key; LIVE key-gated calls, never in verify/check): (1) re-pin the coin/network codes
+  against the venue's own key-gated `GET /coins` (the adapter's `icp`/`sol` on `Mainnet` rows are
+  BEST-EFFORT, following the docs' example vocabulary — a wrong code fails at the venue, never
+  silently); (2) pin the trade-status vocabulary the same way (the docs enumerate NO status
+  values; the resume engine keeps unknown words honest-`unknown` and never guesses). Trocador is
+  the venue family slated to replace SideShift as the PRIMARY CeFi rail once its with-key coverage
+  probe shows ICP↔SOL partner coverage; if it shows none, ChangeNOW is the documented fallback
+  venue #2 (same relay-held-key pattern). Founder note (no API flag refuses it): Trocador's
+  `markup=0` pin keeps the USER's price at the venue's own baseline, but Trocador still accrues
+  half of ITS own commission to the partner account — what happens to that accrual is a founder
+  decision, outside code.
 
 **1. Objective 3 (card/bank funding) — HARD-BLOCKED on founder/legal; NOTHING is offline-buildable
 until the blockers land. THE thing that unblocks it:**
