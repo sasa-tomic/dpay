@@ -773,6 +773,15 @@ async fn cors_any_origin(
         header::ACCESS_CONTROL_ALLOW_ORIGIN,
         header::HeaderValue::from_static("*"),
     );
+    // `X-Dpay-Order-Id` (the Trocador agreement's order id, attached by the trade route and
+    // persisted by the wallet's convert service) is a NON-simple response header: a cross-origin
+    // page can read it only when it is EXPOSED. Same-origin reads — prod, where the relay serves
+    // /wallet itself — are unaffected either way; this only unblocks the cross-origin topologies
+    // (vite-served web builds in tests/review) that already carry `ACAO *` from this helper.
+    h.insert(
+        header::ACCESS_CONTROL_EXPOSE_HEADERS,
+        header::HeaderValue::from_static("X-Dpay-Order-Id"),
+    );
     if preflight {
         h.insert(
             header::ACCESS_CONTROL_ALLOW_METHODS,

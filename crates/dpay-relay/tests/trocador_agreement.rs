@@ -600,6 +600,16 @@ async fn order_is_persisted_before_the_upstream_call_and_trade_id_after() {
         Some(webhook_key.as_str()),
         "the header IS the webhook key"
     );
+    // The header is non-simple: a CROSS-ORIGIN web wallet can read it only when the CORS layer
+    // exposes it. This suite drives the full router with `test-helpers` on, so what is asserted
+    // here is the same header set the vite-served web build meets (see `cors_any_origin`).
+    assert_eq!(
+        headers
+            .get(header::ACCESS_CONTROL_EXPOSE_HEADERS)
+            .and_then(|v| v.to_str().ok()),
+        Some(ORDER_ID_HEADER),
+        "cross-origin readers must be able to see the order id"
+    );
     assert_eq!(
         seen_headers.get("API-Key").and_then(|v| v.to_str().ok()),
         Some(STUB_KEY)
