@@ -136,7 +136,9 @@
 //!                           from outside. (The server already wires ConnectInfo via
 //!                           into_make_service_with_connect_info.)
 //!   DPAY_TROCADOR_PG_DSN    the postgres connection string for the partner-agreement's
-//!                           compliance records (e.g. postgres://user:pass@host/db). SET →
+//!                           compliance records (e.g. postgres://user:pass@host/db; the
+//!                           tracked credential lives in secrets/trocador-pg.sops.json —
+//!                           decrypt into the env, never into a plaintext .env). SET →
 //!                           BOTH stores — the access log and the order store — live in PG
 //!                           (tables `trocador_access_log` + `trocador_order_events`,
 //!                           created idempotently at startup; APPEND-ONLY: the code only

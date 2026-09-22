@@ -156,7 +156,9 @@
   `trocador_access_log`/`trocador_order_events`, created idempotently, code only ever INSERTs,
   fail-closed (unreachable DSN refuses startup; a refused access-log write refuses the request);
   else the JSONL files `trocador-access.jsonl`/`trocador-orders.jsonl` behind
-  `DPAY_TROCADOR_LOG_DIR` for the offline dev loop. OPS MUST wire the DSN in the deploy env: the
+  `DPAY_TROCADOR_LOG_DIR` for the offline dev loop. OPS MUST wire the DSN in the deploy env (its
+  tracked credential lives in `secrets/trocador-pg.sops.json` — decrypt into the env, never into a
+  plaintext .env; see `deploy/.env.example`): the
   prod compose stack mounts NO volume, so flat files die on every redeploy — `DPAY_TROCADOR_PG_DSN`
   is already a passthrough line in `deploy/docker-compose.yml` + `deploy/.env.example`), the
   webhook route (`/api/v1/trocador/webhook`, ≤1/min fallback polling
