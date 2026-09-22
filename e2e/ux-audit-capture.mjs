@@ -179,6 +179,9 @@ async function runPass(env, tag, opts = {}) {
   });
   await step('checkout-form', async () => {
     // The till is the VCHF counter (flow 114): select VCHF before opening the Receive form.
+    // selectCurrency assumes the Accounts route — navigate there first (the prior step left the
+    // app on the Receive tab, where asset rows do not exist).
+    await openBalances(driver);
     await selectCurrency(driver, 'vchf');
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.findByTestID('btn-code-till', { timeoutMs: 5_000 });
