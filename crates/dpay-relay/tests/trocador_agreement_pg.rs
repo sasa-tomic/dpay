@@ -135,6 +135,10 @@ async fn pg_access_log_inserts_and_reads_back() {
     .expect("the PG access-log insert is acknowledged");
 
     // The webhook-unmatched shape: key_hash carries the correlation, everything else absent.
+    // The marker key is RUN-UNIQUE: the unmatched line has no order correlation ids (only
+    // key_hash), so a shared database accumulates these rows across runs — a constant key
+    // would break the exact-count assertion below.
+    let unmatched_key = unique_id("unmatched");
     a.log(AccessLine {
         kind: "webhook-unmatched",
         route: "/api/v1/trocador/webhook",
@@ -147,7 +151,7 @@ async fn pg_access_log_inserts_and_reads_back() {
         trade_id: None,
         upstream_status: None,
         duration_ms: None,
-        key_hash: Some("abcdef0123456789".into()),
+        key_hash: Some(unmatched_key.clone()),
     })
     .await
     .expect("the second insert is acknowledged");
@@ -195,7 +199,7 @@ async fn pg_access_log_inserts_and_reads_back() {
             "SELECT ip, user_agent, accept_language, client_order_id, order_id, trade_id, \
              upstream_status, duration_ms, key_hash \
              FROM trocador_access_log WHERE key_hash = $1",
-            &[&"abcdef0123456789"],
+            &[&unmatched_key],
         )
         .await
         .expect("read back the unmatched line");
@@ -209,7 +213,10 @@ async fn pg_access_log_inserts_and_reads_back() {
     assert!(row.get::<_, Option<String>>(5).is_none());
     assert!(row.get::<_, Option<i32>>(6).is_none());
     assert!(row.get::<_, Option<i64>>(7).is_none());
-    assert_eq!(row.get::<_, Option<String>>(8).as_deref(), Some("abcdef0123456789"));
+    assert_eq!(
+        row.get::<_, Option<String>>(8).as_deref(),
+        Some(unmatched_key.as_str())
+    );
 }
 
 /// The order store: creation → trade_id attachment → two webhook state transitions, every

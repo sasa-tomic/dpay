@@ -61,6 +61,10 @@ const CHANNEL_CAP: usize = 4096;
 /// running an old image against a migrated DB and vice versa are both no-ops). APPEND-ONLY
 /// by contract: the code below only ever INSERTs — no UPDATE, no DELETE — so the ≥12-month
 /// retention is a property of the founder's PG backups, not of anything the relay runs.
+/// Advisory-lock key gating the schema DDL below (any nonzero i64; "dpayTROC" so other
+/// tools can identify it). Session-scoped: auto-released when the owning connection dies.
+const SCHEMA_LOCK_KEY: i64 = 0x6470_6179_5452_4F43;
+
 const SCHEMA: [&str; 3] = [
     // Field-for-field the JSONL access line (kind/route/method/ip/ua/accept-language +
     // upstream_status/duration_ms, the correlation ids, and both timestamp renderings).
@@ -106,7 +110,12 @@ const ACCESS_INSERT: &str = "INSERT INTO trocador_access_log (
     )";
 
 const EVENT_INSERT: &str = "INSERT INTO trocador_order_events (order_id, client_order_id, ts, event)
-    VALUES ($1, $2, to_timestamp($3::double precision), $4::jsonb)";
+    VALUES ($1, $2, to_timestamp($3::double precision), $4::text::jsonb)";
+// ^ `event` travels as TEXT — the exact bytes the JSONL store would have appended — and the
+// server casts to jsonb. ($4::jsonb alone would make the driver serialize a Rust String as
+// the jsonb wire type, which tokio-postgres only implements behind `with-serde_json-1` —
+// and that impl would re-serialize through serde_json::Value, losing the line's key order.)
+// JSONB storage normalizes internally regardless; readers parse (never byte-compare).
 
 /// Startup index rebuild — the same last-wins rule the JSONL replay implements, sourced from
 /// PG: the highest id per order_id IS the latest state transition.
@@ -290,10 +299,30 @@ async fn connect_and_prepare(
             eprintln!("dpay-relay: trocador agreement: postgres connection ended: {e}");
         }
     });
+    // Serialize DDL across concurrent openers (parallel test runs; two relay instances
+    // starting against one database): CREATE TABLE IF NOT EXISTS checks-then-creates, and
+    // two sessions can race past the check together — the loser dies with "relation already
+    // exists", and fail-closed startup would then refuse a perfectly good start. The whole
+    // block runs under one session-level advisory lock, unlocked explicitly below on the
+    // live-connection path (and by the connection dying on any earlier error path).
+    client
+        .execute("SELECT pg_advisory_lock($1)", &[&SCHEMA_LOCK_KEY])
+        .await
+        .map_err(|e| format!("postgres: schema lock failed: {e}"))?;
+    let mut schema_err: Option<String> = None;
     for statement in SCHEMA {
-        client.execute(statement, &[]).await.map_err(|e| {
-            format!("postgres: schema setup failed: {e} — the DSN's user may lack CREATE on its schema")
-        })?;
+        if let Err(e) = client.execute(statement, &[]).await {
+            schema_err = Some(format!(
+                "postgres: schema setup failed: {e} — the DSN's user may lack CREATE on its schema"
+            ));
+            break;
+        }
+    }
+    let _ = client
+        .execute("SELECT pg_advisory_unlock($1)", &[&SCHEMA_LOCK_KEY])
+        .await;
+    if let Some(err) = schema_err {
+        return Err(err);
     }
     // Last-wins replay into the same in-memory index the JSONL replay builds — webhook
     // correlation survives a relay restart identically under both backends.
