@@ -8,14 +8,14 @@
 //   CASE 1 — happy path (both ATAs exist):
 //     Balances → select USDC·Solana → Pay tab → "Send to address" → the form renders in USDC
 //     units ("Available: 2.500000 USDC"); entering address + amount surfaces the review card with
-//     the USDC rent disclosure note (`sol-send-ata-note`: "If they don't have a USDC account yet,
+//     the USDC rent disclosure note (`sol-send-ata-note`: "If they have no USDC account yet,
 //     this creates it for them (one-time ≈0.00204428 SOL paid by you)") → confirm → sendSpl
 //     (accountExists ×2 → blockhash → sign locally → sendTransaction → confirm, all stubbed) →
 //     "Sent ✓" + signature.
 //
 //   CASE 2 — recipient ATA absent + sender SOL below the rent floor (folded in to share the
 //     setup/teardown): sendSpl's honest cost pre-check fires BEFORE building anything — the
-//     friendly error ("They don't have a USDC account yet. Creating it costs about 0.00204428
+//     friendly error ("They have no USDC account yet. Creating it costs about 0.00204428
 //     SOL, paid by you — send a little SOL here first") renders via `sol-send-err` and NO
 //     "Sent ✓" state is reached (the sheet stays on the form).
 //
@@ -110,7 +110,7 @@ export async function run() {
 
     const note = await driver.findByTestID('sol-send-ata-note', {timeoutMs: 4_000});
     const noteTxt = await note.evaluate((n) => (n.textContent ?? '').trim());
-    assertIncludes(noteTxt, "If they don't have a USDC account yet, this creates it for them", 'the USDC review card must disclose the recipient-ATA rent');
+    assertIncludes(noteTxt, "If they have no USDC account yet, this creates it for them", 'the USDC review card must disclose the recipient-ATA rent');
     assertIncludes(noteTxt, 'one-time ≈0.00204428 SOL paid by you', 'the rent disclosure must carry the exact SOL_ATA_SETUP_MIN_LAMPORTS cost');
     console.log('[77-sol-usdc-withdraw] ✓ rent disclosure note rendered');
 
@@ -153,7 +153,7 @@ export async function run() {
     // the unit, so the i18n template must not re-append it; pinned in __tests__/solana-ata-copy).
     assertEq(
       errTxt,
-      "They don't have a USDC account yet. Creating it costs about 0.00204428 SOL, paid by you "
+      "They have no USDC account yet. Creating it costs about 0.00204428 SOL, paid by you "
       + '— send a little SOL here first',
       'the pre-check error renders the whole sentence, with the rent amount carrying its unit ONCE',
     );

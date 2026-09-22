@@ -306,7 +306,7 @@ export type PayMessages = {
 export const payEn: PayMessages = {
   notAPaymentCode: "This isn't a dpay payment code",
   scannedCoinRequest: (coin, uri) =>
-    `That's a ${coin} payment request (${uri}…). This wallet pays on the Internet Computer and Solana — use a ${coin} wallet.`,
+    `That's a payment request in ${coin} (${uri}…). This wallet pays on the Internet Computer and Solana — use a wallet that supports ${coin}.`,
   requestExpired: 'This request expired — ask the merchant for a fresh QR',
 
   sent: amount => (amount ? `Sent ${amount}` : 'Sent'),
@@ -439,7 +439,7 @@ export const payEn: PayMessages = {
   fundTitle: symbol => `No ${symbol} available`,
   fundBody: (symbol, action) =>
     action === 'pay'
-      ? `To pay a ${symbol} request, first receive ${symbol} at your address.`
+      ? `To pay in ${symbol}, first receive ${symbol} at your address.`
       : `To send ${symbol}, first receive ${symbol} at your address.`,
   fundBodyNoDeposits: symbol =>
     `dpay cannot show a deposit address for ${symbol}. Receive it from another wallet before spending it.`,
@@ -607,9 +607,9 @@ export type ReceiveMessages = {
    * that (`services/till.ts`).
    */
   till: {
-    /** The checkbox under the amount: the same request, two audiences. The label names WHO can scan
-     *  the code — OpenCryptoPay wallets, Binance Pay, MoonPay — and that the payer must be online
-     *  (this is an online-payer standard). Founder wording, 2026-09-16. */
+    /** The checkbox under the amount: the same request, two audiences. The label says what the box
+     *  does — also produce a code that OpenCryptoPay-compatible apps (Binance Pay, MoonPay) can
+     *  scan — and that the payer must be online (this is an online-payer standard). */
     tillCode: string;
 
     ringUpHint: string;
@@ -752,7 +752,7 @@ export const receiveEn: ReceiveMessages = {
   broadcasting: 'Broadcasting on Solana — this can take up to a minute.',
 
   till: {
-    tillCode: 'OpenCryptoPay (OCP), Binance Pay, MoonPay app [Payer must be Online]',
+    tillCode: 'Also show a code for OpenCryptoPay-compatible apps (Binance Pay, MoonPay) — the payer must have the app open',
 
     ringUpHint: 'Open this charge on your till and show the customer a payable code',
     badAmount: reason =>

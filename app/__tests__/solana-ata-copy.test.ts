@@ -66,7 +66,7 @@ describe('both messages stay actionable after the correction', () => {
 describe('the exact strings e2e flow 77 asserts', () => {
   test('the English recipient + own-account sentences, verbatim', () => {
     expect(errorsEn.solana.recipientNoTokenAccount(RENT, 'USDC')).toBe(
-      "They don't have a USDC account yet. Creating it costs about 0.00204428 SOL, paid by you "
+      'They have no USDC account yet. Creating it costs about 0.00204428 SOL, paid by you '
       + '— send a little SOL here first',
     );
     expect(errorsEn.solana.ownTokenAccountRent(RENT, 'USDC')).toBe(

@@ -48,7 +48,7 @@ export async function run() {
     await driver.click('tab-pay');
     const txt = await driver.readText('pay-fund');
     assertIncludes(txt, 'No BTC available', 'panel headline names the selected asset');
-    assertIncludes(txt, 'To pay a BTC request, first receive BTC at your address.',
+    assertIncludes(txt, 'To pay in BTC, first receive BTC at your address.',
       'the scan sub-mode states the PAY instruction');
     assertIncludes(txt, 'Show my BTC address', 'depositable asset offers the deposit primary');
     assert(await driver.isPresent('btn-start-scan'), 'the scan surface stays reachable on a zero balance (X3)');
@@ -82,7 +82,7 @@ export async function run() {
     // one gate string that still differs per sub-mode — pin it in BOTH directions.
     assertIncludes(sendTxt, 'To send BTC, first receive BTC at your address.',
       'send sub-mode states the SEND instruction');
-    assert(!sendTxt.includes('To pay a BTC request'),
+    assert(!sendTxt.includes('To pay in BTC'),
       `the send gate must not keep the scan sub-mode instruction. Got: ${JSON.stringify(sendTxt)}`);
     const sendFormLeak = await driver.eval(() => document.querySelector('[data-testid="send-address-input"]') != null);
     assert(!sendFormLeak, 'send form must NOT be mounted while gated');

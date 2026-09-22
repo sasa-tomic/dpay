@@ -493,7 +493,7 @@ export const depositEn: DepositMessages = {
   },
 
   ata: {
-    absent: asset => `You don't have a ${asset} account on this device yet.`,
+    absent: asset => `You have no ${asset} account on this device yet.`,
     cost: (setupCost, asset) =>
       `Creating your ${asset} account costs ${setupCost}, paid from your SOL balance. It stays yours, on your keys.`,
     checkingSol: 'Checking your SOL balance…',
@@ -828,7 +828,7 @@ export const withdrawEn: WithdrawMessages = {
     reviewTitle: 'Review send',
     sendAmount: amount => `Send ${amount}`,
     recipientAtaNote: (cost, asset) =>
-      `If they don't have a ${asset} account yet, this creates it for them (one-time ≈${cost} paid by you).`,
+      `If they have no ${asset} account yet, this creates it for them (one-time ≈${cost} paid by you).`,
     confirmLabel: asset => `Confirm ${asset} send`,
   },
 };

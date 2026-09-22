@@ -274,7 +274,7 @@ export const receiveFr: ReceiveMessages = {
   broadcasting: 'Envoi sur Solana — cela peut prendre jusqu’à une minute.',
 
   till: {
-    tillCode: 'OpenCryptoPay (OCP), Binance Pay, application MoonPay [Le payeur doit être en ligne]',
+    tillCode: 'Affiche aussi un code pour les apps compatibles OpenCryptoPay (Binance Pay, MoonPay) — le payeur doit avoir l’application ouverte',
 
     ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code payable',
     badAmount: reason =>

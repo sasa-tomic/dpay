@@ -201,7 +201,7 @@ export const errorsEn: ErrorMessages = {
     senderTokenAccountUnverifiedRailDown: asset =>
       `dpay couldn’t check your ${asset} account because Solana isn’t answering. Without one, this payment can’t settle. Check or create it in Receive ▸ My address once Solana is back.`,
     recipientNoTokenAccount: (solAmount, asset) =>
-      `They don't have a ${asset} account yet. Creating it costs about ${solAmount}, paid by you — send a little SOL here first`,
+      `They have no ${asset} account yet. Creating it costs about ${solAmount}, paid by you — send a little SOL here first`,
     ownTokenAccountRent: (solAmount, asset) =>
       `Creating your ${asset} account costs about ${solAmount}. Send a little SOL here first.`,
   },
