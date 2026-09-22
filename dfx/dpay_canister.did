@@ -1,0 +1,297 @@
+type BalanceEntry = record { currency : nat32; amount : nat64 };
+type DepositInfo = record {
+  deposit_min_amount : opt nat64;
+  min_confirmations : nat32;
+  deposit_fee : nat64;
+};
+type DepositRefresh = record {
+  pending : vec PendingUtxo;
+  minted : vec MintedUtxo;
+  required_confirmations : nat32;
+  minted_total : nat64;
+};
+type InFlightView = record {
+  stale : bool;
+  nonce : blob;
+  reserved_at_secs : nat64;
+  age_secs : nat64;
+  flagged : bool;
+};
+type InitArg = record {
+  controller : opt principal;
+  demo_ledger : principal;
+  per_tx_cap : nat64;
+};
+type MintedUtxo = record { block_index : nat; amount : nat64 };
+type PayReceipt = record {
+  to : blob;
+  block_index : nat64;
+  from : blob;
+  receipt_sig : blob;
+  pubkey : blob;
+  nonce : blob;
+  amount : nat64;
+  new_from_balance : nat64;
+  settle_ts : nat64;
+};
+type PendingUtxo = record { confirmations : nat64; value : nat64 };
+type ReceiptView = record {
+  to : blob;
+  block_index : nat64;
+  from : blob;
+  receipt_sig : blob;
+  pubkey : blob;
+  currency : nat32;
+  nonce : blob;
+  amount : nat64;
+  settle_ts : nat64;
+};
+type ReconcileReport = record {
+  blocks_scanned : nat64;
+  currency : nat32;
+  orphans_repaired : nat64;
+};
+type Result = variant { Ok : nat64; Err : text };
+type Result_1 = variant { Ok; Err : text };
+type Result_10 = variant { Ok : nat; Err : text };
+type Result_11 = variant { Ok : WithdrawReceipt; Err : text };
+type Result_2 = variant { Ok : text; Err : text };
+type Result_3 = variant { Ok : DepositInfo; Err : text };
+type Result_4 = variant { Ok : blob; Err : text };
+type Result_5 = variant { Ok : PayReceipt; Err : text };
+type Result_6 = variant { Ok : principal; Err : text };
+type Result_7 = variant { Ok : ReconcileReport; Err : text };
+type Result_8 = variant { Ok : vec BalanceEntry; Err : text };
+type Result_9 = variant { Ok : DepositRefresh; Err : text };
+type TxnView = record {
+  to : blob;
+  from_name : text;
+  to_name : text;
+  from : blob;
+  memo : text;
+  currency : nat32;
+  nonce : blob;
+  timestamp : nat64;
+  amount : nat64;
+};
+type WithdrawReceipt = record {
+  destination : text;
+  block_index : nat64;
+  from : blob;
+  currency : nat32;
+  nonce : blob;
+  amount : nat64;
+};
+type WithdrawRequest = record {
+  sig : blob;
+  destination : text;
+  currency : nat32;
+  nonce : blob;
+  from_pubkey : blob;
+  expiry : nat64;
+  amount : nat64;
+};
+service : (InitArg) -> {
+  // Readback of the governance controller cell — the wiring check behind `just faucet-verify`
+  // (leg 3) and the deploy script's idempotent arming step. Public and side-effect-free on
+  // purpose: a principal is not a secret (the IC-level controllers are equally public via
+  // `dfx canister info`), and scripts need it to distinguish "already armed with the relay's key"
+  // (skip) from "null" (arm) from "governed by another principal" (loud, do-not-touch) without
+  // side-effecting into `set_controller`. `None` = open/demo mode.
+  admin_controller : () -> (opt principal) query;
+  // `balance_of(blob, nat32) -> nat64` — now a **query** returning the display-only cache. The cache
+  // is refreshed after every settle; if stale (someone transferred directly on the ledger), callers
+  // get the last known value. Settlement never reads this — it reads the ledger directly.
+  balance_of : (blob, nat32) -> (nat64) query;
+  // `burn(blob, nat32, nat64) -> Result<nat64, text>` — destroy a MINTABLE (demo) currency by
+  // transferring it back to the ledger's minting account (the ICRC convention). Only demo currencies
+  // can be burned. Refreshes the display cache post-settle. Same controller gating as `mint`. Returns
+  // the ledger transfer's block index (unlike `mint`, which returns the new balance): `burn` is
+  // facade-internal with no relay consumer, so no contract pins its return to a balance.
+  burn : (blob, nat32, nat64) -> (Result);
+  // `(nonce: vec nat8, reserved_at_secs: nat64) -> Result<(), String>` — TEST/OPS SEAM: manufactures
+  // the marker state a pay whose message was dropped mid-settle leaves behind — an unflagged
+  // [`INFLIGHT`] entry at an arbitrary age. A REAL dropped-mid-settle cannot be driven in PocketIC
+  // (a full cross-canister settle drains within ONE tick-round, so there is no between-rounds
+  // moment to interrupt), and the lazy-sweep tests need exactly that state: backdated markers,
+  // the 1/hour guard, the flag bit. Admin-gated (`require_admin`, the same trust boundary as
+  // `mint`) and inert by construction: a marker moves no funds (spend authority is the signed
+  // envelope + `SPENT`, not the marker); the worst it can do is a row in `inflight_intents` and,
+  // once stale, one WARN line. It is the only writer of [`INFLIGHT`] besides `reserve_nonce`.
+  debug_dangle_intent : (blob, nat64) -> (Result_1);
+  // `(blob pubkey, nat32 currency) -> Result<text, text>`. Proxies the minter's `get_btc_address` —
+  // the user's native deposit address for the currency. No auth: a deposit address is not secret
+  // (revealing it only lets someone send *to* the user), and minter methods are permissionless. Bad
+  // pubkey length is rejected up front via `to_pubkey`.
+  deposit_address : (blob, nat32) -> (Result_2);
+  // `(nat32 currency) -> Result<DepositInfo, text>`. Combines the minter's `get_minter_info` and
+  // `get_deposit_fee` into the normalized deposit parameters the app renders as instructions.
+  deposit_info : (nat32) -> (Result_3);
+  // `(blob account, nat32 currency) -> Result<nat64, text>` — the self-service demo on-ramp. Mints
+  // a FIXED [`FAUCET_AMOUNT`] ($100.00) of a mintable currency to `account`, rate-limited per
+  // (account, currency) via [`FAUCET_COOLDOWN`] (one mint per [`FAUCET_COOLDOWN_SECS`] window). No
+  // admin gate. Refreshes the display cache from the authoritative ledger post-mint and returns the
+  // new balance (matching the `Ledger::faucet` contract the relay surfaces as `{balance}`).
+  // 
+  // SUPERSEDED (2026-08-20): the production faucet is the RELAY (founder-approved design) — it
+  // owns the cooldown and drives the controller-gated [`mint`] with an authenticated identity, so
+  // the on-ramp credits the USER principal (see [`calls::user_account_of`]). This endpoint remains
+  // as the direct-canister self-service surface (open mode / no relay); note it still credits the
+  // facade-custody [`calls::account_of`] shape, which the post-cutover app does not read.
+  faucet : (blob, nat32) -> (Result);
+  // `() -> vec InFlightView` — the operator-facing half of the stale-intent flag: every currently-open
+  // intent with its reservation time, live age, staleness (age > [`INFLIGHT_STALE_SECS`]), and
+  // whether the sweep has already WARN-logged it. This is what an operator (or the OPS.md
+  // incident flow) reads to see WHAT to reconcile; `transactions_of`/`receipt` then show the
+  // outcome. Query, unauthenticated: it exposes only nonces + timestamps (a nonce alone moves no
+  // funds; the signed authorization is what spends, and it is not stored here). Pull-based and
+  // free — the operator polls it; no background execution (no heartbeat) ever runs on its behalf.
+  inflight_intents : () -> (vec InFlightView) query;
+  // `() -> Result<blob, text>` — eagerly generate the receipt keypair (idempotent) and return the
+  // public key. Self-service: generating the canister's OWN signing identity moves no value, so any
+  // caller may trigger it (an operator/relay calls it once post-deploy so the pubkey is available
+  // before any `pay`). The key, once generated, is never rotated.
+  init_receipt_key : () -> (Result_4);
+  // `mint(blob, nat32, nat64) -> Result<nat64, text>` — fund a user on a MINTABLE (demo) currency by
+  // transferring from the ledger's minting account (which this canister owns). Real ck currencies are
+  // not mintable. Refreshes the display cache from the authoritative ledger post-settle. Gated to the
+  // controller in production (open only when `controller` is unset, i.e. the demo).
+  // 
+  // Settlement target (2026-08-20 faucet re-target): the USER's own principal —
+  // [`calls::user_account_of`] (`self_authenticating(DER(pubkey))`, no subaccount), the account the
+  // app reads. Before the re-target `mint` credited the facade-custody `account_of` subaccount,
+  // which the app cannot see — that made even a controller-run mint invisible post-cutover. The
+  // production faucet is the RELAY (founder-approved 2026-08-20): it rate-limits locally and drives
+  // THIS admin-gated `mint` with an authenticated controller identity.
+  mint : (blob, nat32, nat64) -> (Result);
+  // Settle an offline-signed authorization. Same candid signature as the pre-facade canister's `pay`;
+  // balances are moved on the ICRC ledger named by the payment's currency, not here.
+  pay : (blob) -> (Result_5);
+  per_tx_cap : () -> (nat64) query;
+  // Provision a fresh canister that carries `cycles` of THIS canister's cycle balance, with
+  // `controller` as its sole controller, and return its id. Gated to operator callers (the fixed
+  // ADMIN_CALLERS allowlist). Used to spin up ICRC ledgers using cycles held inside this canister:
+  // the deploy identity has no cycles wallet, so the only way to spend the canister's cycles is for
+  // its own code to attach them to a management-canister call. This canister is NOT made a controller
+  // of the new canister — it spends the cycles and is done — so the non-custodial posture is intact.
+  provision_ledger_canister : (principal, nat) -> (Result_6);
+  // `(blob nonce) -> opt ReceiptView` — the canister-signed receipt for a settled payment, looked up
+  // by its nonce. Returns `null` if that nonce never settled (or settled before this canister version
+  // introduced signed receipts). The payer verifies `receipt_sig` over the canonical
+  // `ReceiptClaim{nonce, from, to, amount, currency, block_index, settle_ts}` under `pubkey`
+  // (== `receipt_pubkey`) before trusting the outcome — defeating a merchant/relay that lies about it.
+  receipt : (blob) -> (opt ReceiptView) query;
+  // `() -> opt blob` — the canister's receipt Ed25519 public key (32 bytes), or `null` if the key
+  // has not been generated yet (no successful `pay` and no `init_receipt_key` call). A payer fetches
+  // this once and verifies receipt signatures against it.
+  receipt_pubkey : () -> (opt blob) query;
+  // `(nat32 currency) -> Result<ReconcileReport, text>` — walk the currency's recent ledger
+  // transactions and repair any facade-account debit whose nonce is missing from SPENT (the post-trap
+  // orphan state). Controller-only. Idempotent: re-running on already-consistent state repairs nothing.
+  // 
+  // The walk itself is PAGED (mirroring the relay's icrc3 walk, `agent_ledger.rs
+  // transactions_walk`, adapted to a whole-window scan): one probe round trip captures
+  // `log_length`; for a log longer than one page the walk pages backwards from that snapshot to
+  // the window floor (`log_length - RECONCILE_MAX_BLOCKS`) in [`RECONCILE_PAGE_BLOCKS`] pages.
+  // Every page anchors on the response's `first_index` (the ACTUAL first block served — the
+  // ICRC-3 reply is an arbitrary sub-range of the request, so assuming `start` was served would
+  // skip or double-count blocks), and the next page's exclusive end is the current page's
+  // `first_index`. The walk STOPS at the archived boundary: a reply with `archived_transactions`
+  // non-empty marks that the older part of the requested range lives in archive canisters behind
+  // per-archive callbacks — this page serves what it can and the walk ends (recent-blocks-only,
+  // documented, not a silent gap). An empty page ends the walk the same way. Paged anchoring is
+  // what lets one `reconcile` actually cover the whole 10_000-block window: the one-shot fetch it
+  // replaced could silently return fewer blocks than requested (the ledger bounds each response),
+  // missing recent orphans entirely.
+  // 
+  // Match rule: a `transfer` whose `from.owner == canister_self()`, `from.subaccount == Some(pk)`,
+  // and whose `memo` is a 16-byte nonce — exactly the shape `pay` produces. Mint/burn use the minting
+  // account (subaccount `None`) or carry no nonce memo, so they are not matched. Each repair inserts
+  // the nonce into SPENT (so a retry is a duplicate) and records the txn (so history reflects it).
+  reconcile : (nat32) -> (Result_7);
+  // `(blob pubkey, vec nat32 currencies) -> Result<vec record { currency: nat32, amount: nat64 },
+  // text>` — the UNIFIED authoritative on-demand balance refresh (single + batch via the SAME call;
+  // pass `[currency]` for one, every resolvable id for all). Reads the live ledger balance via
+  // `icrc1_balance_of` for `Account{owner: canister_self(), subaccount: pubkey}` for each REQUESTED
+  // currency, writes each to `BAL_CACHE` (so the fast `balance_of` query reflects it on subsequent
+  // reads), and returns the list of `BalanceEntry { currency, amount }`.
+  // 
+  // Replaces the relay's N separate per-currency update calls (each its own 2-5s consensus round)
+  // with ONE call that does N inter-canister `icrc1_balance_of` reads sequentially inside a single
+  // update (one consensus round). Inter-canister calls are sequential (a `for` loop with `.await`) —
+  // parallelizing them would require `futures` in the canister; not worth it, since same-subnet
+  // `icrc1_balance_of` calls are fast (~50-100ms each), so N sequential ≈ 300-600ms inside ONE
+  // consensus round vs N × 2-5s rounds for the per-currency path.
+  // 
+  // Best-effort per currency, two layers:
+  // - An UNKNOWN id (one `ledger_for` fails to resolve to a live ledger) is SKIPPED
+  // (logged via `ic_cdk::print`, never silent) and the batch continues — the caller asked for it,
+  // but it resolves to no live ledger; the returned entries cover only the currencies that resolved.
+  // - A `ledger_balance_of` read failure on ONE currency keeps its last-known cached value
+  // (display-only; settlement always reads the ledger directly — the money-safety invariant is
+  // unchanged), is logged via `ic_cdk::print` (never silent), and the batch continues — one bad
+  // ledger cannot fail the whole batch.
+  // 
+  // **No auth gate** — consistent with the unauthenticated `balance_of`/`deposit_address` surface:
+  // this is a read + cache writes that move NO value; it only ever credits the named pubkey's true
+  // balance. Use this to surface credits that bypass the facade: asynchronous ckERC20 heartbeat
+  // mints and direct ICRC transfers land on the ledger WITHOUT invoking the facade, so `BAL_CACHE`
+  // stays stale until this is called. Settlement (`pay`) NEVER reads this — it reads the ledger
+  // directly (the money-safety invariant is unchanged). The ONLY hard error is a malformed `pubkey`
+  // (via `to_pubkey`); everything else is best-effort. Modeled on the post-mint authoritative read
+  // in `mint` (re-read + `write_cache`).
+  refresh_balances : (blob, vec nat32) -> (Result_8);
+  // `(blob pubkey, nat32 currency) -> Result<DepositRefresh, text>`. Proxies the minter's
+  // `update_balance` — the value-creating call that mints confirmed UTXOs onto the currency's ledger
+  // at `Account{owner: canister_self(), subaccount: pubkey}`. No auth: idempotent and safe to call by
+  // anyone (a no-op when no confirmed UTXOs exist). `Ok(statuses)` -> minted list + total, empty
+  // pending; `Err(NoNewUtxos{..})` -> empty minted + pending mapped from the error; the remaining
+  // minter errors surface as `Err(String)`.
+  // 
+  // After a successful minter call (both the `Ok(statuses)` and the `NoNewUtxos` branches), the
+  // display cache is refreshed from the authoritative ledger so a freshly-minted deposit is
+  // immediately visible via `balance_of` WITHOUT an extra `refresh_balances` call (MC3 U1). The
+  // `NoNewUtxos` branch is hit every 10s poll and catches coincident direct transfers / async mints
+  // for free (the ~1 extra `icrc1_balance_of` per 10s-poll-per-user is negligible). The cache refresh
+  // is deliberately NOT added to the AlreadyProcessing / TemporarilyUnavailable / GenericError
+  // branches — the minter call FAILED there and the cache state is unknown, so we do not paper over
+  // it with a speculative read.
+  refresh_deposit : (blob, nat32) -> (Result_9);
+  // Rotate (or, from open/demo mode, set the first) governance principal for `mint`/`burn`/
+  // `reconcile`/`set_controller`. Governed by
+  // [`require_controller_rotation`]: in open-demo mode (no controller set) any caller may set the
+  // first controller — the one-time lockdown path; once a controller is set, only it can rotate
+  // (two-step rotation). The PRODUCTION path is to seed a governed principal at `init`
+  // (`InitArg::controller`) so the canister never runs in open mode against an adversary. (This gates
+  // admin *methods* only. The IC-level canister controller — who can `install_code`/upgrade — is a
+  // separate concern set via `dfx`/NNS/SNS; see docs/GOVERNANCE.md.)
+  set_controller : (opt principal) -> (Result_1);
+  // Newest-first history for a (pubkey, currency) pair. O(limit): the underlying `range` iterator is
+  // double-ended, so `.rev().take(limit)` walks from the newest end and stops early — it does NOT
+  // materialize the whole history. `limit == 0` returns no rows.
+  transactions_of : (blob, nat32, nat32) -> (vec TxnView) query;
+  // Transfer up to `amount` cycles from THIS canister's balance to `to` via the management canister's
+  // `deposit_cycles`. Gated to operator callers — the SAME `require_operator` gate
+  // (`ADMIN_CALLERS` allowlist) that `provision_ledger_canister` uses — NOT the governance
+  // `require_admin` controller gate: rebalancing cycles between this canister and canisters it
+  // provisions is an ops/owner cycles action. Used to reclaim cycles from a retiring canister (e.g.
+  // before a mainnet upgrade) and to top up / rebalance cycles on canisters this one provisions.
+  // 
+  // The amount is bounded by the current balance (`amount.min(bal)`), so this never overdraws and
+  // never traps. A request at/above the LIQUID cycle balance returns `Err` (the management canister is
+  // the authority on liquid cycles — no CDK API exposes liquid balance) — retry with a smaller amount.
+  // Returns the amount actually transferred so the caller can confirm.
+  transfer_cycles : (principal, nat) -> (Result_10);
+  // `(WithdrawRequest) -> Result<WithdrawReceipt, text>` — withdraw a chain-key asset to a native
+  // address on a verified user signature. The request carries the [`WithdrawAuth`] fields + the user's
+  // Ed25519 signature over the canonical signing bytes; the facade verifies the signature under
+  // `from_pubkey` (== the debit subaccount) before moving any funds.
+  // 
+  // Idempotency / replay safety mirrors `pay`: the withdraw nonce is reserved synchronously before any
+  // cross-canister call (the concurrency barrier — two concurrent withdraws with the same nonce
+  // cannot both succeed), released on a transient/pre-burn failure (the same auth may retry), and
+  // settled once the burn commits (the auth can never replay → no double-burn). The family branch
+  // owns its own settle/release classification of the minter's typed errors (permanent → settle the
+  // dead auth; transient → release so the same auth retries).
+  withdraw : (WithdrawRequest) -> (Result_11);
+}
