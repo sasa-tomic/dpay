@@ -73,6 +73,16 @@ services:
       # Per-call upstream timeout for the proxy, ms (default 10000; 0 refused at startup).
       DPAY_SOLANA_TIMEOUT_MS: ${DPAY_SOLANA_TIMEOUT_MS:-}
 
+      # The Trocador partner-agreement compliance records (access log + order store). SET the
+      # DSN in prod — it is REQUIRED for durable records: this stack mounts NO volume, so the
+      # JSONL fallback (unset) writes into the ephemeral container cwd and dies on every
+      # rebuild/redeploy. With the DSN set the records live in the backed-up Postgres (tables
+      # trocador_access_log/trocador_order_events, created idempotently, append-only), the
+      # relay refuses to start when the DSN is unreachable, and a refused access-log write
+      # refuses the request (fail-closed — the partner agreement requires the record to
+      # exist). SECRET: the DSN embeds credentials — never logged, never echoed.
+      DPAY_TROCADOR_PG_DSN: ${DPAY_TROCADOR_PG_DSN:-}
+
     # Lets DPAY_IC_URL point at a dfx replica running on the host (http://host.docker.internal:4943)
     # — the pre-mainnet rehearsal: the real container, the real agent path, a replica you own.
     extra_hosts:

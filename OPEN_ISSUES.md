@@ -151,8 +151,15 @@
   budget, webhook-first status keyed on OUR internal order id, the 12-month data-retention
   commitment, `markup=0`) is recorded in
   `docs/specs/2026-09-22-trocador-partner-agreement.md`, and its code deliverables — the proxied-
-  request access log + order store (`trocador-access.jsonl`/`trocador-orders.jsonl` behind
-  `DPAY_TROCADOR_LOG_DIR`), the webhook route (`/api/v1/trocador/webhook`, ≤1/min fallback polling
+  request access log + order store (a DUAL-BACKEND append-only store since 2026-09-22: the
+  founder's BACKED-UP Postgres when `DPAY_TROCADOR_PG_DSN` is set — tables
+  `trocador_access_log`/`trocador_order_events`, created idempotently, code only ever INSERTs,
+  fail-closed (unreachable DSN refuses startup; a refused access-log write refuses the request);
+  else the JSONL files `trocador-access.jsonl`/`trocador-orders.jsonl` behind
+  `DPAY_TROCADOR_LOG_DIR` for the offline dev loop. OPS MUST wire the DSN in the deploy env: the
+  prod compose stack mounts NO volume, so flat files die on every redeploy — `DPAY_TROCADOR_PG_DSN`
+  is already a passthrough line in `deploy/docker-compose.yml` + `deploy/.env.example`), the
+  webhook route (`/api/v1/trocador/webhook`, ≤1/min fallback polling
   stopping at the first terminal state), the upstream limiters, the privacy-policy section
   (`/privacy` §7), and the live probe — are landing in this branch. STILL OPEN on key arrival,
   BEFORE the venue serves a real trade, both now executable via `just trocador-probe` (refuses
