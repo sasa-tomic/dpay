@@ -273,9 +273,19 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'android' ? StatusBar.currentHeight ?? 24 : 0}>
         <ScrollView style={{flex: 1}} contentContainerStyle={S.onboard} keyboardShouldPersistTaps="handled">
-          <Logo size={104} />
-          <WordmarkLink style={S.wordmarkBig} />
-          <Text style={S.onboardSub}>{M.onboarding.tagline}</Text>
+          {/* The full brand header (logo tile + wordmark + tagline) belongs to the create and
+              restore stages. The BACKUP GATE compacts it away: repeating ~250pt of brand chrome
+              above the 24-word grid pushed the grid below the fold and the acknowledgement +
+              Continue after it out of sight on a 390×844 viewport. On this stage the stage title
+              below IS the heading, the custody trust line stays as the preamble, and the warning
+              carries the operative copy — the brand moments return on the very next screen. */}
+          {backupMnemonic === null ? (
+            <>
+              <Logo size={104} />
+              <WordmarkLink style={S.wordmarkBig} />
+              <Text style={S.onboardSub}>{M.onboarding.tagline}</Text>
+            </>
+          ) : null}
           <Text style={S.dim2}>{M.onboarding.custody}</Text>
           {backupMnemonic ? (
             <>
@@ -349,7 +359,10 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
             </>
           ) : (
             <>
-              <Text style={S.label}>{M.onboarding.usernameLabel}</Text>
+              {/* Eyebrow treatment (was S.label): the trust paragraph above printed in the same
+                  centered secondary ink, so "Choose a username" read as its last line. The
+                  small-caps eyebrow + top margin breaks the two blocks apart. */}
+              <Text style={S.onboardFieldLabel}>{M.onboarding.usernameLabel}</Text>
               <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder={M.onboarding.usernamePlaceholder} placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} onSubmitEditing={busy ? undefined : create} accessibilityLabel={M.onboarding.usernameA11y} accessibilityHint={M.onboarding.usernameHint} />
               {/* Own-seed alternative (2026-08-18): create from an EXISTING seed instead of the
                   generated random one. Collapsed by default so first-time users see the plain

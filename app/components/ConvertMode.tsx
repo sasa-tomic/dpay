@@ -1244,9 +1244,10 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
             ) : null}
           </View>
         ) : null}
-      <View style={S.convertFooting}>
-        <IconSwap size={20} color={C.sub} />
-      </View>
+        {/* The ⇄ footing affordance is deliberately NOT rendered here: with a zero balance there
+            is nothing to swap yet, and the icon floated alone in the dead space under the fund
+            gate. It stays on every FILLED state (the form's own footing below, the state panels),
+            which render through the main return, never this early return. */}
     </View>
   );
 }

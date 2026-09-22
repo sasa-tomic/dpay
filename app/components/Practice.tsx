@@ -305,7 +305,11 @@ export function Practice({identity, relayUrl, onDone}: {identity: Identity; rela
           </Pressable>
         ) : null}
       </View>
-      <ScrollView style={S.walkScroll} contentContainerStyle={S.walkBody}>
+      {/* The request phase centers its short content in the frame (walkBodyCenter); every other
+          branch — blocked, outcome, review — keeps the plain body layout it was designed with. */}
+      <ScrollView
+        style={S.walkScroll}
+        contentContainerStyle={phase === 'request' && blocker === null ? [S.walkBody, S.walkBodyCenter] : S.walkBody}>
         {blocker !== null ? (
           <Blocked blocker={blocker} onRetry={() => setAttempt(a => a + 1)} />
         ) : phase === 'outcome' && outcome !== null ? (

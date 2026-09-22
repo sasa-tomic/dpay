@@ -276,9 +276,16 @@ function buildStyles(p: Palette) {
   // ── The Accounts route (2026-09-08) — the accounts list lifted off Home ────────────────────
   // Same rows, same testIDs; a route header (back + title) instead of an inline section heading,
   // and a divider that names the practice rail in a whole sentence before its row.
-  accountsWrap: {alignSelf: 'stretch', paddingTop: 6, paddingBottom: 20},
+  // Bottom inset doubles as the accounts route's scroll-end clearance: when the list is scrolled
+  // fully down, the practice footer line sits this far above the bottom nav bar instead of
+  // touching it (founder UX pass 2026-09-21).
+  accountsWrap: {alignSelf: 'stretch', paddingTop: 6, paddingBottom: 24},
   accountsList: {alignSelf: 'stretch', marginTop: 12},
-  accountsPractice: {fontSize: 13, color: p.sub, marginTop: 22, marginBottom: 8, fontFamily: FONT.sans},
+  // Top margin tightened 22 → 10 (same pass): at 22 the footer line's glyphs started ~5pt below
+  // the scroll fold and the bottom nav bar sliced them mid-glyph at rest — the line box must end
+  // above the nav for the at-rest view to read clean. 10pt still seats the sentence immediately
+  // above its practice row (anti-scam rule R3 keeps them unseparable by a scroll).
+  accountsPractice: {fontSize: 13, color: p.sub, marginTop: 10, marginBottom: 8, fontFamily: FONT.sans},
   // Convert — the delegated-conversion surface (spec 2026-09-07 §5). The checklist card carries
   // every transparency line on ONE surface before signing; the state panel renders the §4 machine.
   // Left-aligned instruction copy (not centered): these are lines to read closely before money
@@ -382,6 +389,12 @@ function buildStyles(p: Palette) {
   // 388 px of content in a 628 px box) and moves every field the moment one line of copy wraps.
   centerTop: MODE_SURFACE,
   label: {fontSize: 15, color: p.sub, marginBottom: 10, textAlign: 'center', fontFamily: FONT.sans},
+  // The create form's username label. `label` read as a run-on tail of the trust paragraph above
+  // it (`dim2` — same centered secondary ink, no gap), so this label gets the section-header
+  // eyebrow grammar instead (mono small caps over `sub2`, the `histTitle` voice) plus its own top
+  // margin: the paragraph ends where it ends and the field's name starts a NEW block. `sub2` is
+  // an approved page ink (contrast gate), so the swap is AA-safe in both themes.
+  onboardFieldLabel: {fontSize: 12, fontWeight: '600', color: p.sub2, letterSpacing: 1.4, textTransform: 'uppercase', textAlign: 'center', marginTop: 26, marginBottom: 10, fontFamily: FONT.mono},
   err: {color: p.bad, fontSize: 14, textAlign: 'center', marginTop: 10, fontFamily: FONT.sansMedium},
   // A failed leg state INSIDE a checklist keeps the list's left alignment — S.err centers,
   // which is right for standalone form errors and wrong inside the leg list (2026-09-20).
@@ -850,6 +863,13 @@ function buildStyles(p: Palette) {
   // Text block — LEFT-aligned (the editorial reading; centered stacks read as generic onboarding,
   // which the spec bans). 22dp side margins = the sheet rhythm (sheetHead/sheetCenter use 22).
   walkBody: {paddingHorizontal: 22, paddingTop: 6},
+  // Practice request phase only: its content (title + balance + practice card) is short and
+  // otherwise dies ~40% down the screen, leaving the lower half dead before the pinned footer.
+  // flexGrow (NOT flex:1 — see `onboard` for why flex would disable scrolling) lets the block
+  // fill the frame when short and still scroll when tall; justifyContent centers the short case.
+  // Composed ONTO walkBody by Practice's request branch, so the walkthrough, passport, and the
+  // practice review/outcome/blocked branches keep their layouts byte-identical.
+  walkBodyCenter: {flexGrow: 1, justifyContent: 'center'},
   walkEyebrow: {fontSize: 11, fontWeight: '600', color: p.sub2, letterSpacing: 1.8, textTransform: 'uppercase', fontFamily: FONT.mono},
   walkTitle: {fontSize: 29, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.7, lineHeight: 33, marginTop: 12},
   walkText: {fontSize: 16, color: p.sub, lineHeight: 23, marginTop: 12, fontFamily: FONT.sans},
