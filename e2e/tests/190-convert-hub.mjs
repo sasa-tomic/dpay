@@ -378,8 +378,12 @@ export async function run() {
 
     console.log(`[190-convert-hub] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {
-    await r2.stop();
+    // env.stop() first (flow-38 convention): closing the page quiesces the app's balance/history
+    // polls — a poll that fired after r2.stop() would surface as a requestfailed diagnostic at
+    // driver.close() and RED an otherwise-green flow under load (measured 2026-09-22: body GREEN
+    // in 85.6s, then RED solely on the teardown race).
     await env.stop();
+    await r2.stop();
   }
 }
 
