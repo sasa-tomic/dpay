@@ -83,6 +83,13 @@
 //!   503 state; transport death answers 504 `jupiter-upstream-unreachable`. The registry
 //!   row's `endpoint` stays the venue's identity/attribution, no longer a device dial
 //!   target.
+//! - `POST /api/v1/trocador/rate`, `POST /api/v1/trocador/trade`, `GET /api/v1/trocador/trade?id=`
+//!   — the Trocador AGGREGATOR proxy (registered 2026-09-20; [`crate::trocador`]), all-GET
+//!   upstream, every method key-gated so the STATUS read is proxied too. Plus
+//!   `POST|GET /api/v1/trocador/webhook` — the partner agreement's per-trade webhook receiver
+//!   (2026-09-21; [`crate::trocador_agreement`]): access log + order store + webhooks + the
+//!   promised upstream limits wrap around the proxy; the receiver answers 200 to anything
+//!   (the venue probes at creation and never retries a failed delivery).
 //!
 //! Read-only by construction apart from the play-money faucet: there is no value-moving route
 //! left on this crate (the 2026-08-19 IC-rail cutover moved settlement to the app's own signed
@@ -405,6 +412,18 @@ pub fn app(state: AppState) -> Router {
             "/trocador/trade",
             axum::routing::post(crate::trocador::trade_proxy)
                 .get(crate::trocador::trade_status_proxy),
+        )
+        // The Trocador partner-agreement WEBHOOK receiver (2026-09-21, confirmed by the
+        // venue's commercial email) — registered ALWAYS for the same 503-not-404 reason:
+        // the venue PROBES this URL at trade creation and a 404 would fail the trade. POST
+        // carries the venue's status-change deliveries (echoing our per-trade `webhook_key`
+        // back as `key`); GET is the probe-shaped lenient sink. BOTH answer 200
+        // unconditionally — a non-2xx would fail the trade, and failed deliveries are never
+        // retried. See `crate::trocador_agreement`.
+        .route(
+            "/trocador/webhook",
+            axum::routing::post(crate::trocador_agreement::webhook_receiver)
+                .get(crate::trocador_agreement::webhook_probe),
         )
         // The Jupiter proxy (2026-09-16 founder ask) — registered ALWAYS, and unlike the
         // proxies above there is no unconfigured 503 branch at all: the venue is keyless

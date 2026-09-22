@@ -99,18 +99,31 @@
 //! - The docs document NO end-user-IP forwarding requirement (unlike SideShift's
 //!   `x-user-ip` rule), so nothing of the kind is sent — the relay forwards no address
 //!   it was not asked for.
+//!
+//! # The partner agreement (2026-09-21) — [`crate::trocador_agreement`]
+//!
+//! With the founder's signed partner agreement, three more obligations wrap AROUND these
+//! routes without changing any answer above: a compliance ACCESS LOG for every proxied call
+//! (append-only, ≥12-month retention), per-trade WEBHOOKS (`webhook`/`webhook_key` params at
+//! creation when `DPAY_PUBLIC_ORIGIN` is set; the receiver route in app.rs answers 200 to any
+//! probe or delivery), and UPSTREAM RATE LIMITS (status reads ≤1/min per trade, per-client
+//! bounds on the rate and trade routes). See `crate::trocador_agreement` for the signed terms.
 
-use std::time::Duration;
-use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+use std::sync::{Arc, OnceLock};
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 use crate::AppState;
+use crate::trocador_agreement::{
+    AccessLine, ClientFingerprint, LimitKind, ORDER_ID_HEADER, RATE_LIMITED_CODE,
+    STATUS_THROTTLED_CODE, TRADE_LIMITED_CODE,
+};
 
 /// The venue id this adapter serves (must match the `cefi` row in `catalog.rs`).
 pub const TROCADOR_VENUE_ID: &str = "trocador";
@@ -175,27 +188,51 @@ const TROCADOR_ASSETS: &[(&str, &str, &str, &str)] = &[
 ];
 
 /// The proxy's state: the partner key (secret — module header), the API base, the shared
-/// HTTP client and the per-call timeout. Held in an `Arc` on [`AppState`];
-/// `unconfigured` decides between serving and the 503 marker.
+/// HTTP client and the per-call timeout — plus the partner-AGREEMENT layer
+/// ([`crate::trocador_agreement`]: access log, order store, webhooks, upstream limits) when
+/// attached. Held in an `Arc` on [`AppState`]; `unconfigured` decides between serving and the
+/// 503 marker. The agreement is deployment config attached in main.rs; a proxy built without
+/// it (unit tests) behaves exactly like the pre-agreement relay — no logs, no stores, no limits.
 pub struct TrocadorProxy {
     api_key: Option<String>,
     base: String,
     timeout: Duration,
     #[allow(dead_code)] // read through `&self` in every call path; field kept for symmetry
     client: reqwest::Client,
+    agreement: Option<Arc<crate::trocador_agreement::Agreement>>,
 }
 
 impl TrocadorProxy {
-    /// Build the proxy. The key `None` (legal until the founder's request lands) leaves
+    /// Build the proxy. The key `None` (legal until the founder's request landed) leaves
     /// the routes registered but answering the 503 `trocador-unconfigured` marker naming
-    /// exactly which variable is missing.
+    /// exactly which variable is missing. The agreement layer starts UNATTACHED — see
+    /// [`TrocadorProxy::with_agreement`].
     pub fn new(api_key: Option<String>, base: String, timeout: Duration) -> Self {
         TrocadorProxy {
             api_key,
             base,
             timeout,
             client: http_client(),
+            agreement: None,
         }
+    }
+
+    /// Attach the partner-agreement layer (main.rs builds it from the env; the offline tests
+    /// build it with explicit config + an injectable clock).
+    pub fn with_agreement(mut self, agreement: crate::trocador_agreement::Agreement) -> Self {
+        self.agreement = Some(Arc::new(agreement));
+        self
+    }
+
+    /// The agreement layer, when attached.
+    pub fn agreement(&self) -> Option<&Arc<crate::trocador_agreement::Agreement>> {
+        self.agreement.as_ref()
+    }
+
+    /// Whether `X-Forwarded-For` may name the client IP (`DPAY_TRUST_PROXY`) — read by the
+    /// [`ClientFingerprint`] extractor through the state.
+    pub fn trust_proxy(&self) -> bool {
+        self.agreement.as_ref().is_some_and(|a| a.trust_proxy())
     }
 
     /// The missing credential name(s). Unset is a LEGAL state (503, not 404).
@@ -219,7 +256,17 @@ impl TrocadorProxy {
 /// "<decimal string in the venue's own units>"}`. The pair must be exactly the registered
 /// `cefi` row's pair (unordered). Success answers the attribution wrap (module header);
 /// upstream errors pass through verbatim.
-pub async fn rate_proxy(State(state): State<AppState>, body: Bytes) -> Response {
+///
+/// Agreement wrapping (see [`crate::trocador_agreement`]): the quote is an UPSTREAM-BOUND call,
+/// so the per-client fixed window (`DPAY_TROCADOR_RATE_PER_MIN`, default 6/min) admits it right
+/// before the call — 429 + `Retry-After` + the house marker when the window is full — and the
+/// completed call appends one `kind:"rate"` line to the compliance access log. Device 400s and
+/// the unconfigured 503 are neither counted nor logged: they never reach the venue.
+pub async fn rate_proxy(
+    State(state): State<AppState>,
+    fp: ClientFingerprint,
+    body: Bytes,
+) -> Response {
     let proxy = state.trocador.clone();
     if let Some(response) = unconfigured(&proxy) {
         return response;
@@ -278,6 +325,19 @@ pub async fn rate_proxy(State(state): State<AppState>, body: Bytes) -> Response 
     // The venue's `new_rate`: the pair + amount, the founder pins, and `best_only=True` —
     // the AGGREGATOR's own pick, ONE quote (a ranked list is the venue's product to make,
     // never a surface dpay renders). Percent-encoding is the URL builder's job.
+    // The agreement's per-client window admits the call right before it is made (upstream-bound
+    // only — every refusal above this line is neither counted nor logged).
+    if let Some(a) = proxy.agreement() {
+        if let Err(retry) = a.admit(LimitKind::Rate, fp.ip.as_deref()) {
+            return too_many(
+                RATE_LIMITED_CODE,
+                "trocador rate quotes are rate-limited for this client: the partner agreement \
+                 bounds quote requests per client per minute",
+                retry,
+            );
+        }
+    }
+    let started = Instant::now();
     let url = match build_url(
         &proxy.base,
         "new_rate",
@@ -296,6 +356,24 @@ pub async fn rate_proxy(State(state): State<AppState>, body: Bytes) -> Response 
         Err(e) => return err(StatusCode::BAD_REQUEST, e),
     };
     let outcome = get_upstream(&proxy, url, &api_key).await;
+    // Agreement: the call WAS upstream-bound — count it at admit (above), log it here, after
+    // it completed, so the line carries the upstream status and the real duration.
+    if let Some(a) = proxy.agreement() {
+        a.log(AccessLine {
+            kind: "rate",
+            route: "/api/v1/trocador/rate",
+            method: "POST",
+            ip: fp.ip.clone(),
+            user_agent: fp.user_agent.clone(),
+            accept_language: fp.accept_language.clone(),
+            client_order_id: None,
+            order_id: None,
+            trade_id: None,
+            upstream_status: Some(outcome.status.as_u16()),
+            duration_ms: Some(started.elapsed().as_millis() as u64),
+            key_hash: None,
+        });
+    }
     // Success: wrap for attribution + timestamp. The venue's numbers ride untouched under
     // `quote`. A 2xx body that is not a JSON object is passed VERBATIM instead — it is
     // what the venue said, and the wrap is only for bodies the app can actually read.
@@ -329,7 +407,21 @@ pub async fn rate_proxy(State(state): State<AppState>, body: Bytes) -> Response 
 /// non-custodial red line), never a dpay-controlled one. A missing or malformed field is
 /// a client bug: the 400 house error, refused BEFORE any upstream call (this is a device
 /// error, not a 503-class relay fact).
-pub async fn trade_proxy(State(state): State<AppState>, body: Bytes) -> Response {
+///
+/// Agreement wrapping (see [`crate::trocador_agreement`]): an optional `clientOrderId` string
+/// is accepted (the device's own order id — informational, length-clamped). The relay mints an
+/// order id and persists the order BEFORE the upstream call; when `DPAY_PUBLIC_ORIGIN` is set
+/// the upstream call carries `webhook=<origin>/api/v1/trocador/webhook` +
+/// `webhook_key=<order_id>` (unset origin → NO webhook params — the offline default), the
+/// response rides an `X-Dpay-Order-Id` header, and the venue's trade_id is persisted against
+/// the order when the venue answers. The BODY stays the venue's VERBATIM answer either way.
+/// The per-client trade window (`DPAY_TROCADOR_TRADE_PER_MIN`, default 4/min) admits the call;
+/// a `kind:"trade"` access-log line is appended after it completes.
+pub async fn trade_proxy(
+    State(state): State<AppState>,
+    fp: ClientFingerprint,
+    body: Bytes,
+) -> Response {
     let proxy = state.trocador.clone();
     if let Some(response) = unconfigured(&proxy) {
         return response;
@@ -416,29 +508,98 @@ pub async fn trade_proxy(State(state): State<AppState>, body: Bytes) -> Response
     // The venue's `new_trade`: the quote's own rate id + provider, the user's own
     // addresses, the SAME founder pins the rate carried (a trade can never re-attribute
     // the markup, loosen the KYC filter, or flip the rate type).
-    let url = match build_url(
-        &proxy.base,
-        "new_trade",
-        &[
-            ("id", rate_id),
-            ("ticker_from", t_from),
-            ("network_from", n_from),
-            ("ticker_to", t_to),
-            ("network_to", n_to),
-            ("amount_from", deposit_amount),
-            ("address", settle_address),
-            ("provider", provider),
-            ("fixed", FIXED),
-            ("refund", refund_address),
-            ("min_kycrating", MIN_KYCRATING),
-            ("markup", MARKUP),
-        ],
-    ) {
+    //
+    // Agreement: the device's optional clientOrderId rides the record (verbatim, clamped);
+    // the per-client window admits the call; the order is minted + persisted BEFORE the
+    // upstream call; and the webhook params ride only when DPAY_PUBLIC_ORIGIN is configured.
+    let client_order_id = req
+        .get("clientOrderId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.chars().take(crate::trocador_agreement::MAX_CLIENT_ORDER_ID_CHARS).collect::<String>());
+    let agreement = proxy.agreement();
+    if let Some(a) = agreement {
+        if let Err(retry) = a.admit(LimitKind::Trade, fp.ip.as_deref()) {
+            return too_many(
+                TRADE_LIMITED_CODE,
+                "trocador trade creation is rate-limited for this client: the partner \
+                 agreement bounds trade creation per client per minute",
+                retry,
+            );
+        }
+    }
+    let order_id = agreement.map(|a| a.open_order(client_order_id.as_deref()));
+    let webhook_url = agreement.and_then(|a| a.webhook_url());
+    let mut pairs: Vec<(&str, &str)> = vec![
+        ("id", rate_id),
+        ("ticker_from", t_from),
+        ("network_from", n_from),
+        ("ticker_to", t_to),
+        ("network_to", n_to),
+        ("amount_from", deposit_amount),
+        ("address", settle_address),
+        ("provider", provider),
+        ("fixed", FIXED),
+        ("refund", refund_address),
+        ("min_kycrating", MIN_KYCRATING),
+        ("markup", MARKUP),
+    ];
+    if let (Some(webhook), Some(order_id)) = (webhook_url.as_deref(), order_id.as_deref()) {
+        // The venue probes this URL at trade creation and POSTs every status change to it,
+        // echoing `webhook_key` back as `key` (module header / crate::trocador_agreement §2).
+        pairs.push(("webhook", webhook));
+        pairs.push(("webhook_key", order_id));
+    }
+    let url = match build_url(&proxy.base, "new_trade", &pairs) {
         Ok(u) => u,
         Err(e) => return err(StatusCode::BAD_REQUEST, e),
     };
+    let started = Instant::now();
     let outcome = get_upstream(&proxy, url, &api_key).await;
-    json_response(outcome.status, &outcome.body)
+    // The venue's trade_id rides its 2xx answer — attach it to the order (and the log line)
+    // when present. A refused trade (4xx/5xx) leaves the order trade_id-less: the venue's
+    // own refusal is the authority, verbatim below.
+    let mut trade_id: Option<String> = None;
+    if outcome.status.is_success() {
+        if let Ok(v) = serde_json::from_slice::<Value>(&outcome.body) {
+            if let Some(t) = v.get("trade_id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                trade_id = Some(t.to_string());
+            }
+        }
+    }
+    if let (Some(a), Some(order_id), Some(trade_id)) =
+        (agreement, order_id.as_deref(), trade_id.as_deref())
+    {
+        a.attach_trade_id(order_id, trade_id);
+    }
+    if let Some(a) = agreement {
+        a.log(AccessLine {
+            kind: "trade",
+            route: "/api/v1/trocador/trade",
+            method: "POST",
+            ip: fp.ip.clone(),
+            user_agent: fp.user_agent.clone(),
+            accept_language: fp.accept_language.clone(),
+            client_order_id: client_order_id.clone(),
+            order_id: order_id.clone(),
+            trade_id: trade_id.clone(),
+            upstream_status: Some(outcome.status.as_u16()),
+            duration_ms: Some(started.elapsed().as_millis() as u64),
+            key_hash: None,
+        });
+    }
+    let mut response = json_response(outcome.status, &outcome.body);
+    // The relay-side order id rides a response header ONLY when the public origin is set (the
+    // device needs it to reason about webhooks; offline there is nothing to correlate).
+    if webhook_url.is_some() {
+        if let Some(order_id) = order_id.as_deref() {
+            if let Ok(value) = HeaderValue::from_str(order_id) {
+                response.headers_mut().insert(ORDER_ID_HEADER, value);
+            }
+        }
+    }
+    response
 }
 
 /// `GET /api/v1/trocador/trade?id=<trade_id>` — trade status (the venue's `trade`
@@ -447,9 +608,18 @@ pub async fn trade_proxy(State(state): State<AppState>, body: Bytes) -> Response
 /// body, whose top-level `status` string is the field the engine reads) while the key
 /// rides HERE, server-side. `id` is required and non-empty; a missing or empty one is a
 /// client bug — 400, no upstream call.
+///
+/// Agreement freshness (see [`crate::trocador_agreement`] §3): when a webhook-delivered
+/// payload exists for the trade id, THAT is served verbatim with ZERO upstream calls (the
+/// webhook is the primary channel). Otherwise the read is the promised FALLBACK — at most one
+/// upstream read per trade_id per 60s (fixed, it is the promise): within the window the route
+/// answers 429 + `Retry-After` with the house marker, and webhook-served responses never
+/// count against any window. Every answered read appends a `kind:"status"` line to the
+/// compliance access log, correlated with the order when the store knows the trade id.
 pub async fn trade_status_proxy(
     State(state): State<AppState>,
     Query(params): Query<BTreeMap<String, String>>,
+    fp: ClientFingerprint,
 ) -> Response {
     let proxy = state.trocador.clone();
     if let Some(response) = unconfigured(&proxy) {
@@ -464,11 +634,65 @@ pub async fn trade_status_proxy(
              key the trade creation answer carried)",
         );
     };
+    let agreement = proxy.agreement();
+    // The webhook cache answers FIRST and leaves no trace on any window: a matched delivery is
+    // the freshest fact we hold, and reading it costs the venue nothing.
+    if let Some(payload) = agreement.and_then(|a| a.cached_payload(trade_id)) {
+        if let Some(a) = agreement {
+            let record = a.order_by_trade_id(trade_id);
+            a.log(AccessLine {
+                kind: "status",
+                route: "/api/v1/trocador/trade",
+                method: "GET",
+                ip: fp.ip.clone(),
+                user_agent: fp.user_agent.clone(),
+                accept_language: fp.accept_language.clone(),
+                client_order_id: record.as_ref().and_then(|r| r.client_order_id.clone()),
+                order_id: record.as_ref().map(|r| r.order_id.clone()),
+                trade_id: Some(trade_id.to_string()),
+                upstream_status: None,
+                duration_ms: None,
+                key_hash: None,
+            });
+        }
+        return json_response(StatusCode::OK, &Bytes::from(payload));
+    }
+    // The fallback upstream read: the promised 60s-per-trade spacing gates it (marking the
+    // window BEFORE the call — a failed read still reached the venue).
+    if let Some(a) = agreement {
+        if let Err(remaining) = a.admit_status(trade_id) {
+            return too_many(
+                STATUS_THROTTLED_CODE,
+                "trocador status for this trade was fetched upstream less than 60s ago (the \
+                 partner agreement's organic-demand bound) — the next fresh read arrives when \
+                 the window opens",
+                remaining,
+            );
+        }
+    }
     let url = match build_url(&proxy.base, "trade", &[("id", trade_id)]) {
         Ok(u) => u,
         Err(e) => return err(StatusCode::BAD_REQUEST, e),
     };
+    let started = Instant::now();
     let outcome = get_upstream(&proxy, url, &api_key).await;
+    if let Some(a) = agreement {
+        let record = a.order_by_trade_id(trade_id);
+        a.log(AccessLine {
+            kind: "status",
+            route: "/api/v1/trocador/trade",
+            method: "GET",
+            ip: fp.ip.clone(),
+            user_agent: fp.user_agent.clone(),
+            accept_language: fp.accept_language.clone(),
+            client_order_id: record.as_ref().and_then(|r| r.client_order_id.clone()),
+            order_id: record.as_ref().map(|r| r.order_id.clone()),
+            trade_id: Some(trade_id.to_string()),
+            upstream_status: Some(outcome.status.as_u16()),
+            duration_ms: Some(started.elapsed().as_millis() as u64),
+            key_hash: None,
+        });
+    }
     json_response(outcome.status, &outcome.body)
 }
 
@@ -599,7 +823,7 @@ fn transport_refusal(e: reqwest::Error, timeout: Duration) -> Outcome {
 /// `crate::solana` and `crate::sideshift`:
 /// `{"dpayRelayError": <code>, "detail": <short human phrase>}`. Fixed inputs only (env
 /// var NAMES and categories), so no secret can leak through.
-fn relay_error_body(code: &str, detail: &str) -> Bytes {
+pub(crate) fn relay_error_body(code: &str, detail: &str) -> Bytes {
     Bytes::from(
         serde_json::json!({
             "dpayRelayError": code,
@@ -607,6 +831,17 @@ fn relay_error_body(code: &str, detail: &str) -> Bytes {
         })
         .to_string(),
     )
+}
+
+/// The 429 answer for a limit the partner agreement imposes (crate::trocador_agreement §3):
+/// the house marker + `Retry-After` in whole seconds. Fixed-string discipline as everywhere
+/// else — the detail names the category, never a value.
+fn too_many(code: &str, detail: &str, retry_after_secs: u64) -> Response {
+    let mut response = json_response(StatusCode::TOO_MANY_REQUESTS, &relay_error_body(code, detail));
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from(retry_after_secs));
+    response
 }
 
 /// The shared HTTP client (one per process; redirects NOT followed — same discipline
@@ -631,7 +866,7 @@ fn err(status: StatusCode, msg: impl Into<String>) -> Response {
 }
 
 /// A body-carrying response with a fixed status, `application/json` by contract.
-fn json_response(status: StatusCode, body: &Bytes) -> Response {
+pub(crate) fn json_response(status: StatusCode, body: &Bytes) -> Response {
     (
         status,
         [(header::CONTENT_TYPE, "application/json")],

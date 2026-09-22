@@ -28,6 +28,10 @@ pub mod sideshift;
 pub mod solana;
 pub mod till;
 pub mod trocador;
+/// The Trocador partner-agreement layer (2026-09-21): the compliance access log, the per-trade
+/// webhooks + order store, and the promised upstream rate limits — wrapped around the proxy
+/// above without changing its route contract. See the module's own doc for the signed terms.
+pub mod trocador_agreement;
 
 /// Unix seconds now — the ONE clock reading in this crate, and it stops rather than guesses.
 ///

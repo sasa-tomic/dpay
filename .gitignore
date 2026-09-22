@@ -46,5 +46,11 @@ signing.properties
 .DS_Store
 dist-prod
 
+# The trocador partner-agreement's append-only runtime files (DPAY_TROCADOR_LOG_DIR defaults
+# to the process cwd, so local runs/e2e drop them in the tree they run from — relay runtime
+# artifacts, never committed; the append-only retention lives on the deployed volume).
+trocador-access.jsonl
+trocador-orders.jsonl
+
 # nested git worktrees (session work areas)
 /.worktrees

@@ -108,6 +108,42 @@
 //!                           equivalent `https://trocador.app/api/` prefix host). The
 //!                           offline loop points it at the relay's own test stub. A
 //!                           set-but-malformed URL refuses startup (EXIT_CONFIG).
+//!   DPAY_PUBLIC_ORIGIN      the public https origin THIS relay is served at (e.g.
+//!                           `https://dpay.kalaj.org`). When set, Trocador trade creation
+//!                           appends `webhook=<ORIGIN>/api/v1/trocador/webhook` and
+//!                           `webhook_key=<order_id>` to the upstream new_trade call (the
+//!                           partner agreement's per-trade webhooks — every status change
+//!                           POSTs the trade body back to us, and the venue PROBES the URL
+//!                           at creation, so the route must be publicly reachable) and the
+//!                           trade answer rides an `X-Dpay-Order-Id` response header. When
+//!                           unset there are NO webhook params and no header — the
+//!                           dev/offline behavior stays byte-identical. A set-but-malformed
+//!                           origin refuses startup (EXIT_CONFIG).
+//!   DPAY_TROCADOR_LOG_DIR   the directory for the partner-agreement's append-only files
+//!                           `trocador-access.jsonl` (the compliance access log — one JSON
+//!                           line per relay→Trocador proxied call + every webhook delivery;
+//!                           ≥12-month retention is a deployment property, nothing the relay
+//!                           runs ever deletes) and `trocador-orders.jsonl` (the order store
+//!                           the webhook correlation rebuilds its index from at startup).
+//!                           Default: the process's current directory. Created on first
+//!                           write, so an unconfigured relay that never proxies anything
+//!                           creates nothing.
+//!   DPAY_TRUST_PROXY        `=1` (or true) when the relay sits behind a reverse proxy that
+//!                           sets X-Forwarded-For: the FIRST XFF entry is taken as the
+//!                           client IP (for the trocador compliance access log and its
+//!                           per-client limits). Unset (default): the connecting peer
+//!                           address is the client IP and the header is IGNORED — spoofable
+//!                           from outside. (The server already wires ConnectInfo via
+//!                           into_make_service_with_connect_info.)
+//!   DPAY_TROCADOR_RATE_PER_MIN   the per-client per-minute bound on POST
+//!                           /api/v1/trocador/rate (the agreement's organic-demand pattern;
+//!                           default 6). Upstream-bound calls only — device 400s and the
+//!                           unconfigured 503 are never counted. A zero or non-numeric value
+//!                           refuses startup (EXIT_CONFIG).
+//!   DPAY_TROCADOR_TRADE_PER_MIN  the per-client per-minute bound on POST
+//!                           /api/v1/trocador/trade (default 4). Same rules as the rate
+//!                           bound above. The STATUS read has NO knob: at most one upstream
+//!                           read per trade per 60s is the signed promise itself.
 
 use std::net::SocketAddr;
 use std::process;
@@ -211,11 +247,29 @@ async fn main() {
     // contract — an unset key answers 503 naming the missing variable. The key is SECRET
     // deploy config: never logged, never echoed in a response. UNLIKE sideshift the status
     // read is proxied too — every venue method is key-gated. See src/trocador.rs.
-    let state = state.with_trocador(dpay_relay::trocador::TrocadorProxy::new(
-        cfg.trocador_api_key.clone(),
-        cfg.trocador_api_base.clone(),
-        dpay_relay::trocador::DEFAULT_TIMEOUT,
-    ));
+    //
+    // The partner-AGREEMENT layer (2026-09-21, src/trocador_agreement.rs) attaches here,
+    // ALWAYS: the compliance access log + the order store (both append-only under
+    // DPAY_TROCADOR_LOG_DIR, default the cwd), the webhook registration (only when
+    // DPAY_PUBLIC_ORIGIN is set), and the promised upstream limits (status 60s/trade fixed;
+    // per-client rate/trade bounds). Without the attachment (unit tests) the proxy behaves
+    // exactly as before the agreement.
+    let state = state.with_trocador(
+        dpay_relay::trocador::TrocadorProxy::new(
+            cfg.trocador_api_key.clone(),
+            cfg.trocador_api_base.clone(),
+            dpay_relay::trocador::DEFAULT_TIMEOUT,
+        )
+        .with_agreement(dpay_relay::trocador_agreement::Agreement::new(
+            dpay_relay::trocador_agreement::AgreementConfig {
+                public_origin: cfg.public_origin.clone(),
+                log_dir: cfg.trocador_log_dir.clone(),
+                trust_proxy: cfg.trust_proxy,
+                rate_per_min: cfg.trocador_rate_per_min,
+                trade_per_min: cfg.trocador_trade_per_min,
+            },
+        )),
+    );
     // The Jupiter proxy (2026-09-16 founder ask: quotes + swap-tx builds "through our relay
     // (for caching etc)"). ALWAYS serving — the venue is keyless and the base has a constant
     // default, so there is no unconfigured branch and no secret: the base may be named
@@ -335,6 +389,32 @@ async fn main() {
         );
     }
 
+    // The partner agreement's one line per leg (2026-09-21): which parts are live, where the
+    // append-only files land, and the promised bounds. Values printed here are not secrets
+    // (the origin is public, the dir and the limits are operator config).
+    match &cfg.public_origin {
+        Some(origin) => println!(
+            "POST /api/v1/trocador/webhook: ENABLED — trade creation registers \
+             {origin}/api/v1/trocador/webhook with webhook_key=<order_id> upstream \
+             (DPAY_PUBLIC_ORIGIN); the receiver answers 200 to probes and deliveries."
+        ),
+        None => println!(
+            "POST /api/v1/trocador/webhook: registered but DORMANT — set DPAY_PUBLIC_ORIGIN \
+             to have trade creation register the per-trade webhook upstream (the offline \
+             default sends no webhook params)."
+        ),
+    }
+    println!(
+        "trocador agreement: access log + order store append-only under {} \
+         (DPAY_TROCADOR_LOG_DIR); upstream limits: rate {}/min and trade {}/min per client \
+         (DPAY_TROCADOR_RATE_PER_MIN / DPAY_TROCADOR_TRADE_PER_MIN), status reads at most \
+         1/min per trade — the signed 60s promise, no knob; XFF trust: {}.",
+        cfg.trocador_log_dir.display(),
+        cfg.trocador_rate_per_min,
+        cfg.trocador_trade_per_min,
+        if cfg.trust_proxy { "on (DPAY_TRUST_PROXY)" } else { "off" },
+    );
+
     println!(
         "POST /api/v1/jupiter/*: ENABLED — the quote cache + swap pipe against {} \
          (DPAY_JUPITER_API_BASE, default the venue's keyless lite host). Upstream error \
@@ -452,6 +532,19 @@ struct Config {
     trocador_api_key: Option<String>,
     /// The Trocador API base (`DPAY_TROCADOR_API_BASE`); default the verified-live host.
     trocador_api_base: String,
+    /// The relay's public origin (`DPAY_PUBLIC_ORIGIN`) — when set, Trocador trade creation
+    /// registers the per-trade webhook + key upstream and the trade answer carries the relay
+    /// order id header. Unset is the offline default (no webhook params at all).
+    public_origin: Option<String>,
+    /// The partner-agreement log dir (`DPAY_TROCADOR_LOG_DIR`, default "."): the append-only
+    /// access log + order store live here.
+    trocador_log_dir: std::path::PathBuf,
+    /// Whether X-Forwarded-For names the client IP (`DPAY_TRUST_PROXY`).
+    trust_proxy: bool,
+    /// The per-client rate-quote bound (`DPAY_TROCADOR_RATE_PER_MIN`, default 6).
+    trocador_rate_per_min: u32,
+    /// The per-client trade-creation bound (`DPAY_TROCADOR_TRADE_PER_MIN`, default 4).
+    trocador_trade_per_min: u32,
 }
 
 impl Config {
@@ -617,6 +710,54 @@ impl Config {
             None => dpay_relay::trocador::DEFAULT_API_BASE.to_string(),
         };
 
+        // The partner-agreement layer (2026-09-21). The origin is optional (unset = the
+        // offline default with NO webhook params); a set-but-malformed one refuses startup —
+        // same ParseError discipline as the other URL envs. The log dir defaults to the
+        // process's cwd and is created on first write, never eagerly. The limits default to
+        // the agreement's own numbers; zero would refuse every call, so it is a config error
+        // like the solana proxy's zero timeout.
+        let public_origin = match non_empty("DPAY_PUBLIC_ORIGIN") {
+            Some(origin) => {
+                let url = reqwest::Url::parse(&origin)
+                    .map_err(|e| format!("DPAY_PUBLIC_ORIGIN is not a valid URL: {e}"))?;
+                if url.scheme() != "https" && url.scheme() != "http" {
+                    return Err(format!(
+                        "DPAY_PUBLIC_ORIGIN={origin:?} must be an http(s) origin (got scheme {:?})",
+                        url.scheme()
+                    ));
+                }
+                Some(origin.trim_end_matches('/').to_string())
+            }
+            None => None,
+        };
+        let trocador_log_dir = std::path::PathBuf::from(
+            non_empty("DPAY_TROCADOR_LOG_DIR").unwrap_or_else(|| ".".into()),
+        );
+        let trust_proxy = match non_empty("DPAY_TRUST_PROXY") {
+            Some(s) => parse_bool("DPAY_TRUST_PROXY", &s)?,
+            None => false,
+        };
+        let parse_per_min = |key: &str, default: u32| -> Result<u32, String> {
+            match non_empty(key) {
+                Some(raw) => {
+                    let n: u32 = raw
+                        .parse()
+                        .map_err(|e| format!("{key}={raw:?} is not a number: {e}"))?;
+                    if n == 0 {
+                        return Err(format!(
+                            "{key}=0 — a zero bound refuses every call before it is made"
+                        ));
+                    }
+                    Ok(n)
+                }
+                None => Ok(default),
+            }
+        };
+        let trocador_rate_per_min =
+            parse_per_min("DPAY_TROCADOR_RATE_PER_MIN", dpay_relay::trocador_agreement::DEFAULT_RATE_PER_MIN)?;
+        let trocador_trade_per_min =
+            parse_per_min("DPAY_TROCADOR_TRADE_PER_MIN", dpay_relay::trocador_agreement::DEFAULT_TRADE_PER_MIN)?;
+
         Ok(Config {
             addr,
             ledger,
@@ -630,6 +771,11 @@ impl Config {
             jupiter_api_base,
             trocador_api_key,
             trocador_api_base,
+            public_origin,
+            trocador_log_dir,
+            trust_proxy,
+            trocador_rate_per_min,
+            trocador_trade_per_min,
         })
     }
 }
