@@ -83,6 +83,22 @@ async function installSolRpcStub(driver) {
 async function openSolConvert(driver) {
   await openBalances(driver);
   await driver.click('asset-sol-select', {timeoutMs: 8_000});
+  // The tap's state can lag the click by a render under pool contention (the wallet's reconcile
+  // effect answers a transient `assets` rebuild by latching the home rail), and this surface's
+  // identity is decided by WHICH row holds the selection when convert opens. So wait for the row
+  // to actually report aria-selected (the selectCurrency pattern in harness/lib.mjs) before
+  // asking for convert — otherwise the surface opens for the PREVIOUS selection and every
+  // SOL-surface assert below starves on a testID that never exists there.
+  const selDeadline = Date.now() + 8_000;
+  for (;;) {
+    const selected = await driver.eval((t) => {
+      const el = document.querySelector(`[data-testid="${t}"]`);
+      return el ? el.getAttribute('aria-selected') === 'true' : null;
+    }, 'asset-sol');
+    if (selected === true) break;
+    if (Date.now() > selDeadline) throw new Error('openSolConvert: asset-sol never reported aria-selected — the selection never landed');
+    await new Promise((r) => setTimeout(r, 150));
+  }
   await driver.waitForText('Convert', {timeoutMs: 6_000});
   let opened = false;
   for (let i = 0; i < 3 && !opened; i++) {
@@ -117,11 +133,17 @@ export async function run() {
     // calls server-side. Any surprise origin would be a bug this flow cannot silently pass.
 
     // --- §1 the merged landing spot: row names the spot, sub-picker names the services
+    // Saturated-box lesson (2026-09-22, first full-suite RED here): the row testIDs below only
+    // mean something on the SOL surface, and the SOL surface also renders `convert-screen` — so
+    // pin the surface IDENTITY before any row lookup (12s text budget), then budget the row
+    // lookups for pool contention (10s), not for a quiet box (3s starved at 32.9s wall once).
     await openSolConvert(driver);
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for SOL');
-    assert(await driver.findByTestID('convert-sol-dest', {timeoutMs: 5_000}) != null, 'the out-destination picker renders');
-    assert(await driver.findByTestID(AMM_ROW, {timeoutMs: 3_000}) != null, 'the in-wallet USDC row is present (amm surface unchanged)');
-    const cefiRow = await driver.findByTestID(CEFI_ROW, {timeoutMs: 3_000});
+    assert(await driver.waitForText('Convert SOL to USDC', {timeoutMs: 12_000}),
+      'the convert surface is the SOL surface ("Convert SOL to USDC" header — the row testIDs below are SOL-surface facts)');
+    assert(await driver.findByTestID('convert-sol-dest', {timeoutMs: 8_000}) != null, 'the out-destination picker renders');
+    assert(await driver.findByTestID(AMM_ROW, {timeoutMs: 10_000}) != null, 'the in-wallet USDC row is present (amm surface unchanged)');
+    const cefiRow = await driver.findByTestID(CEFI_ROW, {timeoutMs: 8_000});
     assert(cefiRow != null, 'the merged cefi ICP row is present');
     const cefiRowText = await driver.readText(CEFI_ROW);
     assertIncludes(cefiRowText, 'ICP', 'the merged row names the landing asset');
