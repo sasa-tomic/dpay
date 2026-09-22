@@ -34,7 +34,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::body::{Body, Bytes};
+use axum::body::Body;
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
