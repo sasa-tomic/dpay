@@ -85,7 +85,7 @@ export function AccountsTab({
   const bannered = new Set<string>();
   return (
     <View style={S.accountsWrap}>
-      <View style={S.routeHeaderRow}>
+      <View style={S.accountsHeader}>
         <Pressable
           testID="btn-accounts-back"
           onPress={onBack}

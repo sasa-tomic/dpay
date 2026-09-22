@@ -279,13 +279,17 @@ function buildStyles(p: Palette) {
   // Bottom inset doubles as the accounts route's scroll-end clearance: when the list is scrolled
   // fully down, the practice footer line sits this far above the bottom nav bar instead of
   // touching it (founder UX pass 2026-09-21).
-  accountsWrap: {alignSelf: 'stretch', paddingTop: 6, paddingBottom: 24},
-  accountsList: {alignSelf: 'stretch', marginTop: 12},
-  // Top margin tightened 22 → 10 (same pass): at 22 the footer line's glyphs started ~5pt below
-  // the scroll fold and the bottom nav bar sliced them mid-glyph at rest — the line box must end
-  // above the nav for the at-rest view to read clean. 10pt still seats the sentence immediately
-  // above its practice row (anti-scam rule R3 keeps them unseparable by a scroll).
-  accountsPractice: {fontSize: 13, color: p.sub, marginTop: 10, marginBottom: 8, fontFamily: FONT.sans},
+  accountsWrap: {alignSelf: 'stretch', paddingTop: 2, paddingBottom: 24},
+  // Header/list/practice are accounts-scoped trims (routeHeaderRow/accountsList margins hold for
+  // the shared routes): the practice sentence WRAPS TO TWO LINES at 390pt, so the at-rest fold
+  // needs the whole 2-line box + ~5pt clearance above the bottom nav — measured from the rendered
+  // screen, not from a single line box. Without the ~18pt reclaimed here the nav slices the second
+  // line mid-glyph at rest (visual-audit round 2, 2026-09-22).
+  accountsHeader: {...ROUTE_HEADER_ROW, marginBottom: 10},
+  accountsList: {alignSelf: 'stretch', marginTop: 8},
+  // Still seats the sentence immediately above its practice row (anti-scam rule R3 keeps them
+  // unseparable by a scroll).
+  accountsPractice: {fontSize: 13, color: p.sub, marginTop: 6, marginBottom: 8, fontFamily: FONT.sans},
   // Convert — the delegated-conversion surface (spec 2026-09-07 §5). The checklist card carries
   // every transparency line on ONE surface before signing; the state panel renders the §4 machine.
   // Left-aligned instruction copy (not centered): these are lines to read closely before money
