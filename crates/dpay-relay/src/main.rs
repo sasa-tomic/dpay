@@ -95,7 +95,9 @@
 //!                           refuses startup (EXIT_CONFIG).
 //!   DPAY_TROCADOR_API_KEY   the Trocador partner API key for the aggregator proxy
 //!                           (registered 2026-09-20 — POST+GET /api/v1/trocador/*; see
-//!                           src/trocador.rs). Attached server-side as the `API-Key`
+//!                           src/trocador.rs; tracked credential: `secrets/trocador.sops.json`
+//!                           — decrypt into the env, never a plaintext .env). Attached
+//!                           server-side as the `API-Key`
 //!                           header (the venue's own auth header — every method is
 //!                           key-gated, including the status read); the device never sees
 //!                           it. SECRET deploy config: never logged, never echoed, never

@@ -163,16 +163,20 @@
   is already a passthrough line in `deploy/docker-compose.yml` + `deploy/.env.example`), the
   webhook route (`/api/v1/trocador/webhook`, ≤1/min fallback polling
   stopping at the first terminal state), the upstream limiters, the privacy-policy section
-  (`/privacy` §7), and the live probe — are landing in this branch. STILL OPEN on key arrival,
-  BEFORE the venue serves a real trade, both now executable via `just trocador-probe` (refuses
-  without the key; LIVE key-gated calls, never in verify/check): (1) re-pin the coin/network codes
-  against the venue's own key-gated `GET /coins` (the adapter's `icp`/`sol` on `Mainnet` rows are
-  BEST-EFFORT, following the docs' example vocabulary — a wrong code fails at the venue, never
-  silently); (2) pin the trade-status vocabulary the same way (the docs enumerate NO status
-  values; the resume engine keeps unknown words honest-`unknown` and never guesses). Trocador is
-  the venue family slated to replace SideShift as the PRIMARY CeFi rail once its with-key coverage
-  probe shows ICP↔SOL partner coverage; if it shows none, ChangeNOW is the documented fallback
-  venue #2 (same relay-held-key pattern). Founder note (no API flag refuses it): Trocador's
+  (`/privacy` §7), and the live probe — are landing in this branch. FIRST PROBE RUN 2026-09-22
+  (the key now lives in `secrets/trocador.sops.json`; the probe still refuses outside a manual
+  run — LIVE key-gated calls, never in verify/check): (1) the pinned coin/network codes are
+  VERIFIED against the venue's key-gated `GET /coins` (2305 rows; `icp`/`sol` on `Mainnet` are
+  exact pair matches — NO re-pin needed; the same-ticker wrapped "Solana (BEP20)" row is a
+  different market, not our pin); (2) the trade-status vocabulary remains a /trade fact (the
+  quote body previews only `status:"new"`; the resume engine keeps unknown words honest-
+  `unknown` and never guesses). COVERAGE MEASURED 2026-09-22: ICP markets are LISTED but
+  UNQUOTED — `icp→sol`, `icp→btc` (control) and `sol→icp` all answer `"no resulting quote"`
+  while the `btc→xmr` rig-control QUOTES, so the key, params and pins are proven and the venue's
+  provider pool simply had no live ICP markets that day. Consequence: SideShift remains the only
+  live-settling ICP↔SOL venue; ChangeNOW stays the documented fallback #2 (same relay-held-key
+  pattern); the go-live gate STANDS — re-run `just trocador-probe` immediately BEFORE the venue
+  serves its first real trade. Founder note (no API flag refuses it): Trocador's
   `markup=0` pin keeps the USER's price at the venue's own baseline, but Trocador still accrues
   half of ITS own commission to the partner account — what happens to that accrual is a founder
   decision, outside code.

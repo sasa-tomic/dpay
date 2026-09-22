@@ -64,16 +64,21 @@ dpay cannot refuse the accrual over the API, and what happens to that partner ba
 ## 3. Remaining founder/ops steps to go live
 
 1. **Set `DPAY_TROCADOR_API_KEY` in the deploy environment.** Access was enabled 2026-09-22;
-   their proxy may need up to 60 minutes from the email before the key answers.
+   their proxy may need up to 60 minutes from the email before the key answers. The key's
+   tracked source of truth is `secrets/trocador.sops.json` (sops, all three age recipients) —
+   decrypt into the env, never a plaintext .env; `deploy/.env.example` carries the one-liner.
 2. **Set `DPAY_PUBLIC_ORIGIN` and `DPAY_TRUST_PROXY=1` in prod.** The first builds the webhook
    URL the venue probes at creation; the second makes the access log's IP field honest instead of
    a tunnel-internal address.
 3. **BEFORE the first real trade: run `just trocador-probe`** and re-pin from its output:
    (a) the coin/network codes the adapter pins (`crates/dpay-relay/src/trocador.rs`
-   `TROCADOR_ASSETS` — currently best-effort docs vocabulary), and (b) the trade-status
-   vocabulary. A wrong code fails loudly at the venue; an unpinned status word renders
-   honest-`unknown`. The probe prints both vocabularies and flags any mismatch against the
-   current pins.
+   `TROCADOR_ASSETS` — VERIFIED against the live vocabulary 2026-09-22: exact pair matches, no
+   re-pin needed), and (b) the trade-status vocabulary (still a /trade fact; the quote body
+   previews only `status:"new"`). A wrong code fails loudly at the venue; an unpinned status
+   word renders honest-`unknown`. The probe prints both vocabularies and flags any mismatch
+   against the current pins. FIRST-RUN RESULT 2026-09-22: pins verified; the registered pair is
+   listed but currently UNQUOTED (rig verified via a btc→xmr control quote — exit 3) → re-run
+   this probe before go-live; SideShift remains the live ICP↔SOL venue until then.
 4. **Deploy is founder-run.** The one runbook is **`docs/OPS.md` §3** — it is deliberately not
    restated here (image build, the between-steps commit record, `just verify-relay`/`just floor`
    afterwards).
