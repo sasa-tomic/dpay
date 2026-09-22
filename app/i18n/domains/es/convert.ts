@@ -146,6 +146,7 @@ export const convertEs: ConvertMessages = {
     destLabel: 'Destino',
     destDirect: sym => `${sym} — en esta cartera`,
     destRoute: (sym, network) => `${sym} — a tu dirección de ${network}`,
+    destRouteSol: (sym, network, venue) => `${sym} — a tu dirección de ${network} · último paso vía ${venue}`,
     routeHeadingCollapsed: (inSym, hopSym, network) => `Ruta: ${inSym} → ${hopSym} (hacia ${network})`,
     destInWallet: sym => `${sym} — en esta cartera`,
     mechDirect: 'Pool directo',
@@ -179,6 +180,9 @@ export const convertEs: ConvertMessages = {
     gasFeeLine: amount => `Gas del retiro (cotización en vivo del minter): ${amount}`,
     routeMinLine: (amount, pct) => `Al menos ${amount} en tu dirección (piso de deslizamiento ${pct})`,
     routeSurplusNote: hopSym => `Si el canje paga por encima del piso, el excedente queda en esta cartera como ${hopSym}.`,
+    routeDestEstimate: (amount, sym) =>
+      `Llegada estimada: \u2248 ${amount} ${sym} en tu dirección Solana — el paso final pasa por Jupiter con una cotización fresca`,
+    routeVenues: (icVenue, solVenue) => `Ruta: ${icVenue} → Circle CCTP → ${solVenue}`,
     gasPreflightTitle: 'El retiro necesita gas primero',
     gasPreflightBody: needed =>
       `Quemar hacia Ethereum cuesta un gas pagado en ckETH, y esta cartera no tiene suficiente. Se necesita aproximadamente ${needed} (la cotización de gas en vivo del minter más su comisión de autorización). Consigue ckETH en esta cartera primero y vuelve — comprar una porción de gas aquí es trabajo futuro, y dpay no te esconderá este costo.`,
@@ -252,7 +256,9 @@ export const convertEs: ConvertMessages = {
     timingNote: 'Por la vía rápida la llegada suele tardar de segundos a pocos minutos (en nuestra prueba real ~20 s). Si Ethereum está congestionado puede tardar más — esta pantalla se actualiza sola.',
     externalGasLine: 'El gas Ethereum de estas dos transacciones lo paga el ETH de tu propia cartera. dpay no puede pagarlo ni cotizarlo con exactitud.',
     circleFeeLine: fee => `Comisión del puente de Circle (su propia cifra, descontada del importe): como máximo ${fee}`,
-    mintFloorLine: floor => `Llegan como mínimo ${floor} a tu dirección Solana`,
+    mintFloorLine: (floor, sym) =>
+      `Al menos ${floor} ${sym} cruzan a tu dirección Solana — el paso final los cambia por tu destino`,
+    mintFloorDestLine: (floor, sym) => `Llegan como mínimo ${floor} ${sym} a tu dirección Solana`,
     burnTxLabel: 'Hash de la transacción de burn (de tu cartera, tras firmar)',
     burnTxPlaceholder: '0x…',
     attachButton: 'Ya lo firmé — vigilar el cruce',
@@ -275,6 +281,7 @@ export const convertEs: ConvertMessages = {
       'La comisión de red del cambio se paga en SOL y esta cartera no tiene SOL. Consigue primero algo de SOL en esta cartera — los USDC quedan seguros mientras tanto.',
     doneTitle: 'Convertido',
     doneBody: (amount, sym, address) => `${amount} ${sym} están en tu dirección Solana ${address} — verificado on-chain.`,
+    doneVia: (icVenue, solVenue) => `Cambiado vía ${icVenue}, Circle y ${solVenue}.`,
     declinedTitle: 'Handoff cancelado',
     declinedBody: address =>
       `No cruzó nada. Tus USDC están en tu propia dirección Ethereum ${address} — envíalos donde quieras desde tu cartera o repite esta ruta más tarde.`,

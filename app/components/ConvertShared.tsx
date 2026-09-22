@@ -162,7 +162,12 @@ export const buildDestGroups = (
     push({
       key,
       testID: `convert-dest-route-${r.routeId}`,
-      label: M.convert.multihop.destRoute(r.dest.symbol, r.dest.network),
+      // A Route-C row names its FINAL leg's venue in the row itself (founder clarity fix
+      // 2026-09-22): the registry display name — the cefi destRow's source — never a literal,
+      // so the Jupiter tail is visible BEFORE any quote or confirm.
+      label: r.crossRail?.sol != null
+        ? M.convert.multihop.destRouteSol(r.dest.symbol, r.dest.network, venueDisplayName(r.crossRail.sol.venueId))
+        : M.convert.multihop.destRoute(r.dest.symbol, r.dest.network),
       mechs: [{kind: 'route', route: r}],
     });
   }

@@ -81,6 +81,8 @@ import {
 } from '../convertResume';
 import {cctpMaxFee, cctpMintFloor, fetchEthBalance} from '../cctp';
 import {DpayCore} from '../services/native';
+import {fetchJupiterQuote} from '../services/jupiter';
+import {USDC_MINT_ADDRESS} from '../solana/tokens';
 import {deriveSolanaAddress} from '../solana/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {hubRoutes, multihopRoutesFrom, gasFundRoutes, type HubRoute, type MultihopRoute} from '../routes';
@@ -223,6 +225,10 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
   // shown in the census as the venue's own number; prepare re-fetches live at confirm.
   const [crossFee, setCrossFee] = useState<{maxFee: string; floor: string} | null>(null);
   const [crossFeeErr, setCrossFeeErr] = useState<string | null>(null);
+  // Route C's review-time destination estimate (founder clarity fix, 2026-09-22): the raw
+  // Jupiter out-amount (subunits) the mint floor would land as at the destination. NULL is
+  // the honest "no estimate yet / fetch failed" — the line is simply absent, never an error.
+  const [destEstimate, setDestEstimate] = useState<string | null>(null);
   // The HUB two-quote flow (2026-09-18 hub UX, D7–D13): quote1 (from → hub), then quote2
   // (hub → dest) QUOTED ON math1.minOut — the compounding floor the engine signs. The plain
   // quote/math pair above stays null in hub mode; these carry the composed estimate.
@@ -845,6 +851,46 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoute?.routeId, math?.minOut, record != null && isLiveRecord(record)]);
+
+  // --- Route C's review-time destination estimate (founder clarity fix, 2026-09-22): the
+  //     review numbers name the HOP asset (USDC), so the destination's own figure is a
+  //     Jupiter quote for the mint FLOOR (crossFee.floor USDC → the route's out mint) — the
+  //     same machinery the sol_ready final leg quotes with, sized on the floor not the
+  //     verified credit (there is no credit yet; this is an estimate, labeled as one).
+  //     EVENT-DRIVEN ONLY: it re-keys on the floor (which re-keys on the quote/amount via
+  //     the crossFee effect) and the route — NO interval, NO polling. Fail-soft by
+  //     construction: fetch error, refusal, or timeout → the line is simply absent; it can
+  //     never block review or raise an error UI. Single-flight via the cancelled-flag
+  //     cleanup: a superseded fetch is dropped, never a late overwrite.
+  useEffect(() => {
+    const sol = activeRoute?.crossRail?.sol;
+    if (sol == null || crossFee == null || isLiveRecord(record)) {
+      setDestEstimate(null);
+      return;
+    }
+    const venue = venueOfId(sol.venueId);
+    if (venue == null) {
+      setDestEstimate(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        // fetchJupiterQuote resolves to the honest-failure union (never throws), but the
+        // catch keeps the fail-soft promise airtight even against a transport surprise.
+        const q = await fetchJupiterQuote(relayUrl, venue, USDC_MINT_ADDRESS, sol.outMint, crossFee.floor, slippageBps);
+        if (!cancelled && mountedRef.current) setDestEstimate(q.ok ? q.quote.outAmount : null);
+      } catch {
+        if (!cancelled && mountedRef.current) setDestEstimate(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // slippageBps deliberately NOT a dependency: the floor re-key already bakes it in
+    // (crossFee re-derives from math.minOut, which is slippage-sized).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoute?.routeId, crossFee?.floor, relayUrl, record != null && isLiveRecord(record)]);
 
   // HUB confirm (D7–D13): the destination is the user's OWN account on the destination
   // ledger — no address input, no gas preflight, no cross-fee. Both hops re-quoted fresh at
@@ -1815,6 +1861,17 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
                 ) : null}
                 {activeRoute.crossRail != null ? (
                   <View testID="convert-crossrail-fees">
+                    {/* The full venue chain, named in one line (founder clarity fix
+                        2026-09-22): registry display names on both ends, Circle's crossing
+                        in the middle — Route C only (Route B has no final venue). */}
+                    {activeRoute.crossRail.sol != null ? (
+                      <Text testID="convert-route-venues" style={S.convertChecklistLine}>
+                        {M.convert.multihop.routeVenues(
+                          venueDisplayName(activeRoute.swapVenueId),
+                          venueDisplayName(activeRoute.crossRail.sol.venueId),
+                        )}
+                      </Text>
+                    ) : null}
                     {/* Fee census honesty for the crossing: the EVM gas is the USER's wallet's
                         ETH (dpay can neither pay nor quote it); Circle's mint fee is Circle's
                         own published number, deducted from the amount — never a dpay fee. */}
@@ -1826,9 +1883,27 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
                         <Text testID="crossrail-circle-fee" style={S.convertChecklistLine}>
                           {M.convert.crossrail.circleFeeLine(fmtAssetCompact(crossFee.maxFee, dispOutDecimals, dispOutSym))}
                         </Text>
+                        {/* The floor line reads USDC as the MID-STOP on a Route C (a final
+                            Jupiter step swaps it onward); Route B's USDC IS the outcome at
+                            the address, so it keeps the arrives-here phrasing. The BARE
+                            number + symbol: the copy owns the unit (solMinLine's rule). */}
                         <Text testID="crossrail-mint-floor" style={S.convertChecklistLine}>
-                          {M.convert.crossrail.mintFloorLine(fmtAssetCompact(crossFee.floor, dispOutDecimals, dispOutSym))}
+                          {activeRoute.crossRail.sol != null
+                            ? M.convert.crossrail.mintFloorLine(fmtAssetCompact(crossFee.floor, dispOutDecimals, '').trim(), dispOutSym)
+                            : M.convert.crossrail.mintFloorDestLine(fmtAssetCompact(crossFee.floor, dispOutDecimals, '').trim(), dispOutSym)}
                         </Text>
+                        {/* The destination's own estimate (founder clarity fix 2026-09-22):
+                            what the floor would land as after the final Jupiter leg, from
+                            the SAME quote machinery the final leg runs. Fail-soft — absent
+                            until it fetches, never an error, never a gate. */}
+                        {activeRoute.crossRail.sol != null && destEstimate != null ? (
+                          <Text testID="crossrail-dest-estimate" style={S.convertChecklistLine}>
+                            {M.convert.multihop.routeDestEstimate(
+                              fmtAssetCompact(destEstimate, activeRoute.crossRail.sol.outDecimals, '').trim(),
+                              activeRoute.dest.symbol,
+                            )}
+                          </Text>
+                        ) : null}
                       </>
                     ) : null}
                   </View>

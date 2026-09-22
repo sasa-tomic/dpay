@@ -147,6 +147,7 @@ export const convertDe: ConvertMessages = {
     destLabel: 'Ziel',
     destDirect: sym => `${sym} — in dieser Wallet`,
     destRoute: (sym, network) => `${sym} — an deine ${network}-Adresse`,
+    destRouteSol: (sym, network, venue) => `${sym} — an deine ${network}-Adresse · letzter Schritt über ${venue}`,
     routeHeadingCollapsed: (inSym, hopSym, network) => `Route: ${inSym} → ${hopSym} (nach ${network})`,
     destInWallet: sym => `${sym} — in dieser Wallet`,
     mechDirect: 'Direkter Pool',
@@ -180,6 +181,9 @@ export const convertDe: ConvertMessages = {
     gasFeeLine: amount => `Auszahlungs-Gas (Live-Angebot des Minters): ${amount}`,
     routeMinLine: (amount, pct) => `Mindestens ${amount} an deiner Adresse (Slippage-Untergrenze ${pct})`,
     routeSurplusNote: hopSym => `Zahlt der Tausch über der Untergrenze, bleibt der Überschuss als ${hopSym} in dieser Wallet.`,
+    routeDestEstimate: (amount, sym) =>
+      `Geschätzte Ankunft: \u2248 ${amount} ${sym} an deiner Solana-Adresse — der letzte Schritt holt bei Jupiter einen frischen Kurs`,
+    routeVenues: (icVenue, solVenue) => `Route: ${icVenue} → Circle CCTP → ${solVenue}`,
     gasPreflightTitle: 'Die Auszahlung braucht erst Gas',
     gasPreflightBody: needed =>
       `Das Verbrennen nach Ethereum kostet Gas in ckETH — und diese Wallet hat nicht genug davon. Es braucht etwa ${needed} (das Live-Gas-Angebot des Minters plus seine Ermächtigungsgebühr). Hol zuerst ckETH in diese Wallet und komm dann zurück — einen Gas-Anteil hier zu kaufen ist Zukunftarbeit, und dpay versteckt dir diese Kosten nicht.`,
@@ -253,7 +257,9 @@ export const convertDe: ConvertMessages = {
     timingNote: 'Auf dem schnellen Pfad dauert die Ankunft typischerweise Sekunden bis wenige Minuten (in unserer Live-Prüfung ~20 s). Ist Ethereum beschäftigt, kann es länger dauern — dieser Bildschirm aktualisiert sich von selbst.',
     externalGasLine: 'Das Ethereum-Gas für diese beiden Transaktionen zahlt das ETH deiner eigenen Wallet. dpay kann es weder zahlen noch exakt beziffern.',
     circleFeeLine: fee => `Circle\u2019s Bridge-Gebühr (seine eigene Zahl, vom Betrag abgezogen): höchstens ${fee}`,
-    mintFloorLine: floor => `Mindestens ${floor} kommen an deiner Solana-Adresse an`,
+    mintFloorLine: (floor, sym) =>
+      `Mindestens ${floor} ${sym} werden zu deiner Solana-Adresse übertragen — der letzte Schritt tauscht sie für dein Ziel weiter`,
+    mintFloorDestLine: (floor, sym) => `Mindestens ${floor} ${sym} kommen an deiner Solana-Adresse an`,
     burnTxLabel: 'Burn-Transaktions-Hash (aus deiner Wallet, nach dem Signieren)',
     burnTxPlaceholder: '0x…',
     attachButton: 'Ich habe signiert — den Transfer beobachten',
@@ -276,6 +282,7 @@ export const convertDe: ConvertMessages = {
       'Die Netzwerkgebühr des Tauschs wird in SOL gezahlt, und diese Wallet hält kein SOL. Hol zuerst etwas SOL in diese Wallet — die USDC bleiben derweil sicher liegen.',
     doneTitle: 'Umgetauscht',
     doneBody: (amount, sym, address) => `${amount} ${sym} liegen an deiner Solana-Adresse ${address} — on-chain verifiziert.`,
+    doneVia: (icVenue, solVenue) => `Umgetauscht über ${icVenue}, Circle und ${solVenue}.`,
     declinedTitle: 'Handoff abgebrochen',
     declinedBody: address =>
       `Nichts ist überquert. Deine USDC liegen an deiner eigenen Ethereum-Adresse ${address} — sende sie von deiner Wallet irgendwohin hin oder starte diese Route später erneut.`,

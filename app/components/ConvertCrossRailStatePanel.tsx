@@ -230,7 +230,12 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
                 {M.convert.crossrail.circleFeeLine(fmtAssetCompact(handoff.maxFeeSubunits, hopDecimals, hopSymbol))}
               </Text>
               <Text style={S.convertChecklistLine}>
-                {M.convert.crossrail.mintFloorLine(fmtAssetCompact(handoff.mintFloorSubunits, hopDecimals, hopSymbol))}
+                {/* Same mid-stop split as the review census: on a Route C the crossing USDC
+                    is the MID-STOP (a final Jupiter step swaps it onward); Route B's USDC is
+                    the outcome at the address. BARE number + symbol (the copy owns the unit). */}
+                {cross.kind === 'cctp_sol'
+                  ? M.convert.crossrail.mintFloorLine(fmtAssetCompact(handoff.mintFloorSubunits, hopDecimals, '').trim(), hopSymbol)
+                  : M.convert.crossrail.mintFloorDestLine(fmtAssetCompact(handoff.mintFloorSubunits, hopDecimals, '').trim(), hopSymbol)}
               </Text>
               <Text style={S.convertChecklistLine}>{M.convert.crossrail.timingNote}</Text>
               <Text testID="crossrail-external-gas" style={S.convertChecklistLine}>{M.convert.crossrail.externalGasLine}</Text>
@@ -373,6 +378,15 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
           <Text style={S.convertStateBody}>
             {M.convert.crossrail.doneBody(amountStr, destSymbol, cross.solAddress)}
           </Text>
+          {/* The receipt names WHO executed it (founder clarity fix 2026-09-22): the IC
+              swap venue, Circle's crossing, and the final leg's venue — the record's own
+              frozen registry keys, never literals. Route B has no final venue: its receipt
+              keeps the plain done body. */}
+          {cross.kind === 'cctp_sol' && cross.solVenueId != null ? (
+            <Text testID="crossrail-done-via" style={S.convertStateMeta}>
+              {M.convert.crossrail.doneVia(venueName, solVenueName)}
+            </Text>
+          ) : null}
           {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
         </View>
       ) : null}

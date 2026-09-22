@@ -146,6 +146,7 @@ export const convertFr: ConvertMessages = {
     destLabel: 'Destination',
     destDirect: sym => `${sym} — dans ce portefeuille`,
     destRoute: (sym, network) => `${sym} — vers ton adresse ${network}`,
+    destRouteSol: (sym, network, venue) => `${sym} — vers ton adresse ${network} · dernière étape via ${venue}`,
     routeHeadingCollapsed: (inSym, hopSym, network) => `Route : ${inSym} → ${hopSym} (vers ${network})`,
     destInWallet: sym => `${sym} — dans ce portefeuille`,
     mechDirect: 'Pool direct',
@@ -179,6 +180,9 @@ export const convertFr: ConvertMessages = {
     gasFeeLine: amount => `Gaz du retrait (devis en direct du minter) : ${amount}`,
     routeMinLine: (amount, pct) => `Au moins ${amount} à ton adresse (plancher de glissement ${pct})`,
     routeSurplusNote: hopSym => `Si l\u2019échange paie au-dessus du plancher, l\u2019excédent reste dans ce portefeuille en ${hopSym}.`,
+    routeDestEstimate: (amount, sym) =>
+      `Arrivée estimée : \u2248 ${amount} ${sym} à ton adresse Solana — la dernière étape passe par Jupiter avec une cotation fraîche`,
+    routeVenues: (icVenue, solVenue) => `Route : ${icVenue} → Circle CCTP → ${solVenue}`,
     gasPreflightTitle: 'Le retrait exige du gaz d\u2019abord',
     gasPreflightBody: needed =>
       `Brûler vers Ethereum coûte un gaz payé en ckETH, et ce portefeuille n\u2019en a pas assez. Il en faut environ ${needed} (le devis de gaz en direct du minter plus ses frais d\u2019autorisation). Procure-toi du ckETH dans ce portefeuille d\u2019abord, puis reviens — acheter une part de gaz ici est un travail futur, et dpay ne te cachera pas ce coût.`,
@@ -252,7 +256,9 @@ export const convertFr: ConvertMessages = {
     timingNote: 'Sur la voie rapide, l\u2019arrivée prend typiquement de quelques secondes à quelques minutes (~20 s lors de notre vérification en direct). Si Ethereum est chargé, cela peut durer plus longtemps — cet écran se met à jour tout seul.',
     externalGasLine: 'Le gaz Ethereum de ces deux transactions est payé par l\u2019ETH de ton propre portefeuille. dpay ne peut ni le payer ni le chiffrer exactement.',
     circleFeeLine: fee => `Frais du pont de Circle (son propre chiffre, déduit du montant) : au plus ${fee}`,
-    mintFloorLine: floor => `Au moins ${floor} arrivent à ton adresse Solana`,
+    mintFloorLine: (floor, sym) =>
+      `Au moins ${floor} ${sym} traversent vers ton adresse Solana — la dernière étape les échange contre ta destination`,
+    mintFloorDestLine: (floor, sym) => `Au moins ${floor} ${sym} arrivent à ton adresse Solana`,
     burnTxLabel: 'Hash de la transaction de burn (de ton portefeuille, après signature)',
     burnTxPlaceholder: '0x…',
     attachButton: 'Je l\u2019ai signé — surveiller la traversée',
@@ -275,6 +281,7 @@ export const convertFr: ConvertMessages = {
       'Les frais réseau de l\u2019échange se paient en SOL et ce portefeuille ne détient pas de SOL. Procure-toi d\u2019abord un peu de SOL dans ce portefeuille — les USDC restent en sécurité entre-temps.',
     doneTitle: 'Converti',
     doneBody: (amount, sym, address) => `${amount} ${sym} sont à ton adresse Solana ${address} — vérifié on-chain.`,
+    doneVia: (icVenue, solVenue) => `Converti via ${icVenue}, Circle et ${solVenue}.`,
     declinedTitle: 'Remise annulée',
     declinedBody: address =>
       `Rien n\u2019a traversé. Tes USDC se trouvent à ta propre adresse Ethereum ${address} — envoie-les où tu veux depuis ton portefeuille ou relance cette route plus tard.`,

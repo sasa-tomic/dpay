@@ -189,6 +189,10 @@ export type ConvertMessages = {
     destLabel: string;
     destDirect: (sym: string) => string;
     destRoute: (sym: string, network: string) => string;
+    /** The Route-C shape of destRow: names the FINAL leg's venue in the row itself, so a
+     *  Jupiter-tailed route reads as Jupiter-tailed at the picker (founder clarity fix
+     *  2026-09-22 — the venue chain was invisible until after confirm). */
+    destRouteSol: (sym: string, network: string, venue: string) => string;
     /** F1: the collapsed route heading for a same-asset hop (ICP → USDC → USDC on Ethereum) —
      *  the through-route plus the landing place, no duplicated symbol. */
     routeHeadingCollapsed: (inSym: string, hopSym: string, network: string) => string;
@@ -248,6 +252,13 @@ export type ConvertMessages = {
     /** The floor the destination is promised + where any surplus stays (spec §5). */
     routeMinLine: (amount: string, pct: string) => string;
     routeSurplusNote: (hopSym: string) => string;
+    /** Route C's review-time estimate of what LANDS at the destination after the final
+     *  Jupiter leg (founder clarity fix 2026-09-22): the headline numbers describe the
+     *  USDC hop, this line names the destination asset. Rendered only when the estimate
+     *  actually fetched — it is an estimate, never a promise, and never a gate. */
+    routeDestEstimate: (amount: string, symbol: string) => string;
+    /** The full venue chain of a Route-C intent, one line inside the Details census. */
+    routeVenues: (icVenue: string, solVenue: string) => string;
     /** ckETH-gas preflight (spec §6): a KNOWN-insufficient balance blocks confirm, honestly. */
     gasPreflightTitle: string;
     gasPreflightBody: (needed: string) => string;
@@ -335,7 +346,12 @@ export type ConvertMessages = {
     timingNote: string;
     externalGasLine: string;
     circleFeeLine: (fee: string) => string;
-    mintFloorLine: (floor: string) => string;
+    /** Route C's floor line: the USDC reads as the MID-STOP, not the outcome (founder
+     *  clarity fix 2026-09-22) — it crosses to Solana and the final step swaps it onward.
+     *  `floor` is the BARE number; `symbol` renders USDC (locale-invariant). */
+    mintFloorLine: (floor: string, symbol: string) => string;
+    /** Route B's floor line (no final leg exists — the USDC IS the outcome at the address). */
+    mintFloorDestLine: (floor: string, symbol: string) => string;
     burnTxLabel: string;
     burnTxPlaceholder: string;
     attachButton: string;
@@ -362,6 +378,9 @@ export type ConvertMessages = {
     solPreflightBody: string;
     doneTitle: string;
     doneBody: (amount: string, sym: string, address: string) => string;
+    /** The done receipt's venue attribution (Route C): who executed the conversion, named
+     *  in one line — the receipt used to name nobody (founder clarity fix 2026-09-22). */
+    doneVia: (icVenue: string, solVenue: string) => string;
     declinedTitle: string;
     declinedBody: (address: string) => string;
     solFailedTitle: string;
@@ -547,6 +566,7 @@ export const convertEn: ConvertMessages = {
     destLabel: 'Destination',
     destDirect: sym => `${sym} — in this wallet`,
     destRoute: (sym, network) => `${sym} — to your ${network} address`,
+    destRouteSol: (sym, network, venue) => `${sym} — to your ${network} address · final step via ${venue}`,
     routeHeadingCollapsed: (inSym, hopSym, network) => `Route: ${inSym} → ${hopSym} (to ${network})`,
     destAddressLabel: 'Your own address on the destination network',
     destAddressInvalid: 'Not a valid destination address — expected 0x followed by 40 hex characters.',
@@ -580,6 +600,9 @@ export const convertEn: ConvertMessages = {
     gasFeeLine: amount => `Cash-out gas (the minter\u2019s live quote): ${amount}`,
     routeMinLine: (amount, pct) => `At least ${amount} at your address (slippage floor ${pct})`,
     routeSurplusNote: hopSym => `If the swap pays above the floor, the surplus stays in this wallet as ${hopSym}.`,
+    routeDestEstimate: (amount, sym) =>
+      `Estimated landing: \u2248 ${amount} ${sym} at your Solana address — the final Jupiter step re-quotes fresh`,
+    routeVenues: (icVenue, solVenue) => `Route: ${icVenue} → Circle CCTP → ${solVenue}`,
     gasPreflightTitle: 'Cash-out needs gas first',
     gasPreflightBody: needed =>
       `Burning to Ethereum costs gas paid in ckETH, and this wallet does not hold enough. About ${needed} is needed (the minter\u2019s live gas quote plus its approve fee). Get ckETH into this wallet first, then come back — buying a gas slice here is future work, and dpay will not hide this cost.`,
@@ -651,7 +674,9 @@ export const convertEn: ConvertMessages = {
     timingNote: 'On the fast path the arrival typically takes seconds to a few minutes (measured ~20 s in our live check). If Ethereum is busy it can take longer — this screen updates on its own.',
     externalGasLine: 'Ethereum gas for these two transactions is paid by your wallet\u2019s own ETH. dpay cannot pay it or quote it exactly.',
     circleFeeLine: fee => `Circle\u2019s bridge fee (its own number, taken from the amount): at most ${fee}`,
-    mintFloorLine: floor => `At least ${floor} arrives at your Solana address`,
+    mintFloorLine: (floor, sym) =>
+      `At least ${floor} ${sym} crosses to your Solana address — the final step swaps it on for your destination`,
+    mintFloorDestLine: (floor, sym) => `At least ${floor} ${sym} arrives at your Solana address`,
     burnTxLabel: 'Burn transaction hash (from your wallet, after signing)',
     burnTxPlaceholder: '0x…',
     attachButton: 'I signed it — watch the crossing',
@@ -674,6 +699,7 @@ export const convertEn: ConvertMessages = {
       'The swap\u2019s network fee is paid in SOL and this wallet holds no SOL. Get a little SOL into this wallet first — the USDC stays put meanwhile.',
     doneTitle: 'Converted',
     doneBody: (amount, sym, address) => `${amount} ${sym} is at your Solana address ${address} — verified on-chain.`,
+    doneVia: (icVenue, solVenue) => `Converted via ${icVenue}, Circle and ${solVenue}.`,
     declinedTitle: 'Handoff cancelled',
     declinedBody: address =>
       `Nothing crossed. Your USDC sits at your own Ethereum address ${address} — send it anywhere from your wallet, or run this route again later.`,
