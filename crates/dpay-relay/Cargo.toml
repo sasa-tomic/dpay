@@ -57,7 +57,17 @@ sha2 = "0.10"
 # real randomness, not a hash of a clock. Already in the tree at 0.2.17 (rand_core pulls it for
 # ed25519-dalek's key generation), so this names an existing edge rather than adding a crate.
 getrandom = "0.2"
-# The solana RPC proxy's one-hop upstream client (`src/solana.rs`). Pinned to the 0.12 line that
+# The partner-agreement's POSTGRES store (2026-09-22, founder directive: "postgres is being
+# backed up, flat files are not"). When DPAY_TROCADOR_PG_DSN is set the Trocador compliance
+# access log + order store persist to PG instead of the JSONL files; unset keeps the JSONL
+# behavior byte-identical (the offline default). ONE dedicated writer connection, owned by the
+# store's persist thread, serializes every INSERT in arrival order (the append-only ordering
+# guarantee the JSONL files get from write-under-lock). DELIBERATELY NO deadpool pool: the
+# single serialized writer makes checkout fan-out dead weight, and no pool is what keeps the
+# agreement's sync order-store methods (open_order/apply_webhook — pinned by the offline test
+# suite) able to block on a durable-write ack without borrowing a runtime.
+tokio-postgres = "0.7"
+# The Solana RPC proxy's one-hop upstream client (`src/solana.rs`). Pinned to the 0.12 line that
 # ic-agent already locks into the tree (0.12.28, in the offline registry cache) so this adds NO
 # new crates. rustls-tls, NOT default-tls (native-tls → system OpenSSL): the deploy image
 # deliberately has no system OpenSSL — see the ic-agent note below, same choice. The proxy sets
@@ -87,3 +97,7 @@ http-body-util = "0.1.4"
 # Live tests derive the controller's self-authenticating principal from a known Ed25519 seed
 # (the same computation the canister's `user_account_of` and the app's icpSelfPrincipal do).
 dpay-icp = { path = "../dpay-icp" }
+# The gated PG tests (DPAY_TEST_PG_DSN) read rows back through their OWN connection — the
+# store's writer thread stays the write path under test. Same crate as the regular dep above
+# (zero extra build weight).
+tokio-postgres = "0.7"

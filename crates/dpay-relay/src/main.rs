@@ -135,6 +135,22 @@
 //!                           address is the client IP and the header is IGNORED — spoofable
 //!                           from outside. (The server already wires ConnectInfo via
 //!                           into_make_service_with_connect_info.)
+//!   DPAY_TROCADOR_PG_DSN    the postgres connection string for the partner-agreement's
+//!                           compliance records (e.g. postgres://user:pass@host/db). SET →
+//!                           BOTH stores — the access log and the order store — live in PG
+//!                           (tables `trocador_access_log` + `trocador_order_events`,
+//!                           created idempotently at startup; APPEND-ONLY: the code only
+//!                           ever INSERTs, so ≥12-month retention rides the deployment's PG
+//!                           backups). PG is the BACKED-UP store: the prod compose stack
+//!                           mounts no volume, so prod MUST set this for durable records.
+//!                           Fail-closed: a DSN that is set but unreachable (or whose user
+//!                           cannot create/read the tables) refuses startup (EXIT_CONFIG),
+//!                           a refused access-log write refuses the request, and order
+//!                           creation persists BEFORE the upstream trade call. Unset
+//!                           (default) → the JSONL files under DPAY_TROCADOR_LOG_DIR,
+//!                           byte-identical to the pre-PG relay (the offline dev loop).
+//!                           SECRET: the DSN embeds credentials — never logged, never
+//!                           echoed; store errors carry fixed strings.
 //!   DPAY_TROCADOR_RATE_PER_MIN   the per-client per-minute bound on POST
 //!                           /api/v1/trocador/rate (the agreement's organic-demand pattern;
 //!                           default 6). Upstream-bound calls only — device 400s and the
@@ -249,26 +265,36 @@ async fn main() {
     // read is proxied too — every venue method is key-gated. See src/trocador.rs.
     //
     // The partner-AGREEMENT layer (2026-09-21, src/trocador_agreement.rs) attaches here,
-    // ALWAYS: the compliance access log + the order store (both append-only under
-    // DPAY_TROCADOR_LOG_DIR, default the cwd), the webhook registration (only when
-    // DPAY_PUBLIC_ORIGIN is set), and the promised upstream limits (status 60s/trade fixed;
-    // per-client rate/trade bounds). Without the attachment (unit tests) the proxy behaves
-    // exactly as before the agreement.
+    // ALWAYS: the compliance access log + the order store (JSONL files under
+    // DPAY_TROCADOR_LOG_DIR by default — or the BACKED-UP Postgres when DPAY_TROCADOR_PG_DSN
+    // is set), the webhook registration (only when DPAY_PUBLIC_ORIGIN is set), and the
+    // promised upstream limits (status 60s/trade fixed; per-client rate/trade bounds).
+    // Without the attachment (unit tests) the proxy behaves exactly as before the agreement.
+    // `Agreement::open` (not `new`) because a set DSN needs the fail-closed startup: connect
+    // + schema + order-index rebuild BEFORE the relay can serve — any failure is the
+    // config-style exit, never a degraded mode.
+    let trocador_agreement = dpay_relay::trocador_agreement::Agreement::open(
+        dpay_relay::trocador_agreement::AgreementConfig {
+            public_origin: cfg.public_origin.clone(),
+            log_dir: cfg.trocador_log_dir.clone(),
+            pg_dsn: cfg.trocador_pg_dsn.clone(),
+            trust_proxy: cfg.trust_proxy,
+            rate_per_min: cfg.trocador_rate_per_min,
+            trade_per_min: cfg.trocador_trade_per_min,
+        },
+    )
+    .await
+    .unwrap_or_else(|e| {
+        eprintln!("dpay-relay: bad configuration: {e}");
+        process::exit(EXIT_CONFIG);
+    });
     let state = state.with_trocador(
         dpay_relay::trocador::TrocadorProxy::new(
             cfg.trocador_api_key.clone(),
             cfg.trocador_api_base.clone(),
             dpay_relay::trocador::DEFAULT_TIMEOUT,
         )
-        .with_agreement(dpay_relay::trocador_agreement::Agreement::new(
-            dpay_relay::trocador_agreement::AgreementConfig {
-                public_origin: cfg.public_origin.clone(),
-                log_dir: cfg.trocador_log_dir.clone(),
-                trust_proxy: cfg.trust_proxy,
-                rate_per_min: cfg.trocador_rate_per_min,
-                trade_per_min: cfg.trocador_trade_per_min,
-            },
-        )),
+        .with_agreement(trocador_agreement),
     );
     // The Jupiter proxy (2026-09-16 founder ask: quotes + swap-tx builds "through our relay
     // (for caching etc)"). ALWAYS serving — the venue is keyless and the base has a constant
@@ -404,12 +430,23 @@ async fn main() {
              default sends no webhook params)."
         ),
     }
+    let store_line = if cfg.trocador_pg_dsn.is_some() {
+        "trocador agreement: access log + order store append-only in POSTGRES \
+         (DPAY_TROCADOR_PG_DSN — the backed-up store; schema created, order index \
+         rebuilt; fail-closed on refused writes)"
+            .to_string()
+    } else {
+        format!(
+            "trocador agreement: access log + order store append-only under {} \
+             (DPAY_TROCADOR_LOG_DIR — JSONL; set DPAY_TROCADOR_PG_DSN for the backed-up \
+             Postgres store)",
+            cfg.trocador_log_dir.display()
+        )
+    };
     println!(
-        "trocador agreement: access log + order store append-only under {} \
-         (DPAY_TROCADOR_LOG_DIR); upstream limits: rate {}/min and trade {}/min per client \
+        "{store_line}; upstream limits: rate {}/min and trade {}/min per client \
          (DPAY_TROCADOR_RATE_PER_MIN / DPAY_TROCADOR_TRADE_PER_MIN), status reads at most \
          1/min per trade — the signed 60s promise, no knob; XFF trust: {}.",
-        cfg.trocador_log_dir.display(),
         cfg.trocador_rate_per_min,
         cfg.trocador_trade_per_min,
         if cfg.trust_proxy { "on (DPAY_TRUST_PROXY)" } else { "off" },
@@ -537,8 +574,13 @@ struct Config {
     /// order id header. Unset is the offline default (no webhook params at all).
     public_origin: Option<String>,
     /// The partner-agreement log dir (`DPAY_TROCADOR_LOG_DIR`, default "."): the append-only
-    /// access log + order store live here.
+    /// access log + order store live here — the JSONL backend, used only when the PG DSN
+    /// below is unset.
     trocador_log_dir: std::path::PathBuf,
+    /// The partner-agreement postgres DSN (`DPAY_TROCADOR_PG_DSN`): when set, BOTH
+    /// compliance stores persist to the backed-up Postgres instead of the JSONL files.
+    /// SECRET — embeds credentials; never logged, never echoed.
+    trocador_pg_dsn: Option<String>,
     /// Whether X-Forwarded-For names the client IP (`DPAY_TRUST_PROXY`).
     trust_proxy: bool,
     /// The per-client rate-quote bound (`DPAY_TROCADOR_RATE_PER_MIN`, default 6).
@@ -733,6 +775,11 @@ impl Config {
         let trocador_log_dir = std::path::PathBuf::from(
             non_empty("DPAY_TROCADOR_LOG_DIR").unwrap_or_else(|| ".".into()),
         );
+        // The compliance records' PG DSN (2026-09-22 dual store). Unset is the legal default
+        // (JSONL backend). NO shape validation here on purpose — a postgres connection string
+        // is the driver's grammar, not ours; a DSN that does not CONNECT is caught by the
+        // fail-closed startup in `Agreement::open` below (same EXIT_CONFIG outcome).
+        let trocador_pg_dsn = non_empty("DPAY_TROCADOR_PG_DSN");
         let trust_proxy = match non_empty("DPAY_TRUST_PROXY") {
             Some(s) => parse_bool("DPAY_TRUST_PROXY", &s)?,
             None => false,
@@ -773,6 +820,7 @@ impl Config {
             trocador_api_base,
             public_origin,
             trocador_log_dir,
+            trocador_pg_dsn,
             trust_proxy,
             trocador_rate_per_min,
             trocador_trade_per_min,

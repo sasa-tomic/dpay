@@ -357,22 +357,30 @@ pub async fn rate_proxy(
     };
     let outcome = get_upstream(&proxy, url, &api_key).await;
     // Agreement: the call WAS upstream-bound — count it at admit (above), log it here, after
-    // it completed, so the line carries the upstream status and the real duration.
+    // it completed, so the line carries the upstream status and the real duration. PG mode
+    // fail-closed: a refused write refuses the RESPONSE (the quote is never delivered
+    // unlogged); JSONL mode cannot produce the error.
     if let Some(a) = proxy.agreement() {
-        a.log(AccessLine {
-            kind: "rate",
-            route: "/api/v1/trocador/rate",
-            method: "POST",
-            ip: fp.ip.clone(),
-            user_agent: fp.user_agent.clone(),
-            accept_language: fp.accept_language.clone(),
-            client_order_id: None,
-            order_id: None,
-            trade_id: None,
-            upstream_status: Some(outcome.status.as_u16()),
-            duration_ms: Some(started.elapsed().as_millis() as u64),
-            key_hash: None,
-        });
+        if let Err(e) = a
+            .log(AccessLine {
+                kind: "rate",
+                route: "/api/v1/trocador/rate",
+                method: "POST",
+                ip: fp.ip.clone(),
+                user_agent: fp.user_agent.clone(),
+                accept_language: fp.accept_language.clone(),
+                client_order_id: None,
+                order_id: None,
+                trade_id: None,
+                upstream_status: Some(outcome.status.as_u16()),
+                duration_ms: Some(started.elapsed().as_millis() as u64),
+                key_hash: None,
+            })
+            .await
+        {
+            eprintln!("dpay-relay: trocador agreement: access-log write refused: {e}");
+            return store_down();
+        }
     }
     // Success: wrap for attribution + timestamp. The venue's numbers ride untouched under
     // `quote`. A 2xx body that is not a JSON object is passed VERBATIM instead — it is
@@ -529,8 +537,19 @@ pub async fn trade_proxy(
             );
         }
     }
-    let order_id = agreement.map(|a| a.open_order(client_order_id.as_deref()));
-    let webhook_url = agreement.and_then(|a| a.webhook_url());
+    // Persist-first, fail-closed in PG mode: a refused order-store write refuses the TRADE
+    // (no order id minted → no upstream call is ever issued unrecorded). JSONL mode keeps the
+    // pre-PG lenience (a failed file append is a stderr note, the trade proceeds).
+    let order_id = match agreement.as_ref().map(|a| a.try_open_order(client_order_id.as_deref()))
+    {
+        Some(Ok(id)) => Some(id),
+        Some(Err(e)) => {
+            eprintln!("dpay-relay: trocador agreement: {e}");
+            return store_down();
+        }
+        None => None,
+    };
+    let webhook_url = agreement.as_ref().and_then(|a| a.webhook_url());
     let mut pairs: Vec<(&str, &str)> = vec![
         ("id", rate_id),
         ("ticker_from", t_from),
@@ -569,25 +588,35 @@ pub async fn trade_proxy(
         }
     }
     if let (Some(a), Some(order_id), Some(trade_id)) =
-        (agreement, order_id.as_deref(), trade_id.as_deref())
+        (agreement.as_ref(), order_id.as_deref(), trade_id.as_deref())
     {
         a.attach_trade_id(order_id, trade_id);
     }
-    if let Some(a) = agreement {
-        a.log(AccessLine {
-            kind: "trade",
-            route: "/api/v1/trocador/trade",
-            method: "POST",
-            ip: fp.ip.clone(),
-            user_agent: fp.user_agent.clone(),
-            accept_language: fp.accept_language.clone(),
-            client_order_id: client_order_id.clone(),
-            order_id: order_id.clone(),
-            trade_id: trade_id.clone(),
-            upstream_status: Some(outcome.status.as_u16()),
-            duration_ms: Some(started.elapsed().as_millis() as u64),
-            key_hash: None,
-        });
+    if let Some(a) = agreement.as_ref() {
+        if let Err(e) = a
+            .log(AccessLine {
+                kind: "trade",
+                route: "/api/v1/trocador/trade",
+                method: "POST",
+                ip: fp.ip.clone(),
+                user_agent: fp.user_agent.clone(),
+                accept_language: fp.accept_language.clone(),
+                client_order_id: client_order_id.clone(),
+                order_id: order_id.clone(),
+                trade_id: trade_id.clone(),
+                upstream_status: Some(outcome.status.as_u16()),
+                duration_ms: Some(started.elapsed().as_millis() as u64),
+                key_hash: None,
+            })
+            .await
+        {
+            // Fail-closed in PG mode — but AFTER the upstream trade exists, refusing the
+            // RESPONSE (never the trade): the device sees a clean relay error, the venue's
+            // trade simply goes unclaimed by this response. The order itself IS durable
+            // (persist-first above), so webhook correlation cannot orphan it.
+            eprintln!("dpay-relay: trocador agreement: access-log write refused: {e}");
+            return store_down();
+        }
     }
     let mut response = json_response(outcome.status, &outcome.body);
     // The relay-side order id rides a response header ONLY when the public origin is set (the
@@ -637,23 +666,29 @@ pub async fn trade_status_proxy(
     let agreement = proxy.agreement();
     // The webhook cache answers FIRST and leaves no trace on any window: a matched delivery is
     // the freshest fact we hold, and reading it costs the venue nothing.
-    if let Some(payload) = agreement.and_then(|a| a.cached_payload(trade_id)) {
-        if let Some(a) = agreement {
+    if let Some(payload) = agreement.as_ref().and_then(|a| a.cached_payload(trade_id)) {
+        if let Some(a) = agreement.as_ref() {
             let record = a.order_by_trade_id(trade_id);
-            a.log(AccessLine {
-                kind: "status",
-                route: "/api/v1/trocador/trade",
-                method: "GET",
-                ip: fp.ip.clone(),
-                user_agent: fp.user_agent.clone(),
-                accept_language: fp.accept_language.clone(),
-                client_order_id: record.as_ref().and_then(|r| r.client_order_id.clone()),
-                order_id: record.as_ref().map(|r| r.order_id.clone()),
-                trade_id: Some(trade_id.to_string()),
-                upstream_status: None,
-                duration_ms: None,
-                key_hash: None,
-            });
+            if let Err(e) = a
+                .log(AccessLine {
+                    kind: "status",
+                    route: "/api/v1/trocador/trade",
+                    method: "GET",
+                    ip: fp.ip.clone(),
+                    user_agent: fp.user_agent.clone(),
+                    accept_language: fp.accept_language.clone(),
+                    client_order_id: record.as_ref().and_then(|r| r.client_order_id.clone()),
+                    order_id: record.as_ref().map(|r| r.order_id.clone()),
+                    trade_id: Some(trade_id.to_string()),
+                    upstream_status: None,
+                    duration_ms: None,
+                    key_hash: None,
+                })
+                .await
+            {
+                eprintln!("dpay-relay: trocador agreement: access-log write refused: {e}");
+                return store_down();
+            }
         }
         return json_response(StatusCode::OK, &Bytes::from(payload));
     }
@@ -676,22 +711,28 @@ pub async fn trade_status_proxy(
     };
     let started = Instant::now();
     let outcome = get_upstream(&proxy, url, &api_key).await;
-    if let Some(a) = agreement {
+    if let Some(a) = agreement.as_ref() {
         let record = a.order_by_trade_id(trade_id);
-        a.log(AccessLine {
-            kind: "status",
-            route: "/api/v1/trocador/trade",
-            method: "GET",
-            ip: fp.ip.clone(),
-            user_agent: fp.user_agent.clone(),
-            accept_language: fp.accept_language.clone(),
-            client_order_id: record.as_ref().and_then(|r| r.client_order_id.clone()),
-            order_id: record.as_ref().map(|r| r.order_id.clone()),
-            trade_id: Some(trade_id.to_string()),
-            upstream_status: Some(outcome.status.as_u16()),
-            duration_ms: Some(started.elapsed().as_millis() as u64),
-            key_hash: None,
-        });
+        if let Err(e) = a
+            .log(AccessLine {
+                kind: "status",
+                route: "/api/v1/trocador/trade",
+                method: "GET",
+                ip: fp.ip.clone(),
+                user_agent: fp.user_agent.clone(),
+                accept_language: fp.accept_language.clone(),
+                client_order_id: record.as_ref().and_then(|r| r.client_order_id.clone()),
+                order_id: record.as_ref().map(|r| r.order_id.clone()),
+                trade_id: Some(trade_id.to_string()),
+                upstream_status: Some(outcome.status.as_u16()),
+                duration_ms: Some(started.elapsed().as_millis() as u64),
+                key_hash: None,
+            })
+            .await
+        {
+            eprintln!("dpay-relay: trocador agreement: access-log write refused: {e}");
+            return store_down();
+        }
     }
     json_response(outcome.status, &outcome.body)
 }
@@ -842,6 +883,23 @@ fn too_many(code: &str, detail: &str, retry_after_secs: u64) -> Response {
         .headers_mut()
         .insert(header::RETRY_AFTER, HeaderValue::from(retry_after_secs));
     response
+}
+
+/// The fail-closed answer when the compliance store refuses a write in PG mode (founder rule
+/// 2026-09-22: "postgres is being backed up, flat files are not" — the record MUST exist, so
+/// the request is refused rather than proceed unlogged). Unreachable in JSONL mode: a failed
+/// file append stays a stderr note there, exactly as before this store existed. Fixed-string
+/// discipline — the store error text goes to stderr only, never into a response (the DSN
+/// embeds credentials, and PG error text is not ours to forward).
+fn store_down() -> Response {
+    json_response(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        &relay_error_body(
+            "trocador-store-unavailable",
+            "the compliance store refused the write — the request is refused rather than \
+             proceed unlogged; retry after the store recovers",
+        ),
+    )
 }
 
 /// The shared HTTP client (one per process; redirects NOT followed — same discipline

@@ -32,6 +32,10 @@ pub mod trocador;
 /// webhooks + order store, and the promised upstream rate limits — wrapped around the proxy
 /// above without changing its route contract. See the module's own doc for the signed terms.
 pub mod trocador_agreement;
+/// The agreement records' POSTGRES backend (2026-09-22, founder: "postgres is being backed up,
+/// flat files are not") — the dual-store's PG arm, selected by `DPAY_TROCADOR_PG_DSN`. Private:
+/// the only public surface is `trocador_agreement::AgreementConfig::pg_dsn` + `Agreement::open`.
+mod trocador_pg;
 
 /// Unix seconds now — the ONE clock reading in this crate, and it stops rather than guesses.
 ///

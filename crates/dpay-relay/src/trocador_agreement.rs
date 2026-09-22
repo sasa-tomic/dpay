@@ -12,17 +12,26 @@
 //! # 1. The compliance access log (live before the first proxied trade)
 //!
 //! Every relay→Trocador proxied request — rate quote, trade creation, status read — appends
-//! one JSON line to `trocador-access.jsonl`: the timestamp (RFC3339 + unix seconds), the source
-//! IP, the User-Agent, the Accept-Language, the route and method, the upstream status, the
-//! duration, and — once known — the correlation ids (our internal `order_id` and the venue's
+//! one compliance record: the timestamp (RFC3339 + unix seconds), the source IP, the
+//! User-Agent, the Accept-Language, the route and method, the upstream status, the duration,
+//! and — once known — the correlation ids (our internal `order_id` and the venue's
 //! `trade_id`). The venue's webhook deliveries log here too (`kind`: "webhook", or
-//! "webhook-unmatched" when a delivery cannot be correlated to an order). The file is
-//! APPEND-ONLY and no code path truncates or deletes: the agreement's ≥12-month retention is a
-//! deployment property (mount the dir; nothing the relay runs ever destroys a line). Writes are
-//! fsync-free fast appends — a failed write goes to stderr and NEVER fails the request (a
-//! compliance log must not become a trade outage). Where: `DPAY_TROCADOR_LOG_DIR` (default:
-//! the process's current directory; created on first write, so an unconfigured relay that
-//! never proxies anything creates nothing).
+//! "webhook-unmatched" when a delivery cannot be correlated to an order). The store is
+//! APPEND-ONLY and no code path truncates or deletes: the agreement's ≥12-month retention is
+//! satisfied by the deployment (the founder's backed-up Postgres, or a mounted volume),
+//! never by anything the relay runs. Two backends, ONE behavior (2026-09-22 dual store):
+//!
+//! - `DPAY_TROCADOR_PG_DSN` SET → Postgres (`crate::trocador_pg`): both records live in the
+//!   founder's BACKED-UP database (the prod compose stack mounts no volume — flat files die
+//!   on redeploy, PG does not). Fail-closed: an unreachable DSN refuses startup, and a
+//!   refused access-log write refuses the request — an unlogged proxied call is an
+//!   agreement violation.
+//! - UNSET (default) → the append-only JSONL files under `DPAY_TROCADOR_LOG_DIR` (default:
+//!   the process's current directory; created on first write, so an unconfigured relay that
+//!   never proxies anything creates nothing): `trocador-access.jsonl` (one line per proxied
+//!   call) and `trocador-orders.jsonl` (below). Writes are fsync-free fast appends — a
+//!   failed write goes to stderr and NEVER fails the request (a compliance log must not
+//!   become a trade outage; this lenience is the OFFLINE mode's alone — PG mode is strict).
 //!
 //! # 2. Webhooks (per-trade, key-echoed, probe-tested, never retried)
 //!
@@ -55,10 +64,13 @@
 //!
 //! Trade creation mints a relay-side order id (`trod-` + 16 lowercase hex from the OS CSPRNG —
 //! the same source the till's charge ids draw from) and persists the order BEFORE the upstream
-//! call; the venue's trade_id is attached when the venue answers. Records are appended to
-//! `trocador-orders.jsonl` (state transitions appended; last-wins on load) and indexed
-//! in-memory at startup, so webhook correlation survives a relay restart. The optional
-//! `clientOrderId` string the device may send rides the record verbatim (trimmed, length-clamped).
+//! call (in PG mode the INSERT is acknowledged before the id is returned — the promise holds
+//! under both backends); the venue's trade_id is attached when the venue answers. Records are
+//! appended — JSONL lines under the orders lock, or `trocador_order_events` rows through the
+//! PG writer's single ordered queue — and the in-memory index is rebuilt at startup
+//! (file replay, or the PG `DISTINCT ON` last-wins read), so webhook correlation survives a
+//! relay restart on either backend. The optional `clientOrderId` string the device may send
+//! rides the record verbatim (trimmed, length-clamped).
 //!
 //! # Client-IP honesty (what "source IP" means here)
 //!
@@ -146,8 +158,15 @@ pub struct AgreementConfig {
     /// When unset there are NO webhook params (the offline default) and no header.
     pub public_origin: Option<String>,
     /// `DPAY_TROCADOR_LOG_DIR` — the directory for both append-only files. Default: the
-    /// process's current directory. Created on first write.
+    /// process's current directory. Created on first write. Used ONLY when `pg_dsn` is None
+    /// (the JSONL backend; the offline default).
     pub log_dir: PathBuf,
+    /// `DPAY_TROCADOR_PG_DSN` — when set, BOTH stores (the access log and the order store)
+    /// persist to Postgres (the backed-up store) instead of the JSONL files. Unset (the
+    /// default) keeps the JSONL behavior byte-identical. Wired via [`Agreement::open`]
+    /// (the async constructor — PG needs a startup connect + index rebuild);
+    /// [`Agreement::new`] refuses a set DSN (a sync constructor cannot fail honestly).
+    pub pg_dsn: Option<String>,
     /// `DPAY_TRUST_PROXY` — see "Client-IP honesty" in the module doc.
     pub trust_proxy: bool,
     /// `DPAY_TROCADOR_RATE_PER_MIN` — per-client per-minute rate-quote bound (default 6).
@@ -161,6 +180,7 @@ impl Default for AgreementConfig {
         AgreementConfig {
             public_origin: None,
             log_dir: PathBuf::from("."),
+            pg_dsn: None,
             trust_proxy: false,
             rate_per_min: DEFAULT_RATE_PER_MIN,
             trade_per_min: DEFAULT_TRADE_PER_MIN,
@@ -191,12 +211,25 @@ pub struct OrderRecord {
     pub last_webhook_payload: Option<String>,
 }
 
+/// The in-memory order index — identical under both backends: the JSONL file replay and the
+/// PG last-wins rebuild produce exactly this shape, and every read the routes serve
+/// (webhook cache, trade-id correlation) comes from it, never from the store.
 #[derive(Default)]
-struct OrdersInner {
+pub(crate) struct OrdersInner {
     /// order_id → latest record.
     by_order: HashMap<String, OrderRecord>,
     /// trade_id → order_id (built from records with a trade_id; the status route's correlation).
     by_trade: HashMap<String, String>,
+}
+
+impl OrdersInner {
+    /// Index one record: last-wins on `by_order`, and the trade-id correlation learns the id.
+    pub(crate) fn insert(&mut self, record: OrderRecord) {
+        if let Some(t) = &record.trade_id {
+            self.by_trade.insert(t.clone(), record.order_id.clone());
+        }
+        self.by_order.insert(record.order_id.clone(), record);
+    }
 }
 
 /// What one webhook delivery taught the store (the receiver's log/answer only cares which).
@@ -217,8 +250,9 @@ pub struct Agreement {
     trust_proxy: bool,
     rate_per_min: u32,
     trade_per_min: u32,
-    log_dir: PathBuf,
-    orders_path: PathBuf,
+    /// The record sink — both the access log and the order store ride ONE backend choice
+    /// (`DPAY_TROCADOR_PG_DSN` set ⇒ PG, else JSONL), never a mix.
+    store: Store,
     orders: Mutex<OrdersInner>,
     /// Fixed-window counters: "rate|<ip>" → (window bucket start, hits in bucket).
     limiter: Mutex<HashMap<String, (u64, u32)>>,
@@ -227,13 +261,99 @@ pub struct Agreement {
     now: NowFn,
 }
 
+/// The compliance records' sink: one backend for BOTH the access log and the order store.
+/// The JSONL arm keeps the pre-PG behavior byte-identical (fast appends, stderr-only
+/// failures); the PG arm is fail-closed where the agreement demands the record exist.
+enum Store {
+    Jsonl { dir: PathBuf },
+    Pg(crate::trocador_pg::PgStore),
+}
+
+impl Store {
+    fn load_jsonl_orders(&self) -> OrdersInner {
+        match self {
+            Store::Jsonl { dir } => load_orders(&dir.join(ORDERS_LOG_FILE)),
+            // The PG index is rebuilt during `PgStore::open` (before the store is handed
+            // over); this arm is only reachable from the sync constructor, which never
+            // builds a PG store.
+            Store::Pg(_) => OrdersInner::default(),
+        }
+    }
+
+    /// Append one order state transition. JSONL: the append IS the semantics — a failed
+    /// write is a stderr note and `Ok` (the offline mode's lenience; unchanged from the
+    /// pre-PG relay). PG: the insert is acknowledged BEFORE returning — `Err` means the
+    /// transition did NOT durably land, and the caller applies fail-closed policy.
+    fn persist_order_event(&self, record: &OrderRecord, ts: u64) -> Result<(), String> {
+        match self {
+            Store::Jsonl { dir } => {
+                write_jsonl(dir, &dir.join(ORDERS_LOG_FILE), &order_record_line(record));
+                Ok(())
+            }
+            Store::Pg(pg) => pg.insert_order_event(record, ts),
+        }
+    }
+
+    /// Append one access-log line. JSONL: identical to the pre-PG relay (stderr on failure,
+    /// always `Ok`). PG: awaited to durability — `Err` refuses the request.
+    async fn log_access(
+        &self,
+        line: &AccessLine<'_>,
+        now: u64,
+    ) -> Result<(), String> {
+        match self {
+            Store::Jsonl { dir } => {
+                write_jsonl(dir, &dir.join(ACCESS_LOG_FILE), &access_line_json(line, now));
+                Ok(())
+            }
+            Store::Pg(pg) => {
+                pg.insert_access(crate::trocador_pg::AccessRow::from_line(line, now))
+                    .await
+            }
+        }
+    }
+}
+
 impl Agreement {
     /// Build the agreement and REBUILD the order index from `trocador-orders.jsonl` (last-wins
     /// per order_id; corrupt lines skipped — append-only files must tolerate a torn tail). This
-    /// is what makes webhook correlation survive a relay restart.
+    /// is what makes webhook correlation survive a relay restart. JSONL backend ONLY — a set
+    /// `pg_dsn` is refused here (the sync constructor cannot honestly fail, which PG startup
+    /// must be allowed to): use [`Agreement::open`].
     pub fn new(config: AgreementConfig) -> Self {
-        let orders_path = config.log_dir.join(ORDERS_LOG_FILE);
-        let orders = load_orders(&orders_path);
+        assert!(
+            config.pg_dsn.is_none(),
+            "dpay-relay: trocador agreement: DPAY_TROCADOR_PG_DSN is set — build the agreement \
+             with Agreement::open (PG needs a startup connect + index rebuild), never Agreement::new"
+        );
+        let store = Store::Jsonl {
+            dir: config.log_dir.clone(),
+        };
+        let orders = store.load_jsonl_orders();
+        Self::assemble(config, store, orders)
+    }
+
+    /// The async constructor — the ONE that handles a set `DPAY_TROCADOR_PG_DSN`: connect,
+    /// create the schema, rebuild the order index — all before the store is handed over.
+    /// `Err` ⇒ the deployment is defective (a DSN that does not yield a working, initialized
+    /// store): main.rs turns this into the config-style exit (fail-closed — a relay that
+    /// cannot record must not take trades). No DSN ⇒ identical to [`Agreement::new`].
+    pub async fn open(config: AgreementConfig) -> Result<Self, String> {
+        let store = match config.pg_dsn.as_deref() {
+            None => Store::Jsonl {
+                dir: config.log_dir.clone(),
+            },
+            Some(dsn) => {
+                let (pg, orders) = crate::trocador_pg::PgStore::open(dsn).await?;
+                return Ok(Self::assemble(config, Store::Pg(pg), orders));
+            }
+        };
+        let orders = store.load_jsonl_orders();
+        Ok(Self::assemble(config, store, orders))
+    }
+
+    /// The common field setup — every field normalizes exactly as it always has.
+    fn assemble(config: AgreementConfig, store: Store, orders: OrdersInner) -> Self {
         Agreement {
             public_origin: config
                 .public_origin
@@ -244,8 +364,7 @@ impl Agreement {
             trust_proxy: config.trust_proxy,
             rate_per_min: config.rate_per_min,
             trade_per_min: config.trade_per_min,
-            log_dir: config.log_dir,
-            orders_path,
+            store,
             orders: Mutex::new(orders),
             limiter: Mutex::new(HashMap::new()),
             spacing: Mutex::new(HashMap::new()),
@@ -281,7 +400,21 @@ impl Agreement {
 
     /// Mint an order id, persist the order BEFORE the upstream call (the agreement's
     /// persist-first promise), and return the id. The id doubles as the `webhook_key`.
+    /// JSONL mode (the tests, the offline loop) cannot fail here; PG mode uses
+    /// [`Agreement::try_open_order`]'s `Err` → this panics with the full reason, the same
+    /// no-fallback discipline as `fresh_order_id`: a relay that cannot durably mint an order
+    /// must not return a tradeable id.
     pub fn open_order(&self, client_order_id: Option<&str>) -> String {
+        self.try_open_order(client_order_id).unwrap_or_else(|e| {
+            panic!("dpay-relay: trocador agreement: {e} — cannot mint a durable order id")
+        })
+    }
+
+    /// The fallible form of [`Agreement::open_order`] — the trade route's entry point, so a
+    /// refused PG write surfaces as a handler error (fail-closed: the trade is NOT created
+    /// unrecorded), not a panic. The in-memory index mirrors the store: a refused write
+    /// removes the record it would have guarded.
+    pub fn try_open_order(&self, client_order_id: Option<&str>) -> Result<String, String> {
         let order_id = fresh_order_id();
         let record = OrderRecord {
             order_id: order_id.clone(),
@@ -293,17 +426,25 @@ impl Agreement {
             last_webhook_payload: None,
         };
         let mut orders = self.orders.lock().unwrap_or_else(|p| p.into_inner());
-        orders
-            .by_order
-            .insert(record.order_id.clone(), record.clone());
-        // The line is written under the same lock that guards the map so concurrent state
-        // transitions land in file order (a sync write — never held across an await).
-        write_jsonl(&self.log_dir, &self.orders_path, &order_record_line(&record));
-        order_id
+        orders.insert(record.clone());
+        // The write is issued under the same lock that guards the map so concurrent state
+        // transitions land in durable order (a bounded blocking ack — never held across the
+        // caller's awaits; in PG mode this waits out one INSERT, sub-millisecond at the
+        // agreement's own volume).
+        if let Err(e) = self.store.persist_order_event(&record, record.created_at) {
+            orders.by_order.remove(&order_id);
+            return Err(format!(
+                "the order store refused the creation write (order NOT created): {e}"
+            ));
+        }
+        Ok(order_id)
     }
 
     /// Attach the venue's trade_id to an order (after a successful creation, or when a webhook
-    /// teaches it) and append the state transition.
+    /// teaches it) and append the state transition. Best-effort persistence in BOTH backends
+    /// (a failed file append is stderr; a failed PG insert is stderr too): the upstream trade
+    /// EXISTS at this point, so failing the handler could strand a device believing a trade
+    /// never happened while funds are already moving — the honest posture is the loud note.
     pub fn attach_trade_id(&self, order_id: &str, trade_id: &str) {
         let mut orders = self.orders.lock().unwrap_or_else(|p| p.into_inner());
         orders
@@ -313,8 +454,12 @@ impl Agreement {
             return;
         };
         record.trade_id = Some(trade_id.to_string());
-        let line = order_record_line(record);
-        write_jsonl(&self.log_dir, &self.orders_path, &line);
+        if let Err(e) = self.store.persist_order_event(record, (self.now)()) {
+            eprintln!(
+                "dpay-relay: trocador agreement: trade_id attachment NOT durably stored \
+                 (order {order_id}, trade {trade_id}): {e}"
+            );
+        }
     }
 
     /// Apply one webhook delivery. `key` is the echoed `webhook_key` (= the order id). The body
@@ -364,12 +509,21 @@ impl Agreement {
         }
         // The FULL payload, verbatim — the status route serves this string byte-for-byte.
         record.last_webhook_payload = Some(body.to_string());
-        let line = order_record_line(record);
-        // The record borrow ends above; the trade index learns the id here.
+        // Own the updated state (ends the map borrow): the trade index learns the id below,
+        // and the persist runs against the SAME owned snapshot the index now reflects.
+        let record = record.clone();
         if let Some(t) = &trade_id {
             orders.by_trade.insert(t.clone(), key.to_string());
         }
-        write_jsonl(&self.log_dir, &self.orders_path, &line);
+        // Persist under the lock, but BEST-EFFORT in both backends: the receiver answers 200
+        // unconditionally (module doc §2 — the venue never retries, and a 4xx/5xx would fail
+        // the trade at probe time), so a refused write can only be a loud stderr note.
+        if let Err(e) = self.store.persist_order_event(&record, (self.now)()) {
+            eprintln!(
+                "dpay-relay: trocador agreement: webhook update NOT durably stored \
+                 (order {key}): {e}"
+            );
+        }
         WebhookOutcome::Matched {
             order_id: key.to_string(),
             trade_id,
@@ -445,47 +599,12 @@ impl Agreement {
     }
 
     /// Append one access-log line (module doc §1). The timestamp comes from the agreement's
-    /// clock; a failed write is a stderr note and nothing else.
-    pub fn log(&self, line: AccessLine<'_>) {
+    /// clock. JSONL mode keeps the pre-PG contract: a failed write is a stderr note and this
+    /// NEVER fails. PG mode is fail-closed: the insert is awaited to durability and `Err`
+    /// MUST refuse the request — an unlogged proxied call is an agreement violation.
+    pub async fn log(&self, line: AccessLine<'_>) -> Result<(), String> {
         let now = (self.now)();
-        let mut object = serde_json::Map::new();
-        object.insert("ts".into(), json!(rfc3339(now)));
-        object.insert("ts_unix".into(), json!(now));
-        object.insert("kind".into(), json!(line.kind));
-        object.insert("route".into(), json!(line.route));
-        object.insert("method".into(), json!(line.method));
-        object.insert("ip".into(), json!(line.ip.as_deref().unwrap_or("-")));
-        object.insert(
-            "user_agent".into(),
-            json!(line.user_agent.as_deref().unwrap_or("-")),
-        );
-        object.insert(
-            "accept_language".into(),
-            json!(line.accept_language.as_deref().unwrap_or("-")),
-        );
-        if let Some(v) = &line.client_order_id {
-            object.insert("client_order_id".into(), json!(v));
-        }
-        if let Some(v) = &line.order_id {
-            object.insert("order_id".into(), json!(v));
-        }
-        if let Some(v) = &line.trade_id {
-            object.insert("trade_id".into(), json!(v));
-        }
-        if let Some(v) = line.upstream_status {
-            object.insert("upstream_status".into(), json!(v));
-        }
-        if let Some(v) = line.duration_ms {
-            object.insert("duration_ms".into(), json!(v));
-        }
-        if let Some(v) = &line.key_hash {
-            object.insert("key_hash".into(), json!(v));
-        }
-        write_jsonl(
-            &self.log_dir,
-            &self.log_dir.join(ACCESS_LOG_FILE),
-            &Value::Object(object).to_string(),
-        );
+        self.store.log_access(&line, now).await
     }
 }
 
@@ -527,8 +646,9 @@ fn fresh_order_id() -> String {
 }
 
 /// One order record as a JSON line (optional fields omitted; `last_webhook_payload` embedded as
-/// the verbatim payload string). Append-only: readers do last-wins.
-fn order_record_line(record: &OrderRecord) -> String {
+/// the verbatim payload string). Append-only: readers do last-wins. The SAME bytes the PG
+/// backend stores as the `event` jsonb — one record reader for both backends.
+pub(crate) fn order_record_line(record: &OrderRecord) -> String {
     let mut object = serde_json::Map::new();
     object.insert("order_id".into(), json!(record.order_id));
     if let Some(v) = &record.client_order_id {
@@ -550,6 +670,45 @@ fn order_record_line(record: &OrderRecord) -> String {
     Value::Object(object).to_string()
 }
 
+/// One access-log line as JSON — byte-identical to the pre-PG builder (the same keys, the
+/// same `-` renderings, the same omission of absent correlation fields).
+fn access_line_json(line: &AccessLine<'_>, now: u64) -> String {
+    let mut object = serde_json::Map::new();
+    object.insert("ts".into(), json!(rfc3339(now)));
+    object.insert("ts_unix".into(), json!(now));
+    object.insert("kind".into(), json!(line.kind));
+    object.insert("route".into(), json!(line.route));
+    object.insert("method".into(), json!(line.method));
+    object.insert("ip".into(), json!(line.ip.as_deref().unwrap_or("-")));
+    object.insert(
+        "user_agent".into(),
+        json!(line.user_agent.as_deref().unwrap_or("-")),
+    );
+    object.insert(
+        "accept_language".into(),
+        json!(line.accept_language.as_deref().unwrap_or("-")),
+    );
+    if let Some(v) = &line.client_order_id {
+        object.insert("client_order_id".into(), json!(v));
+    }
+    if let Some(v) = &line.order_id {
+        object.insert("order_id".into(), json!(v));
+    }
+    if let Some(v) = &line.trade_id {
+        object.insert("trade_id".into(), json!(v));
+    }
+    if let Some(v) = line.upstream_status {
+        object.insert("upstream_status".into(), json!(v));
+    }
+    if let Some(v) = line.duration_ms {
+        object.insert("duration_ms".into(), json!(v));
+    }
+    if let Some(v) = &line.key_hash {
+        object.insert("key_hash".into(), json!(v));
+    }
+    Value::Object(object).to_string()
+}
+
 /// Rebuild the order index from the append-only store (last-wins per order_id). A missing file
 /// is the empty store; a torn/corrupt line is skipped, never fatal — the agreement's log
 /// outlives any single write.
@@ -562,36 +721,39 @@ fn load_orders(path: &Path) -> OrdersInner {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        let Some(order_id) = value.get("order_id").and_then(Value::as_str) else {
-            continue;
-        };
-        let record = OrderRecord {
-            order_id: order_id.to_string(),
-            client_order_id: value
-                .get("client_order_id")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            trade_id: value.get("trade_id").and_then(Value::as_str).map(str::to_string),
-            created_at: value
-                .get("created_at")
-                .and_then(Value::as_u64)
-                .unwrap_or(0),
-            last_status: value
-                .get("last_status")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            status_ts: value.get("status_ts").and_then(Value::as_u64),
-            last_webhook_payload: value
-                .get("last_webhook_payload")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-        };
-        if let Some(t) = &record.trade_id {
-            inner.by_trade.insert(t.clone(), record.order_id.clone());
+        if let Some(record) = parse_order_record(&value) {
+            inner.insert(record);
         }
-        inner.by_order.insert(record.order_id.clone(), record);
     }
     inner
+}
+
+/// One stored order line/event → a record. The shared reader for BOTH backends (the JSONL
+/// replay and the PG `event` jsonb hold the same bytes). `None` = not a usable record
+/// (no `order_id`) — skipped by every reader, never fatal.
+pub(crate) fn parse_order_record(value: &Value) -> Option<OrderRecord> {
+    let order_id = value.get("order_id").and_then(Value::as_str)?;
+    Some(OrderRecord {
+        order_id: order_id.to_string(),
+        client_order_id: value
+            .get("client_order_id")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        trade_id: value.get("trade_id").and_then(Value::as_str).map(str::to_string),
+        created_at: value
+            .get("created_at")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        last_status: value
+            .get("last_status")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        status_ts: value.get("status_ts").and_then(Value::as_u64),
+        last_webhook_payload: value
+            .get("last_webhook_payload")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    })
 }
 
 /// One append-only JSONL write. Creates the dir on first use; a failure is a stderr note and
@@ -686,7 +848,7 @@ pub async fn webhook_receiver(
     fp: ClientFingerprint,
     body: Bytes,
 ) -> Response {
-    webhook_sink(&state, &params, &fp, Some(&body))
+    webhook_sink(&state, &params, &fp, Some(&body)).await
 }
 
 /// `GET /api/v1/trocador/webhook` — the probe-shaped lenient sink. The venue tests the URL at
@@ -697,13 +859,16 @@ pub async fn webhook_probe(
     Query(params): Query<BTreeMap<String, String>>,
     fp: ClientFingerprint,
 ) -> Response {
-    webhook_sink(&state, &params, &fp, None)
+    webhook_sink(&state, &params, &fp, None).await
 }
 
 /// The one sink both methods share: correlate `key` → order, update the store on a matched,
 /// usable delivery, log the line, answer 200 — unconditionally (a 4xx/5xx or redirect would
-/// fail the trade at creation, and failed deliveries are never retried).
-fn webhook_sink(
+/// fail the trade at creation, and failed deliveries are never retried). That contract is why
+/// the PG backend's strict log rule does NOT apply here: this route has no "proceed" to
+/// refuse, and answering non-200 could only ever break a trade creation probe while never
+/// recovering the delivery — a refused PG write is a stderr note, nothing else.
+async fn webhook_sink(
     state: &AppState,
     params: &BTreeMap<String, String>,
     fp: &ClientFingerprint,
@@ -742,7 +907,11 @@ fn webhook_sink(
                 WebhookOutcome::Invalid | WebhookOutcome::Unmatched => {}
             }
         }
-        a.log(line);
+        if let Err(e) = a.log(line).await {
+            eprintln!(
+                "dpay-relay: trocador agreement: webhook line not durably stored: {e}"
+            );
+        }
     }
     (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
 }
