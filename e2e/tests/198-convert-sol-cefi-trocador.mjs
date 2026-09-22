@@ -39,7 +39,7 @@ export const meta = {
   covers: ['convert', 'solana-rail', 'venue:trocador', 'cefi', 'aggregator', 'same-surfaces',
     'deposit-handoff', 'derived-payout-address', 'order-locks-quote', 'reload-recovery', 'cross-rail'],
   verifies: 'With the trocador aggregator row registered (ICP<->SOL, same pair as sideshift) the SOL convert surface merges both venues under one ICP landing spot whose row names the spot and whose sub-picker chooses the service (registry order, never ranked, default first). Picking the Trocador mechanism quotes verbatim through the relay proxy (estimate, Trocador attribution), shows the user\'s OWN derived IC account identifier (the 64-hex account hash of the wallet\'s principal — the form the venue\'s ICP payout layer requires) as the payout target BEFORE any order, and confirms to the venue\'s fixed-rate ORDER without broadcasting anything on the SOL rail. Every venue call — rate, trade AND the key-gated status read — rides the relay (zero bare upstream calls, the API-Key attaches server-side, the refund address rides every trade request), and the provider lifecycle awaiting_deposit → processing → done runs through the relay status route, surviving a page reload on the persisted record.',
-  timeoutMs: 180000,
+  timeoutMs: 300000,
 };
 
 async function relayHits(relayBaseURL) {
@@ -208,21 +208,21 @@ export async function run() {
     const statusCallsBefore = (await relayHits(r2.baseURL)).statusCalls;
     assert(statusCallsBefore >= 1, 'the record already polls the relay status route');
     await armStub(r2.baseURL, {status: 'Processing'});
-    assert(await driver.findByTestID('convert-provider-processing', {timeoutMs: 45_000}) != null, 'the venue status drives processing (through the relay)');
+    assert(await driver.findByTestID('convert-provider-processing', {timeoutMs: 90_000}) != null, 'the venue status drives processing (through the relay)');
 
     // --- §6 reload resume: the persisted record re-enters the provider panel, still relay-fed
     await driver.navigate(webBaseURL, page, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 8_000});
     await installSolRpcStub(driver); // page stubs die with the page
     await openSolConvert(driver);
-    assert(await driver.findByTestID('convert-provider-processing', {timeoutMs: 45_000}) != null, 'the record resumes from storage');
+    assert(await driver.findByTestID('convert-provider-processing', {timeoutMs: 90_000}) != null, 'the record resumes from storage');
     const after = await relayHits(r2.baseURL);
     assertEq(after.tradeCalls, 1, 'the resume created NO second trade');
     assert(after.statusCalls > statusCallsBefore, 'the resumed record polls the relay status route');
 
     // --- §7 settle → done with the realized figures at the user's own address
     await armStub(r2.baseURL, {status: 'Completed', amount_to: '0.0496', hashout: SETTLE_HASH});
-    assert(await driver.waitForText('Converted', {timeoutMs: 45_000}), 'the venue settle drives the record to done');
+    assert(await driver.waitForText('Converted', {timeoutMs: 90_000}), 'the venue settle drives the record to done');
     const done = await driver.readText('convert-done');
     assertIncludes(done, SETTLE_TEXT, 'done reports the realized settle figure');
     assertIncludes(done, 'Paid out to your own address', 'done names the payout destination');

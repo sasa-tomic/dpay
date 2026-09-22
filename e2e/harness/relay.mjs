@@ -259,6 +259,11 @@ async function spawnOnce(opts = {}) {
     // deliberate-per-spawn rule as the two blocks above: named HERE so a shell-exported
     // DPAY_JUPITER_API_BASE can never leak a real base into the harness relay.
     DPAY_JUPITER_API_BASE: `http://127.0.0.1:${port}/api/v1/test/jupiter-upstream`,
+    // Flow 199 (2026-09-22): a flow's OWN agreement knobs (DPAY_PUBLIC_ORIGIN,
+    // DPAY_TROCADOR_LOG_DIR, …) ride `opts.env` — spread BEFORE the RUST_LOG clamp so the
+    // fixed wiring above still wins for the knobs IT owns, and the clamp stays last. A flow
+    // that passes nothing (every other flow) spawns byte-identically to before.
+    ...(opts.env ?? {}),
     // Clamp noisy logs (the binary's banner is enough).
     RUST_LOG: process.env.RUST_LOG ?? 'warn',
   };
