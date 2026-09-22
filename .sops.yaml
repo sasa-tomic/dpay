@@ -9,5 +9,8 @@
 # the same disk. Treat `secrets/` as protection from accidental publication, not from local
 # compromise. Operating rules for the funded key: docs/AGENT-FUNDS.md
 creation_rules:
+  # Recipient 1 is the agent key (identity at .dev/age/agent-key.txt, see header). Recipients 2-3
+  # are the founder's local identities so the seeds decrypt directly on the founder's machines
+  # (~/.config/sops/age/keys.txt and ~/.age/key.txt respectively) with no env var needed.
   - path_regex: ^secrets/.*\.sops\.json$
-    age: age1zqqzr070hwzw5w3dkdwa67t6n258cax6s6xxu307kydjkfcpa5tslpuepx
+    age: age1zqqzr070hwzw5w3dkdwa67t6n258cax6s6xxu307kydjkfcpa5tslpuepx,age1mfrtmf7k0nyms9sqlf5tmhl2wk4xhf6r5tcqdvtfr0nk6e9gpc9shykapm,age107dt88t9vpsgr95lw64dc6pdppre2l7u65vm6lqen5m2m3sdyd6s92vhy2
