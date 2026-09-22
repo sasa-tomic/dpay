@@ -20,13 +20,14 @@
    the adapter's pinned ticker/network codes (crates/dpay-relay/src/trocador.rs TROCADOR_ASSETS)
    follow the docs' example vocabulary and are UNVERIFIED until this probe runs. A wrong code
    fails loudly at the venue — at trade time, which is too late. Re-pin BEFORE the first real
-   trade. Exit 0 = vocabulary matches + quote answered; exit 2 = MISMATCH; exit 1 = refused or
+   trade. Exit 0 = vocabulary matches + quote answered; exit 2 = MISMATCH; exit 3 = vocabulary matches but the registered pair is unquoted (venue
+    coverage gap; rig verified via a btc→xmr control quote); exit 1 = refused or
    transport failure. Node ≥18 (global fetch), no new deps.
 */
 
 const API_KEY = process.env.DPAY_TROCADOR_API_KEY;
 const BASE = process.env.DPAY_TROCADOR_API_BASE || 'https://api.trocador.app';
-const AMOUNT = process.env.DPAY_TROCADOR_PROBE_AMOUNT || '0.1'; // small; a quote moves nothing
+const AMOUNT = process.env.DPAY_TROCADOR_PROBE_AMOUNT || '2'; // ICP; must clear the venue minimum (live /coins 2026-09-22: ICP minimum 1.876233) — a quote moves nothing
 const TIMEOUT_MS = 20_000; // the relay's own per-upstream bound is 15 s (trocador.rs DEFAULT_TIMEOUT)
 
 // The adapter's CURRENTLY PINNED venue codes — DUPLICATED (the probe must run without a Rust
@@ -143,21 +144,39 @@ if (!rows) {
       console.log(`  ✗ MISMATCH ${exp.label}: NO /coins row matches ticker "${exp.ticker}" — the pin is stale or the venue dropped the market`);
       continue;
     }
-    for (const hit of hits.slice(0, 5)) {
+    // The pin is a (ticker, network) PAIR and the relay sends BOTH to new_rate — the pin is
+    // verified iff at least one live row matches the full pair. The venue also lists the same
+    // ticker on OTHER networks (e.g. wrapped "Solana (BEP20)" next to native Solana); those are
+    // informational, NOT mismatches — live-measured 2026-09-22: sol exists on Mainnet AND BEP20.
+    const pair = hits.find((r) => {
+      const net = networkOf(r);
+      return net != null && net.toLowerCase() === exp.network.toLowerCase();
+    });
+    if (pair) {
+      console.log(`  ✓ ${exp.label}: pinned pair (ticker=${JSON.stringify(exp.ticker)}, network=${JSON.stringify(exp.network)}) matches a live row:\n      ${JSON.stringify(pair)}`);
+    } else if (hits.some((r) => networkOf(r) == null)) {
+      console.log(`  ? ${exp.label}: rows match the ticker but expose no network field — compare manually:\n${hits.slice(0, 5).map((r) => `      ${JSON.stringify(r)}`).join('\n')}`);
+    } else {
+      mismatches++;
+      console.log(`  ✗ MISMATCH ${exp.label}: no row matches the pinned pair (ticker=${JSON.stringify(exp.ticker)}, network=${JSON.stringify(exp.network)}); the venue lists the ticker only on: ${[...new Set(hits.map((r) => networkOf(r)).filter(Boolean))].join(', ') || '(unknown networks)'} — RE-PIN crates/dpay-relay/src/trocador.rs`);
+    }
+    for (const hit of hits) {
       const net = networkOf(hit);
-      const netNote = exp.pinned
-        ? net == null
-          ? '(row exposes no network field — compare manually)'
-          : net.toLowerCase() === exp.network.toLowerCase()
-            ? `✓ network "${net}" matches the pinned "${exp.network}"`
-            : `✗ MISMATCH: row network "${net}" ≠ pinned "${exp.network}" — RE-PIN crates/dpay-relay/src/trocador.rs`
-        : '(no pin yet — this is the row a future pin would cite)';
-      if (exp.pinned && net != null && net.toLowerCase() !== exp.network.toLowerCase()) mismatches++;
-      console.log(`  ${exp.pinned ? (net && net.toLowerCase() === exp.network.toLowerCase() ? '✓' : '⚠') : '·'} ${exp.label}: ${JSON.stringify(hit)}\n      ${netNote}`);
+      if (pair && hit === pair) continue;
+      if (net != null && net.toLowerCase() !== exp.network.toLowerCase()) {
+        console.log(`  · ${exp.label} is also listed on network ${JSON.stringify(net)} — different market, not our pin`);
+      }
     }
   }
   for (const tok of REFERENCE_TOKENS) {
-    const scoped = rows.filter((r) => mentions(r, tok) && (mentions(r, 'mainnet') || mentions(r, 'solana')));
+    // Live-measured 2026-09-22: native coins sit on network "Mainnet"; tokens on Solana carry
+    // network "SOL" (e.g. {"name":"USDC (SOL)","ticker":"usdc","network":"SOL"}). Scope on all
+    // three signals so the reference rows are the ones a future pin would actually cite.
+    const scoped = rows.filter(
+      (r) =>
+        mentions(r, tok) &&
+        (mentions(r, 'mainnet') || mentions(r, 'solana') || (networkOf(r) || '').toLowerCase() === 'sol'),
+    );
     const anyTok = rows.filter((r) => mentions(r, tok));
     const show = (scoped.length ? scoped : anyTok).slice(0, 5);
     console.log(`  · ${tok.toUpperCase()} (Solana/mainnet reference rows${scoped.length ? '' : ' — no mainnet/solana-scoped match, showing any match'}):`);
@@ -173,8 +192,33 @@ if (!rows) {
 }
 
 // ── 2. ONE rate probe — the registered pair, the founder's pins, a small amount ─────────────
+// Soft variant: a 400 "no resulting quote" is a MEASUREMENT (pair listed but unquoted right
+// now), not a rig failure — report it and contrast with a known-popular control pair so the
+// rig itself is proven either way (live-measured 2026-09-22: icp→btc AND icp→sol both
+// unquoted while btc→xmr quoted — the rig works, the venue's provider pool simply had no
+// live ICP markets that day).
+async function GETq(path, params) {
+  const url = new URL(path, BASE);
+  if (params) for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  try {
+    const res = await fetch(url, {
+      headers: { 'API-Key': API_KEY, Accept: 'application/json' },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      redirect: 'error',
+    });
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch { /* non-JSON body */ }
+    return { ok: res.ok, status: res.status, data, text };
+  } catch (e) {
+    fail(`venue unreachable at ${BASE} (${e.name === 'TimeoutError' ? `no answer within ${TIMEOUT_MS} ms` : 'connection failed'})`);
+  }
+}
+
+const noQuote = (r) => r && !r.ok && typeof r.text === 'string' && r.text.includes('no resulting quote');
+
 console.log(`\n▶ GET ${BASE}/new_rate  (ICP↔SOL, fixed=True, best_only=True, min_kycrating=A, markup=0, amount_from=${AMOUNT})`);
-const quote = await GET('new_rate', {
+const quote = await GETq('new_rate', {
   ticker_from: 'icp', // pinned: trocador.rs TROCADOR_ASSETS (ICP_LEDGER_PRINCIPAL row)
   network_from: 'Mainnet',
   ticker_to: 'sol', // pinned: trocador.rs TROCADOR_ASSETS (WRAPPED_SOL_MINT row)
@@ -184,10 +228,27 @@ const quote = await GET('new_rate', {
   markup: '0', // the founder pin (trocador.rs MARKUP)
   best_only: 'True', // the aggregator's own pick — one quote (trocador.rs rate_proxy)
 });
+
+if (noQuote(quote)) {
+  console.log(`\n✗ COVERAGE: the venue answered "no resulting quote" for the registered pair (listed on /coins, but no provider is quoting it right now).`);
+  const control = await GETq('new_rate', {
+    ticker_from: 'btc', network_from: 'Mainnet', ticker_to: 'xmr', network_to: 'Mainnet', amount_from: '0.01',
+  });
+  if (control.ok) {
+    console.log(`  Control pair btc→xmr DID quote (provider ${JSON.stringify(control.data?.provider ?? '?')}) — the key, params and network labels are all correct, so this is a venue coverage gap for ICP markets, not a rig or pin problem.`);
+    console.log(`  Action: re-run this probe later; keep SideShift as the live ICP↔SOL venue until Trocador quotes ICP pairs. The go-live gate (probe passes BEFORE the first real trade) still applies.`);
+    fail(`registered pair unquoted (venue coverage gap; rig verified via control pair)`, 3);
+  }
+  fail(`registered pair unquoted AND the control pair also failed — the rig or key access is broken (status ${control.status}): ${String(control.text).slice(0, 300)}`, 1);
+}
+if (!quote.ok) {
+  fail(`venue answered ${quote.status} for /new_rate: ${String(quote.text).slice(0, 400)}`, 1);
+}
+
 console.log('\n▼ the venue\'s attributed quote (RAW venue body — the relay\'s /api/v1/trocador/rate');
 console.log('  wraps exactly this as {"venue_id":"trocador","quote":<this>,"fetched_at":<unix secs>},');
 console.log('  crates/dpay-relay/src/trocador.rs rate_proxy):');
-console.log(JSON.stringify(quote, null, 2));
+console.log(JSON.stringify(quote.data, null, 2));
 
 // The status vocabulary is a /trade fact (key-gated like everything else) — it appears here only
 // if the venue happens to include one. Print it when present; say so plainly when not.
@@ -199,7 +260,7 @@ const status = (v, depth = 0) => {
       : status(val, depth + 1),
   );
 };
-const statuses = status(quote);
+const statuses = status(quote.data);
 console.log(
   statuses.length
     ? `\n▶ status vocabulary present in the quote response:\n    ${statuses.join('\n    ')}`
