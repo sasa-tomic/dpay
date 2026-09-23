@@ -240,6 +240,9 @@ export const convertFr: ConvertMessages = {
     depositSolFeeNote: 'L\u2019envoi du dépôt paie aussi de petits frais de réseau en SOL — garde un peu de SOL dans ce portefeuille.',
     solInsufficientLine: (needed, balance) =>
       `Ce dépôt envoie exactement ${needed} et ce portefeuille détient ${balance}. Réduis le montant ou reçois d\u2019abord davantage.`,
+    noQuoteTitle: 'Pas de marché pour cette paire pour le moment',
+    noQuoteBody: venue =>
+      `${venue} référence cette paire mais n\u2019a pas de marché en direct pour le moment. Rien n\u2019a été envoyé. Choisis une autre plateforme ou réessaie plus tard.`,
   },
 
   /** La famille cross-rail (routes B/C, 2026-09-16) : tout ce qui suit les cinq jambes IC —

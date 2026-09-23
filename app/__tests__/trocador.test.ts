@@ -30,7 +30,9 @@ import {
   trocadorStatusUrl,
 } from '../services/trocador';
 import {
+  CeFiNoQuoteError,
   createCeFiOrder,
+  fetchCeFiConvertQuote,
   fetchCeFiQuoteResult,
   prepareCeFiConvertRecord,
 } from '../convert';
@@ -206,6 +208,30 @@ describe('convert.ts — the trocador family dispatch', () => {
     expect(r.provider).toBe('SomeSwap');
     expect(r.quoteId).toBeNull();
     expect(r.settleAmount).toBe('0.0496');
+  });
+
+  test('the LISTED-BUT-UNQUOTED body ("no resulting quote", live-measured 2026-09-22) is a typed no-quote verdict, not a refusal', async () => {
+    // The venue's own 400 body, passed through the relay verbatim (the 401 shape's
+    // vocabulary: {"error": …}). A fresh Response per call — a Response body reads once.
+    const noQuoteBody = () => new Response(JSON.stringify({error: 'no resulting quote'}), {status: 400});
+    relayMock.mockImplementation(() => Promise.resolve(noQuoteBody()));
+    await expect(fetchTrocadorQuote(RELAY, VENUE, ICP_LEDGER, WRAPPED_SOL_MINT_ADDRESS, '2'))
+      .rejects.toThrow('noquote');
+    // Through the convert dispatch the typed error carries the venue's display name and
+    // the honest attributed copy — the surfaces render it as a state, never a red error.
+    let caught: unknown = null;
+    try {
+      await fetchCeFiConvertQuote(RELAY, VENUE, ICP_LEDGER, WRAPPED_SOL_MINT_ADDRESS, '200000000', {
+        inDecimals: 8, outDecimals: 9,
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(CeFiNoQuoteError);
+    const noQuote = caught as CeFiNoQuoteError;
+    expect(noQuote.venueName).toBe('Trocador');
+    expect(noQuote.message).toContain('Trocador');
+    expect(noQuote.message).toContain('Nothing was sent');
   });
 
   test('createCeFiOrder routes to the trocador service and refuses a quote missing the provider', async () => {

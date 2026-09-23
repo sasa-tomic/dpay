@@ -81,7 +81,9 @@ export function trocadorStatusUrl(relayUrl: string, tradeId: string): string {
  *  attribution. The attribution check pins the exact registry row this call quoted —
  *  a foreign or cross-row attribution is a shape failure. Fail-closed vocabulary mirrors
  *  the sideshift service: 'unconfigured' (relay has no key — the venue is absent, 503),
- *  'unreachable', 'refused', 'unavailable', 'shape'. NO result is ever defaulted. */
+ *  'unreachable', 'refused', 'unavailable', 'shape' — plus 'noquote', the venue's OWN
+ *  listed-but-unquoted verdict (no live market for the pair right now; nothing moved).
+ *  NO result is ever defaulted. */
 export async function fetchTrocadorQuote(
   relayUrl: string,
   venue: VenueEntry,
@@ -106,11 +108,23 @@ export async function fetchTrocadorQuote(
     throw new Error('unreachable');
   }
   if (r.status === 503) throw new Error('unconfigured');
+  // The body is read ONCE as text: the venue's refusal bodies are small JSON, and the
+  // LISTED-BUT-UNQUOTED verdict ("no resulting quote", live-measured 2026-09-22 as a 400
+  // while the /coins row still lists the pair) is detected off the raw body — a coverage
+  // state of the venue, typed as its own vocabulary word below, never a generic refusal.
+  const text = await r.text().catch(() => '');
+  if (!r.ok && text.includes('no resulting quote')) throw new Error('noquote');
   if (r.status === 422 || r.status === 400) throw new Error('refused');
   if (!r.ok) throw new Error('unavailable');
-  const j = await r.json().catch(() => null) as
-    | {venue_id?: unknown; quote?: Record<string, unknown> | null; fetched_at?: unknown}
-    | null;
+  const j = (() => {
+    try {
+      return JSON.parse(text) as
+        | {venue_id?: unknown; quote?: Record<string, unknown> | null; fetched_at?: unknown}
+        | null;
+    } catch {
+      return null;
+    }
+  })();
   const q = j != null ? j.quote : null;
   if (j == null || j.venue_id !== venue.venue_id || q == null
     || typeof q.trade_id !== 'string' || q.trade_id.length === 0

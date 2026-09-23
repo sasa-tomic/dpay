@@ -240,6 +240,9 @@ export const convertEs: ConvertMessages = {
     depositSolFeeNote: 'Enviar el depósito también paga una pequeña comisión de red en SOL: conserva algo de SOL en este monedero.',
     solInsufficientLine: (needed, balance) =>
       `Este depósito envía exactamente ${needed} y este monedero tiene ${balance}. Baja el importe o recibe más primero.`,
+    noQuoteTitle: 'Ahora no hay mercado para este par',
+    noQuoteBody: venue =>
+      `${venue} enumera este par, pero ahora mismo no tiene un mercado en vivo. No se envió nada. Elige otra sede o inténtalo más tarde.`,
   },
 
   /** La familia cross-rail (rutas B/C, 2026-09-16): todo lo que sigue a las cinco piernas IC —

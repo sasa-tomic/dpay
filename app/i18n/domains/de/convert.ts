@@ -241,6 +241,9 @@ export const convertDe: ConvertMessages = {
     depositSolFeeNote: 'Beim Senden der Einzahlung fällt auch eine kleine Netzwerkgebühr in SOL an — halte etwas SOL in dieser Wallet.',
     solInsufficientLine: (needed, balance) =>
       `Diese Einzahlung sendet genau ${needed} und diese Wallet hält ${balance}. Reduziere den Betrag oder empfange zuerst mehr.`,
+    noQuoteTitle: 'Gerade kein Markt für dieses Paar',
+    noQuoteBody: venue =>
+      `${venue} listet dieses Paar, hat aber gerade keinen Live-Markt. Nichts wurde gesendet. Wähle einen anderen Handelsplatz oder versuche es später erneut.`,
   },
 
   /** Die Cross-Rail-Familie (Routen B/C, 2026-09-16): alles nach den fünf IC-Beinen —

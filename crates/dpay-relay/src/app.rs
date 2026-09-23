@@ -1478,6 +1478,11 @@ static TROCADOR_STUB_LAST_TRADE_QUERY: std::sync::Mutex<Option<String>> =
 #[cfg(feature = "test-helpers")]
 static TROCADOR_STUB_STATE: std::sync::Mutex<(String, String, Option<String>)> =
     std::sync::Mutex::new((String::new(), String::new(), None));
+/// Arm the LISTED-BUT-UNQUOTED verdict on the rate stub (flow 207): `new_rate` answers the
+/// venue's own 400 body — `{"error":"no resulting quote"}`, the exact text the adapter's
+/// client detects (live-measured 2026-09-22; the /coins row still lists the pair).
+#[cfg(feature = "test-helpers")]
+static TROCADOR_STUB_NO_QUOTE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Record one stub hit: key-bearing vs bare + the last query string (the audit reads it).
 #[cfg(feature = "test-helpers")]
@@ -1506,6 +1511,16 @@ async fn trocador_stub_new_rate(
         .join("&");
     trocador_stub_record(&headers, &query);
     TROCADOR_STUB_RATE_CALLS.fetch_add(1, Ordering::Relaxed);
+    if TROCADOR_STUB_NO_QUOTE.load(Ordering::Relaxed) {
+        // The venue's own listed-but-unquoted answer, VERBATIM (module doc): a 400 whose
+        // body names the coverage state — what the real venue answered for ICP markets on
+        // 2026-09-22 while the pair sat listed on /coins.
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "no resulting quote" })),
+        )
+            .into_response();
+    }
     (
         StatusCode::OK,
         Json(serde_json::json!({
@@ -1617,6 +1632,10 @@ async fn trocador_stub_config(body: axum::body::Bytes) -> Response {
         .get("hashout")
         .and_then(|x| x.as_str())
         .map(|s| s.to_string());
+    drop(state);
+    if let Some(nq) = v.get("no_quote").and_then(|x| x.as_bool()) {
+        TROCADOR_STUB_NO_QUOTE.store(nq, std::sync::atomic::Ordering::Relaxed);
+    }
     StatusCode::OK.into_response()
 }
 

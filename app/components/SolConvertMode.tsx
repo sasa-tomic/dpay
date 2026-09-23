@@ -15,6 +15,7 @@ import {
 } from '../config/convert';
 import {venueDisplayName} from '../config/venues';
 import {
+  CeFiNoQuoteError,
   ceFiQuoteFromResult,
   createCeFiOrder,
   fetchCeFiQuoteResult,
@@ -74,6 +75,9 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
   // Jupiter quote: whichever MECHANISM is active renders its own quote's digits.
   const [cefiQuote, setCefiQuote] = useState<ConvertQuote | null>(null);
   const [quoteErr, setQuoteErr] = useState<string | null>(null);
+  // The venue's own listed-but-unquoted verdict (CeFi no-quote, 2026-09-22): a STATE, not
+  // an error — when set, the attributed no-market line renders instead of the red error.
+  const [noQuoteVenue, setNoQuoteVenue] = useState<string | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [staleRefreshing, setStaleRefreshing] = useState(false);
   const [quoteChanged, setQuoteChanged] = useState<{oldAmt: string; newAmt: string} | null>(null);
@@ -129,7 +133,7 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
     if (key === destKey || confirmBusy) return;
     setDestKey(key);
     setDestMechKey(null); // the new group re-derives its default mechanism
-    setQuote(null); setQuoteErr(null); setQuoteChanged(null); setQuoteBusy(false); setConfirmErr(null);
+    setQuote(null); setQuoteErr(null); setNoQuoteVenue(null); setQuoteChanged(null); setQuoteBusy(false); setConfirmErr(null);
   };
   const balanceRaw = legs == null ? null : legs.inMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.inMint] ?? null;
   const outHeldRaw = legs != null && legs.kind === 'amm'
@@ -213,7 +217,7 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
     if (legs == null || venue == null || showRecord) return;
     const parsed = parseUserAmount(amountText, legs.inDecimals);
     if (!parsed.ok || parsed.raw === '0') {
-      setQuote(null); setCefiQuote(null); setQuoteErr(null); setQuoteBusy(false); setQuoteChanged(null);
+      setQuote(null); setCefiQuote(null); setQuoteErr(null); setNoQuoteVenue(null); setQuoteBusy(false); setQuoteChanged(null);
       return;
     }
     if (legs.kind === 'cefi') {
@@ -227,11 +231,20 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
           if (cancelled) return;
           setCefiQuote(q);
           setQuoteErr(null);
+          setNoQuoteVenue(null);
         })
         .catch((e: unknown) => {
           if (cancelled) return;
           setCefiQuote(null);
-          setQuoteErr(e instanceof Error ? e.message : M.convert.errors.quoteUnreachable(venueName));
+          // The venue's OWN listed-but-unquoted verdict renders as the attributed
+          // no-market line, never the red quote error.
+          if (e instanceof CeFiNoQuoteError) {
+            setQuoteErr(null);
+            setNoQuoteVenue(e.venueName);
+          } else {
+            setNoQuoteVenue(null);
+            setQuoteErr(e instanceof Error ? e.message : M.convert.errors.quoteUnreachable(venueName));
+          }
         })
         .finally(() => {
           if (!cancelled) setQuoteBusy(false);
@@ -246,15 +259,17 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
       .then(res => {
         if (cancelled) return;
         if (res.ok) {
-          setQuote(res.quote); setQuoteErr(null);
+          setQuote(res.quote); setQuoteErr(null); setNoQuoteVenue(null);
         } else {
           setQuote(null);
+          setNoQuoteVenue(null);
           setQuoteErr(res.code === 'refused' ? M.convert.errors.quoteRefused(venueName) : M.convert.errors.quoteUnreachable(venueName));
         }
       })
       .catch(() => {
         if (cancelled) return;
         setQuote(null);
+        setNoQuoteVenue(null);
         setQuoteErr(M.convert.errors.quoteUnreachable(venueName));
       })
       .finally(() => {
@@ -588,7 +603,7 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
                         onPress={() => {
                           if (confirmBusy || mechOn) return;
                           setDestMechKey(id);
-                          setQuote(null); setQuoteErr(null); setQuoteChanged(null); setQuoteBusy(false); setConfirmErr(null);
+                          setQuote(null); setQuoteErr(null); setNoQuoteVenue(null); setQuoteChanged(null); setQuoteBusy(false); setConfirmErr(null);
                         }}
                         accessibilityRole="radio"
                         accessibilityState={{checked: mechOn}}
@@ -741,6 +756,14 @@ export function SolConvertMode({identity, relayUrl, asset, catalog, solana, onBa
         ) : null}
       </View>
 
+      {/* The CeFi no-quote verdict (listed but unquoted): a STATE, not an error — the
+          attributed line names the venue, says nothing was sent, and names the way out. */}
+      {noQuoteVenue != null ? (
+        <View testID="convert-no-quote">
+          <Text style={S.convertChecklistWarn}>{M.convert.cefi.noQuoteTitle}</Text>
+          <Text style={S.convertChecklistLine}>{M.convert.cefi.noQuoteBody(noQuoteVenue)}</Text>
+        </View>
+      ) : null}
       {quoteErr != null ? (
         <Text testID="convert-quote-err" style={S.err}>{quoteErr}</Text>
       ) : null}

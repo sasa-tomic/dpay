@@ -53,6 +53,7 @@ import {
 } from '../config/convert';
 import {BUNDLED_VENUES, cefiOtherSide, cefiVenuesForLedger, venueDisplayName, venueEndpointOf, venueOfId, venuesForPair, type VenueEntry} from '../config/venues';
 import {
+  CeFiNoQuoteError,
   ceFiQuoteFromResult,
   createCeFiOrder,
   fetchCeFiQuoteResult,
@@ -187,6 +188,10 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
   const [quote, setQuote] = useState<ConvertQuote | null>(null);
   const [math, setMath] = useState<ConvertMath | null>(null);
   const [quoteErr, setQuoteErr] = useState<string | null>(null);
+  // The venue's own listed-but-unquoted verdict (CeFi no-quote, 2026-09-22): NOT an error —
+  // when set, the surface renders the attributed no-market line instead of the red quote
+  // error. The two are mutually exclusive; every quoteErr write below clears this.
+  const [noQuoteVenue, setNoQuoteVenue] = useState<string | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [staleRefreshing, setStaleRefreshing] = useState(false);
   const [quoteChanged, setQuoteChanged] = useState<{oldAmt: string; newAmt: string} | null>(null);
@@ -451,6 +456,7 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       setQuote(null);
       setMath(null);
       setQuoteErr(null);
+      setNoQuoteVenue(null);
       setQuoteChanged(null);
       setVenueQuotes({});
       setVenueQuoteErrs({});
@@ -464,6 +470,7 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       setQuote(null);
       setMath(null);
       setQuoteErr(null);
+      setNoQuoteVenue(null);
       setQuoteChanged(null);
       setVenueQuotes({});
       setVenueQuoteErrs({});
@@ -477,11 +484,13 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
         setQuote(null);
         setMath(null);
         setQuoteErr(M.convert.errors.quoteUnavailable(venueDisplayName(activeCefiVenue?.venue_id ?? 'venue')));
+        setNoQuoteVenue(null);
         return;
       }
       let cancelled = false;
       setQuoteBusy(true);
       setQuoteErr(null);
+      setNoQuoteVenue(null);
       void (async () => {
         try {
           const q = await fetchCeFiConvertQuote(
@@ -492,7 +501,15 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
         } catch (e) {
           if (!cancelled && mountedRef.current) {
             setQuote(null);
-            setQuoteErr(e instanceof Error ? e.message : String(e));
+            // The venue's OWN listed-but-unquoted verdict is a state, not a failure: it
+            // renders as the attributed no-market line, never the red quote error.
+            if (e instanceof CeFiNoQuoteError) {
+              setQuoteErr(null);
+              setNoQuoteVenue(e.venueName);
+            } else {
+              setNoQuoteVenue(null);
+              setQuoteErr(e instanceof Error ? e.message : String(e));
+            }
           }
         } finally {
           if (!cancelled && mountedRef.current) setQuoteBusy(false);
@@ -509,6 +526,7 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       let cancelled = false;
       setQuoteBusy(true);
       setQuoteErr(null);
+      setNoQuoteVenue(null);
       void (async () => {
         try {
           const q = await fetchConvertQuote(
@@ -519,6 +537,7 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
         } catch (e) {
           if (!cancelled && mountedRef.current) {
             setQuote(null);
+            setNoQuoteVenue(null);
             setQuoteErr(e instanceof Error ? e.message : String(e));
           }
         } finally {
@@ -538,6 +557,7 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       let cancelled = false;
       setQuoteBusy(true);
       setQuoteErr(null);
+      setNoQuoteVenue(null);
       setVenueQuotes({});
       setVenueQuoteErrs({});
       void (async () => {
@@ -562,6 +582,7 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
     let cancelled = false;
     setQuoteBusy(true);
     setQuoteErr(null);
+    setNoQuoteVenue(null);
     void (async () => {
       try {
         const q = await fetchConvertQuote(relayUrl, legs.inDesc.ledger, effOut!.ledger, parsed.raw);
@@ -569,6 +590,7 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       } catch (e) {
         if (!cancelled && mountedRef.current) {
           setQuote(null);
+          setNoQuoteVenue(null);
           setQuoteErr(e instanceof Error ? e.message : String(e));
         }
       } finally {
@@ -776,6 +798,7 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
         if (!cancelled && mountedRef.current) {
           setMath(null);
           setQuoteErr(msg);
+          setNoQuoteVenue(null);
         }
       }
     })();
@@ -1947,6 +1970,14 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       </View>
       ) : null}
 
+      {/* The CeFi no-quote verdict (listed but unquoted): a STATE, not an error — the
+          attributed line names the venue, says nothing was sent, and names the way out. */}
+      {noQuoteVenue != null ? (
+        <View testID="convert-no-quote">
+          <Text style={S.convertChecklistWarn}>{M.convert.cefi.noQuoteTitle}</Text>
+          <Text style={S.convertChecklistLine}>{M.convert.cefi.noQuoteBody(noQuoteVenue)}</Text>
+        </View>
+      ) : null}
       {(quoteErr ?? hubErr) != null ? (
         <Text testID="convert-quote-err" style={S.err}>
           {quoteErr ?? hubErr}

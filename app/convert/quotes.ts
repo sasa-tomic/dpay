@@ -141,16 +141,34 @@ export async function fetchConvertQuote(
  *  cefi venue has no pool; prepare never reads it as one). Fixed-shift rates are LOCKED
  *  at quote time, so `zeroForOne` is null and the slippage math degenerates honestly
  *  (min-you'll-receive == the quoted settle figure). */
-/** Map the sideshift service's fail-closed vocabulary onto the screen's honesty keys —
- *  shared by the quote path and the confirm-time order path so both surfaces name the
- *  same states, including the one no IC venue can be in: the relay holds no partner
- *  credential for this venue, so the venue is simply ABSENT (503 naming the env var). */
+/** Map the cefi services' fail-closed vocabulary onto the screen's honesty keys — shared
+ *  by the quote path and the confirm-time order path so both surfaces name the same
+ *  states, including the one no IC venue can be in: the relay holds no partner credential
+ *  for this venue, so the venue is simply ABSENT (503 naming the env var). */
+/** A cefi venue whose relay holds no partner credential — the venue is ABSENT, not broken. */
 export function ceFiServiceError(e: unknown, venueName: string): Error {
   const code = e instanceof Error ? e.message : 'unavailable';
   if (code === 'unreachable') return new Error(M.convert.errors.quoteUnreachable(venueName));
   if (code === 'unconfigured') return new Error(M.convert.errors.quoteUnconfigured(venueName));
   if (code === 'refused') return new Error(M.convert.errors.quoteRefused(venueName));
+  // The venue's own listed-but-unquoted verdict (Trocador's "no resulting quote",
+  // live-measured 2026-09-22): a COVERAGE state, not a failure — typed so the surfaces
+  // render the attributed no-market line, never a generic error.
+  if (code === 'noquote') return new CeFiNoQuoteError(venueName);
   return new Error(M.convert.errors.quoteUnavailable(code));
+}
+
+/** The typed no-quote verdict: the VENUE carries the pair but has no live market right
+ *  now — nothing was sent, nothing failed. `venueName` is the display name the line
+ *  attributes to; `message` is the honest body copy, so a surface that renders the error
+ *  plain still shows the attributed no-market sentence instead of a code. */
+export class CeFiNoQuoteError extends Error {
+  readonly venueName: string;
+  constructor(venueName: string) {
+    super(M.convert.cefi.noQuoteBody(venueName));
+    this.name = 'CeFiNoQuoteError';
+    this.venueName = venueName;
+  }
 }
 
 /** Scale a verbatim SideShift quote result into the ConvertQuote shape the screen's math

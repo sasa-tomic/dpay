@@ -343,6 +343,11 @@ export type ConvertMessages = {
     /** SOL-side cefi insufficientLine: the deposit moves EXACTLY the amount (its network
      *  fee is SOL-side, named in the handoff note) — the pool's fee arithmetic is false here. */
     solInsufficientLine: (needed: string, balance: string) => string;
+    /** The honest listed-but-unquoted state (Trocador, 2026-09-22 probe): the venue carries
+     *  the pair but no provider is quoting it right now. NOT an error — nothing moved, and
+     *  the line says so and names the way out. */
+    noQuoteTitle: string;
+    noQuoteBody: (venue: string) => string;
   };
 
   // --- the cross-rail family (Routes B/C, 2026-09-16): the CCTP handoff (the USER's own
@@ -681,6 +686,9 @@ export const convertEn: ConvertMessages = {
     depositSolFeeNote: 'Sending the deposit also pays a small network fee in SOL — keep a little SOL in this wallet.',
     solInsufficientLine: (needed, balance) =>
       `This deposit sends exactly ${needed} and this wallet holds ${balance}. Lower the amount, or receive more first.`,
+    noQuoteTitle: 'No market for this pair right now',
+    noQuoteBody: venue =>
+      `${venue} lists this pair but has no live market right now. Nothing was sent. Pick another venue or try again later.`,
   },
 
   /** The cross-rail family (Routes B/C, 2026-09-16): everything past the five IC legs —
