@@ -117,10 +117,13 @@ export const convertDe: ConvertMessages = {
   stuckTitle: 'Unbekannter Ausgang',
   stop: 'Stoppen',
   stopWatching: 'Nicht mehr beobachten',
+  stopProvider: 'Nicht mehr beobachten',
   abortedTitle: 'Gestoppt',
   abortedClean: 'Nichts hat deine Wallet verlassen.',
   abortedFee: 'Du hast bereits eine kleine Genehmigungsgebühr bezahlt.',
   abortedWatching: 'Der Tausch kann noch durchgehen. Sieh später unter Guthaben nach.',
+  abortedProvider:
+    'Beobachtung gestoppt. Hast du die Einzahlung nie geschickt, kann sich nichts bewegen — die Order verfällt unbezahlt beim Anbieter. Hast du sie schon geschickt, kann der Tausch noch abschließen: Sieh unter Guthaben nach und auf der Statusseite des Anbieters (Shift-ID oben).',
   stuckBody:
     'Der Tausch wurde übermittelt, aber die Antwort des Pools kam nicht an. Starte keinen zweiten Tausch mit denselben Mitteln. Wenn die Auszahlung eintrifft, springt dieser Bildschirm von selbst auf „Getauscht".',
   stuckSigned: (amount, minAmount, venue) =>
@@ -275,6 +278,10 @@ export const convertDe: ConvertMessages = {
     stillCrossing: 'Die Attestierung ist noch nicht fertig. Das bleibt offen — es ist nicht fehlgeschlagen. Auf dem schnellen Pfad sind es Sekunden bis Minuten; bei Stau auf Ethereum länger.',
     solReadyTitle: 'USDC sind auf Solana angekommen',
     solReadyBody: (credit, ata) => `${credit} liegen bei ${ata}, on-chain verifiziert. Schließe die Route ab — oder lass die USDC dort, sie sind in beiden Fällen deine.`,
+    abortedCrossing: ata =>
+      `Beobachtung gestoppt. Dein Burn ist schon raus, Circle kann den Mint also noch abschließen — die USDC landet so oder so an deiner eigenen Solana-Adresse ${ata}. Sieh später unter Guthaben nach.`,
+    abortedSolReady: ata =>
+      `Es wurde nichts signiert — der letzte Tausch lief nie. Deine USDC liegen an deiner eigenen Solana-Adresse ${ata}: behalte sie oder wandle sie dort weiter um.`,
     solQuoteLabel: venue => `${venue}-Kurs (frisch)`,
     solMinLine: (min, sym) => `Mindestens ${min} ${sym} an deiner Adresse`,
     solConfirmButton: sym => `Zu ${sym} tauschen`,

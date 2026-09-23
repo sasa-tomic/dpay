@@ -116,10 +116,13 @@ export const convertEs: ConvertMessages = {
   stuckTitle: 'Desenlace desconocido',
   stop: 'Detener',
   stopWatching: 'Dejar de vigilar',
+  stopProvider: 'Dejar de vigilar',
   abortedTitle: 'Detenido',
   abortedClean: 'Nada salió de tu billetera.',
   abortedFee: 'Ya pagaste una pequeña comisión de aprobación.',
   abortedWatching: 'El intercambio puede completarse igual. Revisa Saldos más tarde.',
+  abortedProvider:
+    'Vigilancia detenida. Si nunca enviaste el depósito, nada puede moverse — la orden muere sin fondos en el proveedor. Si ya lo enviaste, el intercambio aún puede completarse: revisa Saldos y la página de estado del proveedor (ID de shift arriba).',
   stuckBody:
     'El intercambio se envió, pero la respuesta del pool no llegó. No inicies un segundo intercambio con los mismos fondos. Si el pago llega, esta pantalla pasará a «Convertido» por sí sola.',
   stuckSigned: (amount, minAmount, venue) =>
@@ -274,6 +277,10 @@ export const convertEs: ConvertMessages = {
     stillCrossing: 'La atestación todavía no está lista. Esto queda pendiente — no es un fallo. Por la vía rápida son segundos o minutos; con Ethereum congestionado, más.',
     solReadyTitle: 'Los USDC ya están en Solana',
     solReadyBody: (credit, ata) => `${credit} están en ${ata}, verificado on-chain. Termina la ruta — o deja ahí los USDC; son tuyos en cualquier caso.`,
+    abortedCrossing: ata =>
+      `Vigilancia detenida. Tu burn ya salió, así que Circle aún puede completar el mint — el USDC llega de todos modos a tu propia dirección de Solana ${ata}. Revisa Saldos más tarde.`,
+    abortedSolReady: ata =>
+      `Nada se firmó — el último intercambio nunca se ejecutó. Tu USDC está en tu dirección de Solana ${ata}: consérvalo o conviértelo allí.`,
     solQuoteLabel: venue => `Cotización de ${venue} (reciente)`,
     solMinLine: (min, sym) => `Como mínimo ${min} ${sym} a tu dirección`,
     solConfirmButton: sym => `Cambiar a ${sym}`,

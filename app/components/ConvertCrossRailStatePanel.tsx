@@ -5,8 +5,8 @@
 import {useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, TextInput, View} from 'react-native';
 import {venueDisplayName, venueEndpointOf, venueOfId} from '../config/venues';
-import {buildCctpHandoff, convertRecordMinOut, type ConvertRecord, type LegPlan} from '../convert';
-import {acknowledgeStuckRecord, attachCctpBurnTx, confirmCrossRailSolLeg, declineCctpHandoff} from '../convertResume';
+import {buildCctpHandoff, convertAbortFlavor, convertRecordMinOut, type ConvertRecord, type LegPlan} from '../convert';
+import {abortConvertRecord, acknowledgeStuckRecord, attachCctpBurnTx, confirmCrossRailSolLeg, declineCctpHandoff} from '../convertResume';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
 import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
@@ -16,7 +16,7 @@ import {copyToClipboard} from '../lib/clipboard';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconSwap} from './icons';
-import {ConvertHeader, LinkRow, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
+import {ConvertHeader, gasPreFundedAborted, LinkRow, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
 
 /** The cross-rail record surface (Routes B/C, 2026-09-16): everything after the five IC legs.
  *  The IC phases render exactly like RouteStatePanel's; then the surface splits —
@@ -301,6 +301,21 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
             </>
           ) : null}
           <LinkRow testID="btn-crossrail-view-circle" label={M.convert.crossrail.viewCircle} href="https://cctp.cash/" />
+          {/* The user's Stop (2026-09-24): the burn tx is OUT, so the flavor is 'watching' —
+              Circle may still complete the mint, and the funds land at the user's OWN ATA
+              either way. The button says so; the aborted card names it. */}
+          <Pressable
+            testID="btn-convert-stop"
+            style={S.linkBtn}
+            onPress={() => {
+              void abortConvertRecord(record.id);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={M.convert.stopWatching}
+            accessibilityState={{disabled: false}}
+          >
+            <Text style={S.linkText}>{M.convert.stopWatching}</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -351,6 +366,21 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
             accessibilityRole="button"
             accessibilityLabel={M.convert.crossrail.solConfirmButton(destSymbol)}>
             <Text style={S.primaryText}>{M.convert.crossrail.solConfirmButton(destSymbol)}</Text>
+          </Pressable>
+          {/* The user's Stop (2026-09-24): the final Jupiter leg is UNSIGNED — the stop is
+              genuinely clean, and the USDC already sits at the user's own ATA. The aborted
+              card names where it is and what the exit is. */}
+          <Pressable
+            testID="btn-convert-stop"
+            style={S.linkBtn}
+            onPress={() => {
+              void abortConvertRecord(record.id);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={M.convert.stop}
+            accessibilityState={{disabled: false}}
+          >
+            <Text style={S.linkText}>{M.convert.stop}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -469,6 +499,24 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
           ) : (
             <Text style={S.convertStateMeta}>{M.convert.stuckAcknowledged}</Text>
           )}
+        </View>
+      ) : null}
+
+      {/* The aborted card (2026-09-24): the Stop on `crossing` (the mint may still land — the
+          funds are at the user's OWN ATA either way) and on `sol_ready` (the final Jupiter leg
+          was UNSIGNED — genuinely clean). Keyed on abortedFromStep; the gas-funded case keeps
+          its own honest body; anything else falls back to the shared flavors. */}
+      {record.step === 'aborted' ? (
+        <View testID="convert-aborted">
+          <Text style={S.convertStateTitle}>{M.convert.abortedTitle}</Text>
+          <Text style={S.convertStateBody}>
+            {record.abortedFromStep === 'crossing' ? M.convert.crossrail.abortedCrossing(cross.mintRecipientAta)
+              : record.abortedFromStep === 'sol_ready' ? M.convert.crossrail.abortedSolReady(cross.mintRecipientAta)
+              : gasPreFundedAborted(record) ? M.convert.crossrail.abortedGasBody
+              : convertAbortFlavor(record) === 'watching' ? M.convert.abortedWatching
+              : convertAbortFlavor(record) === 'fee' ? M.convert.abortedFee
+              : M.convert.abortedClean}
+          </Text>
         </View>
       ) : null}
 

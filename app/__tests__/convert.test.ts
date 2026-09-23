@@ -1081,6 +1081,26 @@ describe('convertAbortFlavor — what the user\'s Stop has already cost', () => 
     expect(convertAbortFlavor(flavorRec(undefined, leg))).toBe('watching');
     expect(convertAbortFlavor(flavorRec([plan('approve', 'confirmed')], leg))).toBe('watching');
   });
+
+  test('provider: the venue holds the order — live and frozen phases both read it (2026-09-24)', () => {
+    const prov = (step: string, from?: string) =>
+      ({id: 'p', legs: [], step, ...(from != null ? {abortedFromStep: from} : {})} as unknown as ConvertRecord);
+    expect(convertAbortFlavor(prov('awaiting_deposit'))).toBe('provider');
+    expect(convertAbortFlavor(prov('provider_processing'))).toBe('provider');
+    expect(convertAbortFlavor(prov('aborted', 'awaiting_deposit'))).toBe('provider');
+    expect(convertAbortFlavor(prov('aborted', 'provider_processing'))).toBe('provider');
+  });
+
+  test('crossing stops as watching (the mint may still land); sol_ready stops clean (the final leg was unsigned)', () => {
+    // The plan would misread these (confirmed IC approves → 'fee'); the cross-rail phase
+    // reads FIRST so the story is the honest one: a burn already out vs nothing in flight.
+    const xr = (step: string, from?: string) =>
+      ({id: 'x', legs: [], legPlan: [plan('approve', 'confirmed'), plan('swap', 'confirmed')], step, ...(from != null ? {abortedFromStep: from} : {})} as unknown as ConvertRecord);
+    expect(convertAbortFlavor(xr('crossing'))).toBe('watching');
+    expect(convertAbortFlavor(xr('aborted', 'crossing'))).toBe('watching');
+    expect(convertAbortFlavor(xr('sol_ready'))).toBe('clean');
+    expect(convertAbortFlavor(xr('aborted', 'sol_ready'))).toBe('clean');
+  });
 });
 
 describe('executeConvert — the user\'s Stop (abort) during the settle watch', () => {

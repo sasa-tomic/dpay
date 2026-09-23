@@ -34,7 +34,7 @@ jest.mock('../convert', () => ({
   isTerminalConvertStep: (step: string) =>
     ['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded'].includes(step),
   TERMINAL_CONVERT_STEPS: new Set(['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded']),
-  convertAbortFlavor: () => 'clean',
+  convertAbortFlavor: jest.fn(() => 'clean'),
   // The gas-fund NEED derivation: the real arithmetic (fee + the engine's 20% headroom), so a
   // test asserting the card's numbers reads the same digits the engine freezes into the record.
   gasFundNeededWei: (feeWei: string) => ((BigInt(feeWei) * 120n) / 100n).toString(),
@@ -75,8 +75,8 @@ jest.mock('../convertResume', () => ({
 }));
 
 import {ConvertMode} from '../components/ConvertMode';
-import {convertRecordMinOut, deriveConvertMath, fetchConvertQuote, prepareConvertRecord, prepareHubConvertRecord, prepareMultihopConvertRecord} from '../convert';
-import {acknowledgeStuckRecord, adoptConvertRecord, convertResumeSnapshot, providerLastCheckedAtMs} from '../convertResume';
+import {convertAbortFlavor, convertRecordMinOut, deriveConvertMath, fetchConvertQuote, prepareConvertRecord, prepareHubConvertRecord, prepareMultihopConvertRecord} from '../convert';
+import {abortConvertRecord, acknowledgeStuckRecord, adoptConvertRecord, convertResumeSnapshot, providerLastCheckedAtMs} from '../convertResume';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import type {ConvertMath, ConvertQuote, ConvertRecord} from '../convert';
 import {buildSelectableAssets} from '../config/assets';
@@ -979,6 +979,7 @@ describe('the CeFi panel lines — no-expiry honesty + the last-checked timestam
   afterEach(() => {
     jest.mocked(convertResumeSnapshot).mockReturnValue({});
     jest.mocked(providerLastCheckedAtMs).mockReturnValue(null);
+    jest.mocked(convertAbortFlavor).mockReturnValue('clean');
   });
   const cefiBase: ConvertRecord = {
     id: 'cefi-view',
@@ -1039,6 +1040,33 @@ describe('the CeFi panel lines — no-expiry honesty + the last-checked timestam
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-provider-processing')).toBe(true);
     expect(present(tree, 'convert-last-checked')).toBe(false);
+  });
+
+  test('awaiting_deposit offers the Stop; tapping it calls abortConvertRecord through the engine', async () => {
+    // C2 (2026-09-24): the Stop is offered on the provider-held states — the exit that keeps
+    // an unfunded Trocador order from polling forever.
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[cefiBase.id]: cefiBase});
+    jest.mocked(convertAbortFlavor).mockReturnValue('provider');
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'btn-convert-stop')).toBe(true);
+    expect(textOf(tree, 'btn-convert-stop')).toContain(convertEn.stopProvider);
+    await act(async () => {
+      node(tree, 'btn-convert-stop')!.props.onPress();
+    });
+    expect(jest.mocked(abortConvertRecord)).toHaveBeenCalledWith(cefiBase.id);
+  });
+
+  test('the aborted provider card carries the two-sided truth AND the venue handle it points at', async () => {
+    // The copy says "shift id above" — the card renders the id so the instruction is TRUE.
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[cefiBase.id]: cefiBase}); // live → adopted
+    const tree = await mountConvert('250000000', null);
+    jest.mocked(convertAbortFlavor).mockReturnValue('provider');
+    await act(async () => {
+      mockEngineSub.cb?.({[cefiBase.id]: {...cefiBase, step: 'aborted', abortedFromStep: 'awaiting_deposit', abortedAtMs: 1}});
+    });
+    expect(textOf(tree, 'convert-aborted')).toContain(convertEn.abortedProvider.slice(0, 60));
+    expect(textOf(tree, 'convert-aborted-shift-id')).toContain('shift-x1');
+    expect(present(tree, 'btn-convert-stop')).toBe(false); // terminal: no second Stop
   });
 });
 

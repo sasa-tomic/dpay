@@ -223,6 +223,18 @@ export const fetchHubQuotes = async (
 export const isLiveRecord = (r: ConvertRecord | null): boolean =>
   r !== null && !isTerminalConvertStep(r.step) && r.step !== 'quote' && r.step !== 'confirming';
 
+/** The gas-fund abort read (2026-09-20): the funding pre-legs CONFIRMED and no main leg has
+ *  moved — the generic abort flavors would misread this position, so the aborted card says
+ *  exactly what happened: the gas money is still in the wallet, the conversion never ran.
+ *  Lives here (shared) because gasPre records render through BOTH state panels' forks. */
+export const gasPreFundedAborted = (rec: ConvertRecord): boolean => {
+  if (rec.step !== 'aborted' || rec.gasPre == null) return false;
+  const pre = rec.gasPre.legs.length * 2;
+  const plan = rec.legPlan ?? [];
+  return plan.slice(0, pre).every(l => l.state === 'confirmed')
+    && plan.slice(pre).every(l => l.state === 'pending');
+};
+
 /** The per-venue disclosure sentence for the pre-sign checklist: the venue registry's OWN
  *  `disclosure_key` picks the copy, and a key the catalog does not carry falls back to the
  *  generic sentence — fail closed: a disclosure always renders, never a blank, never copy that

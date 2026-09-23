@@ -518,8 +518,19 @@ export function convertAborted(id: string): boolean {
 /** What the user gave up — the aborted panel's one-line body flavor.
  *  'watching': a swap was already submitted — it may still go through.
  *  'fee': an approve confirmed — its tiny network fee is spent, principal untouched.
- *  'clean': nothing left the wallet at all. */
-export function convertAbortFlavor(rec: ConvertRecord): 'clean' | 'fee' | 'watching' {
+ *  'clean': nothing left the wallet at all.
+ *  'provider': the venue holds the order (2026-09-24) — dpay only watched its status;
+ *  the flavor carries the two-sided truth (no deposit sent → the order dies unfunded;
+ *  deposit already sent → the trade may still settle at the venue). */
+export function convertAbortFlavor(rec: ConvertRecord): 'clean' | 'fee' | 'watching' | 'provider' {
+  // The provider-held and cross-rail phases read off the step machine FIRST (2026-09-24):
+  // the plan-based reads below misread them (a crossing/sol_ready record's confirmed IC
+  // approves would say 'fee' — but the abort's honest story is the mint that may still
+  // land, or the USDC already sitting at the user's ATA).
+  const at = rec.step === 'aborted' ? rec.abortedFromStep : rec.step;
+  if (at === 'awaiting_deposit' || at === 'provider_processing') return 'provider';
+  if (at === 'crossing') return 'watching'; // the CCTP mint may still land at the user's ATA
+  if (at === 'sol_ready') return 'clean'; // the final Jupiter leg was UNSIGNED — nothing in flight
   if (rec.solanaLeg != null) return 'watching';
   const plan = rec.legPlan ?? [];
   if (plan.some(l => l.kind === 'swap' && l.state !== 'pending')) return 'watching';

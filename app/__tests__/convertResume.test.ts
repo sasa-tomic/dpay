@@ -48,6 +48,9 @@ import {
   prepareCrossRailSolLeg,
   requestConvertAbort,
   executeConvert,
+  executeCrossRailConvert,
+  executeCrossRailSolSwap,
+  executeSolanaConvert,
   loadConvertRecords,
   probeConvertSettlement,
   saveConvertRecord,
@@ -627,8 +630,7 @@ describe('abortConvertRecord — the user\'s Stop through the resume engine', ()
 });
 
 // --- the late-deposit watch: an expired quote keeps a SLOW provider poll (2026-09-24) -------------
-describe('the late-deposit watch — quote_expired is a watch, not the end', () => {
-  test('an expired quote keeps polling; the venue\'s refunded word flips it to provider_refunded', async () => {
+describe('the late-deposit watch — quote_expired is a watch, not the end', () => {  test('an expired quote keeps polling; the venue\'s refunded word flips it to provider_refunded', async () => {
     jest.mocked(loadConvertRecords).mockResolvedValue({
       'cef-1': providerRecord({step: 'quote_expired'}),
     });
@@ -681,6 +683,58 @@ describe('the late-deposit watch — quote_expired is a watch, not the end', () 
       const at = providerLastCheckedAtMs('cef-1');
       expect(at).not.toBeNull();
       expect(at!).toBeLessThanOrEqual(Date.now());
+    } finally {
+      stop();
+    }
+  });
+});
+
+// --- C2: the Stop on a provider-held order retires the poll loop (2026-09-24) ---------------------
+describe('C2 — aborting a provider record stops the venue watch', () => {
+  test('Stop on awaiting_deposit freezes the record at aborted; fetchProviderStatus is never called again', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'cef-1': providerRecord()});
+    jest.mocked(fetchWithTimeout).mockResolvedValue(res({status: 'waiting'}) as never);
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      expect(fetchWithTimeout).toHaveBeenCalled(); // the venue is being watched
+      await abortConvertRecord('cef-1');
+      expect(convertResumeSnapshot()['cef-1']?.step).toBe('aborted');
+      expect(convertResumeSnapshot()['cef-1']?.abortedFromStep).toBe('awaiting_deposit');
+      await sleep(5); // let any in-flight poll land
+      const polls = jest.mocked(fetchWithTimeout).mock.calls.length;
+      await sleep(40);
+      expect(jest.mocked(fetchWithTimeout).mock.calls.length).toBe(polls); // never polled again
+    } finally {
+      stop();
+    }
+  });
+});
+
+// --- C4: the resume driver never re-enters an aborted record, whatever its shape (2026-09-24) -----
+describe('C4 — aborted records are skipped by every driver (parametric over record shapes)', () => {
+  const mkPlan = (states: Array<'pending' | 'sent' | 'confirmed'>) =>
+    states.map((s, i) => ({kind: i % 2 === 0 ? 'approve' as const : 'swap' as const, canister: `c${i}`, fee: '0', state: s}));
+  const shapes = (): Array<[string, ConvertRecord]> => [
+    ['direct', legRecord({step: 'aborted', abortedFromStep: 'swapping', abortedAtMs: 1})],
+    ['planned', legRecord({id: 'planned-1', step: 'aborted', legPlan: mkPlan(['confirmed', 'sent']), abortedFromStep: 'swapping', abortedAtMs: 1})],
+    ['hub', legRecord({id: 'hub-1', step: 'aborted', legPlan: mkPlan(['confirmed', 'confirmed', 'confirmed', 'pending']), venue2Id: 'icpswap', destLedger: VCHF_LEDGER, abortedFromStep: 'swapping', abortedAtMs: 1})],
+    ['cefi', providerRecord({step: 'aborted', abortedFromStep: 'awaiting_deposit', abortedAtMs: 1})],
+    ['crossrail', legRecord({id: 'xr-1', step: 'aborted', crossRail: {kind: 'cctp_sol', solAddress: 'SolAddr1', mintRecipientAta: 'AtaAddr1'}, legPlan: mkPlan(['confirmed', 'confirmed']), abortedFromStep: 'crossing', abortedAtMs: 1})],
+    ['solana', legRecord({id: 'sol-1', step: 'aborted', legs: [], solanaLeg: {protocol: 'solana', signedTxHex: 'aa', signature: 'sig', lastValidBlockHeight: 9}, abortedFromStep: 'swapping', abortedAtMs: 1})],
+  ];
+  test.each(shapes())('%s', async (_name, rec) => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({[rec.id]: rec});
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(40); // several re-arm windows: a wrongly-armed record would be re-driven
+      const callsFor = (m: jest.Mock) => m.mock.calls.filter((c: unknown[]) => (c[0] as ConvertRecord).id === rec.id);
+      expect(callsFor(jest.mocked(executeConvert))).toHaveLength(0);
+      expect(callsFor(jest.mocked(executeSolanaConvert))).toHaveLength(0);
+      expect(callsFor(jest.mocked(executeCrossRailConvert))).toHaveLength(0);
+      expect(callsFor(jest.mocked(executeCrossRailSolSwap))).toHaveLength(0);
+      expect(probeConvertSettlement).not.toHaveBeenCalled(); // no stuck probe either
+      expect(fetchWithTimeout).not.toHaveBeenCalled(); // and no provider poll
     } finally {
       stop();
     }

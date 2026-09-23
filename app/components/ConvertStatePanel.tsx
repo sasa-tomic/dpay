@@ -14,24 +14,19 @@ import {copyToClipboard} from '../lib/clipboard';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconSwap} from './icons';
-import {ConvertHeader, nonBreakingClock} from './ConvertShared';
+import {ConvertHeader, gasPreFundedAborted, nonBreakingClock} from './ConvertShared';
 
 /** Renders the §4 state-machine record — every non-done state carries practical instructions. */
 export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void}) {
   const [, forceTick] = useState(0);
-  // The gas-fund abort read (2026-09-20): the funding pre-legs CONFIRMED and no main leg has
-  // moved — the generic abort flavors would misread this position, so the card says exactly
-  // what happened: the gas money is still in the wallet, the conversion never ran.
-  const gasPreFundedAborted = (rec: ConvertRecord): boolean => {
-    if (rec.step !== 'aborted' || rec.gasPre == null) return false;
-    const pre = rec.gasPre.legs.length * 2;
-    const plan = rec.legPlan ?? [];
-    return plan.slice(0, pre).every(l => l.state === 'confirmed')
-      && plan.slice(pre).every(l => l.state === 'pending');
-  };
   // Which deposit fact was last copied ('address' | 'memo') — the transient "Copied" label on
   // the CeFi handoff's copy buttons, same pattern as the cross-rail calldata buttons.
   const [copiedDeposit, setCopiedDeposit] = useState<'address' | 'memo' | null>(null);
+  // The Stop label follows the flavor (2026-09-24): a submitted swap is 'watching', a
+  // provider order is 'provider', everything else is the plain Stop.
+  const stopLabel = convertAbortFlavor(record) === 'watching' ? M.convert.stopWatching
+    : convertAbortFlavor(record) === 'provider' ? M.convert.stopProvider
+    : M.convert.stop;
   // The stuck screen restates what was signed, including the minimum bound. The record no
   // longer persists that figure (V2): it is re-derived by the compiled core from the record's
   // own frozen quote + slippage — the same deterministic arithmetic that computed it at prepare.
@@ -116,10 +111,14 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
         </View>
       ) : null}
-      {/* The user's Stop (2026-09-19): offered while the conversion runs. The flavor picks the
-          honest label — a submitted swap keeps its own momentum, so the button says so. */}
+      {/* The user's Stop (2026-09-19): offered while the conversion runs — widened 2026-09-24
+          to the provider-held states (awaiting_deposit / provider_processing), where stopping
+          means dpay stops polling the venue (the order's own life is the venue's business).
+          The flavor picks the honest label — a submitted swap keeps its own momentum, so the
+          button says so. */}
       {(record.step === 'approving' || record.step === 'approved' || record.step === 'swapping'
-        || record.step === 'settling' || record.step === 'pending_withdrawal') ? (
+        || record.step === 'settling' || record.step === 'pending_withdrawal'
+        || record.step === 'awaiting_deposit' || record.step === 'provider_processing') ? (
         <Pressable
           testID="btn-convert-stop"
           style={S.linkBtn}
@@ -127,12 +126,10 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
             void abortConvertRecord(record.id);
           }}
           accessibilityRole="button"
-          accessibilityLabel={convertAbortFlavor(record) === 'watching' ? M.convert.stopWatching : M.convert.stop}
+          accessibilityLabel={stopLabel}
           accessibilityState={{disabled: false}}
         >
-          <Text style={S.linkText}>
-            {convertAbortFlavor(record) === 'watching' ? M.convert.stopWatching : M.convert.stop}
-          </Text>
+          <Text style={S.linkText}>{stopLabel}</Text>
         </Pressable>
       ) : null}
       {record.step === 'aborted' ? (
@@ -140,10 +137,18 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           <Text style={S.convertStateTitle}>{M.convert.abortedTitle}</Text>
           <Text style={S.convertStateBody}>
             {gasPreFundedAborted(record) ? M.convert.crossrail.abortedGasBody
+              : convertAbortFlavor(record) === 'provider' ? M.convert.abortedProvider
               : convertAbortFlavor(record) === 'watching' ? M.convert.abortedWatching
               : convertAbortFlavor(record) === 'fee' ? M.convert.abortedFee
               : M.convert.abortedClean}
           </Text>
+          {/* The provider abort's copy points at "the shift id above" — make that TRUE: the
+              venue handle the user needs for the venue's own status page renders here. */}
+          {convertAbortFlavor(record) === 'provider' && record.providerRef != null ? (
+            <Text testID="convert-aborted-shift-id" style={S.convertStateMeta} selectable>
+              {M.convert.cefi.shiftId(record.providerRef.orderId)}
+            </Text>
+          ) : null}
         </View>
       ) : null}
       {record.step === 'failed_refunded' ? (

@@ -129,10 +129,17 @@ export type ConvertMessages = {
   stuckTitle: string;
   stop: string;
   stopWatching: string;
+  /** The provider-held stop (2026-09-24): the venue order keeps its own life at the venue —
+   *  dpay only ever watched its status. Its own key so locales can carry that nuance. */
+  stopProvider: string;
   abortedTitle: string;
   abortedClean: string;
   abortedFee: string;
   abortedWatching: string;
+  /** The provider-held abort body (2026-09-24): BOTH halves of the truth — no deposit sent
+   *  → nothing can move and the order dies unfunded at the venue; deposit already sent →
+   *  the trade may still settle (check Balances + the venue's own status page). */
+  abortedProvider: string;
   stuckBody: string;
   stuckSigned: (amount: string, minAmount: string, venue: string) => string;
   /** "Unused approval expires by 14:42 — after that the pool can pull nothing." */
@@ -373,6 +380,13 @@ export type ConvertMessages = {
     stillCrossing: string;
     solReadyTitle: string;
     solReadyBody: (credit: string, ata: string) => string;
+    /** The Stop during `crossing` (2026-09-24): the burn already happened, so Circle may
+     *  still complete the mint. NEVER claims nothing moved — the USDC lands at the user's
+     *  own ATA either way; `ata` names where. */
+    abortedCrossing: (ata: string) => string;
+    /** The Stop at `sol_ready` (2026-09-24): the final Jupiter leg was UNSIGNED — nothing
+     *  was in flight. Names where the USDC sits and the exit (convert it on Solana). */
+    abortedSolReady: (ata: string) => string;
     solQuoteLabel: (venue: string) => string;
     /** Generalized (2026-09-19): the final leg lands ANY registered USDC-pair token —
      *  EURC on the jupiter-usdc-eurc route, SOL on the original. `min` is the BARE
@@ -544,10 +558,13 @@ export const convertEn: ConvertMessages = {
   // The user's Stop (2026-09-19): the button and the frozen-record panel. Short on purpose.
   stop: 'Stop',
   stopWatching: 'Stop watching',
+  stopProvider: 'Stop watching',
   abortedTitle: 'Stopped',
   abortedClean: 'Nothing left your wallet.',
   abortedFee: 'You already paid a tiny approval fee.',
   abortedWatching: 'The swap may still go through. Check Balances later.',
+  abortedProvider:
+    'Watching stopped. If you never sent the deposit, nothing can move — the order dies unfunded at the venue. If you already sent it, the trade may still settle: check Balances and the venue\u2019s own status page (shift id above).',
   stuckBody:
     'The swap was submitted, but the pool\u2019s answer did not arrive. Do not start a second swap with the same funds. If the payout arrives, this screen flips to done on its own.',
   stuckSigned: (amount, minAmount, venue) =>
@@ -700,6 +717,10 @@ export const convertEn: ConvertMessages = {
     stillCrossing: 'Attestation is not finished yet. This stays pending — it is not failed. On the fast path it is seconds to minutes; if Ethereum is congested, longer.',
     solReadyTitle: 'USDC landed on Solana',
     solReadyBody: (credit, ata) => `${credit} is at ${ata}, verified on-chain. Finish the route, or leave the USDC there — it is yours either way.`,
+    abortedCrossing: ata =>
+      `Watching stopped. Your burn already went out, so Circle may still complete the mint — the USDC arrives at your own Solana address ${ata} either way. Check Balances later.`,
+    abortedSolReady: ata =>
+      `Nothing was signed — the final swap never ran. Your USDC sits at your Solana address ${ata}: keep it, or convert it there.`,
     solQuoteLabel: venue => `${venue} quote (fresh)`,
     solMinLine: (min, sym) => `At least ${min} ${sym} at your address`,
     solConfirmButton: sym => `Swap to ${sym}`,

@@ -116,10 +116,13 @@ export const convertFr: ConvertMessages = {
   stuckTitle: 'Issue inconnue',
   stop: 'Arrêter',
   stopWatching: 'Arrêter le suivi',
+  stopProvider: 'Arrêter le suivi',
   abortedTitle: 'Arrêté',
   abortedClean: 'Rien n’a quitté votre portefeuille.',
   abortedFee: 'Vous avez déjà payé des petits frais d’approbation.',
   abortedWatching: 'L’échange peut encore passer. Vérifiez Soldes plus tard.',
+  abortedProvider:
+    'Surveillance arrêtée. Si vous n’avez jamais envoyé le dépôt, rien ne peut bouger — l’ordre meurt sans fonds chez la plateforme. Si vous l’avez déjà envoyé, l’échange peut encore aboutir : vérifiez Soldes et la page de statut de la plateforme (ID du shift ci-dessus).',
   stuckBody:
     'L’échange a été envoyé, mais la réponse du pool n’est pas arrivée. Ne lance pas un second échange avec les mêmes fonds. Si le versement arrive, cet écran passera tout seul à « Converti ».',
   stuckSigned: (amount, minAmount, venue) =>
@@ -274,6 +277,10 @@ export const convertFr: ConvertMessages = {
     stillCrossing: 'L\u2019attestation n\u2019est pas encore prête. Cela reste en attente — ce n\u2019est pas un échec. Sur la voie rapide, comptes des secondes à des minutes ; Ethereum congestionné, plus longtemps.',
     solReadyTitle: 'Les USDC sont arrivés sur Solana',
     solReadyBody: (credit, ata) => `${credit} sont à ${ata}, vérifié on-chain. Termine la route — ou laisse les USDC là, ils sont à toi dans les deux cas.`,
+    abortedCrossing: ata =>
+      `Suveillance arrêtée. Votre burn est déjà parti, Circle peut donc encore compléter le mint — l’USDC arrive de toute façon à votre propre adresse Solana ${ata}. Vérifiez Soldes plus tard.`,
+    abortedSolReady: ata =>
+      `Rien n’a été signé — l’échange final n’a jamais été lancé. Vos USDC sont à votre adresse Solana ${ata} : gardez-les ou convertissez-les là-bas.`,
     solQuoteLabel: venue => `Devis ${venue} (en direct)`,
     solMinLine: (min, sym) => `Au moins ${min} ${sym} à ton adresse`,
     solConfirmButton: sym => `Échanger contre ${sym}`,

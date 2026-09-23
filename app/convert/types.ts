@@ -1,5 +1,15 @@
 // --- the §4 state machine record -------------------------------------------------------------------
 
+// PRE-BROADCAST INVARIANT (2026-09-24): NO record exists before the user's confirm tap.
+// Every prepare*Record runs AT the confirm gesture and only then hands the record to the
+// engine (adoptConvertRecord); going back at review discards in-memory state — nothing was
+// persisted, so there is nothing to clean up (pinned by jest: convertMode.test.tsx and
+// convertCefiConfirm.test.tsx). The ONE pre-broadcast side effect is CeFi's, and the copy
+// says so honestly: confirming CREATES the venue order (the record is born at
+// `awaiting_deposit`), so a Stop after confirm does not un-create it — the abort copy
+// (`convert.abortedProvider`) names that the order dies unfunded at the venue if the
+// deposit never went out.
+
 export type ConvertStep =
   | 'quote' | 'confirming' | 'approving' | 'approved' | 'swapping' | 'settling'
   | 'done' | 'pending_withdrawal' | 'failed_refunded' | 'failed_leg' | 'stuck'
