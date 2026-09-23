@@ -203,6 +203,24 @@ describe('CeFi confirm vs a ticking venue rate', () => {
     expect(exists(tree, 'convert-confirm-err')).toBe(false);
   });
 
+  test('the pre-broadcast invariant: back at review (unmount before confirm) NO order exists, NOTHING is adopted', async () => {
+    // C1 (2026-09-24): no record exists before the confirm tap. The review quote may have
+    // been fetched, but the venue order — the ONE pre-broadcast side effect — is created
+    // only AT the confirm gesture. Unmounting at review discards the in-memory state and
+    // leaves nothing to clean up: no venue order, no record, no store write.
+    const tree = await mountWithSideshiftPicked();
+    const input = present(tree, 'convert-amount')[0];
+    await act(async () => {
+      input.props.onChangeText('1');
+    });
+    expect(jest.mocked(fetchSideShiftQuote).mock.calls.length).toBe(1); // the review quote
+    await act(async () => {
+      tree.unmount();
+    });
+    expect(jest.mocked(createSideShiftFixedShift).mock.calls.length).toBe(0);
+    expect(jest.mocked(adoptConvertRecord).mock.calls.length).toBe(0);
+  });
+
   test('a failed confirm-time re-quote still fails closed with an error line, no order', async () => {
     const tree = await mountWithSideshiftPicked();
     const input = present(tree, 'convert-amount')[0];

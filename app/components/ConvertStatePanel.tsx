@@ -5,7 +5,7 @@ import {useEffect, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, View} from 'react-native';
 import {venueDisplayName, venueEndpointOf} from '../config/venues';
 import {convertAbortFlavor, convertRecordMinOut, type ConvertRecord} from '../convert';
-import {abortConvertRecord, acknowledgeStuckRecord} from '../convertResume';
+import {abortConvertRecord, acknowledgeStuckRecord, providerLastCheckedAtMs} from '../convertResume';
 import {solanaTokenOfMint} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
@@ -47,8 +47,9 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record.id, record.step]);
   // stuck/pending states show when the approval expires — a 30 s tick keeps that line honest.
+  // provider_processing joins for the "last checked" clock (no SLA implied — just fresh).
   useEffect(() => {
-    if (record.step !== 'stuck' && record.step !== 'pending_withdrawal') return;
+    if (record.step !== 'stuck' && record.step !== 'pending_withdrawal' && record.step !== 'provider_processing') return;
     const id = setInterval(() => forceTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
   }, [record.step]);
@@ -267,7 +268,14 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
                 <Text style={S.convertStateMeta}>
                   {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(record.providerDeposit.expiresAtMs)))}
                 </Text>
-              ) : null}
+              ) : (
+                // The venue published NO expiry (e.g. Trocador orders): say so, instead of
+                // letting an unfunded order read as quietly abandoned. The shift id above
+                // is the handle; the watch is the commitment.
+                <Text testID="convert-deposit-no-expiry" style={S.convertStateMeta}>
+                  {M.convert.cefi.noExpiryLine}
+                </Text>
+              )}
               {/* The venue's own order id: the one handle support and the user both need
                   when talking to the venue's own status page — visible, not buried. */}
               {record.providerRef != null ? (
@@ -301,6 +309,17 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           <Text style={S.convertStateTitle}>{M.convert.providerProcessingTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.providerProcessingBody(outSymbol, venueName)}</Text>
           <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
+          {/* The honest wait line (2026-09-24): when the engine last completed a status
+              read. A timestamp only — the venue publishes no SLA, so none is invented and
+              no verdict is implied. Hidden until this session's own first read lands. */}
+          {(() => {
+            const at = providerLastCheckedAtMs(record.id);
+            return at != null ? (
+              <Text testID="convert-last-checked" style={S.convertStateMeta}>
+                {M.convert.cefi.lastCheckedLine(formatClock(new Date(at)))}
+              </Text>
+            ) : null;
+          })()}
         </View>
       ) : null}
       {record.step === 'quote_expired' ? (

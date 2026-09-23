@@ -70,11 +70,13 @@ jest.mock('../convertResume', () => ({
   }),
   adoptConvertRecord: jest.fn(async () => undefined),
   acknowledgeStuckRecord: jest.fn(async () => undefined),
+  abortConvertRecord: jest.fn(async () => undefined),
+  providerLastCheckedAtMs: jest.fn((): number | null => null),
 }));
 
 import {ConvertMode} from '../components/ConvertMode';
 import {convertRecordMinOut, deriveConvertMath, fetchConvertQuote, prepareConvertRecord, prepareHubConvertRecord, prepareMultihopConvertRecord} from '../convert';
-import {acknowledgeStuckRecord, adoptConvertRecord, convertResumeSnapshot} from '../convertResume';
+import {acknowledgeStuckRecord, adoptConvertRecord, convertResumeSnapshot, providerLastCheckedAtMs} from '../convertResume';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import type {ConvertMath, ConvertQuote, ConvertRecord} from '../convert';
 import {buildSelectableAssets} from '../config/assets';
@@ -82,6 +84,7 @@ import type {Identity} from '../lib/types';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {BUNDLED_VENUES, setRuntimeVenues, venueDisplayName, type VenueEntry} from '../config/venues';
 import {convertEn} from '../i18n/domains/en/convert';
+import {nonBreakingClock} from '../components/ConvertShared';
 import {formatClock} from '../i18n/intl';
 import {convertDe} from '../i18n/domains/de/convert';
 import {convertEs} from '../i18n/domains/es/convert';
@@ -180,6 +183,7 @@ afterEach(async () => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(providerLastCheckedAtMs).mockReturnValue(null);
   jest.mocked(fetchConvertQuote).mockResolvedValue(QUOTE);
   jest.mocked(deriveConvertMath).mockResolvedValue(MATH);
   jest.mocked(fetchGasFeeWei).mockResolvedValue('78000000000000'); // the fake-IC minter's 78e12 wei
@@ -943,6 +947,98 @@ describe('V6 — engine view', () => {
     });
     expect(textOf(tree, 'convert-stuck')).toContain(convertEn.stuckAcknowledged);
     expect(present(tree, 'btn-convert-stuck-ack')).toBe(false);
+  });
+});
+
+// --- the pre-broadcast invariant + the CeFi panel lines (2026-09-24) -------------------------------
+// C1: no record exists before the confirm tap — every prepare*Record runs AT the confirm
+// gesture and only then adopts; backing out at review discards in-memory state, and nothing
+// was persisted (nothing to clean up). The CeFi panel lines: the honest no-expiry fact and
+// the provider_processing "last checked" timestamp (a timestamp, never an SLA).
+describe('C1 — no record exists before the confirm (pre-broadcast invariant)', () => {
+  afterEach(() => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({});
+  });
+  test('mount → type → unmount WITHOUT confirm: nothing prepared, nothing adopted', async () => {
+    const tree = await mountConvert('250000000', '1');
+    expect(present(tree, 'convert-screen')).toBe(true);
+    expect(jest.mocked(prepareConvertRecord)).not.toHaveBeenCalled();
+    expect(jest.mocked(adoptConvertRecord)).not.toHaveBeenCalled();
+    await act(async () => {
+      tree.unmount();
+    });
+    mounted = null;
+    // Going back at review discards everything: no record was minted, none was persisted
+    // through the engine — there is nothing to clean up because nothing was created.
+    expect(jest.mocked(prepareConvertRecord)).not.toHaveBeenCalled();
+    expect(jest.mocked(adoptConvertRecord)).not.toHaveBeenCalled();
+  });
+});
+
+describe('the CeFi panel lines — no-expiry honesty + the last-checked timestamp', () => {
+  afterEach(() => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({});
+    jest.mocked(providerLastCheckedAtMs).mockReturnValue(null);
+  });
+  const cefiBase: ConvertRecord = {
+    id: 'cefi-view',
+    createdAtMs: 5,
+    step: 'awaiting_deposit',
+    venueId: 'sideshift',
+    inCurrency: 8,
+    outLedger: 'so-mint',
+    inLedger: QUOTE.tokenInLedger,
+    inSymbol: 'ICP',
+    outSymbol: 'SOL',
+    amountIn: '100000000',
+    expectedGross: '4950000',
+    expectedNet: '4950000',
+    inFee: '0',
+    outFee: '0',
+    slippageBps: 0,
+    legs: [],
+    providerRef: {orderId: 'shift-x1', statusUrl: 'https://sideshift.ai/api/v2/shifts/shift-x1'},
+    providerDeposit: {depositAddress: 'ss-addr', depositAmount: '1'},
+  };
+
+  test('awaiting_deposit with NO venue expiry says so — the unfunded order is not quietly abandoned', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[cefiBase.id]: cefiBase});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-awaiting-deposit')).toBe(true);
+    expect(textOf(tree, 'convert-deposit-no-expiry')).toContain(convertEn.cefi.noExpiryLine);
+    // The shift id line still names the handle the user needs for the venue's status page.
+    expect(textOf(tree, 'convert-shift-id')).toContain('shift-x1');
+  });
+
+  test('an expiry the venue DID publish renders the expiry line, not the no-expiry fact', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({
+      [cefiBase.id]: {...cefiBase, providerDeposit: {...cefiBase.providerDeposit!, expiresAtMs: 1_700_000_000_000}},
+    });
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-deposit-no-expiry')).toBe(false);
+    // The panel renders the expiry through nonBreakingClock (the line must not wrap mid-time).
+    expect(textOf(tree, 'convert-awaiting-deposit'))
+      .toContain(convertEn.cefi.depositExpiryLine(nonBreakingClock(new Date(1_700_000_000_000))));
+  });
+
+  test('provider_processing shows the engine\'s last completed read — a timestamp, not an SLA', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({
+      [cefiBase.id]: {...cefiBase, step: 'provider_processing'},
+    });
+    jest.mocked(providerLastCheckedAtMs).mockReturnValue(1_700_000_000_000);
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-provider-processing')).toBe(true);
+    expect(textOf(tree, 'convert-last-checked'))
+      .toContain(convertEn.cefi.lastCheckedLine(formatClock(new Date(1_700_000_000_000))));
+  });
+
+  test('provider_processing BEFORE this session\'s first read claims nothing (no line)', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({
+      [cefiBase.id]: {...cefiBase, step: 'provider_processing'},
+    });
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-provider-processing')).toBe(true);
+    expect(present(tree, 'convert-last-checked')).toBe(false);
   });
 });
 
