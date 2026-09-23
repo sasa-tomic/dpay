@@ -331,6 +331,15 @@ export const withdrawFr: WithdrawMessages = {
       'Le transfert a été soumis mais n’est pas encore confirmé. Il peut encore aboutir — vérifiez votre solde dans un instant au lieu de l’envoyer à nouveau.',
     blockIndex: index => `Bloc ${index} du registre`,
     noLedger: 'Cet actif n’a aucun registre : il ne peut donc pas être envoyé.',
+
+    copyReference: 'Copier la référence',
+    viewReceipt: 'Voir le reçu',
+    checkStatus: 'Vérifier le statut',
+    checking: 'Vérification…',
+    checkFailed: 'Impossible de vérifier pour le moment. Réessayez dans un instant.',
+    failed: 'Échec',
+    feeOnly: 'Le transfert a échoué sur la chaîne. Rien n’a été livré, seuls les frais de réseau ont été prélevés.',
+    nothingSent: 'Rien n’a été envoyé. Le réseau a refusé le transfert avant de l’accepter, votre argent n’a donc jamais quitté le portefeuille.',
   },
 
   sol: {

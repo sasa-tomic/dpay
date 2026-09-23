@@ -689,6 +689,20 @@ export type WithdrawMessages = {
     sentUnknownBody: string;
     blockIndex: (index: string) => string;
     noLedger: string;
+
+    /** The shared send-terminal surface (SendTerminal — both rails' settled and unknown endings). */
+    copyReference: string;
+    viewReceipt: string;
+    /** SOL unknown panels only: re-read the chain for the kept signature. Read-only, never re-signs. */
+    checkStatus: string;
+    checking: string;
+    /** A check that could not complete (rail unreachable) — the honest pending stays, said plainly. */
+    checkFailed: string;
+    /** Check-status revealed an on-chain failure: terminal, fee-only, never a resend invite. */
+    failed: string;
+    feeOnly: string;
+    /** The pre-broadcast refusal's guidance: nothing was accepted, nothing moved, a retry is safe. */
+    nothingSent: string;
   };
 
   /** Native Solana rail (SolanaWithdrawSheet): the device key signs and broadcasts directly. */
@@ -806,6 +820,15 @@ export const withdrawEn: WithdrawMessages = {
       "The transfer was submitted but isn't confirmed yet. It may still go through — check your balance in a moment instead of sending again.",
     blockIndex: index => `Ledger block ${index}`,
     noLedger: 'This asset has no ledger, so it cannot be sent.',
+
+    copyReference: 'Copy reference',
+    viewReceipt: 'View receipt',
+    checkStatus: 'Check status',
+    checking: 'Checking…',
+    checkFailed: 'Could not check just now. Try again in a moment.',
+    failed: 'Failed',
+    feeOnly: 'The transfer failed on chain. Nothing was delivered, and only the network fee was charged.',
+    nothingSent: 'Nothing was sent. The network refused the transfer before it was accepted, so no money left the wallet.',
   },
 
   sol: {

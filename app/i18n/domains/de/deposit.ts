@@ -330,6 +330,15 @@ export const withdrawDe: WithdrawMessages = {
       'Die Überweisung wurde übermittelt, ist aber noch nicht bestätigt. Sie kann trotzdem noch ankommen — prüfe gleich dein Guthaben, statt sie noch einmal zu senden.',
     blockIndex: index => `Ledger-Block ${index}`,
     noLedger: 'Dieses Asset hat keinen Ledger, deshalb kann es nicht gesendet werden.',
+
+    copyReference: 'Referenz kopieren',
+    viewReceipt: 'Beleg ansehen',
+    checkStatus: 'Status prüfen',
+    checking: 'Wird geprüft…',
+    checkFailed: 'Konnte gerade nicht geprüft werden. Versuch es gleich noch einmal.',
+    failed: 'Fehlgeschlagen',
+    feeOnly: 'Die Überweisung ist on-chain fehlgeschlagen. Nichts wurde zugestellt, nur die Netzwerkgebühr wurde berechnet.',
+    nothingSent: 'Es wurde nichts gesendet. Das Netzwerk hat die Überweisung abgelehnt, bevor sie angenommen wurde, deshalb hat dein Geld die Wallet nie verlassen.',
   },
 
   sol: {

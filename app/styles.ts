@@ -527,6 +527,11 @@ function buildStyles(p: Palette) {
   ghostBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18, minHeight: 44, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14, borderWidth: 1, borderColor: p.line, backgroundColor: p.card},
   ghostBtnText: {color: p.sub, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
   ghostBtnMuted: {backgroundColor: 'transparent', borderColor: p.line2},
+  // SendTerminal's stacked secondary actions (Check status / View receipt): full-width so every
+  // action on the terminal shares ONE column and one height — the primary copy button above and
+  // the Done ghost below are the anchors, these two never render at mixed widths.
+  termBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'stretch', marginTop: 10, minHeight: 44, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 14, borderWidth: 1, borderColor: p.line2},
+  termBtnText: {color: p.sub, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
   smallBtn: {backgroundColor: p.brand, borderRadius: 12, paddingHorizontal: 16, height: 44, alignItems: 'center', justifyContent: 'center', shadowColor: p.brand2, shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: {width: 0, height: 4}, elevation: 3},
   smallBtnText: {color: p.brandInk, fontWeight: '700', fontFamily: FONT.sansBold},
   // Bordered secondary button (Cancel/secondary action parity with the primary Approve). Same

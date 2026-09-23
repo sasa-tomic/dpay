@@ -470,7 +470,9 @@ describe('SendSheet — a send fills the Trip Readiness PAYMENT TESTED stamp, bu
     jest.mocked(submitTransfer).mockResolvedValue({kind: 'unknown'});
     const tree = await armedSend();
     expect(await sendAndReadStamp(tree)).toBe(false);
-    expect(textOf(tree, 'send-outcome')).toBe(M.withdraw.send.sentUnknown); // the pending screen, not a failure
+    // The shared terminal's grammar: the unknown headline carries `-unknown-title` (the SOL rail's
+    // convention, now uniform), the settled one `-outcome`.
+    expect(textOf(tree, 'send-unknown-title')).toBe(M.withdraw.send.sentUnknown); // the pending screen, not a failure
     act(() => { tree.unmount(); });
   });
 });

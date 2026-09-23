@@ -15,10 +15,12 @@ import {detectAddressShape, routeForShape, chainNameOfShape} from '../lib/destin
 import {prepareTransfer, prepareLegacyTransfer, submitTransfer, decodeLegacyReply, fetchLedgerFee, type RailPrepared, type RailOutcome} from '../services/rail';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
 import {DpayCore} from '../services/native';
+import type {Txn} from '../lib/types';
+import {fmtTime} from '../lib/format';
 import {AddressField, shortAddress} from './AddressField';
 import {WithdrawSheet} from './WithdrawSheet';
+import {SendTerminal} from './SendTerminal';
 import {useEscapeToClose} from '../hooks/useHotkeys';
-import {IconCheck, IconClock} from './icons';
 import {M} from '../i18n';
 
 /** Where an `icrc1_transfer` actually executes. Every ledger in this catalog is an IC canister, so
@@ -54,7 +56,7 @@ const IC_NETWORK = 'Internet Computer';
  */
 export function SendSheet({
   identity, catalog, desc, balance, family, display, tokenContract,
-  homeRail = null, prefillAddress = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose, onSendActiveChange, online = true, onReviewShown,
+  homeRail = null, prefillAddress = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose, onSendActiveChange, online = true, onReviewShown, onOpenReceipt,
 }: {
   identity: Identity;
   catalog: CurrencyDescriptor[];
@@ -95,12 +97,21 @@ export function SendSheet({
   /** Fired ONCE per mount, the first time this sheet renders its review card (surface ownership,
    *  2026-09-21): the parent's offline strike gate must then stop replacing this sheet. */
   onReviewShown?: (shown: boolean) => void;
+  /** Open the shared `TxnReceipt` for a finished send: the sheet builds the `Txn` (amount,
+   *  destination, ledger reference, honest pending flag) and hands it up — the receipt itself
+   *  stays mounted at the Wallet root per its documented rule. Optional so narrow mounts
+   *  (tests) keep working; PayMode always passes it. */
+  onOpenReceipt?: (t: Txn) => void;
 }) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'unknown'>('form');
   const [err, setErr] = useState<string | null>(null);
   const [blockIndex, setBlockIndex] = useState<string>('');
+  // This send's fresh memo hex (randomMemoHex below) — shown on the unknown terminal as the
+  // transfer's reference and stamped into the receipt, so a pending send still names the handle
+  // the ledger will carry instead of showing nothing.
+  const [memoHex, setMemoHex] = useState<string>('');
   const [saved, setSaved] = useState<SavedAddress[]>([]);
   const [saveName, setSaveName] = useState('');
   // The core's verdict on the CURRENT address text: the canonical destination, or the reason it
@@ -313,6 +324,9 @@ export function SendSheet({
     if (!canSend || !resolved?.ok) return;
     setPhase('submitting');
     setErr(null);
+    // A fresh send starts with no memo reference; the ICRC branch below stamps its own. (A retry
+    // after a rejection must never show the previous attempt's memo as this send's reference.)
+    setMemoHex('');
     try {
       if (!desc.ledger) throw new Error(M.withdraw.send.noLedger);
       let prepared: RailPrepared;
@@ -325,12 +339,16 @@ export function SendSheet({
         out = await submitTransfer(prepared, identity.secretHex, {attempts: 12, intervalMs: 500}, decodeLegacyReply);
       } else {
         // A send is not a payment against a request, so there is no request nonce to reconcile
-        // against; the memo is a fresh random 16 bytes — see `randomMemoHex`.
+        // against; the memo is a fresh random 16 bytes — see `randomMemoHex`. Captured in state:
+        // the terminal surface shows it as the transfer's reference (the honest unknown has no
+        // block index yet, but the ledger will carry THIS memo either way).
+        const memo = randomMemoHex();
+        setMemoHex(memo);
         prepared = await prepareTransfer(identity.secretHex, {currencies: [desc]}, {
           // The SAME string the field showed, the review showed and the address book will save.
           // The rail parses owner + subaccount out of it, so a `principal.subaccount` destination
           // is credited to the account the user actually read.
-          toAccount: resolved.destination, amount: raw, currency: desc.currency, nonceHex: randomMemoHex(),
+          toAccount: resolved.destination, amount: raw, currency: desc.currency, nonceHex: memo,
         });
         out = await submitTransfer(prepared, identity.secretHex, {attempts: 12, intervalMs: 500});
       }
@@ -357,36 +375,40 @@ export function SendSheet({
 
   if (phase === 'done' || phase === 'unknown') {
     const pending = phase === 'unknown';
+    // The terminal receipt (the SAME TxnReceipt the History rows open, mounted at the Wallet
+    // root): amount, destination, the ledger reference and — for the honest unknown — the
+    // pending flag that makes the receipt say "not confirmed yet" instead of printing a proof.
+    // The unknown's reference is the send's memo hex (no block exists yet; the memo is the
+    // handle the ledger will carry either way).
+    const txn: Txn = {
+      nonce: memoHex || `ic-send-${Date.now()}`,
+      amount: raw,
+      who: '',
+      memo: memoHex,
+      time: fmtTime(Date.now()),
+      ts: Date.now(),
+      dir: 'out',
+      assetId: `ic:${desc.currency}`,
+      counterparty: resolved?.ok ? resolved.destination : '',
+      ledgerRef: pending ? '' : blockIndex,
+      ...(pending ? {pending: true as const} : {}),
+    };
     return (
       <View style={S.sheetBody}>
-        <View style={S.centerAll}>
-          <View style={[S.check, pending && S.checkAlready]}>
-            {pending ? <IconClock size={44} color={C.brandInk} /> : <IconCheck size={44} color={C.brandInk} />}
-          </View>
-          <Text testID="send-outcome" style={S.paidText}>
-            {pending ? M.withdraw.send.sentUnknown : M.withdraw.send.sent}
-          </Text>
-          <Text style={S.paidSub}>{fmt(raw)}</Text>
-          <Text style={S.dim2}>{M.withdraw.ic.sentTo}</Text>
-          <Text testID="send-destination" selectable={true} style={S.sheetAddr}>
-            {resolved?.ok ? resolved.destination : ''}
-          </Text>
-          {pending ? (
-            <Text testID="send-unknown-note" style={S.warnNote}>{M.withdraw.send.sentUnknownBody}</Text>
-          ) : blockIndex ? (
-            <Text testID="send-block" style={S.dim2}>{M.withdraw.send.blockIndex(blockIndex)}</Text>
-          ) : null}
-          <Text style={S.dim2}>{M.withdraw.balanceAuto}</Text>
-          <Pressable
-            testID="btn-send-done"
-            style={[S.ghostBtn, S.ghostBtnMuted]}
-            onPress={onClose}
-            accessibilityRole="button"
-            accessibilityLabel={M.common.done}
-            accessibilityState={{disabled: false}}>
-            <Text style={S.ghostBtnText}>{M.common.done}</Text>
-          </Pressable>
-        </View>
+        <SendTerminal
+          settled={!pending}
+          headline={pending ? M.withdraw.send.sentUnknown : M.withdraw.send.sent}
+          amountText={fmt(raw)}
+          destinationLabel={M.withdraw.ic.sentTo}
+          destination={resolved?.ok ? resolved.destination : ''}
+          pendingBody={pending ? M.withdraw.send.sentUnknownBody : undefined}
+          referenceLabel={pending ? M.receipt.referenceLabel : M.receipt.blockLabel}
+          reference={pending ? memoHex : blockIndex}
+          refTestID="send-ref"
+          prefix="send"
+          onOpenReceipt={onOpenReceipt != null ? () => onOpenReceipt(txn) : undefined}
+          onDone={onClose}
+        />
       </View>
     );
   }

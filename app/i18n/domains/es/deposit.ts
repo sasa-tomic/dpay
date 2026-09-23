@@ -330,6 +330,15 @@ export const withdrawEs: WithdrawMessages = {
       'La transferencia se envió, pero aún no está confirmada. Puede que todavía se complete: revisa tu saldo en un momento en vez de volver a enviarla.',
     blockIndex: index => `Bloque ${index} del registro`,
     noLedger: 'Este activo no tiene registro, así que no se puede enviar.',
+
+    copyReference: 'Copiar la referencia',
+    viewReceipt: 'Ver el recibo',
+    checkStatus: 'Comprobar el estado',
+    checking: 'Comprobando…',
+    checkFailed: 'No se pudo comprobar ahora mismo. Inténtalo de nuevo en un momento.',
+    failed: 'Falló',
+    feeOnly: 'La transferencia falló en la cadena. No se entregó nada y solo se cobró la comisión de red.',
+    nothingSent: 'No se envió nada. La red rechazó la transferencia antes de aceptarla, así que tu dinero nunca salió de la cartera.',
   },
 
   sol: {

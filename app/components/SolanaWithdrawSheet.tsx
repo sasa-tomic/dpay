@@ -3,8 +3,9 @@ import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'rea
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
-import {fmtAssetCompact, toUnits} from '../lib/format';
+import {fmtAssetCompact, fmtTime, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
+import type {Txn} from '../lib/types';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
 import {detectAddressShape, routeForSolana, chainNameOfShape, isBase58NearMiss} from '../lib/destination';
@@ -12,16 +13,15 @@ import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT, deriveSolanaAddress, isValidSolanaAddress} from '../solana/identity';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {solanaTokenInfo} from '../solana/tokens';
-import {sendSol, sendSpl, preloadSolanaRpc} from '../solana';
+import {sendSol, sendSpl, preloadSolanaRpc, getSolSignatureStatus} from '../solana';
 import {friendlySolError, isSolTransactionFailed} from '../solana/errors';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
 import {saveTxNote} from '../services/txNotes';
 import {useEscapeToClose} from '../hooks/useHotkeys';
-import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
 import {AddressField} from './AddressField';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
-import {IconCheck, IconCopy} from './icons';
+import {SendTerminal} from './SendTerminal';
 import {M} from '../i18n';
 
 /** The chain this rail settles on. Wire/display proper noun, never translated — the twin of
@@ -55,12 +55,24 @@ const SOL_NETWORK = 'Solana';
  * Bitcoin address pasted into the wrong wallet, and which offered neither a scanner nor an address
  * book that the IC surface had. CLAUDE.md's same-surfaces rule calls that divergence a bug.
  */
-export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose, onSendActiveChange, online = true, onReviewShown}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; /** The LAST-KNOWN balance in raw units — null when no balance was EVER known. Deliberately NOT a fresh-poll demand: a poll that is currently aborting/timing out must never gate a review that checks out against the last-known figure (the stale-ok rule, 2026-09-21 live EURC attempt #7). */ balance: string | null; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string; label?: string; memo?: string} | null; onPrefillConsumed?: () => void; onOpenAddressBook?: () => void; onSent: () => void; onClose: () => void; onSendActiveChange?: (active: boolean) => void; /** The device's connectivity as the parent's balance polls see it — only shapes the in-sheet notice, never a gate. */ online?: boolean; /** Fired ONCE per mount, the first time this sheet renders its review card (surface ownership, 2026-09-21): the parent's offline strike gate must then stop replacing this sheet — offline may only speak inside it. */ onReviewShown?: (shown: boolean) => void;}) {
+export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose, onSendActiveChange, online = true, onReviewShown, onOpenReceipt}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; /** The LAST-KNOWN balance in raw units — null when no balance was EVER known. Deliberately NOT a fresh-poll demand: a poll that is currently aborting/timing out must never gate a review that checks out against the last-known figure (the stale-ok rule, 2026-09-21 live EURC attempt #7). */ balance: string | null; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string; label?: string; memo?: string} | null; onPrefillConsumed?: () => void; onOpenAddressBook?: () => void; onSent: () => void; onClose: () => void; onSendActiveChange?: (active: boolean) => void; /** The device's connectivity as the parent's balance polls see it — only shapes the in-sheet notice, never a gate. */ online?: boolean; /** Fired ONCE per mount, the first time this sheet renders its review card (surface ownership, 2026-09-21): the parent's offline strike gate must then stop replacing this sheet — offline may only speak inside it. */ onReviewShown?: (shown: boolean) => void; /** Open the shared `TxnReceipt` for a finished send (the sheet builds the `Txn`; the receipt stays mounted at the Wallet root). Optional so narrow mounts (tests) keep working. */ onOpenReceipt?: (t: Txn) => void;}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'unknown' | 'error'>('form');
   const [err, setErr] = useState<string | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
+  // The destination + acceptance fact of the LAST submit, for the terminal surface and the
+  // error-phase guidance. `accepted` mirrors `broadcast.sig !== null` into render space: the
+  // terminal (unknown with the kept signature) and the two refund-safe guidance lines
+  // (nothing-sent vs fee-only) are decisions about whether the network ACCEPTED anything.
+  const [sentTo, setSentTo] = useState('');
+  const [accepted, setAccepted] = useState(false);
+  // Check status (the unknown terminal's read-only re-read of the chain): busy flag, a failed
+  // check (the rail answered and cannot be reached right now), and the VERDICT state — the
+  // status carried an on-chain `err`, which is the definitive fee-only failure panel.
+  const [checkBusy, setCheckBusy] = useState(false);
+  const [checkErr, setCheckErr] = useState<string | null>(null);
+  const [checkFailed, setCheckFailed] = useState(false);
   const [saved, setSaved] = useState<SavedAddress[]>([]);
   const [saveName, setSaveName] = useState('');
   // A pay link's claimed label + memo (the SOL twin of the IC prefill's toName/memo). `for` pins
@@ -72,7 +84,6 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
   // that CONFIRMED). `sendSol`/`sendSpl` resolve only on a confirmed signature and throw otherwise,
   // so the catch below — the honest "we don't know" path — never reaches the award.
   const {journey} = useJourney();
-  const {copied, copy: doCopy} = useCopyFeedback();
 
   useEscapeToClose(onClose);
 
@@ -214,6 +225,11 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
     console.warn(`money: sol send sheet submit ${isSpl ? token : 'SOL'} to=${destination} amount=${raw}`);
     setPhase('submitting');
     setErr(null);
+    // Fresh attempt: no acceptance fact, no check verdict, and the destination the review showed.
+    setAccepted(false);
+    setCheckFailed(false);
+    setCheckErr(null);
+    setSentTo(destination);
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
     // The broadcast boundary, captured: the moment the network ACCEPTS the transaction this holds
     // its signature — the ONLY fact that separates "definitely not sent" (a throw before it) from
@@ -228,7 +244,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
       // transfer needs no decimals — the mint fixes them). Both sign locally + broadcast to the RPC.
       const splMint = isSpl ? mint : null;
       if (isSpl && splMint == null) throw new Error(`no mint for token ${token}`);
-      const onBroadcast = (sig: string) => { broadcast.sig = sig; };
+      const onBroadcast = (sig: string) => { broadcast.sig = sig; setAccepted(true); };
       const sig = splMint != null
         ? await sendSpl(identity.secretHex, destination, BigInt(raw), splMint, signal, onBroadcast)
         : await sendSol(identity.secretHex, destination, BigInt(raw), signal, onBroadcast);
@@ -247,6 +263,11 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
     } catch (e: unknown) {
       // The honest outcome split. The seam guarantees this catch runs by the caller's deadline
       // (sendSol/sendSpl settle on abort), so `submitting` can never outlive SOL_SEND_TIMEOUT.
+      // INVARIANT (pinned in SolanaWithdrawSheet.test.tsx): the error phase — the only phase that
+      // returns to the form and so offers a fresh send — is reachable ONLY when nothing was
+      // accepted (`broadcast.sig === null`) or the failure is the chain's own definitive
+      // `transaction failed:` verdict (fee-only; nothing moved but the fee). Every other
+      // post-acceptance throw lands in `unknown`, which has NO send control at all.
       const msg = e instanceof Error ? e.message : String(e);
       if (broadcast.sig !== null && !isSolTransactionFailed(msg)) {
         // The network ACCEPTED the transaction; only the confirmation is missing (deadline, abort,
@@ -265,7 +286,8 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
         // A Solana RPC error (insufficient funds / rent-exempt violation / network / missing ATA),
         // the venue's own broadcast rejection (a 2xx JSON-RPC error body — thrown before anything
         // was accepted), or an on-chain failure (`transaction failed:` — definite, fee only).
-        console.warn(`money: sol send sheet ERROR (nothing accepted): ${msg}`);
+        // The form returns with a per-class guidance line below (nothing-sent vs fee-only).
+        console.warn(`money: sol send sheet ERROR (accepted=${broadcast.sig !== null}): ${msg}`);
         setErr(friendlySolError(msg));
         setPhase('error');
       }
@@ -274,9 +296,38 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
     }
   }
 
-  const copySig = async () => {
-    if (signature) { await doCopy(signature); }
-  };
+  /** The unknown terminal's Check status — a READ, never a re-sign. `getSolSignatureStatus`
+   *  re-reads the chain for the kept signature; the resolution matrix (pinned in
+   *  SolanaWithdrawSheet.test.tsx): confirmed/finalized ⇒ the settled panel (the transfer
+   *  landed — the stamp follows, now that it is a confirmed payment); an on-chain `err` ⇒ the
+   *  terminal failed panel (fee-only truth); null (never heard of it) or 'processed' ⇒ the
+   *  honest pending stays, unchanged; a throw (rail unreachable) ⇒ a check-failed line under
+   *  the button and the pending STAYS — a check that cannot complete is never a verdict. */
+  async function checkStatus() {
+    if (!signature || checkBusy) return;
+    setCheckBusy(true);
+    setCheckErr(null);
+    try {
+      const st = await getSolSignatureStatus(signature);
+      if (st != null && st.err != null) {
+        setCheckFailed(true);
+        console.warn(`money: sol send sheet check → ON-CHAIN FAILURE for ${signature}`);
+        return;
+      }
+      if (st != null && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
+        setPhase('done');
+        awardPaymentTested(journey); // confirmed NOW — the stamp follows the resolution, as ever
+        console.warn(`money: sol send sheet check → CONFIRMED ${signature}`);
+        return;
+      }
+      console.warn(`money: sol send sheet check → still pending (${st?.confirmationStatus ?? 'unknown to the cluster'})`);
+    } catch (e: unknown) {
+      setCheckErr(M.withdraw.send.checkFailed);
+      console.warn(`money: sol send sheet check FAILED:`, e instanceof Error ? e.message : String(e));
+    } finally {
+      setCheckBusy(false);
+    }
+  }
 
   // Phase 6 fail-closed + 2026-08-14 setup action: token send when the device's ATA is KNOWN
   // absent → the shared one-tap setup card (SolanaAtaSetupCard — same surface as the Receive
@@ -308,37 +359,47 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
 
   const body = (
     <>
-      {phase === 'done' && signature ? (
-        <View style={S.centerAll}>
-          <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-          <Text testID="sol-send-outcome" style={S.paidText}>{M.withdraw.sol.sent}</Text>
-          <Text style={S.paidSub}>{fmt(raw)}</Text>
-          <Text style={S.dim2}>{M.withdraw.sol.txSignature}</Text>
-          <Text testID="sol-send-signature" selectable={true} style={S.sheetAddr}>{signature}</Text>
-          <Pressable testID="btn-sol-send-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel={M.withdraw.sol.copySignatureLabel}>
-            <IconCopy size={18} color={C.brandInk}/>
-            <Text style={S.primaryText}>{copied === 'clipboard' ? M.withdraw.copied : copied === 'shared' ? M.withdraw.shared : M.withdraw.sol.copySignature}</Text>
-          </Pressable>
-          <Text style={S.dim2}>{M.withdraw.balanceAuto}</Text>
-          <Pressable testID="btn-sol-send-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
-        </View>
-      ) : phase === 'unknown' && signature ? (
-        // The honest unknown outcome (the send's deadline/abort over an ACCEPTED transaction): the
-        // signature is real — the transfer MAY still land — so the panel says exactly that and
-        // names the practical next step (check the balance, do NOT resend). No green check: it is
-        // not a settled send; no spinner: it is not a pending UI promise either.
-        <View style={S.centerAll}>
-          <Text testID="sol-send-unknown-title" style={S.paidText}>{M.withdraw.sol.sentUnknown}</Text>
-          <Text style={S.paidSub}>{fmt(raw)}</Text>
-          <Text testID="sol-send-unknown-note" style={S.dim2}>{M.withdraw.sol.sentUnknownBody}</Text>
-          <Text style={S.dim2}>{M.withdraw.sol.txSignature}</Text>
-          <Text testID="sol-send-signature" selectable={true} style={S.sheetAddr}>{signature}</Text>
-          <Pressable testID="btn-sol-send-copy" style={S.primaryWide} onPress={copySig} accessibilityRole="button" accessibilityLabel={M.withdraw.sol.copySignatureLabel}>
-            <IconCopy size={18} color={C.brandInk}/>
-            <Text style={S.primaryText}>{copied === 'clipboard' ? M.withdraw.copied : copied === 'shared' ? M.withdraw.shared : M.withdraw.sol.copySignature}</Text>
-          </Pressable>
-          <Pressable testID="btn-sol-send-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
-        </View>
+      {(phase === 'done' || (phase === 'unknown' && signature)) ? (
+        // The shared send terminal (both rails end here). Settled: the confirmed panel with the
+        // signature as the reference. Unknown: the honest "may still land" panel — the signature
+        // is real (the network ACCEPTED), so it is kept, shown, and re-checkable via the
+        // read-only Check status; the receipt rides the pending flag so it says "not confirmed
+        // yet" instead of printing a proof. A Check status that returns an on-chain err flips
+        // the panel to the definitive fee-only failure (never a resend invite — the form is the
+        // only place a NEW send is consented).
+        <SendTerminal
+          settled={phase === 'done'}
+          failed={phase === 'unknown' && checkFailed}
+          headline={phase === 'done' ? M.withdraw.sol.sent : checkFailed ? M.withdraw.send.failed : M.withdraw.sol.sentUnknown}
+          amountText={fmt(raw)}
+          destinationLabel={M.withdraw.ic.sentTo}
+          destination={sentTo}
+          pendingBody={checkFailed ? undefined : M.withdraw.sol.sentUnknownBody}
+          failedBody={checkFailed ? M.withdraw.send.feeOnly : undefined}
+          referenceLabel={M.withdraw.sol.txSignature}
+          reference={signature ?? ''}
+          refTestID="sol-send-signature"
+          prefix="sol-send"
+          onOpenReceipt={onOpenReceipt != null && signature != null
+            ? () => onOpenReceipt({
+                nonce: signature!,
+                amount: raw,
+                who: '',
+                memo: '',
+                time: fmtTime(Date.now()),
+                ts: Date.now(),
+                dir: 'out',
+                assetId: `solana:${token}`,
+                counterparty: sentTo,
+                ledgerRef: signature!,
+                ...(phase === 'unknown' && !checkFailed ? {pending: true as const} : {}),
+              })
+            : undefined}
+          onCheckStatus={phase === 'unknown' ? () => { void checkStatus(); } : undefined}
+          checkBusy={checkBusy}
+          checkErr={checkErr}
+          onDone={onClose}
+        />
       ) : phase === 'submitting' ? (
         <View style={S.centerAll}>
           <ActivityIndicator color={C.brandText} />
@@ -427,6 +488,14 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
           ) : null}
 
           {err ? <Text testID="sol-send-err" style={S.err}>{err}</Text> : null}
+
+          {/* Error-phase guidance, one refund-safe line per failure class (the invariant comment
+              in confirm()): nothing was accepted ⇒ the money never left, a fresh send is safe;
+              the chain's own `transaction failed:` verdict over an ACCEPTED broadcast ⇒ fee-only
+              truth. The form is the only place a NEW send is consented — no automatic re-send
+              exists on either path. */}
+          {phase === 'error' && !accepted ? <Text testID="sol-send-nothing-sent" style={S.dim2}>{M.withdraw.send.nothingSent}</Text> : null}
+          {phase === 'error' && accepted ? <Text testID="sol-send-fee-note" style={S.warnNote}>{M.withdraw.send.feeOnly}</Text> : null}
 
           {/* Offline while the review is up: a NOTICE inside the sheet, never a teardown. The
               strike gate defers (see onReviewShown) — the honest statement of what offline means
