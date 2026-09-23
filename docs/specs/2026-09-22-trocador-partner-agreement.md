@@ -79,6 +79,15 @@ dpay cannot refuse the accrual over the API, and what happens to that partner ba
    against the current pins. FIRST-RUN RESULT 2026-09-22: pins verified; the registered pair is
    listed but currently UNQUOTED (rig verified via a btc→xmr control quote — exit 3) → re-run
    this probe before go-live; SideShift remains the live ICP↔SOL venue until then.
+   RE-RUN RESULT 2026-09-24: same verdict (exit 3) — pins verified, icp→sol still listed but
+   unquoted (the btc→xmr control quoted, so the rig and key are sound). Same-day pair
+   measurements toward registration: icp→usdc answered "no resulting quote" too (usdc/SOL is
+   listed, minimum 5.51); EURC has NO Solana row at all — only "Euro Coin (ERC20)",
+   ticker `EURC`, network `ERC20` (a different rail than dpay's EURC-on-Solana); usdc→icp
+   resolves the pair and refused 2 USDC as below the venue minimum. → The trocador-usdc /
+   trocador-eurc registry rows stay UNREGISTERED: a listed-but-unquoted venue is no venue to
+   route through, and the app's honest no-quote verdict (the cefi noQuote state, flow 207) is
+   the product behavior until a probe run actually QUOTES the pairs.
 4. **Deploy is founder-run.** The one runbook is **`docs/OPS.md` §3** — it is deliberately not
    restated here (image build, the between-steps commit record, `just verify-relay`/`just floor`
    afterwards).
