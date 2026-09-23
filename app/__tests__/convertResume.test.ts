@@ -16,6 +16,7 @@
  */
 import {afterEach, beforeEach, describe, expect, jest, test} from '@jest/globals';
 
+const MOCK_ABORT_FLAGS = new Set<string>();
 jest.mock('../convert', () => ({
   executeConvert: jest.fn(),
   probeConvertSettlement: jest.fn(),
@@ -24,7 +25,8 @@ jest.mock('../convert', () => ({
   saveConvertRecord: jest.fn(async () => undefined),
   isTerminalConvertStep: (step: string) =>
     ['done', 'failed_refunded', 'failed_leg', 'stuck', 'quote_expired', 'provider_refunded', 'aborted'].includes(step),
-  requestConvertAbort: jest.fn(),
+  requestConvertAbort: jest.fn((id: string) => { MOCK_ABORT_FLAGS.add(id); }),
+  convertAborted: (id: string) => MOCK_ABORT_FLAGS.has(id),
   isHubConvertRecord: jest.fn(() => false),
   prepareCrossRailSolLeg: jest.fn(),
   attachCctpBurnTx: jest.fn(),
@@ -61,6 +63,7 @@ import {
   confirmCrossRailSolLeg,
   convertResumeSnapshot,
   fetchProviderStatus,
+  providerLastCheckedAtMs,
   startConvertResumeEngine,
   subscribeConvertRecords,
 } from '../convertResume';
@@ -110,6 +113,7 @@ const FAST = {rearmMs: 5, stuckWatchMs: 5, providerPollMs: 5, executorOpts: {sub
 
 beforeEach(() => {
   jest.clearAllMocks();
+  MOCK_ABORT_FLAGS.clear();
   jest.mocked(loadConvertRecords).mockResolvedValue({});
   jest.mocked(executeConvert).mockImplementation(async (rec: ConvertRecord) => rec);
   jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue('principal' as never);
@@ -301,6 +305,22 @@ describe('advanceProviderRecord — the providerRef driver', () => {
     expect(next.step).toBe('done');
     expect(next.outAmountNet).toBe('49600000'); // toUnits('0.0496', 9) — the venue's own figure
     expect(next.outTx).toBe('h-out-1');
+  });
+  test('the late-deposit watch (2026-09-24): from quote_expired the venue\'s later words stay true', async () => {
+    // expired-from-awaiting_deposit lands the record at quote_expired, but a LATE deposit
+    // can still land at the venue and be refunded (or even honored) — only the venue knows,
+    // so the venue's OWN later words must stay able to move the record. Never backwards: a
+    // repeated 'expired' or an awaiting status resurrects nothing.
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(res({status: 'refunded'}) as never);
+    expect((await advanceProviderRecord(providerRecord({step: 'quote_expired'}))).step).toBe('provider_refunded');
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(res({status: 'deposit_received'}) as never);
+    expect((await advanceProviderRecord(providerRecord({step: 'quote_expired'}))).step).toBe('provider_processing');
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(res({status: 'Completed', amount_out: '189990000'}) as never);
+    expect((await advanceProviderRecord(providerRecord({step: 'quote_expired'}))).step).toBe('done');
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(res({status: 'expired'}) as never);
+    expect((await advanceProviderRecord(providerRecord({step: 'quote_expired'}))).step).toBe('quote_expired');
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(res({status: 'waiting'}) as never);
+    expect((await advanceProviderRecord(providerRecord({step: 'quote_expired'}))).step).toBe('quote_expired');
   });
   test('a 429 advances NOTHING and registers the Retry-After backoff for the engine', async () => {
     expect(providerRateLimitedUntilMs('cef-1')).toBeNull();
@@ -603,6 +623,67 @@ describe('abortConvertRecord — the user\'s Stop through the resume engine', ()
     expect(jest.mocked(requestConvertAbort)).toHaveBeenCalledWith('no-such-record');
     expect(Object.keys(convertResumeSnapshot())).toEqual([]);
     expect(saveConvertRecord).not.toHaveBeenCalled();
+  });
+});
+
+// --- the late-deposit watch: an expired quote keeps a SLOW provider poll (2026-09-24) -------------
+describe('the late-deposit watch — quote_expired is a watch, not the end', () => {
+  test('an expired quote keeps polling; the venue\'s refunded word flips it to provider_refunded', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({
+      'cef-1': providerRecord({step: 'quote_expired'}),
+    });
+    // The first slow poll still reads expired, then the venue notices the late deposit
+    // and refunds it — the dead record must observe that, not assert it never happens.
+    jest.mocked(fetchWithTimeout)
+      .mockResolvedValueOnce(res({status: 'expired'}) as never)
+      .mockResolvedValueOnce(res({status: 'refunded'}) as never);
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(40);
+      expect(fetchWithTimeout).toHaveBeenCalled(); // the watch is live past the expiry
+      expect(convertResumeSnapshot()['cef-1']?.step).toBe('provider_refunded');
+      expect(saveConvertRecord).toHaveBeenCalledWith('pub', expect.objectContaining({step: 'provider_refunded'}));
+    } finally {
+      stop();
+    }
+  });
+
+  test('the user\'s abort flag retires the watch: no further polls, the step stays quote_expired', async () => {
+    // quote_expired is TERMINAL, so Stop does not rewrite the step (an abort must never
+    // un-terminal a record) — the flag alone retires the slow watch.
+    jest.mocked(loadConvertRecords).mockResolvedValue({
+      'cef-1': providerRecord({step: 'quote_expired'}),
+    });
+    jest.mocked(fetchWithTimeout).mockResolvedValue(res({status: 'expired'}) as never);
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      await abortConvertRecord('cef-1');
+      expect(convertResumeSnapshot()['cef-1']?.step).toBe('quote_expired'); // never un-terminal
+      await sleep(5); // let any in-flight poll land
+      const polls = jest.mocked(fetchWithTimeout).mock.calls.length;
+      await sleep(40);
+      expect(jest.mocked(fetchWithTimeout).mock.calls.length).toBe(polls); // the watch is dead
+    } finally {
+      stop();
+    }
+  });
+
+  test('the engine remembers the LAST completed read — the panel\'s "last checked" fact', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({
+      'cef-1': providerRecord({step: 'provider_processing'}),
+    });
+    jest.mocked(fetchWithTimeout).mockResolvedValue(res({status: 'processing'}) as never);
+    expect(providerLastCheckedAtMs('cef-1')).toBeNull(); // no read yet — nothing is claimed
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      const at = providerLastCheckedAtMs('cef-1');
+      expect(at).not.toBeNull();
+      expect(at!).toBeLessThanOrEqual(Date.now());
+    } finally {
+      stop();
+    }
   });
 });
 

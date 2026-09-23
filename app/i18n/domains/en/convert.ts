@@ -143,8 +143,9 @@ export type ConvertMessages = {
   awaitingDepositBody: (sym: string, venue: string) => string;
   providerProcessingTitle: string;
   providerProcessingBody: (sym: string, venue: string) => string;
-  /** The provider's own quote/deposit window died BEFORE any value moved — distinct from any leg
-   *  expiry; the venue refused nothing, it simply stopped waiting. */
+  /** The provider's own quote/deposit window died BEFORE the deposit arrived — but a LATE
+   *  deposit can still land and be refunded (the engine keeps a slow watch for exactly
+   *  that, 2026-09-24), so this copy names the watch instead of claiming the story is over. */
   quoteExpiredTitle: string;
   quoteExpiredBody: (sym: string, venue: string) => string;
   providerRefundedTitle: string;
@@ -311,6 +312,13 @@ export type ConvertMessages = {
     /** Where a completed cross-rail payout landed (the user's own address on the other rail). */
     payoutAt: (address: string) => string;
     depositExpiryLine: (at: string) => string;
+    /** Rendered when the venue published NO expiry (e.g. Trocador orders): the honest fact
+     *  that keeps an unfunded order from reading as quietly abandoned. Sits beside the
+     *  shift-id line — the id is already named there, so this line carries ONLY the fact. */
+    noExpiryLine: string;
+    /** The provider_processing tail line: when the engine last completed a status read.
+     *  A timestamp, nothing more — no SLA is claimed and no verdict is implied (2026-09-24). */
+    lastCheckedLine: (at: string) => string;
     shiftId: (id: string) => string;
     /** Shown while the venue holds/settles the deposit: dpay owns the escalation, not the user.
      *  A calming, commitment-bearing PAIR — what is already true (funds in, payout locked),
@@ -554,7 +562,7 @@ export const convertEn: ConvertMessages = {
     `${venue} holds the deposit and is executing the order. Your ${sym} arrives when the provider completes it — dpay keeps watching until it resolves.`,
   quoteExpiredTitle: 'Quote expired',
   quoteExpiredBody: (sym, venue) =>
-    `The quote died before any value moved: ${venue} never received the deposit, so nothing was swapped and nothing needs reversing. Your ${sym} stayed where it was — start a new conversion if you still want one.`,
+    `The quote expired before the deposit arrived: ${venue} stopped waiting, so nothing was swapped. If a deposit lands late anyway, the venue returns it — dpay keeps watching in the background and this screen updates on its own. Your ${sym} stays put meanwhile.`,
   providerRefundedTitle: 'Refunded by the provider',
   providerRefundedBody: (sym, venue) =>
     `${venue} cancelled this order and returned the deposit. Watch for your ${sym} to arrive back.`,
@@ -645,6 +653,8 @@ export const convertEn: ConvertMessages = {
       `This deposit needs ${needed} — the amount plus one transfer fee — and this wallet holds ${balance}. Lower the amount, or receive more first.`,
     payoutAt: address => `Paid out to your own address: ${address}`,
     depositExpiryLine: at => `Order expires ${at}`,
+    noExpiryLine: 'No expiry published — dpay keeps watching until the venue resolves the order.',
+    lastCheckedLine: at => `Last checked ${at}.`,
     shiftId: id => `Shift ${id}`,
     settlingFundsLine: `Funds confirmed with the venue \u2014 your payout is locked at the quoted amount.`,
     settlingWatchLine: `Most conversions settle within minutes. dpay monitors every shift and steps in with the venue if one stalls \u2014 nothing for you to do.`,

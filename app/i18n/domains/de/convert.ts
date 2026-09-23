@@ -135,7 +135,7 @@ export const convertDe: ConvertMessages = {
     `${venue} hält die Einzahlung und führt die Order aus. Dein ${sym} kommt an, sobald der Anbieter sie abschließt — dpay beobachtet weiter, bis es sich auflöst.`,
   quoteExpiredTitle: 'Angebot abgelaufen',
   quoteExpiredBody: (sym, venue) =>
-    `Das Angebot ist abgelaufen, bevor ein Wert bewegt wurde: ${venue} hat die Einzahlung nie erhalten, also wurde nichts getauscht und nichts muss rückgängig gemacht werden. Dein ${sym} ist geblieben, wo es war — starte eine neue Umwandlung, wenn du weiterhin eine möchtest.`,
+    `Das Angebot ist abgelaufen, bevor die Einzahlung ankam: ${venue} wartet nicht mehr, also wurde nichts getauscht. Trifft eine Einzahlung doch noch spät ein, gibt sie der Anbieter zurück — dpay beobachtet im Hintergrund weiter, und dieser Bildschirm aktualisiert sich von selbst. Dein ${sym} bleibt solange, wo es ist.`,
   providerRefundedTitle: 'Vom Anbieter erstattet',
   providerRefundedBody: (sym, venue) =>
     `${venue} hat diese Order storniert und die Einzahlung zurückgezahlt. Beobachte, wann dein ${sym} zurückkommt.`,
@@ -218,6 +218,8 @@ export const convertDe: ConvertMessages = {
     depositAmountLabel: 'Genauer Einzahlungsbetrag',
     depositMemoLabel: 'Memo (erforderlich)',
     depositExpiryLine: at => `Bestellung läuft um ${at} ab`,
+    noExpiryLine: 'Kein Ablaufdatum veröffentlicht — dpay beobachtet weiter, bis der Anbieter die Order abschließt.',
+    lastCheckedLine: at => `Zuletzt geprüft: ${at}.`,
     shiftId: id => `Shift ${id}`,
     settlingFundsLine: `Fonds bei der Plattform bestätigt — deine Auszahlung ist auf den genannten Betrag festgelegt.`,
     settlingWatchLine: `Die meisten Konvertierungen sind in Minuten abgewickelt. dpay überwacht jeden Shift und interviniert bei der Plattform, falls einer hakt — nichts für dich zu tun.`,

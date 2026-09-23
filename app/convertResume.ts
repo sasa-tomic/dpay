@@ -16,11 +16,13 @@
  * Idle-safety: at most one in-flight drive per record id; every re-arm is a single timeout
  * (pending ledger watch: CONVERT_ENGINE_REARM_MS; provider poll: one request per
  * CONVERT_ENGINE_PROVIDER_POLL_MS; unacknowledged stuck watch: one probe per
- * CONVERT_ENGINE_STUCK_WATCH_MS). Terminal steps stop their record's timer for good — except
- * `stuck`, which the engine keeps slow-probing (the submitted update may still have executed)
- * until it resolves done/refunded or the USER acknowledges the stuck state
- * (`acknowledgeStuckRecord` → `acknowledgedStuckAtMs`), because an honest unknown is watchable,
- * not dismissable.
+ * CONVERT_ENGINE_STUCK_WATCH_MS). Terminal steps stop their record's timer for good — with
+ * TWO honest exceptions that keep a SLOW watch: `stuck`, which the engine keeps slow-probing
+ * (the submitted update may still have executed) until it resolves done/refunded or the USER
+ * acknowledges the stuck state (`acknowledgeStuckRecord` → `acknowledgedStuckAtMs`), and a
+ * CeFi `quote_expired`, which the engine keeps slow-polling until the venue answers for a
+ * LATE deposit (refunded/processing/completed) — an expired quote does not un-see a deposit
+ * that lands afterwards. Both are honest unknowns: watchable, not dismissable.
  *
  * Red lines (spec 2026-09-07, unchanged): nothing new is ever signed during recovery — the IC
  * driver only re-submits the record's OWN frozen envelope bytes, and the provider driver is a
@@ -38,6 +40,7 @@ import {DpayCore} from './services/native';
 import {deriveSolanaAddress} from './solana/identity';
 import {
   attachCctpBurnTx as attachCctpBurnTxToRecord,
+  convertAborted,
   declineCctpHandoff as declineCctpHandoffOnRecord,
   executeConvert,
   executeCrossRailConvert,
@@ -73,6 +76,18 @@ export async function advanceProviderRecord(
   relayUrl?: string,
 ): Promise<ConvertRecord> {
   return advanceProviderRecordPersisted(record, saveConvertRecordFor, stillMine, relayUrl);
+}
+
+/** Per-record epoch ms of the engine's LAST completed provider status read — the
+ *  "last checked" fact the provider_processing panel shows (2026-09-24). Session-local
+ *  by design (a fresh session honestly knows nothing until its own first poll lands)
+ *  and never persisted: the persisted record must stay a state machine, not a poll log. */
+const PROVIDER_LAST_CHECKED_MS = new Map<string, number>();
+
+/** When did the engine last finish ONE status read for this record? Null = no read this
+ *  session (nothing is claimed). */
+export function providerLastCheckedAtMs(recordId: string): number | null {
+  return PROVIDER_LAST_CHECKED_MS.get(recordId) ?? null;
 }
 // --- the engine singleton -------------------------------------------------------------------------
 
@@ -383,12 +398,36 @@ async function driveOne(id: string): Promise<void> {
       } else if (rec.providerRef != null) {
         next = await advanceProviderRecord(rec, mine, ctx.relayUrl);
         if (!mine()) return; // stale drive — no post-run write, no re-arm
+        PROVIDER_LAST_CHECKED_MS.set(id, Date.now()); // one read completed — the panel's "last checked"
         if (next !== rec) {
           const before = state.records.get(id)?.step;
           state.records.set(id, next);
           fireOnTerminalIfEnteredListed(before, next);
           notify();
         }
+      }
+    } else if (
+      rec.step === 'quote_expired'
+      && rec.providerRef != null
+      && rec.legs.length === 0
+      && rec.solanaLeg == null
+    ) {
+      // The LATE-DEPOSIT watch (2026-09-24): `expired` from awaiting_deposit is the VENUE
+      // giving up on its quote window, but a deposit that lands late is still refunded (or
+      // even honored) by the venue — a dead record must observe that, not assert it never
+      // happens. One SLOW poll per stuck-watch window (a record that cannot be advanced any
+      // faster must not be polled any faster) until the venue answers refunded/processing/
+      // completed — or the user's abort flag retires the watch (the flag, not a step rewrite:
+      // quote_expired is terminal, and abort must not un-terminal a record).
+      if (convertAborted(id)) return; // the watch was retired — never re-armed below
+      next = await advanceProviderRecord(rec, mine, ctx.relayUrl);
+      if (!mine()) return; // stale drive — no post-run write, no re-arm
+      PROVIDER_LAST_CHECKED_MS.set(id, Date.now());
+      if (next !== rec) {
+        const before = state.records.get(id)?.step;
+        state.records.set(id, next);
+        fireOnTerminalIfEnteredListed(before, next);
+        notify();
       }
     } else if (
       rec.step === 'stuck'
@@ -467,6 +506,18 @@ function scheduleNext(id: string, rec: ConvertRecord): void {
     && rec.acknowledgedStuckAtMs == null
   ) {
     delay = state.opts.stuckWatchMs;
+  } else if (
+    rec.step === 'quote_expired'
+    && rec.providerRef != null
+    && rec.legs.length === 0
+    && rec.solanaLeg == null
+    && !convertAborted(id)
+  ) {
+    // The late-deposit watch (2026-09-24): the quote_expired step keeps ONE SLOW poll per
+    // stuck-watch window — the same cadence as the stuck probe (a record that cannot be
+    // advanced any faster must not be polled any faster) — until the venue resolves the
+    // late deposit or the user's abort flag retires the watch.
+    delay = state.opts.stuckWatchMs;
   }
   if (delay == null) return;
   state.timers.set(id, setTimeout(() => {
@@ -488,8 +539,10 @@ function stopEngine(): void {
   for (const id of [...state.timers.keys()]) clearTimer(id);
   state.ctx = null;
   // The 429 backoffs die with the session that earned them: a new identity's engine sizes
-  // its ticks from its own drives, never a predecessor's hints.
+  // its ticks from its own drives, never a predecessor's hints. The last-checked fact is
+  // the same shape of honesty — the next session reports only its own reads.
   clearAllProviderRateLimits();
+  PROVIDER_LAST_CHECKED_MS.clear();
   // subscribers survive a stop: a still-mounted screen keeps reading the last snapshot until a
   // new engine starts (identity switch / wallet reload).
 }

@@ -134,7 +134,7 @@ export const convertEs: ConvertMessages = {
     `${venue} retiene el depósito y está ejecutando la orden. Tu ${sym} llega cuando el proveedor la complete — dpay sigue vigilando hasta que se resuelva.`,
   quoteExpiredTitle: 'Cotización caducada',
   quoteExpiredBody: (sym, venue) =>
-    `La cotización murió antes de que se moviera algún valor: ${venue} nunca recibió el depósito, así que no se intercambió nada y no hay nada que revertir. Tu ${sym} se quedó donde estaba — inicia una nueva conversión si aún quieres una.`,
+    `La cotización caducó antes de que llegara el depósito: ${venue} dejó de esperar, así que no se intercambió nada. Si un depósito llega tarde igualmente, el proveedor lo devuelve — dpay sigue vigilando en segundo plano y esta pantalla se actualiza sola. Tu ${sym} se queda donde está mientras tanto.`,
   providerRefundedTitle: 'Reembolsado por el proveedor',
   providerRefundedBody: (sym, venue) =>
     `${venue} canceló esta orden y devolvió el depósito. Vigila la llegada de tu ${sym}.`,
@@ -217,6 +217,8 @@ export const convertEs: ConvertMessages = {
     depositAmountLabel: 'Cantidad exacta a depositar',
     depositMemoLabel: 'Memo (obligatorio)',
     depositExpiryLine: at => `La orden caduca ${at}`,
+    noExpiryLine: 'Sin caducidad publicada — dpay sigue vigilando hasta que el proveedor resuelva la orden.',
+    lastCheckedLine: at => `Última comprobación: ${at}.`,
     shiftId: id => `Shift ${id}`,
     settlingFundsLine: `Fondos confirmados con la plataforma: tu pago queda bloqueado por el importe cotizado.`,
     settlingWatchLine: `La mayoría de las conversiones se liquidan en minutos. dpay supervisa cada shift e interviene con la plataforma si uno se demora — nada que hacer de tu parte.`,

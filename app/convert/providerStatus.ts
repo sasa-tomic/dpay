@@ -177,13 +177,24 @@ export async function fetchProviderStatus(
  *        the agreement's webhook-first status the relay-side state can already be settled
  *        the first time the fallback poll looks, and a terminal word must never be polled
  *        past)
- *      expired → quote_expired (the QUOTE died before value moved — never set by leg expiry)
+ *      expired → quote_expired (the QUOTE died before value moved — never set by leg expiry;
+ *        NOT the end: a LATE deposit can still land and be refunded, so the ENGINE keeps a
+ *        slow watch on this step — see the quote_expired arm)
  *      refunded → provider_refunded
  *    from provider_processing:
  *      completed → done (the provider's own amount, else the record's expected net)
  *      refunded → provider_refunded
  *      anything else → unchanged (an 'expired' after value moved is the provider's refund story
  *      to tell, not ours to guess)
+ *    from quote_expired (the late-deposit watch, 2026-09-24): the venue said the quote died,
+ *      but only the venue knows whether a late deposit landed afterwards — so the venue's own
+ *      later words stay true here:
+ *      refunded → provider_refunded (the late deposit came and was sent back)
+ *      processing-family → provider_processing (the venue honored the late deposit — the
+ *        record is live again and re-enters the matrix above)
+ *      completed → done (the first terminal word lands, same rule as every other state)
+ *      everything else → unchanged (an 'expired' repeat or an awaiting status never
+ *        resurrects the expired quote)
  */
 export async function advanceProviderRecord(
   record: ConvertRecord,
@@ -203,6 +214,7 @@ export async function advanceProviderRecord(
   const reading = await fetchProviderStatus(ref, relayUrl);
   const from = record.step;
   const inAwaiting = from === 'awaiting_deposit';
+  const inExpired = from === 'quote_expired';
   const apply = async (next: ConvertRecord): Promise<ConvertRecord> => {
     if (!stillMine()) return next; // stale drive (identity switched mid-poll) — persist nothing
     await persist(next);
@@ -213,12 +225,14 @@ export async function advanceProviderRecord(
       if (inAwaiting) return apply({...record, step: 'awaiting_deposit'});
       return record;
     case 'processing':
-      if (inAwaiting || from === 'provider_processing') return apply({...record, step: 'provider_processing'});
+      if (inAwaiting || inExpired || from === 'provider_processing') {
+        return apply({...record, step: 'provider_processing'});
+      }
       return record;
     case 'completed':
-      // The FIRST observed terminal word lands the record from either held state (see the
+      // The FIRST observed terminal word lands the record from any held state (see the
       // matrix note): a settled trade is never polled again (agreement term 4).
-      if (inAwaiting || from === 'provider_processing') {
+      if (inAwaiting || inExpired || from === 'provider_processing') {
         // The cefi widening (2026-09-15): SideShift speaks DECIMAL strings in the out
         // asset's own units ("settleAmount": "0.0495…"), while outAmountNet is raw units
         // like every other record money field. Normalize exactly at this boundary and
@@ -239,7 +253,7 @@ export async function advanceProviderRecord(
       if (inAwaiting) return apply({...record, step: 'quote_expired'});
       return record;
     case 'refunded':
-      if (inAwaiting || from === 'provider_processing') {
+      if (inAwaiting || inExpired || from === 'provider_processing') {
         return apply({...record, step: 'provider_refunded'});
       }
       return record;

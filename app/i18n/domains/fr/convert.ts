@@ -134,7 +134,7 @@ export const convertFr: ConvertMessages = {
     `${venue} détient le dépôt et exécute la commande. Ton ${sym} arrive quand le prestataire la termine — dpay continue de surveiller jusqu'à sa résolution.`,
   quoteExpiredTitle: 'Devis expiré',
   quoteExpiredBody: (sym, venue) =>
-    `Le devis a expiré avant qu'une valeur ne bouge : ${venue} n'a jamais reçu le dépôt, donc rien n'a été échangé et rien n'est à annuler. Ton ${sym} est resté là où il était — lance une nouvelle conversion si tu en veux toujours une.`,
+    `Le devis a expiré avant l'arrivée du dépôt : ${venue} a cessé d'attendre, donc rien n'a été échangé. Si un dépôt arrive quand même en retard, la plateforme le renvoie — dpay continue de surveiller en arrière-plan et cet écran se met à jour tout seul. Ton ${sym} reste où il est entre-temps.`,
   providerRefundedTitle: 'Remboursé par le prestataire',
   providerRefundedBody: (sym, venue) =>
     `${venue} a annulé cette commande et retourné le dépôt. Surveille le retour de ton ${sym}.`,
@@ -217,6 +217,8 @@ export const convertFr: ConvertMessages = {
     depositAmountLabel: 'Montant exact à déposer',
     depositMemoLabel: 'Memo (obligatoire)',
     depositExpiryLine: at => `L'ordre expire ${at}`,
+    noExpiryLine: 'Pas d’expiration publiée — dpay continue de surveiller jusqu’à ce que la plateforme résolve la commande.',
+    lastCheckedLine: at => `Dernière vérification : ${at}.`,
     shiftId: id => `Shift ${id}`,
     settlingFundsLine: `Fonds confirmés auprès de la plateforme — votre versement est verrouillé au montant coté.`,
     settlingWatchLine: `La plupart des conversions sont réglées en quelques minutes. dpay surveille chaque shift et intervient auprès de la plateforme si l'un bloque — rien à faire de votre côté.`,
