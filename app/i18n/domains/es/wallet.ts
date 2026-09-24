@@ -15,7 +15,6 @@ export const walletEs: WalletMessages = {
   balance: {
     label: 'Saldos',
     lockedHint: 'Primero termina o cancela el pago en curso',
-    of: asset => `Saldo de ${asset}`,
     approx: asset => `~ ${asset} aprox.`,
     approxAmount: amount => `~${amount}`,
     backAgainToExit: 'Pulsa atrás otra vez para salir',
@@ -28,7 +27,6 @@ export const walletEs: WalletMessages = {
     railReason: {destination: 'es el que pide el cobro', funded: 'aquí tienes saldo'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Principal',
-    mainLabel: currency => `${currency} · Principal`,
     settingsTitle: 'Moneda principal',
     settingsHint: 'La moneda que dpay muestra primero y usa por defecto',
     confirm: 'Continuar',
@@ -53,11 +51,21 @@ export const walletEs: WalletMessages = {
 
   home: {
     actions: {
-      pay: 'Pagar',
-      payHint: 'Escanea un código o toca un teléfono',
-      receive: 'Recibir',
-      receiveHint: 'Pide o muestra tu dirección',
-      addMoney: 'Añadir dinero',
+      addFunds: 'Añadir fondos',
+      convert: 'Convertir',
+      withdraw: 'Retirar fondos',
+      more: 'Más acciones',
+    },
+    balanceEyebrow: code => `Saldo ${code}`,
+    menu: {
+      ledger: 'Lista de transacciones',
+      remove: 'Quitar',
+      close: 'Cerrar menú',
+    },
+    removeRefusal: {
+      nonzero: amount => `Todavía tienes ${amount}. Conviértelo o muévelo primero, y después quítalo.`,
+      unreadable: 'dpay no puede leer este saldo ahora mismo. Reconéctate e inténtalo de nuevo.',
+      last: 'Tu cartera necesita al menos una moneda.',
     },
     activity: {
       title: 'Actividad',

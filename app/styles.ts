@@ -307,6 +307,12 @@ function buildStyles(p: Palette) {
   // [Add new currency] — the full-width pill at the currency list's end (the assetActionBtn
   // chrome, stretched to the list so the affordance reads as a list action, not a row's).
   accountsAddCurrency: {alignSelf: 'stretch', marginTop: 18},
+  // The Home overflow menu's rows (the [...] sheet): a full-width tap row, icon + label, with the
+  // same 44px+ touch height every list control carries.
+  homeMenuRow: {flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48, paddingVertical: 12, paddingHorizontal: 4},
+  homeMenuRowText: {flex: 1, fontSize: 16, fontWeight: '600', color: p.ink, fontFamily: FONT.sansMedium},
+  // The menu's context line — WHICH currency the actions act on, under the "More actions" title.
+  homeMenuCurrency: {fontSize: 20, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, marginBottom: 6},
   // Convert — the delegated-conversion surface (spec 2026-09-07 §5). The checklist card carries
   // every transparency line on ONE surface before signing; the state panel renders the §4 machine.
   // Left-aligned instruction copy (not centered): these are lines to read closely before money

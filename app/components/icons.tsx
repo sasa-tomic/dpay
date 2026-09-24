@@ -67,6 +67,12 @@ export const IconClose = make(({color}) => {
   return [l(18, 6, 6, 18), l(6, 6, 18, 18)];
 });
 
+// The overflow-menu mark (the sketch's [...]): three dots on the horizontal mid-line.
+export const IconMore = make(({color}) => {
+  const {c} = withStroke(color);
+  return [c(5, 12, 1.4), c(12, 12, 1.4), c(19, 12, 1.4)];
+});
+
 export const IconCheck = make(({color}) => {
   const {p} = withStroke(color);
   return [p('M20 6 9 17l-5-5')];

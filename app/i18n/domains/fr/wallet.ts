@@ -16,7 +16,6 @@ export const walletFr: WalletMessages = {
   balance: {
     label: 'Soldes',
     lockedHint: 'Terminez ou annulez d’abord le paiement en cours',
-    of: asset => `Solde ${asset}`,
     approx: asset => `~ ${asset} environ`,
     approxAmount: amount => `~${amount}`,
     backAgainToExit: 'Appuyez à nouveau pour quitter',
@@ -29,7 +28,6 @@ export const walletFr: WalletMessages = {
     railReason: {destination: 'c’est lui que demande le paiement', funded: 'tu as un solde ici'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Principale',
-    mainLabel: currency => `${currency} · Principale`,
     settingsTitle: 'Monnaie principale',
     settingsHint: 'La monnaie que dpay affiche en premier et utilise par défaut',
     confirm: 'Continuer',
@@ -54,11 +52,21 @@ export const walletFr: WalletMessages = {
 
   home: {
     actions: {
-      pay: 'Payer',
-      payHint: 'Scanner un code ou toucher un téléphone',
-      receive: 'Recevoir',
-      receiveHint: 'Demander ou afficher votre adresse',
-      addMoney: 'Ajouter de l’argent',
+      addFunds: 'Ajouter des fonds',
+      convert: 'Convertir',
+      withdraw: 'Retirer des fonds',
+      more: 'Plus d’actions',
+    },
+    balanceEyebrow: code => `Solde ${code}`,
+    menu: {
+      ledger: 'Liste des transactions',
+      remove: 'Retirer',
+      close: 'Fermer le menu',
+    },
+    removeRefusal: {
+      nonzero: amount => `Vous détenez encore ${amount}. Convertissez-le ou déplacez-le d’abord, puis retirez.`,
+      unreadable: 'dpay ne peut pas lire ce solde pour l’instant. Reconnectez-vous, puis réessayez.',
+      last: 'Votre portefeuille a besoin d’au moins une devise.',
     },
     activity: {
       title: 'Activité',

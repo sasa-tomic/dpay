@@ -45,7 +45,6 @@ export type WalletMessages = {
     /** Shown as the chip's hint while a pay engine holds the selection lock. */
     lockedHint: string;
     /** Online: the polled balance is authoritative. Offline: the honest approximation. */
-    of: (asset: string) => string;
     approx: (asset: string) => string;
     /**
      * The offline balance itself, marked as best-known rather than authoritative. Takes the
@@ -82,8 +81,6 @@ export type WalletMessages = {
     railWithReason: (line: string, reason: string) => string;
     /** The badge on the accounts-list row that IS the main currency. */
     mainBadge: string;
-    /** The header eyebrow above the headline amount. */
-    mainLabel: (currency: string) => string;
     /** Settings row. */
     settingsTitle: string;
     settingsHint: string;
@@ -118,31 +115,48 @@ export type WalletMessages = {
   tab: {pay: string; receive: string; transactions: string; home: string};
 
   /**
-   * The HOME TAB — the landing surface since 2026-09-08. Its headline is the HOME CURRENCY's, not
-   * the selection's: it names the CURRENCY (`homeCurrency.mainLabel`) over the home rail's own
-   * token unit, and the offline approximation marker (`balance.approx`) outranks that label —
-   * naming the currency changes the NAME, never the online/offline distinction. The amount is
-   * always ONE rail's own balance in its own token unit, never a portfolio sum.
+   * The HOME TAB — the landing surface, currency-first (2026-09-24 redesign). Its headline is the
+   * MAIN CURRENCY's summed balance in the CURRENCY unit (fork #4): the eyebrow names the code
+   * ("Balance CHF"), the amount renders with the currency's own unit placement ("4.54 Fr"). The
+   * offline approximation marker (`balance.approx`) outranks everything — a wallet that is not
+   * connected renders its best-known figure, marked.
    */
   home: {
-    /** The action row — three EQUAL cards since 2026-09-14, when the founder killed the oversized
-     *  "Scan to pay" button for naming one gesture the screen behind it surpasses. `pay` is
-     *  honestly named: scanning, tapping and beaming all live behind it. */
+    /**
+     * The action row (fork #1): Add funds / Convert / Withdraw funds / [...]. Pay and Receive
+     * stay on the bottom tab bar — they are one tap from anywhere, so the row is money in, out,
+     * and across. `more` names the overflow menu the icon opens.
+     */
     actions: {
-      pay: string;
-      payHint: string;
-      receive: string;
-      receiveHint: string;
-      addMoney: string;
+      addFunds: string;
+      convert: string;
+      withdraw: string;
+      more: string;
+    };
+    /** The eyebrow above the headline amount: the currency as its SHORT code. */
+    balanceEyebrow: (code: string) => string;
+    /** The overflow menu (the [...] sheet): its entries, and the close affordance. */
+    menu: {
+      ledger: string;
+      remove: string;
+      close: string;
+    };
+    /**
+     * The Remove refusals — the guard's reasons as practical next steps (founder rule
+     * 2026-08-29: every refusal says what to do). `nonzero` names the balance that must move.
+     */
+    removeRefusal: {
+      nonzero: (amount: string) => string;
+      unreadable: string;
+      last: string;
     };
     /** The inline activity feed — the newest ledger rows, capped, with the see-all link. */
     activity: {
       title: string;
       seeAll: string;
     };
-    /** The headline block IS the affordance that opens the ACCOUNTS route (founder, 2026-09-14:
-     *  tapping the balance goes to the accounts and balances). `openLabel` names the ACTION for
-     *  the screen reader — never a second copy of the eyebrow sentence, which would drift. */
+    /** The headline block IS the affordance that opens the CURRENCY LIST. `openLabel` names the
+     *  ACTION for the screen reader — never a second copy of the eyebrow sentence. */
     accounts: {
       openLabel: string;
     };
@@ -314,7 +328,6 @@ export const walletEn: WalletMessages = {
   balance: {
     label: 'Balances',
     lockedHint: 'Finish or cancel the current payment first',
-    of: asset => `${asset} balance`,
     approx: asset => `~ ${asset} approx.`,
     approxAmount: amount => `~${amount}`,
     backAgainToExit: 'Press back again to exit',
@@ -327,7 +340,6 @@ export const walletEn: WalletMessages = {
     railReason: {destination: 'the payment asks for this rail', funded: 'you hold a balance here'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Main',
-    mainLabel: currency => `${currency} · Main`,
     settingsTitle: 'Main currency',
     settingsHint: 'The currency dpay shows first and pays in by default',
     confirm: 'Continue',
@@ -352,11 +364,21 @@ export const walletEn: WalletMessages = {
 
   home: {
     actions: {
-      pay: 'Pay',
-      payHint: 'Scan a code or tap a phone',
-      receive: 'Receive',
-      receiveHint: 'Request or show your address',
-      addMoney: 'Add money',
+      addFunds: 'Add funds',
+      convert: 'Convert',
+      withdraw: 'Withdraw funds',
+      more: 'More actions',
+    },
+    balanceEyebrow: code => `Balance ${code}`,
+    menu: {
+      ledger: 'Transaction list',
+      remove: 'Remove',
+      close: 'Close menu',
+    },
+    removeRefusal: {
+      nonzero: amount => `You still hold ${amount}. Move or convert it first, then remove.`,
+      unreadable: 'dpay can’t read this balance right now. Reconnect, then try again.',
+      last: 'Your wallet needs at least one currency.',
     },
     activity: {
       title: 'Activity',

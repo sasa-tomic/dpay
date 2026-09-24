@@ -1,19 +1,19 @@
 /**
- * HomeTab — the LANDING surface since 2026-09-08. Three contracts are pinned here:
+ * HomeTab — the LANDING surface, currency-first (2026-09-24 redesign). Three contracts are pinned:
  *
- *   • The HEADLINE is the HOME CURRENCY's, always. It names the currency ("Swiss francs · Main")
- *     over the home rail's own token unit, and the offline approximation marker OUTRANKS the main
- *     label — naming the currency changes the NAME, never the online/offline distinction. What it
- *     does NOT do is follow the transient selection: that was X4, where any account tap or rail
- *     toggle silently rewrote the setting onboarding exists to establish.
- *   • The action row is three EQUAL cards since 2026-09-14 (founder killed the oversized "Scan to
- *     pay" button): Pay is honestly named — the screen behind it scans, taps and beams — and lands
- *     the camera; Receive navigates; Add money acts on the HOME RAIL — the account the screen is
- *     showing — so nothing on Home moves money in or out of an account the screen is not naming.
- *   • The accounts LIST is not here (it is the accounts route — HomeAccounts.test.tsx); the
- *     AFFORDANCE is the headline block itself since 2026-09-14 (founder: "if the user clicks on
- *     the balance, they should be taken to the accounts and balances") — the whole eyebrow+amount
- *     block is the button, carrying `btn-home-accounts`.
+ *   • The HEADLINE is the founder sketch verbatim: the eyebrow names the MAIN currency as its
+ *     short code ("Balance CHF") and the amount is that currency's SUMMED balance in the CURRENCY
+ *     unit ("1.20 Fr" — forks #2 + #4; the sum itself is buildCurrencyBalances' contract, tested
+ *     in currencyBalances.test.ts). The offline approximation marker OUTRANKS everything — a
+ *     wallet that is not connected renders its best-known figure, marked. The DEMO balance never
+ *     reaches the headline (practice money is not the user's currency).
+ *   • The action row is fork #1's four cards: Add funds / Convert / Withdraw funds / [...]. Pay
+ *     and Receive stay on the bottom tab bar and are NOT duplicated here. The three money
+ *     actions act on the MAIN RAIL — the account the headline names — and disable together when
+ *     the catalog cannot realise the currency. The [...] opens the overflow menu (Wallet owns
+ *     the sheet; the menu's guard logic is tested in currency.test.ts).
+ *   • The currency LIST is not here (it is the accounts route — HomeAccounts.test.tsx); the
+ *     AFFORDANCE is the headline block itself (`btn-home-accounts`, kept from 2026-09-14).
  *
  * The activity feed is capped at ACTIVITY_ROWS rows of the merged ledger, rendered through the
  * same HistoryRow as the Transactions tab but under its OWN home-hist-* testIDs.
@@ -24,16 +24,18 @@ import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
 import {ACTIVITY_ROWS, HomeTab} from '../components/HomeTab';
 import {buildSelectableAssets} from '../config/assets';
-import {buildAssetBalances} from '../lib/assetBalances';
+import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
-import {preferredRail} from '../config/currency';
+import {offerableCurrencies, preferredRail} from '../config/currency';
 import {M} from '../i18n';
 import type {AssetId, Txn} from '../lib/types';
+import type {BalanceView} from '../lib/assetBalances';
 
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(CATALOG, {
   showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: BUNDLED_NETWORKS,
 });
+const VISIBLE = offerableCurrencies(ASSETS);
 const HOME = 'CHF' as const;
 const HOME_RAIL = preferredRail(HOME, ASSETS);
 
@@ -83,7 +85,7 @@ function pressable(tree: renderer.ReactTestRenderer, testID: string) {
   return tree.root.findAll(n => n.props?.testID === testID && typeof n.props.onPress === 'function')[0];
 }
 
-function balancesFor(over: Partial<Parameters<typeof buildAssetBalances>[0]> = {}) {
+function viewsFor(over: Partial<Parameters<typeof buildAssetBalances>[0]> = {}) {
   return buildAssetBalances({
     catalog: CATALOG,
     assets: ASSETS,
@@ -95,21 +97,42 @@ function balancesFor(over: Partial<Parameters<typeof buildAssetBalances>[0]> = {
   });
 }
 
+/** The per-currency sums, from the same views — the Wallet pipeline in miniature. */
+function sumsFor(
+  views: Readonly<Partial<Record<AssetId, BalanceView>>>,
+  over: Partial<Parameters<typeof buildCurrencyBalances>[0]> = {},
+) {
+  return buildCurrencyBalances({
+    currencies: VISIBLE,
+    assets: ASSETS,
+    catalog: CATALOG,
+    views,
+    icBalances: {7: '120000000'},
+    solBalance: null,
+    tokenAmounts: {},
+    approx: {},
+    ...over,
+  });
+}
+
 function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer.ReactTestRenderer {
+  const views = props.balances ?? viewsFor();
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(
       <HomeTab
         assets={ASSETS}
-        balances={balancesFor()}
+        balances={views}
+        currencyBalances={sumsFor(views)}
         catalog={CATALOG}
         homeCurrency={HOME}
         homeAsset={HOME_RAIL}
         online={true}
         history={[]}
-        onPay={jest.fn()}
-        onReceive={jest.fn()}
         onDeposit={jest.fn()}
+        onConvert={jest.fn()}
+        onWithdraw={jest.fn()}
+        onOpenMenu={jest.fn()}
         onOpenAccounts={jest.fn()}
         onSeeAll={jest.fn()}
         onOpenReceipt={jest.fn()}
@@ -120,58 +143,57 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
   return tree;
 }
 
-describe('HomeTab — the headline is the home currency (X4)', () => {
-  test('names the CURRENCY with the Main label over the home rail\'s own token unit', () => {
+describe('HomeTab — the headline is the founder sketch (forks #2 + #4)', () => {
+  test('eyebrow names the SHORT code, amount is the summed CURRENCY-unit figure', () => {
     const tree = mountHome();
-    expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.homeCurrency.mainLabel(M.wallet.homeCurrency.name[HOME]));
-    expect(textOf(tree, 'home-headline-amount')).toBe('1.20 VCHF');
+    expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.home.balanceEyebrow('CHF'));
+    expect(textOf(tree, 'home-headline-label')).toBe('Balance CHF');
+    // 1.20 VCHF summed into the CHF unit — "1.20 Fr", the sketch's "4,54 Fr" grammar.
+    expect(textOf(tree, 'home-headline-amount')).toBe('1.20 Fr');
     act(() => { tree.unmount(); });
   });
 
   test('the DEMO balance never reaches the headline, however big it is', () => {
-    // X4's exact shape: the wallet holds ∂123.45 of practice money and 1.20 VCHF of the currency
-    // it was set up in. The headline is the francs — the practice pile is not the user's money
-    // and, more to the point, is not the currency they chose.
     const tree = mountHome();
     expect(textOf(tree, 'home-headline-amount')).not.toContain('∂');
     act(() => { tree.unmount(); });
   });
 
-  test('the home currency changes the headline; nothing else can', () => {
-    const tree = mountHome({homeCurrency: 'USD', homeAsset: preferredRail('USD', ASSETS)});
-    expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.homeCurrency.mainLabel(M.wallet.homeCurrency.name.USD));
+  test('a token-currency main renders its token unit — currency == token there', () => {
+    const btcRail = preferredRail('BTC', ASSETS)!;
+    const views = viewsFor({icBalances: {1: '50000'}});
+    const tree = mountHome({
+      homeCurrency: 'BTC', homeAsset: btcRail, balances: views,
+      currencyBalances: sumsFor(views, {icBalances: {1: '50000'}}),
+    });
+    expect(textOf(tree, 'home-headline-label')).toBe('Balance BTC');
+    expect(textOf(tree, 'home-headline-amount')).toBe('0.0005 BTC');
     act(() => { tree.unmount(); });
   });
 
-  test('offline OUTRANKS the main label — never a main-currency reading over a stale figure', () => {
-    // approx marks the DEMO read stale the way the wallet's 60 s rule does (2026-09-15).
-    const tree = mountHome({online: false, balances: balancesFor({approx: {'ic:0': true}})});
-    expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.balance.approx(M.wallet.homeCurrency.name[HOME]));
-    expect(textOf(tree, 'home-headline-label')).not.toContain('Main');
+  test('offline OUTRANKS the eyebrow — the marker wraps the whole line, never a confident figure', () => {
+    const tree = mountHome({online: false, balances: viewsFor({approx: {'ic:7': true}})});
+    expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.balance.approx(M.wallet.home.balanceEyebrow('CHF')));
+    expect(textOf(tree, 'home-headline-label')).toContain('~');
     act(() => { tree.unmount(); });
   });
 
   test('a currency the catalog cannot realise shows "—", never a borrowed number', () => {
-    const tree = mountHome({homeAsset: null});
+    const tree = mountHome({homeAsset: null, homeCurrency: 'EUR'});
     expect(textOf(tree, 'home-headline-amount')).toBe('—');
     act(() => { tree.unmount(); });
   });
 });
 
-// The landing screen's largest number is the one most worth being honest about. Until now Home
-// rendered `displayText ?? '—'` with no status branch at all, so an endpoint refusing this wallet
-// (the measured HTTP 429) and a first poll still in flight printed the identical dash. The
-// accounts route has told that apart since flow 147; this is the same fact, said by the same
-// renderer, on the screen the user actually lands on.
+// The landing screen's largest number is the one most worth being honest about. An unreadable
+// rail (the measured HTTP 429) and a first poll in flight printed the identical dash until flow
+// 147's renderer took over; Home says the same fact the accounts route says.
 describe('HomeTab — an UNREADABLE home rail says so (M2)', () => {
   const EUR_RAIL = preferredRail('EUR', ASSETS);
-  // The preferred EUR rail is EURC on Solana — the only family whose balance can report 'error'
-  // at all (an IC read either answers or leaves the wallet offline). If the catalog ever moves EUR
-  // onto another rail this narrowing fails loudly rather than silently testing nothing.
   const EUR_MINT = EUR_RAIL?.protocol === 'solana' ? EUR_RAIL.mint : null;
 
-  /** The EUR home rail with its endpoint refusing — the outage this copy exists for. */
-  const eurUnreadable = () => balancesFor({
+  /** The preferred EUR rail with its endpoint refusing — the outage this copy exists for. */
+  const eurUnreadable = (): ReturnType<typeof viewsFor> => viewsFor({
     tokenStates: {[EUR_MINT ?? '']: {amount: null, decimals: null, status: 'error'}},
   });
 
@@ -183,18 +205,15 @@ describe('HomeTab — an UNREADABLE home rail says so (M2)', () => {
   });
 
   test('the line is the ACCOUNTS route\'s, word for word — one fact, one owner', () => {
-    // If these two ever diverge, one of them was re-worded in place instead of the shared source.
     const tree = mountHome({homeCurrency: 'EUR', homeAsset: EUR_RAIL, balances: eurUnreadable()});
     const line = textUnder(tree, 'rail-unreadable-solana');
     expect(line).toContain('Solana');
     expect(line).toContain('Nothing moved');
-    expect(line).toContain('sent data this wallet can’t read');
-    expect(line).toContain('keeps retrying');
     act(() => { tree.unmount(); });
   });
 
   test('a readable rail says nothing, and neither does a rail still loading', () => {
-    const loading = mountHome({homeCurrency: 'EUR', homeAsset: EUR_RAIL, balances: balancesFor()});
+    const loading = mountHome({homeCurrency: 'EUR', homeAsset: EUR_RAIL});
     expect(testIDs(loading)).not.toContain('rail-unreadable-solana');
     act(() => { loading.unmount(); });
     const ok = mountHome(); // CHF/VCHF, a real balance
@@ -203,79 +222,87 @@ describe('HomeTab — an UNREADABLE home rail says so (M2)', () => {
   });
 
   test('no home rail at all cannot name a network, so it says nothing', () => {
-    const tree = mountHome({homeAsset: null, balances: eurUnreadable()});
+    const tree = mountHome({homeAsset: null, homeCurrency: 'EUR', balances: eurUnreadable()});
     expect(testIDs(tree).filter(id => id.startsWith('rail-unreadable-'))).toEqual([]);
     act(() => { tree.unmount(); });
   });
 });
 
-describe('HomeTab — the accounts affordance IS the headline (2026-09-14)', () => {
-  test('the balance block opens the accounts route — labelled with the ACTION, never a re-read of the balance', () => {
+describe('HomeTab — the accounts affordance IS the headline (kept from 2026-09-14)', () => {
+  test('the balance block opens the currency list — labelled with the ACTION, never a re-read of the balance', () => {
     const onOpenAccounts = jest.fn();
     const tree = mountHome({onOpenAccounts});
-    // The whole eyebrow+amount block is the button; its accessible name states what the tap DOES
-    // (a second copy of the balance would be an announcement with no action attached to it).
     const btn = tree.root.findAll(n => n.props?.testID === 'btn-home-accounts')[0]!;
     expect(String(btn.props.accessibilityLabel)).toBe(M.wallet.home.accounts.openLabel);
-    // No a11y hint: the label names the action, a hint would only restate it (verbosity pass
-    // 2026-09-17 — hints that restate the label are cut everywhere in the wallet domain).
     expect(btn.props.accessibilityHint).toBeUndefined();
-    // The amount stays inside the tappable — the founder's rule was that TAPPING THE BALANCE is
-    // the gesture, so shrinking the target to the pill again would quietly undo it. (findAll
-    // counts the Text wrapper AND its host instance — presence, not count, is the contract.)
     expect(btn.findAll(n => n.props?.testID === 'home-headline-amount').length).toBeGreaterThan(0);
     act(() => { pressable(tree, 'btn-home-accounts').props.onPress(); });
     expect(onOpenAccounts).toHaveBeenCalledTimes(1);
     act(() => { tree.unmount(); });
   });
 
-  test('the accounts LIST itself is not on Home — no row, no faucet, no testnet toggle', () => {
+  test('the currency LIST itself is not on Home — no rows, no faucet, no testnet toggle', () => {
     const ids = testIDs(mountHome());
-    for (const gone of ['accounts-list', 'home-accounts', 'asset-vchf', 'asset-demo', 'btn-topup', 'btn-toggle-testnet', 'btn-home-convert']) {
+    for (const gone of ['accounts-list', 'home-accounts', 'asset-vchf', 'asset-demo', 'btn-topup', 'btn-toggle-testnet', 'accounts-currency-CHF']) {
       expect(ids).not.toContain(gone);
     }
   });
 });
 
-describe('HomeTab — the action row is three EQUAL cards (2026-09-14)', () => {
-  test('Pay is honestly named and hands off to the pay screen (the one-tap checkout gesture)', () => {
-    const onPay = jest.fn();
-    const tree = mountHome({onPay});
-    const btn = pressable(tree, 'btn-home-pay');
-    // The label is "Pay", never "Scan to pay" — the screen behind it scans, taps and beams.
-    expect(String(btn.props.accessibilityLabel)).toBe(M.wallet.home.actions.pay);
-    expect(M.wallet.home.actions.pay).not.toContain('Scan');
-    act(() => { btn.props.onPress(); });
-    expect(onPay).toHaveBeenCalledTimes(1);
-    act(() => { tree.unmount(); });
+describe('HomeTab — the action row is Add funds / Convert / Withdraw funds / [...] (fork #1)', () => {
+  test('Pay and Receive are NOT on Home — they live on the bottom tabs, unchanged', () => {
+    const ids = testIDs(mountHome());
+    for (const gone of ['btn-home-pay', 'btn-home-receive', 'btn-home-add-money']) {
+      expect(ids).not.toContain(gone);
+    }
   });
 
-  test('Receive navigates by mode switch, not by asset capability', () => {
-    const onReceive = jest.fn();
-    const tree = mountHome({onReceive});
-    act(() => { pressable(tree, 'btn-home-receive').props.onPress(); });
-    expect(onReceive).toHaveBeenCalledTimes(1);
-    act(() => { tree.unmount(); });
-  });
-
-  test('Add money funds the HOME RAIL — the account the headline is showing', () => {
+  test('Add funds funds the MAIN RAIL — the account the headline is showing', () => {
     const onDeposit = jest.fn();
     const tree = mountHome({onDeposit});
-    act(() => { pressable(tree, 'btn-home-add-money').props.onPress(); });
+    act(() => { pressable(tree, 'btn-home-add-funds').props.onPress(); });
     expect(onDeposit).toHaveBeenCalledWith(HOME_RAIL!.id);
     act(() => { tree.unmount(); });
   });
 
-  test('Add money is disabled — and fires nothing — when the currency has no rail', () => {
-    const onDeposit = jest.fn();
-    const tree = mountHome({homeAsset: null, onDeposit});
-    const btn = pressable(tree, 'btn-home-add-money');
-    expect(btn.props.disabled).toBe(true);
-    act(() => { btn.props.onPress(); });
-    expect(onDeposit).not.toHaveBeenCalled();
+  test('Convert opens the swap surface with the main currency as the source', () => {
+    const onConvert = jest.fn();
+    const tree = mountHome({onConvert});
+    expect(String(pressable(tree, 'btn-home-convert').props.accessibilityLabel)).toBe(M.wallet.home.actions.convert);
+    act(() => { pressable(tree, 'btn-home-convert').props.onPress(); });
+    expect(onConvert).toHaveBeenCalledTimes(1);
     act(() => { tree.unmount(); });
   });
 
+  test('Withdraw funds hands off to the off-ramp surface', () => {
+    const onWithdraw = jest.fn();
+    const tree = mountHome({onWithdraw});
+    act(() => { pressable(tree, 'btn-home-withdraw').props.onPress(); });
+    expect(onWithdraw).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('[...] opens the overflow menu — Wallet owns the sheet', () => {
+    const onOpenMenu = jest.fn();
+    const tree = mountHome({onOpenMenu});
+    act(() => { pressable(tree, 'btn-home-more').props.onPress(); });
+    expect(onOpenMenu).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the three money actions disable when the currency has no rail; the menu stays live', () => {
+    const onDeposit = jest.fn();
+    const tree = mountHome({homeAsset: null, onDeposit});
+    // A disabled Pressable never fires at runtime (the test renderer invokes raw handlers, so
+    // the disabled PROP is the assertion — the component must not rely on handler-side guards).
+    expect(pressable(tree, 'btn-home-add-funds').props.disabled).toBe(true);
+    expect(pressable(tree, 'btn-home-convert').props.disabled).toBe(true);
+    expect(pressable(tree, 'btn-home-withdraw').props.disabled).toBe(true);
+    // The menu affordance is navigation, not money movement — it stays live.
+    expect(pressable(tree, 'btn-home-more').props.disabled).toBeFalsy();
+    expect(onDeposit).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
 });
 
 describe('HomeTab — the inline activity feed', () => {

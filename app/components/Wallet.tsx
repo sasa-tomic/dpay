@@ -10,7 +10,7 @@ import {setIcClockRoutingCanister} from '../services/icp';
 import {base, randNonceHex, fmtTime} from '../lib/format';
 import {applyOffline} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
-import {buildSelectableAssets, chipLabel, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
+import {buildSelectableAssets, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
 import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {mergeHistoryByTime, mergePendingByTime, settledJoinKey} from '../lib/ledger';
 import type {AssetId, Identity, NfcStatus, PayIntent, Txn} from '../lib/types';
@@ -57,7 +57,8 @@ import {IconArrowDownLeft, IconChevronDown, IconClock, IconHome, IconMoon, IconQ
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 import {HomeCurrencyChooser} from './HomeCurrencyChooser';
 import {AddCurrencyTab} from './AddCurrencyTab';
-import {type HomeCurrency, chooseRail, currencyName, currencyOfAsset, offerableCurrencies, parseHiddenCurrencies, preferredRail} from '../config/currency';
+import {type HomeCurrency, chooseRail, offerableCurrencies, parseHiddenCurrencies, preferredRail, removeCurrencyGuard, type RemoveRefusal} from '../config/currency';
+import {HomeMenu} from './HomeMenu';
 import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 import {modeForScreen, screenForMode, type WalletMode, type WalletRoute} from '../lib/walletRoute';
@@ -652,26 +653,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   const depositFamily = (selectedFamily === 'CkBtcUtxo' || selectedFamily === 'CkEthErc20') ? selectedFamily : null;
   const depositChainId = selectedDesc?.chain_id ?? null;
   const depositNativeEth = selectedFamily === 'CkEthErc20' && selectedDesc?.token_contract == null;
-  // The header name + active-rail chip text. `chipLabel` returns the bare asset symbol UNLESS
-  // another visible asset shares it — the USDC collision (ic:2 Ethereum + solana:USDC Solana both
-  // read 'USDC') is then qualified with a short network tag (USDC·Eth / USDC·Sol) so a user can tell
-  // which network is selected from the main screen. Unique symbols (DEMO/BTC/ETH/SOL) stay compact.
-  // The 'DEMO' fallback covers the pre-reconcile first paint (selectedAsset is null only then).
-  const activeAssetName = selectedAsset ? chipLabel(selectedAsset, assets) : 'DEMO';
-  // The header eyebrow. When the selected asset IS the home currency's rail the label names the
-  // CURRENCY ("Swiss francs · Main") — that is the Revolut-style "this is your money" reading, and
-  // it is honest because the amount beneath it still carries the token's own unit. Any other
-  // selection keeps naming the ASSET, so switching to BTC never reads as francs.
-  const selectedIsHome = selectedAsset !== null && homeCurrency !== null
-    && currencyOfAsset(selectedAsset) === homeCurrency && selectedAsset.id === homeAsset?.id;
-  // Naming the currency changes the NAME, never the online/offline distinction. The offline branch
-  // marks the balance as an approximation, and that marker outranks the main-currency label — a
-  // wallet that reads "Swiss francs · Main" over a stale figure while offline would be asserting a
-  // balance it cannot know. Caught by flow 100, which is exactly what that flow is for.
-  const eyebrowName = selectedIsHome && homeCurrency !== null ? currencyName(homeCurrency) : activeAssetName;
-  const balanceEyebrow = !online
-    ? M.wallet.balance.approx(eyebrowName)
-    : (selectedIsHome ? M.wallet.homeCurrency.mainLabel(eyebrowName) : M.wallet.balance.of(eyebrowName));
+  // The header chip no longer names the SELECTION (2026-09-24): it names the MAIN currency and
+  // its summed figure, in the same "Balance CHF" grammar the Home headline uses — the chip is
+  // declared inline in the JSX below. The per-asset selection keeps stating itself inside the
+  // Pay/Receive engines, which is where a per-asset name is money-critical.
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -723,6 +708,16 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
       .then(v => { if (alive) setHiddenCurrencies(parseHiddenCurrencies(v)); })
       .catch((e: unknown) => { console.log(`[dpay] failed to load hidden currencies: ${e instanceof Error ? e.message : String(e)}`); });
     return () => { alive = false; };
+  }, []);
+  const hideCurrency = useCallback((c: HomeCurrency) => {
+    setHiddenCurrencies(prev => {
+      if (prev.includes(c)) return prev;
+      const next = [...prev, c];
+      AsyncStorage.setItem(HIDDEN_CURRENCIES_STORAGE_KEY, JSON.stringify(next)).catch((e: unknown) => {
+        console.log(`[dpay] failed to persist hidden currencies: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      return next;
+    });
   }, []);
   const restoreCurrency = useCallback((c: HomeCurrency) => {
     setHiddenCurrencies(prev => {
@@ -1275,6 +1270,45 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     selectAsset(rail.id);
     setMode('convert');
   }, [selectionLocked, assets, balances, selectAsset]);
+  // Withdraw funds (the Home action row): the EXISTING withdraw surface for the main rail — the
+  // Pay tab's "Send to address" sub-mode, where the IC withdraw and the Solana withdraw sheets
+  // both live (the off-ramp; partner off-ramps land in this entry when the legal blockers clear).
+  // A user gesture, so it respects the selection lock.
+  const openWithdrawForMain = useCallback(() => {
+    if (!shouldAllowUserSelect(selectionLocked)) return;
+    if (homeCurrency == null) return;
+    const choice = chooseRail(homeCurrency, assets, balances);
+    const rail = choice != null ? choice.rail : preferredRail(homeCurrency, assets);
+    if (rail == null) return;
+    selectAsset(rail.id);
+    setPaySubMode('send');
+    setMode('pay');
+  }, [selectionLocked, homeCurrency, assets, balances, selectAsset]);
+  // The Home overflow menu ([...]) — STATE at the wallet root, like every overlay that must cover
+  // the whole app column (the X6 receipt precedent: a sheet mounted inside Home's own box would
+  // clip to it). Transaction list is a tab switch; Remove runs the hidden-currency guard.
+  const [homeMenuOpen, setHomeMenuOpen] = useState(false);
+  const [removeRefusal, setRemoveRefusal] = useState<RemoveRefusal | null>(null);
+  const openHomeMenu = useCallback(() => { setRemoveRefusal(null); setHomeMenuOpen(true); }, []);
+  const closeHomeMenu = useCallback(() => setHomeMenuOpen(false), []);
+  const openLedgerFromMenu = useCallback(() => { setHomeMenuOpen(false); setMode('ledger'); }, []);
+  // Remove the MAIN currency (the one the menu was opened from). The guard decides; a refusal is
+  // stated in the menu with its practical next step, never a silent swallow. A successful remove
+  // keeps the wallet "in" a visible currency: if the removed one WAS main, main moves to the
+  // first survivor (the guard guarantees at least one remains).
+  const removeMainCurrency = useCallback(() => {
+    if (homeCurrency == null) return;
+    const verdict = removeCurrencyGuard({
+      currency: homeCurrency,
+      balance: currencyBalances[homeCurrency] ?? null,
+      visibleCount: visibleCurrencies.length,
+    });
+    if (!verdict.ok) { setRemoveRefusal(verdict.reason); return; }
+    hideCurrency(homeCurrency);
+    const next = visibleCurrencies.find(c => c !== homeCurrency);
+    if (next != null) onSetHomeCurrency(next);
+    setHomeMenuOpen(false);
+  }, [homeCurrency, currencyBalances, visibleCurrencies, hideCurrency, onSetHomeCurrency]);
 
   // The rail flip inside Receive ▸ "My address" (Objective 2, currency-first wallet): switching
   // WHICH rail of the home-currency group the address surface shows. Deliberately NOT handleSelect
@@ -1401,22 +1435,15 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               pushes; `textContent` is the whole name (the e2e `header-who` contract). */}
           <Text style={S.who} testID="header-who" numberOfLines={1}>{identity.username}</Text>
         </View>
-        {/* The header account chip — WHICH account is selected, how much is in it, and one tap to
-            the ACCOUNTS route (X7, UX swarm 2026-09-08: a `⌄` beside a balance means "switch
-            account" in every wallet, so it now goes where it looked like it went).
+        {/* The header account chip — WHICH currency the wallet is "in", how much is in it, and
+            one tap to the CURRENCY LIST (2026-09-24 redesign: the chip names the MAIN currency and
+            shows its SUMMED balance — the same two facts the Home headline carries, so the wallet
+            reads one currency everywhere; the per-asset selection keeps naming itself inside Pay
+            and Receive, where each engine states its own asset).
 
-            NOT ON HOME (founder, 2026-09-09: "it's obviously wrong"). Home is the only screen that
-            prints its own balance, and it prints a DIFFERENT one: the headline names the HOME
-            CURRENCY while this chip names the SELECTION, and those are deliberately separate — the
-            accounts route changes the selection and must never rewrite the home currency (flow
-            133). Rendered together they put two accounts and two labels in one viewport with
-            nothing saying which is which ("DEMO balance" over "Swiss francs · Main · 0.00 VCHF").
-            X8 had already noticed half of this and hidden the AMOUNT here on Home; what was left
-            was a label that could contradict the headline and a chevron that duplicated Home's own
-            accounts affordance. Both are gone — and since 2026-09-14 that affordance is the
-            headline block itself: the founder's "if the user clicks on the balance, they should be
-            taken to the accounts and balances", so `btn-home-accounts` rides the balance.
-            Everywhere else the chip is the only statement of the selection, so it stays. */}
+            NOT ON HOME (founder, 2026-09-09: "it's obviously wrong") — Home prints the headline
+            itself; rendering both would put the same currency and the same number in one viewport
+            twice. */}
         {mode === 'home' ? null : (
           <Pressable
             testID="balance"
@@ -1428,26 +1455,28 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
             accessibilityHint={balancesDisabled ? M.wallet.balance.lockedHint : undefined}
             accessibilityState={{disabled: balancesDisabled}}
           >
-            {/* One row, two ends: which account on the left, how much in it on the right. The amount
-                is the widest thing the header ever carries, and on its own row it has the width to
-                be carried — an 8-decimal VCHF balance used to consume the whole header and crush
-                the wordmark beside it (founder report + device measurement, 2026-09-09). */}
+            {/* One row, two ends: which currency on the left, how much in it on the right. The
+                amount is the widest thing the header ever carries, and on its own row it has the
+                width to be carried — an 8-decimal balance used to consume the whole header and
+                crush the wordmark beside it (founder report + device measurement, 2026-09-09). */}
             <View style={S.balHeaderRow}>
               <View style={S.balLabelRow}>
                 <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
-                {/* D3: the header label names the active asset in BOTH branches — online reads "X balance",
-                    offline reads "~ X approx.". `activeAssetName` is the single source of truth for the
-                    symbol; e2e asserts the active rail via this label (testID active-asset-label). */}
-                <Text testID="active-asset-label" style={S.balLabel} numberOfLines={1}>{balanceEyebrow}</Text>
-                {/* D5a: the A badge rides with the label rather than floating at the row's far edge,
-                    where the switcher chevron now lives. */}
+                {/* The chip names the MAIN currency with the SAME "Balance CHF" grammar the Home
+                    headline uses — one currency, one figure, one vocabulary everywhere. Offline
+                    reads "~ Balance CHF approx." (the marker outranks the label; flow 100's rule). */}
+                <Text testID="active-asset-label" style={S.balLabel} numberOfLines={1}>
+                  {online
+                    ? M.wallet.home.balanceEyebrow(homeCurrency)
+                    : M.wallet.balance.approx(M.wallet.home.balanceEyebrow(homeCurrency))}
+                </Text>
+                {/* D5a: the A badge rides with the label rather than floating at the row's far
+                    edge, where the switcher chevron now lives. */}
                 <HotkeyHint k="A" />
               </View>
               <View style={S.balAmtRow}>
-                {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
-                    map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
-                    polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e). */}
-                <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>
+                {/* The MAIN currency's summed figure, pre-formatted in the currency unit. */}
+                <Text style={S.balAmt}>{currencyBalances[homeCurrency]?.displayText ?? '—'}</Text>
                 <IconChevronDown size={16} color={C.sub2} />
               </View>
             </View>
@@ -1485,19 +1514,17 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
           ? <HomeTab
               assets={assets}
               balances={balances}
+              currencyBalances={currencyBalances}
               catalog={catalog}
               homeCurrency={homeCurrency}
               homeAsset={homeAsset}
               online={online}
               history={walletHistory}
               noteFor={noteFor}
-              // Pay pins the SCAN sub-mode, so the camera is live in ONE tap from a cold start
-              // whatever the Pay tab was last left showing (a `send` sub-mode left over from a
-              // previous session would otherwise make the checkout gesture two taps — the exact
-              // regression the primary Pay card exists to prevent).
-              onPay={() => { setPaySubMode('scan'); setMode('pay'); }}
-              onReceive={() => setMode('receive')}
               onDeposit={goToDeposit}
+              onConvert={() => openConvertForCurrency(homeCurrency)}
+              onWithdraw={openWithdrawForMain}
+              onOpenMenu={openHomeMenu}
               onOpenAccounts={openAccounts}
               onSeeAll={() => setMode('ledger')}
               onOpenReceipt={setReceiptTxn}
@@ -1734,12 +1761,25 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
       {receiptTxn ? (
         <TxnReceipt t={receiptTxn} catalog={catalog} assets={assets} note={noteFor(receiptTxn)} onClose={() => setReceiptTxn(null)} />
       ) : null}
+      {/* The Home overflow menu ([...]) — mounted at the ROOT like every overlay that must cover
+          the whole app column (the X6 receipt discipline). */}
+      {homeMenuOpen ? (
+        <AppModal onRequestClose={closeHomeMenu}>
+          <HomeMenu
+            currency={homeCurrency}
+            balance={currencyBalances[homeCurrency] ?? null}
+            refusal={removeRefusal}
+            onLedger={openLedgerFromMenu}
+            onRemove={removeMainCurrency}
+            onClose={closeHomeMenu}
+          />
+        </AppModal>
+      ) : null}
       {/* An incoming payment link that cannot be paid. It states WHICH asset/chain the link asked
           for and the one action the payer can take (founder hard rule: every dead end gives a
           useful instruction). dpay never swaps, so no "pay it with something else" is offered.
           Dismissing drops the link — nothing is retried behind the user's back. */}
-      {linkError ? (
-        <AppModal onRequestClose={dismissLinkError}>
+      {linkError ? (        <AppModal onRequestClose={dismissLinkError}>
           {/* Centered dimmed card — the same shape as the NFC "why is this unavailable" popup, so a
               short explanation reads as a popup on BOTH platforms instead of a full screen with one
               paragraph pinned to the top (found on the emulator, 2026-08-29). Tapping the backdrop

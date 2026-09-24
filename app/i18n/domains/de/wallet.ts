@@ -14,7 +14,6 @@ export const walletDe: WalletMessages = {
   balance: {
     label: 'Guthaben',
     lockedHint: 'Beende oder brich zuerst die laufende Zahlung ab',
-    of: asset => `${asset}-Guthaben`,
     approx: asset => `~ ${asset} ca.`,
     approxAmount: amount => `~${amount}`,
     backAgainToExit: 'Nochmal Zurück zum Beenden',
@@ -27,7 +26,6 @@ export const walletDe: WalletMessages = {
     railReason: {destination: 'die Zahlung verlangt diesen Weg', funded: 'du hast hier ein Guthaben'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Haupt',
-    mainLabel: currency => `${currency} · Haupt`,
     settingsTitle: 'Hauptwährung',
     settingsHint: 'Die Währung, die dpay zuerst anzeigt und standardmässig verwendet',
     confirm: 'Weiter',
@@ -52,11 +50,21 @@ export const walletDe: WalletMessages = {
 
   home: {
     actions: {
-      pay: 'Bezahlen',
-      payHint: 'Code scannen oder Telefon antippen',
-      receive: 'Empfangen',
-      receiveHint: 'Zahlung anfordern oder Adresse anzeigen',
-      addMoney: 'Geld hinzufügen',
+      addFunds: 'Geld einzahlen',
+      convert: 'Tauschen',
+      withdraw: 'Geld abheben',
+      more: 'Weitere Aktionen',
+    },
+    balanceEyebrow: code => `Guthaben ${code}`,
+    menu: {
+      ledger: 'Transaktionsliste',
+      remove: 'Entfernen',
+      close: 'Menü schließen',
+    },
+    removeRefusal: {
+      nonzero: amount => `Du besitzt noch ${amount}. Tausche oder verschiebe es zuerst, dann entferne.`,
+      unreadable: 'dpay kann dieses Guthaben gerade nicht lesen. Verbinde dich erneut und versuche es dann.',
+      last: 'Deine Wallet braucht mindestens eine Währung.',
     },
     activity: {
       title: 'Aktivität',

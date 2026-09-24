@@ -142,20 +142,26 @@ function solanaDownWith(failure: SolanaReadFailure) {
 }
 
 function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer.ReactTestRenderer {
+  const views = props.balances ?? balancesFor({balance: '1500000000', status: 'ok'});
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(
       <HomeTab
         assets={ASSETS}
-        balances={balancesFor({balance: '1500000000', status: 'ok'})}
+        balances={views}
+        currencyBalances={buildCurrencyBalances({
+          currencies: offerableCurrencies(ASSETS), assets: ASSETS, catalog: CATALOG, views,
+          icBalances: {}, solBalance: null, tokenAmounts: {}, approx: {},
+        })}
         catalog={CATALOG}
         homeCurrency={HOME}
         homeAsset={HOME_RAIL}
         online={true}
         history={[]}
-        onPay={jest.fn()}
-        onReceive={jest.fn()}
         onDeposit={jest.fn()}
+        onConvert={jest.fn()}
+        onWithdraw={jest.fn()}
+        onOpenMenu={jest.fn()}
         onOpenAccounts={jest.fn()}
         onSeeAll={jest.fn()}
         onOpenReceipt={jest.fn()}
@@ -205,9 +211,9 @@ function mountAccounts(props: Partial<Parameters<typeof AccountsTab>[0]> = {}): 
 describe('A2 — the headline announces exactly what it renders, unit stated once', () => {
   test('no announcement of the headline block states the unit twice', () => {
     const tree = mountHome();
-    expect(textOf(tree, 'home-headline-amount')).toContain('VCHF');
+    expect(textOf(tree, 'home-headline-amount')).toContain('Fr');
     for (const s of announcedStrings(tree, 'home-headline')) {
-      expect(`${s} :: VCHF×${occurrences(s, 'VCHF')}`).toBe(`${s} :: VCHF×${Math.min(occurrences(s, 'VCHF'), 1)}`);
+      expect(`${s} :: Fr×${occurrences(s, 'Fr')}`).toBe(`${s} :: Fr×${Math.min(occurrences(s, 'Fr'), 1)}`);
     }
     act(() => { tree.unmount(); });
   });
@@ -217,14 +223,13 @@ describe('A2 — the headline announces exactly what it renders, unit stated onc
       online: false,
       balances: balancesFor({balance: null, status: 'unavailable'}),
     });
-    expect(announced(tree, 'home-headline')).toContain(M.wallet.balance.approx(M.wallet.homeCurrency.name[HOME]));
+    expect(announced(tree, 'home-headline')).toContain(M.wallet.balance.approx(M.wallet.home.balanceEyebrow(HOME)));
     act(() => { tree.unmount(); });
   });
 
-  test('the home rail announces its Main marker, not a re-derived "balance" sentence', () => {
+  test('the eyebrow announces the main currency as its short code — the sketch\'s "Balance CHF"', () => {
     const tree = mountHome();
-    expect(announced(tree, 'home-headline'))
-      .toContain(M.wallet.homeCurrency.mainLabel(M.wallet.homeCurrency.name[HOME]));
+    expect(announced(tree, 'home-headline')).toContain(M.wallet.home.balanceEyebrow(HOME));
     act(() => { tree.unmount(); });
   });
 });
