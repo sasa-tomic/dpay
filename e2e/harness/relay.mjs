@@ -210,7 +210,7 @@ async function spawnOnce(opts = {}) {
   const port = opts.port ?? await pickFreePort();
   const addr = `127.0.0.1:${port}`;
   const baseURL = `http://${addr}`;
-  console.log(`[relay] spawning ${RELAY_BIN} at ${addr} (FakeLedger, faucet ${opts.faucet === false ? 'off' : 'on'}, till ${opts.till === false ? 'off' : 'on'})…`);
+  console.log(`[relay] spawning ${RELAY_BIN} at ${addr} (FakeLedger, faucet ${opts.faucet === false ? 'off' : 'on'}, checkout ${opts.checkout === false ? 'off' : 'on'})…`);
 
   const env = {
     ...process.env,
@@ -224,13 +224,13 @@ async function spawnOnce(opts = {}) {
     // no practice money — the first-run screens have to be honest about that and must not ask
     // the user for funds instead (anti-scam rule R1), and the only way to see it is to serve it.
     DPAY_ENABLE_FAUCET: opts.faucet === false ? 'false' : 'true',
-    // The OpenCryptoPay till is ON by default in a shipped relay since the 2026-09-10 founder
-    // decision; the harness still sets it EXPLICITLY so `opts.till === false` (flow 144) exercises
-    // the operator opt-out deterministically whatever the binary's default. Flows 114-116 ring up
-    // a real signed charge on `POST /api/v1/till`, pay it with a real signed VCHF transfer, and
-    // watch `GET /api/v1/till/{id}` credit it. Enabling it costs the other flows nothing — the
-    // till's payer-facing routes are shadowed by each OCP flow's own fetch stub.
-    DPAY_ENABLE_TILL: opts.till === false ? 'false' : 'true',
+    // The OpenCryptoPay checkout is ON by default in a shipped relay since the 2026-09-10 founder
+    // decision; the harness still sets it EXPLICITLY so `opts.checkout === false` (flow 144) exercises
+    // the operator opt-out deterministically whatever the binary's default. Flows 114-116 open charges
+    // a real signed charge on `POST /api/v1/checkout`, pay it with a real signed VCHF transfer, and
+    // watch `GET /api/v1/checkout/{id}` credit it. Enabling it costs the other flows nothing — the
+    // checkout's payer-facing routes are shadowed by each OCP flow's own fetch stub.
+    DPAY_ENABLE_TILL: opts.checkout === false ? 'false' : 'true',
     // Marker so a future relay feature can detect the e2e harness (no behavior change today).
     DPAY_E2E: '1',
     // R2 (flow 165): the Solana RPC proxy's UPSTREAM — the relay's own test-helpers JSON-RPC

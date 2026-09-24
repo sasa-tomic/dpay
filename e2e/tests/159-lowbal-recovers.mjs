@@ -6,7 +6,7 @@
 // 19 does NOT cover is what happens when the refusal stops being true: money arrives, the poll
 // answers, and the note disappears. Before this flow the screen went blank of controls — amount,
 // payee, Cancel, nothing to press — while the header a few pixels above showed a balance that
-// covered the payment. A payer standing at a till had to Cancel and re-scan to spend money the app
+// covered the payment. A payer standing at a checkout had to Cancel and re-scan to spend money the app
 // could already see.
 //
 // Driven end to end through the REAL app + REAL relay:

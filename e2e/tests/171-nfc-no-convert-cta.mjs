@@ -24,7 +24,7 @@
 // (no convert-* testIDs, no Accounts-Convert entry, no button/radio/link labelled "Convert").
 //
 // NOT reachable in this harness (noted, not faked): the READER-side NFC surface — that is the
-// merchant till terminal (flow 117's /till page, served by the relay), not a wallet surface, and
+// merchant checkout terminal (flow 117's /checkout page, served by the relay), not a wallet surface, and
 // it has no convert surface of its own to walk; and the NFC 'pending' terminal (the
 // settle-receipt timer), which renders through the same NfcTapView shell whose terminals are
 // walked above. The probe's honesty control (Accounts with the ICP row selected reports exactly
@@ -37,7 +37,7 @@ export const meta = {
   name: 'nfc-no-convert-cta',
   journey: 'nfc',
   covers: ['nfc', 'convert-absence', 'inv-8', 'nfc-phases', 'auto-sign', 'sol-nfc', 'no-conversion-in-payment'],
-  verifies: 'Every NFC sub-surface reachable in the harness (IC card: idle/linking/exchanging/settling/success/auto-sign-disclosure/declined/error; SOL card: idle/linking/auto-sign/receipt-paid) shows ZERO convert affordances — the one-press tap never grows a conversion offer. Reader-side (merchant till) is not a wallet surface; pending terminal shares the walked NfcTapView shell.',
+  verifies: 'Every NFC sub-surface reachable in the harness (IC card: idle/linking/exchanging/settling/success/auto-sign-disclosure/declined/error; SOL card: idle/linking/auto-sign/receipt-paid) shows ZERO convert affordances — the one-press tap never grows a conversion offer. Reader-side (merchant checkout) is not a wallet surface; pending terminal shares the walked NfcTapView shell.',
   timeoutMs: 90000,
 };
 

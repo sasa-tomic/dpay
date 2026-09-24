@@ -1,9 +1,9 @@
-// Flow 175 — a till code arriving as an OS App Link, not a camera scan.
+// Flow 175 — a checkout code arriving as an OS App Link, not a camera scan.
 //
-// The till QR the relay mints is an https URL (`{origin}/pl/?lightning=<LNURL…>`, TILL_CODE_PATH in
-// crates/dpay-relay/src/till.rs). Before the `/pl/` App Link claim existed, a phone WITH the app
+// The checkout QR the relay mints is an https URL (`{origin}/pl/?lightning=<LNURL…>`, CHECKOUT_CODE_PATH in
+// crates/dpay-relay/src/checkout.rs). Before the `/pl/` App Link claim existed, a phone WITH the app
 // that read that QR with its own camera opened the relay's static landing page in a browser — the
-// app could only pay a till through its in-app scanner. The fix is one manifest filter plus a third
+// app could only pay a checkout through its in-app scanner. The fix is one manifest filter plus a third
 // door in Wallet's link pipeline: the URL enters PayMode/SolPayMode as a PREFILLED SCAN and runs the
 // SAME classification a camera scan of the same QR takes (flow 111/112 pin the camera halves).
 //
@@ -27,22 +27,22 @@ import {
 } from '../harness/lib.mjs';
 import { generateKeypair } from '../harness/wire.mjs';
 import {
-  installTillStub, ocpStubState, CLAIMED_MERCHANT, PROVIDER_HOST, TILL_QR,
+  installCheckoutStub, ocpStubState, CLAIMED_MERCHANT, PROVIDER_HOST, CHECKOUT_QR,
 } from '../harness/ocp.mjs';
 
 // The PROD App-Link shape: the relay's own host carrying the fixture's lightning payload. Built
 // from the harness QR (whose foreign host `app.dfx.swiss` is what a scan of the REAL printed code
 // would carry) so the payload stays the one the stub knows how to price.
-const TILL_LINK = 'https://dpay.kalaj.org' + new URL(TILL_QR).pathname + new URL(TILL_QR).search;
+const CHECKOUT_LINK = 'https://dpay.kalaj.org' + new URL(CHECKOUT_QR).pathname + new URL(CHECKOUT_QR).search;
 
 const ICP = 8;
 const ICP_SEED = 500_000_001; // 5.00000001 ICP — funds the IC leg without moving anything (no approve here)
-const PAY_RAW = 50_795_551;   // the till's 0.50795551 ICP at 8 decimals (the stub's CHF-1 quote)
+const PAY_RAW = 50_795_551;   // the checkout's 0.50795551 ICP at 8 decimals (the stub's CHF-1 quote)
 
 // SYNTHETIC (same provenance as flow 112): a real, checksum-valid base58 Solana address — the app
 // validates it with `isValidSolanaAddress` before the payer ever sees it.
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
-const SOL_PAY_DISPLAY = '0.01219752 SOL'; // the till's 0.01219252 SOL at 9 decimals
+const SOL_PAY_DISPLAY = '0.01219752 SOL'; // the checkout's 0.01219252 SOL at 9 decimals
 
 /** The Solana RPC simulator (the same seam every SOL flow uses): this flow never approves, so the
  *  stub only has to fund the wallet (5 SOL) and answer balance reads. `__E2E_SOL_SENT` is the
@@ -72,22 +72,22 @@ const broadcasts = (driver) => driver.eval(() => globalThis.__E2E_SOL_SENT.map((
 
 export const meta = {
   id: '175',
-  name: 'till-deeplink',
+  name: 'checkout-deeplink',
   journey: 'pay',
   covers: ['deeplink', 'app-link', 'opencryptopay', 'explicit-approve', 'never-auto-sign', 'sol-rail'],
-  verifies: 'A till code arriving as an OS App Link (…/pl/?lightning=…) routes from idle Balances — the Pay tab never opened — straight into the SAME OpenCryptoPay review a camera scan of the same QR produces, on both rails: exact amount, full destination, one price+host line, and no auto-sign (IC ledger balance unchanged, zero Solana broadcasts until an Approve that this flow never presses).',
+  verifies: 'A checkout code arriving as an OS App Link (…/pl/?lightning=…) routes from idle Balances — the Pay tab never opened — straight into the SAME OpenCryptoPay review a camera scan of the same QR produces, on both rails: exact amount, full destination, one price+host line, and no auto-sign (IC ledger balance unchanged, zero Solana broadcasts until an Approve that this flow never presses).',
   timeoutMs: 30000, // 2 provider round trips per rail, no settlement
 };
 
 export async function run() {
   const start = Date.now();
-  console.log('[175-till-deeplink] setup (relay + web + browser + sol stub)…');
+  console.log('[175-checkout-deeplink] setup (relay + web + browser + sol stub)…');
   const env = await setup({solStub: true});
   try {
     const {driver, relayBaseURL, webBaseURL} = env;
 
-    console.log('[175-till-deeplink] onboarding…');
-    await onboardWallet(driver, 'e2e-till-link');
+    console.log('[175-checkout-deeplink] onboarding…');
+    await onboardWallet(driver, 'e2e-checkout-link');
     const identity = await accountOf(driver);
     const accountHex = identity?.publicHex;
     assert(typeof accountHex === 'string' && accountHex.length === 64,
@@ -99,7 +99,7 @@ export async function run() {
     const fund = await faucetAccount(relayBaseURL, accountHex, ICP_SEED, {currency: ICP});
     assert(fund.ok, `faucet funding of ICP must succeed, got HTTP ${fund.status}: ${JSON.stringify(fund.body)}`);
 
-    await installTillStub(driver, {
+    await installCheckoutStub(driver, {
       passOrigins: [new URL(relayBaseURL).origin, new URL(webBaseURL).origin],
       uris: {
         'InternetComputer/ICP': `icp:ryjl3-tyaaa-aaaaa-aaaba-cai/transfer?to=${merchantPrincipal}&amount=0.50795551`,
@@ -108,42 +108,42 @@ export async function run() {
     });
 
     // --- 1. IC rail: the App Link opens the review, never the browser's flow --------------------
-    console.log('[175-till-deeplink] leg 1 — IC: App Link fired from idle Balances…');
+    console.log('[175-checkout-deeplink] leg 1 — IC: App Link fired from idle Balances…');
     await openBalances(driver);
     await selectCurrency(driver, 'icp');
     assert(await driver.waitForText('5.00000001 ICP', {timeoutMs: 10_000}), 'the app must see the ICP seed');
     // Deliberately NOT clicking tab-pay: the OS entry must do its own routing — an App Link arrives
     // with no Pay Now gate passed, exactly like a payment link (flow 70's territory).
-    await driver.eval((u) => { window.__DPAY_TEST_DEEPLINK(u); }, TILL_LINK);
+    await driver.eval((u) => { window.__DPAY_TEST_DEEPLINK(u); }, CHECKOUT_LINK);
 
     await driver.findByTestID('pay-amount', {timeoutMs: 15_000});
     // The total debit (amount + ledger fee, async icrc1_fee) — the same total the scan review
     // shows; WAIT for it because the instant-read can catch the pre-fee fallback.
     assert(await driver.waitForText('Pay 0.50805551 ICP', {timeoutMs: 15_000}),
-      'the till App Link review must reach the fee-inclusive total');
+      'the checkout App Link review must reach the fee-inclusive total');
     assertEq(await driver.readText('pay-amount'), 'Pay 0.50805551 ICP',
-      'the till App Link lands on the SAME review a camera scan of the same QR produces');
+      'the checkout App Link lands on the SAME review a camera scan of the same QR produces');
     assertEq(await driver.readText('review-payee'), merchantPrincipal,
       'the review shows the FULL destination account');
     assertEq(await driver.readText('ocp-price'), `CHF 1 · price from ${PROVIDER_HOST}`,
       'the price+host line is the scan review\'s line, unchanged');
-    assertIncludes(await driver.bodyText(), CLAIMED_MERCHANT, 'the review shows the name the till claims');
+    assertIncludes(await driver.bodyText(), CLAIMED_MERCHANT, 'the review shows the name the checkout claims');
     // NEVER AUTO-SIGNS — proven with money, not pixels (the camera twins assert the same in 111).
     assert(await driver.isPresent('btn-approve'), 'the App-Link entry still requires an explicit Approve press');
     assertEq(await getBalance(relayBaseURL, accountHex, ICP), String(ICP_SEED),
       'nothing may leave the wallet before the payer approves');
     assertEq(JSON.stringify((await ocpStubState(driver)).txUrls), '[]',
       'a review the payer never approved must never touch the submission endpoint');
-    await driver.screenshot('175-till-deeplink-ic');
-    console.log('[175-till-deeplink] ✓ IC: idle → review, no auto-sign');
+    await driver.screenshot('175-checkout-deeplink-ic');
+    console.log('[175-checkout-deeplink] ✓ IC: idle → review, no auto-sign');
     await driver.click('btn-review-cancel');
 
     // --- 2. SOL rail: the same App Link through the SOL twin (same-surfaces rule) ----------------
-    console.log('[175-till-deeplink] leg 2 — SOL: the same link on the twin rail…');
+    console.log('[175-checkout-deeplink] leg 2 — SOL: the same link on the twin rail…');
     await installSolStub(driver);
     await openBalances(driver);
     await driver.click('asset-sol-select', {timeoutMs: 8_000});
-    await driver.eval((u) => { window.__DPAY_TEST_DEEPLINK(u); }, TILL_LINK);
+    await driver.eval((u) => { window.__DPAY_TEST_DEEPLINK(u); }, CHECKOUT_LINK);
 
     await driver.findByTestID('sol-pay-amount', {timeoutMs: 15_000});
     assertEq(await driver.readText('sol-pay-amount'), `Pay ${SOL_PAY_DISPLAY}`,
@@ -156,20 +156,20 @@ export async function run() {
     assert(await driver.isPresent('btn-approve'), 'the SOL review still requires an explicit Approve press');
     assertEq(JSON.stringify(await broadcasts(driver)), '[]',
       'the device must broadcast nothing while the review is unapproved');
-    await driver.screenshot('175-till-deeplink-sol');
-    console.log('[175-till-deeplink] ✓ SOL: idle → review, nothing broadcast');
+    await driver.screenshot('175-checkout-deeplink-sol');
+    console.log('[175-checkout-deeplink] ✓ SOL: idle → review, nothing broadcast');
     await driver.click('btn-sol-pay-cancel');
 
     // Nothing ever escaped toward the real provider.
     const seen = await ocpStubState(driver);
     assertEq(JSON.stringify(seen.unexpected), '[]', 'no request may reach an origin outside the fixture table');
 
-    console.log(`[175-till-deeplink] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
+    console.log(`[175-checkout-deeplink] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
   } finally {
     await env.stop();
   }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run().catch((e) => { console.error(`\n[175-till-deeplink] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
+  run().catch((e) => { console.error(`\n[175-checkout-deeplink] RED: ${e.stack || e.message || e}\n`); process.exit(1); });
 }

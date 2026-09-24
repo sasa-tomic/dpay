@@ -1,8 +1,8 @@
 // Flow 146 — the two forms a user types MONEY into fit the screen they are shown on.
 //
-// WHY THIS EXISTS. The suite drives both of these forms end to end — flows 113–117 ring up and pay a
-// till charge, 104–107 send to an address — and neither ever asked whether the form was ON SCREEN.
-// It was not. Measured at 390px: the cashier ring-up form hung 71.7px off BOTH edges of a 358px
+// WHY THIS EXISTS. The suite drives both of these forms end to end — flows 113-117 open a charge and pay a
+// checkout charge, 104–107 send to an address — and neither ever asked whether the form was ON SCREEN.
+// It was not. Measured at 390px: the cashier checkout-open form hung 71.7px off BOTH edges of a 358px
 // column (the `CHF` prefix off-screen left, the button's corner radii off-screen right, the hint
 // clipped at both ends), and the Send-to-address form hung 17.4px off both edges with its Max
 // button a further 28.7px past the right. Every one of those flows was GREEN throughout, and so was
@@ -17,24 +17,24 @@
 //
 // BOTH LOCALES, because the copy under each amount field is the longest sentence on its screen and
 // German is the app's longest rendering of it. Language is not the cause (English measured the
-// identical 533px till root), which is why it is a SEPARATE pass rather than the only one: the
+// identical 533px checkout root), which is why it is a SEPARATE pass rather than the only one: the
 // structural fix has to hold for the widest copy the app ships.
 //
-// Selector contract: `btn-code-till`, `amount-input`, `btn-till-ring-up`, `btn-pay-send`,
+// Selector contract: `btn-code-checkout`, `amount-input`, `btn-checkout-open`, `btn-pay-send`,
 // `send-address-input`, `btn-send-max`, `btn-lang-de`, `btn-settings`, `btn-settings-close`.
 import {
   setup, assert, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency,
 } from '../harness/lib.mjs';
 
-const VCHF = 7;      // the till's one asset — and the row this flow sends from
+const VCHF = 7;      // the checkout's one asset — and the row this flow sends from
 const SEED = 500_000_000;
 
 export const meta = {
   id: '146',
   name: 'money-forms-fit',
   journey: 'pay',
-  covers: ['till', 'merchant-till', 'send-to-address', 'layout', 'viewport-fit', 'receive', 'vchf', 'i18n', 'regression'],
-  verifies: 'The two forms a user types money into — the till ring-up (the shared Receive amount row with the till checkbox checked) and Send-to-address — render entirely inside the phone viewport in both a short and the app’s longest locale: each form’s mode surface is no wider than its content column, and every rendered box in it (the unit prefix, the amount fields, the Max button, the hints and the primary buttons) sits between the two viewport edges with no horizontal page scroll.',
+  covers: ['checkout', 'merchant-checkout', 'send-to-address', 'layout', 'viewport-fit', 'receive', 'vchf', 'i18n', 'regression'],
+  verifies: 'The two forms a user types money into — the checkout checkout-open (the shared Receive amount row with the checkout checkbox checked) and Send-to-address — render entirely inside the phone viewport in both a short and the app’s longest locale: each form’s mode surface is no wider than its content column, and every rendered box in it (the unit prefix, the amount fields, the Max button, the hints and the primary buttons) sits between the two viewport edges with no horizontal page scroll.',
   timeoutMs: 90000,
 };
 
@@ -105,13 +105,13 @@ function assertFits(m, painted, where) {
     `${where}: the page scrolls horizontally (${m.documentScrollW}px of content in a ${m.viewportW}px viewport) — ${shown}`);
 }
 
-/** Receive ▸ Request payment ▸ the till checkbox. The code-form choice persists across visits and
+/** Receive ▸ Request payment ▸ the checkout checkbox. The code-form choice persists across visits and
  *  the checkbox TOGGLES (unlike the Send form's segmented toggle, whose click SETS), so a blind
  *  click on the second visit would flip BACK to the dpay code — guard on the form being up. */
-async function openRingUpForm(driver) {
+async function openChargeForm(driver) {
   await driver.click('tab-receive', {timeoutMs: 5_000});
-  if (!(await driver.isPresent('btn-till-ring-up'))) await driver.click('btn-code-till', {timeoutMs: 5_000});
-  await driver.findByTestID('btn-till-ring-up', {timeoutMs: 8_000});
+  if (!(await driver.isPresent('btn-checkout-open'))) await driver.click('btn-code-checkout', {timeoutMs: 5_000});
+  await driver.findByTestID('btn-checkout-open', {timeoutMs: 8_000});
 }
 
 /** Pay ▸ Send to address — the segmented toggle SETS its value, so the blind click is a no-op when
@@ -124,11 +124,11 @@ async function openSendForm(driver) {
 
 /** Measure + assert both forms in whatever language the app is currently in. */
 async function bothForms(driver, locale) {
-  await openRingUpForm(driver);
-  const till = await measureIn(driver, 'amount-input', ['amount-input', 'btn-till-ring-up']);
-  console.log(`[146-money-forms-fit] ring-up (${locale}): ${JSON.stringify(till.m)}`);
-  assertFits(till.m, till.painted, `ring-up form (${locale})`);
-  await driver.screenshot(`146-till-form-${locale}`);
+  await openChargeForm(driver);
+  const checkout = await measureIn(driver, 'amount-input', ['amount-input', 'btn-checkout-open']);
+  console.log(`[146-money-forms-fit] checkout-open (${locale}): ${JSON.stringify(checkout.m)}`);
+  assertFits(checkout.m, checkout.painted, `checkout-open form (${locale})`);
+  await driver.screenshot(`146-checkout-form-${locale}`);
 
   await openSendForm(driver);
   const send = await measureIn(driver, 'send-address-input', ['send-address-input', 'send-scan', 'btn-send-max']);
@@ -146,12 +146,12 @@ async function measureIn(driver, anchor, mustPaint) {
 
 export async function run() {
   const start = Date.now();
-  console.log('[146-money-forms-fit] setup (relay + web + browser; the session relay serves the till)…');
+  console.log('[146-money-forms-fit] setup (relay + web + browser; the session relay serves the checkout)…');
   const env = await setup();
   try {
     const {driver, relayBaseURL} = env;
     await onboardWallet(driver, 'Bahnhof Kiosk');
-    // VCHF is the one asset a dpay till takes, so it is the one whose Receive tab reaches the
+    // VCHF is the one asset a dpay checkout takes, so it is the one whose Receive tab reaches the
     // counter rather than the refusal panel — and funding it is what makes the send form render
     // instead of the fund-first gate.
     const me = await accountOf(driver);

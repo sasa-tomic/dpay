@@ -11,7 +11,7 @@
 //   (c) Pay (2026-09-14: honestly named — the screen behind it scans, taps and beams; the oversized
 //       "Scan to pay" button is gone and the action row is three EQUAL cards) is one tap to a live
 //       camera, and it lands the SCAN sub-mode even when the Pay tab was last left on
-//       "Send to address" — the returning traveller's till gesture stays one tap;
+//       "Send to address" — the returning traveller's checkout gesture stays one tap;
 //   (d) Home carries the accounts AFFORDANCE and not the accounts LIST (that is flow 136's route);
 //       since 2026-09-14 the affordance IS the headline — tapping the balance opens accounts;
 //   (e) Receive still opens the request form.

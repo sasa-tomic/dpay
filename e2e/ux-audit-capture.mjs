@@ -8,7 +8,7 @@
 //     reset dialog
 //   • convert: FUNDED happy path (3 ICP seeded via faucet currency:8) — destination picker →
 //     amount+quote → details disclosure → checklist → in-flight → done
-//   • checkout (till) code form + charge QR with VCHF SELECTED (the rail the till takes)
+//   • checkout (checkout) code form + charge QR with VCHF SELECTED (the rail the checkout takes)
 //   • SOL rail in its OWN pass with {solStub:true}: accounts SOL card, SOL receive QR + address,
 //     SOL pay, SOL send form
 // Run: node e2e/ux-audit-capture.mjs   (screenshots land in e2e/shots/ux-*.png)
@@ -175,27 +175,27 @@ async function runPass(env, tag, opts = {}) {
     await sleep(700);
     await shot('19-receive-address');
     await driver.click('btn-receive-request', { timeoutMs: 4_000 });
-    await driver.findByTestID('btn-code-till', { timeoutMs: 5_000 });
+    await driver.findByTestID('btn-code-checkout', { timeoutMs: 5_000 });
   });
   await step('checkout-form', async () => {
-    // The till is the VCHF counter (flow 114): select VCHF before opening the Receive form.
+    // The checkout is the VCHF counter (flow 114): select VCHF before opening the Receive form.
     // selectCurrency assumes the Accounts route — navigate there first (the prior step left the
     // app on the Receive tab, where asset rows do not exist).
     await openBalances(driver);
     await selectCurrency(driver, 'vchf');
     await driver.click('tab-receive', { timeoutMs: 4_000 });
-    await driver.findByTestID('btn-code-till', { timeoutMs: 5_000 });
-    await driver.click('btn-code-till', { timeoutMs: 4_000 });
+    await driver.findByTestID('btn-code-checkout', { timeoutMs: 5_000 });
+    await driver.click('btn-code-checkout', { timeoutMs: 4_000 });
     await sleep(600);
     await shot('20-checkout-form');
     await driver.type('amount-input', '10.50', { timeoutMs: 4_000 });
-    await driver.click('btn-till-ring-up', { timeoutMs: 4_000 });
-    await driver.findByTestID('till-qr', { timeoutMs: 15_000 });
+    await driver.click('btn-checkout-open', { timeoutMs: 4_000 });
+    await driver.findByTestID('checkout-qr', { timeoutMs: 15_000 });
     await sleep(400);
     await shot('21-checkout-qr');
-    await driver.click('btn-till-cancel', { timeoutMs: 4_000 });
-    await driver.findByTestID('btn-code-till', { timeoutMs: 5_000 });
-    await driver.click('btn-code-till', { timeoutMs: 4_000 }); // back to the dpay code form
+    await driver.click('btn-checkout-cancel', { timeoutMs: 4_000 });
+    await driver.findByTestID('btn-code-checkout', { timeoutMs: 5_000 });
+    await driver.click('btn-code-checkout', { timeoutMs: 4_000 }); // back to the dpay code form
     await sleep(300);
   });
   await step('add-money', async () => {

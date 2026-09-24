@@ -6,12 +6,12 @@
 // request to api.dfx.swiss. That stub is what keeps the suite honest and fast — and it is also the
 // reason a wrong belief about the provider's payload could sit behind 107 green flows indefinitely.
 // It did: `parsePaymentDetails` refused every body carrying an empty `assets` array, which the live
-// provider sends on every response, so no real till was payable while everything was green (review
+// provider sends on every response, so no real checkout was payable while everything was green (review
 // ledger row 16). No fixture could have caught that, because the fixture WAS the wrong belief.
 //
 // So this probe closes exactly one gap: it points the shipped app at the real thing and reads what
 // comes back. It runs the REAL parser, the REAL provider client and the REAL review screen against
-// a live 300-second quote from the public CHF-1 test till.
+// a live 300-second quote from the public CHF-1 test checkout.
 //
 // IT NEVER SPENDS MONEY, BY CONSTRUCTION. It stops at the review — the screen whose entire purpose
 // is that it has not signed anything yet — and never presses Approve. The wallet it drives is a
@@ -28,10 +28,10 @@ import {
   setup, assert, assertIncludes, onboardWallet, accountOf, faucetAccount,
   openBalances, selectCurrency, armPayScan,
 } from './harness/lib.mjs';
-import { PROVIDER_HOST, TILL_QR } from './harness/ocp.mjs';
+import { PROVIDER_HOST, CHECKOUT_QR } from './harness/ocp.mjs';
 
-const ICP = 8;                 // the till's `InternetComputer` menu offers ICP; the agent float holds it
-const ICP_SEED = 210_000_001;  // 2.10000001 ICP — comfortably over the ~0.5 ICP the CHF-1 till asks
+const ICP = 8;                 // the checkout's `InternetComputer` menu offers ICP; the agent float holds it
+const ICP_SEED = 210_000_001;  // 2.10000001 ICP — comfortably over the ~0.5 ICP the CHF-1 checkout asks
 
 const start = Date.now();
 console.log('[live-ocp] setup (relay + web + browser)…');
@@ -59,9 +59,9 @@ try {
   assert(await driver.waitForText('2.10000001 ICP', { timeoutMs: 10_000 }), 'the app must see the ICP seed before Pay can scan');
   await driver.click('tab-pay');
 
-  console.log('[live-ocp] scanning the live till — two real provider round trips…');
+  console.log('[live-ocp] scanning the live checkout — two real provider round trips…');
   await armPayScan(driver);
-  await driver.eval((qr) => { window.__DPAY_TEST_SCAN(qr); }, TILL_QR);
+  await driver.eval((qr) => { window.__DPAY_TEST_SCAN(qr); }, CHECKOUT_QR);
 
   // The review is the outcome. Generous timeout: two live HTTPS round trips to Switzerland.
   const review = await driver.findByTestID('btn-approve', { timeoutMs: 30_000 });
@@ -78,14 +78,14 @@ try {
     console.log(`  payee    ${payee}`);
     console.log(`  price    ${price}\n`);
 
-    // ONE line carries both: the till's own fiat price, and the host that set it.
+    // ONE line carries both: the checkout's own fiat price, and the host that set it.
     assertIncludes(price, PROVIDER_HOST, 'the review must name the live provider host');
-    assertIncludes(price, 'CHF 1', "the review must show the till's own price");
+    assertIncludes(price, 'CHF 1', "the review must show the checkout's own price");
     // The destination is DFX's real receiving principal, and it must be rendered in FULL — it is the
     // one value on the screen a payer can independently check.
     assert(/^[a-z0-9-]{20,}$/.test(payee.trim()), `the full destination principal must render, got "${payee}"`);
     assertIncludes(amount, 'ICP', 'the amount must be denominated in the selected asset');
-    ok('amount, full destination, provider host and the till’s fiat price all rendered');
+    ok('amount, full destination, provider host and the checkout’s fiat price all rendered');
   }
 
   await driver.screenshot('live-ocp-review');

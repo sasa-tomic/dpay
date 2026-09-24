@@ -188,7 +188,7 @@ export class Driver {
     // an expected 404 taught the harness to ignore a class that also contains real failures.)
     //
     // Scope is STATIC ASSETS only. `fetch`/`xhr` are the app's own API calls, where a 404 is often
-    // the product working as designed — an unknown till charge, a relay that serves no till, a
+    // the product working as designed — an unknown checkout charge, a relay that serves no checkout, a
     // capabilities probe against a relay that has none — and those are asserted by the flows that
     // provoke them, not here.
     this.page.on('response', (res) => {

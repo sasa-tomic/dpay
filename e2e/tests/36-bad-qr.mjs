@@ -27,10 +27,10 @@
 // Three payloads exercise three real failure shapes, in an order where every expected message
 // differs from the previous one:
 //   1. a plain non-base64 string        → "This isn't a dpay payment code"
-//   2. a DAMAGED OpenCryptoPay till code — a real merchant QR whose bech32 checksum no longer
+//   2. a DAMAGED OpenCryptoPay checkout code — a real merchant QR whose bech32 checksum no longer
 //      verifies → "This code is damaged…", the distinct instruction to ask for the code again. (A
 //      damaged code must never resolve to whatever host the damage happens to spell, which is what
-//      the checksum is for. Flow 111 owns the WORKING till code and its payment.)
+//      the checksum is for. Flow 111 owns the WORKING checkout code and its payment.)
 //   3. a valid-base64, wrong-length decode (3 bytes can't reconstruct the 132-byte request)
 //                                        → back to "This isn't a dpay payment code"
 //
@@ -47,20 +47,20 @@ export const meta = {
   name: 'bad-qr',
   journey: 'pay',
   covers: ['bad-qr', 'malformed', 'error-handling', 'input-validation', 'rescan'],
-  verifies: 'Three unpayable codes in a row (non-base64, a bech32-damaged OpenCryptoPay till code, a wrong-length base64) each surface their OWN honest error; the review never mounts; and after every refusal the scanner REMOUNTS (mount counter advances) so the next, different code is genuinely read rather than swallowed.',
+  verifies: 'Three unpayable codes in a row (non-base64, a bech32-damaged OpenCryptoPay checkout code, a wrong-length base64) each surface their OWN honest error; the review never mounts; and after every refusal the scanner REMOUNTS (mount counter advances) so the next, different code is genuinely read rather than swallowed.',
   timeoutMs: 90000,
 };
 
 const NOT_A_PAYMENT_CODE = "isn't a dpay payment code";
 const DAMAGED_CODE = 'This code is damaged';
 
-// A real OpenCryptoPay till code with ONE data symbol corrupted: still an `lnurl1…` string (so the
+// A real OpenCryptoPay checkout code with ONE data symbol corrupted: still an `lnurl1…` string (so the
 // app knows what KIND of code it is), but the checksum no longer verifies.
 const DAMAGED_TILL = damageLnurl(encodeLnurl('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e'));
 
 const PAYLOADS = [
   { label: 'non-base64 garbage', payload: 'this is definitely not a valid request QR!!!', expect: NOT_A_PAYMENT_CODE },
-  { label: 'damaged till code', payload: DAMAGED_TILL, expect: DAMAGED_CODE },
+  { label: 'damaged checkout code', payload: DAMAGED_TILL, expect: DAMAGED_CODE },
   { label: 'valid base64, wrong length', payload: 'AAAA', expect: NOT_A_PAYMENT_CODE },
 ];
 

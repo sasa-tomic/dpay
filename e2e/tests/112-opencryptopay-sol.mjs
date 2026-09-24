@@ -1,8 +1,8 @@
-// Flow 112 — paying the SAME merchant till on the SOLANA rail, and refusing the one asset it offers
+// Flow 112 — paying the SAME merchant checkout on the SOLANA rail, and refusing the one asset it offers
 // that dpay must not pay.
 //
-// Flow 111 pays this till on the Internet Computer. This is its twin on the device-key rail, and the
-// pair is the point: a merchant's till code is not per-rail, so the same fixture (`harness/ocp.mjs`)
+// Flow 111 pays this checkout on the Internet Computer. This is its twin on the device-key rail, and the
+// pair is the point: a merchant's checkout code is not per-rail, so the same fixture (`harness/ocp.mjs`)
 // has to behave identically whichever asset the payer happens to have selected — the same explicit
 // review, the same never-auto-sign rule, the same one-shot report. Only the settlement changes: a
 // System Program transfer signed on the device, with the transaction SIGNATURE as the proof, where
@@ -10,18 +10,18 @@
 //
 // Three legs, in the order a payer meets them:
 //
-//   1. SOLANA USDC IS REFUSED, BY NAME. The till really does offer `Solana/USDC` (measured), and
+//   1. SOLANA USDC IS REFUSED, BY NAME. The checkout really does offer `Solana/USDC` (measured), and
 //      dpay really can hold it — so this is not "asset not accepted", it is dpay declining an offer
 //      it could physically take. The reason is money-safety and it is measured: the provider's
 //      Solana URI carries no `spl-token` parameter, so `solana:<address>?amount=…` is byte-identical
 //      to a native SOL transfer and the address is ambiguous between the owner and its token account
 //      (`docs/specs/2026-09-01-opencryptopay-findings.md`, "Stale-README trap #2"). Sending against
 //      that would move real money to the wrong account. The refusal must name SOL as the way to pay
-//      this same till, cost at most the one details read, ask for NO destination, and — the part
+//      this same checkout, cost at most the one details read, ask for NO destination, and — the part
 //      that actually protects the user — broadcast NOTHING.
-//   2. SOL PAYS, AND NEVER AUTO-SIGNS. A scanned till lands on an explicit review carrying the
+//   2. SOL PAYS, AND NEVER AUTO-SIGNS. A scanned checkout lands on an explicit review carrying the
 //      amount at SOL's own precision, the FULL destination address, the provider host the price came
-//      from, the countdown, the FIAT PRICE the till is charging, and the merchant name marked as
+//      from, the countdown, the FIAT PRICE the checkout is charging, and the merchant name marked as
 //      CLAIMED. Proven by the chain, not by pixels: zero transactions have been broadcast while that
 //      review is on screen. Approve → one broadcast → one proof submission naming that signature →
 //      the paid state.
@@ -45,15 +45,15 @@ import {
   setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, armPayScan,
 } from '../harness/lib.mjs';
 import {
-  installTillStub, ocpStubState,
-  CLAIMED_MERCHANT, PAYMENT_ID, PROVIDER_HOST, TILL_QR,
+  installCheckoutStub, ocpStubState,
+  CLAIMED_MERCHANT, PAYMENT_ID, PROVIDER_HOST, CHECKOUT_QR,
 } from '../harness/ocp.mjs';
 
-// SYNTHETIC (the findings doc records the URI's shape, not this till's Solana address): a real,
+// SYNTHETIC (the findings doc records the URI's shape, not this checkout's Solana address): a real,
 // checksum-valid base58 Solana address — the app runs it through `isValidSolanaAddress` before the
 // payer ever sees it, so a made-up string would be refused rather than displayed.
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
-/** The till's `0.01219252` SOL rendered at SOL's own 9 decimals — what the review must say. */
+/** The checkout's `0.01219252` SOL rendered at SOL's own 9 decimals — what the review must say. */
 const PAY_DISPLAY = '0.01219752 SOL';
 
 export const meta = {
@@ -62,7 +62,7 @@ export const meta = {
   journey: 'pay',
   covers: ['opencryptopay', 'sol-rail', 'explicit-approve', 'solana-usdc-refused',
     'one-shot-submit', 'honest-instructions', 'fail-closed', 'loss-path-recovery'],
-  verifies: 'The Solana rail pays an OpenCryptoPay till: a scanned till with SOL selected resolves a live quote and lands on an explicit review (exact SOL amount, full destination address, and ONE line carrying the fiat price the till itself is charging and the host that set it) that broadcasts nothing until Approve; Approve sends exactly one Solana transaction and reports that signature to the provider exactly once → paid. With Solana USDC selected the SAME till is refused by name — its URI names no token account — pointing the payer at SOL, costing one provider read, and broadcasting nothing. A transfer the cluster accepts but will not confirm is reported to nobody, keeps its signature, and is completed by the wallet itself once the status read comes back — one broadcast, one submission.',
+  verifies: 'The Solana rail pays an OpenCryptoPay checkout: a scanned checkout with SOL selected resolves a live quote and lands on an explicit review (exact SOL amount, full destination address, and ONE line carrying the fiat price the checkout itself is charging and the host that set it) that broadcasts nothing until Approve; Approve sends exactly one Solana transaction and reports that signature to the provider exactly once → paid. With Solana USDC selected the SAME checkout is refused by name — its URI names no token account — pointing the payer at SOL, costing one provider read, and broadcasting nothing. A transfer the cluster accepts but will not confirm is reported to nobody, keeps its signature, and is completed by the wallet itself once the status read comes back — one broadcast, one submission.',
   timeoutMs: 60000, // 3 legs × (2 provider round trips) + a real local sign/broadcast/confirm
 };
 
@@ -73,7 +73,7 @@ export const meta = {
  * landing here.
  *
  * The USDC token account exists and holds a balance so leg 1 reaches the SCAN surface: an absent ATA
- * parks the Pay tab on the fail-closed setup card (flow 76) and the till would never be scanned.
+ * parks the Pay tab on the fail-closed setup card (flow 76) and the checkout would never be scanned.
  */
 async function installSolStub(driver) {
   await driver.eval(() => {
@@ -118,7 +118,7 @@ async function selectAndScan(driver, assetKey) {
   await driver.click('tab-pay', {timeoutMs: 5_000});
   await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
   await armPayScan(driver); // the pay-intent gate — the shared choke point for every injected scan
-  await driver.eval((qr) => { window.__DPAY_TEST_SCAN(qr); }, TILL_QR);
+  await driver.eval((qr) => { window.__DPAY_TEST_SCAN(qr); }, CHECKOUT_QR);
 }
 
 export async function run() {
@@ -131,7 +131,7 @@ export async function run() {
     console.log('[112-opencryptopay-sol] onboarding…');
     await onboardWallet(driver, 'e2e-ocp-sol');
     await installSolStub(driver);
-    await installTillStub(driver, {
+    await installCheckoutStub(driver, {
       passOrigins: [new URL(relayBaseURL).origin, new URL(webBaseURL).origin],
       // The real provider takes real time over two reads, and leg 2 asserts the wallet says what it
       // is doing instead of freezing — so the fixture has to take time too. Without this the reads
@@ -146,30 +146,30 @@ export async function run() {
       },
     });
 
-    // --- 1. Solana USDC: offered by the till, refused by dpay ----------------------------------
-    console.log('[112-opencryptopay-sol] leg 1 — scanning the till with Solana USDC selected…');
+    // --- 1. Solana USDC: offered by the checkout, refused by dpay ----------------------------------
+    console.log('[112-opencryptopay-sol] leg 1 — scanning the checkout with Solana USDC selected…');
     await selectAndScan(driver, 'sol-usdc');
 
     assert(await driver.waitForText('doesn’t say which account to pay', {timeoutMs: 12_000}),
-      'the refusal must name the measured reason: the till\'s code does not say which account to pay');
+      'the refusal must name the measured reason: the checkout\'s code does not say which account to pay');
     const body = await driver.bodyText();
-    assertIncludes(body, 'pay with SOL instead', 'the refusal must point at the asset that CAN pay this same till');
-    assert(!(await driver.isPresent('sol-pay-amount')), 'a refused till must never render a payment review');
-    assert(!(await driver.isPresent('btn-approve')), 'a refused till must never render an Approve button');
+    assertIncludes(body, 'pay with SOL instead', 'the refusal must point at the asset that CAN pay this same checkout');
+    assert(!(await driver.isPresent('sol-pay-amount')), 'a refused checkout must never render a payment review');
+    assert(!(await driver.isPresent('btn-approve')), 'a refused checkout must never render an Approve button');
 
     // Cheap AND safe: one details read, no destination asked for, and — the part that matters —
     // nothing signed and nothing broadcast.
     let seen = await ocpStubState(driver);
-    assertEq(String(seen.calls.length), '1', 'an unpayable till costs exactly one provider read');
+    assertEq(String(seen.calls.length), '1', 'an unpayable checkout costs exactly one provider read');
     assertIncludes(seen.calls[0], 'timeout=0', 'the details read asks for the current charge, never a long poll');
     assertEq(String(seen.txUrls.length), '0', 'a refusal before any funds move must never touch the submission endpoint');
     assertEq(JSON.stringify(await broadcasts(driver)), '[]',
-      'a refused Solana USDC till must broadcast NOTHING — that refusal exists to stop money reaching the wrong account');
+      'a refused Solana USDC checkout must broadcast NOTHING — that refusal exists to stop money reaching the wrong account');
     console.log('[112-opencryptopay-sol] ✓ Solana USDC refused by name; one read, nothing signed');
     await driver.screenshot('112-ocp-sol-usdc-refused');
 
     // --- 2. SOL: the explicit review, then the payment -----------------------------------------
-    console.log('[112-opencryptopay-sol] leg 2 — scanning the till with SOL selected…');
+    console.log('[112-opencryptopay-sol] leg 2 — scanning the checkout with SOL selected…');
     await selectAndScan(driver, 'sol');
 
     // Two provider reads take real time. The wallet says what it is doing rather than freezing —
@@ -179,11 +179,11 @@ export async function run() {
 
     await driver.findByTestID('sol-pay-amount', {timeoutMs: 15_000});
     assertEq(await driver.readText('sol-pay-amount'), `Pay ${PAY_DISPLAY}`,
-      'the review shows the till\'s exact quoted amount, converted at SOL\'s own 9-decimal precision');
+      'the review shows the checkout\'s exact quoted amount, converted at SOL\'s own 9-decimal precision');
     assertEq(await driver.readText('sol-pay-payee'), MERCHANT_ADDR,
       'the review shows the FULL destination address — the one thing on screen the payer can check');
-    // ONE provider line: the till's own price (`0.01221422 SOL` is uncheckable against the number
-    // on the till) beside the host that set it, which is what attributes the fiat figure to the
+    // ONE provider line: the checkout's own price (`0.01221422 SOL` is uncheckable against the number
+    // on the checkout) beside the host that set it, which is what attributes the fiat figure to the
     // provider. One component renders it for both rails, so this is byte-identical to the IC
     // rail's line (CLAUDE.md same-surfaces rule) even though the asset amount above it is not.
     assertEq(await driver.readText('ocp-price'), `CHF 1 · price from ${PROVIDER_HOST}`,
@@ -191,12 +191,12 @@ export async function run() {
     assert(!(await driver.isPresent('review-claimed')), 'the review carries no unactionable name caveat');
     assert(!(await driver.isPresent('ocp-expiry')),
       'a quote with minutes left must not put a countdown on the review');
-    assertIncludes(await driver.bodyText(), CLAIMED_MERCHANT, 'the review shows the name the till claims');
+    assertIncludes(await driver.bodyText(), CLAIMED_MERCHANT, 'the review shows the name the checkout claims');
 
     // NEVER AUTO-SIGNS — proven on the chain, not in pixels: the Approve press is still pending and
     // the device has broadcast nothing. (A scanned dpay REQUEST does auto-sign on this rail too, by
     // design; this code came from a stranger, so it may not.)
-    assert(await driver.isPresent('btn-approve'), 'a scanned till must still require an explicit Approve press');
+    assert(await driver.isPresent('btn-approve'), 'a scanned checkout must still require an explicit Approve press');
     assertEq(JSON.stringify(await broadcasts(driver)), '[]',
       'nothing may be broadcast before the payer approves');
     await driver.screenshot('112-ocp-sol-review');
@@ -227,7 +227,7 @@ export async function run() {
     await driver.screenshot('112-ocp-sol-paid');
 
     // --- 4. (header leg 3) confirmation fails AFTER the broadcast — still recoverable -----------
-    // The likeliest failure of a till payment is not a refusal: it is losing the network while the
+    // The likeliest failure of a checkout payment is not a refusal: it is losing the network while the
     // transaction is already landing. Money on chain, provider untold, and the only claim on it is
     // the signature the broadcast returned. Discarding it is what made this rail's version of the
     // loss path unrecoverable (review #15); keeping it makes the outcome resolvable without the
@@ -238,7 +238,7 @@ export async function run() {
     await driver.click('btn-sol-pay-done', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
     await armPayScan(driver);
-    await driver.eval((qr) => { window.__DPAY_TEST_SCAN(qr); }, TILL_QR);
+    await driver.eval((qr) => { window.__DPAY_TEST_SCAN(qr); }, CHECKOUT_QR);
     await driver.findByTestID('sol-pay-amount', {timeoutMs: 15_000});
     await driver.click('btn-approve', {timeoutMs: 5_000});
 

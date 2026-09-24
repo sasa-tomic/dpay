@@ -3,7 +3,7 @@
 // The founder's ask when Home stopped being the currency list: "the list of currencies should
 // still be easily accessible." The literal answer is the header account chip, which renders on
 // every surface INCLUDING the Pay scanner — so this flow starts on the scanner, the screen a
-// traveller is actually standing on at a till.
+// traveller is actually standing on at a checkout.
 //
 // It also pins what makes the list a route rather than the modal it used to be:
 //   (a) one tap on the header chip, from the Pay scanner, opens it;
@@ -37,7 +37,7 @@ export async function run() {
     console.log('[150-accounts-route] onboarding…');
     await onboardWallet(driver, 'e2e-accounts-route');
 
-    // (a) Standing on the Pay scanner — the till surface — ONE tap on the header chip.
+    // (a) Standing on the Pay scanner — the checkout surface — ONE tap on the header chip.
     await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
     await driver.click('balance', { timeoutMs: 5_000 });
     await driver.findByTestID('accounts-list', { timeoutMs: 5_000 });
