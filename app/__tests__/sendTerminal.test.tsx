@@ -65,7 +65,6 @@ import {SendSheet} from '../components/SendSheet';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {CurrencyDescriptor} from '../config/catalog';
 import type {Identity, Txn} from '../lib/types';
-import {M} from '../i18n';
 
 beforeEach(async () => {
   jest.clearAllMocks();
@@ -252,7 +251,6 @@ describe('SolanaWithdrawSheet — the receipt Txn: pending truth, then the settl
 // 3 — the IC sheet: the settled receipt Txn + the throw classification at the signature boundary
 // ============================================================================
 describe('SendSheet — the signature boundary: nothing-sent vs the honest unknown', () => {
-  const OISY = '3nrdb-dxqqw-mc4gr-fbwxc-ynsdh-2e72e-urieh-mx52v-moiye-hff4l-4qe';
   const K2 = 'k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae';
   const CATALOG: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
   const VCHF = CATALOG.find(c => c.currency === 7)!;
