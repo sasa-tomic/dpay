@@ -2,7 +2,7 @@
 //
 // WHY THIS EXISTS. The suite drives both of these forms end to end — flows 113-117 open a charge and pay a
 // checkout charge, 104–107 send to an address — and neither ever asked whether the form was ON SCREEN.
-// It was not. Measured at 390px: the cashier checkout-open form hung 71.7px off BOTH edges of a 358px
+// It was not. Measured at 390px: the cashier charge-open form hung 71.7px off BOTH edges of a 358px
 // column (the `CHF` prefix off-screen left, the button's corner radii off-screen right, the hint
 // clipped at both ends), and the Send-to-address form hung 17.4px off both edges with its Max
 // button a further 28.7px past the right. Every one of those flows was GREEN throughout, and so was
@@ -34,7 +34,7 @@ export const meta = {
   name: 'money-forms-fit',
   journey: 'pay',
   covers: ['checkout', 'merchant-checkout', 'send-to-address', 'layout', 'viewport-fit', 'receive', 'vchf', 'i18n', 'regression'],
-  verifies: 'The two forms a user types money into — the checkout checkout-open (the shared Receive amount row with the checkout checkbox checked) and Send-to-address — render entirely inside the phone viewport in both a short and the app’s longest locale: each form’s mode surface is no wider than its content column, and every rendered box in it (the unit prefix, the amount fields, the Max button, the hints and the primary buttons) sits between the two viewport edges with no horizontal page scroll.',
+  verifies: 'The two forms a user types money into — the checkout charge-open (the shared Receive amount row with the checkout checkbox checked) and Send-to-address — render entirely inside the phone viewport in both a short and the app’s longest locale: each form’s mode surface is no wider than its content column, and every rendered box in it (the unit prefix, the amount fields, the Max button, the hints and the primary buttons) sits between the two viewport edges with no horizontal page scroll.',
   timeoutMs: 90000,
 };
 
