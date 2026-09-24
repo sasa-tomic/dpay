@@ -337,6 +337,56 @@ describe('proof (c): an instruction-error refusal does NOT walk', () => {
 // must stay single-homed, and the devnet guard — config-level, fresh registries, no network.
 // ============================================================================
 
+// ============================================================================
+// (e/f) THE HANG BOUNDS (2026-09 stream D pins, extending the audit table in `solana.ts`'s
+// header). Every await on the send path answers to exactly one deadline; these two pin the
+// bounds that live OUTSIDE the sheet's 60s withTimeout:
+//   (e) the module load's own bound (`loadRpcForSend`) — expiry throws the engine-load class
+//       (friendlySolError → M.sol.engineLoad), never an unbounded wait on the lazy chunk;
+//   (f) the confirm loop's own bound (`confirmTransaction`) — the poll throws at its deadline,
+//       which is what turns "the chain never answered" into the sheet's honest unknown.
+// ============================================================================
+
+describe('the hang bounds: module-load deadline and confirm-loop deadline', () => {
+  test('(e) loadRpcForSend expiry throws the engine-load class — the lazy chunk can never hang a send', async () => {
+    const {loadRpcForSend} = require('../solana') as typeof import('../solana');
+    const {friendlySolError} = require('../solana/errors') as typeof import('../solana/errors');
+    const {M} = require('../i18n') as typeof import('../i18n');
+    // A chunk that never arrives (the stalled origin fetch of the 2026-09-21 live sends) against
+    // a short injected deadline: the race must REJECT, with the message the classifier maps to
+    // the engine-load copy ("check your connection, reopen, retry"), not a silent hang.
+    const never = (): Promise<never> => new Promise(() => {});
+    let raw = '';
+    await expect(loadRpcForSend(20, never).catch((err: unknown) => {
+      raw = err instanceof Error ? err.message : String(err);
+      throw err;
+    })).rejects.toThrow(/rpc module failed to load within 20ms/);
+    expect(friendlySolError(raw)).toBe(M.sol.engineLoad);
+  });
+
+  test('(f) confirmTransaction throws at its deadline — the poll is bounded, never a forever loop', async () => {
+    const rpc = require('../solana/rpc') as typeof import('../solana/rpc');
+    // A cluster that has never heard of the signature, answering `[null]` forever (exactly the
+    // shape the relay's offline stub serves by default). The loop must end at the deadline with
+    // its honest timeout — the caller (sheet → unknown) owns the story from there.
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: Record<string, unknown>};
+    g.__DPAY_TEST_SOLANA_RPC_STUB = {
+      getSignatureStatuses: () => ({context: {slot: 1}, value: [null]}),
+    };
+    try {
+      await expect(rpc.confirmTransaction(['https://stub.test'], SIG_OK.result, {timeoutMs: 80, pollMs: 10}))
+        .rejects.toThrow('solana confirmation timeout');
+    } finally {
+      delete g.__DPAY_TEST_SOLANA_RPC_STUB;
+    }
+  });
+});
+
+// ============================================================================
+// (d) The candidate list + order pin. The constant, the derivation, the override slots that
+// must stay single-homed, and the devnet guard — config-level, fresh registries, no network.
+// ============================================================================
+
 /** Fresh constants module (its operator/relay slots are module state), jest override `baked`. */
 function freshConfig(baked?: string): typeof import('../config/constants') {
   const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string};

@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
+import {solSendTimeoutMs} from '../config/constants';
 import {fmtAssetCompact, fmtTime, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import type {Txn} from '../lib/types';
@@ -230,7 +230,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
     setCheckFailed(false);
     setCheckErr(null);
     setSentTo(destination);
-    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(solSendTimeoutMs());
     // The broadcast boundary, captured: the moment the network ACCEPTS the transaction this holds
     // its signature — the ONLY fact that separates "definitely not sent" (a throw before it) from
     // "unknown — may still land" (a throw after it). The Solana Pay rail's pattern

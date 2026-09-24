@@ -29,12 +29,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 jest.mock('../solana', () => ({
   sendSol: jest.fn(),
   sendSpl: jest.fn(),
+  // The unknown terminal's Check status read (read-only, never re-signs) — armed per test below.
+  getSolSignatureStatus: jest.fn(),
   // The sheet warms the lazily-loaded network module at mount (the 2026-09-21 engine-load fix);
   // a no-op here — this suite owns the seam's behavior, not the module load.
   preloadSolanaRpc: () => {},
 }));
 
-import {sendSol, sendSpl} from '../solana';
+import {sendSol, sendSpl, getSolSignatureStatus} from '../solana';
 import {deriveSolanaAddress} from '../solana/identity';
 import {hasStamp, loadJourney} from '../lib/journey';
 import {loadAddressBook} from '../services/addressBook';
@@ -340,6 +342,118 @@ describe('SolanaWithdrawSheet — the honest unknown outcome (accepted send, mis
     expect(has(tree, 'sol-send-signature')).toBe(true);
     expect(has(tree, 'sol-send-unknown-title')).toBe(false);
     expect(has(tree, 'sol-send-err')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});
+
+// ============================================================================
+// The terminal surface's pins (2026-09 stream D). (a) the deadline-over-accepted-broadcast
+// unknown (above, kept); (d) the Check-status resolution matrix — the one read that may resolve
+// an unknown, and it may never re-sign; (e) the no-re-arm invariant: the unknown terminal offers
+// NO send control, so a second 60s deadline can never be armed over an unresolved send.
+// ============================================================================
+describe('SolanaWithdrawSheet — the unknown terminal: Check status + no-re-send invariant', () => {
+  const SIG = '5ig'.repeat(10);
+
+  /** Mount, send with the deadline firing over an ACCEPTED broadcast (the unknown panel), and
+   *  return the tree — the state every Check-status press starts from. */
+  async function sendToUnknown(props: Partial<Parameters<typeof SolanaWithdrawSheet>[0]> = {}) {
+    jest.mocked(sendSol).mockImplementation((_seed, _dest, _amt, _signal, onBroadcast) => {
+      onBroadcast?.(SIG);
+      return Promise.reject(new Error('sol send aborted (deadline)'));
+    });
+    const tree = await mount({token: 'SOL', balance: '2000000000', ...props});
+    await act(async () => {
+      tree.root.findByProps({testID: 'sol-send-address-input'}).props.onChangeText(SOL_DEST);
+      tree.root.findByProps({testID: 'sol-send-amount-input'}).props.onChangeText('0.5');
+    });
+    await act(async () => { await tree.root.findByProps({testID: 'btn-sol-send-confirm'}).props.onPress(); });
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect(has(tree, 'sol-send-unknown-title')).toBe(true);
+    return tree;
+  }
+
+  const checkButton = (tree: renderer.ReactTestRenderer) => tree.root.findByProps({testID: 'btn-sol-send-check'}).props;
+
+  test('(d) status confirmed → the panel flips SETTLED (Sent ✓), never re-signs', async () => {
+    jest.mocked(getSolSignatureStatus).mockResolvedValue({confirmationStatus: 'confirmed', err: null});
+    const tree = await sendToUnknown();
+    await act(async () => { await checkButton(tree).onPress(); });
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect(has(tree, 'sol-send-outcome')).toBe(true);
+    expect(has(tree, 'sol-send-unknown-title')).toBe(false);
+    expect(jest.mocked(sendSol)).toHaveBeenCalledTimes(1); // the read resolved it; nothing re-signed
+    act(() => { tree.unmount(); });
+  });
+
+  test('(d) status err → the terminal FAILED panel: fee-only truth, signature kept as proof, no resend', async () => {
+    jest.mocked(getSolSignatureStatus).mockResolvedValue({confirmationStatus: 'confirmed', err: {InstructionError: [0, {Custom: 1}]}});
+    const tree = await sendToUnknown();
+    await act(async () => { await checkButton(tree).onPress(); });
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect(has(tree, 'sol-send-failed-title')).toBe(true);
+    expect(tree.root.findByProps({testID: 'sol-send-failed-note'}).props.children).toBe(M.withdraw.send.feeOnly);
+    expect(has(tree, 'sol-send-signature')).toBe(true); // the proof stays checkable
+    expect(has(tree, 'btn-sol-send-confirm')).toBe(false); // no resend control on a terminal failure
+    expect(jest.mocked(sendSol)).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('(d) status null (the cluster never heard of it) → the honest pending stays, unchanged', async () => {
+    jest.mocked(getSolSignatureStatus).mockResolvedValue(null);
+    const tree = await sendToUnknown();
+    await act(async () => { await checkButton(tree).onPress(); });
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect(has(tree, 'sol-send-unknown-title')).toBe(true);
+    expect(has(tree, 'sol-send-unknown-note')).toBe(true);
+    expect(has(tree, 'sol-send-failed-title')).toBe(false);
+    expect(has(tree, 'sol-send-outcome')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('(d) a check that cannot complete (rail unreachable) says so — the pending STAYS, never a verdict', async () => {
+    jest.mocked(getSolSignatureStatus).mockRejectedValue(new Error(M.errors.solana.offline));
+    const tree = await sendToUnknown();
+    await act(async () => { await checkButton(tree).onPress(); });
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect(tree.root.findByProps({testID: 'sol-send-check-err'}).props.children).toBe(M.withdraw.send.checkFailed);
+    expect(has(tree, 'sol-send-unknown-title')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('(e) the unknown terminal arms NO second deadline: no send control, only read/copy/done', async () => {
+    jest.mocked(getSolSignatureStatus).mockResolvedValue(null);
+    const tree = await sendToUnknown();
+    // THE INVARIANT: with a signature accepted and unresolved, the only controls are the copy,
+    // the read-only check and Done. Confirm is gone — pressing anything on this panel can never
+    // re-enter confirm() and arm a second withTimeout over the same unresolved transfer.
+    expect(has(tree, 'btn-sol-send-confirm')).toBe(false);
+    await act(async () => { await checkButton(tree).onPress(); }); // the read
+    await act(async () => { await tree.root.findByProps({testID: 'btn-sol-send-copy'}).props.onPress(); });
+    await act(async () => { await tree.root.findByProps({testID: 'btn-sol-send-done'}).props.onPress(); });
+    expect(jest.mocked(sendSol)).toHaveBeenCalledTimes(1); // one send, one deadline, whole story
+    act(() => { tree.unmount(); });
+  });
+
+  test('(e) a fresh send after an ERROR re-arms exactly one deadline per press', async () => {
+    // The error phase is the ONLY place a new send is consented. Each press drives exactly one
+    // send chain (one withTimeout arm); two presses, two chains — never two timers for one.
+    let calls = 0;
+    jest.mocked(sendSol).mockImplementation(() => { calls += 1; throw new Error('solana rpc: HTTP 503'); });
+    const tree = await mount({token: 'SOL', balance: '2000000000'});
+    const pressSend = async () => {
+      await act(async () => {
+        tree.root.findByProps({testID: 'sol-send-address-input'}).props.onChangeText(SOL_DEST);
+        tree.root.findByProps({testID: 'sol-send-amount-input'}).props.onChangeText('0.5');
+      });
+      await act(async () => { await tree.root.findByProps({testID: 'btn-sol-send-confirm'}).props.onPress(); });
+      await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    };
+    await pressSend();
+    await pressSend();
+    expect(calls).toBe(2); // each error retry was one fresh, single-armed chain
+    expect(has(tree, 'sol-send-nothing-sent')).toBe(true); // the nothing-was-sent guidance
+    expect(has(tree, 'sol-send-fee-note')).toBe(false);
     act(() => { tree.unmount(); });
   });
 });

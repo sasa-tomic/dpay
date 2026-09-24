@@ -27,7 +27,7 @@ import {FundedSiblingRail} from './FundedSiblingRail';
 import {RailLiquidityNote} from './RailLiquidityNote';
 import type {CurrencyDescriptor} from '../config/catalog';
 import {withTimeout} from '../lib/timeout';
-import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
+import {SOL_SEND_TIMEOUT_MS, solSendTimeoutMs} from '../config/constants';
 import {decodeSolReq, encodeSolPay} from '../solana/qr';
 import type {SolReqV2} from '../solana/qr';
 import {extractSignedTxParts} from '../solana/tx';
@@ -538,7 +538,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     // amount is the honest total for its own row.
     const amount = fmtAssetCompact((isSol ? rawAmount + SOL_FEE_LAMPORTS : rawAmount).toString(), decimals, unit);
     const broadcast: {sig: string | null} = {sig: null};
-    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(solSendTimeoutMs());
     setBusy(true);
     setErr(null);
     try {
@@ -677,7 +677,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   // became of it, and discarding it would turn the recoverable case into the unrecoverable one.
   async function sendSolForOcp(target: OcpTarget, hold: {claim: string | null}): Promise<OcpSendResult> {
     const broadcast: {sig: string | null} = {sig: null};
-    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
+    const {signal, cancel} = withTimeout(solSendTimeoutMs());
     try {
       const sig = await sendSol(identity.secretHex, target.to, BigInt(target.rawAmount), signal, s => { broadcast.sig = s; });
       // Same payer-side annotation as approveSpay, keyed by the signature (this rail signs no

@@ -13,6 +13,34 @@
 //   signSolPayment / signSplPayment — OFFLINE payer signs the canonical message (no network).
 //   broadcastSolPayment — ONLINE merchant strictly verifies, freshness-checks, broadcasts, confirms.
 // (The v1 durable-nonce reclaim tool was removed 2026-08-14: no user ever held v1 nonce funds.)
+//
+// ============================================================================
+// SEND-HANG AUDIT (2026-09 stream D) — every await on the send path, its bound, its owner.
+// The 2026-09-21 EURC sheet hangs (stuck in `submitting` forever) are the class this table pins:
+// an await with no bound and no abort path is a spinner forever, so EVERY await below answers to
+// exactly one deadline and one owner, and the sheet's own withTimeout is the last resort that
+// converts an unbounded wait into an honest unknown. Confirm is POLL-ONLY — there is no websocket
+// path anywhere in this seam.
+//
+//   await (send path)                          bound                                   owner
+//   ─────────────────────────────────────────  ──────────────────────────────────────  ────────────────────────────────────────
+//   module load `import('./solana/rpc')`       SOL_RPC_IMPORT_DEADLINE_MS (10s)        `loadRpcForSend` — races the import,
+//     (the lazy chunk; no signal of its own)     + sheet-mount preload (preloadSolanaRpc)  fails with the engine-load class, stays retryable
+//   blockhash fetch / broadcast                per-attempt rpcFetch deadline (8s,      `solana/rpc.ts` rpcFetch — halving under the
+//   (`getLatestBlockhash`, `sendTransaction`)    halving per candidate, 1s floor)        candidate walk; caller signal composed in
+//   pre-check reads (ATA existence, balance,   per-attempt rpcFetch deadline + the     `solana/rpc.ts` rpcFetch over the READ candidate
+//     getMultipleAccounts/getFeeForMessage)      caller's signal                         list; caller abort cuts it immediately
+//   sign (keypair derive, message assemble,    SYNC — no await, nothing to bind        `broadcastSignedWithFreshBlockhash`'s `sign`
+//     ed25519 sign)                                                                      callback; one sign per attempt, never re-signs
+//   confirm (`confirmTransaction`)             CONFIRM_TIMEOUT_MS (30s), poll 1.5s,    `solana/rpc.ts` confirmTransaction — poll-only,
+//                                                signal-checked sleep                    deadline throw, per-poll rpcFetch deadline
+//   the WHOLE sheet submit                     SOL_SEND_TIMEOUT_MS (60s)               the sheet's `withTimeout` signal + `abortable`
+//     (blockhash → send → confirm)                                                       (below): the promise REJECTS on abort even if
+//                                                                                         a lower layer ignored it, so the sheet flips
+//                                                                                         to the honest unknown instead of spinning
+//   merchant rail (`broadcastSolPayment`)      SOL_BROADCAST_TIMEOUT_MS (120s)         its own confirm loop — poll-only, per-call
+//                                                confirm deadline + rpcFetch bounds      rpcFetch, honest-unknown on timeout
+// ============================================================================
 
 import bs58 from 'bs58';
 import {solanaRpcUrl, solanaRpcUrls, solanaBroadcastRpcUrls, icGatewayUrl, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS, SOL_RPC_IMPORT_DEADLINE_MS} from './config/constants';

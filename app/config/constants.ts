@@ -429,6 +429,15 @@ export function setIcGatewayUrl(url: string): void {
 // CONFIRM_TIMEOUT_MS=30s). 60s gives headroom over the full confirm path so a slow-but-finalising
 // transfer is never reported as a false failure.
 export const SOL_SEND_TIMEOUT_MS = 60000;
+/** The send deadline as the sheets USE it — read PER CALL so the e2e harness can shorten the
+ *  deadline mid-session (`__DPAY_TEST_SOL_SEND_TIMEOUT_MS`, flow 202: it forces the honest-unknown
+ *  path in seconds without waiting a real minute). The `__DPAY_TEST_SOL_ACTIVE_WINDOW_MS` pattern:
+ *  prod never sets that global, so every read falls through to the 60s floor. Per call (not
+ *  captured at module load like POLL) because the deadline is armed at confirm-press time, and a
+ *  flow arms the override on the live page — after the bundle evaluated. */
+export function solSendTimeoutMs(): number {
+  return (globalThis as unknown as {__DPAY_TEST_SOL_SEND_TIMEOUT_MS?: number}).__DPAY_TEST_SOL_SEND_TIMEOUT_MS ?? SOL_SEND_TIMEOUT_MS;
+}
 // The send path's module-load deadline (solana.ts `loadRpcForSend`). The network module is a lazy
 // chunk in the served web build (`rpc-*.js`), and a module load carries NO abort signal — the one
 // await in the send chain the caller's deadline cannot cut. 2026-09-21: three live EURC sends died
