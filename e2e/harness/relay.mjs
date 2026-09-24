@@ -230,7 +230,7 @@ async function spawnOnce(opts = {}) {
     // a real signed charge on `POST /api/v1/checkout`, pay it with a real signed VCHF transfer, and
     // watch `GET /api/v1/checkout/{id}` credit it. Enabling it costs the other flows nothing — the
     // checkout's payer-facing routes are shadowed by each OCP flow's own fetch stub.
-    DPAY_ENABLE_TILL: opts.checkout === false ? 'false' : 'true',
+    DPAY_ENABLE_CHECKOUT: opts.checkout === false ? 'false' : 'true',
     // Marker so a future relay feature can detect the e2e harness (no behavior change today).
     DPAY_E2E: '1',
     // R2 (flow 165): the Solana RPC proxy's UPSTREAM — the relay's own test-helpers JSON-RPC

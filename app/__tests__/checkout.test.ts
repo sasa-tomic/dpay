@@ -300,7 +300,7 @@ describe('ringing up a charge', () => {
   });
 
   test('tells a relay that serves no checkout apart from a checkout that refused', async () => {
-    // An unregistered route 404s with nothing to say (`DPAY_ENABLE_TILL=false`) — a first-class
+    // An unregistered route 404s with nothing to say (`DPAY_ENABLE_CHECKOUT=false`) — a first-class
     // state with its own instruction. A live checkout's 404 carries the envelope and a sentence.
     serve(404, null, {unreadable: true});
     expect(await openCheckoutCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF')).toEqual({kind: 'not-served', addr: RELAY});

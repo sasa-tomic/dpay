@@ -12,7 +12,7 @@
 // WHAT IS REAL: the checkout-open is a genuine Ed25519 signature from the app's own core over
 // `dpay_core::CheckoutOpen` (the relay verifies it with `validate_checkout_open` and refuses a key the
 // caller cannot sign for); the three checkout routes are the relay's own, served because the harness
-// runs it with `DPAY_ENABLE_TILL`; the payment is a signed `icrc1_transfer` submitted to the fake-IC
+// runs it with `DPAY_ENABLE_CHECKOUT`; the payment is a signed `icrc1_transfer` submitted to the fake-IC
 // gateway exactly as flows 97/98 pay a merchant request.
 //
 // THE ONE TEST-ONLY SEAM is `observeCheckoutOpens`, which wraps `window.fetch` to KEEP a copy of the
