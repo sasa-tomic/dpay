@@ -3733,7 +3733,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
          * `merchant_name` is the CLAIMED display name and is bound by the signature. `note` is the
          * one-line purpose the payer reads on review ("2× Kafi, Tisch 4") — CLAIMED like the name and
          * bound by the signature the same way. An EMPTY `note` signs the note-less (v1) encoding, so a
-         * merchant who rings up without a purpose needs no relay upgrade to be accepted; any non-empty
+         * merchant who opens a charge without a purpose needs no relay upgrade to be accepted; any non-empty
          * note signs under `CHECKOUT_OPEN_DOMAIN_V2`. Returns the raw 64-byte Ed25519 signature. The
          * canonical bytes are `dpay_core::CheckoutOpen::signing_bytes` — the relay rebuilds them and calls
          * `dpay_core::validate_checkout_open`, so there is ONE encoding.

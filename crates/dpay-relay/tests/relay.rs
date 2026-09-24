@@ -2952,7 +2952,7 @@ async fn open_checkout_noted(
 ) -> Value {
     let body = checkout_body_noted(key, cents, name, fresh_nonce(), unix_secs(), note);
     let (status, body) = call(state, checkout_post("/api/v1/checkout", &body, host, proto)).await;
-    assert_eq!(status, StatusCode::OK, "ringing up a charge: {body}");
+    assert_eq!(status, StatusCode::OK, "opening a charge: {body}");
     body
 }
 
@@ -3531,7 +3531,7 @@ async fn an_approval_is_carried_to_the_shop_whose_phone_can_collect_it() {
         "a wallet that named a transaction pushed; it is not asking to be collected from: {pushed}"
     );
 
-    // …and the charge the first claim was aimed at is DEAD now (ringing up the second voided it).
+    // …and the charge the first claim was aimed at is DEAD now (opening the second voided it).
     // An approval aimed at a dead charge is refused by name rather than left looking live.
     let (status, refused) = call(&state, get_req(&format!("{report}&sender={payer}"))).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
@@ -4629,7 +4629,7 @@ async fn checkout_wire_matches_the_golden_the_payer_parses() {
     //
     // A FRESH charge, opened before the money is sent, rather than the one above: that charge was
     // just walked, and a charge is walked at most once every couple of seconds however hard it is
-    // polled (the amplification bound). Ringing up again is what a cashier does anyway, and it
+    // polled (the amplification bound). Opening another charge is what a cashier does anyway, and it
     // keeps this test free of a sleep it would otherwise have to spend. The payment carries THAT
     // charge's own reference, because a transfer that names no charge credits none.
     let raw: u64 = field(&["amount_raw"])

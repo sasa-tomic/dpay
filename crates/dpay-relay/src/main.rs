@@ -355,7 +355,7 @@ async fn main() {
     if cfg.checkout {
         println!(
             "OpenCryptoPay checkout ENABLED (DPAY_ENABLE_CHECKOUT unset or true) — /api/v1/checkout, \
-             /api/v1/checkout/void and /v1/lnurlp/* are served. Ringing up and cancelling both \
+             /api/v1/checkout/void and /v1/lnurlp/* are served. Opening and cancelling a charge both \
              require the merchant's own signature over the request (dpay_core::CheckoutOpen); the \
              payer routes are public reads."
         );

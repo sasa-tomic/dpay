@@ -41,7 +41,7 @@
 //!    transaction id on any failure, which is the loss path the payer side is built around. As the
 //!    provider we simply decline to inflict it.
 //!
-//! 4. **ONE TRANSFER, ONE SALE.** A ledger row credits at most one charge, and ringing up a new
+//! 4. **ONE TRANSFER, ONE SALE.** A ledger row credits at most one charge, and opening a new
 //!    charge voids the merchant's previous one. Without the first, two CHF 4.50 charges and a
 //!    single CHF 4.50 payment both read as paid and the shop hands over the goods twice — the rule
 //!    and its mechanism live at [`match_payment`] and [`CheckoutStore`].
@@ -122,13 +122,13 @@ const SETTLED_TTL_SECS: u64 = 24 * 60 * 60;
 
 /// The most charges one merchant may hold in this store at once.
 ///
-/// It exists because ringing up is AUTHENTICATED but not RATIONED: a merchant holding their own key
+/// It exists because opening a charge is AUTHENTICATED but not RATIONED: a merchant holding their own key
 /// can sign as fast as they like, and every accepted checkout-open adds a charge that lives an hour
 /// unpaid ([`CHARGE_TTL_SECS`]) or a day credited ([`SETTLED_TTL_SECS`]). Unbounded, that is one
 /// signer growing this relay's memory without limit — the residual risk the signed-checkout-open change
 /// left open.
 ///
-/// The number is a MEMORY bound, deliberately far above any trading limit: a checkout ringing up a sale
+/// The number is a MEMORY bound, deliberately far above any trading limit: a checkout opening a sale
 /// every ten seconds, without a pause, for the whole day a credited charge is kept, makes 8 640 —
 /// already several times what a human counter does — and a charge costs on the order of a kilobyte
 /// (its ids, the merchant's account text, a clamped name and up to [`MAX_LIVE_QUOTES`] quotes). So
@@ -282,7 +282,7 @@ pub struct Settled {
 }
 
 /// Why a charge stopped being payable without having been paid. Named at the store's door
-/// ([`CheckoutStore::void`]) so the ONE mechanism serves both: ringing up the next customer, and a
+/// ([`CheckoutStore::void`]) so the ONE mechanism serves both: opening the next customer's charge, and a
 /// cashier clearing a total they mis-keyed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VoidCause {
@@ -547,7 +547,7 @@ impl CheckoutStore {
     /// the caller so the randomness stays in one place (the HTTP layer, which has the CSPRNG) and
     /// this module stays pure and testable.
     ///
-    /// The void is the "one live charge per merchant" policy: a cashier who rings up a new total
+    /// The void is the "one live charge per merchant" policy: a cashier who opens a new total
     /// has abandoned the last one. It is a POLICY over a store that holds many — see the type's own
     /// note for why that distinction is the whole design.
     ///
@@ -1137,7 +1137,7 @@ mod tests {
             cents,
             at,
         )
-        .unwrap_or_else(|e| panic!("ringing up {id}: {e:?}"))
+        .unwrap_or_else(|e| panic!("opening charge {id}: {e:?}"))
     }
 
     /// A store holding one charge, and that charge.
@@ -1886,7 +1886,7 @@ mod tests {
 
     #[test]
     fn a_merchant_may_not_hold_more_charges_than_the_store_bounds() {
-        // Ringing up is authenticated but not rationed, so without this one signer grows this
+        // Opening a charge is authenticated but not rationed, so without this one signer grows this
         // relay's memory without limit. The bound is per merchant and counted from the store
         // itself, so another merchant's checkout is unaffected by a neighbour at its limit.
         let mut s = CheckoutStore::default();
@@ -2542,7 +2542,7 @@ fn checkout_open_response(e: CheckoutOpenError, now: u64, issued_at: u64) -> Res
     }
 }
 
-/// `POST /api/v1/checkout` — the merchant rings one up, and proves the account they are ringing up on
+/// `POST /api/v1/checkout` — the merchant opens one, and proves the account it is opened on
 /// is theirs.
 ///
 /// ORDER IS THE DESIGN. The price bounds are integer comparisons and go first, so a flood of
@@ -2672,7 +2672,7 @@ pub(crate) async fn checkout_code_page() -> Response {
 }
 
 /// `GET /checkout/{id}` — the CASHIER's own screen: watches the charge the merchant opened in the
-/// app (the app rings up; this page is the plan's "web page later" — same endpoints, additive).
+/// app (the app opens the charge; this page is the plan's "web page later" — same endpoints, additive).
 ///
 /// THE FENCE this page stands on: it can WATCH a charge and it can NEVER open one, void one,
 /// or move a cent — those actions live behind the merchant's key in the app, and the app is
@@ -2700,7 +2700,7 @@ pub(crate) async fn checkout_page() -> Response {
 
 /// `POST /api/v1/checkout/void` — the merchant clears their checkout.
 ///
-/// THE MIS-KEYED TOTAL, which until now nobody could take back: a cashier who rings up CHF 100.00
+/// THE MIS-KEYED TOTAL, which until now nobody could take back: a cashier who opens a CHF 100.00 charge
 /// for a CHF 1.00 coffee has put a payable code in front of a customer for the next hour, and the
 /// only way out was to open something else and leave THAT payable instead.
 ///

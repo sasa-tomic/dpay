@@ -215,7 +215,7 @@ describe('a franc price, in integers', () => {
   });
 });
 
-describe('ringing up a charge', () => {
+describe('opening a charge', () => {
   test('signs the price with the merchant’s own seed and returns the relay’s charge', async () => {
     serve(200, GOLDEN.open);
     const outcome = await openCheckoutCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF');

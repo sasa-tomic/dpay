@@ -1,6 +1,6 @@
 /**
  * `DpayCore.checkoutOpenSignature` — the merchant's proof that the OpenCryptoPay checkout account they are
- * ringing up a charge on is one they can spend from.
+ * opening a charge on is one they can spend from.
  *
  * Driven through the REAL compiled core: the staged `dpay-core.wasm` is injected via the shim's
  * `__DPAY_WASM_BYTES` seam, so this exercises the same bytes the web wallet loads and the same

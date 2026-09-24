@@ -825,7 +825,7 @@ describe('ReceiveMode — the message box is one box, whatever the code form', (
     act(() => { tree.unmount(); });
   });
 
-  test('the checkout button rings up what the ONE box holds — the shared text is the signed note', async () => {
+  test('the checkout button opens a charge for what the ONE box holds — the shared text is the signed note', async () => {
     // The seam between the box and the counter: the parent's message rides the charge-open as the
     // note (the same trip e2e flow 114 pins through the real route). Amount first, like a cashier.
     jest.mocked(openCheckoutCharge).mockResolvedValue({kind: 'open', charge: CHARGE});

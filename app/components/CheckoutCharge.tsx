@@ -29,12 +29,12 @@ import {IconCheck, IconClock} from './icons';
 import {M} from '../i18n';
 
 /**
- * The counter: a cashier rings up a price in francs, shows a code, and watches it be paid.
+ * The counter: a cashier opens a charge in francs, shows a code, and watches it be paid.
  *
  * WHERE THIS LIVES, AND WHY IT IS NOT A TAB. A checkout charge is not a third kind of receiving — it is
  * the SAME request with a wider audience — so it sits inside Receive ▸ Request payment beside the
  * checkout-code CHECKBOX: the amount row and the message row are the dpay-code form's own, shared, and
- * the checkbox is what flips the single button from building a dpay payment link to ringing up a
+ * the checkbox is what flips the single button from building a dpay payment link to opening a
  * checkout charge. The message row is the ONE box in both modes (founder 2026-09-14): same input, same
  * place, same text whether or not the checkbox is checked — in checkout mode its text is the signed
  * note, and it arrives here as a prop exactly like the amount does. The
@@ -432,7 +432,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
     // The right asset, and still not priceable: the shop pays the ledger fee out of the price, so a
     // catalog row that states no fee leaves nothing to subtract. Quoting the full price instead
     // would put the fee back on the customer silently — the one outcome this whole rule exists to
-    // prevent — so the counter closes and names the fix rather than ringing up a wrong number.
+    // prevent — so the counter closes and names the fix rather than opening a charge for a wrong number.
     return (
       <InstructionPanel
         testID="checkout-no-fee"

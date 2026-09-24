@@ -380,7 +380,9 @@ a fresh charge"; de keeps natural Kasse wording; es caja; fr caisse — no local
 up); e2e flows renamed keeping ids (114-checkout-open, 205-checkout-settlement-predicate, …) +
 FLOWS.md regenerated; android bridge + manifest; all living docs. History: the scan-audience label
 `M.receive.checkout.checkoutCode` had already been reworded earlier in the wave. Old AsyncStorage
-keys: none existed under `dpay.till*`, so nothing needed to die.
+keys: none existed under `dpay.till*`, so nothing needed to die. Validation round (2026-09-24): the
+zero-match criterion's `ring[- ]?up` missed the INFLECTED "rings up"/"ringing up" — ~30 sites swept
+(incl. the SERVED cashier page's "never rings up" and the regenerated FFI bindings' doc), gates re-run green.
 
 **7. IC hub 2-hop generalization — DONE (2026-09-18, closed by the convert-hub slice).** What
 shipped: `hubRoutes(catalog, fromLedger)` in `app/routes.ts` walks the REGISTRY (no hardcoded

@@ -11,7 +11,7 @@
 //   * a dollar pick served by today's VCHF-only checkout is REFUSED WHOLE: the answer names the asset
 //     it opened, the counter shows no code for a charge the counter did not open, and the
 //     refusal names both assets with the one-tap fix;
-//   * re-picking the served asset and ringing up again opens the charge — the franc price reads
+//   * re-picking the served asset and opening again yields a fresh charge — the franc price reads
 //     exactly as flow 114's, so the picker costs the VCHF path nothing.
 import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency } from '../harness/lib.mjs';
 

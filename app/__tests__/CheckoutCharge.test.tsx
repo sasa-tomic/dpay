@@ -315,7 +315,7 @@ describe('which asset may open a checkout charge', () => {
   });
 });
 
-describe('ringing up', () => {
+describe('opening a charge', () => {
   test('closes the counter when the catalog states no fee, rather than billing the customer for it', async () => {
     // The shop pays the ledger fee out of the price. A row that states no fee leaves nothing to
     // subtract, and quoting the full price instead would put the fee back on the customer in

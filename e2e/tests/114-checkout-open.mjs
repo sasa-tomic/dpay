@@ -1,4 +1,4 @@
-// Flow 114 — the OTHER side of the counter: a dpay wallet RINGS UP a sale and is paid for it.
+// Flow 114 — the OTHER side of the counter: a dpay wallet OPENS a sale and is paid for it.
 //
 // Every payment flow before this one has dpay paying somebody. This is the merchant half: a shop
 // enters a price in francs, the app signs a checkout-open on its own account, the relay opens a charge,

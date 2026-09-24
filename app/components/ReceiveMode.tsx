@@ -715,7 +715,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
                 level. `onSubmitEditing` is the RN-native spelling of it, so the same key works on a
                 hardware keyboard attached to a phone. The DPAY form only: a checkout-open is signed and
                 supersedes the live charge, so the shared field does not submit while the checkout
-                checkbox is checked — the checkout's own button is the one that rings up. */}
+                checkbox is checked — the checkout's own button is the one that opens the charge. */}
             <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} onSubmitEditing={(checkoutAvailable || checkoutHeld) && codeForm === 'checkout' ? undefined : makeRequest} returnKeyType="done" />
           </View>
           {/* The ONE message box — mounted in BOTH code forms (founder 2026-09-14): same component,
@@ -723,7 +723,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
               the dpay form its text rides the payment link as the memo; in the checkout form it is the
               charge's signed note (passed to CheckoutCharge below). Submit-on-Enter is the DPAY form's
               only — the shared amount row above says why (a checkout-open is signed; the checkout's own
-              button is the one that rings up). */}
+              button is the one that opens the charge). */}
           <TextInput
             testID="memo-input"
             style={memoInputStyle()}
