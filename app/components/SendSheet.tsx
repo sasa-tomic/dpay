@@ -110,8 +110,14 @@ export function SendSheet({
   const [blockIndex, setBlockIndex] = useState<string>('');
   // This send's fresh memo hex (randomMemoHex below) — shown on the unknown terminal as the
   // transfer's reference and stamped into the receipt, so a pending send still names the handle
-  // the ledger will carry instead of showing nothing.
+  // the ledger will carry instead of showing nothing. The legacy route stamps its own handle: the
+  // signed envelope's request id (a legacy send carries no memo argument).
   const [memoHex, setMemoHex] = useState<string>('');
+  // The error phase's honesty line (the SOL sheet's `accepted` twin): TRUE only when the failing
+  // attempt provably put nothing on the wire — a validate/prepare throw, or the ledger's own
+  // rejection — so the returned form is a SAFE retry. Never true after the envelope was signed:
+  // that throw lands in the honest unknown instead (see the split in send()).
+  const [nothingSent, setNothingSent] = useState(false);
   const [saved, setSaved] = useState<SavedAddress[]>([]);
   const [saveName, setSaveName] = useState('');
   // The core's verdict on the CURRENT address text: the canonical destination, or the reason it
@@ -324,19 +330,31 @@ export function SendSheet({
     if (!canSend || !resolved?.ok) return;
     setPhase('submitting');
     setErr(null);
-    // A fresh send starts with no memo reference; the ICRC branch below stamps its own. (A retry
-    // after a rejection must never show the previous attempt's memo as this send's reference.)
+    // A fresh send starts with no memo reference and no nothing-sent claim; the ICRC branch below
+    // stamps its own memo. (A retry after a rejection must never show the previous attempt's memo
+    // as this send's reference.)
     setMemoHex('');
+    setNothingSent(false);
+    // THE SIGNATURE BOUNDARY — this rail's twin of the SOL sheet's `broadcast.sig`. Everything
+    // before `submitTransfer` is local (validate/prepare/sign): a throw there provably put
+    // NOTHING on the wire, so the honest ending is the form + the nothing-was-sent line and a
+    // retry is safe. From `submitTransfer` on, a SIGNED envelope exists whose fate this device
+    // can no longer decide — a throw there is the honest UNKNOWN (the transfer may still
+    // execute), never an error that invites a resend: a resend signs a SECOND, independent
+    // transfer (a fresh memo), and the first could still land. The invariant "retry is offered
+    // only when nothing was accepted; post-submission failures land in unknown, never error" is
+    // the same one SolanaWithdrawSheet pins over `broadcast.sig`.
+    let prepared: RailPrepared;
     try {
       if (!desc.ledger) throw new Error(M.withdraw.send.noLedger);
-      let prepared: RailPrepared;
-      let out: RailOutcome;
       if (resolved.kind === 'icp-legacy') {
         prepared = await prepareLegacyTransfer(identity.secretHex, {
           // Again the one string the screen showed — see `ResolvedDestination`.
           ledger: desc.ledger, toAccountId: resolved.destination, amountE8s: raw, feeE8s: feeRaw ?? '',
         });
-        out = await submitTransfer(prepared, identity.secretHex, {attempts: 12, intervalMs: 500}, decodeLegacyReply);
+        // The legacy rail carries no memo argument; its reference handle is the signed envelope's
+        // request id — what the unknown terminal and the receipt name while no block exists.
+        setMemoHex(prepared.requestIdHex);
       } else {
         // A send is not a payment against a request, so there is no request nonce to reconcile
         // against; the memo is a fresh random 16 bytes — see `randomMemoHex`. Captured in state:
@@ -350,27 +368,51 @@ export function SendSheet({
           // is credited to the account the user actually read.
           toAccount: resolved.destination, amount: raw, currency: desc.currency, nonceHex: memo,
         });
-        out = await submitTransfer(prepared, identity.secretHex, {attempts: 12, intervalMs: 500});
       }
-      if (out.kind === 'settled') {
-        setBlockIndex(out.blockIndex);
-        setPhase('done');
-        void rememberAddress(assetKey, resolved.destination, saveName.trim(), Date.now());
-        onSent();
-        awardPaymentTested(journey); // CONFIRMED settle only — the 'unknown' branch below claims nothing
-        return;
-      }
-      if (out.kind === 'rejected') { setErr(out.reason); setPhase('form'); return; }
-      // Not terminal within budget. The transfer MAY still execute, so this is an honest pending
-      // state — never a failure, and never an invitation to send again.
+    } catch (e: unknown) {
+      // Pre-signature throw: validation or prepare failed — nothing was sent, definitively.
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('send failed (nothing sent):', msg);
+      setErr(msg);
+      setNothingSent(true);
+      setPhase('form');
+      return;
+    }
+    let out: RailOutcome;
+    try {
+      out = await submitTransfer(prepared, identity.secretHex, {attempts: 12, intervalMs: 500},
+        resolved.kind === 'icp-legacy' ? decodeLegacyReply : undefined);
+    } catch (e: unknown) {
+      // Post-signature throw (the submit POST or the poll lost the network): the envelope is
+      // signed and its fate is unknown — the honest pending terminal, with the reference this
+      // send will be reconciled by. NEVER the error phase: no resend invite over a signed send.
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('send outcome unknown (envelope signed):', msg);
       setPhase('unknown');
       onSent();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.warn('send failed:', msg);
-      setErr(msg);
-      setPhase('form');
+      return;
     }
+    if (out.kind === 'settled') {
+      setBlockIndex(out.blockIndex);
+      setPhase('done');
+      void rememberAddress(assetKey, resolved.destination, saveName.trim(), Date.now());
+      onSent();
+      awardPaymentTested(journey); // CONFIRMED settle only — the 'unknown' branch below claims nothing
+      return;
+    }
+    if (out.kind === 'rejected') {
+      // The ledger REFUSED the transfer — nothing moved, so the form returns with the reason and
+      // the nothing-was-sent line (a retry really is safe here).
+      console.warn('send rejected:', out.reason);
+      setErr(out.reason);
+      setNothingSent(true);
+      setPhase('form');
+      return;
+    }
+    // Not terminal within budget. The transfer MAY still execute, so this is an honest pending
+    // state — never a failure, and never an invitation to send again.
+    setPhase('unknown');
+    onSent();
   }
 
   if (phase === 'done' || phase === 'unknown') {
@@ -542,6 +584,7 @@ export function SendSheet({
       ) : null}
 
       {err ? <Text testID="send-err" style={S.err}>{err}</Text> : null}
+      {phase === 'form' && err != null && nothingSent ? <Text testID="send-nothing-sent" style={S.dim2}>{M.withdraw.send.nothingSent}</Text> : null}
 
       {/* Offline while the review is up: a NOTICE inside the sheet, never a teardown — the
           strike gate defers (see onReviewShown). A genuinely-offline send fails at submit. */}
