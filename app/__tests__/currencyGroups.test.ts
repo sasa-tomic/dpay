@@ -22,26 +22,32 @@ const ids = (sections: ReturnType<typeof groupAccountsByCurrency>): string[] =>
   sections.flatMap(s => s.assets.map(a => a.id));
 
 describe('groupAccountsByCurrency — section order', () => {
-  test('home currency leads; other currencies follow in HOME_CURRENCIES order; the tail is last', () => {
+  test('main currency leads; other currencies follow in WALLET_CURRENCIES order; the tail is last', () => {
     const ordered = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
     const sections = groupAccountsByCurrency(ordered, 'USD');
-    expect(sections.map(s => s.currency)).toEqual(['USD', 'CHF', 'EUR', null]);
+    // Stables first, then the token currencies — the generalized main gives BTC/ETH/ICP/SOL
+    // their own sections (2026-09-24); the tail is the practice rail alone.
+    expect(sections.map(s => s.currency)).toEqual(['USD', 'CHF', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL', null]);
     expect(sections[0]!.assets.map(a => a.id)).toEqual(['ic:2', 'solana:USDC']); // preferred rail first
     expect(sections[1]!.assets.map(a => a.id)).toEqual(['ic:7']); // VCHF alone settles CHF
     expect(sections[2]!.assets.map(a => a.id)).toEqual(['solana:EURC']);
+    expect(sections[3]!.assets.map(a => a.id)).toEqual(['ic:1']); // ckBTC settles BTC
+    expect(sections[7]!.assets.map(a => a.id)).toEqual(['ic:0']); // the practice rail is the tail
   });
 
-  test('a currency with no rail in the list emits NO section — not even the home one', () => {
+  test('a currency with no rail in the list emits NO section — not even the main one', () => {
     const stripped = assets.filter(a => a.id !== 'ic:7' && a.id !== 'solana:EURC');
-    expect(groupAccountsByCurrency(stripped, 'CHF').map(s => s.currency)).toEqual(['USD', null]);
+    expect(groupAccountsByCurrency(stripped, 'CHF').map(s => s.currency)).toEqual(['USD', 'BTC', 'ETH', 'ICP', 'SOL', null]);
   });
 });
 
 describe('groupAccountsByCurrency — presentation over the given order, nothing more', () => {
   test('intra-section order is the input order — funding never promotes an account across sections', () => {
     // Deliberately NOT orderAccounts output: the helper must not care how its input was ordered,
-    // only preserve it. A funded ckBTC stays inside the tail; it never joins a currency section.
-    const ordered = [assets[3]!, assets[1]!, assets[0]!].filter(Boolean);
+    // only preserve it. The two USD rails in REVERSED preference order stay exactly as handed
+    // in (grouping never re-orders, never promotes the preferred rail); the practice rail keeps
+    // its tail.
+    const ordered = ['solana:USDC', 'ic:2', 'ic:0'].map(id => assets.find(a => a.id === id)!);
     const sections = groupAccountsByCurrency(ordered, 'CHF');
     expect(ids(sections)).toEqual(ordered.map(a => a.id));
   });

@@ -4,10 +4,9 @@
  * the sections are LABELS over `buildDestGroups`' registry order, never a recomputation of it.
  * What is pinned, over the REAL VCHF pipeline (resolveLegs → resolveConvertDestinations →
  * buildDestGroups — the exact sequence ConvertMode renders):
- *   • section ORDER: the home currencies in HOME_CURRENCIES order (a section only when the
- *     picker carries a destination for it), then the tail of destinations that settle no home
- *     currency — other in-wallet assets AND the standing direct pair when it lands on a
- *     non-currency asset (VCHF's direct pair is ICP), AND the external-address payouts;
+ *   • section ORDER: the wallet currencies in WALLET_CURRENCIES order (a section only when the
+ *     picker carries a destination for it), then the tail of destinations that settle no wallet
+ *     currency (the external-address payouts);
  *   • intra-section order is EXACTLY buildDestGroups' order restricted to that section
  *     (registry order) — grouping is presentation, not a re-sort;
  *   • the sections PARTITION the picker — every row appears exactly once, none dropped;
@@ -67,12 +66,13 @@ const pickerFor = (catalog: CurrencyDescriptor[], from: CurrencyDescriptor) => {
 describe('groupDestSections — labels over registry order, nothing more', () => {
   const {legs, groups} = pickerFor(BUNDLED, VCHF);
 
-  test('home currencies first in HOME_CURRENCIES order, then the tail', () => {
+  test('wallet currencies first in WALLET_CURRENCIES order, then the tail', () => {
     const sections = groupDestSections(groups, BUNDLED, legs);
-    // From VCHF the only currency-settling destination is ckUSDC (USD); the standing direct
-    // pair is VCHF → ICP, and ICP settles no home currency, so there is no CHF section —
-    // the input asset is not a destination.
-    expect(sections.map(s => s.currency)).toEqual(['USD', null]);
+    // From VCHF the currency-settling destinations are ckUSDC (USD) and — since the generalized
+    // model (2026-09-24) — the token currencies their rows settle: ckBTC→BTC, ckETH→ETH, and the
+    // standing direct pair VCHF→ICP now sections under ICP instead of the tail. There is no CHF
+    // section — the input asset is not a destination.
+    expect(sections.map(s => s.currency)).toEqual(['USD', 'BTC', 'ETH', 'ICP', null]);
   });
 
   test('intra-section order is buildDestGroups order restricted to the section; the sections partition the picker', () => {
@@ -86,11 +86,14 @@ describe('groupDestSections — labels over registry order, nothing more', () =>
       const slice = s.groups.map(g => idx.indexOf(g.key));
       expect([...slice].sort((a, b) => a - b)).toEqual(slice);
     }
-    // And the USD section carries exactly the ckUSDC row; the direct pair (ICP) leads the tail.
+    // And the USD section carries exactly the ckUSDC row; the direct pair (ICP) leads the ICP
+    // section, and the tail is the external-address payouts.
     const usd = sections.find(s => s.currency === 'USD')!;
     expect(usd.groups.map(g => g.key)).toEqual(['ic:2']);
+    const icpSection = sections.find(s => s.currency === 'ICP')!;
+    expect(icpSection.groups[0]!.key).toBe('direct');
     const tail = sections.find(s => s.currency === null)!;
-    expect(tail.groups[0]!.key).toBe('direct');
+    expect(tail.groups.every(g => g.key.startsWith('ext:'))).toBe(true);
   });
 
   test('a section is a LABEL: it carries no amounts, so nothing can be summed or ranked', () => {

@@ -163,6 +163,23 @@ export function fmtAssetCompact(
   raw: string, decimals: number, unit: string, displayDecimals?: number, minFractionDigits = 0,
   sign = '',
 ): string {
+  return fmtMoneyCompact(raw, decimals, {position: 'suffix', symbol: unit}, displayDecimals, minFractionDigits, sign);
+}
+
+/**
+ * The CURRENCY-UNIT formatter (fork #4, 2026-09-24) — the SAME three rules as `fmtAssetCompact`
+ * (trim to the floor, truncate never round, name a hidden/threshold value), with the unit placed
+ * by the currency's own format: a PREFIX hugs the number ("$4.54", "€4.54"), a SUFFIX rides the
+ * trailing space every crypto unit uses ("4.54 Fr", "0.0005 BTC"). `fmtAssetCompact` is the
+ * suffix arm of exactly this core — one BigInt number core, two unit placements, no drift.
+ *
+ * `unit == null` renders the bare number (a caller that only wants the numeric part).
+ */
+export function fmtMoneyCompact(
+  raw: string, decimals: number, unit: {position: 'prefix' | 'suffix'; symbol: string} | null,
+  displayDecimals?: number, minFractionDigits = 0,
+  sign = '',
+): string {
   const n = BigInt(raw);
   const dd = displayDecimals != null && displayDecimals >= 0 && displayDecimals <= decimals ? displayDecimals : decimals;
   const min = Math.max(0, Math.min(minFractionDigits, dd));
@@ -171,18 +188,23 @@ export function fmtAssetCompact(
   const whole = groupDigits((n / scale).toString());
   const fracAll = (n % scale).toString().padStart(decimals, '0');
   const kept = fracAll.slice(0, dd);
+  const placed = (num: string): string => {
+    if (unit == null) return num;
+    return unit.position === 'prefix' ? `${unit.symbol}${num}` : `${num} ${unit.symbol}`;
+  };
   // Below the display resolution: name the threshold rather than render a zero the user would read
-  // as "empty". `n !== 0n` keeps a REAL zero on the normal path ("0 BTC" / "0.00 VCHF").
+  // as "empty". `n !== 0n` keeps a REAL zero on the normal path ("0 BTC" / "0.00 VCHF" / "$0.00").
   if (n !== 0n && whole === '0' && !/[1-9]/.test(kept)) {
     const threshold = dd === 0 ? '1' : `0${decimalSep()}${'0'.repeat(dd - 1)}1`;
-    return `< ${threshold} ${unit}`;
+    return `< ${placed(threshold)}`;
   }
   // Trailing-zero trim (rule 1). It only ever removes '0's, so it can never trigger rule 3.
   let frac = kept;
   while (frac.length > min && frac.endsWith('0')) frac = frac.slice(0, -1);
   const num = frac.length === 0 ? whole : `${whole}${decimalSep()}${frac}`;
-  // The ticker rides as a suffix in every locale, exactly as in `fmtAsset`.
-  return `${/[1-9]/.test(fracAll.slice(dd)) ? '≈ ' : ''}${sign}${num} ${unit}`;
+  // The truncation marker sits OUTSIDE the signed number, and the sign outside the unit:
+  // "≈ −0.039922 ETH", "≈ $0.12" — a marker glued into the digits would read as part of them.
+  return `${/[1-9]/.test(fracAll.slice(dd)) ? '≈ ' : ''}${sign}${placed(num)}`;
 }
 
 // Parse a user-entered amount (decimal string) into integer smallest-units at the given decimal

@@ -1,4 +1,4 @@
-// The HOME CURRENCY — the one currency the wallet is "in" (founder direction, 2026-09-04).
+// The MAIN CURRENCY — the one currency the wallet is "in" (founder direction, 2026-09-04).
 //
 // A currency is NOT an asset. It is a set of rails that all settle the same unit: CHF is VCHF on
 // the Internet Computer and (when it lands) VCHF on Solana; USD is ckUSDC on the IC and USDC on
@@ -8,6 +8,13 @@
 // order. Full direction + the boundary that keeps rail-selection out of swap territory:
 // docs/specs/2026-09-04-currency-first-wallet-plan.md.
 //
+// GENERALIZED MAIN CURRENCY (2026-09-24, the currency-first redesign): the wallet's main currency
+// is no longer one of the fiat stables — ANY wallet currency can be main, the pure-token ones
+// (BTC/ETH/ICP/SOL) included. A token currency is its own currency: its rail set is the rows that
+// settle exactly that token, and its display unit IS the token (currency == unit there). DEMO is
+// deliberately NOT a currency in this model: practice money is never settable as main and never
+// enters the currency list — it keeps its own separated practice slot wherever it renders.
+//
 // Two rules this module exists to enforce, both of them honesty rules:
 //
 //   1. A currency is only OFFERED if the catalog carries a rail for it. EUR is the live case: it
@@ -16,11 +23,12 @@
 //      retirement shrank EUR to its one remaining rail by editing only CURRENCY_RAILS below).
 //      Shipping a currency the user can select and then cannot hold
 //      would be exactly the dead end the founder's 2026-08-29 rule forbids.
-//   2. The currency is the LABEL; the token is the UNIT. A CHF balance is displayed as
-//      `12.40 VCHF`, never `CHF 12.40` — VCHF is a third party's franc-denominated token whose peg
-//      is the issuer's claim, not something dpay verifies (docs/VCHF_ICP_ANALYSIS.md is the
-//      authority: "the payment unit must remain VCHF"). Naming the currency in the label and the
-//      token in the amount is how the wallet can be "in francs" without asserting a peg.
+//   2. BALANCES RENDER IN THE CURRENCY UNIT (founder fork #4, 2026-09-24 — supersedes the
+//      2026-09-04 token-is-the-unit rule for BALANCE DISPLAY only): a CHF balance renders
+//      `4.54 Fr`, a USD balance `$4.54`, a EUR balance `€4.54`; pure-token currencies keep their
+//      token unit (`0.0005 BTC`). The peg disclosure lives where fees/quotes are shown — a
+//      balance is not a peg claim, and VCHF remains the only thing a CHF rail actually moves
+//      (docs/VCHF_ICP_ANALYSIS.md). History rows keep their own token units.
 //
 // PURE: no React, no AsyncStorage, no network. Deterministic in (currency, assets, balances,
 // destination, catalog).
@@ -41,9 +49,34 @@ import {SOL_ATA_RENT_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {M} from '../i18n';
 
-/** The currencies dpay can be "in". Ordered as the chooser presents them. */
-export const HOME_CURRENCIES = ['CHF', 'USD', 'EUR'] as const;
-export type HomeCurrency = (typeof HOME_CURRENCIES)[number];
+/** The currencies dpay can be "in". Ordered as every list presents them: the fiat stables first,
+ *  then the pure-token currencies ("Other"). DEMO is deliberately absent — practice money is
+ *  never a main currency (docs/specs/2026-09-24-currency-first-radical-redesign.md). */
+export const STABLE_CURRENCIES = ['CHF', 'USD', 'EUR'] as const;
+export const TOKEN_CURRENCIES = ['BTC', 'ETH', 'ICP', 'SOL'] as const;
+export const WALLET_CURRENCIES = [...STABLE_CURRENCIES, ...TOKEN_CURRENCIES] as const;
+export type HomeCurrency = (typeof WALLET_CURRENCIES)[number];
+
+/** Is this one of the fiat stables ("Stable currencies" section) or a pure token ("Other")? */
+export function isStableCurrency(c: HomeCurrency): boolean {
+  return (STABLE_CURRENCIES as readonly string[]).includes(c);
+}
+
+/**
+ * Fork #4 — the currency-unit format for a balance: prefix ("$4.54", "€4.54"), suffix
+ * ("4.54 Fr"), or null for a pure-token currency, whose unit IS the token and rides as the
+ * suffix the token formatters already render ("0.0005 BTC"). Symbols are locale-invariant
+ * product identity (the i18n catalog's own rule), never translated copy.
+ */
+export type CurrencyUnitFormat = {position: 'prefix' | 'suffix'; symbol: string};
+export function currencyUnitOf(currency: HomeCurrency): CurrencyUnitFormat | null {
+  switch (currency) {
+    case 'CHF': return {position: 'suffix', symbol: 'Fr'};
+    case 'USD': return {position: 'prefix', symbol: '$'};
+    case 'EUR': return {position: 'prefix', symbol: '€'};
+    default: return null;
+  }
+}
 
 // Which ledger tokens realise each currency, in PREFERENCE ORDER — the first one present in the
 // catalog is the rail the wallet lands on. Order is a product decision, not an accident:
@@ -52,6 +85,9 @@ export type HomeCurrency = (typeof HOME_CURRENCIES)[number];
 //   EUR is EURC on Solana alone since the 2026-09-19 VEUR retirement: VEUR was the thin IC rail
 //   (VEUR rode second in this list as the fallback), and the deep-liquidity EURC rail — the
 //   stated preference, backed by a catalog field — is the one that remains.
+//   The token currencies settle exactly their own token: ckBTC is the BTC rail, ckETH the ETH
+//   rail, ICP and native SOL are theirs. A testnet sibling (ckTESTBTC, ckSepoliaUSDC) carries a
+//   DIFFERENT wrapper token, so it never resolves as a rail of the mainnet currency.
 // Matching is by the asset's `linkToken` through `tokenEq` — the ONE definition of asset-token
 // identity in the app (app/config/assets.ts). A second definition here would be a second way to
 // resolve a currency to the wrong asset.
@@ -59,6 +95,10 @@ const CURRENCY_RAILS: Record<HomeCurrency, readonly string[]> = {
   CHF: ['VCHF'],
   USD: ['ckUSDC', 'USDC'],
   EUR: ['EURC'],
+  BTC: ['ckBTC'],
+  ETH: ['ckETH'],
+  ICP: ['ICP'],
+  SOL: ['SOL'],
 };
 
 /**
@@ -90,16 +130,16 @@ export function preferredRail(currency: HomeCurrency, assets: SelectableAsset[])
  * so a new rail row (EURC, VCHF on Solana) enables its currency with no change here.
  */
 export function offerableCurrencies(assets: SelectableAsset[]): HomeCurrency[] {
-  return HOME_CURRENCIES.filter(c => preferredRail(c, assets) !== null);
+  return WALLET_CURRENCIES.filter(c => preferredRail(c, assets) !== null);
 }
 
 /** Which currency does this LINK TOKEN settle, if any? The one resolver `currencyOfAsset` and the
  *  catalog-row form below both share — token identity has exactly one definition (`tokenEq`), so
- *  the currency lookup has exactly one too. Null outside the home-currency model (DEMO, ckBTC,
- *  ckETH, ICP, SOL) — those are held and spent, they are just not what the wallet is "in". */
+ *  the currency lookup has exactly one too. Null only for DEMO (practice money is not a currency
+ *  in this model — it is never main and never a list row). */
 export function currencyOfLinkToken(linkToken: string | null | undefined): HomeCurrency | null {
   const t = linkToken ?? null;
-  for (const currency of HOME_CURRENCIES) {
+  for (const currency of WALLET_CURRENCIES) {
     if (CURRENCY_RAILS[currency].some(token => tokenEq(t, token))) return currency;
   }
   return null;
@@ -123,10 +163,10 @@ export function currencyOfCatalogRow(row: CurrencyDescriptor): HomeCurrency | nu
  *  is deliberately no default: picking francs for someone who never said so is a worse failure than
  *  asking again. */
 export function parseHomeCurrency(v: string | null | undefined): HomeCurrency | null {
-  return HOME_CURRENCIES.includes(v as HomeCurrency) ? (v as HomeCurrency) : null;
+  return (WALLET_CURRENCIES as readonly string[]).includes(v as string) ? (v as HomeCurrency) : null;
 }
 
-/** The currency's own name, in the user's language ("Swiss francs" / "US dollars" / "Euros"). */
+/** The currency's own name, in the user's language ("Swiss francs" / "Bitcoin" / …). */
 export function currencyName(currency: HomeCurrency): string {
   return M.wallet.homeCurrency.name[currency];
 }
@@ -197,22 +237,23 @@ export function railFees(rail: SelectableAsset, catalog: readonly CurrencyDescri
 /**
  * One ACCOUNTS-ROUTE section: the ordered account list partitioned by the currency each account
  * settles, so the route reads as currencies first and loose assets after. `currency: null` is the
- * non-currency tail (ckBTC/ckETH/ICP/SOL — held and spent, just not what the wallet is "in").
+ * non-currency tail (DEMO — practice money; every real asset settles a wallet currency now).
  */
 export type CurrencyAccountGroup = {currency: HomeCurrency | null; assets: SelectableAsset[]};
 
 /**
  * Presentation-only grouping OVER the `orderAccounts` output — the order inside every section is
- * exactly the order handed in, and the sections themselves are fixed: the HOME currency's rails
- * first, then every other offered currency's rails in HOME_CURRENCIES order, then the
- * non-currency tail. No section is emitted for a currency the list carries no rail for.
+ * exactly the order handed in, and the sections themselves are fixed: the MAIN currency's rails
+ * first, then every other offered currency's rails in WALLET_CURRENCIES order (stables, then the
+ * token currencies), then the non-currency tail. No section is emitted for a currency the list
+ * carries no rail for.
  *
  * It exists because a flat list answers "how much is in each account" while the wallet's own
- * question is "what am I in": the section header NAMES the currency (the label is the currency,
- * the token is the unit — rule 2 at the top of this module), which is what lets a USD wallet read
- * its two dollar rails as one group and its bitcoin as something else. What it deliberately does
- * NOT do is sum a section or reorder anything by magnitude — the rows keep their own units and the
- * no-FX-quote rule untouched.
+ * question is "what am I in": the section header NAMES the currency, which is what lets a USD
+ * wallet read its two dollar rails as one group. What it deliberately does NOT do is sum a
+ * section or reorder anything by magnitude — the rows keep their own units and the no-FX-quote
+ * rule untouched. (The SUMMED per-currency balance is a separate, fork-#4 display layer —
+ * lib/assetBalances.ts `buildCurrencyBalances`.)
  */
 export function groupAccountsByCurrency(
   ordered: SelectableAsset[],
@@ -228,7 +269,7 @@ export function groupAccountsByCurrency(
   const sections: CurrencyAccountGroup[] = [];
   const home = buckets.get(homeCurrency);
   if (home != null) sections.push({currency: homeCurrency, assets: home});
-  for (const c of HOME_CURRENCIES) {
+  for (const c of WALLET_CURRENCIES) {
     if (c === homeCurrency) continue;
     const bucket = buckets.get(c);
     if (bucket != null) sections.push({currency: c, assets: bucket});

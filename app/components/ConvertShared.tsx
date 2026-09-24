@@ -6,7 +6,7 @@
 import {Linking, Pressable, Text, View} from 'react-native';
 import {icpCatalogOf, BUNDLED_NETWORKS, type CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
-import {HOME_CURRENCIES, currencyOfCatalogRow, type HomeCurrency} from '../config/currency';
+import {WALLET_CURRENCIES, currencyOfCatalogRow, type HomeCurrency} from '../config/currency';
 import {resolveConvertDestinations, type ConvertDestination, type ConvertRouteOption} from '../config/convert';
 import {BUNDLED_VENUES, cefiOtherSide, venueDisplayName, venueOfId, type VenueEntry} from '../config/venues';
 import {deriveConvertMath, fetchConvertQuote, isTerminalConvertStep, type ConvertMath, type ConvertQuote, type ConvertRecord, type LegPlan} from '../convert';
@@ -226,7 +226,7 @@ export const groupDestSections = (
     else bucket.push(g);
   }
   const sections: DestSection[] = [];
-  for (const c of HOME_CURRENCIES) {
+  for (const c of WALLET_CURRENCIES) {
     const bucket = buckets.get(c);
     if (bucket != null) sections.push({currency: c, groups: bucket});
   }

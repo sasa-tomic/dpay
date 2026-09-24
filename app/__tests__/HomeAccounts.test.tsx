@@ -238,7 +238,8 @@ describe('AccountsTab — currency sections (labels, never totals; switch afford
     const list = tree.root.findAll(n => n.props && n.props.testID === 'accounts-list')[0]!;
     const marks = [...new Set(list.findAll(n => n.props?.testID?.startsWith('accounts-group-') === true)
       .map(n => String(n.props.testID)))];
-    expect(marks).toEqual(['accounts-group-usd', 'accounts-group-chf', 'accounts-group-eur', 'accounts-group-other']);
+    // Stables first, then the token currencies (the generalized main, 2026-09-24), tail last.
+    expect(marks).toEqual(['accounts-group-usd', 'accounts-group-chf', 'accounts-group-eur', 'accounts-group-btc', 'accounts-group-eth', 'accounts-group-icp', 'accounts-group-sol', 'accounts-group-other']);
     // A header is a LABEL: no digit may appear in any of them (no sums across assets, ever).
     for (const testID of marks) {
       const text = rowText(tree, testID);
@@ -246,6 +247,7 @@ describe('AccountsTab — currency sections (labels, never totals; switch afford
     }
     expect(rowText(tree, 'accounts-group-usd')).toBe('Main · US dollars');
     expect(rowText(tree, 'accounts-group-chf')).toBe('Swiss francs');
+    expect(rowText(tree, 'accounts-group-btc')).toBe('Bitcoin');
     expect(rowText(tree, 'accounts-group-other')).toBe('Other assets');
     act(() => { tree.unmount(); });
   });

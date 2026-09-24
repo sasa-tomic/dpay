@@ -16,7 +16,8 @@
 import {M} from '../i18n';
 import {type CurrencyDescriptor, fmtCurrencyAmountCompact} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
-import {usd, fmtAssetCompact} from './format';
+import {currencyRails, currencyUnitOf, isStableCurrency, type HomeCurrency} from '../config/currency';
+import {usd, fmtAssetCompact, fmtMoneyCompact} from './format';
 import {cmpRaw} from './amount';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import type {SolanaReadFailure} from '../solana';
@@ -215,4 +216,124 @@ function tokenView(state: TokenStateInput, symbol: string, decimals: number, min
     default:
       return {displayText: '—', status: 'loading', failure: null};
   }
+}
+
+// ── Per-currency SUMMED balances (the currency-first redesign, founder forks #2 + #4) ───────────
+//
+// Fork #2: a multi-rail currency shows ONE summed currency balance across its rails — Revolut-style
+// ("4.54 Fr"), never two rows of the same dollar. Fork #4: that sum renders in the CURRENCY unit
+// (`4.54 Fr`, `$4.54`, `€4.54`; pure-token currencies keep their token unit `0.0005 BTC`), which
+// supersedes the 2026-09-04 token-is-the-unit rule for balance display ONLY — history rows and
+// every commit surface keep their own token units, and the peg disclosure lives where fees/quotes
+// are shown (config/currency.ts rule 2).
+//
+// The sum is exact: each rail's raw smallest-unit amount is BigInt-scaled to the widest decimal
+// count among the CONTRIBUTING rails before adding — no floats, no precision loss, no rounding
+// (the same discipline as lib/amount.ts).
+//
+// Status rollup, and it is an honesty rule:
+//   • a rail is READABLE when its per-asset view carries a known number ('ok' | 'zero', or
+//     'absent' — a known zero-by-absence). Readable rails sum what is readable.
+//   • an unreadable rail (loading / unavailable / error) contributes NOTHING to the sum and does
+//     not zero it either — a partial read renders the readable part; the per-network disclosure
+//     stays the existing RailUnreadableNote pattern, rendered once per affected network from the
+//     per-rail views by the UI layer.
+//   • NO readable rail at all: the rollup is 'loading' while every rail is still polling,
+//     'error' when any rail's read failed, 'unavailable' otherwise — and the display is '—',
+//     never a fabricated zero.
+//
+// PURE: no React, no network. Deterministic in (currencies, assets, catalog, the per-asset views,
+// the raw balance inputs, the approx flags) — safe to unit-test directly and to call on every
+// render (wrapped in a useMemo upstream).
+
+// The display-precision CAP for one rail (catalog `display_decimals`, e.g. ckETH's 6-of-18).
+// Solana rows carry no cap on the wire — their full decimal count is the display precision, the
+// same rule `solView` applies. Never used to round: `fmtMoneyCompact` truncates toward zero and
+// marks what it hid.
+function railDisplayDecimals(catalog: CurrencyDescriptor[], rail: SelectableAsset): number {
+  if (rail.protocol === 'ic') {
+    const row = catalog.find(c => c.currency === rail.currency);
+    return row?.display_decimals ?? rail.decimals;
+  }
+  return rail.decimals;
+}
+
+export function buildCurrencyBalances(args: {
+  /** Which currencies to compute — the caller's visible list; a currency with no rail is skipped. */
+  currencies: readonly HomeCurrency[];
+  assets: SelectableAsset[];
+  catalog: CurrencyDescriptor[];
+  /** The per-asset views (buildAssetBalances' output) — the status authority for every rail. */
+  views: Readonly<Partial<Record<AssetId, BalanceView>>>;
+  /** IC raw balances keyed by currency id (the poll's own map). */
+  icBalances: Record<number, string>;
+  /** Native SOL raw balance (lamports), or null when never read. */
+  solBalance: string | null;
+  /** SPL raw amounts keyed by SPL mint, null when unknown/absent ('absent' status supplies '0'). */
+  tokenAmounts: Record<string, string | null>;
+  /** The per-asset staleness flags — ANY contributing rail's flag marks the whole sum '~'. */
+  approx: Readonly<Partial<Record<AssetId, boolean>>>;
+}): Partial<Record<HomeCurrency, BalanceView>> {
+  const {currencies, assets, catalog, views, icBalances, solBalance, tokenAmounts, approx} = args;
+  const out: Partial<Record<HomeCurrency, BalanceView>> = {};
+  for (const currency of currencies) {
+    const rails = currencyRails(currency, assets);
+    if (rails.length === 0) continue;
+    // The raw amount behind one rail's view, from the SAME inputs buildAssetBalances formats —
+    // one number, two layers: the per-asset view formats it in the rail's token unit, the sum
+    // scales + adds it in the currency unit. A status with no number is not a fact; 'absent'
+    // (known zero-by-absence) is the one unread raw that is still a known zero.
+    const rawOf = (rail: SelectableAsset): string | null => {
+      const status = views[rail.id]?.status;
+      if (status === 'ok' || status === 'zero') {
+        return rail.protocol === 'ic'
+          ? (icBalances[rail.currency] ?? '0')
+          : rail.token === 'SOL'
+            ? solBalance
+            : (tokenAmounts[rail.mint ?? ''] ?? null);
+      }
+      if (status === 'absent') return '0';
+      return null;
+    };
+    const readable = rails.filter(r => rawOf(r) != null);
+    if (readable.length === 0) {
+      // Nothing readable: pick the rollup sentence's status honestly ('—' renders either way).
+      const statuses = rails.map(r => views[r.id]?.status ?? 'loading');
+      const status = statuses.every(s => s === 'loading')
+        ? 'loading'
+        : statuses.includes('error') ? 'error' : 'unavailable';
+      out[currency] = {displayText: '—', status, failure: null};
+      continue;
+    }
+    // Exact BigInt sum, scaled to the widest decimal count among the CONTRIBUTING rails. A
+    // multiply loop, never `**`: the transpiler rewrites exponentiation to Math.pow, which
+    // throws on BigInt operands (the same rule lib/amount.ts's pow10 documents).
+    const maxDec = Math.max(...readable.map(r => r.decimals));
+    let total = 0n;
+    for (const rail of readable) {
+      let scale = 1n;
+      for (let i = 0; i < maxDec - rail.decimals; i++) scale *= 10n;
+      total += BigInt(rawOf(rail)!) * scale;
+    }
+    const totalRaw = total.toString();
+    const approxFlag = readable.some(r => approx[r.id] === true);
+    const marked = (s: string) => (approxFlag ? M.wallet.balance.approxAmount(s) : s);
+    // The unit is the currency's own format; a pure-token currency's unit IS its token, riding
+    // as the suffix every token amount already carries.
+    const unit = currencyUnitOf(currency) ?? {position: 'suffix' as const, symbol: currency};
+    // Display precision: stables render money-style fixed 2 ("4.50 Fr" — the sketch's unit);
+    // token currencies render at the PREFERRED rail's own display facts, so a single-rail token
+    // currency's summed row is byte-identical to the per-rail row it replaces.
+    const [preferred] = rails;
+    const displayDecimals = isStableCurrency(currency)
+      ? 2
+      : railDisplayDecimals(catalog, preferred);
+    const minFraction = isStableCurrency(currency) ? 2 : preferred.minFractionDigits;
+    out[currency] = {
+      displayText: marked(fmtMoneyCompact(totalRaw, maxDec, unit, displayDecimals, minFraction)),
+      status: cmpRaw(totalRaw, '0') > 0 ? 'ok' : 'zero',
+      failure: null,
+    };
+  }
+  return out;
 }

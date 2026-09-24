@@ -20,7 +20,7 @@ import {ICONS} from '../components/icons';
 import {AssetGlyph, glyphFor} from '../components/AssetGlyph';
 import type {SelectableAsset} from '../config/assets';
 import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
-import {HOME_CURRENCIES, currencyOfAsset} from '../config/currency';
+import {STABLE_CURRENCIES, TOKEN_CURRENCIES, currencyOfAsset} from '../config/currency';
 
 describe('icons registry', () => {
   test('every icon renders a 24-grid Svg with at least one primitive', () => {
@@ -70,6 +70,7 @@ const ASSETS: SelectableAsset[] = [
   // The home-currency rails (config/currency.ts CURRENCY_RAILS), matched by `linkToken`.
   {id: 'ic:7', protocol: 'ic', currency: 7, symbol: 'VCHF', networkLabel: 'Internet Computer', network: 'Internet Computer', decimals: 8, linkToken: 'VCHF', minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'vchf'},
   {id: 'solana:EURC', protocol: 'solana', token: 'EURC', symbol: 'EURC', networkLabel: 'Solana', network: 'Solana', mint: EURC_MINT_ADDRESS, decimals: 6, linkToken: 'EURC', minFractionDigits: 2, liquidity: 'deep', onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'sol-eurc'},
+  {id: 'ic:8', protocol: 'ic', currency: 8, symbol: 'ICP', networkLabel: 'Internet Computer', network: 'Internet Computer', decimals: 8, linkToken: 'ICP', minFractionDigits: 0, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'icp'},
 ];
 
 describe('glyphFor', () => {
@@ -115,18 +116,20 @@ describe('glyphFor', () => {
       expect(glyphFor(byId('ic:3'))).toEqual(glyphFor(byId('solana:USDC')));
     });
 
-    test('an asset OUTSIDE the home-currency model keeps its own family mark', () => {
-      // Native SOL is held and spent, but it is not a currency the wallet is "in".
-      expect(currencyOfAsset(byId('solana:SOL'))).toBeNull();
+    test('the token currencies wear their own marks — SOL keeps •, and DEMO alone is outside the model', () => {
+      // Generalized main (2026-09-24): native SOL IS a wallet currency now, and its mark is the
+      // chain's •. The one asset outside the currency model is the practice rail.
+      expect(currencyOfAsset(byId('solana:SOL'))).toBe('SOL');
       expect(glyphFor(byId('solana:SOL')).glyph).toBe('•');
+      expect(currencyOfAsset(byId('ic:0'))).toBeNull();
     });
 
     test('every offerable currency has a distinct mark and hue (no two currencies look alike)', () => {
-      const rails = [byId('ic:7'), byId('ic:3'), byId('solana:EURC')];
-      expect(rails.map(currencyOfAsset)).toEqual([...HOME_CURRENCIES]);
+      const rails = [byId('ic:7'), byId('ic:3'), byId('solana:EURC'), byId('ic:1'), byId('ic:2'), byId('ic:8'), byId('solana:SOL')];
+      expect(rails.map(currencyOfAsset)).toEqual([...STABLE_CURRENCIES, ...TOKEN_CURRENCIES]);
       const specs = rails.map(glyphFor);
-      expect(new Set(specs.map(s => s.glyph)).size).toBe(3);
-      expect(new Set(specs.map(s => s.color)).size).toBe(3);
+      expect(new Set(specs.map(s => s.glyph)).size).toBe(rails.length);
+      expect(new Set(specs.map(s => s.color)).size).toBe(rails.length);
     });
   });
 });

@@ -42,7 +42,7 @@ import {fetchWithTimeout} from './relay';
 import {relayAddresses, relayAddressesRevision} from './relayAddresses';
 import {tokenEq, type SelectableAsset} from '../config/assets';
 import {type CurrencyDescriptor} from '../config/catalog';
-import {currencyOfCatalogRow} from '../config/currency';
+import {currencyOfCatalogRow, isStableCurrency} from '../config/currency';
 import {parseDecimalToUnits} from '../lib/amount';
 import {canonicalizeDecimal} from '../i18n/intl';
 import {sanitiseDisplayText} from '../lib/deepLink';
@@ -63,8 +63,10 @@ export const CHECKOUT_OFFER = {method: 'InternetComputer', asset: 'VCHF'} as con
 
 /** The price scale a checkout charge is typed at: two decimals, for EVERY currency a checkout can price —
  *  francs, dollars and euros all carry a minor unit of 1/100, so one parser serves all three and
- *  no asset outside a home currency can be priced at all (a price settled in BTC or ICP would need
- *  an exchange rate, and dpay has none to quote — `checkoutSettlementRow`). */
+ *  no asset outside a STABLE currency can be priced at all (a price settled in BTC or ICP would need
+ *  an exchange rate, and dpay has none to quote — `checkoutSettlementRow`; the 2026-09-24 generalized
+ *  main makes BTC/ETH/ICP/SOL wallet currencies, but a wallet currency is not thereby a checkout
+ *  pricing unit). */
 const PRICE_DECIMALS = 2;
 
 /** What the cashier typed, as whole minor units (rappen/cents) of the settlement asset's own
@@ -245,10 +247,13 @@ export function checkoutPriceUnits(cents: string, decimals: number): string {
  *  excluding a row for a stated reason:
  *   1. it settles on the Internet Computer — the checkout's method (`METHOD` in the relay's checkout.rs);
  *   2. it is a mainnet row — a charge real money settles is never opened against a testnet token;
- *   3. it settles a HOME CURRENCY — francs, dollars or euros. The price is typed in the
+ *   3. it settles a STABLE currency — francs, dollars or euros. The price is typed in the
  *      merchant's own currency and settles 1:1 into that currency's token; a charge priced in
  *      francs and settled in BTC or ICP would need an exchange rate, and dpay has none to quote
- *      and none may be added. No FX, ever, by construction.
+ *      and none may be added. No FX, ever, by construction. (The 2026-09-24 generalized main
+ *      makes the token currencies wallet currencies — main-able, listable, balance-summed — but
+ *      a 1/100-minor-unit pricing unit is exactly what they are not, so the gate names
+ *      `isStableCurrency` explicitly.)
  * The PAYER side keeps the fixed `CHECKOUT_OFFER` pair above: the payer is TOLD the asset by the code
  * it scans, and never chooses. */
 export function checkoutSettlementShape(asset: SelectableAsset, catalog: readonly CurrencyDescriptor[]): boolean {
@@ -256,7 +261,8 @@ export function checkoutSettlementShape(asset: SelectableAsset, catalog: readonl
   const row = catalog.find(c => c.currency === asset.currency);
   if (row == null || row.testnet) return false;
   if (row.decimals == null || row.decimals < PRICE_DECIMALS) return false;
-  return currencyOfCatalogRow(row) !== null;
+  const currency = currencyOfCatalogRow(row);
+  return currency !== null && isStableCurrency(currency);
 }
 
 /** The full settlement rule: the shape above AND a catalog row that STATES its ledger fee — the

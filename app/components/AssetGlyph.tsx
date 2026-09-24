@@ -56,6 +56,10 @@ const FAMILIES: Record<string, {glyph: string; light: string; dark: string}> = {
   // has to separate two stablecoin rows sitting next to each other in one list.
   chf: {glyph: 'CHF', light: '#B3261E', dark: '#F2887E'},
   eur: {glyph: '€', light: '#06726B', dark: '#5EDBCB'},
+  // ICP — the one currency with no single-character mark in the bundled fonts: the same
+  // three-letter treatment CHF has, in a green that stays distinct from EUR's teal, USD's blue
+  // and BTC's amber at a glance.
+  icp: {glyph: 'ICP', light: '#166534', dark: '#7BD3A8'},
 };
 
 /** A chip is a monogram and a `C.wash` tint of that same monogram. One colour in, one chip out. */
@@ -76,9 +80,13 @@ export function allChips(): FamilyGlyph[] {
   ];
 }
 
-/** Which family carries each home currency's mark. USD deliberately reuses the `usdc` family: the
- *  dollar rails already wore $ and that was always the currency's mark, not the token's. */
-const CURRENCY_FAMILY: Record<HomeCurrency, keyof typeof FAMILIES> = {CHF: 'chf', USD: 'usdc', EUR: 'eur'};
+/** Which family carries each wallet currency's mark. USD deliberately reuses the `usdc` family:
+ *  the dollar rails already wore $ and that was always the currency's mark, not the token's.
+ *  ICP gets its own letters + hue (no single-character Internet Computer mark exists in the
+ *  bundled fonts — the CHF precedent); SOL reuses the chain's • family; BTC/ETH theirs. */
+const CURRENCY_FAMILY: Record<HomeCurrency, keyof typeof FAMILIES> = {
+  CHF: 'chf', USD: 'usdc', EUR: 'eur', BTC: 'btc', ETH: 'eth', ICP: 'icp', SOL: 'sol',
+};
 
 function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'demo' | 'fallback' {
   // FIRST: does this asset settle a home currency? Then it wears the CURRENCY's mark, on every
@@ -90,9 +98,10 @@ function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'demo' | 'fa
   // currency inherits the mark with no change here.
   const currency = currencyOfAsset(asset);
   if (currency !== null) return CURRENCY_FAMILY[currency];
-  // Every remaining Solana row is a rail of no home currency, so it wears the chain's own mark.
-  // (There is no per-token branch left here: a Solana row's `linkToken` IS its token, so USDC and
-  // EURC are both resolved by the currency test above — a second test for them would be dead.)
+  // Remaining rows settle no wallet currency: DEMO's ∂ below, and any future token the currency
+  // table does not know yet — it wears the chain's own mark. (A testnet sibling — ckTESTBTC —
+  // also lands here, since its wrapper token is not a rail: the symbol branches below keep the
+  // family hue for it, as the row label already says testnet.)
   if (asset.protocol === 'solana') return 'sol';
   // IC: currency 0 is the DEMO unit; everything else is an ICRC ck-asset keyed by backing.
   if (asset.currency === 0) return 'demo';

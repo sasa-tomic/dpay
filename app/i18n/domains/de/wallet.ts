@@ -21,7 +21,7 @@ export const walletDe: WalletMessages = {
   },
 
   homeCurrency: {
-    name: {CHF: 'Schweizer Franken', USD: 'US-Dollar', EUR: 'Euro'},
+    name: {CHF: 'Schweizer Franken', USD: 'US-Dollar', EUR: 'Euro', BTC: 'Bitcoin', ETH: 'Ether', ICP: 'Internet Computer', SOL: 'Solana'},
     chooseTitle: 'In welcher Währung denkst du?',
     chooseBody: 'Legt die zuerst angezeigte Währung fest — nur Anzeige.',
     railReason: {destination: 'die Zahlung verlangt diesen Weg', funded: 'du hast hier ein Guthaben'},

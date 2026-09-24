@@ -15,11 +15,15 @@
 import {describe, it, expect} from '@jest/globals';
 import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import {
-  HOME_CURRENCIES,
+  STABLE_CURRENCIES,
+  TOKEN_CURRENCIES,
+  WALLET_CURRENCIES,
   chooseRail,
   currencyOfAsset,
   currencyRails,
+  currencyUnitOf,
   fundedAlternative,
+  isStableCurrency,
   offerableCurrencies,
   parseHomeCurrency,
   preferredRail,
@@ -44,6 +48,7 @@ const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency'
 const DEMO = mk({currency: 0, mintable: true, minter_family: null, symbol: '$', decimals: 2});
 const CKBTC = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin'});
 const CKUSDC = mk({currency: 2, minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum'});
+const CKETH = mk({currency: 6, minter: 's', minter_family: 'CkEthErc20', symbol: 'ETH', decimals: 18, wrapper_name: 'ckETH', backing_symbol: 'ETH', network: 'Ethereum'});
 const VCHF = mk({currency: 7, minter_family: null, symbol: 'VCHF', decimals: 8, wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer'});
 const ICP = mk({currency: 8, minter_family: null, symbol: 'ICP', decimals: 8, wrapper_name: 'ICP', backing_symbol: 'ICP', network: 'Internet Computer'});
 // The RETIRED VEUR row exactly as a legacy SERVED catalog still carries it (prod serves the old
@@ -55,7 +60,7 @@ const LEGACY_VEUR = mk({currency: 9, minter_family: null, symbol: 'VEUR', decima
 const build = (catalog: CurrencyDescriptor[], solana = false): SelectableAsset[] =>
   buildSelectableAssets(catalog, {showTestnet: false, solanaEnabled: solana, solanaTokens: solana});
 
-const FULL = build([DEMO, CKBTC, CKUSDC, VCHF, ICP]);
+const FULL = build([DEMO, CKBTC, CKUSDC, CKETH, VCHF, ICP]);
 
 describe('currencyRails — a currency is a set of rails', () => {
   it('resolves CHF to the VCHF row', () => {
@@ -67,6 +72,15 @@ describe('currencyRails — a currency is a set of rails', () => {
     // one proven on hardware), so it must not follow catalog order.
     const withSol = build([DEMO, CKBTC, CKUSDC, VCHF], true);
     expect(currencyRails('USD', withSol).map(a => a.id)).toEqual(['ic:2', 'solana:USDC']);
+  });
+
+  it('resolves the token currencies to exactly their own rails (generalized main, 2026-09-24)', () => {
+    // BTC/ETH/ICP are IC rails; SOL's is the device-key rail's native row. One rail each today,
+    // but the resolution is the SAME rail-table walk the stables use — no per-token special case.
+    expect(currencyRails('BTC', FULL).map(a => a.id)).toEqual(['ic:1']);
+    expect(currencyRails('ETH', build([DEMO, CKETH])).map(a => a.id)).toEqual(['ic:6']);
+    expect(currencyRails('ICP', FULL).map(a => a.id)).toEqual(['ic:8']);
+    expect(currencyRails('SOL', build([DEMO, CKBTC], true)).map(a => a.id)).toEqual(['solana:SOL']);
   });
 
   it('resolves EUR to nothing while its rail is not visible', () => {
@@ -88,12 +102,17 @@ describe('currencyRails — a currency is a set of rails', () => {
     expect(currencyRails('EUR', build([DEMO, LEGACY_VEUR]))).toEqual([]);
   });
 
-  it('ignores assets that are not a currency rail', () => {
-    // ckBTC, ICP and DEMO are held and spent; they are not what the wallet is "in".
-    const railIds = HOME_CURRENCIES.flatMap(c => currencyRails(c, FULL).map(a => a.id));
+  it('never resolves the practice rail as a currency rail', () => {
+    // DEMO is not a currency in this model: no currency's rail set may contain it, whatever
+    // else the catalog carries.
+    const railIds = WALLET_CURRENCIES.flatMap(c => currencyRails(c, FULL).map(a => a.id));
     expect(railIds).not.toContain('ic:0');
-    expect(railIds).not.toContain('ic:1');
-    expect(railIds).not.toContain('ic:8');
+    // ...and every REAL asset in the list settles exactly one currency now (the generalized
+    // model's totality: ckBTC→BTC, ICP→ICP, VCHF→CHF, ckUSDC→USD).
+    for (const a of FULL) {
+      if (a.id === 'ic:0') continue;
+      expect(WALLET_CURRENCIES.filter(c => currencyRails(c, FULL).some(r => r.id === a.id))).toHaveLength(1);
+    }
   });
 });
 
@@ -114,17 +133,22 @@ describe('preferredRail — the asset the wallet lands on', () => {
 });
 
 describe('offerableCurrencies — the chooser never offers what it cannot deliver', () => {
-  it('offers only the currencies the catalog carries a rail for', () => {
-    expect(offerableCurrencies(FULL)).toEqual(['CHF', 'USD']);
+  it('offers only the currencies the catalog carries a rail for — stables AND token currencies', () => {
+    // The generalized main (2026-09-24): the bundled IC catalog realises CHF/USD and, through
+    // their own token rails, BTC/ETH/ICP; EUR needs the Solana EURC row (absent here); SOL needs
+    // the device-key rail (solana disabled here). Order is declaration order: stables, then tokens.
+    expect(offerableCurrencies(FULL)).toEqual(['CHF', 'USD', 'BTC', 'ETH', 'ICP']);
   });
 
   it('drops a currency whose rail is missing, and keeps declaration order', () => {
     expect(offerableCurrencies(build([DEMO, CKUSDC]))).toEqual(['USD']);
     expect(offerableCurrencies(build([DEMO, VCHF]))).toEqual(['CHF']);
+    expect(offerableCurrencies(build([DEMO, ICP]))).toEqual(['ICP']);
   });
 
   it('offers nothing when no rail exists at all — a broken catalog, surfaced not hidden', () => {
-    expect(offerableCurrencies(build([DEMO, CKBTC]))).toEqual([]);
+    // DEMO alone is practice money, not a currency: nothing may be offered.
+    expect(offerableCurrencies(build([DEMO]))).toEqual([]);
   });
 });
 
@@ -136,10 +160,28 @@ describe('currencyOfAsset — the inverse mapping the accounts list marks rows w
     expect(currencyOfAsset(ckusdc)).toBe('USD');
   });
 
-  it('is null for assets outside the home-currency model', () => {
-    for (const id of ['ic:0', 'ic:1', 'ic:8']) {
-      expect(currencyOfAsset(FULL.find(a => a.id === id)!)).toBeNull();
+  it('names the token currencies too — the generalized main reaches every real rail', () => {
+    expect(currencyOfAsset(FULL.find(a => a.id === 'ic:1')!)).toBe('BTC');
+    expect(currencyOfAsset(FULL.find(a => a.id === 'ic:8')!)).toBe('ICP');
+    expect(currencyOfAsset(build([DEMO, CKETH]).find(a => a.id === 'ic:6')!)).toBe('ETH');
+    expect(currencyOfAsset(build([DEMO], true).find(a => a.id === 'solana:SOL')!)).toBe('SOL');
+  });
+
+  it('is null ONLY for the practice rail', () => {
+    expect(currencyOfAsset(FULL.find(a => a.id === 'ic:0')!)).toBeNull();
+    for (const a of FULL) {
+      if (a.id === 'ic:0') continue;
+      expect(currencyOfAsset(a)).not.toBeNull();
     }
+  });
+
+  it('never resolves a TESTNET sibling as a rail of the mainnet currency', () => {
+    // ckTESTBTC carries its own wrapper token, so it is not a BTC rail: a testnet balance must
+    // never read as, or set, the mainnet currency.
+    const CKTESTBTC = mk({currency: 3, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckTESTBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', testnet: true});
+    const withTestnet = buildSelectableAssets([DEMO, CKBTC, CKTESTBTC], {showTestnet: true, solanaEnabled: false});
+    expect(currencyRails('BTC', withTestnet).map(a => a.id)).toEqual(['ic:1']);
+    expect(currencyOfAsset(withTestnet.find(a => a.id === 'ic:3')!)).toBeNull();
   });
 
   it('round-trips with currencyRails for every offerable currency', () => {
@@ -150,16 +192,42 @@ describe('currencyOfAsset — the inverse mapping the accounts list marks rows w
 });
 
 describe('parseHomeCurrency — absent means UNCHOSEN, never a guess', () => {
-  it('accepts exactly the known currencies', () => {
+  it('accepts exactly the known currencies — stables and token currencies alike', () => {
     expect(parseHomeCurrency('CHF')).toBe('CHF');
     expect(parseHomeCurrency('USD')).toBe('USD');
     expect(parseHomeCurrency('EUR')).toBe('EUR');
+    // The generalized main (2026-09-24): a stored 'BTC'/'ICP' is a wallet the user deliberately
+    // set to a token currency — it must survive a restart, not fall back to a stable.
+    expect(parseHomeCurrency('BTC')).toBe('BTC');
+    expect(parseHomeCurrency('ETH')).toBe('ETH');
+    expect(parseHomeCurrency('ICP')).toBe('ICP');
+    expect(parseHomeCurrency('SOL')).toBe('SOL');
   });
 
   it('returns null for absent, empty, unknown or wrongly-cased values', () => {
-    for (const v of [null, undefined, '', 'chf', 'GBP', 'system', 'ic:7']) {
+    for (const v of [null, undefined, '', 'chf', 'GBP', 'DEMO', 'system', 'ic:7']) {
       expect(parseHomeCurrency(v)).toBeNull();
     }
+  });
+});
+
+describe('the generalized main — isStableCurrency + currencyUnitOf (fork #4)', () => {
+  it('partitions the wallet currencies into stables and Other', () => {
+    for (const c of STABLE_CURRENCIES) expect(isStableCurrency(c)).toBe(true);
+    for (const c of TOKEN_CURRENCIES) expect(isStableCurrency(c)).toBe(false);
+    // The two lists are the whole model, disjoint, in presentation order.
+    expect(WALLET_CURRENCIES).toEqual([...STABLE_CURRENCIES, ...TOKEN_CURRENCIES]);
+  });
+
+  it('formats the stable balances in the CURRENCY unit, as the founder sketched', () => {
+    // "4,54 Fr" is a SUFFIX; "$4.54" / "€4.54" are PREFIXES — the sketch's own placement.
+    expect(currencyUnitOf('CHF')).toEqual({position: 'suffix', symbol: 'Fr'});
+    expect(currencyUnitOf('USD')).toEqual({position: 'prefix', symbol: '$'});
+    expect(currencyUnitOf('EUR')).toEqual({position: 'prefix', symbol: '€'});
+  });
+
+  it('leaves the pure-token currencies on their token unit (currency == token there)', () => {
+    for (const c of TOKEN_CURRENCIES) expect(currencyUnitOf(c)).toBeNull();
   });
 });
 
@@ -273,6 +341,18 @@ describe('chooseRail — which rail, and why', () => {
 
   it('is null when the destination names an asset outside the currency\'s group', () => {
     expect(chooseRail('USD', withSol, null, vchf)).toBeNull();
+  });
+
+  it('answers for the TOKEN currencies by the same three-step policy (generalized main)', () => {
+    // BTC as the main currency behaves exactly like CHF: preference default, funded override,
+    // destination pin — no token special case anywhere.
+    const withBtc = build([DEMO, CKBTC, CKUSDC, VCHF]);
+    const ckbtc = withBtc.find(a => a.id === 'ic:1')!;
+    expect(chooseRail('BTC', withBtc)).toEqual({rail: ckbtc, reason: 'preference'});
+    expect(chooseRail('BTC', withBtc, bal(['ic:1', 'ok']))).toEqual({rail: ckbtc, reason: 'funded'});
+    expect(chooseRail('BTC', withBtc, null, ckbtc)).toEqual({rail: ckbtc, reason: 'destination'});
+    expect(chooseRail('BTC', withBtc, null, vchf)).toBeNull();
+    expect(chooseRail('BTC', build([DEMO, CKUSDC]))).toBeNull();
   });
 });
 

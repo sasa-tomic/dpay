@@ -365,11 +365,14 @@ describe('the settlement rule (multi-currency build-out)', () => {
     return a;
   };
 
-  test('admits exactly the IC rows that settle a home currency at a stated fee', () => {
+  test('admits exactly the IC rows that settle a STABLE currency at a stated fee', () => {
     expect(checkoutSettlementAssets(ASSETS, CATALOG).map(a => a.id).sort()).toEqual([id('ckUSDC'), id('VCHF')].sort());
-    // Per gate, one named exclusion:
-    expect(checkoutSettlementRow(byLink('ckBTC'), CATALOG)).toBe(false); // no currency to price in
-    expect(checkoutSettlementRow(byLink('ICP'), CATALOG)).toBe(false);   // no currency to price in
+    // Per gate, one named exclusion. Under the generalized main (2026-09-24) BTC/ICP ARE wallet
+    // currencies — a wallet currency is not thereby a checkout PRICING unit: a 1/100-minor-unit
+    // price settled 1:1 is what these rows cannot express.
+    expect(checkoutSettlementRow(byLink('ckBTC'), CATALOG)).toBe(false); // no stable currency to price in
+    expect(checkoutSettlementRow(byLink('ICP'), CATALOG)).toBe(false);   // no stable currency to price in
+    expect(checkoutSettlementRow(byLink('ckETH'), CATALOG)).toBe(false); // no stable currency to price in
     expect(checkoutSettlementRow(ASSETS.find(a => a.protocol === 'solana' && a.token === 'SOL')!, CATALOG)).toBe(false); // wrong method
   });
 

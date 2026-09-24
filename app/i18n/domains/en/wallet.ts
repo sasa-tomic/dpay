@@ -67,8 +67,10 @@ export type WalletMessages = {
    * is a claim.
    */
   homeCurrency: {
-    /** The currency's own name, as a heading. Plural reads better as a section label than the code. */
-    name: {CHF: string; USD: string; EUR: string};
+    /** The currency's own name, as a heading. Plural reads better as a section label than the code.
+     *  The token currencies' names are network proper nouns (the same rule the asset rows'
+     *  `network` field follows) — identical across locales by design. */
+    name: {CHF: string; USD: string; EUR: string; BTC: string; ETH: string; ICP: string; SOL: string};
     /** The chooser's title + subtitle. */
     chooseTitle: string;
     chooseBody: string;
@@ -301,7 +303,7 @@ export const walletEn: WalletMessages = {
   },
 
   homeCurrency: {
-    name: {CHF: 'Swiss francs', USD: 'US dollars', EUR: 'Euros'},
+    name: {CHF: 'Swiss francs', USD: 'US dollars', EUR: 'Euros', BTC: 'Bitcoin', ETH: 'Ether', ICP: 'Internet Computer', SOL: 'Solana'},
     chooseTitle: 'Which currency do you think in?',
     chooseBody: 'Sets the currency shown first — display only.',
     railReason: {destination: 'the payment asks for this rail', funded: 'you hold a balance here'},
