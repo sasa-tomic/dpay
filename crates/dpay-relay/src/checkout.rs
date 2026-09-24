@@ -1556,7 +1556,7 @@ mod tests {
     }
 
     #[test]
-    fn a_opened_charge_stops_being_payable_when_it_goes_stale() {
+    fn an_opened_charge_stops_being_payable_when_it_goes_stale() {
         let mut s = CheckoutStore::default();
         open_charge(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         assert!(s.quote("pl_a", "plq_1".into(), CHARGE_TTL_SECS - 1).is_ok());
