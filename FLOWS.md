@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **191 flows**
-> (190 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **193 flows**
+> (192 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (28) · nfc (12) · system (35) · tour (6)
+wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (30) · nfc (12) · system (35) · tour (6)
 
 ---
 
@@ -199,6 +199,8 @@ wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw
 | 198 | convert-sol-cefi-trocador | With the trocador aggregator row registered (ICP<->SOL, same pair as sideshift) the SOL convert surface merges both venues under one ICP landing spot whose row names the spot and whose sub-picker chooses the service (registry order, never ranked, default first). Picking the Trocador mechanism quotes verbatim through the relay proxy (estimate, Trocador attribution), shows the user's OWN derived IC account identifier (the 64-hex account hash of the wallet's principal — the form the venue's ICP payout layer requires) as the payout target BEFORE any order, and confirms to the venue's fixed-rate ORDER without broadcasting anything on the SOL rail. Every venue call — rate, trade AND the key-gated status read — rides the relay (zero bare upstream calls, the API-Key attaches server-side, the refund address rides every trade request), and the provider lifecycle awaiting_deposit → processing → done runs through the relay status route, surviving a page reload on the persisted record. | convert, solana-rail, venue:trocador, cefi, aggregator, same-surfaces, deposit-handoff, derived-payout-address, order-locks-quote, reload-recovery, cross-rail |
 | 199 | convert-trocador-agreement | With the relay running the partner agreement (DPAY_PUBLIC_ORIGIN set, its own log dir) a real SOL→ICP convert through the Trocador mechanism carries the webhook registration upstream — the stub venue observes webhook=<origin>/api/v1/trocador/webhook and webhook_key=<order_id> on the trade, the response names the same order id at X-Dpay-Order-Id, and the webhook route answers 200 to the creation-time GET probe; a venue delivery keyed to that webhook_key lands the pushed status in the app's convert view (processing, then done with the venue's own realized figures) served from the order store VERBATIM with ZERO upstream status reads (the stub's status hit-count freezes); and every proxied call appends a correlated line to the compliance access log (ip, user-agent, accept-language, order/trade/client ids; rate, trade, status, webhook and webhook-unmatched kinds all present). | convert, solana-rail, venue:trocador, cefi, partner-agreement, webhook, webhook-first-status, zero-upstream-status, order-id-correlation, access-log |
 | 200 | convert-crossrail-vchf-sol | VCHF converts to SOL via USDC (Route C) with the whole venue chain named BEFORE anything signs: the destination row itself reads "final step via Jupiter", the review census spells "Route: ICPSwap → Circle CCTP → Jupiter" and renders a fail-soft Jupiter estimate for what the USDC mint floor lands as at the Solana address, the floor line reads USDC as the mid-stop (the final step swaps it onward), the handoff keeps the mid-stop phrasing, and the done receipt attributes the conversion — "via ICPSwap, Circle and Jupiter" — beside the realized SOL figure. | convert, crossrail, vchf, sol, venue-attribution |
+| 208 | convert-cefi-lifecycle | the CeFi record lifecycle is honest past quote expiry: the expired card names the late-deposit watch instead of claiming nothing can move, the slow provider poll keeps running and the venue's refunded word lands provider_refunded on its own, provider_processing shows the engine's last-checked read without inventing an SLA, and the deposit handoff names the shift id and its expiry window. | convert, cefi, sideshift, lifecycle, quote-expired, late-deposit-watch, slow-watch, provider-refunded, last-checked, no-sla, deposit-handoff |
+| 209 | convert-abort-cefi | the Stop on the later conversion legs: a crossing stop keeps the honest watching story (Circle may still mint, the ATA is named) and stops the Circle watch; a sol_ready stop is clean (the final leg was unsigned) and names where the USDC sits; a CeFi awaiting_deposit stop freezes the record aborted with the two-sided unfunded/deposit-sent truth and the venue shift id, survives a reload without ever polling again (stub counter frozen) or re-creating the order, and the ICP ledger is unchanged. | convert, cefi, abort, provider-stop, crossing-stop, sol-ready-stop, pre-broadcast, unfunded-order-truth, watching-flavor, clean-flavor, no-resurrection |
 
 ### NFC (tap-to-pay)
 
