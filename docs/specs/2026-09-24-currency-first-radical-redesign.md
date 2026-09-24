@@ -86,17 +86,20 @@ objective-2 model — a currency is a set of rails, dpay picks one for the user)
 - **The 2026-09-14 three-equal-cards Pay/Receive/Add-money action row**: replaced by
   Add funds / Convert / Withdraw funds / [...].
 
-## Open forks (questions sent to the founder 2026-09-24 — build follows the answers)
+## The four forks — ANSWERED by the founder 2026-09-24
 
-1. **Pay and Receive after the redesign** — bottom tabs unchanged, or reshaped?
-2. **A multi-rail currency row's balance** (CHF = VCHF·IC + VCHF·Sol, USD = ckUSDC·IC + USDC·Sol)
-   — one summed currency number, main rail only, or main + sibling sub-row?
-3. **Venue choice in the swap screen** — the 2026-09-11 rule is the user picks from side-by-side
-   venue quotes, none preselected; the sketch implies dpay resolves and the venue is disclosed at
-   confirm. Which wins?
-4. **The balance unit** — the sketch writes `4,54 Fr`; the standing honesty rule says the currency
-   is the label and the token is the unit (`4.54 VCHF`, never `CHF 4.54` — VCHF's peg is the
-   issuer's claim). Which wins?
+1. **Pay and Receive stay exactly where they are.** Bottom tabs unchanged (Home · Pay ·
+   Receive · Transactions); only Home's action row swaps to Add funds / Convert / Withdraw
+   funds / [...]. Offline pay stays one tap from anywhere.
+2. **A multi-rail currency row shows ONE SUMMED currency balance** across its rails
+   (Revolut-style, per the `4,54 Fr` sketch). Dpay picks the rail automatically; a details
+   affordance may still show per-rail splits.
+3. **The user still picks the venue.** When several venues serve a pair, the chooser renders
+   inside the swap screen (below the target row) — the 2026-09-11 no-ranking, user-picks rule
+   stands.
+4. **Balances render in the CURRENCY unit** (`4,54 Fr`, `Balance CHF`) as sketched. This
+   SUPERSEDES the 2026-09-04 token-is-the-unit rule for balance display; the peg disclosure
+   stays where fees/quotes are shown. (History rows keep their own token units.)
 
 **Proposed Remove semantics** (not a question unless the founder corrects it): Remove hides the
 currency from the wallet's list (device-persisted, re-addable from Add new currency); refused
