@@ -147,7 +147,7 @@ export function AccountsTab({
                     return (
                       <Pressable
                         testID={`btn-accounts-rail-${slug}`}
-                        style={S.linkBtn}
+                        style={S.accountsGroupSwitch}
                         onPress={() => onSwitchRail(choice.rail.id)}
                         accessibilityRole="button"
                         accessibilityLabel={M.wallet.accounts.switchRail(railLineLabel(choice.rail))}

@@ -288,13 +288,19 @@ function buildStyles(p: Palette) {
   accountsHeader: {...ROUTE_HEADER_ROW, marginBottom: 10},
   accountsList: {alignSelf: 'stretch', marginTop: 8},
   // Currency-section chrome (groupAccountsByCurrency render): a quiet label naming the currency —
-  // a section is a label, never a total. The head row carries the optional rail-switch link on
-  // the same line (space-between), so one multi-rail currency costs one row, not two.
+  // a section is a label, never a total. The optional rail-switch link wraps to its own line
+  // below (see accountsGroupSwitch).
   accountsGroupHead: {
-    alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    alignSelf: 'stretch', flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between',
     marginTop: 14, marginBottom: 2,
   },
   accountsGroupLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, flexShrink: 1},
+  // The rail-switch link wraps UNDER its section label (flexBasis 100% + the head's wrap): the
+  // full rail name ("Switch to ckUSDC · Internet Computer") plus the label never fit one phone
+  // row, and shrinking the label wrapped the currency name mid-word. Stacked, the label reads
+  // whole and the link keeps its 44px touch row. Sections without a switch render one line,
+  // exactly as before.
+  accountsGroupSwitch: {flexBasis: '100%', minHeight: 44, justifyContent: 'center', alignItems: 'flex-start'},
   // Still seats the sentence immediately above its practice row (anti-scam rule R3 keeps them
   // unseparable by a scroll).
   accountsPractice: {fontSize: 13, color: p.sub, marginTop: 6, marginBottom: 8, fontFamily: FONT.sans},
