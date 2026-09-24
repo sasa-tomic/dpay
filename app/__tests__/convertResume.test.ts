@@ -728,7 +728,8 @@ describe('C4 — aborted records are skipped by every driver (parametric over re
     const stop = startConvertResumeEngine(CTX, FAST);
     try {
       await sleep(40); // several re-arm windows: a wrongly-armed record would be re-driven
-      const callsFor = (m: jest.Mock) => m.mock.calls.filter((c: unknown[]) => (c[0] as ConvertRecord).id === rec.id);
+      const callsFor = (m: {mock: {calls: Array<unknown[]>}}) =>
+        m.mock.calls.filter((c) => (c[0] as ConvertRecord).id === rec.id);
       expect(callsFor(jest.mocked(executeConvert))).toHaveLength(0);
       expect(callsFor(jest.mocked(executeSolanaConvert))).toHaveLength(0);
       expect(callsFor(jest.mocked(executeCrossRailConvert))).toHaveLength(0);
