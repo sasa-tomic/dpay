@@ -1253,12 +1253,18 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // [Add new currency] — the route. Only ever entered from the accounts route.
   const openAddCurrency = useCallback(() => setMode('add-currency'), []);
   // A currency-row tap: set that currency as MAIN and go Home — the spec's deliberate gesture
-  // (it supersedes the old tap-protection rule). The rail resolution is dpay's job and happens
-  // downstream (homeAsset / chooseRail); this only records the preference and navigates.
+  // (it supersedes the old tap-protection rule). The wallet is "in" EXACTLY one currency, so the
+  // working rail FOLLOWS the main: the new main's chosen rail (chooseRail — funded, else stated
+  // preference) becomes the selection, and Pay/Receive act on it. A user gesture, so it respects
+  // the selection lock.
   const openCurrencyAsMain = useCallback((c: HomeCurrency) => {
+    if (!shouldAllowUserSelect(selectionLocked)) return;
     onSetHomeCurrency(c);
+    const choice = chooseRail(c, assets, balances);
+    const rail = choice != null ? choice.rail : preferredRail(c, assets);
+    if (rail != null) selectAsset(rail.id);
     setMode('home');
-  }, [onSetHomeCurrency]);
+  }, [onSetHomeCurrency, selectionLocked, assets, balances, selectAsset]);
   // A row's Convert: open the convert surface with THAT currency as the source — resolved to its
   // concrete rail through `chooseRail` (the funded rail, else the stated preference), which is the
   // same policy every spend surface uses. A user gesture, so it respects the selection lock.
@@ -1305,10 +1311,18 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     });
     if (!verdict.ok) { setRemoveRefusal(verdict.reason); return; }
     hideCurrency(homeCurrency);
+    // The wallet stays "in" a visible currency: if the removed one WAS main, main moves to the
+    // first survivor — and the working rail follows it (selectAsset, bypassing the lock like
+    // every programmatic re-point: nothing money-critical is in flight on Home's menu).
     const next = visibleCurrencies.find(c => c !== homeCurrency);
-    if (next != null) onSetHomeCurrency(next);
+    if (next != null) {
+      onSetHomeCurrency(next);
+      const choice = chooseRail(next, assets, balances);
+      const rail = choice != null ? choice.rail : preferredRail(next, assets);
+      if (rail != null) selectAsset(rail.id);
+    }
     setHomeMenuOpen(false);
-  }, [homeCurrency, currencyBalances, visibleCurrencies, hideCurrency, onSetHomeCurrency]);
+  }, [homeCurrency, currencyBalances, visibleCurrencies, hideCurrency, onSetHomeCurrency, assets, balances, selectAsset]);
 
   // The rail flip inside Receive ▸ "My address" (Objective 2, currency-first wallet): switching
   // WHICH rail of the home-currency group the address surface shows. Deliberately NOT handleSelect
