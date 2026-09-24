@@ -395,7 +395,7 @@ aid-parity:
 # (merchant-wire is GONE 2026-08-16: the hand-rolled /merchant page was merged into /wallet — the
 #  real app builds requests through its own wasm core, so the hand-rolled-encoder drift class it
 #  guarded against no longer has a surface to live on.)
-check: test-core test-canister relay-default-check test-relay test-live test-icp typecheck test-app bridge-parity aid-parity wasm-core flows-md
+check: test-core test-canister relay-default-check test-relay test-live test-icp typecheck test-app bridge-parity aid-parity wasm-core flows-md convert-matrix
     @python3 scripts/testruns.py record check pass
     @echo "rust inner loop green"
 
@@ -410,6 +410,15 @@ flows-md:
     @diff -u {{justfile_directory()}}/.dev/FLOWS.md.before FLOWS.md \
       || (echo "FLOWS.md was STALE — regenerated above from the flows' own meta; keep the new file." && exit 1)
     @rm -f {{justfile_directory()}}/.dev/FLOWS.md.before
+
+# GENERATED convert-coverage doc (docs/CONVERT_MATRIX.md): every row derived from the venue
+# registry the app itself derives from (dfx/catalog_truth.json venues[] + dfx/venue_health.json
+# + app/solana/tokens.ts) — never a hand list, never an app input. The --check pass (in `check`)
+# fails on a stale or hand-edited doc; app/__tests__/convertMatrix.test.ts pins the same drift
+# plus the registry-coverage invariant (every mainnet row reachable in the pickers).
+convert-matrix:
+    node scripts/gen_convert_matrix.mjs
+    node scripts/gen_convert_matrix.mjs --check
 
 # Wasm-core parity: proves the COMMITTED crates/dpay-relay/assets/dpay-core.wasm (the bytes every
 # web surface loads) signs/builds byte-identically to the JS oracle — catches a stale or corrupted
