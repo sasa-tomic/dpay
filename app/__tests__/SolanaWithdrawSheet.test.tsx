@@ -375,7 +375,7 @@ describe('SolanaWithdrawSheet — the unknown terminal: Check status + no-re-sen
 
   const checkButton = (tree: renderer.ReactTestRenderer) => tree.root.findByProps({testID: 'btn-sol-send-check'}).props;
 
-  test('(d) status confirmed → the panel flips SETTLED (Sent ✓), never re-signs', async () => {
+  test('(d) status confirmed → the panel flips SETTLED (Sent), never re-signs', async () => {
     jest.mocked(getSolSignatureStatus).mockResolvedValue({confirmationStatus: 'confirmed', err: null});
     const tree = await sendToUnknown();
     await act(async () => { await checkButton(tree).onPress(); });

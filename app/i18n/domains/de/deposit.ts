@@ -344,7 +344,7 @@ export const withdrawDe: WithdrawMessages = {
   sol: {
     createAtaLabel: asset => `Mein ${asset}-Konto erstellen`,
     backToScan: 'Zurück zum Scannen',
-    sent: 'Gesendet ✓',
+    sent: 'Gesendet',
     txSignature: 'Transaktionssignatur',
     copySignatureLabel: 'Transaktionssignatur kopieren',
     copySignature: 'Signatur kopieren',

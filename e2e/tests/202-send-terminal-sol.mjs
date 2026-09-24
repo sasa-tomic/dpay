@@ -92,7 +92,7 @@ export async function run() {
 
     console.log('[202-send-terminal-sol] Check status → the stub flips → settled…');
     await driver.click('btn-sol-send-check', { timeoutMs: 4_000 });
-    assert(await driver.waitForText('Sent ✓', { timeoutMs: 15_000 }),
+    assert(await driver.waitForText('Sent', { timeoutMs: 15_000 }),
       'the confirmed read flips the panel to the settled terminal');
     assert(await absent(driver, 'sol-send-unknown-title'), 'the pending headline is gone');
     assert(await absent(driver, 'btn-sol-send-check'), 'a settled send needs no re-read');
