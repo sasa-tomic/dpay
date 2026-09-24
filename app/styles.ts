@@ -341,6 +341,10 @@ function buildStyles(p: Palette) {
   // Same section-heading shape as the slippage label, plus top spacing: the balance/Max row
   // sits directly above the DESTINATION heading and collapsed against it (2026-09-20 shot).
   convertDestLabel: {fontSize: 11, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, fontFamily: FONT.mono, marginTop: 18, marginBottom: 6},
+  // Currency-section header inside the destination picker (groupDestSections render): a quiet
+  // label naming the destination currency — a section is a label, never a total. Same voice as
+  // the accounts route's group headers (13/sans/sub), so both lists read one system.
+  convertDestGroupLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 10, marginBottom: 2},
   // The minimum is a term, but it is the term that bounds the trade — one weight above its siblings.
   convertMinOutLine: {fontSize: 14, color: p.ink, lineHeight: 20, marginBottom: 9, fontFamily: FONT.sansMedium},
   convertSlippageRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap'},

@@ -153,6 +153,7 @@ export const convertDe: ConvertMessages = {
     destRouteSol: (sym, network, venue) => `${sym} — an deine ${network}-Adresse · letzter Schritt über ${venue}`,
     routeHeadingCollapsed: (inSym, hopSym, network) => `Route: ${inSym} → ${hopSym} (nach ${network})`,
     destInWallet: sym => `${sym} — in dieser Wallet`,
+    destGroupOther: 'Andere Ziele',
     mechDirect: 'Direkter Pool',
     mechViaHub: hubSym => `Über ${hubSym}`,
     mechViaCctp: 'Über Circle CCTP',

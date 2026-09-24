@@ -152,6 +152,7 @@ export const convertFr: ConvertMessages = {
     destRouteSol: (sym, network, venue) => `${sym} — vers ton adresse ${network} · dernière étape via ${venue}`,
     routeHeadingCollapsed: (inSym, hopSym, network) => `Route : ${inSym} → ${hopSym} (vers ${network})`,
     destInWallet: sym => `${sym} — dans ce portefeuille`,
+    destGroupOther: 'Autres destinations',
     mechDirect: 'Pool direct',
     mechViaHub: hubSym => `Via ${hubSym}`,
     mechViaCctp: 'Via Circle CCTP',

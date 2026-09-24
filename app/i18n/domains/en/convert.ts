@@ -208,6 +208,10 @@ export type ConvertMessages = {
      *  destination with no qualifier of its own (hub-only rows; the mechanism sub-picker
      *  carries the mechanism names). */
     destInWallet: (sym: string) => string;
+    /** The destination picker's tail section header (multi-currency build-out): every
+     *  destination that settles no home currency — other in-wallet assets and external-address
+     *  payouts. A label, never a total. */
+    destGroupOther: string;
     /** Mechanism sub-picker rows (D2/D5), revealed only when a destination has more than
      *  one: registry order, direct first (the standing default), never ranked beyond that. */
     mechDirect: string;
@@ -613,6 +617,7 @@ export const convertEn: ConvertMessages = {
     legStateFailed: 'Refused',
     legProgress: (n, total) => `Step ${n} of ${total}`,
     destInWallet: sym => `${sym} — in this wallet`,
+    destGroupOther: 'Other destinations',
     mechDirect: 'Direct pool',
     mechViaHub: hubSym => `Via ${hubSym}`,
     mechViaCctp: 'Via Circle CCTP',

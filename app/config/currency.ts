@@ -33,7 +33,7 @@
 // arrives first; until then both numbers are shown side by side, in their own units, and the human
 // does the comparing.
 import {type SelectableAsset, linkNetworkOf, prettyNetwork, tokenEq} from './assets';
-import {type CurrencyDescriptor} from './catalog';
+import {type CurrencyDescriptor, assetLinkToken} from './catalog';
 import {type BalanceView} from '../lib/assetBalances';
 import {fmtAssetCompact} from '../lib/format';
 import {type AssetId} from '../lib/types';
@@ -93,15 +93,29 @@ export function offerableCurrencies(assets: SelectableAsset[]): HomeCurrency[] {
   return HOME_CURRENCIES.filter(c => preferredRail(c, assets) !== null);
 }
 
-/** Which currency does this asset settle, if any? The inverse of `currencyRails`, used to mark the
- *  main-currency rows in the accounts list. Null for assets outside the home-currency model
- *  (DEMO, ckBTC, ckETH, ICP, SOL) — those are held and spent, they are just not what the wallet is
- *  "in". */
-export function currencyOfAsset(asset: SelectableAsset): HomeCurrency | null {
+/** Which currency does this LINK TOKEN settle, if any? The one resolver `currencyOfAsset` and the
+ *  catalog-row form below both share — token identity has exactly one definition (`tokenEq`), so
+ *  the currency lookup has exactly one too. Null outside the home-currency model (DEMO, ckBTC,
+ *  ckETH, ICP, SOL) — those are held and spent, they are just not what the wallet is "in". */
+export function currencyOfLinkToken(linkToken: string | null | undefined): HomeCurrency | null {
+  const t = linkToken ?? null;
   for (const currency of HOME_CURRENCIES) {
-    if (CURRENCY_RAILS[currency].some(token => tokenEq(asset.linkToken, token))) return currency;
+    if (CURRENCY_RAILS[currency].some(token => tokenEq(t, token))) return currency;
   }
   return null;
+}
+
+/** Which currency does this asset settle, if any? The inverse of `currencyRails`, used to mark the
+ *  main-currency rows in the accounts list. */
+export function currencyOfAsset(asset: SelectableAsset): HomeCurrency | null {
+  return currencyOfLinkToken(asset.linkToken);
+}
+
+/** The same lookup for a raw catalog row (the convert surfaces resolve destinations by LEDGER,
+ *  before any SelectableAsset exists) — `assetLinkToken` is the row's own link token, the same
+ *  field `buildSelectableAssets` copies onto the asset. */
+export function currencyOfCatalogRow(row: CurrencyDescriptor): HomeCurrency | null {
+  return currencyOfLinkToken(assetLinkToken(row));
 }
 
 /** Parse a persisted value. Anything unrecognised — including a currency written by a future build

@@ -102,6 +102,7 @@ import {
   fetchHubQuotes,
   formatBps,
   formatMillionthsPct,
+  groupDestSections,
   isLiveRecord,
   mechIdOf,
   mechPickOf,
@@ -114,6 +115,7 @@ import {
   type DestGroup,
   type DestMechPick,
 } from './ConvertShared';
+import {currencyName} from '../config/currency';
 import {StatePanel} from './ConvertStatePanel';
 import {RouteStatePanel} from './ConvertRouteStatePanel';
 import {CrossRailStatePanel} from './ConvertCrossRailStatePanel';
@@ -1425,85 +1427,100 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
           LAND). A destination with more than one mechanism reveals an indented MECHANISM
           sub-picker on selection: direct pool first, then via-hub / CCTP / venue rows in
           registry order — never ranked, nothing preselected beyond that order, and no quote
-          until a mechanism is picked (the venue chooser's red lines, one level down). */}
+          until a mechanism is picked (the venue chooser's red lines, one level down).
+          Since 2026-09 the rows sit under CURRENCY section headers (`groupDestSections`,
+          presentation only): the home currencies first in their fixed order, then the tail of
+          destinations that settle no home currency. A header NAMES the destination currency —
+          it is a label, never a total; the row order inside a section is exactly
+          `buildDestGroups`' registry order, and no row is preselected by the grouping. */}
       {destGroups.length > 0 ? (
         <View testID="convert-dest">
           <Text style={S.convertDestLabel}>{M.convert.multihop.destLabel}</Text>
-          {destGroups.map(g => {
-            const groupOn = selGroup != null && selGroup.key === g.key;
-            const single = g.mechs.length === 1;
+          {groupDestSections(destGroups, catalog, legs).map(sec => {
+            const slug = sec.currency === null ? 'other' : sec.currency.toLowerCase();
             return (
-              <View key={g.key}>
-                <Pressable
-                  testID={g.testID}
-                  style={[S.convertVenueRow, groupOn && S.convertVenueRowOn]}
-                  onPress={() => {
-                    setDestSel(g.key);
-                    setDestMech(single ? mechPickOf(g.mechs[0]) : null);
-                    setQuoteChanged(null);
-                  }}
-                  accessibilityRole="radio"
-                  accessibilityState={{checked: groupOn}}
-                  accessibilityLabel={g.label}>
-                  <View style={[S.convertVenueRadio, groupOn && S.convertVenueRadioOn]}>
-                    {groupOn ? <View style={S.convertVenueRadioDot} /> : null}
-                  </View>
-                  <View style={S.convertVenueRowText}>
-                    <Text style={[S.convertVenueName, groupOn && S.convertVenueNameOn]}>{g.label}</Text>
-                  </View>
-                </Pressable>
-                {groupOn && !single ? (
-                  <View testID="convert-dest-mechs" style={S.convertMechGroup}>
-                    {g.mechs.map(m => {
-                      const pick = mechPickOf(m);
-                      const id = mechIdOf(pick);
-                      const on = activeMech != null && mechIdOf(activeMech) === id;
-                      const mechLabel =
-                        m.kind === 'direct' ? M.convert.multihop.mechDirect
-                        : m.kind === 'hub' ? M.convert.multihop.mechViaHub(m.route.hub.symbol)
-                        : m.kind === 'route' ? (
-                          m.route.crossRail != null ? M.convert.multihop.mechViaCctp : M.convert.multihop.mechDirect
-                        )
-                        : M.convert.multihop.mechViaVenue(m.venue.display_name);
-                      return (
-                        <Pressable
-                          key={id}
-                          testID={`convert-dest-mech-${id}`}
-                          style={[S.convertVenueRow, on && S.convertVenueRowOn]}
-                          onPress={() => {
-                            setDestMech(pick);
-                            setQuoteChanged(null);
-                          }}
-                          accessibilityRole="radio"
-                          accessibilityState={{checked: on}}
-                          accessibilityLabel={mechLabel}>
-                          <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
-                            {on ? <View style={S.convertVenueRadioDot} /> : null}
-                          </View>
-                          <View style={S.convertVenueRowText}>
-                            <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{mechLabel}</Text>
-                            {/* Same settlement-SLA honesty as the venue chooser (2026-09-20). */}
-                            {m.kind === 'cefi' && m.venue.health?.status === 'degraded' ? (
-                              <Text testID={`convert-dest-mech-cefi-slow-${m.venue.venue_id}`} style={S.convertMetaLine}>
-                                {M.convert.venueSlow}
-                              </Text>
-                            ) : null}
-                            {/* D5: an UNPICKED mechanism carries its label + a static shape
-                                line, never another mechanism's live number. */}
-                            {!on && m.kind === 'hub' ? (
-                              <Text style={S.convertMetaLine}>{M.convert.multihop.hubShape()}</Text>
-                            ) : null}
-                          </View>
-                        </Pressable>
-                      );
-                    })}
-                    {mechUnpicked ? (
-                      <Text testID="convert-dest-mech-none" style={S.convertMetaLine}>
-                        {M.convert.multihop.mechNoneSelected}
-                      </Text>
-                    ) : null}
-                  </View>
-                ) : null}
+              <View key={`dest-section-${slug}`}>
+                <Text testID={`convert-dest-group-${slug}`} style={S.convertDestGroupLabel}>
+                  {sec.currency === null ? M.convert.multihop.destGroupOther : currencyName(sec.currency)}
+                </Text>
+                {sec.groups.map(g => {
+                  const groupOn = selGroup != null && selGroup.key === g.key;
+                  const single = g.mechs.length === 1;
+                  return (
+                    <View key={g.key}>
+                      <Pressable
+                        testID={g.testID}
+                        style={[S.convertVenueRow, groupOn && S.convertVenueRowOn]}
+                        onPress={() => {
+                          setDestSel(g.key);
+                          setDestMech(single ? mechPickOf(g.mechs[0]) : null);
+                          setQuoteChanged(null);
+                        }}
+                        accessibilityRole="radio"
+                        accessibilityState={{checked: groupOn}}
+                        accessibilityLabel={g.label}>
+                        <View style={[S.convertVenueRadio, groupOn && S.convertVenueRadioOn]}>
+                          {groupOn ? <View style={S.convertVenueRadioDot} /> : null}
+                        </View>
+                        <View style={S.convertVenueRowText}>
+                          <Text style={[S.convertVenueName, groupOn && S.convertVenueNameOn]}>{g.label}</Text>
+                        </View>
+                      </Pressable>
+                      {groupOn && !single ? (
+                        <View testID="convert-dest-mechs" style={S.convertMechGroup}>
+                          {g.mechs.map(m => {
+                            const pick = mechPickOf(m);
+                            const id = mechIdOf(pick);
+                            const on = activeMech != null && mechIdOf(activeMech) === id;
+                            const mechLabel =
+                              m.kind === 'direct' ? M.convert.multihop.mechDirect
+                              : m.kind === 'hub' ? M.convert.multihop.mechViaHub(m.route.hub.symbol)
+                              : m.kind === 'route' ? (
+                                m.route.crossRail != null ? M.convert.multihop.mechViaCctp : M.convert.multihop.mechDirect
+                              )
+                              : M.convert.multihop.mechViaVenue(m.venue.display_name);
+                            return (
+                              <Pressable
+                                key={id}
+                                testID={`convert-dest-mech-${id}`}
+                                style={[S.convertVenueRow, on && S.convertVenueRowOn]}
+                                onPress={() => {
+                                  setDestMech(pick);
+                                  setQuoteChanged(null);
+                                }}
+                                accessibilityRole="radio"
+                                accessibilityState={{checked: on}}
+                                accessibilityLabel={mechLabel}>
+                                <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
+                                  {on ? <View style={S.convertVenueRadioDot} /> : null}
+                                </View>
+                                <View style={S.convertVenueRowText}>
+                                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{mechLabel}</Text>
+                                  {/* Same settlement-SLA honesty as the venue chooser (2026-09-20). */}
+                                  {m.kind === 'cefi' && m.venue.health?.status === 'degraded' ? (
+                                    <Text testID={`convert-dest-mech-cefi-slow-${m.venue.venue_id}`} style={S.convertMetaLine}>
+                                      {M.convert.venueSlow}
+                                    </Text>
+                                  ) : null}
+                                  {/* D5: an UNPICKED mechanism carries its label + a static shape
+                                      line, never another mechanism's live number. */}
+                                  {!on && m.kind === 'hub' ? (
+                                    <Text style={S.convertMetaLine}>{M.convert.multihop.hubShape()}</Text>
+                                  ) : null}
+                                </View>
+                              </Pressable>
+                            );
+                          })}
+                          {mechUnpicked ? (
+                            <Text testID="convert-dest-mech-none" style={S.convertMetaLine}>
+                              {M.convert.multihop.mechNoneSelected}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
               </View>
             );
           })}

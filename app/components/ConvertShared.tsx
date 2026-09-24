@@ -6,6 +6,7 @@
 import {Linking, Pressable, Text, View} from 'react-native';
 import {icpCatalogOf, BUNDLED_NETWORKS, type CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
+import {HOME_CURRENCIES, currencyOfCatalogRow, type HomeCurrency} from '../config/currency';
 import {resolveConvertDestinations, type ConvertDestination, type ConvertRouteOption} from '../config/convert';
 import {BUNDLED_VENUES, cefiOtherSide, venueDisplayName, venueOfId, type VenueEntry} from '../config/venues';
 import {deriveConvertMath, fetchConvertQuote, isTerminalConvertStep, type ConvertMath, type ConvertQuote, type ConvertRecord, type LegPlan} from '../convert';
@@ -190,6 +191,48 @@ export const buildDestGroups = (
     });
   }
   return groups;
+};
+
+/** One currency SECTION over the destination picker (multi-currency build-out, 2026-09): the D1
+ *  rows partitioned by the currency each DESTINATION settles, presentation only — the rows inside
+ *  a section are exactly buildDestGroups' order (registry order, direct pair first). `currency:
+ *  null` is the tail: every destination that settles no home currency — the other in-wallet
+ *  assets (ckBTC/ckETH/ICP) AND the external-address payouts (burn routes to an EVM address, CeFi
+ *  venues paying a Solana address), which name where money LANDS rather than a rail of the
+ *  wallet. A section header is a label, never a total: rows carry no amounts here, so nothing can
+ *  be summed and nothing is ranked — the no-FX-quote rule holds by construction. */
+export type DestSection = {currency: HomeCurrency | null; groups: DestGroup[]};
+
+export const groupDestSections = (
+  groups: DestGroup[],
+  catalog: CurrencyDescriptor[],
+  legs: ConvertLegs | null,
+): DestSection[] => {
+  const currencyOf = (g: DestGroup): HomeCurrency | null => {
+    // The standing direct row resolves through the standing output leg (its own destLedger slot
+    // is deliberately still absent — line `selGroup.key !== 'direct'` upstream leans on that);
+    // in-wallet rows carry their ledger; external rows resolve to nothing (they are not wallet
+    // assets) and fall to the tail.
+    const ledger = g.key === 'direct' ? legs?.outDesc?.ledger ?? null : g.destLedger ?? null;
+    if (ledger == null) return null;
+    const row = catalog.find(c => c.ledger === ledger);
+    return row != null ? currencyOfCatalogRow(row) : null;
+  };
+  const buckets = new Map<HomeCurrency | 'other', DestGroup[]>();
+  for (const g of groups) {
+    const key = currencyOf(g) ?? 'other';
+    const bucket = buckets.get(key);
+    if (bucket == null) buckets.set(key, [g]);
+    else bucket.push(g);
+  }
+  const sections: DestSection[] = [];
+  for (const c of HOME_CURRENCIES) {
+    const bucket = buckets.get(c);
+    if (bucket != null) sections.push({currency: c, groups: bucket});
+  }
+  const other = buckets.get('other');
+  if (other != null) sections.push({currency: null, groups: other});
+  return sections;
 };
 
 /** The hub two-quote fetch (D9/D13): quote1 (from → hub) through the route's own first
