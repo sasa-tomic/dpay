@@ -54,6 +54,8 @@ export async function run() {
 
     // --- 2. a dollar pick against the VCHF-only till is refused whole -----------------------------
     await driver.click('till-asset-ckusdc', {timeoutMs: 4_000});
+    assertIncludes(await driver.readText('req-prefix'), '$',
+      'the amount-field unit badge follows the pick — a dollar pick never sits under a franc badge');
     await driver.type('amount-input', '10.50', {timeoutMs: 4_000});
     await driver.click('btn-till-ring-up', {timeoutMs: 4_000});
     await driver.findByTestID('till-failed', {timeoutMs: 15_000});

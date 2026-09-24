@@ -493,7 +493,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
         body={M.receive.till.servedOther(servedToken, priceUnit)}
         primaryLabel={served ? M.receive.till.switchTo(served.symbol) : M.receive.till.tryAgain}
         onPrimary={served
-          ? () => { setSettleId(served.id); reset(); }
+          ? () => { setSettleId(served.id); onSelectAsset(served.id); reset(); } // re-pick moves the wallet's asset too — one truth (see the pills)
           : reset}
       />
     );
@@ -644,7 +644,14 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
                 testID={`till-asset-${(r.linkToken ?? r.symbol).toLowerCase()}`}
                 style={[S.railPill, on && S.railPillActive]}
                 disabled={opening}
-                onPress={() => setSettleId(r.id)}
+                onPress={() => {
+                  setSettleId(r.id);
+                  // The pick moves the wallet's own selection too, so the shared amount field's
+                  // unit badge above names the currency the price is ACTUALLY read in — a dollar
+                  // pick must never sit under a franc badge (the same one-truth move the
+                  // wrong-asset panel's "Switch to" button makes).
+                  onSelectAsset(r.id);
+                }}
                 accessibilityRole="radio"
                 accessibilityState={{checked: on}}
                 accessibilityLabel={M.receive.till.settleOption(r.linkToken ?? r.symbol, currencyOfAsset(r) ?? '')}>
