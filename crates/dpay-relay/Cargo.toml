@@ -53,7 +53,7 @@ futures-util = "0.3"
 # sha256 of the served APK — the strong ETag on /download/dpay.apk + the `?v=` cache-buster
 # (computed once in `AppState::with_apk`). Already in the dep tree (transitively locked at 0.10.9).
 sha2 = "0.10"
-# The OS CSPRNG behind the till's charge/quote ids (`till::fresh_id`) — a bearer read-token needs
+# The OS CSPRNG behind the checkout's charge/quote ids (`checkout::fresh_id`) — a bearer read-token needs
 # real randomness, not a hash of a clock. Already in the tree at 0.2.17 (rand_core pulls it for
 # ed25519-dalek's key generation), so this names an existing edge rather than adding a crate.
 getrandom = "0.2"

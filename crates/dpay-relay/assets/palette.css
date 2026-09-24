@@ -5,8 +5,8 @@
  * when this file and the palette disagree is app/__tests__/relay-palette.test.ts.
  *
  * The relay substitutes this whole block for each page's palette placeholder — `with_palette`
- * in crates/dpay-relay/src/app.rs — in landing.html, privacy.html, till.html and
- * till-code.html. The placeholder is deliberately NOT spelled out here: this text is injected
+ * in crates/dpay-relay/src/app.rs — in landing.html, privacy.html, checkout.html and
+ * checkout-code.html. The placeholder is deliberately NOT spelled out here: this text is injected
  * into every page, so a copy of the token inside the injected block would survive the
  * substitution and defeat the serving test that checks the substitution happened.
  *
