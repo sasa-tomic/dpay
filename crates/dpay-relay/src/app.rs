@@ -1208,7 +1208,11 @@ async fn solana_stub_rpc(body: axum::body::Bytes) -> Response {
         "getLatestBlockhash" => serde_json::json!({
             "context": {"slot": 1000},
             "value": {
-                "blockhash": "StubBlockhash111111111111111111111111111111111",
+                // 32 × '1' — VALID base58 that decodes to 32 zero bytes, so the app's sign step
+                // (base58-decode → 32-byte blockhash) really accepts it. A flow 202 send signs
+                // against this and broadcasts; an unparseable string here would fail the sign
+                // step and never reach the terminal story the flow drives.
+                "blockhash": "11111111111111111111111111111111",
                 "lastValidBlockHeight": 1_000_000u64,
             },
         }),
@@ -1255,10 +1259,14 @@ async fn solana_stub_rpc(body: axum::body::Bytes) -> Response {
             "context": {"slot": 1000},
             "value": {"amount": "3000000", "decimals": 6, "uiAmount": 3.0, "uiAmountString": "3"},
         }),
-        // A stub signature: flow 165 never broadcasts, so nothing parses this as a real one.
-        "sendTransaction" => serde_json::json!(
-            "STUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUB"
-        ),
+        // A stub signature, UNIQUE per broadcast (counter-derived): each send gets its own
+        // signature, so a second send's confirm polls never alias the first send's proxy-cached
+        // getSignatureStatuses answers (flow 202 sends twice on one stub). Nothing parses this
+        // as a real one — it is an opaque string the sheet keeps and re-reads by.
+        "sendTransaction" => serde_json::json!(format!(
+            "STUBSIG{}",
+            SOLANA_STUB_HITS.load(std::sync::atomic::Ordering::Relaxed)
+        )),
         other => {
             // Unsupported method: answer as a PROVIDER would (200 + JSON-RPC error envelope),
             // so the client's refusal path — not the transport path — handles it.

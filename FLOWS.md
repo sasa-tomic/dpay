@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **194 flows**
-> (193 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **196 flows**
+> (195 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (31) · nfc (12) · system (35) · tour (6)
+wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (13) · convert (31) · nfc (12) · system (35) · tour (6)
 
 ---
 
@@ -161,6 +161,8 @@ wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw
 | 107 | send-account-identifier | Send ICP to a 64-hex account identifier via the ledger's legacy `transfer`: the address is CRC-validated by the real core, the route disclosed with the fee, one envelope signed on-device, and the gateway credits the principal owning that identifier — the address form icrc1_transfer cannot reach. | send-to-address, account-identifier, icp, legacy-transfer, crc, balance-delta |
 | 15 | withdraw | Withdraw ckBTC: faucet-fund at the principal → enter addr + amount → sign approve + retrieve on-device → gateway burns → "Withdrawn ✓" + Copy destination; balance debits at both the gateway AND the UI (row drops to 0.0005 BTC). | withdraw, icrc2-approve, retrieve_btc_with_approval, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
 | 18 | withdraw-errors | Withdraw error paths: below-min / over-balance warnings disable the confirm button, a wrong-chain destination is refused by name in send-status and renders no offramp body at all; a minter-refused full-balance withdraw surfaces the "insufficient funds" reject in withdraw-err with a fee-only debit. | withdraw-errors, below-min, over-balance, wrong-chain, rail-rejection, money-safe |
+| 201 | send-terminal-ic | The IC send ends on the shared SendTerminal: a settled transfer shows the block index as a copyable reference and opens the Wallet-root TxnReceipt with it as the proof; a deadline-forced unknown shows the honest pending (memo-hex reference, pending receipt, no resend invite, no Check status on the rail that cannot re-read). | send-terminal, send-receipt, honest-unknown, ic-delay-knob, vchf, direct-icrc, no-resend-invite |
+| 202 | send-terminal-sol | The SOL send terminal: a fast deadline over an accepted broadcast lands on the honest unknown (signature kept, no resend control); Check status re-reads the chain read-only and flips the panel to settled on confirmed; a failed check stays honest; an on-chain InstructionError over an accepted broadcast returns to the form with the fee-only note and without the nothing-sent line. | send-terminal, honest-unknown, check-status, sol-send-timeout-seam, solana-stub-flip, fee-only-failure, no-resend-invite |
 | 44 | cketh-withdraw | Withdraw native ckETH: faucet-fund at the principal → enter 0x addr + ETH amount → query the minter gas price + sign approve + withdraw_eth on-device → gateway burns → "Withdrawn ✓"; balance debits fee+amount at both the gateway AND the UI (row drops to 3.999998 ETH). | native-eth-withdraw, cketh, family-dispatch, withdraw, icrc2-approve, withdraw_eth, gas-quote, sign, settle, balance-delta, ui-balance-delta |
 | 48 | ckusdc-withdraw | ckUSDC Send-to-address: gas-dependency note renders (no-swap honesty) → enter 0x addr + USDC amount → query gas + sign gas-approve + amount-approve + withdraw_erc20 on-device → gateway burns BOTH ledgers → "Withdrawn ✓"; ckUSDC debits fee+amount, ckETH debits gas-fee + gas at the gateway AND the UI row drops to 998.99 USDC. | ckerc20-offramp, ckusdc, withdraw, icrc2-approve, withdraw_erc20, dual-ledger-gas, gas-note, sign, settle, balance-delta, ui-balance-delta |
 | 52 | sol-withdraw | SOL withdraw: select SOL → Pay tab "Send to address" → a wrong-chain paste is refused by name and a valid one has its route disclosed → enter amount → sign+broadcast (stub) → Sent ✓. | sol-withdraw, sol-send, sol-tab-ia, sign, route-disclosure, error-handling |
