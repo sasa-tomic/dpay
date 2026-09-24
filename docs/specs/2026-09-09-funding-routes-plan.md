@@ -161,7 +161,7 @@ the instruction under it**, so a surface and its funding copy cannot describe di
 The `FundingRoutes` card is built by whichever surface routed to the sheet and handed down as a
 node; the sheet chooses only where to place it and in which phase.
 
-The founder's note in `OPEN_ISSUES.md` said these four surfaces "just need wiring up" and that the
+The founder's note in `OPEN_ISSUES.md` said these four surfaces "just need wiring completed" and that the
 resolver "already answers for them correctly". It did not, and the founder flagged the note itself
 as the defect: a hand-off that asserts unverified correctness will be believed by whoever picks it
 up. Recorded here rather than corrected silently.

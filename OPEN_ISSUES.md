@@ -48,7 +48,7 @@
 
 > **Pruned 2026-09-08 (parked-disposition sweep)** — five entries under "Other open issues" whose
 > dispositions ("accepted simplification", "cosmetic", "inherent", "low priority") did not meet the
-> new "pre-existing is not a disposition" bar were worked and REMOVED, not re-annotated: the till
+> new "pre-existing is not a disposition" bar were worked and REMOVED, not re-annotated: the checkout
 > bearer-token revisit (argued out at `ChargeStatus`, with a key-set tripwire), the FakeLedger
 > rate-limit (both builds now run one predicate; it caught three e2e flows asserting a repeatable
 > faucet the shipped app has never had), the receipt-poll 404 lines (route and caller both deleted
@@ -360,21 +360,27 @@ decisions are in
 [`docs/specs/2026-09-07-ux-decisions.md`](docs/specs/2026-09-07-ux-decisions.md) and their defect
 inventory is the "UX swarm" section below.
 
-**6. HIGH — drop the word "till" (→ "checkout") and "ring up" from the whole tree (founder
-decision 2026-09-16; the breaking rename is APPROVED — no external users yet).** "Till" is
-British-retail English the sector does not use (the OpenCryptoPay standard itself says "cash
-register"); "ring up" is likewise uncommon and goes too. The replacement noun is **checkout**
-(Stripe/Shopify precedent, unambiguous software/commerce reading; "terminal"/"POS" were rejected —
-hardware connotation collides with the "no POS hardware" pitch line). Scope, all of it: 
-`dpay_core::TillOpen`/`validate_till_open` and the SIGNED domains `dpay-till-open-v1/v2` (breaking;
-regenerate `dfx/till_open_signing.json` via `just wire-layout`), `crates/dpay-relay/src/till.rs` +
-`TillStore`, the `/api/v1/till*` routes, `DPAY_ENABLE_TILL` + capabilities `{"till":true}`,
-`dfx/till_wire.json`, `app/services/till.ts`, `app/components/TillCharge.tsx`, the `pay.till.*` i18n
-subtree in all four locales, e2e flows + `FLOWS.md`, and the living docs (CLAUDE.md,
-CODEBASE_ANALYSIS.md, memory/glossary.md, the till specs). "Ring up" gets plain replacement wording
-(e.g. "create/open a charge" — final wording picked during the sweep). Already done this session:
-the scan-audience label `M.pay.till.tillCode` now reads "OpenCryptoPay (OCP), Binance Pay, MoonPay
-app [Payer must be Online]" (four locales). Value 6, effort L.
+**6. HIGH — drop the word "till" (→ "checkout") and "ring up" from the whole tree — DONE
+(2026-09-24, this rename wave; founder decision 2026-09-16, breaking rename approved — no external
+users).** "Till" was British-retail English the sector does not use (the OpenCryptoPay standard
+itself says "cash register"); "ring up" went too, for plain "create/open a charge". The replacement
+noun is **checkout** (Stripe/Shopify precedent; "terminal"/"POS" were rejected — hardware
+connotation collides with the "no POS hardware" pitch line). What shipped, layer by layer:
+`dpay_core::CheckoutOpen`/`validate_checkout_open` with the SIGNED domains `dpay-checkout-open-v1/v2`
+(signing buffer fixed prefix 81 → 85 bytes — the domain is longer; the payment wire is untouched);
+wasm exports `w_checkout_open_sig`(+`_note`); FFI `checkout_open_signature` with regenerated
+Kotlin/Python bindings; pins regenerated via `just wire-layout` (`dfx/checkout_open_signing.json`)
+and re-signed (`dfx/checkout_wire.json` — the golden input's signature was recomputed under the new
+domain, example host `checkout.example`); relay `src/checkout.rs`/`CheckoutStore`, routes
+`/api/v1/checkout*`, `DPAY_ENABLE_CHECKOUT`, capabilities `{"checkout":true}`, cashier pages
+`checkout.html`/`checkout-code.html`; app `services/checkout.ts`, `components/CheckoutCharge.tsx`,
+`CHECKOUT_OFFER`, `checkoutSettlement*`/`checkoutFeeRaw`, testIDs `checkout-*`/`btn-checkout-open`;
+i18n subtree `pay.checkout.*`/`receive.checkout.*` in all four locales with COPY reworded (en "open
+a fresh charge"; de keeps natural Kasse wording; es caja; fr caisse — no locale says till or ring
+up); e2e flows renamed keeping ids (114-checkout-open, 205-checkout-settlement-predicate, …) +
+FLOWS.md regenerated; android bridge + manifest; all living docs. History: the scan-audience label
+`M.receive.checkout.checkoutCode` had already been reworded earlier in the wave. Old AsyncStorage
+keys: none existed under `dpay.till*`, so nothing needed to die.
 
 **7. IC hub 2-hop generalization — DONE (2026-09-18, closed by the convert-hub slice).** What
 shipped: `hubRoutes(catalog, fromLedger)` in `app/routes.ts` walks the REGISTRY (no hardcoded
@@ -418,15 +424,15 @@ first, then other offered currencies, then the non-currency tail; headers NAME t
 keep their own units; NO sums, NO magnitude ordering (the honesty rules `orderAccounts` already
 encodes, now presentation-wide); one lock-gated rail-switch affordance per multi-rail currency
 section (selects an asset row, never the home currency); flows 203/204. **The cashier picks the
-settlement asset at ring-up** — `tillSettlementAssets` generalizes the VCHF-only offer to every IC
-row whose catalog fee is stated (the `tillFeeRaw != null` honesty gate); the price unit follows
+settlement asset at open** — `checkoutSettlementAssets` generalizes the VCHF-only offer to every IC
+row whose catalog fee is stated (the `checkoutFeeRaw != null` honesty gate); the price unit follows
 the pick and the wallet asset follows with it; the relay's answer `asset` is verified and a
 wrong-asset answer refuses with a one-tap fix (`served-other`); flow 205 + flows 114/115 extended.
 **Convert destinations grouped by currency** in the picker (presentation only, registry order
 preserved within groups, nothing preselected); flow 206. **Trocador no-quote honesty + the
 generated convert matrix** — see the Trocador state bullet above; flow 207. FOLLOW-UP (the wave's
 one open item): the picked settlement asset is verified via the ANSWER's `asset` field because the
-ring-up body's signed bytes are pinned (`dfx/till_open_signing.json`) and an unsigned field in a
+checkout-open body's signed bytes are pinned (`dfx/checkout_open_signing.json`) and an unsigned field in a
 signed request is unattributable — a relay that only serves VCHF fails the app closed with a named
 fix, which is correct today but means multi-asset checkout needs the asset INSIDE the signature:
 new signing domain version, regenerate the pin via `just wire-layout`, relay echoes it. Value 7,
@@ -443,9 +449,9 @@ DO-NOT-NAG set.
 - **O4 Revolut-IA home tab** — `b5912b6` + `711b0ef` + `798edc2` (Balances modal retired, flows
   133–136).
 - **OpenCryptoPay is one interop rail among several, not the strategy** (founder, 2026-09-04). The
-  till v1 build is complete (`702c359`; plan
+  checkout v1 build is complete (`702c359`; plan
   [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md))
-  and **served by default at every layer since 2026-09-10** (`d15b596`; `DPAY_ENABLE_TILL=false`
+  and **served by default at every layer since 2026-09-10** (`d15b596`; `DPAY_ENABLE_CHECKOUT=false`
   is the operator opt-out). What remains of it is the two-handset tap (below). The cashier page
   (`8805027`), the OCP tx-id fix and the bearer-token revisit are done and recorded below/inline.
 
@@ -474,9 +480,9 @@ Re-measured 2026-09-14, HEAD `e2b3002`:
   `just apk`/`just image` as before.
 - `just swap-venue-probe` → **PASS** — the live route still derives swap direction from the venue's
   own metadata (token1→token0 100000000 → 231342577, ratio 0.996998 vs the pool's implied price).
-- **The till IS served in production** — `curl -s https://dpay.kalaj.org/api/v1/capabilities` →
-  `{"till":true,"demo_faucet":true}` (re-measured 2026-09-14 at `e2b3002`): the till + demo faucet
-  flags are live. (The pre-deploy "till NOT yet served" note is retired.)
+- **The checkout IS served in production** — `curl -s https://dpay.kalaj.org/api/v1/capabilities` →
+  `{"till":true,"demo_faucet":true}` (re-measured 2026-09-14 at `e2b3002`; the capabilities key was named 'till' at the time): the checkout + demo faucet
+  flags are live. (The pre-deploy "checkout NOT yet served" note is retired.)
 
 **Verified-clean floor for the next session's review: `e2b3002`** — founder-run `just verify`
 2026-09-14 with ONE RED: `test-canister`'s
@@ -517,7 +523,7 @@ single RED alone before believing it.
 - **SOL HCE hardware tap** (AID `F06470617902`, `DpaySolNfc`) — never tapped on hardware. The
   IC-rail two-phone NFC tap (payer in airplane mode) + real-camera QR scan PASSED 2026-08-26
   (founder-run retest; commit `8940b1d`).
-- **Till tap on two physical handsets** — the merchant counter arming the reader from a live
+- **Checkout tap on two physical handsets** — the merchant counter arming the reader from a live
   charge. Rides the IC rail's proven HCE hop unchanged; a confirmation, not a design risk.
 - **ckBTC live mainnet deposit→mint + withdrawal with real BTC** (low — final pre-pilot confidence
   checks after the testnet proofs).
@@ -616,7 +622,7 @@ address, a 4xx is the answer and never fails over; build drift between replicas 
 sticky error (`/version` + `/integrity` fingerprint match required before a non-primary
 serves data; mismatch named with both addresses + commits, cleared by re-pointing or the
 re-probe Apply); a hung relay fails over via armed per-attempt deadlines + a 30 s order-only
-cooldown; the till stays session-pinned and the faucet single-address; all shared walk state
+cooldown; the checkout stays session-pinned and the faucet single-address; all shared walk state
 is revision-guarded against mid-flight list edits. Three adversary waves + an experimental
 stress wave, all findings fixed and re-verified; jest 117 suites / 2372 tests; flow 164
 (dead primary walked past, 4xx no-failover) GREEN. Full record:
@@ -755,22 +761,22 @@ the one-shot path uses).
   physical-device orders: `2609` native ICP block `38190401`, `2610` VCHF block `81062` submitted
   prefixed — both accepted by DFX). Tripwires: `just ocp-ledger-probe` + flow 113. Re-measured
   2026-09-07: the tx-spelling/ledger-selection rule still holds live; `just live-ocp` GREEN
-  (CHF-1 till quote → review, nothing signed). The old "DFX still owes the CHF 1" residual was
+  (CHF-1 checkout quote → review, nothing signed). The old "DFX still owes the CHF 1" residual was
   written off by the founder 2026-09-14 — no longer tracked.
 - **No third-party wallet can settle an Internet Computer asset** (re-measured 2026-09-05): Oisy's
   IC OpenCryptoPay payer is Option-A (`icrc2_approve` + sender report; no tx id, no memo), DFX's
   wallet list names none. Source-only detail:
   [`docs/specs/2026-09-01-opencryptopay-findings.md`](docs/specs/2026-09-01-opencryptopay-findings.md).
   **2026-09-12 — both reasons it held are gone, and BOTH fixes are uncommitted working-tree changes
-  at this writing.** (1) The founder scanned a live till code with Oisy and got `Code/URL ist nicht
+  at this writing.** (1) The founder scanned a live checkout code with Oisy and got `Code/URL ist nicht
   gültig`: the relay served the provider routes with no CORS headers, so no browser wallet could
-  read a dpay till at all (provider-CORS sub-router + tests). (2) Even read, it could not pay,
+  read a dpay checkout at all (provider-CORS sub-router + tests). (2) Even read, it could not pay,
   because Oisy approves an allowance and dpay refused to collect one — so, founder-directed, the
   merchant's own phone now signs the `icrc2_transfer_from` while the relay still holds no key
   (`PullClaim` → `preparePull` → `collect`; e2e flow 177 drives the whole path offline).
   **Oisy ITSELF is still undriven** — its scanner sits behind Internet Identity, so a real payment
   needs a founder account and a franc or two. Until that run happens "a third-party wallet can pay a
-  dpay till" is a CAPABILITY, not a claim, and must not appear in a deck, a demo or an investor
+  dpay checkout" is a CAPABILITY, not a claim, and must not appear in a deck, a demo or an investor
   mail. Same spec.
 - **dpay speaks no external payment standard, either direction — except Solana Pay, now spoken in
   BOTH directions** (2026-09-05, `app/solana/payUri.ts` + `parseSolanaPayUri`). Everything else is
@@ -790,7 +796,7 @@ the one-shot path uses).
   wire stays frozen — the IC memo remains the 16-byte nonce reconciliation key and SOL on-chain
   memos are never read back — but history rows are now named from DEVICE-SAVED annotations
   (`app/services/txNotes.ts` + `app/hooks/useTxNotes.ts` in `Wallet`, written at the payment
-  seams: PayMode wire/link + OCP till, NfcTap payer, ReceiveMode payee request, SolPayMode spay
+  seams: PayMode wire/link + OCP checkout, NfcTap payer, ReceiveMode payee request, SolPayMode spay
   + SOL OCP + the offline solreq:v2 sign, SolNfcTap card auto-sign, Practice first-run payment,
   the SOL pay-link send (SolanaWithdrawSheet confirm — label rides the prefill like the IC twin),
   and the convert legs (executeConvert, venue-named per leg, keyed by the leg's request-id hex);

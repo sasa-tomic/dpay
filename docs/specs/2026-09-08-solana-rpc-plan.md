@@ -220,7 +220,7 @@ Three consequences, in increasing order of how much they matter:
 
 Relay routes (`crates/dpay-relay/src/app.rs:236–311`), all read-only since the 2026-08-19 cutover:
 `/balances/{hex}`, `/transactions/{hex}`, `/deposit/info`, `/currencies`, `/onramp/ckerc20`,
-`/health`, `/capabilities`, `/version`, `/integrity`, `/swap_quote`, plus the flag-gated till.
+`/health`, `/capabilities`, `/version`, `/integrity`, `/swap_quote`, plus the flag-gated checkout.
 
 - `/balances/{hex}` is a **concurrent fan-out**: one `icrc1_balance_of` per catalog currency under
   `join_all`, each with its own timeout, best-effort (a wedged ledger is omitted and logged).

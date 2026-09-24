@@ -74,7 +74,7 @@ smallest real proof is a CHF 10 bank transfer.
 ### O1 — the money the user thinks in
 
 A home currency, chosen at onboarding and changeable in Settings, from **CHF · USD · EUR**. It sets
-the wallet's default asset, the big number on the home screen, and the unit a till's price is read
+the wallet's default asset, the big number on the home screen, and the unit a checkout's price is read
 in. The founder's own default is CHF.
 
 **BUILT 2026-09-04 — see "What landed".** It was new plumbing rather than a rename: no

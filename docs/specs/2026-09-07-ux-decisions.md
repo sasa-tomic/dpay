@@ -105,7 +105,7 @@ is one tap. See [`2026-09-08-first-run-redesign.md`](2026-09-08-first-run-redesi
 - **The synthesis I am taking, which no single reviewer proposed alone:** honour the founder's
   direction AND keep the payer's gesture at one tap, by putting a persistent **Scan** affordance on
   Home. The dissenting reviewer named it as the mitigation that would make him withdraw the
-  objection. Home becomes the landing; the till gesture stays one tap from cold start.
+  objection. Home becomes the landing; the checkout gesture stays one tap from cold start.
 - A defect both KEEPs found that stands whatever the landing is: the wallet's "home currency" is
   silently overwritten by any account-row tap or receive-rail toggle, so the setting this decision
   exists to protect does not hold.

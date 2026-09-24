@@ -7,23 +7,23 @@ integration is a separate thing (measured provider behaviour:
 
 ## The idea, in one paragraph
 
-Today dpay can PAY an OpenCryptoPay till. This milestone makes dpay BE one: a shop installs dpay,
+Today dpay can PAY an OpenCryptoPay checkout. This milestone makes dpay BE one: a shop installs dpay,
 shows a code, and gets paid at its own account.
 
 **Who can pay that code — corrected 2026-09-04, and this correction is load-bearing.** The plan was
-written on the premise that a Cake, Phoenix or Binance user could pay a dpay till, so serving the
+written on the premise that a Cake, Phoenix or Binance user could pay a dpay checkout, so serving the
 standard would bring merchants payers they would not otherwise have. **That premise is false for
 v1's asset.** Measured twice against the provider's own compatibility list: no wallet on it can pay
 an Internet Computer asset at all ("The standard's reach" in
 [`2026-09-01-opencryptopay-findings.md`](2026-09-01-opencryptopay-findings.md)), and v1 accepts VCHF
-only. So v1 serves **dpay payers paying dpay tills**, and standard conformance is future-proofing —
+only. So v1 serves **dpay payers paying dpay checkouts**, and standard conformance is future-proofing —
 the cost of being reachable the day an IC-capable wallet exists — not distribution.
 
 That is not a retreat, because dpay↔dpay is where dpay can be better than every wallet on that list.
 dpay's own wire already lets the **payer be offline** over NFC or QR; OpenCryptoPay cannot, by
 construction — three HTTP calls from the payer's wallet against a 300-second quote — and the standard
-itself lists NFC terminals as "in development". Be exact about the tense: **paying a dpay till
-through these routes keeps the payer online today.** Making the till take an offline tap is the NFC
+itself lists NFC terminals as "in development". Be exact about the tense: **paying a dpay checkout
+through these routes keeps the payer online today.** Making the checkout take an offline tap is the NFC
 item below, and it is where dpay's existing NFC work stops being a curiosity — against dpay's own
 payers, not against a wallet ecosystem that cannot reach this rail at all.
 
@@ -69,7 +69,7 @@ The shape, in design voice throughout — no bullet below is a claim about what 
   (destination URI per chosen asset), and the step-4 `/tx` submission. The payer-side client
   (`app/services/opencryptopay.ts`) is the exact contract to serve, and
   `e2e/harness/ocp.mjs` is already a working model of the state machine.
-- **Pricing.** A till charges in CHF/EUR and must quote crypto amounts. dpay does not quote or
+- **Pricing.** A checkout charges in CHF/EUR and must quote crypto amounts. dpay does not quote or
   convert (non-negotiable), so this needs a deliberate answer: for VCHF/EURC the quote is 1:1 and
   no price source is needed at all, which is another reason to lead with them. Anything else needs
   an explicitly-labelled third-party price feed, and that decision is NOT made here.
@@ -96,10 +96,10 @@ The shape, in design voice throughout — no bullet below is a claim about what 
     pays exactly `10.00000000` VCHF" was 1:1 on the transfer and NOT on the customer's statement: an
     ICRC ledger debits the sender the fee on top of the amount, so a CHF 10 charge was taking CHF
     10.0001 out of the customer's account. A price is a price, as at every card terminal — so the
-    till now quotes the price MINUS the fee (`9.9999`), the ledger adds the fee back onto the
+    checkout now quotes the price MINUS the fee (`9.9999`), the ledger adds the fee back onto the
     sender, and the customer is debited exactly CHF 10 while the shop receives CHF 9.9999. The
     mechanism, and why subtraction is the only lever ICRC-2 offers, is `LEDGER_FEE_RAW` in
-    `crates/dpay-relay/src/till.rs`; proven end to end on both channels by e2e flows 114 (scan) and
+    `crates/dpay-relay/src/checkout.rs`; proven end to end on both channels by e2e flows 114 (scan) and
     117 (tap). **Extended 2026-09-14 (`b68ebe8`): every OTHER payee-quoted amount in dpay now
     carries the netted wire too** — the Receive-tab request link `amount=` and the NFC 132-byte
     wire (`nettedWireRaw`, `app/lib/amount.ts`: live `icrc1_fee` → catalog fallback → verbatim
@@ -126,14 +126,14 @@ The shape, in design voice throughout — no bullet below is a claim about what 
 - **One asset, VCHF, and no multi-asset menu in v1.** The standard's menu shape permits several
   assets at once; v1 serves exactly one entry, because every additional asset needs a rate somebody
   has to stand behind — the exact thing the 1:1 decision deletes.
-- **Only someone who can sign for the paid account may ring up a charge.** The ring-up names the
+- **Only someone who can sign for the paid account may open a charge.** The checkout-open names the
   ed25519 key whose account every payer is then told to pay; unsigned, that is a stranger's charge
-  on dpay's own domain. The core carries the whole acceptance rule — `validate_till_open`,
-  `dpay-till-open-v1` (`-v2` when the ring-up carries a note — the payer-read purpose,
-  signed like the name; added 2026-09-13), bytes pinned by `dfx/till_open_signing.json` — so the relay checks rather
+  on dpay's own domain. The core carries the whole acceptance rule — `validate_checkout_open`,
+  `dpay-checkout-open-v1` (`-v2` when the checkout-open carries a note — the payer-read purpose,
+  signed like the name; added 2026-09-13), bytes pinned by `dfx/checkout_open_signing.json` — so the relay checks rather
   than re-derives it. The routes are separately gated off by default, and why they are:
-  `crates/dpay-relay/src/app.rs`, at the till gate. Status of both: `OPEN_ISSUES.md`.
-- **The own-relay trust rule is GONE, and nothing replaced it.** It existed to carve dpay's own till
+  `crates/dpay-relay/src/app.rs`, at the checkout gate. Status of both: `OPEN_ISSUES.md`.
+- **The own-relay trust rule is GONE, and nothing replaced it.** It existed to carve dpay's own checkout
   out of a blanket refusal of non-ICP Internet Computer assets, and that refusal was built on a
   wrong diagnosis of the 2026-09-03 loss — the real cause was the spelling of the reported
   transaction id, measured and fixed on 2026-09-04 (`docs/specs/2026-09-01-opencryptopay-findings.md`).
@@ -158,13 +158,13 @@ to get wrong, and no undocumented rule for dpay to have to publish. It already h
 right primitive: `transactions_on_ledger` (`crates/dpay-relay/src/ledger/api.rs`), the same
 exact-memo merchant reconciliation the Receive tab uses (flows 97/98). Verification must therefore
 be: read the MERCHANT's own incoming transfers on the charge's ledger, and look for one that matches
-the charge's amount, arriving at or after the charge was rung up, **and not already consumed by
+the charge's amount, arriving at or after the charge was opened, **and not already consumed by
 another charge**.
 
 That last clause is a rule in its own right, not a detail of the other two — amount and arrival time
 cannot tell two same-price charges apart, so the matcher must own the consumption. Its mechanism and
-the second half of the same rule (a new ring-up voids the merchant's previous charge) are stated
-where they are enforced: the module header of `crates/dpay-relay/src/till.rs`.
+the second half of the same rule (a new checkout-open voids the merchant's previous charge) are stated
+where they are enforced: the module header of `crates/dpay-relay/src/checkout.rs`.
 
 Three properties follow from that rule, and each is something DFX's design cannot offer:
 
@@ -185,7 +185,7 @@ Three properties follow from that rule, and each is something DFX's design canno
 ## Related work landed 2026-09-02
 
 The payer-side gap this session's Spar walkthrough exposed is FIXED and is not part of this
-milestone: a till quotes a MENU, and dpay used to check only the payer's pre-selected asset and send
-them to Balances on a miss. It now offers the till's own menu on the spot
+milestone: a checkout quotes a MENU, and dpay used to check only the payer's pre-selected asset and send
+them to Balances on a miss. It now offers the checkout's own menu on the spot
 (`app/components/OcpAssetChoice.tsx`, shared by both rails). That matters here because the merchant
 side must serve exactly such a menu.

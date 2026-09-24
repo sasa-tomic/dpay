@@ -6,7 +6,7 @@ first — the public README is wrong twice and the loss path is non-obvious.
 
 ## Scope
 
-**In:** paying an OpenCryptoPay till from dpay, on the `InternetComputer` method and the `Solana`
+**In:** paying an OpenCryptoPay checkout from dpay, on the `InternetComputer` method and the `Solana`
 method for **native SOL only**.
 
 Every IC asset the provider lists and the wallet carries, at any provider. That was briefly narrowed
@@ -123,7 +123,7 @@ user's next action (founder rule 2026-08-29). `pay.link` in the same file is the
 ## Unit C — wiring
 
 **Which component handles an OCP code.** `PayMode.tsx` (IC) and `SolPayMode.tsx` (Solana) are
-alternative mounts chosen by the active asset (`Wallet.tsx:840-857`). An OCP till offers many
+alternative mounts chosen by the active asset (`Wallet.tsx:840-857`). An OCP checkout offers many
 assets, so **the user's currently selected asset picks the one we pay with**, and each component
 handles only its own family. That is the same-surface rule satisfied, not bypassed: one camera, one
 gesture, per-rail execution. If the selected asset is not on the merchant's list, refuse and name

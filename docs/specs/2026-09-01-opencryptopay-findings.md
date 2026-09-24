@@ -10,7 +10,7 @@ This is the reference doc. The implementation plan is
 
 ## What OpenCryptoPay is
 
-A permissionless, license-free standard for paying a merchant with crypto. The merchant's till shows
+A permissionless, license-free standard for paying a merchant with crypto. The merchant's checkout shows
 a **static** QR; the payer's wallet resolves it to a live quote, pays the named asset on the named
 chain, and reports the transaction back. DFX.swiss authored it and runs the only production
 provider, but anyone may host one under their own domain.
@@ -79,7 +79,7 @@ Bitcoin + Monero, Phoenix and Wallet of Satoshi are Lightning only, Binance is B
   not ckBTC, not native ICP.
 - **Inferred, weaker:** some wallet outside that list could implement the flow, but none is known,
   and this list is what the payer is actually offered. Treat "a third-party wallet pays an
-  IC-settled till" as false until a specific wallet is measured doing it.
+  IC-settled checkout" as false until a specific wallet is measured doing it.
 - It is plausibly why the `tx` spelling below is documented nowhere: the `InternetComputer` leg has
   no third-party wallet to have needed it written down.
 
@@ -100,8 +100,8 @@ Bitcoin + Monero, Phoenix and Wallet of Satoshi are Lightning only, Binance is B
 - **The `&ref=` hazard is real at source and is answered by who writes the memo.** `decodeQrCodeUrn`
   keeps unknown params (`DecodedUrnSchema` uses `.catchall()`), but `validateIcTransfer` reads only
   `to`/`amount` and the approve sets no memo — `ref` is accepted and dropped. It does not need to
-  survive: against a dpay till the memo is written by the party that COLLECTS, and that is the
-  shop's own phone, which has the reference from its own ring-up (see the 2026-09-12 section below).
+  survive: against a dpay checkout the memo is written by the party that COLLECTS, and that is the
+  shop's own phone, which has the reference from its own checkout-open (see the 2026-09-12 section below).
   Money-moves-but-uncredited would need a collector using somebody else's memo; ours cannot.
 - **Ingestion + drive boundary:** the only entry is the in-app scanner (`ScannerCode.svelte`);
   `parseOpenCryptoPayCode` requires a URL with a `?lightning=` param, so a bare `LNURL1…` string is
@@ -112,7 +112,7 @@ Bitcoin + Monero, Phoenix and Wallet of Satoshi are Lightning only, Binance is B
 
 #### The wallet is a WEB page, and that broke the scan outright (measured + fixed 2026-09-12)
 
-The founder scanned a live dpay till code with Oisy and got `Code/URL ist nicht gültig` — the
+The founder scanned a live dpay checkout code with Oisy and got `Code/URL ist nicht gültig` — the
 scanner's one catch-all (`ScannerCode.svelte`, `scanner.error.code_link_is_not_valid`), which fires
 when anything in the read throws. The code itself was never the problem: it decodes (independently,
 through the same `bech32` algorithm Oisy uses) to this relay's own `/v1/lnurlp/{id}`, and that route
@@ -127,14 +127,14 @@ fixed build, and `/api/v1/*` still refused in both.
 
 **And it makes the next question unavoidable, which is why that landed in the same session.** Oisy
 reports its approve with `GET /tx?…&sender=<principal>` and treats ANY 2xx as a completed payment
-(`payIcp` → `PAYMENT_CONFIRMED`). A till that could be READ but not paid would therefore have told
+(`payIcp` → `PAYMENT_CONFIRMED`). A checkout that could be READ but not paid would therefore have told
 an Oisy user they had paid while their allowance expired unspent — strictly worse than the
-invalid-code refusal it replaced. So the till does not refuse an allowance report; it collects the
+invalid-code refusal it replaced. So the checkout does not refuse an allowance report; it collects the
 allowance. See the verdict below.
 
 **Verdict on "no third-party wallet can settle an IC asset": the reason it held has been removed
 (2026-09-12, founder-directed).** It stands for every wallet DFX offers (re-measured), and Oisy is
-still the one counter-candidate. What changed is that dpay's till now COLLECTS an allowance instead
+still the one counter-candidate. What changed is that dpay's checkout now COLLECTS an allowance instead
 of refusing one. The merchant's own phone does it — never the relay, which still holds no key —
 because the spender Oisy approves is the merchant's own principal (`validateIcUriTransfer` reads
 `to` from our URI), and that phone already holds the key and is already polling the charge.
@@ -147,8 +147,8 @@ read is still the only thing that turns the sale green. No dpay-controlled addre
 any step. Nothing is checked before signing, deliberately: reading `icrc2_allowance` first costs a
 round trip, cannot close the race, and tells us nothing the ledger's own `InsufficientAllowance`
 does not already carry. The pieces, each owning its own half: `PullClaim` and `claim_pull`
-(`crates/dpay-relay/src/till.rs`), `preparePull` (`app/services/rail.ts`), `collect`
-(`app/components/TillCharge.tsx`), `transfer_from_arg` (`crates/dpay-icp/src/icrc.rs`).
+(`crates/dpay-relay/src/checkout.rs`), `preparePull` (`app/services/rail.ts`), `collect`
+(`app/components/CheckoutCharge.tsx`), `transfer_from_arg` (`crates/dpay-icp/src/icrc.rs`).
 
 **Proven offline end to end, and still undriven against Oisy itself.** e2e flow 177 drives the
 whole path on the fake-IC gateway — a real signed `icrc2_approve` from a stand-in allowance wallet,
@@ -242,7 +242,7 @@ Note the asymmetry: per-asset `amount` values are **strings**, but `requestedAmo
 **A method it cannot currently settle carries an EMPTY `assets` array.** Measured on every response
 (2026-09-02): `TaprootAsset`, `Spark` and `Arkade` all arrive as `{available: false, assets: []}`.
 This is normal traffic, not a malformed body, and a parser that refuses over it refuses every real
-till — which is exactly what happened (review ledger row 16).
+checkout — which is exactly what happened (review ledger row 16).
 
 ## Step-2 and step-3 amounts agree within one quote
 
@@ -267,7 +267,7 @@ Measured, not assumed — and **not** what an LNURL implementer would expect.
   LNURL `{status:"ERROR", reason}` shape.
 - **Two different 404s mean different things and must be told apart.** A 404 whose body is the
   payment-link payload (carries `tag:"payRequest"` / `displayName`) means *no charge is pending* —
-  tell the user to ask the cashier to ring it up. A 404 carrying the error envelope means the link
+  tell the user to ask the cashier to open a fresh charge. A 404 carrying the error envelope means the link
   is unknown — a stale or hostile QR. Collapsing them tells the second user to go talk to a cashier
   who does not exist.
 - **Step 3 returns `{expiryDate, blockchain, uri, hint}`** at HTTP 200, and `blockchain` echoes the
@@ -379,7 +379,7 @@ Verified: the example QR's `lightning` parameter bech32-decodes (hrp `lnurl`) to
 `https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e`.
 
 **A scanned LNURL can name ANY host.** Nothing in the standard binds it to a known provider, so a
-hostile sticker over a real till's QR points the wallet at an attacker's server, which then supplies
+hostile sticker over a real checkout's QR points the wallet at an attacker's server, which then supplies
 the merchant name, the amount, and the destination address. This is inherent to the standard — every
 OCP wallet has it — and it is the same threat dpay's payment links already answer. Answer it the
 same way (`app/lib/deepLink.ts` module header is the authority):
@@ -431,7 +431,7 @@ dpay hosting its own provider endpoint instead is the milestone:
 ## Live acceptance proof
 
 Everything up to consent was proven as of 2026-09-02: `just live-ocp` drives the shipped app against
-this till and lands on a review carrying the live price, the full destination, the provider host and
+this checkout and lands on a review carrying the live price, the full destination, the provider host and
 the countdown — so the scan, both provider reads, the parser, the destination checks and the review
 screen are all confirmed against the real thing, not against a fixture.
 

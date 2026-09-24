@@ -77,7 +77,7 @@ That is *why* they're anti-sybil, and it means we are not selling a feature chec
 
 Build later; **do not price on them**, because splitting doesn't hurt them:
 
-- **Static counter QR** ("the sign at the till"). Note the payer enters the amount, so consent gets *stronger*, not weaker — the payer's signature still binds amount+payee, with a payer-generated nonce. This is the dominant small-merchant form factor on UPI/Alipay. Still unbuilt, and **not** the merchant counter that shipped 2026-09-04, which is its inverse: there the merchant keys the price and the charge's own reference is the nonce (`OPEN_ISSUES.md`).
+- **Static counter QR** ("the sign at the checkout"). Note the payer enters the amount, so consent gets *stronger*, not weaker — the payer's signature still binds amount+payee, with a payer-generated nonce. This is the dominant small-merchant form factor on UPI/Alipay. Still unbuilt, and **not** the merchant counter that shipped 2026-09-04, which is its inverse: there the merchant keys the price and the charge's own reference is the nonce (`OPEN_ISSUES.md`).
 - Webhooks / POS integration
 - Tips
 - Invoices / recurring

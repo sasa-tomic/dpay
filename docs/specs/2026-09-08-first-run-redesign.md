@@ -188,8 +188,8 @@ Everything below is what Home then has to be worth landing on.
 **The dissent, and the mitigation that answers it (UX swarm 2026-09-08).** One of three reviewers
 argued against Home-as-landing on measured grounds: a reload lands on Pay today, so scan-to-pay is
 ONE gesture; landing on Home makes it two — a 100% increase on the core gesture, paid on every
-payment, by the user standing at a till. He named the thing that would make him withdraw the
-objection: **a persistent Scan affordance on Home**, so the till gesture stays one tap from cold
+payment, by the user standing at a checkout. He named the thing that would make him withdraw the
+objection: **a persistent Scan affordance on Home**, so the checkout gesture stays one tap from cold
 start. Build that with this change — it is what lets the founder's direction cost nothing.
 
 Home keeps: headline, a NEW accounts affordance (`btn-home-accounts`, labelled with the account

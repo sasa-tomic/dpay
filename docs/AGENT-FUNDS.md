@@ -15,13 +15,13 @@ of proof.
 ## The OpenCryptoPay payment test — use the €0.01 gateway (founder direction, 2026-09-04)
 
 **`https://dfx.shop/produkt/dfx-testing-product/` — €0.01 — is the route to use.** Not the CHF 1
-public test till (`artifacts/spar-test-till-qr.png`), which is fixed-amount and 100× the price. The
-till stays as the fallback for the day the shop route turns out not to work.
+public test checkout (`artifacts/spar-test-checkout-qr.png`), which is fixed-amount and 100× the price. The
+checkout stays as the fallback for the day the shop route turns out not to work.
 
 Measured 2026-09-04, so the route is known to be real before anyone spends on it:
 
 - the shop's own OpenCryptoPay code decodes to `https://api.dfx.swiss/v1/lnurlp/pl_3e6fe374fbc7dcb0`
-  — the SAME provider and standard as the test till, so what it proves transfers;
+  — the SAME provider and standard as the test checkout, so what it proves transfers;
 - that link is a **Donation** link in `Public` mode with no pending charge, and the payer cannot
   supply the amount (`?amount=…` in four spellings all answer `404 No pending payment found`). A
   payable charge exists only after a real order is placed;

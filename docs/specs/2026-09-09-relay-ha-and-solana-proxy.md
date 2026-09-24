@@ -195,10 +195,10 @@ The relay's surfaces split cleanly, and the split is the whole design:
 | `/balances`, `/transactions`, `/deposit/info`, `/onramp/ckerc20` | Yes | Read-only queries against external ledgers. No relay-held state. |
 | `/swap_quote` | Yes | Read-only; the quote is the venue's, read at request time. |
 | Solana RPC proxy (direction 1) | Yes | Stateless pass-through plus a cache. The cache is an optimisation, so a cold replica is slower, never wrong. |
-| **Till charges** (`/till`, `/till/void`, `/till/{id}`) | **No** | A charge is relay-held state. A charge opened on replica A does not exist on replica B, so a merchant mid-charge is session-affine and failover would lose the charge. |
+| **Checkout charges** (`/checkout`, `/checkout/void`, `/checkout/{id}`) | **No** | A charge is relay-held state. A charge opened on replica A does not exist on replica B, so a merchant mid-charge is session-affine and failover would lose the charge. |
 
-So the till is the one surface that constrains the design, and it is off by default on every build
-(`DPAY_ENABLE_TILL`). The honest options for it — shared state, sticky affinity, or "the till is
+So the checkout is the one surface that constrains the design, and it is off by default on every build
+(`DPAY_ENABLE_CHECKOUT`). The honest options for it — shared state, sticky affinity, or "the checkout is
 single-homed and says so" — are a decision this document does not pre-empt.
 
 ### Client shape
@@ -279,7 +279,7 @@ baseline when the preferred is dead); a mismatch throws `RelayBuildDriftError` �
 verbatim in Settings, naming both addresses and commits — and the latch persists until the
 list is re-pointed (revision-guarded: a stale walk can never latch, cool, or pin against a
 list that changed under it; Apply while drift shows re-probes even a clean draft, so a
-same-URL redeploy recovers). Two carve-outs, both spec'd: the till stays session-pinned (2xx
+same-URL redeploy recovers). Two carve-outs, both spec'd: the checkout stays session-pinned (2xx
 pins; a mid-session failover would ask a replica that never heard of the charge; failures
 name the addresses actually tried) and the demo-faucet POSTs stay single-address (a ledger
 effect lands on exactly one relay). A hung relay fails over too: with ≥ 2 addresses every
@@ -292,7 +292,7 @@ residuals, all deliberate: a single-address walk is unarmed (the pre-R1 caller-o
 contract — this is what keeps DepositSheet's 20 s grant honest; with ≥ 2 addresses
 `depositInfo`/`onramp` thread `DEPOSIT_TIMEOUT_MS` so the grant survives arming); 5xx at
 exhaustion is RETURNED (the relay's own error body is a fact); the drift error is English
-operator data (the `setSolanaRpcUrl` precedent); the till pin has no in-app unpin (restart
+operator data (the `setSolanaRpcUrl` precedent); the checkout pin has no in-app unpin (restart
 starts a new session) and waits up to 15 s on a hung pin (session-affinity beats
 availability); an operator who arms a caller timer ≤ `timeoutMs` would re-create the
 hung-first-address shape — the +1 s convention lives at the `useBalancePoll` call site.

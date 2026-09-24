@@ -162,7 +162,7 @@ mechanism is proven and a larger size is itself the thing under test.
   a stated verification that cannot be done offline; and the spend is recorded through the funds
   tooling (`node scripts/funds.mjs add …` — the hard rule below).
 - **Ask the founder first for:** anything above CHF 2, the first payment to any new counterparty
-  (each new merchant/till counts), anything that would empty the float, and any spend whose outcome
+  (each new merchant/checkout counts), anything that would empty the float, and any spend whose outcome
   Claude cannot check afterwards.
 - **Never:** sign anything Claude cannot explain in full; send to an address that failed core
   validation; reuse this seed as any other identity; put it in an APK, a screenshot, a test fixture,
@@ -313,7 +313,7 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   App Links are LIVE and verified end-to-end on physical hardware (2026-08-30):** prod serves
   assetlinks.json (HTTP 200, all 4 certs), the phone reports `dpay.kalaj.org: verified`, and a real
   `…/wallet/pay/…` link opens the app straight onto the pre-filled review — no browser, no chooser.
-  **The till code is an App Link too (2026-09-12):** the relay's ring-up QR
+  **The checkout code is an App Link too (2026-09-12):** the relay's checkout-open QR
   `https://dpay.kalaj.org/pl/?lightning=…` is claimed by a second manifest `autoVerify` filter
   (`pathPrefix="/pl/"`) — a dpay-installed phone opens the payer straight onto the OpenCryptoPay
   review (the SAME classification a camera scan takes; explicit Approve, never auto-signs), while a
@@ -362,27 +362,27 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   copy calls it an *account identifier*. Verified: e2e 102/102 (new flows 104-107), jest 67
   suites/1244, dpay-relay 49/49, dpay-icp 40+27, emulator device gate + `just campreview` green.
 
-- **OpenCryptoPay — dpay pays a merchant till, and now SERVES one (2026-09-01 → 2026-09-04).** A shop
-  rings a price up in francs on its own dpay phone, shows a code, and is paid VCHF at its OWN
+- **OpenCryptoPay — dpay pays a merchant checkout, and now SERVES one (2026-09-01 → 2026-09-04).** A shop
+  opens a charge in francs on its own dpay phone, shows a code, and is paid VCHF at its OWN
   account; the relay is the provider endpoint and never holds a key that could move that money.
-  **The till ships ON: its eight routes register unless `DPAY_ENABLE_TILL=false` is set — the
+  **The checkout ships ON: its eight routes register unless `DPAY_ENABLE_CHECKOUT=false` is set — the
   default flipped true on every build and every ledger by founder decision 2026-09-10, reversing
-  the 2026-09-04 opt-in that predated the signed ring-up** (an operator can still un-serve the
-  surface per deploy). A ring-up, and a cancellation, must be SIGNED by the key whose account gets paid
-  (`dpay_core::validate_till_open`, domain `dpay-till-open-v1` — or `dpay-till-open-v2` when the ring-up
+  the 2026-09-04 opt-in that predated the signed checkout-open** (an operator can still un-serve the
+  surface per deploy). A checkout-open, and a cancellation, must be SIGNED by the key whose account gets paid
+  (`dpay_core::validate_checkout_open`, domain `dpay-checkout-open-v1` — or `dpay-checkout-open-v2` when the checkout-open
   carries a NOTE, the one-line purpose the payer reads on review; the tag itself is the version, so a
   v1 verifier refuses v2 bytes rather than misreading them — bytes pinned by
-  `dfx/till_open_signing.json`). The counter sits inside Receive ▸ Request payment on every asset
+  `dfx/checkout_open_signing.json`). The counter sits inside Receive ▸ Request payment on every asset
   and arms the NFC reader with the charge's own reference, so a TAP pays the same charge a scan
   would — no new AID, no protocol change. Authority, each for its own half and none of it restated
-  here: `crates/dpay-relay/src/till.rs`, `app/services/till.ts`, `app/components/TillCharge.tsx`,
+  here: `crates/dpay-relay/src/checkout.rs`, `app/services/checkout.ts`, `app/components/CheckoutCharge.tsx`,
   and `app/lib/opencryptopay.ts` for the payer side; founder decisions
   `docs/specs/2026-09-02-merchant-side-plan.md`; measured provider behaviour
   `docs/specs/2026-09-01-opencryptopay-findings.md`.
-  **Who has been MEASURED paying a dpay till: a dpay wallet, and only a dpay wallet.** No wallet on
+  **Who has been MEASURED paying a dpay checkout: a dpay wallet, and only a dpay wallet.** No wallet on
   the standard's own compatibility list settles any Internet Computer asset (measured twice — the
   findings doc). Oisy is the one wallet whose source carries an IC leg, and 2026-09-12 removed both
-  things that stopped it: the provider routes now answer a browser (CORS), and the till now COLLECTS
+  things that stopped it: the provider routes now answer a browser (CORS), and the checkout now COLLECTS
   the ICRC-2 allowance such a wallet grants instead of refusing it — the MERCHANT's phone signs that
   `icrc2_transfer_from`, never the relay, which still holds no key. Proven offline end to end (flow
   177) and **never driven against Oisy itself**, whose scanner sits behind Internet Identity. So it
@@ -407,7 +407,7 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
 
 Recipes: `just verify` (core+canister+relay+e2e), `just test-live` (relay↔live canister via ic-agent), `just ffi` (UniFFI), `just sim` (demo), `just deploy` / `just ndk` / `just ondevice` / `just app` (device gate), `just apk` (signed APK+AAB), `just play-upload` (verify + exact signed AAB upload to Play internal testing; one-time credentials documented in `app/android/app/play-signing/README.md`). (The old `just ui` parallel-component harness is removed — `just e2e` drives the real app + screenshots every flow state.) Pinned: ic-cdk 0.19, pocket-ic 14.0.0, ic-agent 0.48.1, uniffi 0.29.5, dfx 0.32.0, RN 0.86.2 (AGP 8.12.0 from the bundled `@react-native/gradle-plugin`; New Arch enabled), Gradle 8.13, Kotlin 2.1.20, compile/target SDK 36, build-tools 36.1.0, AGP 8.7.3 for the standalone `android/` device gate, NDK 27.3.13750724, Gradle Play Publisher 3.13.0 (release path only).
 
-The IC rail is proven on two physical phones (2026-08-26): the **NFC radio hop** (HCE↔reader), the payer's airplane-mode gesture, and the real-camera QR scan all work. Two taps have never crossed a radio: the SOL rail's independent HCE transport, and the till counter arming that IC reader from a live charge. Both are tracked as physical gates in `OPEN_ISSUES.md`.
+The IC rail is proven on two physical phones (2026-08-26): the **NFC radio hop** (HCE↔reader), the payer's airplane-mode gesture, and the real-camera QR scan all work. Two taps have never crossed a radio: the SOL rail's independent HCE transport, and the checkout counter arming that IC reader from a live charge. Both are tracked as physical gates in `OPEN_ISSUES.md`.
 
 ## Scope
 
