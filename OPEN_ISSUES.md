@@ -176,7 +176,15 @@
   provider pool simply had no live ICP markets that day. Consequence: SideShift remains the only
   live-settling ICP↔SOL venue; ChangeNOW stays the documented fallback #2 (same relay-held-key
   pattern); the go-live gate STANDS — re-run `just trocador-probe` immediately BEFORE the venue
-  serves its first real trade. Founder note (no API flag refuses it): Trocador's
+  serves its first real trade. RE-RUN 2026-09-24 (same result, honestly recorded in the agreement
+  spec §3): ICP markets still LISTED-but-UNQUOTED (btc→xmr control still QUOTED), so the
+  trocador-usdc/trocador-eurc venue rows stay UNREGISTERED — registering them is blocked on the
+  venue, not on code. What shipped 2026-09-24 so the unquoted state is a HANDLED state, not an
+  error: the app detects the venue's no-quote body in `fetchCefiQuote` and says so — attributed,
+  honest ("lists this pair but has no live market right now. Nothing was sent."), four locales,
+  e2e flow 207; and `docs/CONVERT_MATRIX.md` is now GENERATED from the venue registry + health
+  (scripts/gen_convert_matrix.mjs, staleness-gated inside `just check`), so venue coverage is a
+  build-checked fact instead of prose. Founder note (no API flag refuses it): Trocador's
   `markup=0` pin keeps the USER's price at the venue's own baseline, but Trocador still accrues
   half of ITS own commission to the partner account — what happens to that accrual is a founder
   decision, outside code.
@@ -382,6 +390,47 @@ pinned end-to-end so its hub pairs stop fail-closing. Covered by jest `convertHu
 (33 tests) and e2e flow 190 (happy 4-leg run + deterministic swap2-refusal choreography).
 Residual (not a blocker): the fee pin is AHEAD of the prod relay's `/api/v1/currencies` row
 until the founder-run redeploy; prod display unaffected (relay sole catalog authority).
+
+**8. Multi-currency build-out wave — DONE (2026-09-24; nine flows 201–209, 199/199 e2e green on
+the merged tree, `just app` device self-checks green).** What shipped, one line each: **send
+terminal** — ONE shared `SendTerminal` surface for the IC send sheet AND the SOL withdraw sheet's
+settled/unknown phases (status glyph, amount+unit, destination, tx reference — IC blockIndex /
+SOL signature — with copy, View receipt through the existing `TxnReceipt` at Wallet root, SOL-only
+Check-status via read-only `getSolSignatureStatus`, honest pending, refund-safe failure lines);
+pinned invariants: retry is offered ONLY before broadcast (`broadcast.sig === null` on SOL; the IC
+sheet's catch no longer maps post-submission throws to the retryable form), post-acceptance
+failures land in `unknown` never `error`, the same signed bytes are never re-signed, and the sheet
+never re-arms a second `withTimeout` on retry; the SOL hang audit (every await → bound → owner)
+lives as the `app/solana.ts` header comment; test seams: `__DPAY_TEST_SOL_SEND_TIMEOUT_MS` +
+the test-helpers-gated `POST /api/v1/test/solana-upstream/mode {confirmAfterHits|failAfterHits}`;
+flows 201/202. **CeFi lifecycle honesty + the abort window** (extends the 2026-09-19 Stop): a
+record expired from `awaiting_deposit` keeps a SLOW watch and honors the venue's later words from
+`quote_expired` (refunded→provider_refunded, processing→provider_processing, completed→done,
+never backwards); `cefi.noExpiryLine` when the venue publishes no expiry (Trocador);
+`cefi.lastCheckedLine` on provider_processing (a timestamp, never an SLA); Stop now covers
+`awaiting_deposit`/`provider_processing` (flavor `provider`: no deposit → order dies; deposit
+sent → may still settle), `crossing` (watching; funds at the user's own ATA) and `sol_ready`
+(clean; final Jupiter leg unsigned); no convert record is written before the confirm tap
+(pinned; the ONE pre-broadcast side effect — a CeFi confirm CREATES the venue order — is named on
+the surface); flows 208/209, spec `docs/specs/2026-09-24-cefi-lifecycle-abort.md`. **Accounts
+grouped by currency** — `groupAccountsByCurrency` in `app/config/currency.ts`: home-currency rails
+first, then other offered currencies, then the non-currency tail; headers NAME the currency; rows
+keep their own units; NO sums, NO magnitude ordering (the honesty rules `orderAccounts` already
+encodes, now presentation-wide); one lock-gated rail-switch affordance per multi-rail currency
+section (selects an asset row, never the home currency); flows 203/204. **The cashier picks the
+settlement asset at ring-up** — `tillSettlementAssets` generalizes the VCHF-only offer to every IC
+row whose catalog fee is stated (the `tillFeeRaw != null` honesty gate); the price unit follows
+the pick and the wallet asset follows with it; the relay's answer `asset` is verified and a
+wrong-asset answer refuses with a one-tap fix (`served-other`); flow 205 + flows 114/115 extended.
+**Convert destinations grouped by currency** in the picker (presentation only, registry order
+preserved within groups, nothing preselected); flow 206. **Trocador no-quote honesty + the
+generated convert matrix** — see the Trocador state bullet above; flow 207. FOLLOW-UP (the wave's
+one open item): the picked settlement asset is verified via the ANSWER's `asset` field because the
+ring-up body's signed bytes are pinned (`dfx/till_open_signing.json`) and an unsigned field in a
+signed request is unattributable — a relay that only serves VCHF fails the app closed with a named
+fix, which is correct today but means multi-asset checkout needs the asset INSIDE the signature:
+new signing domain version, regenerate the pin via `just wire-layout`, relay echoes it. Value 7,
+effort M (wire+relay+app).
 
 Beyond item 6 (item 7 is DONE, above) the remaining list is the physical/outer-loop gates (below, founder-run) and the
 DO-NOT-NAG set.
