@@ -33,7 +33,7 @@ import {
   openBalances, selectCurrency, armPayScan, railPrincipalText,
 } from '../harness/lib.mjs';
 import { generateKeypair } from '../harness/wire.mjs';
-import { installCheckoutStub, ocpStubState, setOcpTxMode, DPAY_TILL, dpayCheckoutAt } from '../harness/ocp.mjs';
+import { installCheckoutStub, ocpStubState, setOcpTxMode, DPAY_CHECKOUT, dpayCheckoutAt } from '../harness/ocp.mjs';
 
 const VCHF = 7;                 // the ONE asset dpay's checkout takes
 const FEE = 10_000;             // the VCHF catalog fee, charged to the sender (flow 95)
@@ -75,7 +75,7 @@ export async function run() {
     // The golden states the raw units its decimal amount means; every balance below is arithmetic on
     // that number, so a checkout that changes its price fails HERE with the reason, not in an assertion
     // about a screen.
-    assertEq(DPAY_TILL.amountRaw, String(PAY_RAW), 'the checkout golden must still quote the amount this flow funds for');
+    assertEq(DPAY_CHECKOUT.amountRaw, String(PAY_RAW), 'the checkout golden must still quote the amount this flow funds for');
 
     console.log('[113-dpay-checkout] onboarding…');
     await onboardWallet(driver, 'e2e-dpay-checkout');
@@ -94,7 +94,7 @@ export async function run() {
 
     // Served from the host the wallet talks to — which is precisely what makes it payable.
     const checkout = dpayCheckoutAt(relayBaseURL, merchantPrincipal);
-    console.log(`[113-dpay-checkout] checkout at ${checkout.host}: ${DPAY_TILL.amount} ${DPAY_TILL.asset} → ${merchantPrincipal}`);
+    console.log(`[113-dpay-checkout] checkout at ${checkout.host}: ${DPAY_CHECKOUT.amount} ${DPAY_CHECKOUT.asset} → ${merchantPrincipal}`);
     await installCheckoutStub(driver, {
       passOrigins: [new URL(relayBaseURL).origin, new URL(webBaseURL).origin],
       ...checkout.cfg,
@@ -127,14 +127,14 @@ export async function run() {
     // ONE provider line, and it names the host even when that host is our OWN relay — a dpay checkout
     // is not exempt from the trust disclosure it asks of every other provider.
     const price = await driver.readText('ocp-price');
-    assertIncludes(price, `${DPAY_TILL.requestedAmount.asset} 10`,
+    assertIncludes(price, `${DPAY_CHECKOUT.requestedAmount.asset} 10`,
       'the review shows the checkout\'s own price, so the payer can check it against the sale');
     assertIncludes(price, checkout.host, 'the review names the host that set the price');
-    assertIncludes(await driver.bodyText(), DPAY_TILL.merchant, 'the review shows the name the checkout claims');
+    assertIncludes(await driver.bodyText(), DPAY_CHECKOUT.merchant, 'the review shows the name the checkout claims');
     // The checkout-open's NOTE — what the charge is for, signed under `dpay-checkout-open-v2` when the
     // merchant rang the charge up and served back on step-2 (`input.note` of the same golden every
     // other value here comes from). Claimed, never verified: it rides the review's memo line.
-    assertEq(await driver.readText('review-memo'), DPAY_TILL.note,
+    assertEq(await driver.readText('review-memo'), DPAY_CHECKOUT.note,
       'the review shows what the checkout says the charge is for — the note the merchant signed at open');
     assert(!(await driver.isPresent('review-claimed')), 'the review carries no unactionable name caveat');
     assert(!(await driver.isPresent('ocp-expiry')),
@@ -160,25 +160,25 @@ export async function run() {
     // the same reconciliation the Receive tab uses. A payment without it would settle on-chain and
     // never be credited to the sale.
     const byRef = await fetch(
-      `${relayBaseURL}/api/v1/transactions/${merchant.publicHex}?currency=${VCHF}&memo=${DPAY_TILL.ref}`,
+      `${relayBaseURL}/api/v1/transactions/${merchant.publicHex}?currency=${VCHF}&memo=${DPAY_CHECKOUT.ref}`,
     ).then(r => r.json());
     assertEq(String(byRef.transactions?.length ?? 0), '1',
-      `exactly one transfer must carry the checkout's reference ${DPAY_TILL.ref}, got ${JSON.stringify(byRef)}`);
+      `exactly one transfer must carry the checkout's reference ${DPAY_CHECKOUT.ref}, got ${JSON.stringify(byRef)}`);
     assertEq(byRef.transactions[0].amount, String(PAY_RAW),
       'the referenced transfer is the one that paid the charge');
 
     let seen = await ocpStubState(driver);
     assertEq(String(seen.txUrls.length), '1', 'the proof is reported exactly once');
     const submitted = new URL(seen.txUrls[0]);
-    assertEq(submitted.pathname, `/v1/lnurlp/tx/${DPAY_TILL.paymentId}`,
+    assertEq(submitted.pathname, `/v1/lnurlp/tx/${DPAY_CHECKOUT.paymentId}`,
       'the submission goes to the /tx path derived from the callback\'s /cb/ segment');
-    assertEq(submitted.searchParams.get('method'), DPAY_TILL.method, 'the submission echoes the checkout\'s method');
-    assertEq(submitted.searchParams.get('asset'), DPAY_TILL.asset, 'the submission echoes the checkout\'s asset');
+    assertEq(submitted.searchParams.get('method'), DPAY_CHECKOUT.method, 'the submission echoes the checkout\'s method');
+    assertEq(submitted.searchParams.get('asset'), DPAY_CHECKOUT.asset, 'the submission echoes the checkout\'s asset');
     // THE IDENTIFIER, in full. Not a shape check: the LEDGER has to be this checkout's own, because a
     // bare index here is exactly the 2026-09-03 defect — the provider would resolve it against the
     // native ICP ledger, find something that is not this sale, and the payer's VCHF would be gone.
     const reportedTx = submitted.searchParams.get('tx') ?? '';
-    assert(new RegExp(`^${DPAY_TILL.ledger}:\\d+$`).test(reportedTx),
+    assert(new RegExp(`^${DPAY_CHECKOUT.ledger}:\\d+$`).test(reportedTx),
       `the submission must name the checkout's own ledger beside the block index, got ${JSON.stringify(reportedTx)}`);
     console.log(`[113-dpay-checkout] ✓ paid; ${reportedTx} reported once`);
     await driver.screenshot('113-dpay-checkout-paid');
@@ -209,7 +209,7 @@ export async function run() {
     seen = await ocpStubState(driver);
     assertEq(String(seen.txUrls.length), '2', 'a pending answer is reported once and never retried from here');
     // …and the second submission spells the identifier the same way. One rule, every submission.
-    assert(new RegExp(`^${DPAY_TILL.ledger}:\\d+$`).test(new URL(seen.txUrls[1]).searchParams.get('tx') ?? ''),
+    assert(new RegExp(`^${DPAY_CHECKOUT.ledger}:\\d+$`).test(new URL(seen.txUrls[1]).searchParams.get('tx') ?? ''),
       'a pending submission names the ledger too — the spelling is the rule, not a happy-path detail');
     await driver.screenshot('113-dpay-checkout-pending');
     console.log('[113-dpay-checkout] ✓ pending rendered as sent-and-waiting, not as paid');
