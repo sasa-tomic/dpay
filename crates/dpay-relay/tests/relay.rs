@@ -6373,3 +6373,77 @@ async fn every_pool_quote_is_its_own_reply_verbatim_and_moves_with_the_knob() {
     }
     assert_ne!(seen[0], seen[1], "the two pools remain two genuinely different curves");
 }
+
+/// The stub upstream's getSignatureStatuses FLIP (`POST /api/v1/test/solana-upstream/mode`;
+/// flow 202's honest-unknown → Check status → settled flip and the fee-only failure leg),
+/// pinned offline. The DEFAULT answers `[null]` forever ("unknown to the cluster" — the shape
+/// that holds a send honestly pending); `confirmAfterHits: N` answers N nulls then `confirmed`;
+/// `failAfterHits: N` answers N nulls then an on-chain `InstructionError` (the definitive
+/// fee-only failure); the body REPLACES the whole mode (an omitted knob is disarmed) and resets
+/// the flip counter, so an arm is always "N nulls from now, then the flip". ONE test drives the
+/// statics end to end — they are process-global, so no parallel sibling may touch them.
+#[cfg(not(feature = "agent"))]
+#[tokio::test]
+async fn solana_stub_mode_flips_get_signature_statuses_after_n_hits() {
+    let state = AppState::new(Arc::new(FakeLedger::new()));
+
+    let post_mode = |body: Value| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/test/solana-upstream/mode")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let statuses = |sig: &str| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/test/solana-upstream")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "getSignatureStatuses",
+                                   "params": [[sig]]})
+                    .to_string(),
+            ))
+            .unwrap()
+    };
+    /// The stub's `result` subtree for one request (the proxy-less direct call: the envelope
+    /// comes back wrapped exactly as the JSON-RPC shape promises).
+    async fn result_of(resp: axum::response::Response) -> Value {
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: Value = serde_json::from_slice(&bytes).unwrap();
+        json["result"].clone()
+    }
+
+    // Default (never armed): [null] forever — the honest "unknown to the cluster".
+    let default_value = result_of(app(state.clone()).oneshot(statuses("SIGDEFAULT")).await.unwrap()).await;
+    assert_eq!(default_value, serde_json::json!({"context": {"slot": 1000}, "value": [null]}));
+
+    // Arm confirmAfterHits: 1 → one null, then confirmed.
+    let (status, body) = call(&state, post_mode(serde_json::json!({"confirmAfterHits": 1}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["confirmAfterHits"], 1);
+    let first = result_of(app(state.clone()).oneshot(statuses("SIGCONFIRM")).await.unwrap()).await;
+    assert_eq!(first["value"][0], Value::Null, "hit 1 of 1: still a null");
+    let second = result_of(app(state.clone()).oneshot(statuses("SIGCONFIRM")).await.unwrap()).await;
+    assert_eq!(second["value"][0]["confirmationStatus"], "confirmed", "hit 2: the flip");
+    assert_eq!(second["value"][0]["err"], Value::Null);
+
+    // Re-arm with failAfterHits: 0 — the body REPLACES the mode (confirm is disarmed) and the
+    // counter resets, so the VERY FIRST hit is already the on-chain failure.
+    let (status, _) = call(&state, post_mode(serde_json::json!({"failAfterHits": 0}))).await;
+    assert_eq!(status, StatusCode::OK);
+    let failed = result_of(app(state.clone()).oneshot(statuses("SIGFAIL")).await.unwrap()).await;
+    assert_eq!(failed["value"][0]["err"]["InstructionError"], serde_json::json!([0, {"Custom": 1}]));
+    assert_eq!(failed["value"][0]["confirmationStatus"], "failed");
+
+    // Disarm entirely: an empty object is the neutral never-flipping default again.
+    let (status, body) = call(&state, post_mode(serde_json::json!({}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["confirmAfterHits"], Value::Null, "an omitted knob is disarmed");
+    assert_eq!(body["failAfterHits"], Value::Null);
+    let neutral = result_of(app(state.clone()).oneshot(statuses("SIGNEUTRAL")).await.unwrap()).await;
+    assert_eq!(neutral["value"][0], Value::Null);
+}

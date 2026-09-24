@@ -526,6 +526,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/test/solana-upstream/hits",
             axum::routing::get(solana_stub_hits),
+        )
+        .route(
+            "/test/solana-upstream/mode",
+            axum::routing::post(solana_stub_mode),
         );
     // Test-only SIDESHIFT UPSTREAM (flow 187 `e2e/tests/187-convert-cefi-sideshift.mjs`):
     // the harness points the partner-key proxy (src/sideshift.rs, DPAY_SIDESHIFT_* set
@@ -1116,11 +1120,65 @@ async fn test_venue_serve(State(state): State<AppState>, Json(req): Json<VenueSe
 //   • `getGenesisHash` answers mainnet-beta's frozen id (the client's `SOL_GENESIS_HASH`) so
 //     the cluster-identity checks stay coherent.
 //   • every other read gets a sane constant; `sendTransaction` echoes a stub signature.
+//   • `getSignatureStatuses` answers `[null]` ("never heard of it") until armed otherwise via
+//     `POST /api/v1/test/solana-upstream/mode` (below): N nulls, then `confirmed`, or — fail
+//     knob — an on-chain InstructionError. Flow 202 drives the send terminal's honest unknown →
+//     Check status → settled flip and the fee-only failure leg through this.
 //
 // The proxy relays these VERBATIM, and its read cache (2s for getMultipleAccounts) applies
 // upstream of the hit counter — a flow asserting hit GROWTH must out-wait that TTL.
 #[cfg(feature = "test-helpers")]
 static SOLANA_STUB_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+// The getSignatureStatuses flip knobs (flow 202, stream D's send-terminal flows). `SOLANA_STUB_GETSIG_HITS`
+// counts getSignatureStatuses envelopes that REACHED the stub (proxy cache hits never arrive here —
+// the confirm loop's `[[sig]]` params and the status read's `[[sig], {searchTransactionHistory:true}]`
+// params canonicalize differently, so they always cache and count separately). The two thresholds
+// are stored SHIFTED: `0` = off, user value N is stored as N+1, and the flip fires on hits ≥ stored
+// — so N=0 means "flip from the very first hit" without colliding with off. Every `/mode` POST
+// REPLACES the whole mode (an omitted knob is disarmed) and resets the hit count, so an arm is
+// always "N [null] answers from now, then the flip".
+#[cfg(feature = "test-helpers")]
+static SOLANA_STUB_GETSIG_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-helpers")]
+static SOLANA_STUB_CONFIRM_AFTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-helpers")]
+static SOLANA_STUB_FAIL_AFTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// `POST /api/v1/test/solana-upstream/mode` — arm the stub's `getSignatureStatuses` flip (see the
+/// statics above). `{confirmAfterHits: N}` → N `[null]` answers, then `confirmed` (flow 202's
+/// submitting → unknown → Check status → settled flip). `{failAfterHits: N}` → N `[null]` answers,
+/// then an on-chain `InstructionError` — the fee-only failure leg, both as the send's own confirm
+/// verdict and as a Check-status answer. The body REPLACES the mode: an omitted knob is disarmed,
+/// `{}` is the neutral never-flipping default, and arming resets the flip counter. Only these two
+/// methods flip; every other stub answer is unchanged.
+#[cfg(feature = "test-helpers")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SolanaStubMode {
+    confirm_after_hits: Option<usize>,
+    fail_after_hits: Option<usize>,
+}
+
+#[cfg(feature = "test-helpers")]
+async fn solana_stub_mode(Json(req): Json<SolanaStubMode>) -> Response {
+    use std::sync::atomic::Ordering;
+    // Shifted encoding: user N → N+1, so 0 stays "off" (see the statics' comment).
+    let confirm = req.confirm_after_hits.map_or(0, |n| n + 1);
+    let fail = req.fail_after_hits.map_or(0, |n| n + 1);
+    SOLANA_STUB_CONFIRM_AFTER.store(confirm, Ordering::Relaxed);
+    SOLANA_STUB_FAIL_AFTER.store(fail, Ordering::Relaxed);
+    SOLANA_STUB_GETSIG_HITS.store(0, Ordering::Relaxed);
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "ok": true,
+            "confirmAfterHits": req.confirm_after_hits,
+            "failAfterHits": req.fail_after_hits,
+        })),
+    )
+        .into_response()
+}
 
 /// `POST /api/v1/test/solana-upstream` — the stub JSON-RPC upstream (see the section comment).
 #[cfg(feature = "test-helpers")]
@@ -1156,7 +1214,37 @@ async fn solana_stub_rpc(body: axum::body::Bytes) -> Response {
         }),
         "getBlockHeight" => serde_json::json!(1_000_000u64),
         "isBlockhashValid" => serde_json::json!({"context": {"slot": 1000}, "value": true}),
-        "getSignatureStatuses" => serde_json::json!({"context": {"slot": 1000}, "value": [null]}),
+        "getSignatureStatuses" => {
+            // The flip knobs (see the statics above): N nulls, then confirmed — or, when the fail
+            // knob is armed, an on-chain InstructionError (it wins: a definitive failure is the
+            // one answer that must never be softened into a settle).
+            use std::sync::atomic::Ordering;
+            let hit = SOLANA_STUB_GETSIG_HITS.fetch_add(1, Ordering::Relaxed) + 1;
+            let confirm_after = SOLANA_STUB_CONFIRM_AFTER.load(Ordering::Relaxed);
+            let fail_after = SOLANA_STUB_FAIL_AFTER.load(Ordering::Relaxed);
+            if fail_after != 0 && hit >= fail_after {
+                serde_json::json!({
+                    "context": {"slot": 1000},
+                    "value": [{
+                        "slot": 1000u64,
+                        "confirmationStatus": "failed",
+                        "err": {"InstructionError": [0, {"Custom": 1}]},
+                    }],
+                })
+            } else if confirm_after != 0 && hit >= confirm_after {
+                serde_json::json!({
+                    "context": {"slot": 1000},
+                    "value": [{
+                        "slot": 1000u64,
+                        "confirmations": 10u64,
+                        "confirmationStatus": "confirmed",
+                        "err": serde_json::Value::Null,
+                    }],
+                })
+            } else {
+                serde_json::json!({"context": {"slot": 1000}, "value": [null]})
+            }
+        }
         "getSignaturesForAddress" => serde_json::json!([]),
         "getFeeForMessage" => {
             serde_json::json!({"context": {"slot": 1000}, "value": {"lamports": 5000u64}})
