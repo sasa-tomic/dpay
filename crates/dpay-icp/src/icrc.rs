@@ -250,7 +250,7 @@ pub fn allowance_arg(account: &Account, spender: &Account) -> Vec<u8> {
 ///
 /// The ledger debits `from` the amount PLUS the fee and credits `to` the amount, exactly as it does
 /// for `icrc1_transfer`; the allowance must cover both. dpay's one caller is a shop collecting a
-/// till charge an OpenCryptoPay wallet approved it for, so `memo` carries that charge's reference
+/// checkout charge an OpenCryptoPay wallet approved it for, so `memo` carries that charge's reference
 /// (nothing credits a sale without it) and the other three options are `None`: dpay signs no
 /// `created_at_time` (the rule and its reasoning: `icp_transfer_arg` in `crates/dpay-ffi`), lets the
 /// ledger state its own fee, and spends from the spender's default subaccount because the wallet

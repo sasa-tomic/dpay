@@ -408,7 +408,7 @@ fn golden_transfer_from_arg() {
     );
     assert_eq_hex(&full, G_TRANSFER_FROM_FULL, "transfer_from arg (every option present)");
 
-    // What a shop signs to collect a till charge: default accounts on both sides, the charge's
+    // What a shop signs to collect a checkout charge: default accounts on both sides, the charge's
     // 16-byte reference as the memo, and nothing else stated — the ledger's own fee, no
     // `created_at_time`, the spender's default subaccount.
     let from = Account { owner: selfauth(), subaccount: [0u8; 32] };
