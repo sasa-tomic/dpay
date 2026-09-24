@@ -837,33 +837,80 @@ export async function openBalances(driver, opts = {}) {
 
 /**
  * Select an IC catalog currency in the ACCOUNTS route via its whole-row select Pressable
- * (`asset-<key>-select`). Assumes the caller is already on that route (`openBalances`). Waits for
+ * (`btn-accounts-currency-<CODE>`). Assumes the caller is already on that route (`openBalances`). Waits for
  * the row's aria-selected (the route has no sheet chrome to close), then restores the Pay tab —
- * the context every caller assumes after selecting. This is the SOLE way to make a currency the
- * active asset (the row is one big select Pressable). `key` is the assetTestKey (e.g. 'ckbtc',
- * 'ckusdc', 'cketh'); 'demo' for the DEMO row.
+ * the context every caller assumes after selecting. `key` is the assetTestKey (e.g. 'ckbtc',
+ * 'ckusdc', 'cketh'); 'demo' for the practice row.
+ *
+ * 2026-09-24 currency-first: the list is ONE row per CURRENCY, and a row tap SETS MAIN — so this
+ * helper now maps the asset key to its CURRENCY, taps that row, and the wallet's own rule (the
+ * working rail follows the main, via chooseRail — the funded rail, else the stated preference)
+ * lands Pay on a rail of that currency. For a multi-rail currency the rail is dpay's pick, not
+ * the caller's: a flow that needs a SPECIFIC rail pins it another way (a payment link, a funded
+ * balance) — the same rule the app's users live under.
  */
+const ASSET_KEY_TO_CURRENCY = {
+  vchf: 'CHF', ckusdc: 'USD', 'sol-eurc': 'EUR',
+  ckbtc: 'BTC', cketh: 'ETH', icp: 'ICP', sol: 'SOL',
+  'sol-usdc': 'USD',
+};
 export async function selectCurrency(driver, key, opts = {}) {
-  await driver.click(`asset-${key}-select`, { timeoutMs: opts.timeoutMs ?? 5_000 });
-  // Poll until the row reports aria-selected="true" — the selection is React state, so the
-  // attribute can lag the click by a render under pool contention (the inline list has no sheet
-  // chrome whose unmount could serve as the signal).
+  // 'demo' — the practice row is the one per-asset row left (practice is never main).
+  if (key === 'demo') {
+    await driver.click('asset-demo-select', { timeoutMs: opts.timeoutMs ?? 5_000 });
+    const deadline = Date.now() + (opts.timeoutMs ?? 5_000);
+    for (;;) {
+      const v = await driver.eval(
+        (sel) => {
+          const el = document.querySelector(sel);
+          return el ? el.getAttribute('aria-selected') : null;
+        },
+        `[data-testid="asset-demo"]`,
+      );
+      if (v === 'true') break;
+      if (Date.now() > deadline) {
+        throw new Error(`selectCurrency: asset-demo is not selected (aria-selected=${v}) after ${opts.timeoutMs ?? 5_000}ms`);
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await driver.click('tab-pay', { timeoutMs: opts.timeoutMs ?? 5_000 });
+    return;
+  }
+  const currency = ASSET_KEY_TO_CURRENCY[key] ?? (key.length <= 4 ? key.toUpperCase() : null);
+  if (currency == null) throw new Error(`selectCurrency: no currency for asset key "${key}"`);
+  await driver.click(`btn-accounts-currency-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+  // The tap sets MAIN and navigates Home (the row unmounts), so the confirmation is Home's own
+  // headline: "Balance <CODE>" names the currency the wallet is now in.
   const deadline = Date.now() + (opts.timeoutMs ?? 5_000);
   for (;;) {
-    const v = await driver.eval(
+    const label = await driver.eval(
       (sel) => {
         const el = document.querySelector(sel);
-        return el ? el.getAttribute('aria-selected') : null;
+        return el ? el.textContent : null;
       },
-      `[data-testid="asset-${key}"]`,
+      '[data-testid="home-headline-label"]',
     );
-    if (v === 'true') break;
+    if (label != null && label.includes(currency)) break;
     if (Date.now() > deadline) {
-      throw new Error(`selectCurrency: asset-${key} is not selected (aria-selected=${v}) after ${opts.timeoutMs ?? 5_000}ms`);
+      throw new Error(`selectCurrency: Home headline never named ${currency} (got ${label}) after ${opts.timeoutMs ?? 5_000}ms`);
     }
     await new Promise((r) => setTimeout(r, 100));
   }
   await driver.click('tab-pay', { timeoutMs: opts.timeoutMs ?? 5_000 });
+}
+
+/**
+ * The CONVERT entry, currency-first (2026-09-24): opens the convert surface with `key`'s
+ * CURRENCY as the source — the per-row Convert button on the currency list
+ * (`btn-accounts-convert-<CODE>`), which replaced the old selected-row-only
+ * `btn-accounts-convert`. Does the whole journey: opens the route, taps the row's Convert.
+ * Wait budget: the convert surface's own fund-gate/quote state is the caller's business.
+ */
+export async function openConvertFor(driver, key, opts = {}) {
+  await openBalances(driver, { timeoutMs: opts.timeoutMs ?? 5_000 });
+  const currency = ASSET_KEY_TO_CURRENCY[key] ?? (key.length <= 4 ? key.toUpperCase() : null);
+  if (currency == null) throw new Error(`openConvertFor: no currency for asset key "${key}"`);
+  await driver.click(`btn-accounts-convert-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
 }
 
 /**
