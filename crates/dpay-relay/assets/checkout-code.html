@@ -1,6 +1,6 @@
 <!doctype html>
-<!-- Served at /pl/ by crates/dpay-relay/src/till.rs (`till_code_page`), which is where the QR this
-     till prints points a phone camera that is not a wallet. The asset and network named below are
+<!-- Served at /pl/ by crates/dpay-relay/src/checkout.rs (`checkout_code_page`), which is where the QR this
+     checkout prints points a phone camera that is not a wallet. The asset and network named below are
      the pair that module serves; both change together with it. -->
 <!-- `scheme-auto`: this page has no theme toggle and no script, so it follows the OS scheme. That
      class is the hook the shared palette block (crates/dpay-relay/assets/palette.css) keys its
@@ -10,8 +10,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Till payment code | Different Pay</title>
-<meta name="description" content="You scanned a Different Pay till code. Here is how to pay it." />
+<title>Checkout payment code | Different Pay</title>
+<meta name="description" content="You scanned a Different Pay checkout code. Here is how to pay it." />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#F4F1E8" />
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
@@ -39,7 +39,7 @@
 </head>
 <body>
 <main class="card">
-  <h1>This is a Different Pay till code</h1>
+  <h1>This is a Different Pay checkout code</h1>
   <p>You pointed a camera at a shop's payment code. Nothing has been charged, and this page cannot
      take a payment — the payment happens in your wallet, on your phone.</p>
   <ol>
@@ -49,7 +49,7 @@
         how long the price is good for, and it pays only when you approve.</li>
   </ol>
   <p><a class="btn" href="/">Get Different Pay</a><a class="btn secondary" href="/wallet">Open the web wallet</a></p>
-  <p class="note">This till is paid in VCHF on the Internet Computer. Other Lightning or LNURL
+  <p class="note">This checkout is paid in VCHF on the Internet Computer. Other Lightning or LNURL
      wallets cannot pay it — they do not settle on that network — so a Different Pay wallet is what
      this code is for. If you do not have one, ask the shop for another way to pay.</p>
 </main>

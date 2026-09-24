@@ -1,6 +1,6 @@
 //! The merchant half of OpenCryptoPay — dpay **as** the provider.
 //!
-//! Everything else in this repo pays someone else's till. This serves one: a shop shows a code, a
+//! Everything else in this repo pays someone else's checkout. This serves one: a shop shows a code, a
 //! dpay wallet pays it, and the money lands at the MERCHANT'S OWN account. A DPAY wallet, and only
 //! one — no other wallet on the standard settles the rail v1 quotes, which is measured in the
 //! findings doc below and corrected through the plan. The standard's shape is still what this
@@ -10,15 +10,15 @@
 //!
 //! FIVE THINGS DECIDE THE WHOLE DESIGN.
 //!
-//! 0. **A ring-up is SIGNED, and so is a cancellation.** The merchant's account is DERIVED from
+//! 0. **A checkout-open is SIGNED, and so is a cancellation.** The merchant's account is DERIVED from
 //!    the key they name, so naming a key is claiming an account — and until 2026-09-04 that claim
-//!    was taken on trust. A probe rang up a live production charge with `deadbeef…deadbeef`, a key
+//!    was taken on trust. A probe opened a live production charge with `deadbeef…deadbeef`, a key
 //!    nobody holds, and this relay served a full payment page for it on dpay's own domain under
 //!    dpay's own certificate: a phishing page aimed at the one control a payer's review has, which
-//!    host served the quote. The whole acceptance rule now lives in `dpay_core::validate_till_open`
+//!    host served the quote. The whole acceptance rule now lives in `dpay_core::validate_checkout_open`
 //!    (skew window, then signature, then nonce) and both merchant routes go through
-//!    [`TillStore::authorize`]. The two are told apart by a SIGNED field rather than by which URL
-//!    they arrived at: a ring-up is `cents >= 1`, a cancellation is `cents == 0`, so neither
+//!    [`CheckoutStore::authorize`]. The two are told apart by a SIGNED field rather than by which URL
+//!    they arrived at: a checkout-open is `cents >= 1`, a cancellation is `cents == 0`, so neither
 //!    signature can ever be replayed as the other.
 //!
 //! 1. **VCHF only, priced 1:1 with CHF.** A charge of CHF 10 is `10.00000000` VCHF. There is no
@@ -44,14 +44,14 @@
 //! 4. **ONE TRANSFER, ONE SALE.** A ledger row credits at most one charge, and ringing up a new
 //!    charge voids the merchant's previous one. Without the first, two CHF 4.50 charges and a
 //!    single CHF 4.50 payment both read as paid and the shop hands over the goods twice — the rule
-//!    and its mechanism live at [`match_payment`] and [`TillStore`].
+//!    and its mechanism live at [`match_payment`] and [`CheckoutStore`].
 //!
-//! 5. **EVERY CHARGE NAMES ITSELF.** A charge mints a 16-byte reference at ring-up
+//! 5. **EVERY CHARGE NAMES ITSELF.** A charge mints a 16-byte reference at open
 //!    ([`Charge::reference`]), hands it to the payer on the step-3 URI as `&ref=`, and credits only
 //!    a transfer whose ICRC-1 memo carries it. That turns "a transfer that looks like this sale"
-//!    into "the transfer for this sale", and it is what a till serving many customers at once needs
+//!    into "the transfer for this sale", and it is what a checkout serving many customers at once needs
 //!    before it can serve them — matching on amount alone cannot tell two identical prices apart.
-//!    The MERCHANT is told it too, on the ring-up they signed ([`open_charge`]) and nowhere else —
+//!    The MERCHANT is told it too, on the checkout-open they signed ([`open_charge`]) and nowhere else —
 //!    without that, a payment the merchant collects any other way than through the payer routes
 //!    (a tap, which never touches them) moves the money and credits no sale.
 //!
@@ -62,7 +62,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use dpay_core::{validate_till_open, TillOpen, TillOpenError, NONCE_LEN, PUBKEY_LEN, SIG_LEN};
+use dpay_core::{validate_checkout_open, CheckoutOpen, CheckoutOpenError, NONCE_LEN, PUBKEY_LEN, SIG_LEN};
 use serde::{Deserialize, Serialize};
 
 use crate::ledger::TxnRecord;
@@ -71,7 +71,7 @@ use crate::now_secs;
 /// VCHF's decimals — the raw units a `1.` on the wire means, the scale `RAW_PER_CENT` below is
 /// derived from, and the precision [`Charge::amount_text`] spells a settlement amount at. The drift
 /// alarm in this module's tests checks it against the compiled catalog, so a catalog row that moved
-/// to another precision fails the build instead of silently re-pricing every charge this till
+/// to another precision fails the build instead of silently re-pricing every charge this checkout
 /// quotes.
 const VCHF_DECIMALS: u32 = 8;
 
@@ -82,8 +82,8 @@ const RAW_PER_CENT: u64 = 1_000_000;
 
 /// THE VCHF LEDGER'S OWN TRANSFER FEE, and the shop's to pay — not the customer's.
 ///
-/// A price is a price: ring up CHF 1.00 and the customer's account must go down by CHF 1.00, not by
-/// CHF 1.0001. That is how every card terminal in the world behaves and it is now how this till
+/// A price is a price: open CHF 1.00 and the customer's account must go down by CHF 1.00, not by
+/// CHF 1.0001. That is how every card terminal in the world behaves and it is now how this checkout
 /// behaves (founder, 2026-09-12). An ICRC ledger gives exactly one lever for it, because the
 /// protocol ALWAYS debits the fee from the sender on top of the amount and has no way to charge the
 /// recipient: quote the price MINUS the fee as the settlement amount. The payer's wallet then
@@ -103,32 +103,32 @@ const LEDGER_FEE_RAW: u64 = 10_000;
 /// golden pins every deadline this module emits against it.
 pub const QUOTE_TTL_SECS: u64 = 300;
 
-/// How long a charge stays payable before the till must ring it up again. THE ONE LIFETIME: a
-/// quote is clamped to it (see [`TillStore::quote`]) so nothing this till hands out can outlive
+/// How long a charge stays payable before the checkout must open a fresh charge. THE ONE LIFETIME: a
+/// quote is clamped to it (see [`CheckoutStore::quote`]) so nothing this checkout hands out can outlive
 /// the charge it belongs to, and every read decides payability through [`Charge::state`] rather
 /// than re-deriving a deadline of its own. Public for the same reason [`QUOTE_TTL_SECS`] is: the
 /// wire states it (`expires_at`), so the golden pins the served instant against the rule instead of
 /// against a second copy of the arithmetic.
 pub const CHARGE_TTL_SECS: u64 = 60 * 60;
 
-/// How long a CREDITED charge is kept after it was rung up. Deliberately far longer than
+/// How long a CREDITED charge is kept after it was opened. Deliberately far longer than
 /// [`CHARGE_TTL_SECS`], because the two are different facts: an unpaid stale charge is litter,
 /// while a paid one is the merchant's record of a sale AND the mark that stops its ledger row
-/// paying anything else (see [`TillStore::consumed_blocks`]). A day is the bound because that mark
+/// paying anything else (see [`CheckoutStore::consumed_blocks`]). A day is the bound because that mark
 /// only has to outlive the row's own visibility: a settlement scan looks back [`HISTORY_LIMIT`]
-/// rows, which even a till doing a transfer a second exhausts in under a minute. Not forever:
+/// rows, which even a checkout doing a transfer a second exhausts in under a minute. Not forever:
 /// memory is bounded.
 const SETTLED_TTL_SECS: u64 = 24 * 60 * 60;
 
 /// The most charges one merchant may hold in this store at once.
 ///
 /// It exists because ringing up is AUTHENTICATED but not RATIONED: a merchant holding their own key
-/// can sign as fast as they like, and every accepted ring-up adds a charge that lives an hour
+/// can sign as fast as they like, and every accepted checkout-open adds a charge that lives an hour
 /// unpaid ([`CHARGE_TTL_SECS`]) or a day credited ([`SETTLED_TTL_SECS`]). Unbounded, that is one
-/// signer growing this relay's memory without limit — the residual risk the signed-ring-up change
+/// signer growing this relay's memory without limit — the residual risk the signed-checkout-open change
 /// left open.
 ///
-/// The number is a MEMORY bound, deliberately far above any trading limit: a till ringing up a sale
+/// The number is a MEMORY bound, deliberately far above any trading limit: a checkout ringing up a sale
 /// every ten seconds, without a pause, for the whole day a credited charge is kept, makes 8 640 —
 /// already several times what a human counter does — and a charge costs on the order of a kilobyte
 /// (its ids, the merchant's account text, a clamped name and up to [`MAX_LIVE_QUOTES`] quotes). So
@@ -136,7 +136,7 @@ const SETTLED_TTL_SECS: u64 = 24 * 60 * 60;
 ///
 /// Enforced in the STORE rather than at the door, unlike [`MAX_CENTS`], because it is a fact about
 /// what the store holds and nowhere else can answer it. The refusal is still given a voice
-/// ([`TillError::TillFull`]).
+/// ([`CheckoutError::CheckoutFull`]).
 const MAX_CHARGES_PER_MERCHANT: usize = 10_000;
 
 /// How long one ledger observation of a charge is reused for.
@@ -148,9 +148,9 @@ const MAX_CHARGES_PER_MERCHANT: usize = 10_000;
 /// reuses is at most two seconds old, and the sale it may not yet name is named on the next poll.
 const OBSERVE_TTL_SECS: u64 = 2;
 
-/// The most a single charge may be for, in CHF cents — one million francs, which is not a till
+/// The most a single charge may be for, in CHF cents — one million francs, which is not a checkout
 /// charge. It exists so `Charge::amount_raw` can never saturate: a price whose raw units do not
-/// fit is a price the till would quote wrongly, and quoting a wrong number is worse than refusing.
+/// fit is a price the checkout would quote wrongly, and quoting a wrong number is worse than refusing.
 /// Enforced at the door ([`open_charge`]) rather than in the store, because refusing needs a voice
 /// — the payer/cashier is told what the limit is.
 const MAX_CENTS: u64 = 100_000_000;
@@ -185,18 +185,18 @@ pub struct Charge {
     pub merchant_name: String,
     /// What the charge is FOR, in the merchant's own words ("2× Kafi, Tisch 4") — the one-line
     /// purpose a payer reads on review before paying. CLAIMED like the name and SIGNED with it
-    /// (under `TILL_OPEN_DOMAIN_V2`), because an unsigned field inside a signed request is a field
+    /// (under `CHECKOUT_OPEN_DOMAIN_V2`), because an unsigned field inside a signed request is a field
     /// this relay cannot attribute to anybody — and this one tells the payer what they are paying
     /// for. `None` = the note-less v1 request every older app sends. Clamped for display by
-    /// [`TillStore::open`] under the same bound as the name, strictly AFTER the signature covered
+    /// [`CheckoutStore::open`] under the same bound as the name, strictly AFTER the signature covered
     /// every byte (see [`clamp_name`]).
     pub note: Option<String>,
     /// The price in CHF cents — the number the merchant typed and the cashier reads aloud.
     pub cents: u64,
-    /// THIS CHARGE'S NAME ON THE LEDGER: 16 bytes of OS randomness as hex, minted at ring-up, put
+    /// THIS CHARGE'S NAME ON THE LEDGER: 16 bytes of OS randomness as hex, minted at open, put
     /// on the step-3 URI as `&ref=`, and echoed back by the payer as the transfer's ICRC-1 memo.
     /// `match_payment` credits only a row carrying it, which is what makes a match exact rather
-    /// than a resemblance — and the reason a till will be able to hold several customers' charges
+    /// than a resemblance — and the reason a checkout will be able to hold several customers' charges
     /// at the same price at once without any of them being ambiguous.
     ///
     /// 16 bytes because that is the width dpay's reconciliation memo already has everywhere else
@@ -205,7 +205,7 @@ pub struct Charge {
     /// is handed to exactly one payer, and a party who does not hold it cannot aim a transfer at
     /// this sale.
     ///
-    /// SERVED TO THE MERCHANT ON THE RING-UP, and to nobody else on the merchant's own routes —
+    /// SERVED TO THE MERCHANT ON THE CHECKOUT-OPEN, and to nobody else on the merchant's own routes —
     /// see [`open_charge`] for what it unlocks and [`ChargeStatus`] for why the poll does not
     /// repeat it.
     pub reference: String,
@@ -219,8 +219,8 @@ pub struct Charge {
     ///
     /// The CAUSE is carried rather than just the fact, because the two causes send a payer standing
     /// at the counter to do opposite things — scan the cashier's new code, or put their phone away.
-    /// The FIRST cause wins ([`TillStore::void`] inserts, never overwrites): a charge the cashier
-    /// cancelled and then rang past was cancelled, and saying it was merely replaced would be a
+    /// The FIRST cause wins ([`CheckoutStore::void`] inserts, never overwrites): a charge the cashier
+    /// cancelled and then closed was cancelled, and saying it was merely replaced would be a
     /// nudge to go and pay the new one.
     voided: Option<VoidCause>,
     /// When the ledger was last read on this charge's behalf — the amplification bound, see
@@ -282,13 +282,13 @@ pub struct Settled {
 }
 
 /// Why a charge stopped being payable without having been paid. Named at the store's door
-/// ([`TillStore::void`]) so the ONE mechanism serves both: ringing up the next customer, and a
+/// ([`CheckoutStore::void`]) so the ONE mechanism serves both: ringing up the next customer, and a
 /// cashier clearing a total they mis-keyed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VoidCause {
     /// A newer charge for the same merchant replaced this one.
     Superseded,
-    /// The merchant cancelled it — a signed `cents = 0` on `POST /api/v1/till/void`.
+    /// The merchant cancelled it — a signed `cents = 0` on `POST /api/v1/checkout/void`.
     Cancelled,
 }
 
@@ -302,7 +302,7 @@ impl VoidCause {
 }
 
 /// Where a charge stands, as one answer rather than four booleans a caller has to combine.
-/// `Paid` outranks everything (a credited sale is credited however the charge was rung up),
+/// `Paid` outranks everything (a credited sale is credited however the charge was opened),
 /// then the void causes, then `Expired`.
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -311,12 +311,12 @@ pub enum ChargeState {
     Open,
     /// Credited on the ledger. Nothing more is owed and nothing more may be quoted.
     Paid,
-    /// The cashier rang up a newer charge for this merchant, which replaced this one.
+    /// The cashier opened a newer charge for this merchant, which replaced this one.
     Superseded,
     /// The merchant cancelled it. TOLD APART from `Superseded` because the instruction differs:
     /// a superseded code means "scan the new one", a cancelled one means "nothing is owed".
     Cancelled,
-    /// Past [`CHARGE_TTL_SECS`] with nothing credited — the cashier must ring it up again.
+    /// Past [`CHARGE_TTL_SECS`] with nothing credited — the cashier must open a fresh charge.
     Expired,
 }
 
@@ -343,7 +343,7 @@ impl Charge {
     ///
     /// Neither saturation can bind, and both are saturations rather than panics only so this stays
     /// total for a caller holding a charge from anywhere: [`MAX_CENTS`] is refused at the door, and
-    /// the smallest price this till can ring up is one rappen — [`RAW_PER_CENT`] raw units, a
+    /// the smallest price this checkout can open is one rappen — [`RAW_PER_CENT`] raw units, a
     /// hundred times the fee.
     pub fn amount_raw(&self) -> u64 {
         self.cents
@@ -395,13 +395,13 @@ impl Charge {
     /// May this charge be quoted / instructed right now? The refusal names WHICH fact stopped it,
     /// because "ask the cashier for the new code" and "this was already paid" send a payer to do
     /// two different things.
-    fn payable(&self, now_secs: u64) -> Result<(), TillError> {
+    fn payable(&self, now_secs: u64) -> Result<(), CheckoutError> {
         match self.state(now_secs) {
             ChargeState::Open => Ok(()),
-            ChargeState::Paid => Err(TillError::AlreadyPaid),
-            ChargeState::Superseded => Err(TillError::Superseded),
-            ChargeState::Cancelled => Err(TillError::Cancelled),
-            ChargeState::Expired => Err(TillError::NoPendingCharge),
+            ChargeState::Paid => Err(CheckoutError::AlreadyPaid),
+            ChargeState::Superseded => Err(CheckoutError::Superseded),
+            ChargeState::Cancelled => Err(CheckoutError::Cancelled),
+            ChargeState::Expired => Err(CheckoutError::NoPendingCharge),
         }
     }
 
@@ -418,7 +418,7 @@ impl Charge {
 }
 
 /// A merchant's claimed name, bounded to [`MERCHANT_NAME_BYTES`] on a CHARACTER boundary (a name
-/// cut mid-codepoint is not a string). Total, and lossy only for a name no till could print.
+/// cut mid-codepoint is not a string). Total, and lossy only for a name no checkout could print.
 fn clamp_name(name: &str) -> String {
     let mut out = String::new();
     for ch in name.chars() {
@@ -432,29 +432,29 @@ fn clamp_name(name: &str) -> String {
 
 /// Every charge this relay is serving. In memory on purpose for v1: a charge is worth less than the
 /// hour it lives, and the money it describes is on a ledger that outlives any process. A restart
-/// costs the cashier a re-ring, never a payment — and never a double credit, because settlement is
+/// costs the cashier a re-open, never a payment — and never a double credit, because settlement is
 /// re-derived from ledger history rather than from anything stored here.
 ///
 /// MANY CHARGES PER MERCHANT, ON PURPOSE. "One live charge per merchant" is a POLICY this store
-/// applies at ring-up ([`TillStore::open`] voids the previous one), never the SHAPE of the store —
+/// applies at open ([`CheckoutStore::open`] voids the previous one), never the SHAPE of the store —
 /// which is why `by_id` holds N charges per merchant and `current` is merely an index into it. The
-/// next step for this till is an online shop: one merchant, many customers, each with their own
+/// next step for this checkout is an online shop: one merchant, many customers, each with their own
 /// charge, none blocking another. A store that could only hold one charge per merchant would have
 /// to be rebuilt to get there; this one only has to stop calling `void_current`.
 #[derive(Default)]
-pub struct TillStore {
+pub struct CheckoutStore {
     by_id: HashMap<String, Charge>,
     /// merchant account text → the id of THEIR current charge. An index over `by_id`, never a
     /// second copy of it: it may only ever name a charge this store still holds (the sweep clears
     /// it alongside), and a dangling entry is a bug this store reports rather than absorbs.
     current: HashMap<String, String>,
     /// `(merchant_pubkey, nonce)` → the second it was ACCEPTED. What makes a merchant's signature
-    /// single-use, and the reason [`TillStore::authorize`] is the only way in: an entry is written
-    /// on `Ok(())` and nowhere else, so a stranger firing forged ring-ups at this relay all day
+    /// single-use, and the reason [`CheckoutStore::authorize`] is the only way in: an entry is written
+    /// on `Ok(())` and nowhere else, so a stranger firing forged checkout-opens at this relay all day
     /// cannot add one byte to it.
     ///
     /// Bounded by the clock rather than by a cap, which is the whole point of `issued_at` carrying
-    /// a time at all: a request is accepted only within ±`TILL_OPEN_MAX_SKEW_SECS` of its own
+    /// a time at all: a request is accepted only within ±`CHECKOUT_OPEN_MAX_SKEW_SECS` of its own
     /// `issued_at`, so a nonce accepted at `t` can next be replayed at latest
     /// `issued_at + skew <= t + 2 * skew`. Remembering exactly that long is therefore not a
     /// heuristic — it is the full replay window, and an eviction cap would instead make an evicted
@@ -476,15 +476,15 @@ pub enum Observation {
 /// Why a provider call could not be answered. Mapped to the measured provider's own wording by the
 /// HTTP layer, so a wallet written against DFX meets the errors it already handles.
 #[derive(Debug, PartialEq, Eq)]
-pub enum TillError {
+pub enum CheckoutError {
     /// No such payment link — a stale or hostile code.
     UnknownCharge,
-    /// The link exists but nothing has been rung up on it yet. A DIFFERENT fact from the above, and
+    /// The link exists but nothing has been opened on it yet. A DIFFERENT fact from the above, and
     /// the measured provider distinguishes them too: this one means "ask the cashier", the other
     /// means "this code is not ours". Collapsing them sends a payer to talk to a cashier who does
     /// not exist.
     NoPendingCharge,
-    /// The cashier rang up a newer charge for this merchant, which replaced this one. The payer is
+    /// The cashier opened a newer charge for this merchant, which replaced this one. The payer is
     /// holding a code that was current a moment ago — they need the new one, which is a different
     /// instruction from both 404s above.
     Superseded,
@@ -499,51 +499,51 @@ pub enum TillError {
     AlreadyPaid,
     /// The quote id is unknown or has expired.
     DeadQuote,
-    /// A method/asset pair this till does not accept.
+    /// A method/asset pair this checkout does not accept.
     UnsupportedAsset,
     /// This merchant is already holding [`MAX_CHARGES_PER_MERCHANT`] charges. The only refusal here
-    /// a PAYER can never meet: it answers a ring-up, and nothing on the payer's three routes opens
+    /// a PAYER can never meet: it answers a checkout-open, and nothing on the payer's three routes opens
     /// one.
-    TillFull,
+    CheckoutFull,
 }
 
-/// Why a merchant's cancellation could not clear their till. Two outcomes only, because from the
+/// Why a merchant's cancellation could not clear their checkout. Two outcomes only, because from the
 /// counter there are only two: there was nothing payable to clear, or the money already arrived.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VoidRefusal {
-    /// This merchant has no charge in this store at all. Nothing was rung up, or the last one was
+    /// This merchant has no charge in this store at all. Nothing was opened, or the last one was
     /// swept — either way there is no code out there for a customer to be holding.
-    NothingRungUp,
+    NothingOpened,
     /// The charge was CREDITED on the ledger. Money moved, so nothing rings it away; the merchant
     /// is told which block paid them so they can act on the real thing that happened.
     AlreadyPaid(Settled),
 }
 
-impl TillStore {
+impl CheckoutStore {
     /// Prove a merchant's request came from the key it names, and BURN its nonce if it did.
     ///
-    /// The whole acceptance rule is `dpay_core::validate_till_open` — this adds only the two
+    /// The whole acceptance rule is `dpay_core::validate_checkout_open` — this adds only the two
     /// things a pure function cannot have: the seen-nonce set, and the guarantee that testing it
     /// and marking it happen under one borrow. Split apart, two copies of one signed request
     /// arriving together would both read "unseen" and both open a charge, which is precisely what
     /// a nonce exists to stop.
     ///
-    /// RECORDING ONLY ON SUCCESS is what keeps [`TillStore::seen_nonces`] finite: every entry cost
+    /// RECORDING ONLY ON SUCCESS is what keeps [`CheckoutStore::seen_nonces`] finite: every entry cost
     /// somebody a valid Ed25519 signature over their own key, so the set grows at the rate real
-    /// merchants ring up and not at the rate strangers can POST.
+    /// merchants open charges and not at the rate strangers can POST.
     pub fn authorize(
         &mut self,
-        open: &TillOpen,
+        open: &CheckoutOpen,
         sig: &[u8; SIG_LEN],
         now_secs: u64,
-    ) -> Result<(), TillOpenError> {
+    ) -> Result<(), CheckoutOpenError> {
         let key = (open.merchant_pubkey, open.nonce);
-        validate_till_open(open, sig, now_secs, self.seen_nonces.contains_key(&key))?;
+        validate_checkout_open(open, sig, now_secs, self.seen_nonces.contains_key(&key))?;
         self.seen_nonces.insert(key, now_secs);
         Ok(())
     }
 
-    /// Ring up a charge, VOIDING this merchant's previous one. `id` and `reference` are supplied by
+    /// Open a charge, VOIDING this merchant's previous one. `id` and `reference` are supplied by
     /// the caller so the randomness stays in one place (the HTTP layer, which has the CSPRNG) and
     /// this module stays pure and testable.
     ///
@@ -552,13 +552,13 @@ impl TillStore {
     /// note for why that distinction is the whole design.
     ///
     /// REFUSED when this merchant is already at [`MAX_CHARGES_PER_MERCHANT`], and refused BEFORE
-    /// the void: a ring-up that cannot be honoured must not also take away the payable charge the
+    /// the void: a checkout-open that cannot be honoured must not also take away the payable charge the
     /// merchant already had, which would turn a bounded refusal into a lost sale.
     ///
     /// AUTHORISATION IS THE CALLER'S: this takes a merchant account and believes it. The one route
-    /// that reaches it puts [`TillStore::authorize`] first, which is what makes the void above
+    /// that reaches it puts [`CheckoutStore::authorize`] first, which is what makes the void above
     /// safe — before that, an anonymous POST naming somebody else's key could keep re-ringing
-    /// their till and force a cashier to ring up again on every attempt.
+    /// their checkout and force a cashier to open a fresh charge on every attempt.
     pub fn open(
         &mut self,
         id: String,
@@ -569,9 +569,9 @@ impl TillStore {
         note: Option<String>,
         cents: u64,
         now_secs: u64,
-    ) -> Result<Charge, TillError> {
+    ) -> Result<Charge, CheckoutError> {
         if self.charges_of(&merchant) >= MAX_CHARGES_PER_MERCHANT {
-            return Err(TillError::TillFull);
+            return Err(CheckoutError::CheckoutFull);
         }
         match self.void(&merchant, VoidCause::Superseded) {
             // The previous charge is closed to new payers. It stays readable and stays OBSERVED —
@@ -579,7 +579,7 @@ impl TillStore {
             Ok(_) => {}
             // This merchant's first charge, or their last one was already paid. Nothing to close
             // either way, and a credited sale is not voided by the next customer.
-            Err(VoidRefusal::NothingRungUp | VoidRefusal::AlreadyPaid(_)) => {}
+            Err(VoidRefusal::NothingOpened | VoidRefusal::AlreadyPaid(_)) => {}
         }
         let charge = Charge {
             id: id.clone(),
@@ -608,7 +608,7 @@ impl TillStore {
     /// How many charges this store is holding for one merchant — the count [`MAX_CHARGES_PER_MERCHANT`]
     /// bounds. Derived from `by_id` rather than kept beside it, for the same reason `current` is an
     /// index and not a copy: a second tally is a second thing to drift, and the sweep would have to
-    /// keep it honest. A scan is affordable because it happens once per ring-up, which costs the
+    /// keep it honest. A scan is affordable because it happens once per checkout-open, which costs the
     /// caller an Ed25519 signature.
     fn charges_of(&self, merchant: &str) -> usize {
         self.by_id
@@ -621,27 +621,27 @@ impl TillStore {
     /// it now stands. Unpaid only: a settled charge is a record of money that moved, and nothing
     /// rings that away.
     ///
-    /// THE ONE VOID MECHANISM, with the reason as a parameter — the next ring-up supersedes, the
+    /// THE ONE VOID MECHANISM, with the reason as a parameter — the next checkout-open supersedes, the
     /// cashier cancels, and both land in the same field so `Charge::state` has one thing to read.
     /// IDEMPOTENT, and deliberately so: cancelling an already-cancelled charge is what a cashier
     /// pressing a button twice does, and it succeeds with the charge unchanged rather than
     /// inventing a failure. The first cause is kept (see `Charge::voided`).
     ///
     /// Authorisation is the CALLER's: this takes an account text and believes it. Both routes that
-    /// reach it call [`TillStore::authorize`] first.
+    /// reach it call [`CheckoutStore::authorize`] first.
     pub fn void(&mut self, merchant: &str, cause: VoidCause) -> Result<Charge, VoidRefusal> {
         let Some(id) = self.current.get(merchant).cloned() else {
-            return Err(VoidRefusal::NothingRungUp); // nothing rung up — no code is out there
+            return Err(VoidRefusal::NothingOpened); // nothing opened — no code is out there
         };
         let Some(charge) = self.by_id.get_mut(&id) else {
             // The index may only ever name a charge this store holds (the sweep clears both
             // together), so this is a broken invariant rather than an ordinary absence. It is
             // REPORTED and then answered as the truth the caller can act on: nothing is payable.
             eprintln!(
-                "dpay-relay: till: the merchant index named {id}, which this store no longer \
+                "dpay-relay: checkout: the merchant index named {id}, which this store no longer \
                  holds — nothing was voided"
             );
-            return Err(VoidRefusal::NothingRungUp);
+            return Err(VoidRefusal::NothingOpened);
         };
         match &charge.paid {
             Some(settled) => Err(VoidRefusal::AlreadyPaid(settled.clone())),
@@ -662,12 +662,12 @@ impl TillStore {
     /// would put a "come and take it" on a screen that has already said "paid".
     ///
     /// The LATEST claim wins, and exactly one is kept. Two customers cannot be mid-payment on one
-    /// charge (a ring-up voids the previous charge, and a shop serves one person at a time), so a
+    /// charge (a checkout-open voids the previous charge, and a shop serves one person at a time), so a
     /// second claim is the same person's wallet reporting again — which is the retry the standard
     /// makes free. Keeping a list would only give the merchant's phone several doomed pulls to try.
-    pub fn claim_pull(&mut self, id: &str, payer: String, now_secs: u64) -> Result<(), TillError> {
+    pub fn claim_pull(&mut self, id: &str, payer: String, now_secs: u64) -> Result<(), CheckoutError> {
         let Some(charge) = self.by_id.get_mut(id) else {
-            return Err(TillError::UnknownCharge);
+            return Err(CheckoutError::UnknownCharge);
         };
         charge.payable(now_secs)?;
         charge.pull = Some(PullClaim {
@@ -680,7 +680,7 @@ impl TillStore {
     /// Mint a quote for a charge and return it. Every read of the payment details mints a fresh one
     /// — the behaviour measured on the live provider, and the reason a wallet may hold several.
     ///
-    /// The expiry is CLAMPED to the charge's own death, so this till never states a deadline it
+    /// The expiry is CLAMPED to the charge's own death, so this checkout never states a deadline it
     /// will not honour: a quote minted with five minutes left on a charge that has thirty seconds
     /// to live is good for thirty seconds, and says so.
     pub fn quote(
@@ -688,8 +688,8 @@ impl TillStore {
         id: &str,
         quote_id: String,
         now_secs: u64,
-    ) -> Result<(String, u64), TillError> {
-        let charge = self.by_id.get_mut(id).ok_or(TillError::UnknownCharge)?;
+    ) -> Result<(String, u64), CheckoutError> {
+        let charge = self.by_id.get_mut(id).ok_or(CheckoutError::UnknownCharge)?;
         charge.payable(now_secs)?;
         let expires = now_secs
             .saturating_add(QUOTE_TTL_SECS)
@@ -702,23 +702,23 @@ impl TillStore {
         Ok((quote_id, expires))
     }
 
-    /// The expiry of a quote this till issued for this charge, if it is still live. Returning the
+    /// The expiry of a quote this checkout issued for this charge, if it is still live. Returning the
     /// instant rather than a yes/no is what lets step 3 state THE QUOTE's deadline instead of
     /// inventing a second one — one object, one death.
-    pub fn quote_expiry(&self, id: &str, quote_id: &str, now_secs: u64) -> Result<u64, TillError> {
-        let charge = self.by_id.get(id).ok_or(TillError::UnknownCharge)?;
+    pub fn quote_expiry(&self, id: &str, quote_id: &str, now_secs: u64) -> Result<u64, CheckoutError> {
+        let charge = self.by_id.get(id).ok_or(CheckoutError::UnknownCharge)?;
         charge
             .quotes
             .iter()
             .find(|(q, exp)| q == quote_id && *exp > now_secs)
             .map(|(_, exp)| *exp)
-            .ok_or(TillError::DeadQuote)
+            .ok_or(CheckoutError::DeadQuote)
     }
 
     /// Decide whether this poll should read the ledger, and mark the claim if it should. See
     /// [`Observation`] and [`OBSERVE_TTL_SECS`].
-    pub fn observe(&mut self, id: &str, now_secs: u64) -> Result<Observation, TillError> {
-        let charge = self.by_id.get_mut(id).ok_or(TillError::UnknownCharge)?;
+    pub fn observe(&mut self, id: &str, now_secs: u64) -> Result<Observation, CheckoutError> {
+        let charge = self.by_id.get_mut(id).ok_or(CheckoutError::UnknownCharge)?;
         if charge.paid.is_some() {
             return Ok(Observation::Recent(charge.clone()));
         }
@@ -744,9 +744,9 @@ impl TillStore {
         &mut self,
         id: &str,
         rows: &[TxnRecord],
-    ) -> Result<Option<Settled>, TillError> {
+    ) -> Result<Option<Settled>, CheckoutError> {
         let consumed = self.consumed_blocks();
-        let charge = self.by_id.get_mut(id).ok_or(TillError::UnknownCharge)?;
+        let charge = self.by_id.get_mut(id).ok_or(CheckoutError::UnknownCharge)?;
         if charge.paid.is_some() {
             return Ok(charge.paid.clone());
         }
@@ -757,7 +757,7 @@ impl TillStore {
         Ok(Some(settled))
     }
 
-    /// Every ledger row this till has already credited, by block index — the CONSUMPTION SET.
+    /// Every ledger row this checkout has already credited, by block index — the CONSUMPTION SET.
     ///
     /// Derived from the charges themselves rather than kept alongside them, so there is exactly
     /// one statement of "this row paid something" (the `Settled` record) and no second structure
@@ -773,7 +773,7 @@ impl TillStore {
 
     /// Drop charges past their life, and nonces past their replay window. Called opportunistically;
     /// nothing depends on it having run, because every read re-checks state itself and
-    /// [`TillStore::authorize`] re-checks the clock.
+    /// [`CheckoutStore::authorize`] re-checks the clock.
     pub fn sweep(&mut self, now_secs: u64) {
         self.by_id.retain(|_, c| match c.paid {
             // A credited sale is the merchant's record of it, and the mark that stops its ledger
@@ -785,20 +785,20 @@ impl TillStore {
         let by_id = &self.by_id;
         self.current.retain(|_, id| by_id.contains_key(id));
         // A nonce is forgotten only once no signature carrying it could be accepted again — see
-        // [`TillStore::seen_nonces`] for why that is exactly twice the skew window. INCLUSIVE, and
+        // [`CheckoutStore::seen_nonces`] for why that is exactly twice the skew window. INCLUSIVE, and
         // that boundary is the whole correctness of it: a request accepted at `at` may have been
         // issued as late as `at + skew`, and such a request is still inside the clock window at
         // `at + 2 * skew` exactly. Dropping the nonce one second early hands the replay through the
         // only door that was holding it; keeping it longer is memory spent refusing what the clock
         // already refuses.
         self.seen_nonces
-            .retain(|_, at| now_secs <= at.saturating_add(2 * dpay_core::TILL_OPEN_MAX_SKEW_SECS));
+            .retain(|_, at| now_secs <= at.saturating_add(2 * dpay_core::CHECKOUT_OPEN_MAX_SKEW_SECS));
     }
 }
 
 /// Shared handle, wrapped the way the rest of the relay wraps mutable state: a poison-tolerant
 /// `Mutex` that is never held across an await.
-pub type SharedTills = Arc<Mutex<TillStore>>;
+pub type SharedCheckouts = Arc<Mutex<CheckoutStore>>;
 
 /// The one method/asset pair v1 serves. A pair outside this is `UnsupportedAsset` — refused rather
 /// than quoted, because quoting anything else would mean holding an exchange rate.
@@ -807,11 +807,11 @@ pub(crate) const ASSET: &str = "VCHF";
 
 /// Is this the pair we serve? Case-insensitive on the asset, because an outside wallet echoes back
 /// whatever spelling it read and casing is not identity.
-pub(crate) fn supported(method: &str, asset: &str) -> Result<(), TillError> {
+pub(crate) fn supported(method: &str, asset: &str) -> Result<(), CheckoutError> {
     if method == METHOD && asset.eq_ignore_ascii_case(ASSET) {
         Ok(())
     } else {
-        Err(TillError::UnsupportedAsset)
+        Err(CheckoutError::UnsupportedAsset)
     }
 }
 
@@ -823,10 +823,10 @@ pub(crate) fn supported(method: &str, asset: &str) -> Result<(), TillError> {
 ///   * the amount is EXACT in raw units — never "at least", so an underpayment is not a payment and
 ///     a rounding difference is not silently absorbed;
 ///   * the memo IS this charge's [`Charge::reference`]. The clause that makes a match exact: two
-///     customers owing the same shop the same CHF 4.50 are told apart by the thing the till minted
+///     customers owing the same shop the same CHF 4.50 are told apart by the thing the checkout minted
 ///     for each of them, not by which of two identical rows arrived first;
 ///   * the row has NOT already paid something. `consumed` holds the block index of every row this
-///     till has credited, and a spent row is spent. It survives the reference rather than being
+///     checkout has credited, and a spent row is spent. It survives the reference rather than being
 ///     replaced by it, because the two rest on different things: the reference is read out of a
 ///     PAYER-SUPPLIED memo, while consumption is derived from this store's own settlements. One
 ///     transfer, one sale therefore stays true without depending on a stranger's field being
@@ -835,8 +835,8 @@ pub(crate) fn supported(method: &str, asset: &str) -> Result<(), TillError> {
 ///
 /// THE CLOCK CLAUSE IS GONE, and its removal is the point rather than a tidy-up. It refused rows
 /// timestamped more than two minutes before the charge, to keep last week's identical sale out —
-/// work the reference now does completely, because a 16-byte value minted at ring-up cannot appear
-/// on a transfer sent before the ring-up. What the clause could still do was LOSE money: a row's
+/// work the reference now does completely, because a 16-byte value minted at open cannot appear
+/// on a transfer sent before the checkout-open. What the clause could still do was LOSE money: a row's
 /// `timestamp` is IC consensus time and `created_secs` is this relay's wall clock, so a relay
 /// running far enough ahead would refuse a correct, referenced payment and credit nothing. A clause
 /// that can no longer refuse a wrong payment and can still refuse a right one is not defence.
@@ -874,7 +874,7 @@ pub(crate) fn match_payment(
 pub(crate) struct DetailsBody {
     pub tag: &'static str,
     pub callback: String,
-    /// LUD-06 defines both of these in MILLISATOSHIS, and this till cannot state a millisatoshi
+    /// LUD-06 defines both of these in MILLISATOSHIS, and this checkout cannot state a millisatoshi
     /// amount: pricing 1:1 against the franc with no rate anywhere is the premise of the whole
     /// module, and converting CHF to msat needs exactly the BTC price this design deletes. So they
     /// are `0` — the honest declaration that nothing here is payable over Lightning, which is also
@@ -948,7 +948,7 @@ pub(crate) struct AssetAmount {
 #[derive(Debug, Serialize)]
 pub(crate) struct TransferBody {
     /// THE QUOTE's own expiry — the instruction dies with the price it belongs to. Minting a fresh
-    /// `now + QUOTE_TTL` here (what this used to do) states a deadline the till does not honour:
+    /// `now + QUOTE_TTL` here (what this used to do) states a deadline the checkout does not honour:
     /// it outlives the quote by however long the wallet took between step 2 and step 3, so a payer
     /// who waited is told the money is still good for a price that is already dead.
     #[serde(rename = "expiryDate")]
@@ -959,11 +959,11 @@ pub(crate) struct TransferBody {
     pub blockchain: &'static str,
     /// `icp:<LEDGER>/transfer?to=<PRINCIPAL>&amount=<DECIMAL>&ref=<32 HEX>` — the measured
     /// provider's LIVE shape (not the one its public README documents — findings doc, "Stale-README
-    /// trap #1"), plus this till's own `ref`.
+    /// trap #1"), plus this checkout's own `ref`.
     ///
     /// `ref` is an ADDITION to that grammar, and it costs compatibility nothing: the wallets that
-    /// speak this standard settle rails this till does not quote (measured — see the module
-    /// header), so the only payer a dpay till can have is a dpay build, which ships this parameter
+    /// speak this standard settle rails this checkout does not quote (measured — see the module
+    /// header), so the only payer a dpay checkout can have is a dpay build, which ships this parameter
     /// with the relay that emits it. A payer that cannot read a parameter must refuse rather than
     /// drop it (dpay's own does: `ICP_URI_PARAMS`, `app/lib/opencryptopay.ts`), so a wallet meeting
     /// this for the first time fails closed and is never quietly credited to the wrong charge.
@@ -972,18 +972,18 @@ pub(crate) struct TransferBody {
 }
 
 /// What the merchant's own app and the cashier page poll. `state` is the answer `paid` alone cannot
-/// give: a charge that was superseded by the next ring-up and one that is still waiting look
+/// give: a charge that was superseded by the next checkout-open and one that is still waiting look
 /// identical through a null `paid`, and the cashier's screen has to tell a customer which of those
 /// it is.
 ///
 /// # THE CHARGE ID IS A BEARER READ TOKEN — the threat model this body survives
 ///
-/// `GET /api/v1/till/{id}` is UNAUTHENTICATED, and has to be: the cashier page
-/// (`../assets/till.html`) is a plain browser page on a screen that holds no key, so the route
+/// `GET /api/v1/checkout/{id}` is UNAUTHENTICATED, and has to be: the cashier page
+/// (`../assets/checkout.html`) is a plain browser page on a screen that holds no key, so the route
 /// cannot tell the merchant from a bystander by anything it sees. Anybody who photographs the code
 /// at the counter can therefore read this body. The question is not whether that is comfortable, it
 /// is what such a reader LEARNS THAT THEY COULD NOT OTHERWISE and what they can DO with it — worked
-/// field by field against the routes the standard ALREADY obliges this till to serve to any caller
+/// field by field against the routes the standard ALREADY obliges this checkout to serve to any caller
 /// holding the same id:
 ///
 /// * `id` — the caller's own token.
@@ -994,7 +994,7 @@ pub(crate) struct TransferBody {
 /// * `state` — steps 2 and 3 refuse a charge that is not payable, BY CAUSE ([`Charge::payable`]),
 ///   so superseded / cancelled / expired is already disclosed to a payer who asks.
 /// * `created_secs` / `expires_at` — step 2 serves the quote's `expiration` and step 3 the
-///   instruction's `expiryDate`. The ring-up second is the one value here no other route states,
+///   instruction's `expiryDate`. The checkout-open second is the one value here no other route states,
 ///   and all it says is when a cashier typed a price.
 /// * `paid` — the settlement, INCLUDING the payer's account ([`Settled::from`]). The only field
 ///   worth arguing over, and what closes it is DERIVATION, not obscurity: an id-holder is handed
@@ -1005,7 +1005,7 @@ pub(crate) struct TransferBody {
 ///   This field restates public state; it creates no link the QR had not already created.
 ///
 /// WHAT AN ID-HOLDER STILL CANNOT DO, which is what makes the above tolerable rather than merely
-/// equal: they cannot ENUMERATE (an id is 16 bytes of OS randomness — [`fresh_id`]); cannot ring up,
+/// equal: they cannot ENUMERATE (an id is 16 bytes of OS randomness — [`fresh_id`]); cannot open one,
 /// void or re-aim anything (both merchant routes demand the signature of the key the destination
 /// account derives from — rule 0); cannot make this relay pay anything; and cannot even make it
 /// walk a ledger on demand ([`OBSERVE_TTL_SECS`] bounds a charge to one history read every 2 s
@@ -1013,7 +1013,7 @@ pub(crate) struct TransferBody {
 /// anything a stranger writes.
 ///
 /// WHAT IS DELIBERATELY OFF THIS BODY. [`Charge::reference`] — not because it would leak (step 3
-/// hands it to any id-holder) but because the merchant was told it on the ring-up they signed, so
+/// hands it to any id-holder) but because the merchant was told it on the checkout-open they signed, so
 /// restating it here would widen an unauthenticated body for no reader. The same rule retired
 /// `merchant`, the destination principal, on 2026-09-08: its only reader was the cashier page,
 /// which was printing a 63-character principal in the place it meant the shop's NAME.
@@ -1027,11 +1027,11 @@ pub(crate) struct ChargeStatus {
     pub id: String,
     pub cents: u64,
     pub amount: String,
-    /// The shop's own CLAIMED name, as signed into the ring-up and clamped to
+    /// The shop's own CLAIMED name, as signed into the checkout-open and clamped to
     /// [`MERCHANT_NAME_BYTES`]. Every renderer treats it as display text and never as markup.
     pub merchant_name: String,
     pub state: ChargeState,
-    /// Unix seconds this charge was rung up, and the second it stops being payable
+    /// Unix seconds this charge was opened, and the second it stops being payable
     /// ([`Charge::expires_at`]). Both are on the wire so the cashier's screen can render an honest
     /// countdown without a copy of this module's lifetime constant — the same reason the payer's
     /// half is given the quote's own `expiration` rather than a TTL to add up itself. They are
@@ -1070,12 +1070,12 @@ impl ChargeStatus {
     }
 }
 
-/// The merchant's SIGNED request: ring one up (`cents >= 1`), or clear the till (`cents == 0`).
+/// The merchant's SIGNED request: open one charge (\`cents >= 1\`), or clear the checkout (\`cents == 0\`).
 ///
-/// Every field below is covered by `signature` — `dpay_core::TillOpen::signing_bytes` is the
-/// canonical encoding and `dfx/till_open_signing.json` pins it for the app that produces one. The
+/// Every field below is covered by `signature` — `dpay_core::CheckoutOpen::signing_bytes` is the
+/// canonical encoding and `dfx/checkout_open_signing.json` pins it for the app that produces one. The
 /// two actions share this shape ON PURPOSE and are separated by the SIGNED `cents`, so a captured
-/// ring-up cannot be re-aimed at the cancel route, nor a cancellation at the ring-up route.
+/// checkout-open cannot be re-aimed at the cancel route, nor a cancellation at the checkout-open route.
 #[derive(Debug, Deserialize)]
 pub(crate) struct OpenCharge {
     /// The merchant's own device pubkey, 64 hex. Their account is DERIVED from it exactly as every
@@ -1088,7 +1088,7 @@ pub(crate) struct OpenCharge {
     /// The one-line purpose the payer reads on review ("2× Kafi, Tisch 4"), or absent for the
     /// note-less (v1) request every older app sends — `None` and an omitted field are the same
     /// thing, which is what `serde(default)` buys. Inside the signed bytes under
-    /// `TILL_OPEN_DOMAIN_V2` when present, so the relay can attribute it.
+    /// `CHECKOUT_OPEN_DOMAIN_V2` when present, so the relay can attribute it.
     #[serde(default)]
     pub note: Option<String>,
     /// The price in CHF cents; `0` on the cancel route and nowhere else.
@@ -1096,31 +1096,31 @@ pub(crate) struct OpenCharge {
     /// 32 hex — the 16-byte single-use nonce that makes this signature good exactly once.
     pub nonce: String,
     /// Unix SECONDS the merchant's device built this request. Accepted only within
-    /// ±`TILL_OPEN_MAX_SKEW_SECS` of this relay's clock, which is what bounds the nonce set.
+    /// ±`CHECKOUT_OPEN_MAX_SKEW_SECS` of this relay's clock, which is what bounds the nonce set.
     pub issued_at: u64,
-    /// 128 hex — the Ed25519 signature over `dpay_core::TillOpen::signing_bytes`.
+    /// 128 hex — the Ed25519 signature over `dpay_core::CheckoutOpen::signing_bytes`.
     pub signature: String,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dpay_core::{sign_till_open, TILL_OPEN_MAX_SKEW_SECS};
+    use dpay_core::{sign_checkout_open, CHECKOUT_OPEN_MAX_SKEW_SECS};
     use ed25519_dalek::SigningKey;
 
     const MERCHANT: &str = "ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae";
     const OTHER_MERCHANT: &str = "3sgnf-nsdcx-tojvm-zvbdz-3v6ec-4uqfa-mgstv-xu4tv-uh5r6-wd7yd-cae";
     const PAYER: &str = "lrdna-ain6m-ja6ko-ac4j2-jqk3t-nqs22-4irws-bsm3b-trzzq-3yfz6-mqe";
 
-    /// The reference every fixture charge below is rung up with. A fixed value, because what the
+    /// The reference every fixture charge below is opened with. A fixed value, because what the
     /// tests are about is whether a row CARRIES it — the randomness of a real one is
     /// `an_id_is_minted_unguessably_and_in_the_standards_shape`'s business.
     const REF: &str = "7c1de0f5a3b264978e0d1a5f2c6b4093";
 
-    /// Ring up a charge, or fail the test with the refusal. The store's `Result` is about the
+    /// Open a charge, or fail the test with the refusal. The store's `Result` is about the
     /// per-merchant bound, which only its own test provokes.
     fn ring_up(
-        s: &mut TillStore,
+        s: &mut CheckoutStore,
         id: &str,
         merchant: &str,
         pk: [u8; 32],
@@ -1142,7 +1142,7 @@ mod tests {
 
     /// A store holding one charge, and that charge.
     fn charge(cents: u64, created: u64) -> Charge {
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         s.open(
             "pl_test".into(),
             REF.into(),
@@ -1217,7 +1217,7 @@ mod tests {
             4_294_967_295 * RAW_PER_CENT - LEDGER_FEE_RAW
         );
         // The largest charge the door admits still multiplies exactly — which is what the door's
-        // bound is for: past it the arithmetic would saturate and the till would quote a lie.
+        // bound is for: past it the arithmetic would saturate and the checkout would quote a lie.
         assert_eq!(
             charge(MAX_CENTS, 0).amount_raw(),
             MAX_CENTS * RAW_PER_CENT - LEDGER_FEE_RAW
@@ -1228,7 +1228,7 @@ mod tests {
     /// the customer's bank statement rather than as the arithmetic that produces it.
     ///
     /// An ICRC ledger debits the sender `amount + fee` and credits the recipient `amount`. So for
-    /// every price this till can ring up, the debit must be the price exactly, and the shop must be
+    /// every price this checkout can open, the debit must be the price exactly, and the shop must be
     /// the one out of pocket by the fee.
     #[test]
     fn the_customer_is_debited_the_price_and_the_shop_pays_the_fee() {
@@ -1316,7 +1316,7 @@ mod tests {
             match_payment(&c, &[row(MERCHANT, c.amount_raw() + 1, 1_050, 2)], &unspent()),
             None
         );
-        // Including the one an old till would have asked for: a payer who sent the PRICE rather
+        // Including the one an old checkout would have asked for: a payer who sent the PRICE rather
         // than the quote has overpaid by the fee this shop absorbs, and that is not this sale.
         assert_eq!(
             match_payment(&c, &[row(MERCHANT, 100 * RAW_PER_CENT, 1_050, 3)], &unspent()),
@@ -1331,17 +1331,17 @@ mod tests {
 
     #[test]
     fn one_transfer_can_only_ever_pay_one_sale() {
-        // THE MONEY BUG: two charges for the same price at the same till and ONE payment, both
+        // THE MONEY BUG: two charges for the same price at the same checkout and ONE payment, both
         // reading as paid, and the shop hands over the goods twice.
         //
         // The reference now stops that on its own — a transfer names ONE charge
         // (`only_a_transfer_carrying_this_charges_reference_settles_it`). What is asserted here is
-        // the clause that stops it WITHOUT the reference, which is why both charges below are rung
+        // the clause that stops it WITHOUT the reference, which is why both charges below are opened
         // up with the same one: a state `open_charge` cannot produce, and deliberately so. The two
         // rules rest on different things — the reference is read out of a memo the PAYER supplies,
         // consumption out of this store's own settlements — so consumption is what keeps "one
         // transfer, one sale" from depending on a stranger's field being unforgeable.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 450, 1_000);
         ring_up(&mut s, "pl_b", MERCHANT, [7u8; 32], 450, 1_001);
         let rows = [paying_row(MERCHANT, 450, 1_010, 12)];
@@ -1371,7 +1371,7 @@ mod tests {
         // The relay stamps a charge with ITS wall clock; the ledger stamps a row with IC consensus
         // time. They are different clocks, so any rule that compares them can refuse a correct
         // payment — money moved, sale never credited. Since a charge's reference cannot exist
-        // before the ring-up that minted it, the row's timestamp has nothing left to prove, and
+        // before the checkout-open that minted it, the row's timestamp has nothing left to prove, and
         // this pins that no floor was reintroduced: a referenced payment settles however far the
         // two clocks disagree, in either direction.
         let c = charge(100, 1_000);
@@ -1386,10 +1386,10 @@ mod tests {
     #[test]
     fn only_a_transfer_carrying_this_charges_reference_settles_it() {
         // THE CLAUSE THAT MAKES A MATCH EXACT. Two customers owe the same shop the same CHF 4.50;
-        // each is handed the till's own reference for their charge, and each transfer credits
+        // each is handed the checkout's own reference for their charge, and each transfer credits
         // exactly the sale it was made for — with no help from consumption, which never sees a
         // second candidate.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         let (first, second) = ("ab".repeat(16), "cd".repeat(16));
         s.open(
             "pl_a".into(),
@@ -1470,7 +1470,7 @@ mod tests {
     fn settlement_is_recorded_once_and_never_rewritten() {
         // The idempotence that lets a payer re-report safely: a second observation must not be able
         // to change who paid. Re-reporting is a RETRY here, not a second chance to lose the money.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         let first = s
             .settle_from_history("pl_a", &[paying_row(MERCHANT, 100, 10, 1)])
@@ -1492,28 +1492,28 @@ mod tests {
     fn a_charge_this_store_does_not_hold_is_reported_rather_than_swallowed() {
         // Every one of these used to be (or could quietly become) a silent no-op. A caller acting
         // on an id that is gone must be told, not answered with a shrug.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         assert_eq!(
             s.settle_from_history("pl_gone", &[]),
-            Err(TillError::UnknownCharge)
+            Err(CheckoutError::UnknownCharge)
         );
         assert_eq!(
             s.quote("pl_gone", "plq_1".into(), 0),
-            Err(TillError::UnknownCharge)
+            Err(CheckoutError::UnknownCharge)
         );
         assert_eq!(
             s.quote_expiry("pl_gone", "plq_1", 0),
-            Err(TillError::UnknownCharge)
+            Err(CheckoutError::UnknownCharge)
         );
         assert!(matches!(
             s.observe("pl_gone", 0),
-            Err(TillError::UnknownCharge)
+            Err(CheckoutError::UnknownCharge)
         ));
     }
 
     #[test]
-    fn only_a_quote_this_till_issued_and_has_not_expired_is_accepted() {
-        let mut s = TillStore::default();
+    fn only_a_quote_this_checkout_issued_and_has_not_expired_is_accepted() {
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         s.quote("pl_a", "plq_1".into(), 0).unwrap();
 
@@ -1527,11 +1527,11 @@ mod tests {
         // Past its life, and one we never issued: both dead, neither payable.
         assert_eq!(
             s.quote_expiry("pl_a", "plq_1", QUOTE_TTL_SECS),
-            Err(TillError::DeadQuote)
+            Err(CheckoutError::DeadQuote)
         );
         assert_eq!(
             s.quote_expiry("pl_a", "plq_invented", 0),
-            Err(TillError::DeadQuote)
+            Err(CheckoutError::DeadQuote)
         );
     }
 
@@ -1540,7 +1540,7 @@ mod tests {
         // The measured provider mints a NEW quote on every read and leaves the old ones valid, so a
         // wallet that reads twice must not find its first quote dead. Bounded, though: a looping
         // wallet must not be able to grow this map without limit.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         for i in 0..MAX_LIVE_QUOTES {
             s.quote("pl_a", format!("plq_{i}"), 0).unwrap();
@@ -1550,19 +1550,19 @@ mod tests {
         assert_eq!(s.get("pl_a").unwrap().quotes.len(), MAX_LIVE_QUOTES);
         assert_eq!(
             s.quote_expiry("pl_a", "plq_0", 0),
-            Err(TillError::DeadQuote)
+            Err(CheckoutError::DeadQuote)
         );
         assert!(s.quote_expiry("pl_a", "plq_overflow", 0).is_ok());
     }
 
     #[test]
-    fn a_rung_up_charge_stops_being_payable_when_it_goes_stale() {
-        let mut s = TillStore::default();
+    fn a_opened_charge_stops_being_payable_when_it_goes_stale() {
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         assert!(s.quote("pl_a", "plq_1".into(), CHARGE_TTL_SECS - 1).is_ok());
         assert_eq!(
             s.quote("pl_a", "plq_2".into(), CHARGE_TTL_SECS),
-            Err(TillError::NoPendingCharge)
+            Err(CheckoutError::NoPendingCharge)
         );
         assert_eq!(
             s.get("pl_a").unwrap().state(CHARGE_TTL_SECS),
@@ -1574,8 +1574,8 @@ mod tests {
     fn a_quote_never_outlives_the_charge_it_prices() {
         // ONE lifetime, not two. A quote minted with five minutes of runway on a charge with ten
         // seconds left is good for ten seconds — and says so, rather than promising a deadline
-        // this till would refuse to honour.
-        let mut s = TillStore::default();
+        // this checkout would refuse to honour.
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         let late = CHARGE_TTL_SECS - 10;
         let (_, expires) = s.quote("pl_a", "plq_late".into(), late).unwrap();
@@ -1587,7 +1587,7 @@ mod tests {
         // …and it really is dead then, so nothing outlives the sweep that clears the charge.
         assert_eq!(
             s.quote_expiry("pl_a", "plq_late", CHARGE_TTL_SECS),
-            Err(TillError::DeadQuote)
+            Err(CheckoutError::DeadQuote)
         );
     }
 
@@ -1595,7 +1595,7 @@ mod tests {
     fn ringing_up_a_new_charge_voids_the_merchants_previous_one() {
         // ONE LIVE CHARGE PER MERCHANT, as a policy over a store that holds many: the old charge
         // is still here, still readable, just no longer payable.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_first", MERCHANT, [7u8; 32], 450, 100);
         ring_up(&mut s, "pl_second", MERCHANT, [7u8; 32], 900, 200);
 
@@ -1609,7 +1609,7 @@ mod tests {
         );
         assert_eq!(
             s.quote("pl_first", "plq_1".into(), 200),
-            Err(TillError::Superseded)
+            Err(CheckoutError::Superseded)
         );
         assert_eq!(s.get("pl_second").unwrap().state(200), ChargeState::Open);
         assert!(s.quote("pl_second", "plq_2".into(), 200).is_ok());
@@ -1624,9 +1624,9 @@ mod tests {
     #[test]
     fn a_voided_charge_still_credits_money_that_already_moved() {
         // The payer was holding the old code and sent the money a heartbeat before the cashier
-        // re-rang. Voiding must close the door to NEW payers, never blind the till to a transfer
+        // re-opened. Voiding must close the door to NEW payers, never blind the checkout to a transfer
         // that already happened — that would lose a real payment.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_first", MERCHANT, [7u8; 32], 450, 100);
         ring_up(&mut s, "pl_second", MERCHANT, [7u8; 32], 450, 200);
         let rows = [paying_row(MERCHANT, 450, 150, 21)];
@@ -1646,13 +1646,13 @@ mod tests {
     fn a_credited_charge_is_not_quoted_again() {
         // Quoting a settled charge invites a SECOND payment for the same sale, which nothing would
         // ever credit — the payer's money would simply sit on the ledger unclaimed.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         s.settle_from_history("pl_a", &[paying_row(MERCHANT, 100, 10, 31)])
             .unwrap();
         assert_eq!(
             s.quote("pl_a", "plq_1".into(), 20),
-            Err(TillError::AlreadyPaid)
+            Err(CheckoutError::AlreadyPaid)
         );
         // Being paid also outranks having been superseded or having gone stale.
         assert_eq!(
@@ -1666,7 +1666,7 @@ mod tests {
         // The amplification bound: one cheap HTTP request must not buy an unlimited number of
         // mainnet ledger walks. Whoever asks first claims the walk; everyone else inside the
         // window is answered from what it found.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 1_000);
         assert!(matches!(s.observe("pl_a", 1_000), Ok(Observation::Walk(_))));
         assert!(matches!(
@@ -1677,7 +1677,7 @@ mod tests {
             s.observe("pl_a", 1_000 + OBSERVE_TTL_SECS - 1),
             Ok(Observation::Recent(_))
         ));
-        // The window ENDS — a cache that never expired would be a till that never sees the money.
+        // The window ENDS — a cache that never expired would be a checkout that never sees the money.
         assert!(matches!(
             s.observe("pl_a", 1_000 + OBSERVE_TTL_SECS),
             Ok(Observation::Walk(_))
@@ -1695,9 +1695,9 @@ mod tests {
     #[test]
     fn a_merchant_name_is_bounded_however_long_it_arrives() {
         // A name is a stranger's text held for an hour. Unbounded, it is a way to spend this
-        // relay's memory a megabyte per ring-up.
-        let mut s = TillStore::default();
-        let named = |s: &mut TillStore, id: &str, name: String| {
+        // relay's memory a megabyte per checkout-open.
+        let mut s = CheckoutStore::default();
+        let named = |s: &mut CheckoutStore, id: &str, name: String| {
             s.open(
                 id.into(),
                 REF.into(),
@@ -1726,7 +1726,7 @@ mod tests {
     fn a_credited_sale_outlives_the_charge_but_not_the_day() {
         // A stale unpaid charge is litter; a credited one is the merchant's record of a sale AND
         // the mark that keeps its ledger row from paying anything else. Neither is kept forever.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_paid", MERCHANT, [7u8; 32], 100, 0);
         ring_up(&mut s, "pl_stale", OTHER_MERCHANT, [8u8; 32], 100, 0);
         s.settle_from_history("pl_paid", &[paying_row(MERCHANT, 100, 5, 51)])
@@ -1770,7 +1770,7 @@ mod tests {
         }
     }
 
-    /// The tripwire under [`ChargeStatus`]'s threat model. `GET /api/v1/till/{id}` is a bearer read
+    /// The tripwire under [`ChargeStatus`]'s threat model. `GET /api/v1/checkout/{id}` is a bearer read
     /// token, and the argument that this is acceptable is field-by-field: every key below is either
     /// already served to the same caller by the standard's own payer routes, or derivable from the
     /// public ICRC-1 ledger the QR itself names. That argument is only true of THIS key set, so the
@@ -1778,7 +1778,7 @@ mod tests {
     /// than merged as a diff nobody re-read.
     #[test]
     fn the_unauthenticated_status_body_is_exactly_these_fields() {
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         let charge = ring_up(
             &mut s,
             "pl_0123456789abcdef",
@@ -1812,7 +1812,7 @@ mod tests {
              re-derive ChargeStatus's threat model before changing this list"
         );
         // The two the argument names explicitly, so their absence is asserted rather than implied:
-        // the reference (the merchant holds it from the ring-up they signed) and the destination
+        // the reference (the merchant holds it from the checkout-open they signed) and the destination
         // principal (retired 2026-09-08 — its only reader was printing it as the shop's name).
         assert!(
             json.get("reference").is_none(),
@@ -1827,9 +1827,9 @@ mod tests {
     }
 
     #[test]
-    fn the_lnurl_encoder_reproduces_a_code_a_real_till_printed() {
+    fn the_lnurl_encoder_reproduces_a_code_a_real_checkout_printed() {
         // AN OUTSIDE-AUTHORED VECTOR, which is the only kind worth pinning an encoder against: this
-        // string was decoded from a photograph of a live DFX till's QR (`artifacts/spar-test-till-qr.png`),
+        // string was decoded from a photograph of a live DFX checkout's QR (`artifacts/spar-test-checkout-qr.png`),
         // so nothing in this repo wrote it and agreeing with it is a real check rather than a
         // tautology. Its 94 characters are also arithmetic: 6 (hrp + separator) + ceil(51 * 8 / 5)
         // (the URL's data symbols) + 6 (checksum).
@@ -1866,7 +1866,7 @@ mod tests {
     fn a_charge_states_the_one_deadline_every_reader_uses() {
         // The wire carries `expires_at` so a cashier's screen can count down without a copy of
         // CHARGE_TTL_SECS. It has to be the SAME instant the store enforces, or the screen and the
-        // till disagree about whether a customer can still pay.
+        // checkout disagree about whether a customer can still pay.
         let c = charge(100, 1_000);
         assert_eq!(c.expires_at(), 1_000 + CHARGE_TTL_SECS);
         assert_eq!(c.state(c.expires_at() - 1), ChargeState::Open);
@@ -1876,7 +1876,7 @@ mod tests {
             "the stated second is the last one"
         );
         // And a quote is clamped to exactly that instant rather than to a second derivation of it.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         let opened = ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 1_000);
         let (_, quote_expires) = s
             .quote("pl_a", "plq_1".into(), 1_000 + CHARGE_TTL_SECS - 5)
@@ -1888,8 +1888,8 @@ mod tests {
     fn a_merchant_may_not_hold_more_charges_than_the_store_bounds() {
         // Ringing up is authenticated but not rationed, so without this one signer grows this
         // relay's memory without limit. The bound is per merchant and counted from the store
-        // itself, so another merchant's till is unaffected by a neighbour at its limit.
-        let mut s = TillStore::default();
+        // itself, so another merchant's checkout is unaffected by a neighbour at its limit.
+        let mut s = CheckoutStore::default();
         for i in 0..MAX_CHARGES_PER_MERCHANT {
             ring_up(&mut s, &format!("pl_{i}"), MERCHANT, [7u8; 32], 100, 0);
         }
@@ -1905,7 +1905,7 @@ mod tests {
                 0
             )
             .err(),
-            Some(TillError::TillFull)
+            Some(CheckoutError::CheckoutFull)
         );
         // REFUSED BEFORE THE VOID: the charge the merchant already had is still the payable one, so
         // a bounded refusal never costs them the sale in front of them.
@@ -1917,7 +1917,7 @@ mod tests {
         assert_eq!(s.get(&live).expect("held").state(0), ChargeState::Open);
         assert!(
             s.get("pl_over").is_none(),
-            "a refused ring-up stores nothing"
+            "a refused checkout-open stores nothing"
         );
 
         // Per MERCHANT, not per store.
@@ -1933,7 +1933,7 @@ mod tests {
                 0
             )
             .is_ok());
-        // And it frees itself with time: the sweep drops the stale charges, and the next ring-up
+        // And it frees itself with time: the sweep drops the stale charges, and the next checkout-open
         // is accepted — which is exactly what the refusal tells the merchant to wait for.
         s.sweep(CHARGE_TTL_SECS);
         assert!(s
@@ -1957,23 +1957,23 @@ mod tests {
                                                                    // Everything else is refused rather than quoted: quoting it would mean holding a rate.
         assert_eq!(
             supported("InternetComputer", "ICP"),
-            Err(TillError::UnsupportedAsset)
+            Err(CheckoutError::UnsupportedAsset)
         );
         assert_eq!(
             supported("InternetComputer", "ckBTC"),
-            Err(TillError::UnsupportedAsset)
+            Err(CheckoutError::UnsupportedAsset)
         );
         assert_eq!(
             supported("Solana", "VCHF"),
-            Err(TillError::UnsupportedAsset)
+            Err(CheckoutError::UnsupportedAsset)
         );
     }
 
-    /// A merchant key and a ring-up genuinely signed by it. The key IS the claim, so a fixture that
+    /// A merchant key and a checkout-open genuinely signed by it. The key IS the claim, so a fixture that
     /// let the two drift would be testing nothing.
-    fn signed(seed: u8, cents: u64, nonce: u8, issued_at: u64) -> (TillOpen, [u8; SIG_LEN]) {
+    fn signed(seed: u8, cents: u64, nonce: u8, issued_at: u64) -> (CheckoutOpen, [u8; SIG_LEN]) {
         let sk = SigningKey::from_bytes(&[seed; PUBKEY_LEN]);
-        let open = TillOpen {
+        let open = CheckoutOpen {
             merchant_pubkey: sk.verifying_key().to_bytes(),
             cents,
             nonce: [nonce; NONCE_LEN],
@@ -1981,25 +1981,25 @@ mod tests {
             merchant_name: "Bahnhof Kiosk".to_string(),
             note: None,
         };
-        let sig = sign_till_open(&sk, &open).to_bytes();
+        let sig = sign_checkout_open(&sk, &open).to_bytes();
         (open, sig)
     }
 
     #[test]
     fn a_forged_ring_up_is_refused_and_leaves_nothing_behind() {
-        // THE HOLE THIS CLOSES. `POST /api/v1/till` took any 32 bytes of hex as the account every
-        // payer would then be sent to; a probe rang up a live production charge with
+        // THE HOLE THIS CLOSES. `POST /api/v1/checkout` took any 32 bytes of hex as the account every
+        // payer would then be sent to; a probe opened a live production charge with
         // `deadbeef…deadbeef` on 2026-09-03. The acceptance rule itself is the core's
-        // (`validate_till_open`, tested there); what is asserted here is the STORE's half of it —
+        // (`validate_checkout_open`, tested there); what is asserted here is the STORE's half of it —
         // that a refusal writes nothing, which is what keeps the nonce set finite when the callers
         // are strangers.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         let now = 1_000_000;
         let (open, sig) = signed(5, 450, 0xa1, now);
 
         // A key nobody holds: not a curve point, so it is told apart from a wrong signature — a
         // merchant who pasted a placeholder must hear about the KEY, not about their signing.
-        let deadbeef = TillOpen {
+        let deadbeef = CheckoutOpen {
             merchant_pubkey: <[u8; PUBKEY_LEN]>::try_from(
                 hex::decode("deadbeef".repeat(8))
                     .expect("a hex fixture")
@@ -2010,18 +2010,18 @@ mod tests {
         };
         assert_eq!(
             s.authorize(&deadbeef, &sig, now),
-            Err(TillOpenError::MalformedKey)
+            Err(CheckoutOpenError::MalformedKey)
         );
         // A real key, someone else's signature.
         let (_, other_sig) = signed(6, 450, 0xa1, now);
         assert_eq!(
             s.authorize(&open, &other_sig, now),
-            Err(TillOpenError::BadSignature)
+            Err(CheckoutOpenError::BadSignature)
         );
         // The right signature, an hour late — a captured request replayed long after the fact.
         assert_eq!(
-            s.authorize(&open, &sig, now + TILL_OPEN_MAX_SKEW_SECS + 1),
-            Err(TillOpenError::Stale)
+            s.authorize(&open, &sig, now + CHECKOUT_OPEN_MAX_SKEW_SECS + 1),
+            Err(CheckoutOpenError::Stale)
         );
 
         // NOT ONE of those three wrote a nonce, which is the property that matters: a stranger
@@ -2031,7 +2031,7 @@ mod tests {
         // …and exactly once. The same request again is the replay a nonce exists to refuse.
         assert_eq!(
             s.authorize(&open, &sig, now),
-            Err(TillOpenError::NonceReused)
+            Err(CheckoutOpenError::NonceReused)
         );
         // A fresh nonce from the same merchant is a new request, not a blocked one.
         let (again, again_sig) = signed(5, 450, 0xa2, now);
@@ -2044,20 +2044,20 @@ mod tests {
         // one, so "when may this be forgotten" has to be an argument rather than a tuning knob. A
         // request accepted at `t` may have been issued as late as `t + skew`, and one issued then
         // is still inside the window at `t + 2 * skew` EXACTLY. That last second is the whole test.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         let t = 1_000_000;
-        let (open, sig) = signed(7, 100, 0xb1, t + TILL_OPEN_MAX_SKEW_SECS);
+        let (open, sig) = signed(7, 100, 0xb1, t + CHECKOUT_OPEN_MAX_SKEW_SECS);
         assert_eq!(
             s.authorize(&open, &sig, t),
             Ok(()),
             "a device a skew-window fast is accepted"
         );
 
-        let last = t + 2 * TILL_OPEN_MAX_SKEW_SECS;
+        let last = t + 2 * CHECKOUT_OPEN_MAX_SKEW_SECS;
         s.sweep(last);
         assert_eq!(
             s.authorize(&open, &sig, last),
-            Err(TillOpenError::NonceReused),
+            Err(CheckoutOpenError::NonceReused),
             "the last second this replay could have passed the clock is the second the nonce must \
              still be held"
         );
@@ -2069,16 +2069,16 @@ mod tests {
         );
         assert_eq!(
             s.authorize(&open, &sig, last + 1),
-            Err(TillOpenError::Stale)
+            Err(CheckoutOpenError::Stale)
         );
     }
 
     #[test]
     fn a_mis_keyed_total_can_be_cancelled_and_a_credited_one_cannot() {
         // CHF 100.00 keyed for a CHF 1.00 coffee. Before this the cashier could not kill the code:
-        // it stayed payable for an hour, and the only way out was to ring up something else and
+        // it stayed payable for an hour, and the only way out was to open something else and
         // leave THAT payable instead.
-        let mut s = TillStore::default();
+        let mut s = CheckoutStore::default();
         ring_up(&mut s, "pl_oops", MERCHANT, [7u8; 32], 10_000, 100);
         let cancelled = s
             .void(MERCHANT, VoidCause::Cancelled)
@@ -2088,11 +2088,11 @@ mod tests {
         // "scan the new code" versus "nothing is owed".
         assert_eq!(
             s.quote("pl_oops", "plq_1".into(), 100),
-            Err(TillError::Cancelled)
+            Err(CheckoutError::Cancelled)
         );
 
         // Idempotent — a cashier pressing the button twice has not failed at anything — and the
-        // FIRST cause survives a later ring-up, so a cancelled charge is never described as merely
+        // FIRST cause survives a later checkout-open, so a cancelled charge is never described as merely
         // replaced.
         assert!(s.void(MERCHANT, VoidCause::Cancelled).is_ok());
         ring_up(&mut s, "pl_next", MERCHANT, [7u8; 32], 100, 200);
@@ -2115,11 +2115,11 @@ mod tests {
             "still paid, not voided"
         );
 
-        // A till nobody has rung anything up on has nothing to clear, and says so rather than
+        // A checkout nobody has opened anything on has nothing to clear, and says so rather than
         // reporting a success that describes no charge.
         assert_eq!(
             s.void(OTHER_MERCHANT, VoidCause::Cancelled).unwrap_err(),
-            VoidRefusal::NothingRungUp
+            VoidRefusal::NothingOpened
         );
     }
 
@@ -2137,13 +2137,13 @@ mod tests {
             Some(u8::try_from(VCHF_DECIMALS).expect("decimals fit a u8"))
         );
         assert_eq!(10u64.pow(VCHF_DECIMALS) / 100, RAW_PER_CENT);
-        // The fee the SHOP now absorbs. A catalog row whose fee moved would have this till quote a
+        // The fee the SHOP now absorbs. A catalog row whose fee moved would have this checkout quote a
         // price-minus-the-wrong-fee, which lands as either a customer overcharged by the difference
         // or a transfer the ledger refuses for underfunding — silently, on every sale.
         assert_eq!(
             row.fee.map(|f| f.0),
             Some(LEDGER_FEE_RAW),
-            "the till subtracts the VCHF ledger fee from every price; it must be the fee the \
+            "the checkout subtracts the VCHF ledger fee from every price; it must be the fee the \
              catalog serves"
         );
     }
@@ -2179,47 +2179,47 @@ fn provider_error(status: StatusCode, message: &str) -> Response {
         .into_response()
 }
 
-impl TillError {
+impl CheckoutError {
     /// Map to the wire, matching the measured provider's own wording where an equivalent exists so
     /// a wallet's error handling behaves the same against either implementation.
     fn to_response(&self) -> Response {
         match self {
             // The two DIFFERENT 404s. A wallet must tell them apart: one means "ask the cashier to
-            // ring it up", the other means "this code is not ours". The measured provider signals
+            // "a fresh charge", the other means "this code is not ours". The measured provider signals
             // the first by answering with the payment-link payload instead of an error envelope —
             // reproduced by the details handler, so this arm is only ever the honest error case.
-            TillError::UnknownCharge => provider_error(StatusCode::NOT_FOUND, "Payment link not found"),
-            TillError::NoPendingCharge => provider_error(StatusCode::NOT_FOUND, "Payment link not found"),
+            CheckoutError::UnknownCharge => provider_error(StatusCode::NOT_FOUND, "Payment link not found"),
+            CheckoutError::NoPendingCharge => provider_error(StatusCode::NOT_FOUND, "Payment link not found"),
             // Both of these have no counterpart on the measured provider, so they say what
             // happened and what to do about it — a payer holding a dead code must be told which
             // kind of dead it is, or they stand at the counter re-scanning it.
-            TillError::Superseded => provider_error(
+            CheckoutError::Superseded => provider_error(
                 StatusCode::NOT_FOUND,
                 "This code was replaced by a newer charge — ask the cashier for the current one",
             ),
             // The opposite instruction from the one above, which is the entire reason the two are
             // separate: a payer holding a cancelled code must NOT go and pay it.
-            TillError::Cancelled => provider_error(
+            CheckoutError::Cancelled => provider_error(
                 StatusCode::NOT_FOUND,
-                "This charge was cancelled at the till — nothing is owed, so do not send anything. \
-                 Ask the cashier to ring it up again if you still want to pay",
+                "This charge was cancelled at the checkout — nothing is owed, so do not send anything. \
+                 Ask the cashier to open a fresh charge if you still want to pay",
             ),
-            TillError::AlreadyPaid => provider_error(
+            CheckoutError::AlreadyPaid => provider_error(
                 StatusCode::CONFLICT,
-                "This charge has already been paid — do not send again; ask the cashier to ring up \
+                "This charge has already been paid — do not send again; ask the cashier to open \
                  a new one if you are paying for something else",
             ),
-            TillError::DeadQuote => provider_error(StatusCode::NOT_FOUND, "No actual quote with ID found"),
-            TillError::UnsupportedAsset => provider_error(StatusCode::BAD_REQUEST, "Invalid method or asset"),
+            CheckoutError::DeadQuote => provider_error(StatusCode::NOT_FOUND, "No actual quote with ID found"),
+            CheckoutError::UnsupportedAsset => provider_error(StatusCode::BAD_REQUEST, "Invalid method or asset"),
             // A merchant's refusal, not a payer's, and the one that has to say what will make it go
             // away by itself: nothing the cashier can press frees a slot (cancelling a charge stops
             // it being payable, it does not forget it), so the honest instruction is the timescale.
-            TillError::TillFull => provider_error(
+            CheckoutError::CheckoutFull => provider_error(
                 StatusCode::TOO_MANY_REQUESTS,
                 &format!(
-                    "this till is already holding its limit of {MAX_CHARGES_PER_MERCHANT} charges. \
-                     They clear themselves: an unpaid charge is dropped {} h after it was rung up \
-                     and a paid one {} h after. Ring up again once the oldest has aged out — \
+                    "this checkout is already holding its limit of {MAX_CHARGES_PER_MERCHANT} charges. \
+                     They clear themselves: an unpaid charge is dropped {} h after it was opened \
+                     and a paid one {} h after. Open a fresh charge again once the oldest has aged out — \
                      cancelling does not free one, and a retry needs a fresh nonce",
                     CHARGE_TTL_SECS / 3_600,
                     SETTLED_TTL_SECS / 3_600,
@@ -2274,7 +2274,7 @@ pub fn iso8601_utc(secs: u64) -> String {
 // --- LNURL (LUD-01): the code a wallet can actually scan -----------------------------------------
 // A bare `https://<host>/v1/lnurlp/<id>` is scannable by dpay and by nothing else: LUD-01 defines
 // the bech32 `lnurl1…` form, and plain-https LNURL-pay is standardised only through LUD-16/LUD-17.
-// So the ring-up answer carries the bech32 too, and the `?lightning=` wrapper the measured till QR
+// So the checkout-open answer carries the bech32 too, and the `?lightning=` wrapper the measured checkout QR
 // actually prints.
 //
 // THE ENCODER LIVES HERE, in the relay, and not in `dpay-core`. Opening a charge already requires
@@ -2321,14 +2321,14 @@ fn bech32_polymod(values: &[u8]) -> u32 {
 
 /// `url` as a LUD-01 `LNURL1…` string with a valid bech32 checksum.
 ///
-/// UPPERCASE, which is what the measured till QR carries and what lets a QR encoder choose
+/// UPPERCASE, which is what the measured checkout QR carries and what lets a QR encoder choose
 /// alphanumeric mode — a denser code for the same string. bech32 is case-insensitive, so this is a
 /// spelling and not a different code; MIXED case would be the invalid one, because the checksum is
 /// defined over a single case.
 ///
 /// Public because it IS a stated property of this provider (the wire golden pins the string), and
 /// because the test that proves it is the one that matters: an outside-authored code, decoded from
-/// a real DFX till QR, must come back out of this function byte for byte.
+/// a real DFX checkout QR, must come back out of this function byte for byte.
 pub fn lnurl_of(url: &str) -> String {
     // 8-bit → 5-bit, zero-padding the final partial group (BIP-173). `acc` is masked so a long URL
     // cannot shift bits off the top.
@@ -2390,7 +2390,7 @@ fn fresh_hex<const N: usize>() -> String {
         Ok(()) => {}
         // No fallback, deliberately — see above.
         Err(e) => panic!(
-            "dpay-relay: till: the OS CSPRNG is unavailable ({e}) — cannot mint {N} random bytes"
+            "dpay-relay: checkout: the OS CSPRNG is unavailable ({e}) — cannot mint {N} random bytes"
         ),
     }
     hex::encode(bytes)
@@ -2415,7 +2415,7 @@ fn origin_of(headers: &HeaderMap) -> String {
         Ok(_) => {} // set to nothing: the deploy said nothing, so the request answers instead
         Err(std::env::VarError::NotPresent) => {} // the ordinary local/dev case
         Err(e) => eprintln!(
-            "dpay-relay: till: {PUBLIC_ORIGIN_ENV} is set but unreadable ({e}); deriving the origin \
+            "dpay-relay: checkout: {PUBLIC_ORIGIN_ENV} is set but unreadable ({e}); deriving the origin \
              from the request instead"
         ),
     }
@@ -2424,7 +2424,7 @@ fn origin_of(headers: &HeaderMap) -> String {
     let host = match headers.get("host").map(|v| v.to_str()) {
         Some(Ok(host)) => host,
         Some(Err(e)) => {
-            eprintln!("dpay-relay: till: the Host header is not text ({e}); using localhost");
+            eprintln!("dpay-relay: checkout: the Host header is not text ({e}); using localhost");
             "localhost"
         }
         None => "localhost",
@@ -2432,7 +2432,7 @@ fn origin_of(headers: &HeaderMap) -> String {
     let scheme = match headers.get("x-forwarded-proto").map(|v| v.to_str()) {
         Some(Ok(scheme)) => scheme,
         Some(Err(e)) => {
-            eprintln!("dpay-relay: till: X-Forwarded-Proto is not text ({e}); using http");
+            eprintln!("dpay-relay: checkout: X-Forwarded-Proto is not text ({e}); using http");
             "http"
         }
         None => "http", // nothing in front of us: a direct local run really is http
@@ -2445,7 +2445,7 @@ const PUBLIC_ORIGIN_ENV: &str = "DPAY_PUBLIC_ORIGIN";
 
 /// A hex field of an exact byte width, or a refusal that names the field and both bounds.
 ///
-/// Every one of these is the FIRST thing a merchant integrating against this till gets wrong, so
+/// Every one of these is the FIRST thing a merchant integrating against this checkout gets wrong, so
 /// the message states the width in the unit the caller typed (characters) as well as the one the
 /// wire means (bytes) — "must be 32-byte hex" reads, to somebody holding a 128-character string,
 /// like their signature is the wrong length.
@@ -2468,11 +2468,11 @@ fn hex_field<const N: usize>(value: &str, field: &str) -> Result<[u8; N], Respon
 ///
 /// `merchant_name` is carried through UNTOUCHED. It is inside the signed bytes, so the value
 /// verified here must be the byte-identical string the merchant signed; the display clamp
-/// ([`clamp_name`], applied by `TillStore::open`) runs strictly AFTER acceptance. Clamping first
+/// ([`clamp_name`], applied by `CheckoutStore::open`) runs strictly AFTER acceptance. Clamping first
 /// would silently rewrite the message and refuse every honest signature over a name of 33 bytes
 /// or more. `note` follows the same rule for the same reason.
-fn decoded(req: &OpenCharge) -> Result<(TillOpen, [u8; SIG_LEN]), Response> {
-    let open = TillOpen {
+fn decoded(req: &OpenCharge) -> Result<(CheckoutOpen, [u8; SIG_LEN]), Response> {
+    let open = CheckoutOpen {
         merchant_pubkey: hex_field::<PUBKEY_LEN>(&req.merchant_pubkey, "merchant_pubkey")?,
         cents: req.cents,
         nonce: hex_field::<NONCE_LEN>(&req.nonce, "nonce")?,
@@ -2486,7 +2486,7 @@ fn decoded(req: &OpenCharge) -> Result<(TillOpen, [u8; SIG_LEN]), Response> {
 /// The merchant's own body, or a refusal that says what a request must carry.
 ///
 /// axum's own JSON rejection names the field it choked on and nothing more, which leaves a
-/// merchant integrating against this till to guess the rest. The rejection's text is kept (it is
+/// merchant integrating against this checkout to guess the rest. The rejection's text is kept (it is
 /// the precise diagnosis) and the shape is added to it, because "what do I send instead" is the
 /// question a refusal has to answer.
 fn body_of(body: Result<Json<OpenCharge>, JsonRejection>) -> Result<OpenCharge, Response> {
@@ -2495,54 +2495,54 @@ fn body_of(body: Result<Json<OpenCharge>, JsonRejection>) -> Result<OpenCharge, 
         Err(rejection) => Err(provider_error(
             StatusCode::BAD_REQUEST,
             &format!(
-                "{}. A till request is {{merchant_pubkey, merchant_name, cents, nonce, issued_at, \
-                 signature}}, signed with the merchant's own key — see dfx/till_open_signing.json",
+                "{}. A checkout request is {{merchant_pubkey, merchant_name, cents, nonce, issued_at, \
+                 signature}}, signed with the merchant's own key — see dfx/checkout_open_signing.json",
                 rejection.body_text()
             ),
         )),
     }
 }
 
-/// Why an authenticated till request was refused, said so the merchant can fix it.
+/// Why an authenticated checkout request was refused, said so the merchant can fix it.
 ///
-/// One arm per `dpay_core::TillOpenError`, because the four failures need four different actions
+/// One arm per `dpay_core::CheckoutOpenError`, because the four failures need four different actions
 /// and a single "unauthorized" would send every one of them to re-check the wrong thing. `now` is
 /// stated back on the clock refusal: the merchant cannot see this relay's clock, and the gap is
 /// the whole diagnosis.
-fn till_open_response(e: TillOpenError, now: u64, issued_at: u64) -> Response {
+fn checkout_open_response(e: CheckoutOpenError, now: u64, issued_at: u64) -> Response {
     match e {
-        TillOpenError::Stale => provider_error(
+        CheckoutOpenError::Stale => provider_error(
             StatusCode::UNAUTHORIZED,
             &format!(
-                "issued_at is {} s from this till's clock, which allows ±{} s (till clock {now}, \
+                "issued_at is {} s from this checkout's clock, which allows ±{} s (checkout clock {now}, \
                  your issued_at {issued_at}). Re-sync the device clock, then sign and send again",
                 now.abs_diff(issued_at),
-                dpay_core::TILL_OPEN_MAX_SKEW_SECS,
+                dpay_core::CHECKOUT_OPEN_MAX_SKEW_SECS,
             ),
         ),
-        TillOpenError::MalformedKey => provider_error(
+        CheckoutOpenError::MalformedKey => provider_error(
             StatusCode::BAD_REQUEST,
             "merchant_pubkey is 32 bytes of hex but not an Ed25519 public key, so no signature \
              could ever verify under it and no account derives from it. Send the public key your \
              own wallet shows — a placeholder or a truncated paste lands exactly here",
         ),
-        TillOpenError::BadSignature => provider_error(
+        CheckoutOpenError::BadSignature => provider_error(
             StatusCode::UNAUTHORIZED,
             "the signature does not verify under merchant_pubkey. Sign the request with the key \
              whose account is to be paid, and sign it AFTER settling cents, nonce, issued_at and \
              merchant_name — every one of them is covered, so changing any of them afterwards \
              invalidates it",
         ),
-        TillOpenError::NonceReused => provider_error(
+        CheckoutOpenError::NonceReused => provider_error(
             StatusCode::CONFLICT,
             "this nonce was already accepted, so the charge it opened exists — poll it with \
-             GET /api/v1/till/{id} rather than signing again. A retry needs a FRESH nonce, and a \
+             GET /api/v1/checkout/{id} rather than signing again. A retry needs a FRESH nonce, and a \
              fresh nonce is a new charge, not the same one",
         ),
     }
 }
 
-/// `POST /api/v1/till` — the merchant rings one up, and proves the account they are ringing up on
+/// `POST /api/v1/checkout` — the merchant rings one up, and proves the account they are ringing up on
 /// is theirs.
 ///
 /// ORDER IS THE DESIGN. The price bounds are integer comparisons and go first, so a flood of
@@ -2561,15 +2561,15 @@ pub(crate) async fn open_charge(
     if req.cents == 0 {
         return provider_error(
             StatusCode::BAD_REQUEST,
-            "a charge must be for more than nothing. A signed cents = 0 is how this till is \
-             CLEARED, and that goes to POST /api/v1/till/void",
+            "a charge must be for more than nothing. A signed cents = 0 is how this checkout is \
+             CLEARED, and that goes to POST /api/v1/checkout/void",
         );
     }
     if req.cents > MAX_CENTS {
         return provider_error(
             StatusCode::BAD_REQUEST,
             &format!(
-                "a charge must be at most {} CHF — split a larger sale, or take it off the till",
+                "a charge must be at most {} CHF — split a larger sale, or take it off the checkout",
                 MAX_CENTS / 100
             ),
         );
@@ -2579,7 +2579,7 @@ pub(crate) async fn open_charge(
         Err(refusal) => return refusal,
     };
     // The merchant's account is DERIVED from their key by the same rule every other read in this
-    // relay uses, and the signature checked just below proves they hold it — so they cannot ring
+    // relay uses, and the signature checked just below proves they hold it — so they cannot open one
     // up on an account they could not spend from. dpay still holds nothing: this is a public
     // derivation, not a key.
     let account =
@@ -2589,16 +2589,16 @@ pub(crate) async fn open_charge(
     let id = fresh_id("pl_");
     let now = now_secs();
     let charge = {
-        let mut tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
-        tills.sweep(now);
-        if let Err(e) = tills.authorize(&open, &sig, now) {
-            return till_open_response(e, now, open.issued_at);
+        let mut checkouts = state.checkouts.lock().unwrap_or_else(|p| p.into_inner());
+        checkouts.sweep(now);
+        if let Err(e) = checkouts.authorize(&open, &sig, now) {
+            return checkout_open_response(e, now, open.issued_at);
         }
         // The name is clamped HERE, after the signature has covered every byte of it — see
         // `decoded`. The store's own bound is the last thing that can refuse, and it refuses
         // AFTER the nonce is burnt on purpose: the request was authentic, so a retry needs a fresh
         // signature exactly as every other retry does.
-        match tills.open(
+        match checkouts.open(
             id.clone(),
             fresh_hex::<REFERENCE_BYTES>(),
             account,
@@ -2618,8 +2618,8 @@ pub(crate) async fn open_charge(
     // rather than by re-deriving anything: `url` is the endpoint itself (what dpay's own payer
     // accepts directly and what a support transcript wants), `lnurl` is the LUD-01 bech32 a
     // Lightning-world wallet expects, and `qr` is the string that actually belongs in a QR — the
-    // `?lightning=` wrapper the measured till QR prints, which a GENERIC phone camera opens as an
-    // ordinary web page (see [`till_code_page`]) instead of showing the user a string they cannot
+    // `?lightning=` wrapper the measured checkout QR prints, which a GENERIC phone camera opens as an
+    // ordinary web page (see [`checkout_code_page`]) instead of showing the user a string they cannot
     // use.
     let lnurl = lnurl_of(&url);
     (
@@ -2631,9 +2631,9 @@ pub(crate) async fn open_charge(
             "merchant": charge.merchant,
             "url": url,
             "lnurl": lnurl,
-            "qr": format!("{origin}{TILL_CODE_PATH}?lightning={lnurl}"),
+            "qr": format!("{origin}{CHECKOUT_CODE_PATH}?lightning={lnurl}"),
             // THIS CHARGE'S NAME ON THE LEDGER, told to the one party who signed for it. Until it
-            // was here the merchant could not learn it without walking their own till's payer
+            // was here the merchant could not learn it without walking their own checkout's payer
             // routes as a fake customer, so any payment they collected THEMSELVES — a tap, which
             // uses no OpenCryptoPay endpoint at all — carried some other memo, moved the money and
             // credited no sale (`match_payment`). The merchant's own app now builds its tap around
@@ -2650,31 +2650,31 @@ pub(crate) async fn open_charge(
 
 /// The path the `?lightning=` wrapper points at — one definition for the string this relay emits
 /// and the route [`crate::app`] registers for it.
-pub const TILL_CODE_PATH: &str = "/pl/";
+pub const CHECKOUT_CODE_PATH: &str = "/pl/";
 
-/// `GET /pl/` — where a GENERIC phone camera lands after scanning a till code.
+/// `GET /pl/` — where a GENERIC phone camera lands after scanning a checkout code.
 ///
 /// The QR carries `…/pl/?lightning=LNURL1…` because that is the shape the measured provider's own
-/// till prints, and a camera that is not a wallet treats it as an ordinary web address. Without
+/// checkout prints, and a camera that is not a wallet treats it as an ordinary web address. Without
 /// this route that scan ends on a 404: the customer standing at the counter is shown nothing, which
 /// is the dead end the founder rule forbids. The page tells them the one thing that is true — this
-/// till settles on the Internet Computer, so the dpay app is what pays it — and where to get it.
+/// checkout settles on the Internet Computer, so the dpay app is what pays it — and where to get it.
 ///
 /// It deliberately does NOT decode the `lightning` parameter. Doing so would put a second bech32
 /// implementation (a decoder) in this crate to render a price the page would then have to fetch,
 /// and none of that changes the instruction: the payment happens in the app either way.
-pub(crate) async fn till_code_page() -> Response {
+pub(crate) async fn checkout_code_page() -> Response {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        crate::app::with_palette(include_str!("../assets/till-code.html")),
+        crate::app::with_palette(include_str!("../assets/checkout-code.html")),
     )
         .into_response()
 }
 
-/// `GET /till/{id}` — the CASHIER's own screen: watches the charge the merchant rang up in the
+/// `GET /checkout/{id}` — the CASHIER's own screen: watches the charge the merchant opened in the
 /// app (the app rings up; this page is the plan's "web page later" — same endpoints, additive).
 ///
-/// THE FENCE this page stands on: it can WATCH a charge and it can NEVER ring one up, void one,
+/// THE FENCE this page stands on: it can WATCH a charge and it can NEVER open one, void one,
 /// or move a cent — those actions live behind the merchant's key in the app, and the app is
 /// where they stay. Putting a seed in a browser to make this page "smarter" would be
 /// custody-shaped (rule 1), and no amount of watching is worth that. What the page CAN do is
@@ -2682,35 +2682,35 @@ pub(crate) async fn till_code_page() -> Response {
 /// for each, so every terminal state names the cashier's next action.
 ///
 /// Served for ANY `{id}` — the handler does not look the charge up, because the PAGE renders
-/// client-side from `GET /api/v1/till/{id}` (the same poll the app uses). That keeps the
+/// client-side from `GET /api/v1/checkout/{id}` (the same poll the app uses). That keeps the
 /// claimed merchant name out of every Rust string on this route entirely (it is untrusted
 /// CLAIMED text; the browser writes it via `textContent`, never as markup), and it means an
 /// unknown id gets the poll's honest answer on the first fetch rather than a server-rendered
 /// guess. `no-store`: a cashier's screen must never resume a stale verdict.
-pub(crate) async fn till_page() -> Response {
+pub(crate) async fn checkout_page() -> Response {
     (
         [
             (header::CONTENT_TYPE, "text/html; charset=utf-8"),
             (header::CACHE_CONTROL, "no-store"),
         ],
-        crate::app::with_palette(include_str!("../assets/till.html")),
+        crate::app::with_palette(include_str!("../assets/checkout.html")),
     )
         .into_response()
 }
 
-/// `POST /api/v1/till/void` — the merchant clears their till.
+/// `POST /api/v1/checkout/void` — the merchant clears their checkout.
 ///
 /// THE MIS-KEYED TOTAL, which until now nobody could take back: a cashier who rings up CHF 100.00
 /// for a CHF 1.00 coffee has put a payable code in front of a customer for the next hour, and the
-/// only way out was to ring up something else and leave THAT payable instead.
+/// only way out was to open something else and leave THAT payable instead.
 ///
-/// It is authenticated by the same signature as a ring-up and told apart from one by the SIGNED
-/// `cents = 0` — the reason this needs no domain of its own in the core. A ring-up carries
+/// It is authenticated by the same signature as a checkout-open and told apart from one by the SIGNED
+/// `cents = 0` — the reason this needs no domain of its own in the core. A checkout-open carries
 /// `cents >= 1` and is refused here; a cancellation carries `cents == 0` and is refused there. So
 /// neither signature is a valid instance of the other action, and an attacker holding one has
 /// nothing they could aim at the opposite route.
 ///
-/// IDEMPOTENT for the cashier (cancelling an already-cleared till succeeds and says so), and never
+/// IDEMPOTENT for the cashier (cancelling an already-cleared checkout succeeds and says so), and never
 /// for the money: a credited charge is refused, and the refusal names the block that paid.
 pub(crate) async fn void_charge(
     State(state): State<AppState>,
@@ -2723,7 +2723,7 @@ pub(crate) async fn void_charge(
     if req.cents != 0 {
         return provider_error(
             StatusCode::BAD_REQUEST,
-            "a cancellation is signed with cents = 0 — that is what keeps a ring-up signature from \
+            "a cancellation is signed with cents = 0 — that is what keeps a checkout-open signature from \
              being replayed as one. Sign the request again with cents = 0 and send that",
         );
     }
@@ -2736,17 +2736,17 @@ pub(crate) async fn void_charge(
             .to_text();
 
     let now = now_secs();
-    let mut tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
-    tills.sweep(now);
-    if let Err(e) = tills.authorize(&open, &sig, now) {
-        return till_open_response(e, now, open.issued_at);
+    let mut checkouts = state.checkouts.lock().unwrap_or_else(|p| p.into_inner());
+    checkouts.sweep(now);
+    if let Err(e) = checkouts.authorize(&open, &sig, now) {
+        return checkout_open_response(e, now, open.issued_at);
     }
-    match tills.void(&account, VoidCause::Cancelled) {
+    match checkouts.void(&account, VoidCause::Cancelled) {
         Ok(charge) => (StatusCode::OK, Json(ChargeStatus::of(&charge, now))).into_response(),
-        Err(VoidRefusal::NothingRungUp) => provider_error(
+        Err(VoidRefusal::NothingOpened) => provider_error(
             StatusCode::NOT_FOUND,
-            "nothing is rung up on this till, so there is nothing to cancel. Ring up a charge with \
-             POST /api/v1/till when the next customer is ready",
+            "nothing is opened on this checkout, so there is nothing to cancel. Open a charge with \
+             POST /api/v1/checkout when the next customer is ready",
         ),
         // Money moved. Saying "cancelled" here would tell a merchant to hand over goods they have
         // in fact been paid for, or to chase a payment that already arrived.
@@ -2754,15 +2754,15 @@ pub(crate) async fn void_charge(
             StatusCode::CONFLICT,
             &format!(
                 "this charge was already paid — {} raw VCHF arrived in ledger block {}, so it \
-                 cannot be cancelled. Refund it on the ledger if the sale is off; ring up the next \
-                 customer with POST /api/v1/till either way",
+                 cannot be cancelled. Refund it on the ledger if the sale is off; open the next \
+                 customer with POST /api/v1/checkout either way",
                 settled.amount_raw, settled.block,
             ),
         ),
     }
 }
 
-/// `GET /api/v1/till/{id}` — what the merchant's screen polls.
+/// `GET /api/v1/checkout/{id}` — what the merchant's screen polls.
 ///
 /// Settlement is re-derived from the LEDGER on every poll, not read out of memory, so the answer
 /// survives a relay restart and cannot drift from what actually happened on chain.
@@ -2771,11 +2771,11 @@ pub(crate) async fn charge_status(
     Path(id): Path<String>,
 ) -> Response {
     let charge = {
-        let tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
-        tills.get(&id).cloned()
+        let checkouts = state.checkouts.lock().unwrap_or_else(|p| p.into_inner());
+        checkouts.get(&id).cloned()
     };
     let Some(charge) = charge else {
-        return TillError::UnknownCharge.to_response();
+        return CheckoutError::UnknownCharge.to_response();
     };
     let charge = observe_payment(&state, charge).await;
     (StatusCode::OK, Json(ChargeStatus::of(&charge, now_secs()))).into_response()
@@ -2791,8 +2791,8 @@ pub(crate) async fn charge_status(
 async fn observe_payment(state: &AppState, charge: Charge) -> Charge {
     let now = now_secs();
     let charge = {
-        let mut tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
-        match tills.observe(&charge.id, now) {
+        let mut checkouts = state.checkouts.lock().unwrap_or_else(|p| p.into_inner());
+        match checkouts.observe(&charge.id, now) {
             Ok(Observation::Walk(c)) => c,
             Ok(Observation::Recent(c)) => return c,
             Err(e) => {
@@ -2800,7 +2800,7 @@ async fn observe_payment(state: &AppState, charge: Charge) -> Charge {
                 // observe and nowhere to record it — say so rather than walking a ledger for a
                 // charge that no longer exists.
                 eprintln!(
-                    "dpay-relay: till {}: cannot observe a charge this store no longer holds ({e:?})",
+                    "dpay-relay: checkout {}: cannot observe a charge this store no longer holds ({e:?})",
                     log_safe(&charge.id)
                 );
                 return charge;
@@ -2812,14 +2812,14 @@ async fn observe_payment(state: &AppState, charge: Charge) -> Charge {
         Err(e) => {
             // Never downgrade a read failure into "not paid" — the caller keeps polling.
             eprintln!(
-                "dpay-relay: till {}: could not read merchant history: {e}",
+                "dpay-relay: checkout {}: could not read merchant history: {e}",
                 charge.id
             );
             return charge;
         }
     };
-    let mut tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
-    match tills.settle_from_history(&charge.id, &rows) {
+    let mut checkouts = state.checkouts.lock().unwrap_or_else(|p| p.into_inner());
+    match checkouts.settle_from_history(&charge.id, &rows) {
         Ok(Some(settled)) => Charge {
             paid: Some(settled),
             ..charge
@@ -2827,7 +2827,7 @@ async fn observe_payment(state: &AppState, charge: Charge) -> Charge {
         Ok(None) => charge,
         Err(e) => {
             eprintln!(
-                "dpay-relay: till {}: the charge was swept while its history was read ({e:?}) — \
+                "dpay-relay: checkout {}: the charge was swept while its history was read ({e:?}) — \
                  nothing credited",
                 log_safe(&charge.id)
             );
@@ -2858,9 +2858,9 @@ async fn merchant_history(
         .find(|d| d.currency == VCHF_CURRENCY)
     else {
         // The compiled catalog is this relay's own code, so a missing VCHF row is a build that
-        // cannot serve this till at all — loud, not a silent "not seen yet".
+        // cannot serve this checkout at all — loud, not a silent "not seen yet".
         return Err(crate::ledger::LedgerError::Rejected(
-            "VCHF is not in this relay's compiled catalog — this build cannot serve a till".into(),
+            "VCHF is not in this relay's compiled catalog — this build cannot serve a checkout".into(),
         ));
     };
     state
@@ -2877,7 +2877,7 @@ async fn merchant_history(
 
 /// VCHF's catalog id — the one asset v1 serves.
 const VCHF_CURRENCY: dpay_core::Currency = 7;
-/// How far back a settlement scan looks. A charge lives an hour; a till doing a transfer a second
+/// How far back a settlement scan looks. A charge lives an hour; a checkout doing a transfer a second
 /// would still be covered many times over.
 const HISTORY_LIMIT: u32 = 50;
 
@@ -2899,11 +2899,11 @@ pub(crate) async fn lnurlp_details(
     let now = now_secs();
     let origin = origin_of(&headers);
     let (charge, quote_id, expires) = {
-        let mut tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(charge) = tills.get(&id).cloned() else {
-            return TillError::UnknownCharge.to_response();
+        let mut checkouts = state.checkouts.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(charge) = checkouts.get(&id).cloned() else {
+            return CheckoutError::UnknownCharge.to_response();
         };
-        match tills.quote(&id, fresh_id("plq_"), now) {
+        match checkouts.quote(&id, fresh_id("plq_"), now) {
             Ok((q, exp)) => (charge, q, exp),
             Err(e) => return e.to_response(),
         }
@@ -2912,14 +2912,14 @@ pub(crate) async fn lnurlp_details(
     let body = DetailsBody {
         tag: "payRequest",
         callback: format!("{origin}/v1/lnurlp/cb/{}", charge.id),
-        // See the field's own note: LUD-06 means millisatoshis, this till has no rate, so it
+        // See the field's own note: LUD-06 means millisatoshis, this checkout has no rate, so it
         // states nothing rather than a number in the wrong unit.
         min_sendable: 0,
         max_sendable: 0,
         // BUILT, not formatted. `metadata` is a JSON document inside a JSON string, and the
         // merchant's name is a stranger's text: pasted into the shape with `format!`, a name of
         // `X"],["image/png;base64,…` closes the entry and opens a second one that wallets parse
-        // and render — proven against this very till on prod. A serialiser cannot be talked into
+        // and render — proven against this very checkout on prod. A serialiser cannot be talked into
         // that, because it escapes what it is given instead of trusting it.
         metadata: serde_json::json!([[
             "text/plain",
@@ -2970,7 +2970,7 @@ pub(crate) struct PayQuery {
     /// `icrc2_transfer_from`. Oisy is one, and names the parameter for exactly that purpose
     /// (`payIcp`, `src/frontend/src/icp/services/ic-open-crypto-pay.services.ts`).
     ///
-    /// dpay's till cannot pull: it holds no key, by the non-custody rule, and a charge is credited
+    /// dpay's checkout cannot pull: it holds no key, by the non-custody rule, and a charge is credited
     /// by reading a transfer that ALREADY happened. So this parameter decides nothing about the
     /// money and exists here only to be REFUSED out loud — see [`lnurlp_submit`].
     pub sender: Option<String>,
@@ -2988,10 +2988,10 @@ pub(crate) async fn lnurlp_callback(
         return e.to_response();
     }
     let (charge, expires) = {
-        let tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
-        let charge = match tills.get(&id) {
+        let checkouts = state.checkouts.lock().unwrap_or_else(|p| p.into_inner());
+        let charge = match checkouts.get(&id) {
             Some(c) => c.clone(),
-            None => return TillError::UnknownCharge.to_response(),
+            None => return CheckoutError::UnknownCharge.to_response(),
         };
         // The charge's own state first, then the quote's: a payer whose code was superseded needs
         // to hear THAT, not "no actual quote with ID found", which tells them nothing they can act
@@ -2999,7 +2999,7 @@ pub(crate) async fn lnurlp_callback(
         if let Err(e) = charge.payable(now) {
             return e.to_response();
         }
-        match tills.quote_expiry(&id, q.quote.as_deref().unwrap_or_default(), now) {
+        match checkouts.quote_expiry(&id, q.quote.as_deref().unwrap_or_default(), now) {
             Ok(expires) => (charge, expires),
             Err(e) => return e.to_response(),
         }
@@ -3060,10 +3060,10 @@ pub(crate) async fn lnurlp_submit(
         return e.to_response();
     }
     let charge = {
-        let tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
-        match tills.get(&id) {
+        let checkouts = state.checkouts.lock().unwrap_or_else(|p| p.into_inner());
+        match checkouts.get(&id) {
             Some(c) => c.clone(),
-            None => return TillError::UnknownCharge.to_response(),
+            None => return CheckoutError::UnknownCharge.to_response(),
         }
     };
     // Recorded for support, never believed. Both values came off the wire from a stranger, so
@@ -3071,14 +3071,14 @@ pub(crate) async fn lnurlp_submit(
     // relay's log.
     match (q.tx.as_deref(), q.sender.as_deref()) {
         (Some(tx), _) => eprintln!(
-            "dpay-relay: till {}: payer reported transaction {}",
+            "dpay-relay: checkout {}: payer reported transaction {}",
             log_safe(&id),
             log_safe(tx)
         ),
         // An allowance wallet, named so the line that follows the refusal below says WHO to look
-        // for on the ledger if they later send the transfer this till actually reads.
+        // for on the ledger if they later send the transfer this checkout actually reads.
         (None, Some(sender)) => eprintln!(
-            "dpay-relay: till {}: payer {} reported an approval instead of a transfer",
+            "dpay-relay: checkout {}: payer {} reported an approval instead of a transfer",
             log_safe(&id),
             log_safe(sender)
         ),
@@ -3086,7 +3086,7 @@ pub(crate) async fn lnurlp_submit(
         // re-read the ledger — worth a line, because a wallet that never sends one is a wallet
         // whose behaviour we would otherwise be guessing at.
         (None, None) => eprintln!(
-            "dpay-relay: till {}: payer reported a payment without a transaction id",
+            "dpay-relay: checkout {}: payer reported a payment without a transaction id",
             log_safe(&id)
         ),
     }
@@ -3103,10 +3103,10 @@ pub(crate) async fn lnurlp_submit(
         // The reference is logged HERE and nowhere else on the settlement path. A report is the one
         // moment somebody CLAIMS to have paid, so it is bounded (one line per claim, not one per
         // poll) and it is the only line worth having when a payment moved and was never credited:
-        // the memo the till was looking for, beside the identifier the payer reported.
+        // the memo the checkout was looking for, beside the identifier the payer reported.
         None => {
             eprintln!(
-                "dpay-relay: till {}: no transfer carrying this charge's reference {} has been seen \
+                "dpay-relay: checkout {}: no transfer carrying this charge's reference {} has been seen \
                  in the merchant's history yet",
                 log_safe(&id),
                 charge.reference
@@ -3121,8 +3121,8 @@ pub(crate) async fn lnurlp_submit(
             // which is now true rather than merely polite — something IS about to happen, and the
             // wallet that sent it will see `OK` on its retry once the shop has pulled.
             if let (Some(payer), None) = (q.sender.as_deref(), q.tx.as_deref()) {
-                let mut tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
-                match tills.claim_pull(&id, payer.to_string(), now_secs()) {
+                let mut checkouts = state.checkouts.lock().unwrap_or_else(|p| p.into_inner());
+                match checkouts.claim_pull(&id, payer.to_string(), now_secs()) {
                     Ok(()) => {}
                     // The charge stopped being payable between the read above and this write. The
                     // payer's own refusal is the honest answer — it names WHICH kind of dead, and

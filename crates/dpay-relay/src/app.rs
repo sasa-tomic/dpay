@@ -23,7 +23,7 @@
 //!   the wallet build carries its own hashed copy under /assets/).
 //! - `GET /shots/{name}` — the real app screenshots embedded in the landing page.
 //! - `GET /api/v1/health` — liveness pre-flight; consults `ledger.healthy()`.
-//! - `GET /api/v1/capabilities` — runtime surface flags: whether this relay serves the till and
+//! - `GET /api/v1/capabilities` — runtime surface flags: whether this relay serves the checkout and
 //!   whether the offline play-money DEMO faucet is available.
 //! - `GET /api/v1/integrity` — the facade canister's live module hash vs the PIN baked at build
 //!   time (`deploy/facade-module-hash.txt`; GOVERNANCE row 7), so one curl detects an unrecorded
@@ -125,14 +125,14 @@ use crate::ledger::{Ledger, LedgerError, TxnRecord, U64String};
 #[derive(Clone)]
 pub struct AppState {
     pub ledger: Arc<dyn Ledger>,
-    /// The merchant tills this relay is serving (`crate::till`). In memory by design: a charge is
+    /// The merchant checkouts this relay is serving (`crate::checkout`). In memory by design: a charge is
     /// worth less than the hour it lives, and settlement is re-derived from the ledger on every
-    /// read — so a restart costs a cashier a re-ring, never a payment and never a double credit.
-    pub tills: crate::till::SharedTills,
-    /// Whether the till's eight routes are REGISTERED at all — see the gate in [`app`]. Read once,
+    /// read — so a restart costs a cashier a re-open, never a payment and never a double credit.
+    pub checkouts: crate::checkout::SharedCheckouts,
+    /// Whether the checkout's eight routes are REGISTERED at all — see the gate in [`app`]. Read once,
     /// while the router is built, so it cannot change under a live request. Set by
-    /// [`AppState::with_till`]; `false` for a state that does not ask.
-    till_enabled: bool,
+    /// [`AppState::with_checkout`]; `false` for a state that does not ask.
+    checkout_enabled: bool,
     /// Whether `POST /api/v1/faucet` — the route THIS build compiles — will actually credit an
     /// account. ONE predicate: [`capabilities`] reports it and the compiled faucet handler refuses
     /// on it, so what the relay advertises can no longer drift from what the route does. It did:
@@ -176,7 +176,7 @@ pub struct AppState {
     /// `DPAY_CANISTER_ID` in main.rs when the ledger is the agent IC path.
     facade_canister: Option<String>,
     /// The Solana JSON-RPC proxy (`crate::solana`) — `POST /api/v1/solana/rpc`. The route is
-    /// registered on EVERY build (no till-style gate): a proxy whose upstream is unset still
+    /// registered on EVERY build (no checkout-style gate): a proxy whose upstream is unset still
     /// answers, honestly, 503 naming `DPAY_SOLANA_RPC_URL`. The default state here carries that
     /// unconfigured proxy; `main` replaces it via [`AppState::with_solana`] from the env.
     pub solana: Arc<crate::solana::SolanaProxy>,
@@ -209,8 +209,8 @@ impl AppState {
     pub fn new(ledger: Arc<dyn Ledger>) -> Self {
         AppState {
             ledger,
-            tills: Arc::new(Mutex::new(crate::till::TillStore::default())),
-            till_enabled: false,
+            checkouts: Arc::new(Mutex::new(crate::checkout::CheckoutStore::default())),
+            checkout_enabled: false,
             faucet_available: false,
             #[cfg(any(feature = "agent", feature = "test-helpers"))]
             faucet_cooldown: Arc::new(Mutex::new(crate::faucet::FaucetCooldown::with_window(
@@ -263,10 +263,10 @@ impl AppState {
         self
     }
 
-    /// Serve the OpenCryptoPay till (`DPAY_ENABLE_TILL`) — the eight routes gated in [`app`].
+    /// Serve the OpenCryptoPay checkout (`DPAY_ENABLE_CHECKOUT`) — the eight routes gated in [`app`].
     /// Must be set BEFORE the router is built, because that is where the gate is read.
-    pub fn with_till(mut self, enabled: bool) -> Self {
-        self.till_enabled = enabled;
+    pub fn with_checkout(mut self, enabled: bool) -> Self {
+        self.checkout_enabled = enabled;
         self
     }
 
@@ -333,7 +333,7 @@ impl AppState {
     /// Declare whether this deployment's faucet can actually credit — see
     /// [`faucet_available`](AppState::faucet_available). `main` derives it from the backend it
     /// built (fixture: `DPAY_ENABLE_FAUCET`; agent: an authenticated identity); tests declare it
-    /// the same way they declare the till.
+    /// the same way they declare the checkout.
     pub fn with_faucet(mut self, available: bool) -> Self {
         self.faucet_available = available;
         self
@@ -383,7 +383,7 @@ pub fn app(state: AppState) -> Router {
         .route("/version", get(version))
         .route("/integrity", get(integrity))
         // The Solana JSON-RPC proxy (spec 2026-09-09, Direction 1) — registered ALWAYS, unlike
-        // the till below: an unconfigured proxy still answers (503 naming DPAY_SOLANA_RPC_URL),
+        // the checkout below: an unconfigured proxy still answers (503 naming DPAY_SOLANA_RPC_URL),
         // because a route that vanishes makes the client guess. Pure pipe + read cache.
         .route("/solana/rpc", axum::routing::post(crate::solana::rpc_proxy))
         // The SideShift partner-key proxy (founder decision 3, 2026-09-14) — registered
@@ -438,21 +438,21 @@ pub fn app(state: AppState) -> Router {
             axum::routing::post(crate::jupiter::swap_proxy),
         );
 
-    // --- the OpenCryptoPay till, ON unless the operator refuses it --------------------------------
+    // --- the OpenCryptoPay checkout, ON unless the operator refuses it --------------------------------
     //
     // The eight routes below (three here; the standard's three, the camera landing page and the
-    // cashier page on the root router) are registered unless `DPAY_ENABLE_TILL=false` — founder
+    // cashier page on the root router) are registered unless `DPAY_ENABLE_CHECKOUT=false` — founder
     // decision 2026-09-10, reversing the 2026-09-04 opt-in that was taken against a production
-    // probe of `POST /api/v1/till`. That route was UNAUTHENTICATED at the time: anyone could ring
+    // probe of `POST /api/v1/checkout`. That route was UNAUTHENTICATED at the time: anyone could open
     // up a charge naming any ed25519 pubkey and any merchant name, and this relay then served a
     // full payment page for it on dpay's own domain under dpay's own certificate — a phishing
     // primitive aimed at the exact control the payer's review relies on, which host served the
     // quote.
     //
-    // Both merchant routes have required the ring-up to be SIGNED by the very key its destination
-    // account derives from ever since (`crate::till`, rule 0; `dpay_core::validate_till_open`), so
+    // Both merchant routes have required the checkout-open to be SIGNED by the very key its destination
+    // account derives from ever since (`crate::checkout`, rule 0; `dpay_core::validate_checkout_open`), so
     // a charge exists only where somebody who can SPEND from that account asked for one, an
-    // anonymous caller can no longer force a cashier to re-ring by voiding their pending charge,
+    // anonymous caller can no longer force a cashier to re-open by voiding their pending charge,
     // and the unbounded `merchant_name` is both signed and clamped rather than an anonymous way to
     // spend this relay's memory. With that fixed, the founder turned the default ON; the flag
     // remains because "which surfaces does this image serve" is still an operator's call to make
@@ -462,13 +462,13 @@ pub fn app(state: AppState) -> Router {
     // router with an empty 404 and no handler code is reachable, so there is one code path rather
     // than a live endpoint with a disabled branch inside it. It is read here, once, while the router
     // is built — the same instant `test-helpers`/`agent` decide their routes just above and below.
-    let api = if state.till_enabled {
-        // The merchant's own surface: ring up a charge, clear the till, and poll. `/till/void` is a
-        // literal segment and `/till/{id}` a parameter, so the router matches the literal first — a
+    let api = if state.checkout_enabled {
+        // The merchant's own surface: open a charge, clear the checkout, and poll. `/checkout/void` is a
+        // literal segment and `/checkout/{id}` a parameter, so the router matches the literal first — a
         // charge id is `pl_<hex>` and can never spell `void` anyway.
-        api.route("/till", axum::routing::post(crate::till::open_charge))
-            .route("/till/void", axum::routing::post(crate::till::void_charge))
-            .route("/till/{id}", get(crate::till::charge_status))
+        api.route("/checkout", axum::routing::post(crate::checkout::open_charge))
+            .route("/checkout/void", axum::routing::post(crate::checkout::void_charge))
+            .route("/checkout/{id}", get(crate::checkout::charge_status))
     } else {
         api
     };
@@ -662,26 +662,26 @@ pub fn app(state: AppState) -> Router {
         .route("/dpay-core.wasm", get(dpay_core_wasm))
         .route("/shots/{name}", get(screenshot));
 
-    // The till's two HTML surfaces, behind the same gate (see above). The first is where a GENERIC
-    // phone camera lands — the till's QR carries the LNURL inside an ordinary web address, so a
-    // camera that is not a wallet opens a page rather than a 404 (`crate::till::till_code_page`).
+    // The checkout's two HTML surfaces, behind the same gate (see above). The first is where a GENERIC
+    // phone camera lands — the checkout's QR carries the LNURL inside an ordinary web address, so a
+    // camera that is not a wallet opens a page rather than a 404 (`crate::checkout::checkout_code_page`).
     // The second is the cashier's own screen — the merchant's OTHER half, which watches the charge
-    // they rang up in the app (`crate::till::till_page`).
+    // they opened in the app (`crate::checkout::checkout_page`).
     //
     // The three routes a WALLET fetches are merged at the very END of this function, after the
     // test-only CORS layer, because they carry a CORS layer of their own and a response with two
     // `Access-Control-Allow-Origin` headers is refused by every browser.
-    let till_enabled = state.till_enabled;
+    let checkout_enabled = state.checkout_enabled;
     // The same state, not a second one: every field that matters here is behind an `Arc`, so the
     // provider sub-router reads and writes the charges the merchant routes above opened.
     let provider_state = state.clone();
-    let router = if till_enabled {
+    let router = if checkout_enabled {
         router
             .route(
-                crate::till::TILL_CODE_PATH,
-                get(crate::till::till_code_page),
+                crate::checkout::CHECKOUT_CODE_PATH,
+                get(crate::checkout::checkout_code_page),
             )
-            .route("/till/{id}", get(crate::till::till_page))
+            .route("/checkout/{id}", get(crate::checkout::checkout_page))
     } else {
         router
     };
@@ -714,7 +714,7 @@ pub fn app(state: AppState) -> Router {
     #[cfg(feature = "test-helpers")]
     let router = router.layer(axum::middleware::from_fn(test_cors_middleware));
 
-    // The payer-facing half of the till — the three routes a WALLET fetches, and the only routes on
+    // The payer-facing half of the checkout — the three routes a WALLET fetches, and the only routes on
     // this relay that answer a cross-origin browser request.
     //
     // WHY THEY NEED CORS AT ALL, and why nothing else here does: an OpenCryptoPay wallet may be a
@@ -730,15 +730,15 @@ pub fn app(state: AppState) -> Router {
     // QR code in a shop window. The relay's OWN surfaces are NOT in here — the Solana RPC proxy
     // alone would hand any web page the operator's provider quota — which is why this is a merged
     // sub-router and not a layer over everything.
-    if till_enabled {
+    if checkout_enabled {
         router.merge(
             Router::new()
                 // The paths the STANDARD dictates, rather than this relay's own namespace: a wallet
                 // derives the submission URL from the callback by swapping `/cb/` for `/tx/`, so
                 // those segments are part of the protocol.
-                .route("/v1/lnurlp/{id}", get(crate::till::lnurlp_details))
-                .route("/v1/lnurlp/cb/{id}", get(crate::till::lnurlp_callback))
-                .route("/v1/lnurlp/tx/{id}", get(crate::till::lnurlp_submit))
+                .route("/v1/lnurlp/{id}", get(crate::checkout::lnurlp_details))
+                .route("/v1/lnurlp/cb/{id}", get(crate::checkout::lnurlp_callback))
+                .route("/v1/lnurlp/tx/{id}", get(crate::checkout::lnurlp_submit))
                 .with_state(provider_state)
                 .layer(axum::middleware::from_fn(provider_cors_middleware)),
         )
@@ -2444,7 +2444,7 @@ async fn ckerc20_onramp(State(state): State<AppState>, Query(qs): Query<CkErc20Q
 ///
 /// It is ONE block for FOUR pages because it used to be four hand-maintained copies of one fact,
 /// which is how palette v5 shipped in the app and left the whole website on v4 — and how
-/// till.html/till-code.html had already drifted off v4 before that. `app/__tests__/relay-palette.test.ts`
+/// checkout.html/checkout-code.html had already drifted off v4 before that. `app/__tests__/relay-palette.test.ts`
 /// fails the moment the checked-in file stops matching the palette it claims to come from.
 const PALETTE_CSS: &str = include_str!("../assets/palette.css");
 
@@ -2491,7 +2491,7 @@ async fn apk_download(State(state): State<AppState>, headers: HeaderMap) -> Resp
     // A matching If-None-Match — an exact strong-etag match anywhere in the (possibly list-valued)
     // header, or `*` — short-circuits to a bodyless 304.
     // A non-text header value is treated as ABSENT (the client gets the full body, which is always
-    // correct) and SAID so — the same shape `till.rs` uses for `Host`/`X-Forwarded-Proto`. Silently
+    // correct) and SAID so — the same shape `checkout.rs` uses for `Host`/`X-Forwarded-Proto`. Silently
     // dropping it would turn "this CDN sends a malformed validator" into a 56 MB re-download nobody
     // can explain.
     let not_modified = match headers.get(header::IF_NONE_MATCH).map(|v| v.to_str()) {
@@ -2968,7 +2968,7 @@ struct HealthBody {
 /// exist at all.
 #[derive(Serialize)]
 struct CapabilitiesBody {
-    till: bool,
+    checkout: bool,
     demo_faucet: bool,
 }
 
@@ -3092,15 +3092,15 @@ async fn health(State(state): State<AppState>) -> Response {
     }
 }
 
-/// `GET /api/v1/capabilities` → `200 {"till":bool,"demo_faucet":bool}`. Both values are read off
-/// the SAME state the surfaces themselves are gated on — `till_enabled` is the flag [`app`] reads
-/// to register the till routes, and `faucet_available` is the flag the compiled faucet handler
+/// `GET /api/v1/capabilities` → `200 {"checkout":bool,"demo_faucet":bool}`. Both values are read off
+/// the SAME state the surfaces themselves are gated on — `checkout_enabled` is the flag [`app`] reads
+/// to register the checkout routes, and `faucet_available` is the flag the compiled faucet handler
 /// refuses on — so an advertised capability is the one thing this relay will actually do.
 async fn capabilities(State(state): State<AppState>) -> Response {
     (
         StatusCode::OK,
         Json(CapabilitiesBody {
-            till: state.till_enabled,
+            checkout: state.checkout_enabled,
             demo_faucet: state.faucet_available,
         }),
     )

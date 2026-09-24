@@ -26,7 +26,7 @@ pub mod jupiter;
 pub mod ledger;
 pub mod sideshift;
 pub mod solana;
-pub mod till;
+pub mod checkout;
 pub mod trocador;
 /// The Trocador partner-agreement layer (2026-09-21): the compliance access log, the per-trade
 /// webhooks + order store, and the promised upstream rate limits — wrapped around the proxy
@@ -39,8 +39,8 @@ mod trocador_pg;
 
 /// Unix seconds now — the ONE clock reading in this crate, and it stops rather than guesses.
 ///
-/// Only a host whose clock is set before 1970 can fail here, and substituting `0` (what the till
-/// and the faucet each used to do) is worse than stopping, in a different way per caller: the till
+/// Only a host whose clock is set before 1970 can fail here, and substituting `0` (what the checkout
+/// and the faucet each used to do) is worse than stopping, in a different way per caller: the checkout
 /// would time every charge an epoch stale and quietly refuse every sale, while the faucet's
 /// cooldown would record every top-up "at the epoch" and — since the clock never advances past it —
 /// tell every account to "try again in ~1 h" forever after their first. Both are silent, both are

@@ -48,7 +48,7 @@
 //! The reqwest error text is NEVER included in a 504: it embeds the request URL, and the URL
 //! carries the provider api key.
 //! - `DPAY_SOLANA_RPC_URL` unset → the route is still REGISTERED (always, on every build —
-//!   unlike the till there is no registration gate) and answers the 503 marker above: an
+//!   unlike the checkout there is no registration gate) and answers the 503 marker above: an
 //!   honest refusal, never a fake success.
 //! - No silent retries. No queueing. No redirects followed (`Policy::none`): the pipe forwards
 //!   exactly one hop, and an upstream that moves is surfaced, not chased.

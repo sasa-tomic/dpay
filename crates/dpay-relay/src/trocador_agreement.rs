@@ -63,7 +63,7 @@
 //! # The order store
 //!
 //! Trade creation mints a relay-side order id (`trod-` + 16 lowercase hex from the OS CSPRNG —
-//! the same source the till's charge ids draw from) and persists the order BEFORE the upstream
+//! the same source the checkout's charge ids draw from) and persists the order BEFORE the upstream
 //! call (in PG mode the INSERT is acknowledged before the id is returned — the promise holds
 //! under both backends); the venue's trade_id is attached when the venue answers. Records are
 //! appended — JSONL lines under the orders lock, or `trocador_order_events` rows through the
@@ -630,14 +630,14 @@ pub struct AccessLine<'a> {
     pub key_hash: Option<String>,
 }
 
-/// `trod-` + 16 lowercase hex from the OS CSPRNG — the till's `fresh_id` discipline (a bearer
+/// `trod-` + 16 lowercase hex from the OS CSPRNG — the checkout's `fresh_id` discipline (a bearer
 /// correlation token gets real randomness, not a hash of a clock), pointed at a different
 /// prefix so the two id spaces can never collide.
 fn fresh_order_id() -> String {
     let mut bytes = [0u8; 8];
     match getrandom::getrandom(&mut bytes) {
         Ok(()) => format!("{ORDER_ID_PREFIX}{}", hex::encode(bytes)),
-        // No fallback, deliberately — same reasoning as the till: a relay whose CSPRNG is
+        // No fallback, deliberately — same reasoning as the checkout: a relay whose CSPRNG is
         // unavailable stops here rather than minting guessable order ids.
         Err(e) => panic!(
             "dpay-relay: trocador: the OS CSPRNG is unavailable ({e}) — cannot mint an order id"

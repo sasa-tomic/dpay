@@ -75,7 +75,7 @@ pub struct TxnRecord {
     /// It is the only STABLE IDENTITY an IC-rail row has (`nonce` is always empty there, and
     /// `{from, to, amount, timestamp}` repeats the moment a customer buys the same coffee twice),
     /// which is what lets a reader say "I have already accounted for THIS row rather than one
-    /// that looks like it". [`crate::till`] consumes a block index when it credits a sale, so one
+    /// that looks like it". [`crate::checkout`] consumes a block index when it credits a sale, so one
     /// transfer can never pay two charges. Bounded ≪ 2^53 → crosses JSON as a RAW number, like
     /// `timestamp` below.
     pub block: u64,

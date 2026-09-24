@@ -36,8 +36,8 @@ use sha2::Digest;
 use tower::ServiceExt; // oneshot
 
 use dpay_core::{
-    sign_till_open, validate_till_open, Currency, TillOpen, DEMO_USD, NONCE_LEN, SIG_LEN,
-    TILL_OPEN_MAX_SKEW_SECS,
+    sign_checkout_open, validate_checkout_open, Currency, CheckoutOpen, DEMO_USD, NONCE_LEN, SIG_LEN,
+    CHECKOUT_OPEN_MAX_SKEW_SECS,
 };
 use dpay_icp::envelope::{
     ingress_expiry, sign_read_state, sign_update, verify_envelope, CallRequest,
@@ -49,7 +49,7 @@ use dpay_icp::icrc::{
 };
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{decode_read_state_tree, request_status, RequestStatus};
-use dpay_relay::till::{iso8601_utc, QUOTE_TTL_SECS};
+use dpay_relay::checkout::{iso8601_utc, QUOTE_TTL_SECS};
 use dpay_relay::{app, ic_gateway::FakeIc, ledger::FAKE_FACADE_MODULE_HASH, AppState, FakeLedger};
 use ed25519_dalek::SigningKey;
 
@@ -134,7 +134,7 @@ fn now_ns() -> u64 {
 }
 
 /// The same instant in whole seconds — what a merchant's `issued_at` is measured in, and what the
-/// till compares it against.
+/// checkout compares it against.
 fn unix_secs() -> u64 {
     now_ns() / 1_000_000_000
 }
@@ -197,7 +197,7 @@ async fn health_ok() {
     assert_eq!(body["status"], "ok");
 }
 
-/// A bare relay — no till, and no backend its faucet could credit (no fake-IC gateway attached,
+/// A bare relay — no checkout, and no backend its faucet could credit (no fake-IC gateway attached,
 /// and a `FakeLedger` that cannot mint) — advertises neither surface.
 #[tokio::test]
 async fn capabilities_report_default_state() {
@@ -207,21 +207,21 @@ async fn capabilities_report_default_state() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body,
-        serde_json::json!({"till": false, "demo_faucet": false})
+        serde_json::json!({"checkout": false, "demo_faucet": false})
     );
 }
 
-/// The reported till capability reads the same immutable state flag that registers its routes.
+/// The reported checkout capability reads the same immutable state flag that registers its routes.
 #[tokio::test]
-async fn capabilities_report_enabled_till() {
+async fn capabilities_report_enabled_checkout() {
     let (state, _led) = state_from(ledger());
-    let state = state.with_till(true);
+    let state = state.with_checkout(true);
 
     let (status, body) = call(&state, get_req("/api/v1/capabilities")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body,
-        serde_json::json!({"till": true, "demo_faucet": false})
+        serde_json::json!({"checkout": true, "demo_faucet": false})
     );
 }
 
@@ -1053,7 +1053,7 @@ async fn transactions_endpoint_returns_history_newest_first() {
 
 /// Every static page this relay serves is painted from the SAME palette, and that palette comes
 /// from `app/config/palette.ts` — not from four hand-typed copies, which is what shipped a website
-/// on palette v4 while the app ran v5 (and left till.html/till-code.html on values that matched
+/// on palette v4 while the app ran v5 (and left checkout.html/checkout-code.html on values that matched
 /// neither). The pages carry a `{{PALETTE}}` token; `with_palette` substitutes the generated
 /// `assets/palette.css` into it at serve time.
 ///
@@ -1063,14 +1063,14 @@ async fn transactions_endpoint_returns_history_newest_first() {
 /// `app/__tests__/relay-palette.test.ts`, which is where a Node-side byte comparison belongs.
 #[tokio::test]
 async fn every_served_page_is_painted_from_the_one_palette() {
-    let (till, _fake) = till_state();
+    let (checkout, _fake) = checkout_state();
     let (plain, _led) = state_from(ledger());
 
     for (state, path) in [
         (&plain, "/"),
         (&plain, "/privacy"),
-        (&till, "/pl/?lightning=LNURL1TEST"),
-        (&till, "/till/pl_0011223344556677"),
+        (&checkout, "/pl/?lightning=LNURL1TEST"),
+        (&checkout, "/checkout/pl_0011223344556677"),
     ] {
         let (status, _headers, bytes) = call_raw(state, get_req(path)).await;
         assert_eq!(status, StatusCode::OK, "{path} must serve");
@@ -1087,7 +1087,7 @@ async fn every_served_page_is_painted_from_the_one_palette() {
             "{path} is missing the shared palette's brand tokens"
         );
         // Both theme hooks ride in the one block, which is what let the two mechanisms already in
-        // use (a pre-paint script on landing/privacy, plain prefers-color-scheme on the till pages)
+        // use (a pre-paint script on landing/privacy, plain prefers-color-scheme on the checkout pages)
         // stay exactly as they were.
         assert!(
             html.contains("html.scheme-auto") && html.contains("html[data-theme-mode=\"dark\"]"),
@@ -2834,28 +2834,28 @@ async fn wasm_core_served_and_unknown_path_is_404() {
     );
 }
 
-// --- the merchant till: dpay AS an OpenCryptoPay provider ---------------------------------------
-// `crates/dpay-relay/src/till.rs` owns the rules and tests them as pure functions; what is asserted
+// --- the merchant checkout: dpay AS an OpenCryptoPay provider ---------------------------------------
+// `crates/dpay-relay/src/checkout.rs` owns the rules and tests them as pure functions; what is asserted
 // here is the HTTP surface a THIRD-PARTY wallet meets — the paths the standard dictates, the field
 // names it parses, and the two behaviours that distinguish this provider from the measured one:
 // settlement is observed on the ledger rather than announced by the payer, and reporting is safe to
-// retry. The bodies themselves are pinned as a golden: `dfx/till_wire.json`.
+// retry. The bodies themselves are pinned as a golden: `dfx/checkout_wire.json`.
 
-/// A relay that SERVES the till, with the fake-IC gateway behind it (the merchant's incoming
-/// history is what settles a charge). The `with_till` is explicit and load-bearing: without it the
-/// eight routes are not registered at all — see `the_till_is_not_served_unless_the_relay_is_told_to`,
+/// A relay that SERVES the checkout, with the fake-IC gateway behind it (the merchant's incoming
+/// history is what settles a charge). The `with_checkout` is explicit and load-bearing: without it the
+/// eight routes are not registered at all — see `the_checkout_is_not_served_unless_the_relay_is_told_to`,
 /// which is the reason the flag exists.
-fn till_state() -> (AppState, Arc<FakeIc>) {
+fn checkout_state() -> (AppState, Arc<FakeIc>) {
     let fake = FakeIc::from_catalog();
     let state = AppState::new(Arc::new(FakeLedger::new()))
         .with_fake_ic(fake.clone())
-        .with_till(true);
+        .with_checkout(true);
     (state, fake)
 }
 
 /// A nonce no other request in this suite has used. A merchant's signature is single-use, so a
-/// shared fixture nonce would make every second ring-up in a test a replay — a failure that would
-/// look like a bug in the till rather than in the test.
+/// shared fixture nonce would make every second checkout-open in a test a replay — a failure that would
+/// look like a bug in the checkout rather than in the test.
 fn fresh_nonce() -> [u8; NONCE_LEN] {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2864,23 +2864,23 @@ fn fresh_nonce() -> [u8; NONCE_LEN] {
     nonce
 }
 
-/// A merchant's SIGNED till request as the wire carries it. The ONE builder for both merchant
+/// A merchant's SIGNED checkout request as the wire carries it. The ONE builder for both merchant
 /// routes and for every forgery below, so a test that means to send a bad SIGNATURE cannot
 /// accidentally send a bad-shaped body and pass for the wrong reason.
-fn till_body(
+fn checkout_body(
     key: &SigningKey,
     cents: u64,
     name: &str,
     nonce: [u8; NONCE_LEN],
     issued_at: u64,
 ) -> Value {
-    till_body_noted(key, cents, name, nonce, issued_at, None)
+    checkout_body_noted(key, cents, name, nonce, issued_at, None)
 }
 
-/// `till_body` carrying (or omitting, for `None`) the charge's note — the v2 spelling when present.
+/// `checkout_body` carrying (or omitting, for `None`) the charge's note — the v2 spelling when present.
 /// The ONE builder stays ONE: every forgery below still goes through the same path, so a bad
 /// signature cannot hide inside a hand-shaped body.
-fn till_body_noted(
+fn checkout_body_noted(
     key: &SigningKey,
     cents: u64,
     name: &str,
@@ -2888,7 +2888,7 @@ fn till_body_noted(
     issued_at: u64,
     note: Option<&str>,
 ) -> Value {
-    let open = TillOpen {
+    let open = CheckoutOpen {
         merchant_pubkey: key.verifying_key().to_bytes(),
         cents,
         nonce,
@@ -2902,7 +2902,7 @@ fn till_body_noted(
         "cents": cents,
         "nonce": hex::encode(nonce),
         "issued_at": issued_at,
-        "signature": hex::encode(sign_till_open(key, &open).to_bytes()),
+        "signature": hex::encode(sign_checkout_open(key, &open).to_bytes()),
     });
     // `null` and absent are the same thing to the relay (`serde(default)`), but the worked example
     // a merchant copies should not carry a field that says nothing.
@@ -2916,7 +2916,7 @@ fn till_body_noted(
 /// absolute URL in the answers is built from — the `Host` a wallet's request carries and the
 /// `X-Forwarded-Proto` the tunnel in front of prod sets — so a caller can ask for the http origin a
 /// local run has or the https one a payer meets.
-fn till_post(uri: &str, body: &Value, host: &str, proto: &str) -> Request<Body> {
+fn checkout_post(uri: &str, body: &Value, host: &str, proto: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
         .uri(uri)
@@ -2927,8 +2927,8 @@ fn till_post(uri: &str, body: &Value, host: &str, proto: &str) -> Request<Body> 
         .unwrap()
 }
 
-/// Ring up a charge, signed by the merchant's own key — the only way in since 2026-09-04.
-async fn open_till(
+/// Open a charge, signed by the merchant's own key — the only way in since 2026-09-04.
+async fn open_checkout(
     state: &AppState,
     key: &SigningKey,
     name: &str,
@@ -2936,12 +2936,12 @@ async fn open_till(
     host: &str,
     proto: &str,
 ) -> Value {
-    open_till_noted(state, key, name, cents, None, host, proto).await
+    open_checkout_noted(state, key, name, cents, None, host, proto).await
 }
 
-/// `open_till` carrying a note — the v2 ring-up, so the golden and the note tests drive the same
+/// `open_checkout` carrying a note — the v2 checkout-open, so the golden and the note tests drive the same
 /// route the merchant app does.
-async fn open_till_noted(
+async fn open_checkout_noted(
     state: &AppState,
     key: &SigningKey,
     name: &str,
@@ -2950,14 +2950,14 @@ async fn open_till_noted(
     host: &str,
     proto: &str,
 ) -> Value {
-    let body = till_body_noted(key, cents, name, fresh_nonce(), unix_secs(), note);
-    let (status, body) = call(state, till_post("/api/v1/till", &body, host, proto)).await;
+    let body = checkout_body_noted(key, cents, name, fresh_nonce(), unix_secs(), note);
+    let (status, body) = call(state, checkout_post("/api/v1/checkout", &body, host, proto)).await;
     assert_eq!(status, StatusCode::OK, "ringing up a charge: {body}");
     body
 }
 
 /// VCHF's ledger and fee, as this relay's own compiled catalog states them — the SAME lookup the
-/// till makes when it names a destination, so a test can never pay a ledger the provider does not
+/// checkout makes when it names a destination, so a test can never pay a ledger the provider does not
 /// read or guess a fee the gateway would refuse.
 async fn vchf_ledger(state: &AppState) -> (String, u64) {
     let (status, body) = call(state, get_req("/api/v1/currencies")).await;
@@ -2983,15 +2983,15 @@ async fn vchf_ledger(state: &AppState) -> (String, u64) {
     )
 }
 
-/// The `ref` this till minted for one charge, read off the RING-UP the merchant signed — the one
+/// The `ref` this checkout minted for one charge, read off the CHECKOUT-OPEN the merchant signed — the one
 /// place this provider states it to the party that OWNS the charge, and 32 lowercase hex either
 /// way. The payer learns the same value from the step-3 instruction, and
-/// `till_serves_the_standard_and_settles_only_on_a_real_transfer` pins the two spellings against
+/// `checkout_serves_the_standard_and_settles_only_on_a_real_transfer` pins the two spellings against
 /// each other; nothing else needs to walk a payer's two routes to recover it.
 fn charge_reference(opened: &Value) -> String {
     let reference = opened["reference"]
         .as_str()
-        .unwrap_or_else(|| panic!("a ring-up answer must name the charge's reference: {opened}"))
+        .unwrap_or_else(|| panic!("a checkout-open answer must name the charge's reference: {opened}"))
         .to_string();
     assert_eq!(reference.len(), 32, "{opened}");
     assert!(
@@ -3003,15 +3003,15 @@ fn charge_reference(opened: &Value) -> String {
     reference
 }
 
-/// The raw VCHF a ring-up asked for, read off the answer's OWN quoted amount — which is what a
+/// The raw VCHF a checkout-open asked for, read off the answer's OWN quoted amount — which is what a
 /// payer does: they are told a decimal and they send exactly it. Never a literal in a test, because
 /// the quote is the price less the ledger fee the shop absorbs, and a hand-typed raw amount would
 /// be a fixture describing a payment no wallet would make (and would silently start overpaying by
-/// the fee the day that policy changed). The subtraction rule itself is pinned in `till.rs`.
+/// the fee the day that policy changed). The subtraction rule itself is pinned in `checkout.rs`.
 fn quoted_raw(opened: &Value) -> u64 {
     let amount = opened["amount"]
         .as_str()
-        .unwrap_or_else(|| panic!("a ring-up answer quotes an amount: {opened}"));
+        .unwrap_or_else(|| panic!("a checkout-open answer quotes an amount: {opened}"));
     let (whole, frac) = amount.split_once('.').unwrap_or((amount, ""));
     assert!(frac.len() <= 8, "VCHF has 8 decimals: {amount}");
     let padded = format!("{frac:0<8}");
@@ -3026,7 +3026,7 @@ fn quoted_raw(opened: &Value) -> u64 {
 /// Deliberately not a faucet credit (which is what these tests used before, and which logs a
 /// memo-less mint row): what settles a charge is now the memo, so a fixture that could not carry
 /// one would prove the opposite of what these tests are for.
-async fn pay_till(
+async fn pay_checkout(
     state: &AppState,
     fake: &Arc<FakeIc>,
     merchant_pk: [u8; 32],
@@ -3099,7 +3099,7 @@ async fn pay_till(
 }
 
 /// A GET carrying the same origin pair, for the one provider route that builds absolute URLs.
-fn till_get(uri: &str, host: &str, proto: &str) -> Request<Body> {
+fn checkout_get(uri: &str, host: &str, proto: &str) -> Request<Body> {
     Request::builder()
         .method("GET")
         .uri(uri)
@@ -3110,8 +3110,8 @@ fn till_get(uri: &str, host: &str, proto: &str) -> Request<Body> {
 }
 
 #[tokio::test]
-async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
-    let (state, fake) = till_state();
+async fn checkout_serves_the_standard_and_settles_only_on_a_real_transfer() {
+    let (state, fake) = checkout_state();
 
     // The merchant is a dpay wallet: their account is DERIVED from their key, so they cannot name
     // one they could not sign for, and this relay never holds it.
@@ -3119,12 +3119,12 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     let merchant_pk: [u8; 32] = merchant.verifying_key().to_bytes();
     let merchant_account = Principal::self_authenticating_ed25519(&merchant_pk).to_text();
 
-    let opened = open_till(
+    let opened = open_checkout(
         &state,
         &merchant,
         "Test Shop",
         1_000,
-        "till.example",
+        "checkout.example",
         "http",
     )
     .await;
@@ -3135,11 +3135,11 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     );
     // CHF 10 is ten francs of a franc-denominated token. No rate anywhere — and the settlement
     // amount is that price LESS the ledger fee the shop absorbs, so the customer's account moves
-    // by exactly CHF 10.00 (`LEDGER_FEE_RAW`, till.rs).
+    // by exactly CHF 10.00 (`LEDGER_FEE_RAW`, checkout.rs).
     assert_eq!(opened["amount"], "9.9999");
     assert_eq!(opened["asset"], "VCHF");
     assert_eq!(opened["merchant"], merchant_account);
-    assert_eq!(opened["url"], format!("http://till.example/v1/lnurlp/{id}"));
+    assert_eq!(opened["url"], format!("http://checkout.example/v1/lnurlp/{id}"));
     // THE CHARGE'S NAME ON THE LEDGER, served to the merchant who signed for it. Without it the
     // only party that could learn a charge's reference was a payer walking the OpenCryptoPay
     // routes, so a merchant collecting the money any other way had nothing to put in the memo.
@@ -3163,7 +3163,7 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // THE TWO NUMBERS A CUSTOMER'S WALLET IS GIVEN, and they are deliberately different: the ask
     // is the PRICE (CHF 10.00 — what the customer agreed to) and the transfer is the price less
     // the ledger fee, so that `amount + fee`, which is what their ledger debits them, IS the price.
-    // The shop is the one short by the fee. `LEDGER_FEE_RAW` in till.rs owns the reasoning.
+    // The shop is the one short by the fee. `LEDGER_FEE_RAW` in checkout.rs owns the reasoning.
     assert_eq!(details["requestedAmount"]["asset"], "CHF");
     assert_eq!(details["requestedAmount"]["amount"], 10.0);
     let offers = &details["transferAmounts"][0];
@@ -3197,7 +3197,7 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
         "{uri}"
     );
     // …and this charge's own reference, which is what the payer echoes as the transfer's memo and
-    // what the till matches on. 32 hex characters — the 16-byte width dpay's reconciliation memo
+    // what the checkout matches on. 32 hex characters — the 16-byte width dpay's reconciliation memo
     // has everywhere else — and different from the charge's id, which is a read token and not a
     // claim on a ledger row.
     let reference = uri
@@ -3223,7 +3223,7 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
         "the reference the merchant was served must be the one the payer is instructed to carry"
     );
 
-    // A pair this till does not serve is refused rather than quoted — quoting it would mean
+    // A pair this checkout does not serve is refused rather than quoted — quoting it would mean
     // holding an exchange rate, which v1 deliberately does not.
     let (status, body) = call(
         &state,
@@ -3247,13 +3247,13 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
         "a lying payer must not credit a sale: {body}"
     );
     assert_eq!(body["status"], "PENDING");
-    let (_, status_body) = call(&state, get_req(&format!("/api/v1/till/{id}"))).await;
+    let (_, status_body) = call(&state, get_req(&format!("/api/v1/checkout/{id}"))).await;
     assert!(
         status_body["paid"].is_null(),
         "nothing may be credited before a transfer exists"
     );
     // …and this route is UNAUTHENTICATED, so it says only what an id-holder may hear. The reference
-    // reaches the merchant on the ring-up they SIGNED and is not repeated here — least authority,
+    // reaches the merchant on the checkout-open they SIGNED and is not repeated here — least authority,
     // the reasoning in full at `ChargeStatus`.
     assert!(
         status_body["reference"].is_null(),
@@ -3263,19 +3263,19 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // --- the money actually arrives --------------------------------------------------------------
     // A real signed transfer to the merchant's principal on the VCHF ledger, carrying the step-3
     // `ref` as its memo — the exact thing a payer is instructed to send.
-    let paying_block = pay_till(&state, &fake, merchant_pk, quoted_raw(&opened), &reference).await;
+    let paying_block = pay_checkout(&state, &fake, merchant_pk, quoted_raw(&opened), &reference).await;
 
     // A same-amount transfer to the same merchant carrying somebody ELSE's reference is not this
     // sale. Sent second, so it is the NEWER row and the first one a newest-first walk meets:
     // matching on amount alone would take it, and this charge would be credited out of a payment
     // made for something else.
-    let stray = pay_till(&state, &fake, merchant_pk, quoted_raw(&opened), &"9e".repeat(16)).await;
+    let stray = pay_checkout(&state, &fake, merchant_pk, quoted_raw(&opened), &"9e".repeat(16)).await;
     assert_ne!(stray, paying_block, "two transfers are two ledger rows");
 
     // Waiting out the observation window, which is a real property and not a test convenience: a
     // charge is walked at most once every couple of seconds however hard it is polled, so a
     // just-arrived transfer is seen by the NEXT walk rather than instantly. The sleep therefore
-    // also pins that the window CLOSES — a cache that never expired would be a till that never
+    // also pins that the window CLOSES — a cache that never expired would be a checkout that never
     // sees the money.
     tokio::time::sleep(std::time::Duration::from_millis(2_100)).await;
 
@@ -3309,7 +3309,7 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // The merchant's own screen sees it too, re-derived from the ledger rather than from memory —
     // including WHICH ledger row credited them, which is the only thing that makes a settlement
     // checkable against the chain afterwards.
-    let (_, merchant_view) = call(&state, get_req(&format!("/api/v1/till/{id}"))).await;
+    let (_, merchant_view) = call(&state, get_req(&format!("/api/v1/checkout/{id}"))).await;
     assert_eq!(
         merchant_view["paid"]["amount_raw"],
         quoted_raw(&opened).to_string()
@@ -3334,23 +3334,23 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     );
 }
 
-/// A ring-up may carry a NOTE — what the charge is for, in the merchant's own signed words. The
+/// A checkout-open may carry a NOTE — what the charge is for, in the merchant's own signed words. The
 /// payer reads it on review, so it is served on step 2 beside the name it belongs to, and folded
-/// into the LUD-06 description a third-party wallet renders instead. A note-less ring-up must not
+/// into the LUD-06 description a third-party wallet renders instead. A note-less checkout-open must not
 /// grow a `note` key: that body is the one every older wallet already parses.
 #[tokio::test]
 async fn a_noted_ring_up_serves_the_note_and_a_noteless_one_serves_nothing_new() {
-    let (state, _fake) = till_state();
+    let (state, _fake) = checkout_state();
     let merchant = SigningKey::from_bytes(&[0x0b; 32]);
 
     // --- noted: the note rides step 2 twice (own field + LUD-06 description) ----------------------
-    let opened = open_till_noted(
+    let opened = open_checkout_noted(
         &state,
         &merchant,
         "Bahnhof Kiosk",
         1_000,
         Some("2× Kafi, Tisch 4"),
-        "till.example",
+        "checkout.example",
         "https",
     )
     .await;
@@ -3366,7 +3366,7 @@ async fn a_noted_ring_up_serves_the_note_and_a_noteless_one_serves_nothing_new()
     );
 
     // --- note-less: the field is ABSENT, not null — the pre-note body, byte for byte ---------------
-    let opened = open_till(&state, &merchant, "Bahnhof Kiosk", 1_000, "till.example", "https").await;
+    let opened = open_checkout(&state, &merchant, "Bahnhof Kiosk", 1_000, "checkout.example", "https").await;
     let id = opened["id"].as_str().unwrap().to_string();
     let (status, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
     assert_eq!(status, StatusCode::OK, "{details}");
@@ -3383,13 +3383,13 @@ async fn a_noted_ring_up_serves_the_note_and_a_noteless_one_serves_nothing_new()
     // what step 2 serves is bounded by the same 32-byte rule as the name (a stranger's text, relay
     // memory), cut on a character boundary.
     let long_note = "Ein sehr langer Zweck für diese Zahlung am Kiosk ☕☕☕"; // 48 bytes, multibyte tail
-    let opened = open_till_noted(
+    let opened = open_checkout_noted(
         &state,
         &merchant,
         "Bahnhof Kiosk",
         1_000,
         Some(long_note),
-        "till.example",
+        "checkout.example",
         "https",
     )
     .await;
@@ -3403,7 +3403,7 @@ async fn a_noted_ring_up_serves_the_note_and_a_noteless_one_serves_nothing_new()
     );
 }
 
-/// A WALLET MAY BE A WEB PAGE, and until 2026-09-12 this till was unreadable by every one of them.
+/// A WALLET MAY BE A WEB PAGE, and until 2026-09-12 this checkout was unreadable by every one of them.
 ///
 /// Oisy — the only wallet measured to carry an Internet Computer OpenCryptoPay leg at all — runs in
 /// a browser and fetches the decoded LNURL with a `Content-Type` header, which makes the read a
@@ -3419,9 +3419,9 @@ async fn a_noted_ring_up_serves_the_note_and_a_noteless_one_serves_nothing_new()
 /// this relay (the Solana proxy above all) closed to a stranger's web page in production.
 #[tokio::test]
 async fn a_browser_wallet_can_read_the_provider_routes() {
-    let (state, _fake) = till_state();
+    let (state, _fake) = checkout_state();
     let merchant = SigningKey::from_bytes(&[31u8; 32]);
-    let opened = open_till(&state, &merchant, "Kiosk", 250, "till.example", "https").await;
+    let opened = open_checkout(&state, &merchant, "Kiosk", 250, "checkout.example", "https").await;
     let id = opened["id"].as_str().unwrap().to_string();
     let (_, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
     let quote = details["quote"]["id"].as_str().unwrap().to_string();
@@ -3477,15 +3477,15 @@ async fn a_browser_wallet_can_read_the_provider_routes() {
 /// poll it is already making, and the payer keeps the standard's retryable `PENDING`.
 #[tokio::test]
 async fn an_approval_is_carried_to_the_shop_whose_phone_can_collect_it() {
-    let (state, _fake) = till_state();
+    let (state, _fake) = checkout_state();
     let merchant = SigningKey::from_bytes(&[32u8; 32]);
     let payer = user_principal(&pubkey(&SigningKey::from_bytes(&[33u8; 32]))).to_text();
-    let opened = open_till(&state, &merchant, "Kiosk", 250, "till.example", "https").await;
+    let opened = open_checkout(&state, &merchant, "Kiosk", 250, "checkout.example", "https").await;
     let id = opened["id"].as_str().unwrap().to_string();
     let (_, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
     let quote = details["quote"]["id"].as_str().unwrap().to_string();
     let report = format!("/v1/lnurlp/tx/{id}?quote={quote}&method=InternetComputer&asset=VCHF");
-    let poll = format!("/api/v1/till/{id}");
+    let poll = format!("/api/v1/checkout/{id}");
 
     // Before anyone claims anything, the body carries no claim at all — a wallet that never
     // approves changes no byte of it.
@@ -3513,7 +3513,7 @@ async fn an_approval_is_carried_to_the_shop_whose_phone_can_collect_it() {
 
     // A wallet that PUSHED is untouched by any of this: it reports a transaction id, gets the same
     // retryable PENDING, and leaves no claim for the shop to act on.
-    let fresh = open_till(&state, &merchant, "Kiosk", 250, "till.example", "https").await;
+    let fresh = open_checkout(&state, &merchant, "Kiosk", 250, "checkout.example", "https").await;
     let fresh_id = fresh["id"].as_str().unwrap().to_string();
     let (_, fresh_details) = call(&state, get_req(&format!("/v1/lnurlp/{fresh_id}?timeout=0"))).await;
     let fresh_quote = fresh_details["quote"]["id"].as_str().unwrap().to_string();
@@ -3525,7 +3525,7 @@ async fn an_approval_is_carried_to_the_shop_whose_phone_can_collect_it() {
     )
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{body}");
-    let (_, pushed) = call(&state, get_req(&format!("/api/v1/till/{fresh_id}"))).await;
+    let (_, pushed) = call(&state, get_req(&format!("/api/v1/checkout/{fresh_id}"))).await;
     assert!(
         pushed.get("pull").is_none(),
         "a wallet that named a transaction pushed; it is not asking to be collected from: {pushed}"
@@ -3543,28 +3543,28 @@ async fn an_approval_is_carried_to_the_shop_whose_phone_can_collect_it() {
 
 /// ONE TRANSFER, ONE SALE — the money bug, over the real HTTP surface.
 ///
-/// Two charges for the same price at the same till and exactly one payment. Matching on amount
+/// Two charges for the same price at the same checkout and exactly one payment. Matching on amount
 /// alone, both read as paid off that single transfer and the shop handed over the goods twice.
 /// Now the payment NAMES the charge it is for, so the second one is not merely left open by the
 /// order the two happened to be polled in — that transfer could never have credited it.
 #[tokio::test]
 async fn one_transfer_credits_exactly_one_sale() {
-    let (state, fake) = till_state();
+    let (state, fake) = checkout_state();
     let merchant = SigningKey::from_bytes(&[21u8; 32]);
     let merchant_pk: [u8; 32] = merchant.verifying_key().to_bytes();
 
-    // Ring up CHF 4.50 and let a customer read its instruction, then ring up CHF 4.50 again — the
-    // customer fumbled, the cashier re-rang. Reading the first charge's step 3 BEFORE the re-ring
+    // Open CHF 4.50 and let a customer read its instruction, then open CHF 4.50 again — the
+    // customer fumbled, the cashier opened a fresh charge. Reading the first charge's step 3 BEFORE the re-open
     // is the sequence a real payer lives: a superseded charge is no longer quoted, which is exactly
-    // why the payer standing there is still holding an instruction the till must honour.
-    let first = open_till(&state, &merchant, "Test Shop", 450, "till.example", "http").await;
+    // why the payer standing there is still holding an instruction the checkout must honour.
+    let first = open_checkout(&state, &merchant, "Test Shop", 450, "checkout.example", "http").await;
     let first_id = first["id"].as_str().unwrap().to_string();
     let first_ref = charge_reference(&first);
-    let second = open_till(&state, &merchant, "Test Shop", 450, "till.example", "http").await;
+    let second = open_checkout(&state, &merchant, "Test Shop", 450, "checkout.example", "http").await;
     let second_id = second["id"].as_str().unwrap().to_string();
     let second_ref = charge_reference(&second);
     let (first_id, second_id) = (first_id.as_str(), second_id.as_str());
-    assert_ne!(first_id, second_id, "two ring-ups are two charges, not one");
+    assert_ne!(first_id, second_id, "two checkout-opens are two charges, not one");
     // The two charges are handed DIFFERENT references, which is the whole mechanism: each customer
     // is told what to write on their payment, so the shop can tell two identical prices apart.
     assert_ne!(
@@ -3574,9 +3574,9 @@ async fn one_transfer_credits_exactly_one_sale() {
 
     // ONE payment of exactly CHF 4.50 lands at the merchant, carrying the FIRST charge's reference
     // — the code the customer was actually holding when they paid.
-    pay_till(&state, &fake, merchant_pk, quoted_raw(&first), &first_ref).await;
+    pay_checkout(&state, &fake, merchant_pk, quoted_raw(&first), &first_ref).await;
 
-    let status_of = |id: &str| format!("/api/v1/till/{id}");
+    let status_of = |id: &str| format!("/api/v1/checkout/{id}");
     let (_, a) = call(&state, get_req(&status_of(first_id))).await;
     let (_, b) = call(&state, get_req(&status_of(second_id))).await;
     let paid: Vec<&Value> = [&a, &b]
@@ -3593,7 +3593,7 @@ async fn one_transfer_credits_exactly_one_sale() {
     // Which one takes it is not the order they were polled in: the transfer named the first charge,
     // so the second is left honestly open however hard it is asked. A VOIDED charge is still
     // observed — that is deliberate, and it is why a payer holding the old code a heartbeat before
-    // the cashier re-rang does not lose their money.
+    // the later charge does not lose their money.
     assert_eq!(a["state"], "paid");
     assert_eq!(b["paid"], Value::Null);
     assert_eq!(b["state"], "open");
@@ -3618,9 +3618,9 @@ async fn one_transfer_credits_exactly_one_sale() {
         "{refused}"
     );
 
-    // …and a code the cashier has rung past is a DIFFERENT kind of dead, told apart out loud: the
-    // third ring-up voids the second, which was never paid.
-    let third = open_till(&state, &merchant, "Test Shop", 450, "till.example", "http").await;
+    // …and a code the cashier has closed is a DIFFERENT kind of dead, told apart out loud: the
+    // third checkout-open voids the second, which was never paid.
+    let third = open_checkout(&state, &merchant, "Test Shop", 450, "checkout.example", "http").await;
     assert_ne!(third["id"], second["id"]);
     let (status, replaced) = call(
         &state,
@@ -3642,14 +3642,14 @@ async fn one_transfer_credits_exactly_one_sale() {
 /// A merchant's name is a STRANGER'S STRING pasted into a JSON document that lives inside a JSON
 /// string. Built with `format!` (what this used to do), a name of `X"],["image/png;base64,…`
 /// closed the entry and opened a second one — a syntactically valid LUD-06 document with an
-/// injected image entry that wallets parse and render. Proven against this till on prod.
+/// injected image entry that wallets parse and render. Proven against this checkout on prod.
 #[tokio::test]
 async fn a_merchant_name_cannot_forge_a_second_metadata_entry() {
-    let (state, _fake) = till_state();
+    let (state, _fake) = checkout_state();
     let merchant = SigningKey::from_bytes(&[23u8; 32]);
     // Short enough to fit the name cap, so what is being tested is the ESCAPING and not the clamp.
     let attack = r#"X"],["a"#;
-    let opened = open_till(&state, &merchant, attack, 100, "till.example", "http").await;
+    let opened = open_checkout(&state, &merchant, attack, 100, "checkout.example", "http").await;
     let id = opened["id"].as_str().unwrap();
     let (status, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
     assert_eq!(status, StatusCode::OK, "{details}");
@@ -3670,7 +3670,7 @@ async fn a_merchant_name_cannot_forge_a_second_metadata_entry() {
     assert_eq!(
         entries[0][1],
         format!("{attack} - CHF 1"),
-        "the name survives INSIDE the entry, escaped — the till does not censor it, it contains it"
+        "the name survives INSIDE the entry, escaped — the checkout does not censor it, it contains it"
     );
     // And the human text is a human's spelling: `CHF 1`, never the wire's bare `CHF 1.`.
     assert!(
@@ -3680,8 +3680,8 @@ async fn a_merchant_name_cannot_forge_a_second_metadata_entry() {
 }
 
 #[tokio::test]
-async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words() {
-    let (state, _fake) = till_state();
+async fn checkout_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words() {
+    let (state, _fake) = checkout_state();
 
     // An unknown link is the error envelope, not the payment-link payload — the two DIFFERENT 404s
     // a wallet must tell apart (one means "ask the cashier", this one means "this code is stale").
@@ -3692,7 +3692,7 @@ async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words(
 
     // A quote we never issued cannot buy a destination.
     let merchant = SigningKey::from_bytes(&[11u8; 32]);
-    let opened = open_till(&state, &merchant, "Test Shop", 250, "till.example", "http").await;
+    let opened = open_checkout(&state, &merchant, "Test Shop", 250, "checkout.example", "http").await;
     let id = opened["id"].as_str().unwrap();
     let (status, body) = call(
         &state,
@@ -3705,11 +3705,11 @@ async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words(
     assert_eq!(body["message"], "No actual quote with ID found");
 
     // A charge of nothing is not a charge — and the refusal names where a signed `cents = 0` DOES
-    // belong, because that spelling is not a mistake anywhere: it is how the till is cleared.
-    let nothing = till_body(&merchant, 0, "Test Shop", fresh_nonce(), unix_secs());
+    // belong, because that spelling is not a mistake anywhere: it is how the checkout is cleared.
+    let nothing = checkout_body(&merchant, 0, "Test Shop", fresh_nonce(), unix_secs());
     let (status, body) = call(
         &state,
-        till_post("/api/v1/till", &nothing, "till.example", "http"),
+        checkout_post("/api/v1/checkout", &nothing, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -3717,47 +3717,47 @@ async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words(
         body["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("/api/v1/till/void"),
-        "a charge of nothing points the cashier at the route that clears the till: {body}"
+            .contains("/api/v1/checkout/void"),
+        "a charge of nothing points the cashier at the route that clears the checkout: {body}"
     );
 
     // CHF 2.50 keeps its cents on the wire, net of the fee the shop absorbs.
     assert_eq!(opened["amount"], "2.4999");
 }
 
-/// A ring-up is refused unless the caller can SIGN for the account the money would go to — and a
+/// A checkout-open is refused unless the caller can SIGN for the account the money would go to — and a
 /// refused one changes nothing.
 ///
-/// The hole this closes was live in production: `POST /api/v1/till` took any 32 bytes of hex as the
+/// The hole this closes was live in production: `POST /api/v1/checkout` took any 32 bytes of hex as the
 /// destination key, so a stranger could open a charge naming any merchant they liked and this relay
 /// would serve a full payment page for it on dpay's own domain, under dpay's own certificate. The
 /// second half — that a refusal leaves the merchant's real charge alone — is the other hole in the
-/// same route: ringing up VOIDS that merchant's previous charge, so an anonymous caller who could
-/// ring up could keep a cashier re-ringing all day.
+/// same route: opening a charge VOIDS that merchant's previous one, so an anonymous caller who
+/// could open one could keep a cashier re-opening charges all day.
 ///
 /// The four refusals are told apart on the wire because they send a merchant to do four different
 /// things: re-sync the clock, fix the key, sign again, or stop signing and go poll the charge that
 /// already exists.
 #[tokio::test]
 async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
-    let (state, _fake) = till_state();
+    let (state, _fake) = checkout_state();
     let merchant = SigningKey::from_bytes(&[31u8; 32]);
     let attacker = SigningKey::from_bytes(&[32u8; 32]);
     let now = unix_secs();
 
-    // The merchant's own, honest ring-up: a live charge for the forgeries below to fail to disturb.
-    let mine = open_till(
+    // The merchant's own, honest checkout-open: a live charge for the forgeries below to fail to disturb.
+    let mine = open_checkout(
         &state,
         &merchant,
         "Bahnhof Kiosk",
         450,
-        "till.example",
+        "checkout.example",
         "http",
     )
     .await;
     let id = mine["id"]
         .as_str()
-        .expect("a rung-up charge carries an id")
+        .expect("an opened charge carries an id")
         .to_string();
 
     // A body with no proof in it at all — the shape an integrator sends first. The refusal names
@@ -3770,7 +3770,7 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
     });
     let (status, body) = call(
         &state,
-        till_post("/api/v1/till", &bare, "till.example", "http"),
+        checkout_post("/api/v1/checkout", &bare, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -3786,11 +3786,11 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
 
     // Someone else's signature over the merchant's own key: the exact impersonation the signature
     // exists to refuse, and the one a stranger with the merchant's public key can attempt.
-    let mut forged = till_body(&attacker, 450, "Bahnhof Kiosk", fresh_nonce(), now);
+    let mut forged = checkout_body(&attacker, 450, "Bahnhof Kiosk", fresh_nonce(), now);
     forged["merchant_pubkey"] = Value::String(hex::encode(merchant.verifying_key().to_bytes()));
     let (status, body) = call(
         &state,
-        till_post("/api/v1/till", &forged, "till.example", "http"),
+        checkout_post("/api/v1/checkout", &forged, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
@@ -3802,14 +3802,14 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
         "{body}"
     );
 
-    // `deadbeef…deadbeef` — the key the 2026-09-03 production probe rang up with. It is not a point
+    // `deadbeef…deadbeef` — the key the 2026-09-03 production probe opened a charge with. It is not a point
     // on the curve, so it is told apart from a wrong signature: nobody can hold it, and no account
     // derives from it. A merchant who pasted a placeholder must hear about their KEY.
-    let mut placeholder = till_body(&merchant, 450, "Bahnhof Kiosk", fresh_nonce(), now);
+    let mut placeholder = checkout_body(&merchant, 450, "Bahnhof Kiosk", fresh_nonce(), now);
     placeholder["merchant_pubkey"] = Value::String("deadbeef".repeat(8));
     let (status, body) = call(
         &state,
-        till_post("/api/v1/till", &placeholder, "till.example", "http"),
+        checkout_post("/api/v1/checkout", &placeholder, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -3823,11 +3823,11 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
 
     // A hex field of the wrong width is named, with both the byte count the wire means and the
     // character count the caller typed — "32-byte hex" reads wrong to someone holding 128 chars.
-    let mut short = till_body(&merchant, 450, "Bahnhof Kiosk", fresh_nonce(), now);
+    let mut short = checkout_body(&merchant, 450, "Bahnhof Kiosk", fresh_nonce(), now);
     short["signature"] = Value::String("ab".repeat(63));
     let (status, body) = call(
         &state,
-        till_post("/api/v1/till", &short, "till.example", "http"),
+        checkout_post("/api/v1/checkout", &short, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -3841,32 +3841,32 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
 
     // A capture replayed a day later. The clock refuses it, and says by how much and against what —
     // the merchant cannot see this relay's clock, and the gap is the whole diagnosis.
-    let stale = till_body(&merchant, 450, "Bahnhof Kiosk", fresh_nonce(), now - 86_400);
+    let stale = checkout_body(&merchant, 450, "Bahnhof Kiosk", fresh_nonce(), now - 86_400);
     let (status, body) = call(
         &state,
-        till_post("/api/v1/till", &stale, "till.example", "http"),
+        checkout_post("/api/v1/checkout", &stale, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     // The gap is computed from the relay's clock at HANDLER time, which can sit one second past
     // the test's own `unix_secs()` (a second-boundary flake when pinned to "86400 s" exactly).
-    // The diagnosis shape is what matters: the gap, named against the till clock.
+    // The diagnosis shape is what matters: the gap, named against the checkout clock.
     assert!(
         body["message"].as_str().unwrap_or_default().contains("issued_at is")
             && body["message"]
                 .as_str()
                 .unwrap_or_default()
-                .contains("s from this till's clock, which allows ±120 s"),
+                .contains("s from this checkout's clock, which allows ±120 s"),
         "{body}"
     );
 
     // NONE of that touched the merchant's live charge. Before the signature, every one of those
     // requests would have opened a charge — and voided this one on the way past, forcing the
-    // cashier to ring up again.
-    let (_, still) = call(&state, get_req(&format!("/api/v1/till/{id}"))).await;
+    // cashier to open a fresh charge.
+    let (_, still) = call(&state, get_req(&format!("/api/v1/checkout/{id}"))).await;
     assert_eq!(
         still["state"], "open",
-        "a refused ring-up must not disturb a real one: {still}"
+        "a refused checkout-open must not disturb a real one: {still}"
     );
     let (status, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
     assert_eq!(
@@ -3878,16 +3878,16 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
     // A signature is good exactly ONCE. The replay is refused as a duplicate rather than as a
     // forgery, and the answer sends the merchant to the charge it already opened instead of to
     // sign again — signing again with the same nonce would only land here a third time.
-    let honest = till_body(&merchant, 900, "Bahnhof Kiosk", fresh_nonce(), now);
+    let honest = checkout_body(&merchant, 900, "Bahnhof Kiosk", fresh_nonce(), now);
     let (status, first) = call(
         &state,
-        till_post("/api/v1/till", &honest, "till.example", "http"),
+        checkout_post("/api/v1/checkout", &honest, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{first}");
     let (status, replay) = call(
         &state,
-        till_post("/api/v1/till", &honest, "till.example", "http"),
+        checkout_post("/api/v1/checkout", &honest, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{replay}");
@@ -3895,44 +3895,44 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
         replay["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("GET /api/v1/till/{id}"),
+            .contains("GET /api/v1/checkout/{id}"),
         "a replay is pointed at the charge it already opened: {replay}"
     );
 }
 
-/// The mis-keyed total, over the real HTTP surface: CHF 100.00 rung up for a CHF 1.00 coffee.
+/// The mis-keyed total, over the real HTTP surface: CHF 100.00 opened for a CHF 1.00 coffee.
 ///
 /// Until this route existed the cashier had no way to kill the code — it stayed payable for an
-/// hour, and the only escape was to ring up something else and leave THAT payable in front of the
+/// hour, and the only escape was to open something else and leave THAT payable in front of the
 /// customer instead.
 #[tokio::test]
 async fn a_cashier_can_cancel_a_mis_keyed_total() {
-    let (state, fake) = till_state();
+    let (state, fake) = checkout_state();
     let merchant = SigningKey::from_bytes(&[41u8; 32]);
     let merchant_pk: [u8; 32] = merchant.verifying_key().to_bytes();
     let now = unix_secs();
 
-    let oops = open_till(
+    let oops = open_checkout(
         &state,
         &merchant,
         "Bahnhof Kiosk",
         10_000,
-        "till.example",
+        "checkout.example",
         "http",
     )
     .await;
     let id = oops["id"]
         .as_str()
-        .expect("a rung-up charge carries an id")
+        .expect("an opened charge carries an id")
         .to_string();
 
-    // A ring-up signature aimed at the cancel route is refused before anything else happens: the
+    // A checkout-open signature aimed at the cancel route is refused before anything else happens: the
     // two actions are told apart by the SIGNED `cents`, which is what stops one being replayed as
     // the other. (The reverse is pinned by the `cents = 0` case in the refusals test.)
-    let ring_up = till_body(&merchant, 10_000, "Bahnhof Kiosk", fresh_nonce(), now);
+    let ring_up = checkout_body(&merchant, 10_000, "Bahnhof Kiosk", fresh_nonce(), now);
     let (status, body) = call(
         &state,
-        till_post("/api/v1/till/void", &ring_up, "till.example", "http"),
+        checkout_post("/api/v1/checkout/void", &ring_up, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -3944,11 +3944,11 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
         "{body}"
     );
 
-    // The cancellation itself, signed by the same key as the ring-up.
-    let clear = till_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), now);
+    // The cancellation itself, signed by the same key as the checkout-open.
+    let clear = checkout_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), now);
     let (status, cleared) = call(
         &state,
-        till_post("/api/v1/till/void", &clear, "till.example", "http"),
+        checkout_post("/api/v1/checkout/void", &clear, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{cleared}");
@@ -3968,36 +3968,36 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
     assert!(message.contains("cancelled"), "{refused}");
     assert!(message.contains("do not send anything"), "{refused}");
 
-    // Cancelling an already-cleared till succeeds — a cashier pressing the button twice has not
+    // Cancelling an already-cleared checkout succeeds — a cashier pressing the button twice has not
     // failed at anything, and inventing an error for it would be noise at the counter. A FRESH
     // nonce, because a signature is single-use whatever it authorises.
-    let again = till_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), now);
+    let again = checkout_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), now);
     let (status, twice) = call(
         &state,
-        till_post("/api/v1/till/void", &again, "till.example", "http"),
+        checkout_post("/api/v1/checkout/void", &again, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{twice}");
     assert_eq!(twice["state"], "cancelled");
 
-    // A stranger cannot clear somebody else's till — the same proof gates both merchant routes.
+    // A stranger cannot clear somebody else's checkout — the same proof gates both merchant routes.
     let stranger = SigningKey::from_bytes(&[42u8; 32]);
-    let mut forged = till_body(&stranger, 0, "Bahnhof Kiosk", fresh_nonce(), now);
+    let mut forged = checkout_body(&stranger, 0, "Bahnhof Kiosk", fresh_nonce(), now);
     forged["merchant_pubkey"] = Value::String(hex::encode(merchant_pk));
     let (status, body) = call(
         &state,
-        till_post("/api/v1/till/void", &forged, "till.example", "http"),
+        checkout_post("/api/v1/checkout/void", &forged, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
 
-    // A till with nothing rung up on it has nothing to clear, and is told what to do instead of
+    // A checkout with nothing opened on it has nothing to clear, and is told what to do instead of
     // being handed a success that describes no charge.
     let idle = SigningKey::from_bytes(&[43u8; 32]);
-    let nothing = till_body(&idle, 0, "Kiosk", fresh_nonce(), now);
+    let nothing = checkout_body(&idle, 0, "Kiosk", fresh_nonce(), now);
     let (status, body) = call(
         &state,
-        till_post("/api/v1/till/void", &nothing, "till.example", "http"),
+        checkout_post("/api/v1/checkout/void", &nothing, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
@@ -4005,33 +4005,33 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
         body["message"]
             .as_str()
             .unwrap_or_default()
-            .contains("POST /api/v1/till"),
-        "an idle till is pointed at the route that rings one up: {body}"
+            .contains("POST /api/v1/checkout"),
+        "an idle checkout is pointed at the route that rings one up: {body}"
     );
 
     // A CREDITED charge is not cancellable, and the refusal names the block that paid. Telling a
     // merchant "cancelled" here would have them hand over goods they have already been paid for.
-    let paid = open_till(
+    let paid = open_checkout(
         &state,
         &merchant,
         "Bahnhof Kiosk",
         100,
-        "till.example",
+        "checkout.example",
         "http",
     )
     .await;
     let paid_id = paid["id"]
         .as_str()
-        .expect("a rung-up charge carries an id")
+        .expect("an opened charge carries an id")
         .to_string();
     let paid_ref = charge_reference(&paid);
-    pay_till(&state, &fake, merchant_pk, quoted_raw(&paid), &paid_ref).await;
-    let (_, settled) = call(&state, get_req(&format!("/api/v1/till/{paid_id}"))).await;
+    pay_checkout(&state, &fake, merchant_pk, quoted_raw(&paid), &paid_ref).await;
+    let (_, settled) = call(&state, get_req(&format!("/api/v1/checkout/{paid_id}"))).await;
     assert_eq!(settled["state"], "paid", "{settled}");
-    let too_late = till_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), unix_secs());
+    let too_late = checkout_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), unix_secs());
     let (status, body) = call(
         &state,
-        till_post("/api/v1/till/void", &too_late, "till.example", "http"),
+        checkout_post("/api/v1/checkout/void", &too_late, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
@@ -4041,49 +4041,49 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
         message.contains(&settled["paid"]["block"].to_string()),
         "the merchant is told WHICH block paid them, so they can check it on the ledger: {body}"
     );
-    let (_, unchanged) = call(&state, get_req(&format!("/api/v1/till/{paid_id}"))).await;
+    let (_, unchanged) = call(&state, get_req(&format!("/api/v1/checkout/{paid_id}"))).await;
     assert_eq!(
         unchanged["state"], "paid",
         "a credited sale is not cancelled away: {unchanged}"
     );
 }
 
-/// The till is served ONLY by a relay that was told to serve it, and "not served" means the eight
-/// routes do not exist — the gate is at registration, so no till handler is reachable at all.
+/// The checkout is served ONLY by a relay that was told to serve it, and "not served" means the eight
+/// routes do not exist — the gate is at registration, so no checkout handler is reachable at all.
 ///
-/// The two halves ride the SAME eight requests: a relay with the till on answers every one of them
+/// The two halves ride the SAME eight requests: a relay with the checkout on answers every one of them
 /// (which is what makes the requests well-formed, the charge live and the quote real), and a
-/// till-less relay — plain `AppState::new`, the shape an explicit `DPAY_ENABLE_TILL=false` builds
-/// (`main` calls `with_till`; since the 2026-09-10 founder decision an UNSET env builds a
-/// till-serving relay, so this is the opt-out's shape, not the default's) — refuses all eight.
+/// checkout-less relay — plain `AppState::new`, the shape an explicit `DPAY_ENABLE_CHECKOUT=false` builds
+/// (`main` calls `with_checkout`; since the 2026-09-10 founder decision an UNSET env builds a
+/// checkout-serving relay, so this is the opt-out's shape, not the default's) — refuses all eight.
 /// The refusal is pinned as a BARE 404: an empty body is axum's own answer for a
-/// path it has no route for, whereas every 404 this till can produce carries the provider's
+/// path it has no route for, whereas every 404 this checkout can produce carries the provider's
 /// `{statusCode, message, error}` envelope (the test above pins that). The empty body is therefore
 /// the proof that no handler ran, rather than a handler politely declining.
 #[tokio::test]
-async fn the_till_is_not_served_unless_the_relay_is_told_to() {
+async fn the_checkout_is_not_served_unless_the_relay_is_told_to() {
     let merchant = SigningKey::from_bytes(&[13u8; 32]);
 
     // A serving relay, used to mint the exact URLs a wallet and a merchant screen would call.
-    let (serving, _fake) = till_state();
-    let opened = open_till(
+    let (serving, _fake) = checkout_state();
+    let opened = open_checkout(
         &serving,
         &merchant,
         "Test Shop",
         500,
-        "till.example",
+        "checkout.example",
         "http",
     )
     .await;
     let id = opened["id"]
         .as_str()
-        .expect("a rung-up charge carries an id")
+        .expect("an opened charge carries an id")
         .to_string();
     let (status, details) = call(
         &serving,
-        till_get(
+        checkout_get(
             &format!("/v1/lnurlp/{id}?timeout=0"),
-            "till.example",
+            "checkout.example",
             "http",
         ),
     )
@@ -4098,7 +4098,7 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
         .expect("a quote carries an id")
         .to_string();
 
-    // The whole till surface, as its callers reach it: the merchant's ring-up, cancel and poll,
+    // The whole checkout surface, as its callers reach it: the merchant's checkout-open, cancel and poll,
     // the standard's three payer steps, the page a generic camera lands on, and the cashier's own
     // watch page. Rebuilt per call because a `Request` is consumed by the router, and each rebuild
     // signs afresh because a merchant's signature is single-use.
@@ -4107,37 +4107,37 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
     // because ringing one up voids that merchant's previous charge — the other six would then be
     // asking about a superseded code and meet a handler's honest 404 instead of its answer, which
     // is not what this test is measuring. They also run in this order on the serving relay: the
-    // cancel has a charge to clear because the ring-up above it just made one.
+    // cancel has a charge to clear because the checkout-open above it just made one.
     let cashier = SigningKey::from_bytes(&[17u8; 32]);
     let surface = || {
         vec![
             (
-                "POST /api/v1/till".to_string(),
-                till_post(
-                    "/api/v1/till",
-                    &till_body(&cashier, 500, "Test Shop", fresh_nonce(), unix_secs()),
-                    "till.example",
+                "POST /api/v1/checkout".to_string(),
+                checkout_post(
+                    "/api/v1/checkout",
+                    &checkout_body(&cashier, 500, "Test Shop", fresh_nonce(), unix_secs()),
+                    "checkout.example",
                     "http",
                 ),
             ),
             (
-                "POST /api/v1/till/void".to_string(),
-                till_post(
-                    "/api/v1/till/void",
-                    &till_body(&cashier, 0, "Test Shop", fresh_nonce(), unix_secs()),
-                    "till.example",
+                "POST /api/v1/checkout/void".to_string(),
+                checkout_post(
+                    "/api/v1/checkout/void",
+                    &checkout_body(&cashier, 0, "Test Shop", fresh_nonce(), unix_secs()),
+                    "checkout.example",
                     "http",
                 ),
             ),
             (
-                format!("GET /api/v1/till/{id}"),
-                get_req(&format!("/api/v1/till/{id}")),
+                format!("GET /api/v1/checkout/{id}"),
+                get_req(&format!("/api/v1/checkout/{id}")),
             ),
             (
                 format!("GET /v1/lnurlp/{id}"),
-                till_get(
+                checkout_get(
                     &format!("/v1/lnurlp/{id}?timeout=0"),
-                    "till.example",
+                    "checkout.example",
                     "http",
                 ),
             ),
@@ -4154,7 +4154,7 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
                 )),
             ),
             ("GET /pl/".to_string(), get_req("/pl/?lightning=LNURL1TEST")),
-            (format!("GET /till/{id}"), get_req(&format!("/till/{id}"))),
+            (format!("GET /checkout/{id}"), get_req(&format!("/checkout/{id}"))),
         ]
     };
 
@@ -4165,39 +4165,39 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
         assert_ne!(
             status,
             StatusCode::NOT_FOUND,
-            "{what} must be served when the till is on"
+            "{what} must be served when the checkout is on"
         );
         assert!(
             !body.is_empty(),
-            "{what}: a till handler always answers with a body"
+            "{what}: a checkout handler always answers with a body"
         );
     }
 
-    // Not served: the same eight against a relay that never asked for the till.
+    // Not served: the same eight against a relay that never asked for the checkout.
     let unserved = AppState::new(Arc::new(FakeLedger::new())).with_fake_ic(FakeIc::from_catalog());
     for (what, req) in surface() {
         let (status, _headers, body) = call_raw(&unserved, req).await;
         assert_eq!(
             status,
             StatusCode::NOT_FOUND,
-            "{what} must not exist unless the till is turned on"
+            "{what} must not exist unless the checkout is turned on"
         );
         assert!(
             body.is_empty(),
-            "{what}: a BARE 404 is the router refusing — a body would mean a till handler ran"
+            "{what}: a BARE 404 is the router refusing — a body would mean a checkout handler ran"
         );
     }
 }
 
-/// `GET /till/{id}` — the cashier's watch page (the plan's "web page later", 2026-09-03). 200 +
+/// `GET /checkout/{id}` — the cashier's watch page (the plan's "web page later", 2026-09-03). 200 +
 /// HTML + `no-store` under the gate, and INDIFFERENT to the id's shape: the handler never looks
 /// the charge up, because the page renders client-side from the poll — an unknown or even
 /// nonsense id still gets the page, and its first fetch gets the poll's honest answer.
 #[tokio::test]
 async fn the_cashier_page_serves_under_the_gate_for_any_id() {
-    let (serving, _fake) = till_state();
+    let (serving, _fake) = checkout_state();
 
-    for uri in ["/till/pl_0011223344556677", "/till/not-a-charge-id-at-all"] {
+    for uri in ["/checkout/pl_0011223344556677", "/checkout/not-a-charge-id-at-all"] {
         let (status, headers, body) = call_raw(&serving, get_req(uri)).await;
         assert_eq!(status, StatusCode::OK, "{uri}");
         assert_eq!(
@@ -4211,7 +4211,7 @@ async fn the_cashier_page_serves_under_the_gate_for_any_id() {
             "names the settlement asset: {uri}"
         );
         assert!(
-            html.contains("/api/v1/till/"),
+            html.contains("/api/v1/checkout/"),
             "polls the charge by id client-side: {uri}"
         );
     }
@@ -4223,23 +4223,23 @@ async fn the_cashier_page_serves_under_the_gate_for_any_id() {
 /// Rust string-building on this route ever handles it.
 #[tokio::test]
 async fn the_cashier_page_interpolates_nothing_serverside() {
-    let (serving, _fake) = till_state();
+    let (serving, _fake) = checkout_state();
     let merchant = SigningKey::from_bytes(&[19u8; 32]);
-    let opened = open_till(
+    let opened = open_checkout(
         &serving,
         &merchant,
         "Zuerich Shop 88",
         500,
-        "till.example",
+        "checkout.example",
         "http",
     )
     .await;
     let id = opened["id"]
         .as_str()
-        .expect("a rung-up charge carries an id")
+        .expect("an opened charge carries an id")
         .to_string();
 
-    let (status, _headers, body) = call_raw(&serving, get_req(&format!("/till/{id}"))).await;
+    let (status, _headers, body) = call_raw(&serving, get_req(&format!("/checkout/{id}"))).await;
     assert_eq!(status, StatusCode::OK);
     let html = String::from_utf8(body).expect("the cashier page is utf-8");
     assert!(
@@ -4249,10 +4249,10 @@ async fn the_cashier_page_interpolates_nothing_serverside() {
 }
 
 // --- the provider half of the wire golden --------------------------------------------------------
-// What the golden is, why it exists and how each half reads it: `dfx/till_wire.json` (`_doc`).
+// What the golden is, why it exists and how each half reads it: `dfx/checkout_wire.json` (`_doc`).
 
 /// The golden. `include_str!` fails the BUILD when it is missing — the loudest failure available.
-const TILL_WIRE: &str = include_str!("../../../dfx/till_wire.json");
+const CHECKOUT_WIRE: &str = include_str!("../../../dfx/checkout_wire.json");
 
 /// A value the provider mints fresh on every call, checked against the shape its pinned counterpart
 /// STATES — same prefix through the `_`, same length, lowercase-hex tail — before the golden's own
@@ -4285,7 +4285,7 @@ fn assert_minted_like(observed: &str, golden: &str, what: &str) {
 /// it must be `iso8601_utc(t + QUOTE_TTL_SECS)` for one of the seconds `t` the request could have
 /// been served in. That pins the VALUE without putting a clock seam in the provider. The golden's
 /// own instant is held to the same spelling by its length here; the payer's strict reader owns the
-/// rest of it (`app/__tests__/tillWire.test.ts`).
+/// rest of it (`app/__tests__/checkoutWire.test.ts`).
 fn assert_deadline(observed: &str, golden: &str, from_secs: u64, to_secs: u64, what: &str) {
     let expected: Vec<String> = (from_secs..=to_secs)
         .map(|t| iso8601_utc(t + QUOTE_TTL_SECS))
@@ -4297,7 +4297,7 @@ fn assert_deadline(observed: &str, golden: &str, from_secs: u64, to_secs: u64, w
     assert_eq!(
         observed.len(),
         golden.len(),
-        "{what}: the golden must spell an instant the till spells"
+        "{what}: the golden must spell an instant the checkout spells"
     );
 }
 
@@ -4321,9 +4321,9 @@ fn golden_body(golden: &Value, key: &str) -> String {
 }
 
 #[tokio::test]
-async fn till_wire_matches_the_golden_the_payer_parses() {
+async fn checkout_wire_matches_the_golden_the_payer_parses() {
     let golden: Value =
-        serde_json::from_str(TILL_WIRE).expect("dfx/till_wire.json must be valid JSON");
+        serde_json::from_str(CHECKOUT_WIRE).expect("dfx/checkout_wire.json must be valid JSON");
     let field = |path: &[&str]| -> String {
         let mut at = &golden;
         for key in path {
@@ -4332,7 +4332,7 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
         at.as_str()
             .unwrap_or_else(|| {
                 panic!(
-                    "dfx/till_wire.json must carry {} as a string",
+                    "dfx/checkout_wire.json must carry {} as a string",
                     path.join(".")
                 )
             })
@@ -4365,10 +4365,10 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     // the key that signed it.
     assert_eq!(hex::encode(pk), field(&["input", "merchant_pubkey"]));
 
-    // THE RECORDED RING-UP IS A REAL ONE. `input` is a complete signed request — the worked example
-    // a merchant integrating against this till copies — so it is verified here with the same
+    // THE RECORDED CHECKOUT-OPEN IS A REAL ONE. `input` is a complete signed request — the worked example
+    // a merchant integrating against this checkout copies — so it is verified here with the same
     // function the route uses, at its own `issued_at`.
-    let recorded = TillOpen {
+    let recorded = CheckoutOpen {
         merchant_pubkey: pk,
         cents,
         nonce: <[u8; NONCE_LEN]>::try_from(hex_field(&["input", "nonce"], NONCE_LEN).as_slice())
@@ -4383,29 +4383,29 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
         <[u8; SIG_LEN]>::try_from(hex_field(&["input", "signature"], SIG_LEN).as_slice())
             .expect("64 bytes");
     assert_eq!(
-        validate_till_open(&recorded, &recorded_sig, recorded.issued_at, false),
+        validate_checkout_open(&recorded, &recorded_sig, recorded.issued_at, false),
         Ok(()),
-        "dfx/till_wire.json's recorded ring-up must be one this till would accept"
+        "dfx/checkout_wire.json's recorded checkout-open must be one this checkout would accept"
     );
     // It is NOT replayed to drive the routes below, and cannot be: a signature is single-use and
-    // good for ±{TILL_OPEN_MAX_SKEW_SECS} seconds, so a committed one is stale by construction the
+    // good for ±{CHECKOUT_OPEN_MAX_SKEW_SECS} seconds, so a committed one is stale by construction the
     // moment it is committed. The bodies are therefore recorded from a FRESH signature by the same
     // key — which is exactly how the file itself was produced.
     assert_eq!(
-        validate_till_open(
+        validate_checkout_open(
             &recorded,
             &recorded_sig,
-            recorded.issued_at + TILL_OPEN_MAX_SKEW_SECS + 1,
+            recorded.issued_at + CHECKOUT_OPEN_MAX_SKEW_SECS + 1,
             false
         ),
-        Err(dpay_core::TillOpenError::Stale),
+        Err(dpay_core::CheckoutOpenError::Stale),
     );
 
-    let (state, fake) = till_state();
+    let (state, fake) = checkout_state();
 
     // --- what the merchant's own screen gets, and the URL its QR carries --------------------------
-    let rung_at = now_ns() / 1_000_000_000;
-    let opened = open_till_noted(
+    let opened_at = now_ns() / 1_000_000_000;
+    let opened = open_checkout_noted(
         &state,
         &merchant,
         &merchant_name,
@@ -4415,10 +4415,10 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
         &proto,
     )
     .await;
-    let rung_done = now_ns() / 1_000_000_000;
+    let opened_done = now_ns() / 1_000_000_000;
     let charge_id = opened["id"]
         .as_str()
-        .expect("a rung-up charge carries an id")
+        .expect("an opened charge carries an id")
         .to_string();
     let golden_charge = field(&["open", "id"]);
     assert_minted_like(&charge_id, &golden_charge, "the payment-link id");
@@ -4426,20 +4426,20 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     // The LNURL is not a substring of anything above it, so it cannot ride the id substitution: a
     // one-character change to the URL changes the whole bech32. Both sides are therefore checked
     // against the encoder itself — the observed code must encode the observed URL, and the golden's
-    // must encode the golden's — which pins the recorded string as the till's own output rather
+    // must encode the golden's — which pins the recorded string as the checkout's own output rather
     // than as a value somebody typed. What the CROSS-LANGUAGE proof is remains the payer's half:
-    // `app/__tests__/tillWire.test.ts` decodes this very string with the wallet's own bech32.
+    // `app/__tests__/checkoutWire.test.ts` decodes this very string with the wallet's own bech32.
     let lnurl = opened["lnurl"]
         .as_str()
-        .expect("a ring-up answer carries the bech32 code")
+        .expect("a checkout-open answer carries the bech32 code")
         .to_string();
     assert_eq!(
         lnurl,
-        dpay_relay::till::lnurl_of(&field(&["open", "url"]).replace(&golden_charge, &charge_id))
+        dpay_relay::checkout::lnurl_of(&field(&["open", "url"]).replace(&golden_charge, &charge_id))
     );
     assert_eq!(
         field(&["open", "lnurl"]),
-        dpay_relay::till::lnurl_of(&field(&["open", "url"]))
+        dpay_relay::checkout::lnurl_of(&field(&["open", "url"]))
     );
     // …and the QR string is that code inside the wrapper a generic camera can open, so pinning the
     // code pins the QR with it.
@@ -4456,21 +4456,21 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     // pair cannot drift from the store's own deadline.
     let created = opened["created_secs"]
         .as_u64()
-        .expect("a ring-up answer states when it was rung up");
+        .expect("a checkout-open answer states when it was opened");
     assert!(
-        (rung_at..=rung_done).contains(&created),
-        "created_secs {created} ∉ [{rung_at}, {rung_done}]"
+        (opened_at..=opened_done).contains(&created),
+        "created_secs {created} ∉ [{opened_at}, {opened_done}]"
     );
     assert_eq!(
         opened["expires_at"],
-        created + dpay_relay::till::CHARGE_TTL_SECS
+        created + dpay_relay::checkout::CHARGE_TTL_SECS
     );
     let golden_created = golden["open"]["created_secs"]
         .as_u64()
         .expect("the golden states created_secs");
     assert_eq!(
         golden["open"]["expires_at"],
-        golden_created + dpay_relay::till::CHARGE_TTL_SECS
+        golden_created + dpay_relay::checkout::CHARGE_TTL_SECS
     );
 
     // The fourth thing this provider mints fresh, and the one the MERCHANT is served: the charge's
@@ -4483,13 +4483,13 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     let golden_reference = golden_uri
         .rsplit_once("&ref=")
         .unwrap_or_else(|| {
-            panic!("dfx/till_wire.json's callback URI must name a ref: {golden_uri}")
+            panic!("dfx/checkout_wire.json's callback URI must name a ref: {golden_uri}")
         })
         .1;
     assert_eq!(
         field(&["open", "reference"]),
         golden_reference,
-        "the golden's ring-up and its step-3 URI must name ONE reference"
+        "the golden's checkout-open and its step-3 URI must name ONE reference"
     );
 
     assert_eq!(
@@ -4506,21 +4506,21 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
                 (
                     &format!(
                         "\"expires_at\":{}",
-                        created + dpay_relay::till::CHARGE_TTL_SECS
+                        created + dpay_relay::checkout::CHARGE_TTL_SECS
                     ),
                     &format!("\"expires_at\":{}", golden["open"]["expires_at"]),
                 ),
             ],
         ),
         golden_body(&golden, "open"),
-        "the merchant's ring-up answer drifted from dfx/till_wire.json"
+        "the merchant's checkout-open answer drifted from dfx/checkout_wire.json"
     );
 
     // --- step 2: the payment details a wallet parses ----------------------------------------------
     let details_at = now_ns() / 1_000_000_000;
     let (status, details) = call(
         &state,
-        till_get(&format!("/v1/lnurlp/{charge_id}?timeout=0"), &host, &proto),
+        checkout_get(&format!("/v1/lnurlp/{charge_id}?timeout=0"), &host, &proto),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "step 2: {details}");
@@ -4555,7 +4555,7 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
             ],
         ),
         golden_body(&golden, "details"),
-        "the step-2 body drifted from dfx/till_wire.json"
+        "the step-2 body drifted from dfx/checkout_wire.json"
     );
 
     // --- step 3: where the money goes -------------------------------------------------------------
@@ -4593,7 +4593,7 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
         .1;
     assert_eq!(
         served, reference,
-        "the ring-up and step 3 must name ONE reference: {uri}"
+        "the checkout-open and step 3 must name ONE reference: {uri}"
     );
     assert_eq!(
         pinned(
@@ -4605,7 +4605,7 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
             ],
         ),
         golden_body(&golden, "callback"),
-        "the step-3 body drifted from dfx/till_wire.json"
+        "the step-3 body drifted from dfx/checkout_wire.json"
     );
 
     // --- step 4: the answer before the transfer has been seen --------------------------------------
@@ -4618,16 +4618,16 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     assert_eq!(
         serde_json::to_string_pretty(&pending).expect("a JSON value renders"),
         golden_body(&golden, "submit_pending"),
-        "the step-4 body drifted from dfx/till_wire.json"
+        "the step-4 body drifted from dfx/checkout_wire.json"
     );
 
     // --- the one fact no body on this wire carries -------------------------------------------------
     // `amount_raw` is what the decimal MEANS: the raw VCHF units the payer's converter has to land
     // on. Pinned by paying EXACTLY that many to the merchant and watching a charge for the golden's
-    // own price credit — so the number in the file is the till's own arithmetic rather than one
+    // own price credit — so the number in the file is the checkout's own arithmetic rather than one
     // copied by hand.
     //
-    // A FRESH charge, rung up before the money is sent, rather than the one above: that charge was
+    // A FRESH charge, opened before the money is sent, rather than the one above: that charge was
     // just walked, and a charge is walked at most once every couple of seconds however hard it is
     // polled (the amplification bound). Ringing up again is what a cashier does anyway, and it
     // keeps this test free of a sleep it would otherwise have to spend. The payment carries THAT
@@ -4635,13 +4635,13 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     let raw: u64 = field(&["amount_raw"])
         .parse()
         .expect("amount_raw is an integer");
-    let reopened = open_till(&state, &merchant, &merchant_name, cents, &host, &proto).await;
+    let reopened = open_checkout(&state, &merchant, &merchant_name, cents, &host, &proto).await;
     let reopened_id = reopened["id"]
         .as_str()
-        .expect("a rung-up charge carries an id")
+        .expect("an opened charge carries an id")
         .to_string();
     let reopened_ref = charge_reference(&reopened);
-    pay_till(&state, &fake, pk, raw, &reopened_ref).await;
+    pay_checkout(&state, &fake, pk, raw, &reopened_ref).await;
     let (status, paid) = call(
         &state,
         get_req(&format!(

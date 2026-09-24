@@ -941,13 +941,13 @@ impl FakeIc {
     }
 
     /// `icrc2_transfer_from`: the PULL. The CALLER spends an allowance the `from` account granted
-    /// them, which is how a dpay shop collects a till charge an ICRC-2 allowance wallet approved it
-    /// for (`PullClaim`, `crate::till`).
+    /// them, which is how a dpay shop collects a checkout charge an ICRC-2 allowance wallet approved it
+    /// for (`PullClaim`, `crate::checkout`).
     ///
     /// Same sequence a real ledger runs, and in the same order, because the ORDER is what the app's
     /// error handling branches on: allowance first (the customer must approve again), then funds
     /// (the customer must top up). The fee comes out of `from`, like every other ICRC debit, and the
-    /// allowance must cover amount + fee — the reason the till quotes the price MINUS the fee.
+    /// allowance must cover amount + fee — the reason the checkout quotes the price MINUS the fee.
     ///
     /// The history row records the PAYER as `from`, not the caller: that is what the relay's
     /// settlement read matches on, and a row naming the shop would credit a sale to nobody.

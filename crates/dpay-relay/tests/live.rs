@@ -1130,7 +1130,7 @@ async fn faucet_capability_and_route(
 
 // The PRODUCTION-build mirror of `capability_demo_faucet_equals_what_the_faucet_route_does`
 // (tests/relay.rs), and the live pin on the defect it exists for: prod served
-// `{"till":false,"demo_faucet":false}` while `POST /api/v1/faucet` minted happily, so the app hid
+// `{"checkout":false,"demo_faucet":false}` while `POST /api/v1/faucet` minted happily, so the app hid
 // the top-up button and onboarded unfunded wallets against a perfectly healthy relay. The
 // expectation is MEASURED against the router on both sides of the gate — an agent that holds the
 // facade's controller identity and an anonymous one — never re-derived from the `cfg!` the

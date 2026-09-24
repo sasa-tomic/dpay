@@ -34,13 +34,13 @@
 //!                           is DPAY_CONTROLLER_SEED below, and this flag is not consulted there.
 //!                           Whichever build, the resolved answer is what
 //!                           `GET /api/v1/capabilities` reports as `demo_faucet`.
-//!   DPAY_ENABLE_TILL        register the OpenCryptoPay till's eight routes (`POST /api/v1/till`,
-//!                           `POST /api/v1/till/void`, `GET /api/v1/till/{id}`,
-//!                           `GET /v1/lnurlp/{id}|/cb/{id}|/tx/{id}`, `GET /pl/`, `GET /till/{id}`
+//!   DPAY_ENABLE_CHECKOUT        register the OpenCryptoPay checkout's eight routes (`POST /api/v1/checkout`,
+//!                           `POST /api/v1/checkout/void`, `GET /api/v1/checkout/{id}`,
+//!                           `GET /v1/lnurlp/{id}|/cb/{id}|/tx/{id}`, `GET /pl/`, `GET /checkout/{id}`
 //!                           — the cashier's watch page). Default TRUE on every build and every
 //!                           ledger (founder decision 2026-09-10); `false` is the operator's
 //!                           opt-out. The gate, and what a merchant must sign to reach the two
-//!                           POSTs: `app.rs` and `till.rs`.
+//!                           POSTs: `app.rs` and `checkout.rs`.
 //!   DPAY_CONTROLLER_SEED    (ic, agent build) hex-encoded 32-byte Ed25519 seed of the facade
 //!                           canister's CONTROLLER key. When set, the relay's agent signs its
 //!                           calls with this identity and `POST /api/v1/faucet` is served: the
@@ -228,7 +228,7 @@ async fn main() {
     let apk = load_apk();
     let state = AppState::new(ledger.clone())
         .with_apk(apk)
-        .with_till(cfg.till)
+        .with_checkout(cfg.checkout)
         // The ONE faucet predicate: `GET /api/v1/capabilities` reports it and `POST
         // /api/v1/faucet` refuses on it. Derived from the backend that was actually built, right
         // above — never from the build's feature flags, which is how the relay came to advertise
@@ -349,20 +349,20 @@ async fn main() {
          (DPAY_ENABLE_FAUCET={} is not consulted).",
         cfg.faucet
     );
-    // The till's state belongs in the log the founder reads (`docker logs`), because which
+    // The checkout's state belongs in the log the founder reads (`docker logs`), because which
     // surfaces an image serves is an operator's decision and one that came up wrong should be
     // visible without a probe.
-    if cfg.till {
+    if cfg.checkout {
         println!(
-            "OpenCryptoPay till ENABLED (DPAY_ENABLE_TILL unset or true) — /api/v1/till, \
-             /api/v1/till/void and /v1/lnurlp/* are served. Ringing up and cancelling both \
-             require the merchant's own signature over the request (dpay_core::TillOpen); the \
+            "OpenCryptoPay checkout ENABLED (DPAY_ENABLE_CHECKOUT unset or true) — /api/v1/checkout, \
+             /api/v1/checkout/void and /v1/lnurlp/* are served. Ringing up and cancelling both \
+             require the merchant's own signature over the request (dpay_core::CheckoutOpen); the \
              payer routes are public reads."
         );
     } else {
         println!(
-            "OpenCryptoPay till OFF — /api/v1/till and /v1/lnurlp/* are not registered (404). \
-             DPAY_ENABLE_TILL=false is set; unset it (or set true) to serve them."
+            "OpenCryptoPay checkout OFF — /api/v1/checkout and /v1/lnurlp/* are not registered (404). \
+             DPAY_ENABLE_CHECKOUT=false is set; unset it (or set true) to serve them."
         );
     }
     // The proxy's one banner line says WHETHER, never WHERE: the upstream URL embeds the
@@ -549,7 +549,7 @@ struct Config {
     addr: SocketAddr,
     ledger: LedgerCfg,
     faucet: bool,
-    till: bool,
+    checkout: bool,
     /// The solana proxy's upstream, when configured (`DPAY_SOLANA_RPC_URL`). Carries the
     /// provider api key — treat as secret end to end.
     solana_rpc_url: Option<String>,
@@ -662,13 +662,13 @@ impl Config {
             None => matches!(ledger, LedgerCfg::Memory),
         };
 
-        // The till is served BY DEFAULT on every ledger and every build (founder decision
+        // The checkout is served BY DEFAULT on every ledger and every build (founder decision
         // 2026-09-10, reversing the 2026-09-04 opt-in): an operator who does not want the surface
-        // must say `DPAY_ENABLE_TILL=false` — an explicit act, not a default nobody chose. A
+        // must say `DPAY_ENABLE_CHECKOUT=false` — an explicit act, not a default nobody chose. A
         // malformed value is a config error, not a silent default: an operator who meant the
         // opposite of what they typed must hear about it.
-        let till = match non_empty("DPAY_ENABLE_TILL") {
-            Some(s) => parse_bool("DPAY_ENABLE_TILL", &s)?,
+        let checkout = match non_empty("DPAY_ENABLE_CHECKOUT") {
+            Some(s) => parse_bool("DPAY_ENABLE_CHECKOUT", &s)?,
             None => true,
         };
 
@@ -813,7 +813,7 @@ impl Config {
             addr,
             ledger,
             faucet,
-            till,
+            checkout,
             solana_rpc_url,
             solana_timeout,
             sideshift_secret,

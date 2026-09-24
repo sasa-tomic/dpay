@@ -1,9 +1,9 @@
 <!doctype html>
-<!-- Served at /till/{id} by crates/dpay-relay/src/till.rs (`till_page`), inside the same
-     DPAY_ENABLE_TILL gate as the till's other routes. The id comes from the URL; the charge is
-     rendered CLIENT-SIDE from GET /api/v1/till/{id} — the server interpolates nothing into this
+<!-- Served at /checkout/{id} by crates/dpay-relay/src/checkout.rs (`checkout_page`), inside the same
+     DPAY_ENABLE_CHECKOUT gate as the checkout's other routes. The id comes from the URL; the charge is
+     rendered CLIENT-SIDE from GET /api/v1/checkout/{id} — the server interpolates nothing into this
      page (the merchant name is CLAIMED, so it never touches Rust string building on this route).
-     The states and their copy mirror ChargeState's own documentation in till.rs; every terminal
+     The states and their copy mirror ChargeState's own documentation in checkout.rs; every terminal
      state names the next action. -->
 <!-- `scheme-auto`: this page has no theme toggle and no pre-paint script, so it follows the OS
      scheme. That class is the hook the shared palette block
@@ -44,7 +44,7 @@
   <h1>Cashier</h1>
   <p class="price" id="price">…</p>
   <p class="settles">settles in VCHF — 1:1 with CHF</p>
-  <p class="state idle" id="state">Reaching the till…</p>
+  <p class="state idle" id="state">Reaching the checkout…</p>
   <p class="next" id="next"></p>
   <p class="note">Paid or not, this page never rings up, cancels or refunds a charge — those
      live in the Different Pay app, under the shop's own key. It only watches.</p>
@@ -54,10 +54,10 @@
 // The charge id is the path's last segment — the page is served for any id, known or not.
 const id = location.pathname.split("/").filter(Boolean).pop();
 const $ = (s) => document.getElementById(s);
-const POLL_MS = 3000; // > the till's 2 s observe window, and gentle on the relay
+const POLL_MS = 3000; // > the checkout's 2 s observe window, and gentle on the relay
 // Every poll is BOUNDED. Without this an unanswering relay leaves `await fetch` pending forever and
 // the loop below never ticks again — the counter freezes on "Waiting for the customer to pay…" with
-// no countdown and no way to tell a stalled page from a live one. Comfortably over the till's own
+// no countdown and no way to tell a stalled page from a live one. Comfortably over the checkout's own
 // ledger walk (the route observes the merchant's history before answering).
 const POLL_TIMEOUT_MS = 8000;
 
@@ -66,7 +66,7 @@ function chf(cents) {
   return `CHF ${whole}.${rem}`;
 }
 // Every server-derived string goes through textContent — the merchant name is CLAIMED (it is what
-// the shop signed into its own ring-up, never anything this relay verified), so it is never parsed
+// the shop signed into its own checkout-open, never anything this relay verified), so it is never parsed
 // as markup here. It is `merchant_name`: the field beside it, `merchant`, was the destination
 // PRINCIPAL, and printing it here put 63 characters of base32 where the cashier expected the shop's
 // name. A charge whose name is empty shows the price alone rather than a dangling separator.
@@ -103,12 +103,12 @@ function render(charge) {
     case "expired":
       $("state").className = "state";
       $("state").textContent = "Expired";
-      next.textContent = "Ring it up again in the app, and hand the customer the new code.";
+      next.textContent = "Open a fresh charge in the app, and hand the customer the new code.";
       // Still watching for the same reason as superseded: a late transfer credits the sale.
       return true;
     default:
-      $("state").textContent = "This till reported a state this page does not know.";
-      next.textContent = "Ring it up again in the app.";
+      $("state").textContent = "This checkout reported a state this page does not know.";
+      next.textContent = "Open a fresh charge in the app.";
       return false;
   }
 }
@@ -119,14 +119,14 @@ function tick(expiresAt) {
   $("state").textContent = `Waiting for the customer to pay… (${mm}:${ss})`;
 }
 function unknown() {
-  $("state").textContent = "No such charge on this till.";
+  $("state").textContent = "No such charge on this checkout.";
   $("next").textContent =
     "This link names a charge this relay does not have — check it came from the app's " +
-    "own Share, or ring the sale up again there.";
+    "own Share, or open a fresh charge there.";
 }
 function unreachable() {
-  $("state").textContent = "Reaching the till…";
-  $("next").textContent = "The till is not answering yet — this page keeps trying.";
+  $("state").textContent = "Reaching the checkout…";
+  $("next").textContent = "The checkout is not answering yet — this page keeps trying.";
 }
 // The cashier is told ONE thing on any unreadable answer — "not answering yet, still trying" — and
 // that is right, because there is nothing else they can do at a counter. The console is where the
@@ -134,7 +134,7 @@ function unreachable() {
 // error. Neither is swallowed; a page that keeps retrying silently is indistinguishable from a page
 // that has given up.
 async function poll() {
-  const url = `/api/v1/till/${encodeURIComponent(id)}`;
+  const url = `/api/v1/checkout/${encodeURIComponent(id)}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), POLL_TIMEOUT_MS);
   try {
@@ -142,7 +142,7 @@ async function poll() {
     if (res.status === 404) { unknown(); return false; }
     if (!res.ok) {
       const body = await res.text().catch((e) => `<body unreadable: ${e}>`);
-      console.warn(`till page: GET ${url} answered HTTP ${res.status}: ${body.slice(0, 300)}`);
+      console.warn(`checkout page: GET ${url} answered HTTP ${res.status}: ${body.slice(0, 300)}`);
       unreachable();
       return true;
     }
@@ -150,14 +150,14 @@ async function poll() {
     try {
       charge = await res.json();
     } catch (e) {
-      console.warn(`till page: GET ${url} answered 200 with a body this page cannot parse:`, e);
+      console.warn(`checkout page: GET ${url} answered 200 with a body this page cannot parse:`, e);
       unreachable();
       return true;
     }
     return render(charge);
   } catch (e) {
     const why = e && e.name === "AbortError" ? `no answer within ${POLL_TIMEOUT_MS} ms` : "transport failure";
-    console.warn(`till page: GET ${url} — ${why}:`, e);
+    console.warn(`checkout page: GET ${url} — ${why}:`, e);
     unreachable();
     return true;
   } finally {
