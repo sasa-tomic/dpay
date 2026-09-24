@@ -42,7 +42,7 @@ import {IconCheck, IconClock, IconShare} from './icons';
 import {M} from '../i18n';
 
 // How long this rail waits for a submitted envelope to reach a terminal state: 12 read_state polls,
-// half a second apart. ONE definition — the online pay path, the till path and the till's
+// half a second apart. ONE definition — the online pay path, the checkout path and the checkout's
 // approve-time deadline below all read it, so the deadline can never fall out of step with the
 // budget it is meant to cover.
 const IC_POLL_BUDGET = {attempts: 12, intervalMs: 500} as const;
@@ -50,7 +50,7 @@ const IC_POLL_BUDGET = {attempts: 12, intervalMs: 500} as const;
 // from the transport's own bounds rather than guessed: the certified-clock read `prepareTransfer`
 // stamps the envelope with, the /call POST, and the full poll budget. `resolveOcpScan` adds the
 // one-shot submission's own timeout and refuses a quote that cannot fit all of it
-// (`OcpTarget.payableUntil`) — approving a till payment that cannot finish inside its price spends
+// (`OcpTarget.payableUntil`) — approving a checkout payment that cannot finish inside its price spends
 // irreversible money for nothing.
 const OCP_IC_SEQUENCE_MS =
   IC_READ_STATE_TIMEOUT_MS
@@ -176,7 +176,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   const [reviewShown, setReviewShown] = useState(false);
   useEffect(() => { if (subMode !== 'send') { setSendActive(false); setReviewShown(false); } }, [subMode]);
 
-  // An OpenCryptoPay merchant till the camera read. The payment itself rides the SAME `intent` +
+  // An OpenCryptoPay merchant checkout the camera read. The payment itself rides the SAME `intent` +
   // review + sign path as every other payment (source 'ocp'); this holds the part no other payment
   // has — the live quote, the provider host, and the method/asset spelling the submission must echo
   // back. Non-null exactly while `intent.source === 'ocp'`.
@@ -184,10 +184,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   // The two provider reads are in flight. Its own flag, not `busy`: `busy` means "a payment is being
   // signed", and this happens before there is anything to sign.
   const [ocpBusy, setOcpBusy] = useState(false);
-  // The till's menu, when the SELECTED asset was not on it. `declined` is that asset's symbol —
+  // The checkout's menu, when the SELECTED asset was not on it. `declined` is that asset's symbol —
   // the heading names it, so switching what you pay with is never silent.
   const [ocpChoice, setOcpChoice] = useState<{details: OcpDetails; host: string; options: OcpOffer[]; declined: string} | null>(null);
-  // A till transfer whose outcome the rail could NOT resolve, plus the quote it was made against.
+  // A checkout transfer whose outcome the rail could NOT resolve, plus the quote it was made against.
   // The prepared envelope is the payer's only claim on that money: its request_id is still pollable
   // and `pollTransfer` is idempotent, so the most likely failure — a flaky connection while the
   // transfer was already in consensus — is recoverable rather than lost. Set ONLY when the transfer
@@ -205,7 +205,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   // through by every successful query) and then the bundled catalog row's drift-alarmed fee.
   // Both are the ledger's own fact by another road, never a guess. The review, the paid screen
   // and the offline QR hand-off all render the TOTAL DEBIT — amount + fee — so the payer reads
-  // the number their account actually moves (founder rule 2026-09-13: at a till that total IS
+  // the number their account actually moves (founder rule 2026-09-13: at a checkout that total IS
   // the shelf price, because the fee was priced in; 2026-09-14: the OFFLINE payer reads the
   // same price, not the 0.0099 wire). Only when no source knows (DEMO play money, a row that
   // registers no fee anywhere) does the display fall back to the amount alone — never a guessed
@@ -367,7 +367,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   //   • a wallet ADDRESS — including the principal dpay's own "My address" screen renders. Routed
   //     to the send form with the address prefilled: its status line then names the route and its
   //     fee, or names what the address IS when it cannot be used for this asset.
-  //   • an OPENCRYPTOPAY till code — a real merchant's static QR. Resolved to a live quote and put
+  //   • an OPENCRYPTOPAY checkout code — a real merchant's static QR. Resolved to a live quote and put
   //     on the same review screen a payment link uses.
   //   • a SOLANA PAY request — the open standard the SOL rail's receive QR speaks. This rail cannot
   //     pay it, but unlike a coin-request it is not foreign: the wallet CAN pay it, one rail over.
@@ -395,7 +395,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     refuseScan(M.pay.notAPaymentCode);
   }
 
-  // The OPENCRYPTOPAY entry: a merchant's till code. Two provider reads turn it into a concrete
+  // The OPENCRYPTOPAY entry: a merchant's checkout code. Two provider reads turn it into a concrete
   // payment (`resolveOcpScan` owns that sequence and every refusal in it), which then lands on the
   // SAME review screen as a payment link — including its never-auto-sign rule. Nothing is signed
   // here and no funds move: the payer approves an explicit review showing the amount, the full
@@ -405,7 +405,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   // so the selection is looked up in the shared asset list by the currency the Wallet handed down.
   async function startOcp(scan: OcpScan) {
     if (!scan.ok) {
-      // The code IS a till code and it is broken — a different fact from "not a payment code", and
+      // The code IS a checkout code and it is broken — a different fact from "not a payment code", and
       // the one the merchant can fix by showing the sticker again.
       refuseScan(scan.reason === 'not-https' ? M.pay.ocp.notHttps : M.pay.ocp.badCode);
       return;
@@ -425,7 +425,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     }
   }
 
-  /** Where BOTH till paths end: the direct one (the selected asset is on the menu) and the chosen
+  /** Where BOTH checkout paths end: the direct one (the selected asset is on the menu) and the chosen
    *  one (it was not, and the payer picked from the menu). One function so the two cannot drift into
    *  two different review screens — the second path is the one a checkout queue will actually use. */
   function landOcp(out: OcpResolveResult, declined: string) {
@@ -454,24 +454,24 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
       toAccountText: out.target.to,
       amount: out.target.rawAmount,
       currency: paying.currency,
-      // The ON-CHAIN MEMO, which is the till's own reference when it gave one: a provider that
+      // The ON-CHAIN MEMO, which is the checkout's own reference when it gave one: a provider that
       // mints a `ref` per charge matches its history on that value, so a transfer that dropped it
       // can move the money and leave the sale uncredited. Absent — a provider that names none, as
-      // the measured one does — a fresh nonce is minted here instead, which is what every till
+      // the measured one does — a fresh nonce is minted here instead, which is what every checkout
       // payment carried before references existed.
       //
       // Either way it is fixed ONCE for this payment, so a second Approve after a refused attempt
-      // re-signs the SAME instruction the till is waiting for rather than a payment it would not
+      // re-signs the SAME instruction the checkout is waiting for rather than a payment it would not
       // recognise. It is not a double-pay guard and must not be read as one — a repeated memo does
       // not stop a ledger executing the transfer twice (`icp_transfer_arg` in dpay-ffi).
       nonceHex: out.target.reference ?? randNonceHex(),
-      // What the charge is FOR, as the till claimed it ("2× Kafi, Tisch 4") — DISPLAY text riding
+      // What the charge is FOR, as the checkout claimed it ("2× Kafi, Tisch 4") — DISPLAY text riding
       // the exact surface a payment link's memo rides: the review's memo line and the txNote
       // seam's `msg` in `approveOcp`. It is NOT the on-chain memo — that stays `nonceHex` above,
-      // the till's reconciliation reference — it only answers, on the payer's own history row, the
+      // the checkout's reconciliation reference — it only answers, on the payer's own history row, the
       // question a receipt answers: what was this for?
       memo: out.target.details.claimedNote ?? '',
-      // A till has no dpay request expiry; its QUOTE deadline is the real one and is enforced by
+      // A checkout has no dpay request expiry; its QUOTE deadline is the real one and is enforced by
       // the review's countdown + the Approve-time check.
       expiry: null,
       source: 'ocp',
@@ -479,7 +479,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     setPhase('review');
   }
 
-  /** The payer picked an asset off the till's menu. Resolves that ONE offer (a second provider read
+  /** The payer picked an asset off the checkout's menu. Resolves that ONE offer (a second provider read
    *  for its destination) and lands on the same review. `Date.now()` is read again on purpose: the
    *  quote has been ticking while the menu was on screen, and the deadline check is only honest if
    *  it is asked about now. */
@@ -518,10 +518,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillIntent, phase]);
 
-  // The TILL entry: an OS-delivered till code (`…/pl/?lightning=<LNURL…>` — an Android App Link on
+  // The CHECKOUT entry: an OS-delivered checkout code (`…/pl/?lightning=<LNURL…>` — an Android App Link on
   // the /pl/ path, or the same URL scanned by this camera) arrives here as a prefilled SCAN, not a
   // parsed intent: it enters onNotARequest, the SAME classification every non-wire scan takes. So a
-  // well-formed till code lands on the explicit OpenCryptoPay review — the SAME zero-press rule as
+  // well-formed checkout code lands on the explicit OpenCryptoPay review — the SAME zero-press rule as
   // the link above: no Pay Now gate was passed, so it NEVER auto-signs — and a broken one gets the
   // same honest refusal a camera scan of it would. Guarded on phase==='scan' + cleared on take,
   // exactly like the link prefill above.
@@ -625,7 +625,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     return sent;
   }
 
-  /** What the IC rail's verdict means for a till payment. ONE mapping — the first attempt and the
+  /** What the IC rail's verdict means for a checkout payment. ONE mapping — the first attempt and the
    *  claim re-poll below must agree, because it decides the money-critical question: only a settled
    *  transfer WITH a real block index may be reported (the provider verifies that identifier against
    *  the ledger and spends the one attempt on it). A settled-but-indexless duplicate names nothing
@@ -640,7 +640,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     if (out.kind === 'rejected') return {kind: 'refused', message: out.reason};
     if (out.kind === 'settled' && out.blockIndex !== '') {
       if (target.ledger === null) {
-        console.warn(`ocp: settled at block ${out.blockIndex} but the till named no ledger — not reporting it`);
+        console.warn(`ocp: settled at block ${out.blockIndex} but the checkout named no ledger — not reporting it`);
         return {kind: 'unknown'};
       }
       return {
@@ -652,7 +652,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     return {kind: 'unknown'};
   }
 
-  // Approve on an OpenCryptoPay till. Same consent gesture as a link, different settlement: the
+  // Approve on an OpenCryptoPay checkout. Same consent gesture as a link, different settlement: the
   // funds move first and the provider is told exactly once, afterwards.
   async function approveOcp(r: PayIntent, target: OcpTarget) {
     // Re-checked at the press, not just by the countdown (which ticks once a second): paying with
@@ -665,9 +665,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     // still unspent and the claim is worth keeping.
     const hold: {claim: RailPrepared | null} = {claim: null};
     // Same annotation as the wire/link path in `approve`, at the same last-point-before-signing
-    // seam: for a till the name is the provider's claimedMerchantName (intent.toName), the msg is
+    // seam: for a checkout the name is the provider's claimedMerchantName (intent.toName), the msg is
     // the provider's claimedNote (intent.memo — display text set by `landOcp`), and the join key
-    // is the reference the till will reconcile by (intent.nonceHex = on-chain memo). Founder rule
+    // is the reference the checkout will reconcile by (intent.nonceHex = on-chain memo). Founder rule
     // 2026-09-14: the row headlines the gross (wire + fee = the paid price), fee as annotation.
     savePriceNote(r);
     setBusy(true);
@@ -694,7 +694,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     }
   }
 
-  // Resolve a till transfer the rail left indefinite. SAME re-poll as the offline hand-off's
+  // Resolve a checkout transfer the rail left indefinite. SAME re-poll as the offline hand-off's
   // reconcile above — the same `pollTransfer`, one attempt per tick — because the situation is the
   // same: an envelope that is already submitted and whose verdict has to be read, not re-signed.
   // What differs is what a verdict is worth here. The provider has NOT been told yet, so a transfer
@@ -721,7 +721,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
         if (sent.kind === 'refused') {
           // Definitive: nothing left the wallet. The pending screen was the honest state a moment
           // ago and is a lie now, so it goes — back to the scanner, with the reason and the one
-          // action that can still pay this till.
+          // action that can still pay this checkout.
           reset();
           refuseScan(M.pay.ocp.transferRefused(sent.message));
           return;
@@ -765,7 +765,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   // The sign path (parameterized: the camera path auto-signs the FRESHLY decoded intent before the
   // `intent` state has flushed; the link review's Approve passes the parked intent).
   async function approve(r: PayIntent) {
-    // A till payment settles through the provider, not through an offline hand-off: it has its own
+    // A checkout payment settles through the provider, not through an offline hand-off: it has its own
     // binding order and never reaches the QR/resubmit machinery below. Fails CLOSED if the quote is
     // somehow gone — signing an unreported transfer to a provider's address is the loss path itself.
     if (r.source === 'ocp') {
@@ -970,7 +970,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
         // Only an IC row carries `currency`, which is what formats an amount at the asset's own
         // precision. The resolver's same-rail filter means every option here is one; a miss falls
         // back to the provider's own spelling rather than dropping a payable option off the menu.
-        // The label is the TOTAL DEBIT where the catalog states the asset's ledger fee (a till
+        // The label is the TOTAL DEBIT where the catalog states the asset's ledger fee (a checkout
         // prices it in, so the option reads the shelf price, not wire-minus-fee); an asset with no
         // catalog fee shows the wire amount — the explicit review after the pick adds the LIVE fee.
         labelOf={o => {
@@ -1019,7 +1019,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     const isSelf = selfAccount !== null && intent.toAccount === selfAccount;
     if (intent.source === 'link' || intent.source === 'ocp') {
       // Link entry (zero-press): the full review card — the single Approve press IS the consent.
-      // An OpenCryptoPay till lands here too, for the same reason: the amount, the destination and
+      // An OpenCryptoPay checkout lands here too, for the same reason: the amount, the destination and
       // the name all came from a party the wallet has no relationship with, so it is reviewed and
       // approved explicitly, never auto-signed. It adds three lines the other entries do not need
       // (host, claimed name, price countdown) — see OcpQuoteLines. The card itself is shared with
@@ -1039,7 +1039,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
           onCancel={reset}
           notes={
             <>
-              {/* The till quote's own line. `onTooLate` writes the reason into `err`, which both
+              {/* The checkout quote's own line. `onTooLate` writes the reason into `err`, which both
                   explains the state and disables Approve — a price with no room left for the whole
                   sequence must never be payable, because the provider would refuse the proof AFTER
                   the money moved. */}
@@ -1052,7 +1052,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
                 />
               ) : null}
               {/* The sender-set memo (if any) — shown as a small subtitle so the payer sees the
-                  note attached to this payment before approving. For a till this line carries the
+                  note attached to this payment before approving. For a checkout this line carries the
                   claimed note ("what the charge is for") on the SAME surface a link's memo rides.
                   Empty memo renders nothing. */}
               {intent.memo ? <Text testID="review-memo" style={S.dim2}>{intent.memo}</Text> : null}
@@ -1144,7 +1144,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   //
   // The HCE card arms on that same press, and the reason is the same fact rather than a weaker
   // version of it: an NFC request carries its OWN currency, so the gate was refusing taps that
-  // would have SETTLED (a DEMO till tapped by a wallet that happens to have VCHF selected). It was
+  // would have SETTLED (a DEMO checkout tapped by a wallet that happens to have VCHF selected). It was
   // never the protection it read as, either — a tap for an asset the wallet genuinely lacks was
   // always reachable whenever the SELECTED asset was funded and the REQUESTED one was not, so this
   // widens no failure mode. That outcome is unchanged and costs nothing: no money moves, and both
@@ -1336,7 +1336,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
               {fundedElsewhere('pay')}
             </>
           )}
-          {/* The till lookup is two network reads and can take tens of seconds — on a screen the
+          {/* The checkout lookup is two network reads and can take tens of seconds — on a screen the
               payer just pointed at a QR code. Say what is happening rather than freezing. */}
           {ocpBusy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingTill}</Text> : null}
           {err ? <Text style={S.err}>{err}</Text> : null}

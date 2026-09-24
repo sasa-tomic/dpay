@@ -6,7 +6,7 @@ import {tokenEq, type SelectableAsset} from '../config/assets';
 import {ICP_LEDGER_PRINCIPAL} from '../config/constants';
 
 // --- OpenCryptoPay: the pure half (scanned code → a typed fact, or a NAMED refusal) ---------------
-// Paying a merchant till that shows a static OpenCryptoPay QR. Measured provider behaviour is
+// Paying a merchant checkout that shows a static OpenCryptoPay QR. Measured provider behaviour is
 // `docs/specs/2026-09-01-opencryptopay-findings.md`; the plan this implements is
 // `docs/specs/2026-09-01-opencryptopay-implementation.md` ("Unit A"). Neither is restated here.
 //
@@ -111,7 +111,7 @@ export type OcpRefusal =
   /** Two wallet assets answer to the same token on the same chain — which one the provider meant is
    *  unknowable, so neither is paid. Mirrors `resolvePayLink`'s `ambiguous_asset`. */
   | 'ambiguous-asset'
-  /** The quote is past its expiry — nothing is payable until the till is rescanned. */
+  /** The quote is past its expiry — nothing is payable until the checkout is rescanned. */
   | 'quote-expired';
 
 type Refused<R extends OcpRefusal> = {ok: false; reason: R};
@@ -137,7 +137,7 @@ export interface OcpAssetAmount {
   amount: string;
 }
 
-/** One settlement method the till accepts, with the exact amount per asset. `method` is carried
+/** One settlement method the checkout accepts, with the exact amount per asset. `method` is carried
  *  VERBATIM because it goes back on the wire in steps 3 and 4. */
 export interface OcpTransferAmount {
   method: string;
@@ -181,7 +181,7 @@ export interface OcpDetails {
    *  description for wallets with no `note` field — this parser reads ONLY the field (the folded
    *  string is the provider's rendering, not a second source this wallet should grow). */
   claimedNote: string | null;
-  /** What the till asked for in ITS OWN unit (e.g. CHF 1) — the merchant's price tag, and the only
+  /** What the checkout asked for in ITS OWN unit (e.g. CHF 1) — the merchant's price tag, and the only
    *  thing on the review a payer can check against the printed price: `0.0000162 BTC` means nothing
    *  on its own. It is the PROVIDER's number, shown as claimed and never as dpay's (dpay does not
    *  quote and does not convert), and it never moves: `transferAmounts` is what gets paid.
@@ -316,7 +316,7 @@ export function decodeLnurl(s: string): LnurlDecode {
 
 /**
  * Recognise an OpenCryptoPay code: a bare `LNURL1…` string, or any URL carrying it in a `lightning`
- * query parameter (the shape the till's QR actually prints,
+ * query parameter (the shape the checkout's QR actually prints,
  * `https://app.dfx.swiss/pl/?lightning=LNURL1…`).
  *
  * `apiUrl` is the decoded string VERBATIM — a provider URL is never rewritten, so what the wallet
@@ -329,7 +329,7 @@ export function parseOcpScan(raw: string): OcpScan {
   const raw0 = typeof raw === 'string' ? raw.trim() : '';
   if (raw0.length === 0) return {ok: false, reason: 'not-lnurl'};
   // The `lightning:` URI scheme is how most of the Lightning world hands an LNURL to a wallet, and
-  // a till printed that way used to read as "not a payment code" — a dead end at a checkout with no
+  // a checkout printed that way used to read as "not a payment code" — a dead end at a checkout with no
   // way to tell an unsupported sticker from a damaged one. Stripped, not parsed as a URL: the
   // payload after the scheme is the code itself, and `lightning://` is the same thing with the
   // authority slashes some encoders add. (`decodeLnurl` still decides whether it IS an LNURL.)
@@ -428,7 +428,7 @@ const SOLANA_URI_SCHEME = 'solana:';
  *
  *  ICP: `to` names the account, `amount` names the value, and `ref` names the sale — the reference a
  *  provider wants echoed as the transfer's on-chain memo so its ledger match is exact rather than a
- *  resemblance (dpay's own till mints one per charge, `crates/dpay-relay/src/till.rs`). It is
+ *  resemblance (dpay's own checkout mints one per charge, `crates/dpay-relay/src/checkout.rs`). It is
  *  honoured, which is why it is listed: the payer's transfer carries it as the ICRC-1 memo. Same
  *  name and same 32-hex shape as a payment link's `ref` (`lib/deepLink.ts`, the authority for
  *  both), because it is the same fact. `subaccount` — the one a real wallet might be tempted to
@@ -467,7 +467,7 @@ function hasUnknownParam(params: Map<string, string>, allowed: string[]): boolea
  * is refused by the same code that refuses one from a payment link.
  *
  * `ref` is OPTIONAL and absence is not a failure: a provider that names no reference gets the
- * wallet's own fresh nonce as the memo, which is what every till payment did before references
+ * wallet's own fresh nonce as the memo, which is what every checkout payment did before references
  * existed. A `ref` that is PRESENT and unreadable is refused rather than dropped — it is the
  * provider's instruction for how its sale gets matched, so ignoring it is how money moves and a
  * sale goes uncredited. Pure, total, never throws.
@@ -602,7 +602,7 @@ export function parseProviderInstant(v: unknown): number | null {
  * single unreadable asset amount — is refused entirely. Keeping the readable half of a payment
  * response would put a shortened list of options on screen with no explanation of what was dropped,
  * which is exactly the silent failure this codebase does not allow. The two DISPLAY fields are the
- * exceptions — the merchant name and the till's own price both yield `null` rather than a refusal,
+ * exceptions — the merchant name and the checkout's own price both yield `null` rather than a refusal,
  * because refusing a payment over a line of context buys the payer nothing.
  *
  * The callback must be `https` for the same reason the scanned code must: it is the URL the wallet
@@ -652,7 +652,7 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
     // the live provider sends three of them on every single response (measured 2026-09-01:
     // `TaprootAsset`, `Spark`, `Arkade`). That is coherent — the method exists, it offers nothing
     // right now — and it names no asset this wallet could ever select, so it is dropped and the
-    // payable methods beside it survive. Refusing the whole body over it made EVERY real till
+    // payable methods beside it survive. Refusing the whole body over it made EVERY real checkout
     // unpayable on both rails while the suite stayed green, because no fixture carried one.
     //
     // `available: true` with nothing to settle is the CONTRADICTORY case and stays malformed: a
@@ -670,9 +670,9 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
     }
     transferAmounts.push({method, available: e.available, assets});
   }
-  // A till that named nothing settleable at all is the same fact as one that sent no methods, and
+  // A checkout that named nothing settleable at all is the same fact as one that sent no methods, and
   // gets the same refusal — so every parsed `OcpDetails` still carries at least one method, and the
-  // "this till takes: …" copy can never be built from an empty list.
+  // "this checkout takes: …" copy can never be built from an empty list.
   if (transferAmounts.length === 0) return {ok: false, reason: 'malformed-details'};
 
   return {
@@ -711,7 +711,7 @@ function submissionUrlOf(cb: URL): string | null {
   return `${cb.origin}${path.slice(0, at)}${SUBMIT_SEGMENT}${id}${cb.search}`;
 }
 
-/** Marks a piece of provider display text the cap CUT — a merchant name or the till's own price.
+/** Marks a piece of provider display text the cap CUT — a merchant name or the checkout's own price.
  *  Without it a truncation is indistinguishable from the whole string, and the payer would be told
  *  they are paying "Migros Bahnhofstrass" — a different merchant than the one the string actually
  *  named — or a price that is a prefix of the one that was sent. Costs 3 bytes past the cap, on the
@@ -726,7 +726,7 @@ const TRUNCATED_MARK = '…';
  * extraction rule, two callers; never verified, always rendered as claimed.
  *
  * BOUNDED AND SANITISED, because this string is hostile input by construction: a scanned LNURL can
- * name ANY host (findings doc, "Trust model"), so a sticker over a real till points the wallet at a
+ * name ANY host (findings doc, "Trust model"), so a sticker over a real checkout points the wallet at a
  * server that writes this name. Unbounded, it is a LAYOUT weapon rather than a lie — React Native
  * `Text` renders newlines, so a name of thirty blank lines pushes the provider host, the countdown
  * and the full destination account off the screen, deleting precisely the three lines that make the
@@ -744,7 +744,7 @@ export function claimedMerchantNameOf(json: unknown): string | null {
 }
 
 /**
- * What the till says the charge is FOR, from the body's own `note` field — the payer's reading of
+ * What the checkout says the charge is FOR, from the body's own `note` field — the payer's reading of
  * "what did I pay for?", claimed and never verified. NOT read out of the LUD-06 `metadata`
  * description the relay folds the note into: that string is the provider's rendering for wallets
  * with no `note` field, and parsing both would grow a second, drifting source of one text.
@@ -768,7 +768,7 @@ function claimedNoteOf(json: unknown): string | null {
 
 /**
  * One asset amount spelled for a REVIEW LINE ("CHF 1"). Display only, and composed rather than
- * converted: the only amount rendered through it is the till's own price (`OcpDetails.requestedAmount`),
+ * converted: the only amount rendered through it is the checkout's own price (`OcpDetails.requestedAmount`),
  * which is the MERCHANT's figure and never dpay's — dpay does not quote and does not convert.
  *
  * The amount's SPELLING is straightened because the grammar this module accepts is deliberately
@@ -879,7 +879,7 @@ export function offerNamesAsset(offer: {method: string; asset: string}, asset: S
  *
  * `nowMs` is passed in rather than read from the clock so the function stays pure and the expiry
  * boundary is testable. An expired quote refuses EVERY offer with `quote-expired`: nothing is
- * payable until the till is rescanned, and one honest reason on every row beats a list of options
+ * payable until the checkout is rescanned, and one honest reason on every row beats a list of options
  * that cannot be taken.
  *
  * Order matters wherever a later step would otherwise turn a refusal into a payable offer. Solana

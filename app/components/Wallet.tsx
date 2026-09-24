@@ -35,7 +35,7 @@ import {TripStrip} from './TripStrip';
 import {deriveSolanaAddress, createTokenAta} from '../solana';
 import {isValidSolanaAddress} from '../solana/identity';
 import {friendlySolError} from '../solana/errors';
-import {readDepositDeepLink, readPayLink, readPaymentDeeplink, parsePayLink, parseTillCode, decodeDeeplink, type PayLink, type PayLinkParse} from '../lib/deepLink';
+import {readDepositDeepLink, readPayLink, readPaymentDeeplink, parsePayLink, parseCheckoutCode, decodeDeeplink, type PayLink, type PayLinkParse} from '../lib/deepLink';
 import {WordmarkLink} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
 import {Tab} from './Tab';
@@ -134,7 +134,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // The Solana rail's equivalent: address + decimal amount pre-filled into the "Send to address"
   // form (SOL has no request/review engine — same tab, same toggle, per the same-surfaces rule).
   const [solPrefill, setSolPrefill] = useState<{address: string; amount: string; label?: string; memo?: string} | null>(null);
-  // A till-code App Link (`…/pl/?lightning=<LNURL…>`): the RAW url waits for whichever rail's Pay
+  // A checkout-code App Link (`…/pl/?lightning=<LNURL…>`): the RAW url waits for whichever rail's Pay
   // engine is mounted, which consumes it through its prefill-scan effect — the SAME classification
   // a camera scan of the same QR takes (an honest refusal for a code that carries nothing payable;
   // an explicit review — never an auto-sign — for one that does). Cleared by the consumer, exactly
@@ -205,11 +205,11 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // auto-open-ckERC20 effect) can land the user directly on the right sub-mode + asset.
   const [receiveSubMode, setReceiveSubMode] = useState<'request' | 'address'>('request');
   // Which CODE the Request-payment form is making: the dpay request (default — the 132-byte signed
-  // request another dpay wallet scans) or this merchant's own till charge. Owned HERE, beside the
-  // sub-mode, for the reason every cross-rail selection is: a merchant who picks "Till code" on the
+  // request another dpay wallet scans) or this merchant's own checkout charge. Owned HERE, beside the
+  // sub-mode, for the reason every cross-rail selection is: a merchant who picks "Checkout code" on the
   // Solana rail is told to switch to VCHF, and that switch re-mounts the OTHER Receive form — a
   // choice held inside either form would be lost exactly at the moment it was acted on.
-  const [receiveCodeForm, setReceiveCodeForm] = useState<'dpay' | 'till'>('dpay');
+  const [receiveCodeForm, setReceiveCodeForm] = useState<'dpay' | 'checkout'>('dpay');
   const [paySubMode, setPaySubMode] = useState<'scan' | 'send'>('scan');
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
   // Demo top-up: a single click adds $100 of demo currency via /api/v1/faucet. The button sits next
@@ -221,7 +221,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   useEffect(() => {
     let alive = true;
     // Back to "this relay has told us nothing" for the duration of the probe: the answer belongs
-    // to the URL being asked, so the previous relay's till must not be offered against the new one.
+    // to the URL being asked, so the previous relay's checkout must not be offered against the new one.
     setCapabilities(NO_RELAY_CAPABILITIES);
     relayCapabilities(relayUrl).then(c => { if (alive) setCapabilities(c); });
     return () => { alive = false; };
@@ -714,7 +714,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // Inbound links (2026-08-29): the wallet accepts exactly three, and this effect is the ONE door.
   //   • a PAYMENT LINK `…/wallet/pay/<recipient>?asset=…&network=…&amount=…` — parsed here, resolved
   //     against the catalog by the effect below, and pre-filled into the Pay tab. It NEVER signs.
-  //   • a TILL CODE `…/pl/?lightning=<LNURL…>` — the OpenCryptoPay QR a till prints; routed below
+  //   • a CHECKOUT CODE `…/pl/?lightning=<LNURL…>` — the OpenCryptoPay QR a checkout prints; routed below
   //     into the SAME payer pipeline a camera scan of it takes (explicit review, never auto-sign).
   //   • the receipt hand-back `dpay:pay/<blob>` — the rail proof for the merchant's Receive screen.
   // Both arrive by two routes and both are bounded + best-effort (a failure never wedges the app,
@@ -753,8 +753,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     if (link) { applyLink(link); return; }
     const dl = decodeDeeplink(url);
     if (dl) { applyReceipt(dl.blob); return; }
-    const till = parseTillCode(url);
-    if (till) applyTill(till);
+    const checkout = parseCheckoutCode(url);
+    if (checkout) applyTill(checkout);
   }, [applyLink, applyReceipt, applyTill]);
 
   useEffect(() => {
@@ -1411,7 +1411,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               noteFor={noteFor}
               // Pay pins the SCAN sub-mode, so the camera is live in ONE tap from a cold start
               // whatever the Pay tab was last left showing (a `send` sub-mode left over from a
-              // previous session would otherwise make the till gesture two taps — the exact
+              // previous session would otherwise make the checkout gesture two taps — the exact
               // regression the primary Pay card exists to prevent).
               onPay={() => { setPaySubMode('scan'); setMode('pay'); }}
               onReceive={() => setMode('receive')}
@@ -1480,7 +1480,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
                   identity={identity} relayUrl={relayUrl} nfcStatus={nfc} solAddress={solAddress}
                   subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                   codeForm={receiveCodeForm} onCodeFormChange={setReceiveCodeForm}
-                  tillAvailable={capabilities.till}
+                  checkoutAvailable={capabilities.checkout}
                   catalog={catalog}
                   selectedToken={selectedSolToken}
                   assets={assets}
@@ -1525,7 +1525,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
                     depositNativeEth={depositNativeEth}
                     subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                     codeForm={receiveCodeForm} onCodeFormChange={setReceiveCodeForm}
-                    tillAvailable={capabilities.till}
+                    checkoutAvailable={capabilities.checkout}
                     depositReturnLabel={
                       // Same rule as the SOL rail: the resume link appears ONLY once the deposit
                       // actually landed (a known-positive balance on the asset being funded), never

@@ -75,15 +75,15 @@ import {M} from '../i18n';
 export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, tokenBalance, tokenAtaAbsent, tokenBalances, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentToken, onShowSolAddress, onShowTokenAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onSwitchRail, onOpenAddressBook, onOpenReceipt}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; /** The SELECTED token's LAST-KNOWN balance — null when no balance was ever known (the send sheet gates an honest unknown; a known figure gates only a real over-spend, stale-ok, 2026-09-21). */ tokenBalance: string | null; tokenAtaAbsent: boolean; /** Per-mint token states for every visible SPL asset (the Wallet's per-mint hook states) — a scanned Solana Pay request names its OWN mint, which need not be the selected asset's. */ tokenBalances: SolMintStates; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: string; onSent: () => void; /** Refreshes the token account that moved — names the request's mint when the sender knows it, else repolls every visible mint. */ onSentToken: (mint?: string | null) => void; onShowSolAddress: () => void; onShowTokenAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string; label?: string; memo?: string} | null; onSendPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void; /** Open the shared TxnReceipt (Wallet root) for a finished send. */ onOpenReceipt?: (t: Txn) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done' | 'spay-review' | 'spay-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
-  // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
+  // An OpenCryptoPay merchant checkout the camera read, and its outcome. Same two states the IC rail
   // holds (PayMode) — the quote context, and the honest sentence for an outcome that is neither
   // paid nor failed — because both rails run the identical provider sequence.
   const [ocp, setOcp] = useState<OcpTarget | null>(null);
   const [ocpBusy, setOcpBusy] = useState(false);
-  // IC twin: PayMode's `ocpChoice`. The till's menu, when the selected asset was not on it.
+  // IC twin: PayMode's `ocpChoice`. The checkout's menu, when the selected asset was not on it.
   const [ocpChoice, setOcpChoice] = useState<{details: OcpDetails; host: string; options: OcpOffer[]; declined: string} | null>(null);
   const [ocpDone, setOcpDone] = useState<{amount: string; who: string; note: string | null} | null>(null);
-  // A till transfer whose outcome this rail could NOT resolve, plus the quote it was made against.
+  // A checkout transfer whose outcome this rail could NOT resolve, plus the quote it was made against.
   // IC twin: PayMode's `ocpClaim`, same reason and same lifecycle. The broadcast signature is the
   // payer's only claim on that money: the network already accepted the transaction, so its status
   // stays readable and the confirmation may be one more poll away — the likeliest failure of all is
@@ -135,10 +135,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   const [reviewShown, setReviewShown] = useState(false);
   useEffect(() => { if (subMode !== 'send') { setSendActive(false); setReviewShown(false); } }, [subMode]);
 
-  // The TILL entry's SOL twin (same-surfaces rule): an OS-delivered till code
-  // (`…/pl/?lightning=<LNURL…>`, the OpenCryptoPay QR a till prints) arrives as a prefilled SCAN —
+  // The CHECKOUT entry's SOL twin (same-surfaces rule): an OS-delivered checkout code
+  // (`…/pl/?lightning=<LNURL…>`, the OpenCryptoPay QR a checkout prints) arrives as a prefilled SCAN —
   // it enters onNotARequest, the SAME classification a camera scan takes, so the SOL rail offers
-  // the same explicit review a scanned till code gets here (never an auto-sign; a broken code the
+  // the same explicit review a scanned checkout code gets here (never an auto-sign; a broken code the
   // same honest refusal). Guarded on phase==='scan' + cleared on take, like the IC rail's prefill.
   useEffect(() => {
     if (prefillScan == null) return;
@@ -177,13 +177,13 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
 
   // Lock the idle asset selection while a SOL payment is in flight. Every non-scan phase holds a
   // captured, immutable snapshot the user must not lose to an asset switch (which unmounts this
-  // component): the SolReqV2 of an offline pay, or the live quote of a merchant till — and, the
+  // component): the SolReqV2 of an offline pay, or the live quote of a merchant checkout — and, the
   // same rule, an in-flight send sheet's terminal surface (`sendActive`, 2026-09-21): an asset
   // switch would tear the sheet down exactly like the offline gate did.
   const locked = phase !== 'scan' || sendActive;
   useReportLock(onLockChange, locked);
 
-  // Resolve a till transfer this rail left indefinite. IC twin: PayMode's claim effect — same
+  // Resolve a checkout transfer this rail left indefinite. IC twin: PayMode's claim effect — same
   // shape, same interval, same one-shot discipline; only the question asked of the network differs
   // (a signature status instead of a read_state poll). The provider has NOT been told yet, so a
   // transaction that turns out to have confirmed can still be reported and the sale still credited;
@@ -213,7 +213,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         if (sent.kind === 'refused') {
           // Definitive: nothing reached the merchant. The pending screen was the honest state a
           // moment ago and is a lie now, so it goes — back to the scanner, with the reason and the
-          // one action that can still pay this till.
+          // one action that can still pay this checkout.
           reset();
           refuseScan(sent.message);
           return;
@@ -583,7 +583,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   }
 
   // The OPENCRYPTOPAY entry — the IC rail's twin (PayMode.startOcp), running the SAME resolution so
-  // a till code behaves identically whichever asset is selected (CLAUDE.md same-surfaces rule).
+  // a checkout code behaves identically whichever asset is selected (CLAUDE.md same-surfaces rule).
   // Two provider reads, no signature, no funds; the payer then approves an explicit review.
   //
   // `catalog` is threaded in only because the resolver checks an IC destination against the ledger
@@ -618,8 +618,8 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     }
   }
 
-  /** Where BOTH till paths end — the direct one and the one the payer picked off the menu. IC twin:
-   *  PayMode's `landOcp`, same shape so a till behaves identically on either rail. */
+  /** Where BOTH checkout paths end — the direct one and the one the payer picked off the menu. IC twin:
+   *  PayMode's `landOcp`, same shape so a checkout behaves identically on either rail. */
   function landOcp(out: OcpResolveResult, declined: string) {
     // Back to the scanner on any refusal, including one reached FROM the menu: leaving the phase on
     // 'ocp-choose' would strand the payer on a list they can no longer act on.
@@ -637,7 +637,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     setPhase('ocp');
   }
 
-  /** The payer picked an asset off the till's menu. IC twin: PayMode's `chooseOcpOffer`. `Date.now()`
+  /** The payer picked an asset off the checkout's menu. IC twin: PayMode's `chooseOcpOffer`. `Date.now()`
    *  is read again on purpose — the quote ticked while the menu was on screen. */
   async function chooseOcpOffer(offer: OcpOffer) {
     const choice = ocpChoice;
@@ -681,7 +681,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     try {
       const sig = await sendSol(identity.secretHex, target.to, BigInt(target.rawAmount), signal, s => { broadcast.sig = s; });
       // Same payer-side annotation as approveSpay, keyed by the signature (this rail signs no
-      // memo to key by): a till's claimed name AND claimed note are the context the rail-side
+      // memo to key by): a checkout's claimed name AND claimed note are the context the rail-side
       // send still has at hand — the IC seam saves the same pair keyed by the on-chain memo.
       // Founder rule 2026-09-14: the gross (amount + fee = the payer's exact debit) + the fee
       // ride along so the log row headlines the price the review showed.
@@ -699,7 +699,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     }
   }
 
-  // Approve on an OpenCryptoPay till: the funds move first and the provider is told exactly once,
+  // Approve on an OpenCryptoPay checkout: the funds move first and the provider is told exactly once,
   // afterwards. IC twin: PayMode.approveOcp — same states, same copy, same refusal to retry.
   async function approveOcp(target: OcpTarget) {
     // Re-checked at the press, not just by the countdown (which ticks once a second): paying with
@@ -788,7 +788,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   const unit = req != null && req.cur !== 'SOL' ? req.cur : SOL_UNIT;
   // The merchant's CLAIMED name and note, from a code a stranger printed or a phone that tapped
   // this one. Same threat and same helper as the IC wire request (`wireRequestToIntent`), a payment
-  // link's `label`/`memo` (`clampLinkText`) and a till's merchant name (`claimedMerchantNameOf`):
+  // link's `label`/`memo` (`clampLinkText`) and a checkout's merchant name (`claimedMerchantNameOf`):
   // the 32-character cap bounds the length, but React Native `Text` renders newlines, so a name of
   // blank lines pushes the destination address — the only checkable thing on this screen — out of
   // view.
@@ -906,7 +906,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
                 </>
               )}
             </View>
-            {/* The till lookup is two network reads and can take tens of seconds. IC twin:
+            {/* The checkout lookup is two network reads and can take tens of seconds. IC twin:
                 PayMode's `ocp-checking`. */}
             {ocpBusy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingTill}</Text> : null}
             {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
@@ -923,7 +923,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         options={ocpChoice.options}
         busy={ocpBusy}
         // This rail spends lamports, so every option it can take is denominated in SOL. The label
-        // is the TOTAL DEBIT (amount + network fee, fee constant and known here) — a till prices
+        // is the TOTAL DEBIT (amount + network fee, fee constant and known here) — a checkout prices
         // the fee in, so the option reads the shelf price, not wire-minus-fee.
         labelOf={o => fmtAssetCompact((BigInt(o.rawAmount) + SOL_FEE_LAMPORTS).toString(), SOL_DECIMALS, SOL_UNIT)}
         onPick={o => void chooseOcpOffer(o)}
@@ -933,10 +933,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   }
 
   if (phase === 'ocp' && ocp) {
-    // A merchant till: reviewed and approved explicitly, NEVER auto-signed. The one-press rule does
+    // A merchant checkout: reviewed and approved explicitly, NEVER auto-signed. The one-press rule does
     // not reach here — it covers a dpay request whose amount and payee came off a dpay QR, while
     // every value on this screen came from a provider the wallet has no relationship with. Mirrors
-    // the IC rail's till review (PayMode), down to the testIDs.
+    // the IC rail's checkout review (PayMode), down to the testIDs.
     // The wallet must cover the price AND the network fee — a transfer of exactly the balance
     // cannot pay for itself. Gated on the IC rail since it shipped; the divergence here was review
     // row 12, and CLAUDE.md's same-surfaces rule makes a money-surface divergence a bug. This
@@ -950,7 +950,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         {/* No screen title: it sat directly above "Pay <amount>" with Approve underneath, and the
             IC rail's review dropped its own for the same reason (founder, 2026-09-09). */}
         {/* TOTAL DEBIT (amount + network fee — the fee is a known constant on this rail, so the
-            headline IS the shelf price at a till; founder rule 2026-09-13). Compact, like every
+            headline IS the shelf price at a checkout; founder rule 2026-09-13). Compact, like every
             glanceable money surface. */}
         <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAssetCompact((BigInt(ocp.rawAmount) + SOL_FEE_LAMPORTS).toString(), SOL_DECIMALS, SOL_UNIT))}</Text>
         <Text style={S.reviewTo}>{M.pay.toWho(ocp.details.claimedMerchantName ?? ocp.host)}</Text>
@@ -963,10 +963,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
           payableUntil={ocp.payableUntil}
           onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}
         />
-        {/* The till's claimed note — what the charge is for — on the same line the IC rail shows
+        {/* The checkout's claimed note — what the charge is for — on the same line the IC rail shows
             it (`review-memo`) and this rail's own link path shows a memo (`sol-pay-memo` in the
             review phase): one surface per question, whichever rail pays. Renders nothing when the
-            till sent none. */}
+            checkout sent none. */}
         {ocp.details.claimedNote ? <Text testID="sol-pay-memo" style={S.dim2}>{ocp.details.claimedNote}</Text> : null}
         {/* Above the button, like the IC rail's own low-balance line, so it is read before the
             press rather than after it. */}
@@ -1014,7 +1014,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
 
   if (phase === 'spay-review' && spay) {
     // A scanned Solana Pay request: reviewed and approved explicitly, NEVER auto-signed — the same
-    // rule as the OCP till review above (every value came from a code a stranger printed; the
+    // rule as the OCP checkout review above (every value came from a code a stranger printed; the
     // one-press rule covers only dpay's own solreq QRs). The amount is fixed text when the URI
     // carried one, an entry field when it did not (the spec makes it optional, and this wallet's
     // own receive QR emits it without one — reading that QR back is the flow this screen serves).
@@ -1026,7 +1026,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     const raw = toUnits(spayAmount, decimals);
     const amountValid = raw !== '0';
     const balance = isSol ? BigInt(solBalance) : BigInt(tokenBalances[spay.splToken ?? '']?.amount ?? '0');
-    // SOL must cover the transfer AND the fee — the same fee-inclusive gate the till review uses.
+    // SOL must cover the transfer AND the fee — the same fee-inclusive gate the checkout review uses.
     const insufficient = !amountValid || (isSol ? balance < BigInt(raw) + SOL_FEE_LAMPORTS : balance < BigInt(raw));
     const spayLabel = sanitiseDisplayText(spay.label ?? '');
     const spayMessage = sanitiseDisplayText(spay.message ?? '');
@@ -1051,7 +1051,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
           </>
         )}
         <Text style={S.reviewTo}>{M.pay.toWho(spayLabel || spay.recipient)}</Text>
-        {/* The FULL destination, never shortened (the till review's discipline): for a spl-token
+        {/* The FULL destination, never shortened (the checkout review's discipline): for a spl-token
             request this is the recipient's WALLET address — the transfer itself targets the
             derived associated token account, and the payable address is the thing to check. */}
         <Text testID="sol-pay-payee" style={S.dim2}>{spay.recipient}</Text>
@@ -1208,7 +1208,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   );
 }
 
-/** What the chain's own verdict on a broadcast signature means for a till payment. IC twin:
+/** What the chain's own verdict on a broadcast signature means for a checkout payment. IC twin:
  *  PayMode's `icOutcomeToSend`, and it decides the same money-critical question: only a CONFIRMED
  *  transaction may be reported, because the provider verifies that identifier against the chain and
  *  spends the one attempt we get on it.

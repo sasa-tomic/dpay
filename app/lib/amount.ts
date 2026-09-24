@@ -165,8 +165,8 @@ export type NettedWire =
 
 /**
  * The payee-quoted WIRE amount under the exact-price rule (founder rule 2026-09-12: if something
- * costs $1, the customer pays exactly $1 — the merchant pays the fees). The dpay till nets the
- * same way at quote time (`till_raw_units`, crates/dpay-relay/src/till.rs); this is the p2p
+ * costs $1, the customer pays exactly $1 — the merchant pays the fees). The dpay checkout nets the
+ * same way at quote time (`checkout_raw_units`, crates/dpay-relay/src/checkout.rs); this is the p2p
  * request's half of the same rule. A wire for the full typed price would arrive as price−fee (the
  * ledger takes its per-transfer fee out of what lands), silently re-billing the difference to the
  * payee — so the payee quotes the NETTED amount instead and the payer pays the wire verbatim,
@@ -175,7 +175,7 @@ export type NettedWire =
  *
  *   fee == null  → wire = price verbatim. The fee is unknowable (DEMO play money, or a ledger the
  *                  catalog states no fee for AND the live query could not reach); the payer then
- *                  pays price+fee, honestly displayed — the same exposure the till ships with its
+ *                  pays price+fee, honestly displayed — the same exposure the checkout ships with its
  *                  const. No number is ever guessed.
  *   fee ≥ price  → REFUSED (`err: 'fee_covers_price'`). The caller must refuse the request BEFORE
  *                  any wire is built — a zero/negative-unit wire is money nonsense — with a

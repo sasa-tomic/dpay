@@ -4,9 +4,9 @@ import type {OcpOffer} from '../lib/opencryptopay';
 import {M} from '../i18n';
 
 /**
- * The till's menu, when the payer's SELECTED asset is not on it.
+ * The checkout's menu, when the payer's SELECTED asset is not on it.
  *
- * WHY THIS EXISTS. An OpenCryptoPay till quotes a MENU — several assets, each with its own price
+ * WHY THIS EXISTS. An OpenCryptoPay checkout quotes a MENU — several assets, each with its own price
  * for the same sale. dpay used to throw that menu away, check only the one asset the payer happened
  * to have selected, and on a miss send them to Balances to switch and re-aim a camera at the QR.
  * At a supermarket checkout with a queue behind you, that round trip is the difference between
@@ -18,7 +18,7 @@ import {M} from '../i18n';
  * what you pay with is a decision, never something the wallet does quietly on your behalf — and why
  * picking still lands on the normal review screen, where the amount, the destination and the
  * provider host are approved explicitly. (Contrast a dpay REQUEST, where the merchant names one
- * exact asset and the payer may not change it — CLAUDE.md's locked-asset rule. A till menu is the
+ * exact asset and the payer may not change it — CLAUDE.md's locked-asset rule. A checkout menu is the
  * opposite case: the merchant offered all of these.)
  *
  * ONE component for both rails (the IC `PayMode` and the Solana `SolPayMode`), because CLAUDE.md
@@ -27,7 +27,7 @@ import {M} from '../i18n';
  * its asset's own units, which each rail already knows how to do and neither should re-derive here.
  */
 export function OcpAssetChoice({declined, options, busy, labelOf, onPick, onCancel}: {
-  /** The selected asset's symbol — the one the till would not take. Named in the heading. */
+  /** The selected asset's symbol — the one the checkout would not take. Named in the heading. */
   declined: string;
   /** Every offer this wallet can pay on the rail the payer is already on. Never empty: the resolver
    *  returns a refusal instead of an empty menu, so this component cannot render a dead end. */

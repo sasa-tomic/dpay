@@ -30,7 +30,7 @@ import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {NfcStatusRow} from './NfcStatusRow';
 import {ModeToggle} from './ModeToggle';
-import {TillCharge} from './TillCharge';
+import {CheckoutCharge} from './CheckoutCharge';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
 import {FundingRoutes} from './FundingRoutes';
 import {RailDisclosure} from './RailDisclosure';
@@ -87,7 +87,7 @@ function solGrossOf(cur: string, amt: string): string {
  * new token (EURC, …) renders here with no component change. `selectedToken` stays as the
  * native-vs-SPL discriminator ('SOL' ⇔ mint null).
  */
-export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, onSelectAssetProgrammatic, tokenAtaStatus = 'balance', tokenAtaFailure = null, tokenAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshToken, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; catalog: CurrencyDescriptor[]; selectedToken: string; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onSelectAssetProgrammatic: (id: AssetId) => void; tokenAtaStatus?: SolTokenStatus; tokenAtaFailure?: SolanaReadFailure | null; tokenAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshToken?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
+export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, checkoutAvailable, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, onSelectAssetProgrammatic, tokenAtaStatus = 'balance', tokenAtaFailure = null, tokenAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshToken, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'checkout'; onCodeFormChange: (f: 'dpay' | 'checkout') => void; checkoutAvailable: boolean; catalog: CurrencyDescriptor[]; selectedToken: string; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onSelectAssetProgrammatic: (id: AssetId) => void; tokenAtaStatus?: SolTokenStatus; tokenAtaFailure?: SolanaReadFailure | null; tokenAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshToken?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
   onReturnFromDeposit?: () => void;
   onLockChange?: (locked: boolean) => void;
   homeCurrency?: HomeCurrency | null;
@@ -304,7 +304,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
     if (!isNativeSol && selectedMint == null) { setErr(friendlySolError(`unknown token ${selectedToken}`)); return; }
     // NATIVE-SOL netting (founder rule 2026-09-12: the customer pays exactly the typed price —
     // the merchant pays the fees): the wire `amt` is the typed price minus the one-signature fee,
-    // the SOL twin of the till's `amount_raw = price − fee`. It must land HERE, in the request the
+    // the SOL twin of the checkout's `amount_raw = price − fee`. It must land HERE, in the request the
     // payee builds — every downstream signer/verifier is byte-exact against the request, so the
     // payer cannot change the amount at sign time, and their displayed total (wire + fee) IS the
     // typed price with no payer-side change. SPL is the ONE documented exception: its fee is
@@ -532,7 +532,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
                 <View testID="sol-req-qr" style={S.qrCard}><QrCode value={payLink!} size={QR_SIZE_SMALL} ecl="M" /></View>
                 <Text testID="sol-req-price" style={S.amountBig}>{fmtAssetCompact(typedPriceRaw, decimals, unit)}</Text>
                 {/* The ONE honest fee/receives line, native SOL only — the fee was netted out of
-                    the wire, so the payee sees both numbers (same row discipline as the IC till's
+                    the wire, so the payee sees both numbers (same row discipline as the IC checkout's
                     settlesAs). SPL keeps its existing display only: nothing was subtracted, and a
                     token-fee line would invent a fee nobody pays in that asset. */}
                 {reqSnapshot!.cur === 'SOL' ? (
@@ -608,15 +608,15 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       {/* WHICH CODE — the same checkbox, on the SOL rail exactly as on the IC one — the
           same-surfaces hard rule: a control that appeared only where it can succeed would be a
           per-rail special case, and the merchant would be left guessing whether their phone can do
-          it at all. What gates it is the RELAY and not the rail: a relay that serves no till shows
+          it at all. What gates it is the RELAY and not the rail: a relay that serves no checkout shows
           the checkbox on neither rail. Where it does show, checking it keeps the shared amount row
           AND the shared message row (one box, both modes, text surviving the toggle — founder
-          2026-09-14, exactly the IC rail's) and swaps the button for the till's own — which lands
-          on the honest closed branch (a till code is paid in VCHF on the Internet Computer, and
+          2026-09-14, exactly the IC rail's) and swaps the button for the checkout's own — which lands
+          on the honest closed branch (a checkout code is paid in VCHF on the Internet Computer, and
           this request is on Solana) with the one tap that fixes it. No
           `onHoldsForm`: a charge can never go live from this rail, so a held-form reporter would be
           dead code. */}
-      {!tillAvailable || codeForm !== 'till' ? <CoachTip tipKey="receiveRequest" /> : null}
+      {!checkoutAvailable || codeForm !== 'checkout' ? <CoachTip tipKey="receiveRequest" /> : null}
       <Text style={S.label}>{M.receive.amountToReceive}</Text>
       <View style={S.amountRow}>
         <Pressable
@@ -643,8 +643,8 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
         />
       </View>
       {/* The ONE message box, both code forms (founder 2026-09-14) — same component, same place
-          under the shared amount row, same text across the till-checkbox toggle. dpay form: the
-          link's memo. Till form: the charge's signed note (handed to TillCharge below). The IC
+          under the shared amount row, same text across the checkout-checkbox toggle. dpay form: the
+          link's memo. Checkout form: the charge's signed note (handed to CheckoutCharge below). The IC
           rail's box is identical in role — the same-surfaces rule. */}
       <TextInput
         testID="sol-req-memo-input"
@@ -656,24 +656,24 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
         accessibilityLabel={M.receive.memo}
         maxLength={32}
       />
-      {tillAvailable ? (
+      {checkoutAvailable ? (
         <View testID="receive-code-form" style={{alignSelf: 'stretch'}}>
           <Pressable
-            testID="btn-code-till"
+            testID="btn-code-checkout"
             style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 6, marginBottom: 10, minHeight: 44}}
-            onPress={() => onCodeFormChange(codeForm === 'till' ? 'dpay' : 'till')}
+            onPress={() => onCodeFormChange(codeForm === 'checkout' ? 'dpay' : 'checkout')}
             accessibilityRole="checkbox"
-            accessibilityLabel={M.receive.till.tillCode}
-            accessibilityState={{checked: codeForm === 'till'}}>
-            <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: codeForm === 'till' ? C.brand : C.sub2, backgroundColor: codeForm === 'till' ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
-              {codeForm === 'till' ? <IconCheck size={14} color={C.brandInk} /> : null}
+            accessibilityLabel={M.receive.checkout.checkoutCode}
+            accessibilityState={{checked: codeForm === 'checkout'}}>
+            <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: codeForm === 'checkout' ? C.brand : C.sub2, backgroundColor: codeForm === 'checkout' ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
+              {codeForm === 'checkout' ? <IconCheck size={14} color={C.brandInk} /> : null}
             </View>
-            <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.receive.till.tillCode}</Text>
+            <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.receive.checkout.checkoutCode}</Text>
           </Pressable>
         </View>
       ) : null}
-      {tillAvailable && codeForm === 'till' ? (
-        <TillCharge
+      {checkoutAvailable && codeForm === 'checkout' ? (
+        <CheckoutCharge
           identity={identity}
           relayUrl={relayUrl}
           asset={assets.find(a => a.id === selectedAssetId) ?? null}

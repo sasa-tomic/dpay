@@ -2,9 +2,9 @@
 //
 // WHY THIS EXISTS. `app/config/palette.ts` is the single home for dpay's colour VALUES, and it was
 // the single home for exactly one of the five surfaces that render them. `landing.html`,
-// `privacy.html`, `till.html` and `till-code.html` each carried a HAND-MAINTAINED copy of the
+// `privacy.html`, `checkout.html` and `checkout-code.html` each carried a HAND-MAINTAINED copy of the
 // light+dark var block, so palette v5 (2026-09-08) moved the app and left the website on v4 —
-// and till.html/till-code.html had already drifted off v4 before that (`--ok:#1E7F4F`,
+// and checkout.html/checkout-code.html had already drifted off v4 before that (`--ok:#1E7F4F`,
 // `--panel:#1D1A17`, `--line:#2E2A25`, a dark `--ink` set to the LIGHT page colour). Four copies of
 // one fact is four places to forget; the fix is not to update them, it is to stop having them.
 //
@@ -18,7 +18,7 @@
 // ── TWO DARK-MODE MECHANISMS, ONE BLOCK ────────────────────────────────────────────────────────
 // landing/privacy resolve the theme in a pre-paint script that sets `data-theme-mode` (and the
 // `.dark` class their component rules key on) from `localStorage` falling back to the OS scheme;
-// till/till-code have no script at all and follow `prefers-color-scheme` directly. Rather than pick
+// checkout/checkout-code have no script at all and follow `prefers-color-scheme` directly. Rather than pick
 // a winner (which would mean adding JS to a kiosk page, or taking the toggle off the landing page),
 // the emitted block serves both and each page DECLARES which it uses with one static attribute:
 // a page that follows the OS puts `class="scheme-auto"` on <html>; a page that resolves the theme
@@ -92,8 +92,8 @@ export function relayPaletteCss(light: Palette, dark: Palette): string {
     ' * when this file and the palette disagree is app/__tests__/relay-palette.test.ts.',
     ' *',
     ' * The relay substitutes this whole block for each page\'s palette placeholder — `with_palette`',
-    ' * in crates/dpay-relay/src/app.rs — in landing.html, privacy.html, till.html and',
-    ' * till-code.html. The placeholder is deliberately NOT spelled out here: this text is injected',
+    ' * in crates/dpay-relay/src/app.rs — in landing.html, privacy.html, checkout.html and',
+    ' * checkout-code.html. The placeholder is deliberately NOT spelled out here: this text is injected',
     ' * into every page, so a copy of the token inside the injected block would survive the',
     ' * substitution and defeat the serving test that checks the substitution happened.',
     ' *',

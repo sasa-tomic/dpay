@@ -91,7 +91,7 @@ export const payEs: PayMessages = {
       `${host} no le ha dado a dpay ninguna forma de informar de tu pago, así que pagar te costaría el dinero sin que se abone la venta. No se ha pagado nada. Volver a escanear no ayudará: pide al comercio otra forma de pago.`,
     proofElsewhere: (quoteHost, proofHost) =>
       `El precio de este código viene de ${quoteHost}, pero el comprobante de tu pago iría a ${proofHost}. Un pago no puede responder ante dos empresas, así que dpay se ha detenido. No se ha pagado nada: pide al comercio su propio código de pago.`,
-    tillPrice: (price, host) => `${price} · precio de ${host}`,
+    checkoutPrice: (price, host) => `${price} · precio de ${host}`,
     checkingTill: 'Comprobando con el proveedor de pagos del comercio…',
     badCode:
       'Este código está dañado, o no es un código de pago. Pide al comercio que lo muestre otra vez y comprueba que no lo tape nada.',
@@ -271,8 +271,8 @@ export const receiveEs: ReceiveMessages = {
   retryBroadcast: 'Reintentar el envío',
   broadcasting: 'Enviando a la red de Solana: puede tardar hasta un minuto.',
 
-  till: {
-    tillCode: 'Muestra también un código para apps compatibles con OpenCryptoPay (Binance Pay, MoonPay) — el pagador debe tener la app abierta',
+  checkout: {
+    checkoutCode: 'Muestra también un código para apps compatibles con OpenCryptoPay (Binance Pay, MoonPay) — el pagador debe tener la app abierta',
 
     ringUpHint: 'Abrir este importe en tu caja y mostrar al cliente un código pagable',
     badAmount: reason =>
@@ -285,7 +285,7 @@ export const receiveEs: ReceiveMessages = {
     wrongAssetTitle: 'Un código de caja se paga en VCHF',
     wrongAsset: (selected, network) =>
       `Un código de caja se paga siempre en VCHF en Internet Computer: dpay nunca convierte. Esta solicitud está en ${selected}${network ? ` en ${network}` : ''}. Cambia a VCHF para cobrar, o quédate con el código dpay: cualquier cámara de teléfono lo abre, y se paga en ${selected}.`,
-    noTillAsset:
+    noCheckoutAsset:
       'Este monedero no tiene VCHF, así que no hay cuenta para un cobro de caja. Usa el código dpay: cualquier cámara de teléfono lo abre, y acepta el activo que has elegido.',
     switchTo: asset => `Cambiar a ${asset}`,
 

@@ -88,8 +88,8 @@ export type PayMessages = {
     badAccount: (network: string) => string;
   };
 
-  // --- an OpenCryptoPay merchant till -------------------------------------------------------
-  // A static till QR resolves to a live quote at a provider dpay does not control, so every string
+  // --- an OpenCryptoPay merchant checkout -------------------------------------------------------
+  // A static checkout QR resolves to a live quote at a provider dpay does not control, so every string
   // here is either a refusal or an honesty marker. Two rules shape the copy:
   //   • Nothing the provider sends is verified by dpay — the merchant name is CLAIMED and the host
   //     the quote came from is shown, so "why does this say another company's name" is answerable.
@@ -98,20 +98,20 @@ export type PayMessages = {
   //     post-transfer keys must say neither "paid" nor "failed", and must hand the payer the
   //     transfer's reference — it is the only thing that ties their money to this sale.
   ocp: {
-    /** An OpenCryptoPay till that takes a Solana token but whose code carries no token account.
+    /** An OpenCryptoPay checkout that takes a Solana token but whose code carries no token account.
      *  `symbol` names the token (USDC, EURC, …). */
     solanaTokenUnsupported: (symbol: string) => string;
-    /** The till doesn't take the selected asset, but DOES take others this wallet can pay from the
+    /** The checkout doesn't take the selected asset, but DOES take others this wallet can pay from the
      *  screen the payer is already on. Heading for that menu. Distinct from `assetNotAccepted`,
      *  which is the dead end — this one has options under it, so it must not send anyone to
      *  Balances. Names the declined asset so the switch is never silent. */
     chooseAsset: (selected: string) => string;
     assetNotAccepted: (selected: string, accepted: string) => string;
-    /** The till DOES take the selected asset, but its provider says it cannot settle that method
-     *  right now. `alternatives` is null when nothing else the till takes is payable here — there
+    /** The checkout DOES take the selected asset, but its provider says it cannot settle that method
+     *  right now. `alternatives` is null when nothing else the checkout takes is payable here — there
      *  is then no "switch in Balances" to point at, so the branch must not pretend there is. */
     methodUnavailable: (selected: string, alternatives: string | null) => string;
-    /** The till takes nothing this wallet can pay — a true dead end for dpay, said plainly. */
+    /** The checkout takes nothing this wallet can pay — a true dead end for dpay, said plainly. */
     noPayableAsset: (accepted: string) => string;
     quoteExpired: string;
     /** The price is still live but has too little time left for the whole sequence (move the funds,
@@ -128,16 +128,16 @@ export type PayMessages = {
      *  disagree is refused instead: that is what keeps the host on screen the host that gets the
      *  money's proof. Names both, because which two they are is the whole point. */
     proofElsewhere: (quoteHost: string, proofHost: string) => string;
-    /** What the till is charging in ITS OWN unit ("CHF 1"), on the review beside the asset amount.
+    /** What the checkout is charging in ITS OWN unit ("CHF 1"), on the review beside the asset amount.
      *  `price` arrives ALREADY FORMATTED (this catalog never formats numbers). Without it the payer
-     *  approves "0.0000162 BTC" with no way to check it against the price on the till.
+     *  approves "0.0000162 BTC" with no way to check it against the price on the checkout.
      *
      *  It is the MERCHANT's figure, and naming `host` in the same breath is what says so — the
      *  provider, not dpay, decided how much crypto that fiat price costs. That attribution used to
      *  be a second sentence of policy ("dpay doesn't convert"), which is a note to dpay rather than
-     *  to the person at the till (founder, 2026-09-09). `providerHost` says the same thing with no
+     *  to the person at the checkout (founder, 2026-09-09). `providerHost` says the same thing with no
      *  price, for a provider that sent none. */
-    tillPrice: (price: string, host: string) => string;
+    checkoutPrice: (price: string, host: string) => string;
     /** Shown while the two provider reads are in flight — up to half a minute of nothing, on a
      *  screen the payer just pointed at a QR code. */
     checkingTill: string;
@@ -181,7 +181,7 @@ export type PayMessages = {
     /** Funds moved; the provider refused the proof. Definitive, and still costs the payer. */
     /** The provider REFUSED the proof after the money moved. `said` is the provider's own sentence
      *  when it gave one, already sanitised — quoted, never presented as dpay's own words. It is the
-     *  only statement of WHY the sale went uncredited, and the thing the payer repeats at the till;
+     *  only statement of WHY the sale went uncredited, and the thing the payer repeats at the checkout;
      *  null when the provider refused without saying anything. */
     submitRejected: (reference: string, said: string | null) => string;
     /** The transfer turned out to have settled only AFTER the price expired, so the one submission
@@ -370,17 +370,17 @@ export const payEn: PayMessages = {
 
   ocp: {
     solanaTokenUnsupported: symbol =>
-      `This till takes ${symbol} on Solana, but its code doesn’t say which account to pay. Paying could send money to the wrong account — pay with SOL instead, or switch in Balances to another asset this till takes.`,
+      `This checkout takes ${symbol} on Solana, but its code doesn’t say which account to pay. Paying could send money to the wrong account — pay with SOL instead, or switch in Balances to another asset this checkout takes.`,
     chooseAsset: selected =>
-      `This till doesn’t take ${selected}, but it takes these. Pick one to pay with — dpay never swaps.`,
+      `This checkout doesn’t take ${selected}, but it takes these. Pick one to pay with — dpay never swaps.`,
     assetNotAccepted: (selected, accepted) =>
-      `This till doesn’t take ${selected} — it takes ${accepted}. dpay never swaps, so switch in Balances and scan again.`,
+      `This checkout doesn’t take ${selected} — it takes ${accepted}. dpay never swaps, so switch in Balances and scan again.`,
     methodUnavailable: (selected, alternatives) =>
       alternatives
-        ? `This till takes ${selected}, but its provider can’t process it right now. The till also takes ${alternatives} — dpay never swaps, so switch in Balances and scan again.`
-        : `This till takes ${selected}, but its provider can’t process it right now, and nothing else it takes can be paid from this wallet. Ask the merchant for another way to pay.`,
+        ? `This checkout takes ${selected}, but its provider can’t process it right now. The checkout also takes ${alternatives} — dpay never swaps, so switch in Balances and scan again.`
+        : `This checkout takes ${selected}, but its provider can’t process it right now, and nothing else it takes can be paid from this wallet. Ask the merchant for another way to pay.`,
     noPayableAsset: accepted =>
-      `dpay can’t pay this till. It takes ${accepted}, which this wallet can’t pay — dpay never swaps. Pay another way.`,
+      `dpay can’t pay this checkout. It takes ${accepted}, which this wallet can’t pay — dpay never swaps. Pay another way.`,
     quoteExpired:
       'This price expired — prices last about five minutes. Scan the code again for a fresh one.',
     notEnoughTime:
@@ -389,7 +389,7 @@ export const payEn: PayMessages = {
       `${host} gave dpay no way to report your payment, so paying would take your money without crediting the sale. Nothing has been paid. Scanning again won’t help — ask the merchant for another way to pay.`,
     proofElsewhere: (quoteHost, proofHost) =>
       `This code’s price comes from ${quoteHost}, but your payment proof would go to ${proofHost}. One payment can’t answer to two companies, so dpay stopped. Nothing has been paid — ask the merchant for their own payment code.`,
-    tillPrice: (price, host) => `${price} · price from ${host}`,
+    checkoutPrice: (price, host) => `${price} · price from ${host}`,
     checkingTill: 'Checking with the merchant’s payment provider…',
     badCode:
       'This code is damaged, or it isn’t a payment code. Ask the merchant to show it again, and check nothing is covering it.',
@@ -404,7 +404,7 @@ export const payEn: PayMessages = {
     providerFailed: (host, status) =>
       `The merchant’s payment provider (${host}) returned an error (${status}) with no reason. Nothing has been paid. Wait a moment and scan again; if it keeps failing, ask the merchant for another way to pay.`,
     badAnswer: (host, part) =>
-      `The merchant’s payment provider (${host}) didn’t send ${part}, so dpay can’t pay this till. Nothing has been paid. Scan again, and tell the merchant if it keeps happening.`,
+      `The merchant’s payment provider (${host}) didn’t send ${part}, so dpay can’t pay this checkout. Nothing has been paid. Scan again, and tell the merchant if it keeps happening.`,
     answerPart: {
       body: 'a readable answer',
       details: 'complete payment details',
@@ -412,7 +412,7 @@ export const payEn: PayMessages = {
       expiry: 'a readable expiry time',
     },
     noPendingCharge: merchant =>
-      `${merchant}’s till has no charge waiting. Ask the cashier to ring up the sale first, then scan again.`,
+      `${merchant}’s checkout has no charge waiting. Ask the cashier to ring up the sale first, then scan again.`,
     ref: {
       icBlock: index => `ledger block ${index}`,
       solTransaction: signature => `Solana transaction ${signature}`,
@@ -420,7 +420,7 @@ export const payEn: PayMessages = {
     submitUnknown: reference =>
       `Your transfer went through, but the provider didn’t confirm it — neither paid nor failed. The money has left your wallet: don’t pay again. Show the merchant ${reference}, the proof of your transfer.`,
     submitPending: reference =>
-      `Your transfer went through and the provider has been told — it just hasn’t matched this sale yet. It credits as soon as it sees the transfer. The money has left your wallet: don’t pay again. If the till doesn’t show it, give the merchant ${reference}.`,
+      `Your transfer went through and the provider has been told — it just hasn’t matched this sale yet. It credits as soon as it sees the transfer. The money has left your wallet: don’t pay again. If the checkout doesn’t show it, give the merchant ${reference}.`,
     submitRejected: (reference, said) =>
       `Your transfer went through, but the provider refused the proof, so the sale wasn’t credited. The money has left your wallet: don’t pay again. Give the merchant ${reference}.`
       + (said === null ? '' : ` The provider said: “${said}”`),
@@ -429,7 +429,7 @@ export const payEn: PayMessages = {
     transferUnknown:
       'dpay couldn’t confirm your transfer yet, so the merchant hasn’t been told — neither paid nor failed. Keep this screen open: dpay is still checking and will finish the payment if it went through. Don’t pay again meanwhile.',
     transferRefused: reason =>
-      `Your transfer did not go through — nothing was paid and your money is still in your wallet: ${reason}. Scan again to pay this till.`,
+      `Your transfer did not go through — nothing was paid and your money is still in your wallet: ${reason}. Scan again to pay this checkout.`,
     transferFailed:
       'The Solana network rejected your transaction — nothing was paid. The amount is still in your wallet, but a small network fee was charged. Scan again to try once more.',
     providerHost: host => `Price from ${host}`,
@@ -517,7 +517,7 @@ export type ReceiveMessages = {
    *  FORMATTED with its unit — this catalog never formats numbers. */
   solAmountUnderFee: (fee: string) => string;
   /** The ONE honest fee/receives line under a native-SOL request headline (the fee nets payee-side,
-   *  founder rule 2026-09-12 — the IC twin is the till's `settlesAs`). Both args ALREADY FORMATTED
+   *  founder rule 2026-09-12 — the IC twin is the checkout's `settlesAs`). Both args ALREADY FORMATTED
    *  with units. SPL requests show nothing here: their fee is separate-asset gas that was never
    *  subtracted, so their existing display is already the whole truth. */
   solFeeLine: (fee: string, receives: string) => string;
@@ -594,63 +594,63 @@ export type ReceiveMessages = {
   retryBroadcast: string;
   broadcasting: string;
 
-  // --- the till: the merchant's own OpenCryptoPay charge -------------------------------------
+  // --- the checkout: the merchant's own OpenCryptoPay charge -------------------------------------
   /**
-   * The counter (`components/TillCharge.tsx`). A till charge is the SAME request with a wider
+   * The counter (`components/CheckoutCharge.tsx`). A checkout charge is the SAME request with a wider
    * audience, so it lives inside "Request payment" as a second code FORM rather than a third tab —
    * which is why the first two keys read as two kinds of CODE and not two kinds of screen.
    *
-   * Almost everything here is a dead end, on purpose: a code that expired, a till that was never
-   * turned on, a relay that cannot be reached, a price the till answered differently. Each one must
+   * Almost everything here is a dead end, on purpose: a code that expired, a checkout that was never
+   * turned on, a relay that cannot be reached, a price the checkout answered differently. Each one must
    * say what happened AND the merchant's next move (founder rule 2026-08-29) — and none of them may
    * ever imply a payment did or did not arrive, because only the relay's own ledger read can say
-   * that (`services/till.ts`).
+   * that (`services/checkout.ts`).
    */
-  till: {
+  checkout: {
     /** The checkbox under the amount: the same request, two audiences. The label says what the box
      *  does — also produce a code that OpenCryptoPay-compatible apps (Binance Pay, MoonPay) can
      *  scan — and that the payer must be online (this is an online-payer standard). */
-    tillCode: string;
+    checkoutCode: string;
 
     ringUpHint: string;
-    /** Why the typed total cannot be a till charge. Three causes, three different corrections. */
+    /** Why the typed total cannot be a checkout charge. Three causes, three different corrections. */
     badAmount: (reason: 'too-precise' | 'not-a-number' | 'too-large') => string;
 
-    /** The selected asset is not the one a till code is paid in. `network` is the chain's proper
+    /** The selected asset is not the one a checkout code is paid in. `network` is the chain's proper
      *  noun (null for an asset that has none), so the refusal names the rail as well as the asset. */
     wrongAssetTitle: string;
     wrongAsset: (selected: string, network: string | null) => string;
-    /** …and this wallet carries no till asset at all, so there is no switch to offer. */
-    noTillAsset: string;
+    /** …and this wallet carries no checkout asset at all, so there is no switch to offer. */
+    noCheckoutAsset: string;
     switchTo: (asset: string) => string;
 
     /** The ring-up did not happen. Nothing is payable in any of these — say so, then say what next. */
     failedTitle: string;
     notServed: (host: string) => string;
     unreachable: (host: string) => string;
-    /** The till's OWN sentence, quoted: it already names the fix (the price bound, the clock skew,
+    /** The checkout's OWN sentence, quoted: it already names the fix (the price bound, the clock skew,
      *  the reused nonce), and it is what the merchant repeats to whoever runs the relay. */
     refused: (said: string) => string;
     refusedNoReason: (status: number) => string;
-    /** The till answered with a price that is not the one that was rung up. */
+    /** The checkout answered with a price that is not the one that was rung up. */
     mispriced: (rung: string, quoted: string) => string;
-    /** The till opened the charge in an asset OTHER than the one picked — it serves what it
+    /** The checkout opened the charge in an asset OTHER than the one picked — it serves what it
      *  serves, and nothing is shown for a charge the counter did not ring up. `served` names the
-     *  asset the till DID open, `picked` the currency the cashier chose. */
+     *  asset the checkout DID open, `picked` the currency the cashier chose. */
     servedOther: (served: string, picked: string) => string;
     unsigned: string;
     tryAgain: string;
 
     /** The settlement picker (multi-currency build-out): the label over the joined asset pills,
      *  and one pill — `token` names the ledger token that settles, `currency` the currency the
-     *  price is read in. One line = the whole honest contract of a multi-asset till. */
+     *  price is read in. One line = the whole honest contract of a multi-asset checkout. */
     settleOption: (token: string, currency: string) => string;
 
     /** The code is up. `settlesAs` states what the SHOP receives beside what the customer pays —
      *  two different numbers since 2026-09-12, because the shop absorbs the ledger fee, and a
      *  cashier shown only the smaller one would read it as a bug. */
     settlesAs: (amount: string, price: string) => string;
-    /** The till's own asset, on a relay whose catalog states no ledger fee for it. The shop pays
+    /** The checkout's own asset, on a relay whose catalog states no ledger fee for it. The shop pays
      *  that fee out of the price, so there is nothing to subtract and no honest price to quote. */
     noFeeTitle: string;
     noFee: (symbol: string, host: string) => string;
@@ -666,13 +666,13 @@ export type ReceiveMessages = {
      *  the rest of its hour); `none` = this phone could not build a tap request at all. */
     showToCustomer: (nfc: 'tap' | 'expired' | 'none') => string;
     waiting: string;
-    /** The till is out of contact. NEVER "unpaid" — the whole reason this string exists. */
+    /** The checkout is out of contact. NEVER "unpaid" — the whole reason this string exists. */
     cantCheck: string;
     /** Expired, and still watching: an offline payer's transfer can land after the deadline. */
     expiredWatching: string;
     cancel: string;
     cancelling: string;
-    /** A cancellation that did not clear the till — the charge is still payable in every case. */
+    /** A cancellation that did not clear the checkout — the charge is still payable in every case. */
     cancelFailed: (said: string) => string;
     cancelFailedNoReason: (status: number) => string;
     /** `host` = the relay address(es) actually tried (the pin alone, or the whole walk). */
@@ -760,37 +760,37 @@ export const receiveEn: ReceiveMessages = {
   retryBroadcast: 'Retry broadcast',
   broadcasting: 'Broadcasting on Solana — this can take up to a minute.',
 
-  till: {
-    tillCode: 'Also show a code for OpenCryptoPay-compatible apps (Binance Pay, MoonPay) — the payer must have the app open',
+  checkout: {
+    checkoutCode: 'Also show a code for OpenCryptoPay-compatible apps (Binance Pay, MoonPay) — the payer must have the app open',
 
-    ringUpHint: 'Open this charge on your till and show the customer a payable code',
+    ringUpHint: 'Open this charge on your checkout and show the customer a payable code',
     badAmount: reason =>
       reason === 'too-precise'
-        ? 'A till charge is in whole rappen — ring up 10.50 rather than 10.505.'
+        ? 'A checkout charge is in whole rappen — ring up 10.50 rather than 10.505.'
         : reason === 'too-large'
         ? 'That total is too large to ring up. Enter what this customer owes.'
         : 'Enter the total to charge, like 10.50.',
 
-    wrongAssetTitle: 'A till code is paid in VCHF',
+    wrongAssetTitle: 'A checkout code is paid in VCHF',
     wrongAsset: (selected, network) =>
-      `A till code is always paid in VCHF on the Internet Computer — dpay never swaps. This request is in ${selected}${network ? ` on ${network}` : ''}. Switch to VCHF to ring one up, or keep the dpay code: any phone camera opens it, and it is paid in ${selected}.`,
-    noTillAsset:
-      'This wallet has no VCHF, so there is no account for a till charge. Use the dpay code instead — any phone camera opens it, and it takes the asset you chose.',
+      `A checkout code is always paid in VCHF on the Internet Computer — dpay never swaps. This request is in ${selected}${network ? ` on ${network}` : ''}. Switch to VCHF to ring one up, or keep the dpay code: any phone camera opens it, and it is paid in ${selected}.`,
+    noCheckoutAsset:
+      'This wallet has no VCHF, so there is no account for a checkout charge. Use the dpay code instead — any phone camera opens it, and it takes the asset you chose.',
     switchTo: asset => `Switch to ${asset}`,
 
     failedTitle: 'The charge was not rung up',
     notServed: host =>
-      `${host} does not serve till codes, so nothing was rung up. Ask whoever runs that relay to turn the till on, or use the dpay code — it needs no till.`,
+      `${host} does not serve checkout codes, so nothing was rung up. Ask whoever runs that relay to turn the checkout on, or use the dpay code — it needs no checkout.`,
     unreachable: host =>
-      `dpay could not reach ${host}, so nothing was rung up. Till codes are created online. Check the connection and try again — or use the dpay code, which this phone can show while offline.`,
+      `dpay could not reach ${host}, so nothing was rung up. Checkout codes are created online. Check the connection and try again — or use the dpay code, which this phone can show while offline.`,
     refused: said =>
-      `The till refused this charge: “${said}” Nothing is payable. Put that right, then ring up again.`,
+      `The checkout refused this charge: “${said}” Nothing is payable. Put that right, then ring up again.`,
     refusedNoReason: status =>
-      `The till refused this charge (HTTP ${status}) without a reason, so nothing is payable. Ring up again; if it refuses twice, tell whoever runs the relay.`,
+      `The checkout refused this charge (HTTP ${status}) without a reason, so nothing is payable. Ring up again; if it refuses twice, tell whoever runs the relay.`,
     mispriced: (rung, quoted) =>
-      `You rang up ${rung}, but the till answered with ${quoted}. dpay won’t show a code for a number nobody chose, so nothing is payable. Ring up again; if it happens twice, tell whoever runs the relay before taking money.`,
+      `You rang up ${rung}, but the checkout answered with ${quoted}. dpay won’t show a code for a number nobody chose, so nothing is payable. Ring up again; if it happens twice, tell whoever runs the relay before taking money.`,
     servedOther: (served, picked) =>
-      `The till opened this charge in ${served}, not ${picked} — it does not settle ${picked} yet, so nothing is payable. Ring up again in ${served}, or ask whoever runs the relay to serve it.`,
+      `The checkout opened this charge in ${served}, not ${picked} — it does not settle ${picked} yet, so nothing is payable. Ring up again in ${served}, or ask whoever runs the relay to serve it.`,
     unsigned:
       'This phone could not sign the charge, so nothing is payable. Close and reopen dpay, then ring up again.',
     tryAgain: 'Try again',
@@ -806,7 +806,7 @@ export const receiveEn: ReceiveMessages = {
       'The customer approved the payment but lacks the money. Nothing has been taken — ask them to top up and pay again.',
     collectFailed:
       'The approved payment could not be collected, and nothing has been taken. The code is still payable — ask them to scan again or tap.',
-    noFeeTitle: 'This till cannot price a charge',
+    noFeeTitle: 'This checkout cannot price a charge',
     noFee: (symbol, host) =>
       `The shop pays the ledger fee out of the price, but dpay has no fee for ${symbol} — a charge here would quietly bill the customer for it. Nothing is payable. Update dpay, or tell whoever runs ${host} that its currency list is missing the ${symbol} fee.`,
     showToCustomer: nfc =>
@@ -817,7 +817,7 @@ export const receiveEn: ReceiveMessages = {
         : 'Show this to the customer — any phone camera opens it and pays.',
     waiting: 'Waiting for the payment…',
     cantCheck:
-      'Can’t check this charge right now — the till is out of contact. That does NOT mean it is unpaid. Keep the code up; this screen updates the moment it reaches the till again.',
+      'Can’t check this charge right now — the checkout is out of contact. That does NOT mean it is unpaid. Keep the code up; this screen updates the moment it reaches the checkout again.',
     expiredWatching:
       'This code expired, so nobody new can pay it. If the customer already paid, the money can still land — watching a moment longer.',
     cancel: 'Cancel charge',
@@ -833,14 +833,14 @@ export const receiveEn: ReceiveMessages = {
       reason === 'expired' ? 'This code expired'
       : reason === 'cancelled' ? 'Charge cancelled'
       : reason === 'superseded' ? 'Replaced by a newer charge'
-      : 'The till no longer has this charge',
+      : 'The checkout no longer has this charge',
     endedBody: reason =>
       reason === 'expired'
         ? 'Nothing arrived for it, and nobody can pay it now. Ring up again to show the customer a fresh code.'
         : reason === 'cancelled'
         ? 'Nothing is owed on it and nobody can pay it. Ring up again when the next customer is ready.'
         : reason === 'superseded'
-        ? 'Another charge was rung up on this till, so this code no longer takes money. Ring up again to show a fresh one.'
+        ? 'Another charge was rung up on this checkout, so this code no longer takes money. Ring up again to show a fresh one.'
         : 'The relay no longer has it — most likely it restarted. Nothing was credited here. Ring up again; if the customer says they paid, check your VCHF balance and Transactions first.',
     ringUpNext: 'Next customer',
 

@@ -65,7 +65,7 @@ export const FIRST_RUN_PRACTICE = 'firstRunPractice';
 
 /** How long practice waits for its own transfer to reach a terminal state before calling the
  *  outcome unknown. Same shape as the pay rail's budget; the cadence is finer (250 ms), because
- *  there is a person waiting on a setup screen rather than standing at a till — settlement is
+ *  there is a person waiting on a setup screen rather than standing at a checkout — settlement is
  *  detected the moment the subnet decides, not on the next half-second tick. */
 const PRACTICE_POLL_BUDGET = {attempts: 12, intervalMs: 250} as const;
 

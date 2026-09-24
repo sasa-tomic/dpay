@@ -66,13 +66,13 @@ export type Req = {toHex: string; amount: string; nonceHex: string; expiry: numb
 //   • 'link' — a shared payment link. It addresses the payee by ICRC-1 principal directly (so it
 //     can pay ANY IC account, not only a dpay user) and has NO request expiry: a link is durable,
 //     and the signed envelope's IC ingress expiry is what bounds the signature.
-//   • 'ocp' — an OpenCryptoPay merchant till. Also principal-addressed and also expiry-less HERE,
+//   • 'ocp' — an OpenCryptoPay merchant checkout. Also principal-addressed and also expiry-less HERE,
 //     but its live quote has its own short deadline, held with the rest of the provider context
 //     next to the intent (`components/PayMode.tsx`) because nothing else in the app has one. It
 //     settles through the provider rather than an offline hand-off: the transfer is reported once,
 //     after it confirms (`services/opencryptopay.ts`).
 // The distinction drives exactly two things: whether the review auto-signs (the camera's "Pay Now"
-// tap was already the deliberate press; a link and a till are both reviewed, never auto-signed —
+// tap was already the deliberate press; a link and a checkout are both reviewed, never auto-signed —
 // their amount and destination came from someone the wallet has no relationship with) and how the
 // destination is rendered.
 export type PayIntent = {
@@ -83,7 +83,7 @@ export type PayIntent = {
   currency: number;
   nonceHex: string;         // the ICRC memo — the reconciliation key the payee watches for
   memo: string;             // display-only note (the on-chain memo is the nonce, never this)
-  expiry: number | null;    // request expiry in seconds; null for a link and a till (none by design)
+  expiry: number | null;    // request expiry in seconds; null for a link and a checkout (none by design)
   source: 'wire' | 'link' | 'ocp';
 };
 export type Identity = {secretHex: string; publicHex: string; username: string};
@@ -131,15 +131,15 @@ export type DpayCoreApi = {
   // Optional so an app built before the native method exists degrades to 'unknown' (chip hidden).
   nfcStatus?(): Promise<string>;
   // Merchant side: the detached Ed25519 signature that proves this device holds the key its
-  // OpenCryptoPay till account is derived from, so `POST /api/v1/till` can refuse a ring-up for a
+  // OpenCryptoPay checkout account is derived from, so `POST /api/v1/checkout` can refuse a ring-up for a
   // key the caller does not own. The merchant pubkey is derived from `secretHex` inside the core —
   // never passed in. `cents` is a raw-u64 decimal string; `issuedAt` is unix SECONDS and must be
-  // inside the relay's skew window (`dpay_core::TILL_OPEN_MAX_SKEW_SECS`); `merchantName` is the
+  // inside the relay's skew window (`dpay_core::CHECKOUT_OPEN_MAX_SKEW_SECS`); `merchantName` is the
   // CLAIMED display name and is bound by the signature; `note` is the one-line purpose the payer
   // reads on review — an EMPTY string signs the note-less (v1) encoding, non-empty signs under
-  // `TILL_OPEN_DOMAIN_V2`. Canonical bytes + the anti-replay rule:
-  // `dpay_core::TillOpen` (golden `dfx/till_open_signing.json`). Resolves 64-byte hex.
-  tillOpenSignature(secretHex: string, cents: string, nonceHex: string, issuedAt: number, merchantName: string, note: string): Promise<string>;
+  // `CHECKOUT_OPEN_DOMAIN_V2`. Canonical bytes + the anti-replay rule:
+  // `dpay_core::CheckoutOpen` (golden `dfx/checkout_open_signing.json`). Resolves 64-byte hex.
+  checkoutOpenSignature(secretHex: string, cents: string, nonceHex: string, issuedAt: number, merchantName: string, note: string): Promise<string>;
   // Append one line to the on-device diagnostic log (`services/log.ts`). Resolves false when the
   // line could not be written — a logger must never reject and never throw on the money path.
   // Optional for the same reason as `nfcStatus`: builds without the native method simply have no
@@ -171,7 +171,7 @@ export type DpayCoreApi = {
   icpIngressExpiry(nowNs: string, aheadS: number): Promise<string>;
   icpTransferArg(toOwnerText: string, toSubaccountHex: string, fromSubaccountHex: string, amount: string, fee: string, memoHex: string): Promise<string>;
   /** `icrc2_transfer_from` — the PULL: spend an allowance the payer granted THIS wallet, moving
-   *  their money to `toOwnerText`. dpay's one caller is a shop collecting a till charge an
+   *  their money to `toOwnerText`. dpay's one caller is a shop collecting a checkout charge an
    *  OpenCryptoPay wallet approved it for; `icp_transfer_from_arg` in dpay-ffi owns the rules. */
   icpTransferFromArg(fromOwnerText: string, fromSubaccountHex: string, toOwnerText: string, toSubaccountHex: string, amount: string, memoHex: string, fee: string): Promise<string>;
   icpApproveArg(spenderOwnerText: string, spenderSubaccountHex: string, fromSubaccountHex: string, amount: string, expectedAllowance: string, expiresAtNs: string, memoHex: string, fee: string): Promise<string>;

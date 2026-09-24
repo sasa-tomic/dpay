@@ -21,7 +21,7 @@ import {NfcStatusRow} from './NfcStatusRow';
 import {QrScanner} from './QrScanner';
 import {NfcIcon} from './NfcIcon';
 import {ModeToggle} from './ModeToggle';
-import {TillCharge} from './TillCharge';
+import {CheckoutCharge} from './CheckoutCharge';
 import {DepositSheet} from './DepositSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {IcrcDepositSheet} from './IcrcDepositSheet';
@@ -38,8 +38,8 @@ import {IconCheck, IconChevronDown, IconClock, IconQr, IconShare, IconWifiOff} f
 import {M} from '../i18n';
 
 // The optional merchant memo input — the ONE message box for BOTH code forms (dpay link memo in
-// one, the till's signed note in the other; founder 2026-09-14: same box, same place, same text
-// across the till-checkbox toggle) — a real secondary field (not a bare text link), mirroring the
+// one, the checkout's signed note in the other; founder 2026-09-14: same box, same place, same text
+// across the checkout-checkbox toggle) — a real secondary field (not a bare text link), mirroring the
 // paste-button affordance pattern (44pt-min touch target + a visible border). Inline (Group E owns
 // styles.ts as ONE block): Traveler Paper input idiom — white field + hairline line2 border +
 // Space Grotesk, matching usernameInput/withdrawAddrInput (the old dark-theme transparent-bg +
@@ -50,7 +50,7 @@ import {M} from '../i18n';
 // object froze the light theme's white field + near-black ink into the dark theme's memo input.
 const memoInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans});
 
-export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onSelectAssetProgrammatic, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onSelectAssetProgrammatic: (id: AssetId) => void; onLockChange?: (locked: boolean) => void; homeCurrency?: HomeCurrency | null; onReceiveRailChange?: (id: AssetId) => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, subMode, onSubModeChange, codeForm, onCodeFormChange, checkoutAvailable, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onSelectAssetProgrammatic, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'checkout'; onCodeFormChange: (f: 'dpay' | 'checkout') => void; checkoutAvailable: boolean; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onSelectAssetProgrammatic: (id: AssetId) => void; onLockChange?: (locked: boolean) => void; homeCurrency?: HomeCurrency | null; onReceiveRailChange?: (id: AssetId) => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
   // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
   // "address" = the on-chain deposit flow. The toggle renders whenever this asset HAS a deposit —
@@ -122,32 +122,32 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
     return () => { alive = false; };
   }, [identity.secretHex]);
 
-  // TillCharge HOLDS THE FORM: from the first ring-up attempt until the cashier presses "next
-  // customer" — a live code, a paid screen, an ended one, a failed one. Reported by TillCharge
+  // CheckoutCharge HOLDS THE FORM: from the first ring-up attempt until the cashier presses "next
+  // customer" — a live code, a paid screen, an ended one, a failed one. Reported by CheckoutCharge
   // (which owns the charge) and folded into the lock below, because everything that is true of an
   // open request QR is true of it — plus one thing that is not: the charge outlives this screen,
   // so navigating away leaves money payable with nobody watching. That is why the toggle, the
   // shared rows and the checkbox are hidden while it holds, exactly as the toggle is while a
   // request QR is up.
-  const [tillHeld, setTillHeld] = useState(false);
+  const [checkoutHeld, setCheckoutHeld] = useState(false);
 
   // A capability can drop under the merchant (a relay retarget, or a relay that stops serving the
-  // till), and `codeForm` outlives it — it is owned by the wallet so a rail switch cannot lose it.
+  // checkout), and `codeForm` outlives it — it is owned by the wallet so a rail switch cannot lose it.
   // Left stale, the checkbox comes back checked over a dpay request form: a mode the merchant is
   // in without having chosen it. The reset belongs HERE and not beside the capability probe
-  // because `tillHeld` is only known here — and it cannot un-mount a charge: in the very state it
-  // runs in (`!tillAvailable && !tillHeld`) the render below has already replaced the till form
+  // because `checkoutHeld` is only known here — and it cannot un-mount a charge: in the very state it
+  // runs in (`!checkoutAvailable && !checkoutHeld`) the render below has already replaced the checkout form
   // with the dpay one, so this only makes the state agree with the screen.
   useEffect(() => {
-    if (tillAvailable || tillHeld || codeForm !== 'till') return;
+    if (checkoutAvailable || checkoutHeld || codeForm !== 'checkout') return;
     onCodeFormChange('dpay');
-  }, [tillAvailable, tillHeld, codeForm, onCodeFormChange]);
+  }, [checkoutAvailable, checkoutHeld, codeForm, onCodeFormChange]);
 
   // Phase 5 — lock the idle asset selection while a request QR is showing, a settlement result is
-  // displayed, or the till form is held. All three hold an in-flight money op the user must not
+  // displayed, or the checkout form is held. All three hold an in-flight money op the user must not
   // lose to an asset switch (the QR is the payment link a payer may be opening; the result is the
-  // settled outcome; the till charge is payable on the relay). The idle form is free.
-  const locked = !!reqQr || !!result || tillHeld;
+  // settled outcome; the checkout charge is payable on the relay). The idle form is free.
+  const locked = !!reqQr || !!result || checkoutHeld;
   useReportLock(onLockChange, locked);
 
   // Tick the display clock only while a request QR is shown (not after settlement) — display-only,
@@ -158,7 +158,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
     return () => clearInterval(id);
   }, [reqQr, result]);
   // Stable across renders (NfcTap's effect depends on it) — only changes when the request does.
-  // `amount` is the WIRE raw (what lands on the ledger), the same netted number the till's
+  // `amount` is the WIRE raw (what lands on the ledger), the same netted number the checkout's
   // reader advertises — the payer's tap-confirm matches ledger history against it. Founder rule
   // 2026-09-14 adds `displayAmount`: the payee's tap readout headlines the TYPED PRICE (the
   // gross), with the wire untouched as the ledger/reconciliation truth below it.
@@ -175,7 +175,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   const reqPrefix = currencySymbol(catalog, selectedCurrency);
 
   // The asset this whole tab is about — the merchant's chosen settlement asset. Read once and used
-  // by both code forms: the dpay link names it, and the till answers whether a charge can be rung
+  // by both code forms: the dpay link names it, and the checkout answers whether a charge can be rung
   // up in it at all.
   const activeAsset = assets.find(a => a.id === selectedAssetId) ?? null;
 
@@ -222,7 +222,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
       const memoVal = memo.trim();
       // Exact-price rule (founder 2026-09-12: if something costs $1, the customer pays exactly
       // $1 — the merchant pays the fees): net the ledger fee out of the wire HERE, at quote
-      // time, the same way the dpay till does (`till_raw_units`). Live ledger fee when the
+      // time, the same way the dpay checkout does (`checkout_raw_units`). Live ledger fee when the
       // effect has one, else the catalog's row, else nothing — an unknown fee never blocks or
       // fakes a number (the payer then pays price+fee, honestly displayed on their review). A
       // price that does not clear the fee is refused BEFORE any wire exists — a zero-unit wire
@@ -666,7 +666,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           that picks the sheet, so the control and its destination cannot disagree. It was two other
           conditions (a family check OR a direct-ICRC check), which is how a third answer gets to differ from
           the first two. */}
-      {mechanism !== 'none' && !tillHeld ? (
+      {mechanism !== 'none' && !checkoutHeld ? (
         <ModeToggle
           testID="receive-mode-toggle"
           value={subMode}
@@ -677,29 +677,29 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
       ) : null}
       {/* WHICH CODE, i.e. who can pay it — the same request, two audiences. A dpay code is this
             wallet's payment link: any phone camera opens it — dpay on a dpay phone, the web wallet
-            otherwise (founder decision 2026-09-12); a till code is this merchant's own
+            otherwise (founder decision 2026-09-12); a checkout code is this merchant's own
             OpenCryptoPay charge, which any wallet that speaks the standard could in principle scan.
             It is a CHECKBOX and not a second form because the request is one request: the amount
             row above is shared, and so is the MESSAGE row — one box, the same component in the same
             place whether or not the box is checked, and its text survives the toggle in both
             directions (founder 2026-09-14: the box must not move, restyle or reset). The text is
-            the dpay link's memo in one mode and the till's signed note in the other — the same
+            the dpay link's memo in one mode and the checkout's signed note in the other — the same
             "what is this for" either way — and the box flips the single button below between the
-            two payloads. Unchecked — the dpay code — is the default. Hidden while TillCharge
+            two payloads. Unchecked — the dpay code — is the default. Hidden while CheckoutCharge
             holds the form, exactly as the toggle above is while a request QR is up: flipping away
             would abandon a code a customer can still pay. */}
       {/* The capability flag gates ENTRY to this form; it never un-mounts a HELD one. If the
-          relay is retargeted or drops mid-charge, `tillAvailable` flips false but `tillHeld` keeps
-          TillCharge mounted — its own poll then says "Can't check this charge right now", which is
+          relay is retargeted or drops mid-charge, `checkoutAvailable` flips false but `checkoutHeld` keeps
+          CheckoutCharge mounted — its own poll then says "Can't check this charge right now", which is
           the honest rendering of silence. Un-mounting here would render the outage as the ABSENCE
           of a sale (flow 116's whole contract). */}
-      {!tillHeld ? (
+      {!checkoutHeld ? (
         <>
           {/* Trip Ready J4 (UX hardening 2026-08-23) — the coach card ALSO mounts at the ENTRY form
               (was: only after pressing Request, so first-time receivers never saw it). Same one-time
               seen marker — whichever surface shows it first wins; the card never returns after.
-              The dpay form only: a till entry is about the charge, not about requesting. */}
-          {((tillAvailable || tillHeld) && codeForm === 'till') ? null : <CoachTip tipKey="receiveRequest" />}
+              The dpay form only: a checkout entry is about the charge, not about requesting. */}
+          {((checkoutAvailable || checkoutHeld) && codeForm === 'checkout') ? null : <CoachTip tipKey="receiveRequest" />}
           <Text style={S.label}>{M.receive.amountToReceive}</Text>
           <View style={S.amountRow}>
             {/* MC5: the merchant selects the EXACT settlement asset by tapping the amount prefix (glyph +
@@ -714,15 +714,15 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
                 them reach for the mouse, and the keyboard shortcuts that DO exist stop at the tab
                 level. `onSubmitEditing` is the RN-native spelling of it, so the same key works on a
                 hardware keyboard attached to a phone. The DPAY form only: a ring-up is signed and
-                supersedes the live charge, so the shared field does not submit while the till
-                checkbox is checked — the till's own button is the one that rings up. */}
-            <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} onSubmitEditing={(tillAvailable || tillHeld) && codeForm === 'till' ? undefined : makeRequest} returnKeyType="done" />
+                supersedes the live charge, so the shared field does not submit while the checkout
+                checkbox is checked — the checkout's own button is the one that rings up. */}
+            <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} onSubmitEditing={(checkoutAvailable || checkoutHeld) && codeForm === 'checkout' ? undefined : makeRequest} returnKeyType="done" />
           </View>
           {/* The ONE message box — mounted in BOTH code forms (founder 2026-09-14): same component,
-              same place under the shared amount row, same text across the till-checkbox toggle. In
-              the dpay form its text rides the payment link as the memo; in the till form it is the
-              charge's signed note (passed to TillCharge below). Submit-on-Enter is the DPAY form's
-              only — the shared amount row above says why (a ring-up is signed; the till's own
+              same place under the shared amount row, same text across the checkout-checkbox toggle. In
+              the dpay form its text rides the payment link as the memo; in the checkout form it is the
+              charge's signed note (passed to CheckoutCharge below). Submit-on-Enter is the DPAY form's
+              only — the shared amount row above says why (a ring-up is signed; the checkout's own
               button is the one that rings up). */}
           <TextInput
             testID="memo-input"
@@ -733,29 +733,29 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
             placeholderTextColor={C.sub}
             accessibilityLabel={M.receive.memo}
             maxLength={32}
-            onSubmitEditing={((tillAvailable || tillHeld) && codeForm === 'till') ? undefined : makeRequest}
+            onSubmitEditing={((checkoutAvailable || checkoutHeld) && codeForm === 'checkout') ? undefined : makeRequest}
             returnKeyType="done"
           />
-          {tillAvailable ? (
+          {checkoutAvailable ? (
             <View testID="receive-code-form" style={{alignSelf: 'stretch'}}>
               <Pressable
-                testID="btn-code-till"
+                testID="btn-code-checkout"
                 style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 6, marginBottom: 10, minHeight: 44}}
-                onPress={() => onCodeFormChange(codeForm === 'till' ? 'dpay' : 'till')}
+                onPress={() => onCodeFormChange(codeForm === 'checkout' ? 'dpay' : 'checkout')}
                 accessibilityRole="checkbox"
-                accessibilityLabel={M.receive.till.tillCode}
-                accessibilityState={{checked: codeForm === 'till'}}>
-                <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: codeForm === 'till' ? C.brand : C.sub2, backgroundColor: codeForm === 'till' ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
-                  {codeForm === 'till' ? <IconCheck size={14} color={C.brandInk} /> : null}
+                accessibilityLabel={M.receive.checkout.checkoutCode}
+                accessibilityState={{checked: codeForm === 'checkout'}}>
+                <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: codeForm === 'checkout' ? C.brand : C.sub2, backgroundColor: codeForm === 'checkout' ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
+                  {codeForm === 'checkout' ? <IconCheck size={14} color={C.brandInk} /> : null}
                 </View>
-                <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.receive.till.tillCode}</Text>
+                <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.receive.checkout.checkoutCode}</Text>
               </Pressable>
             </View>
           ) : null}
         </>
       ) : null}
-      {((tillAvailable || tillHeld) && codeForm === 'till') ? (
-        <TillCharge
+      {((checkoutAvailable || checkoutHeld) && codeForm === 'checkout') ? (
+        <CheckoutCharge
           identity={identity}
           relayUrl={relayUrl}
           asset={activeAsset}
@@ -765,7 +765,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           onRepickAsset={onSelectAssetProgrammatic}
           amount={amount}
           note={memo}
-          onHoldsForm={setTillHeld}
+          onHoldsForm={setCheckoutHeld}
         />
       ) : (
         <>

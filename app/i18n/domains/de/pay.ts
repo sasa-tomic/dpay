@@ -91,7 +91,7 @@ export const payDe: PayMessages = {
       `${host} hat dpay keinen Weg genannt, deine Zahlung zu melden — zahlen würde also dein Geld kosten, ohne dass der Verkauf gutgeschrieben wird. Es wurde nichts bezahlt. Erneutes Scannen hilft nicht — bitte den Händler um eine andere Zahlungsmöglichkeit.`,
     proofElsewhere: (quoteHost, proofHost) =>
       `Der Preis dieses Codes kommt von ${quoteHost}, aber der Nachweis deiner Zahlung würde an ${proofHost} gehen. Eine Zahlung kann nicht zwei Firmen gegenüber gelten, deshalb hat dpay abgebrochen. Es wurde nichts bezahlt — bitte den Händler um seinen eigenen Zahlungscode.`,
-    tillPrice: (price, host) => `${price} · Preis von ${host}`,
+    checkoutPrice: (price, host) => `${price} · Preis von ${host}`,
     checkingTill: 'Wird beim Zahlungsanbieter des Händlers geprüft…',
     badCode:
       'Dieser Code ist beschädigt oder gar kein Zahlungscode. Bitte den Händler, ihn erneut zu zeigen, und achte darauf, dass nichts ihn verdeckt.',
@@ -278,8 +278,8 @@ export const receiveDe: ReceiveMessages = {
   retryBroadcast: 'Übertragung erneut versuchen',
   broadcasting: 'Übertragung auf Solana — das kann bis zu einer Minute dauern.',
 
-  till: {
-    tillCode: 'Zeigt zusätzlich einen Code für OpenCryptoPay-kompatible Apps (Binance Pay, MoonPay) — der Sender muss die App geöffnet haben',
+  checkout: {
+    checkoutCode: 'Zeigt zusätzlich einen Code für OpenCryptoPay-kompatible Apps (Binance Pay, MoonPay) — der Sender muss die App geöffnet haben',
 
     ringUpHint: 'Diesen Betrag auf deiner Kasse buchen und der Kundschaft einen zahlbaren Code zeigen',
     badAmount: reason =>
@@ -292,7 +292,7 @@ export const receiveDe: ReceiveMessages = {
     wrongAssetTitle: 'Ein Kassen-Code wird in VCHF bezahlt',
     wrongAsset: (selected, network) =>
       `Ein Kassen-Code wird immer in VCHF auf dem Internet Computer bezahlt — dpay tauscht nie um. Diese Anforderung lautet auf ${selected}${network ? ` auf ${network}` : ''}. Wechsle zu VCHF, um zu buchen — oder bleib beim dpay-Code: jede Handykamera öffnet ihn, und er wird in ${selected} bezahlt.`,
-    noTillAsset:
+    noCheckoutAsset:
       'Diese Wallet führt kein VCHF, also gibt es kein Konto für eine Kassenbuchung. Nimm den dpay-Code — jede Handykamera öffnet ihn, und er nimmt den gewählten Wert an.',
     switchTo: asset => `Zu ${asset} wechseln`,
 

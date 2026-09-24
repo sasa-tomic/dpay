@@ -45,7 +45,7 @@ export const SOL_ATA_SETUP_MIN_LAMPORTS = SOL_ATA_RENT_LAMPORTS + SOL_FEE_LAMPOR
 /** Net the one-signature network fee out of a payee-quoted NATIVE-SOL request price — founder rule
  *  2026-09-12: "if price of something is $1, the customer pays exactly $1 — the merchant pays the
  *  fees". The wire `amt` a native-SOL request carries is `price − SOL_FEE_LAMPORTS` (the SOL twin
- *  of the dpay till's `amount_raw = price − fee`, till.rs:348), so the payer's displayed total
+ *  of the dpay checkout's `amount_raw = price − fee`, checkout.rs:348), so the payer's displayed total
  *  (wire amount + fee) IS the typed price and the fee lands payee-side. The netting belongs to the
  *  REQUEST BUILDER, never the signer: every downstream verify (verifySolPayment) is byte-exact
  *  against the canonical rebuild of the request, so the payer cannot change the amount at sign

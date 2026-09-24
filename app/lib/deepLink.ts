@@ -236,10 +236,10 @@ export function readPayLink(): PayLinkParse | null {
   return parsePayLink(`${w.location.pathname ?? ''}${w.location.search ?? ''}`);
 }
 
-// --- the till code: `https://<origin>/pl/?lightning=<LNURL…>` -----------------------------------
-// The OTHER https URL this wallet mints: the QR a dpay till (OpenCryptoPay) prints for a rung-up
+// --- the checkout code: `https://<origin>/pl/?lightning=<LNURL…>` -----------------------------------
+// The OTHER https URL this wallet mints: the QR a dpay checkout (OpenCryptoPay) prints for a rung-up
 // sale — `{origin}/pl/?lightning=<LNURL of the charge>`. The path itself serves a static landing
-// page for a GENERIC camera (a stranger without the app still learns whose till it is), while the
+// page for a GENERIC camera (a stranger without the app still learns whose checkout it is), while the
 // Android App Link claim on the same path (AndroidManifest, `pathPrefix="/pl/"`) opens the app on
 // a phone that has it — the same dual life a payment link has. An inbound URL recognised here is
 // routed by Wallet into the OpenCryptoPay payer pipeline (PayMode/SolPayMode `onNotARequest`), the
@@ -247,22 +247,22 @@ export function readPayLink(): PayLinkParse | null {
 // refusals, one never-auto-signs rule. No web reader exists for it because the web wallet is never
 // served at /pl/ — the landing page is the whole response there.
 
-/** The path a till code lives at. The relay's `TILL_CODE_PATH` (`crates/dpay-relay/src/till.rs`)
+/** The path a checkout code lives at. The relay's `CHECKOUT_CODE_PATH` (`crates/dpay-relay/src/checkout.rs`)
  *  is the authority; this is the app-side mirror of it. */
-export const TILL_CODE_PATH = '/pl/';
+export const CHECKOUT_CODE_PATH = '/pl/';
 
-/** Is this URL a till code (exactly the path the relay's till QR prints)? Returns the ORIGINAL
+/** Is this URL a checkout code (exactly the path the relay's checkout QR prints)? Returns the ORIGINAL
  *  string when it is — the OpenCryptoPay parser (`parseOcpScan`, lib/opencryptopay.ts) owns the
  *  payload grammar, including the honest refusal for a code that carries no usable `lightning`
  *  param — or null when it is not (the caller falls through to its other handling). Like
  *  parsePayLink, the HOST is deliberately not checked: on native the OS only delivers App Links
- *  for the verified host, and a host gate here would only break a self-hosted relay's till.
+ *  for the verified host, and a host gate here would only break a self-hosted relay's checkout.
  *  Never throws. */
-export function parseTillCode(url: string): string | null {
+export function parseCheckoutCode(url: string): string | null {
   if (typeof url !== 'string' || url.length === 0) return null;
   try {
     const u = new URL(url, 'https://dpay.invalid');
-    return u.pathname === TILL_CODE_PATH ? url : null;
+    return u.pathname === CHECKOUT_CODE_PATH ? url : null;
   } catch {
     return null;
   }

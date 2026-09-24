@@ -92,7 +92,7 @@ export const payFr: PayMessages = {
       `${host} n’a donné à dpay aucun moyen de signaler votre paiement : payer vous coûterait votre argent sans que la vente soit créditée. Rien n’a été payé. Scanner à nouveau n’aidera pas — demandez au commerçant un autre moyen de paiement.`,
     proofElsewhere: (quoteHost, proofHost) =>
       `Le prix de ce code vient de ${quoteHost}, mais la preuve de votre paiement partirait vers ${proofHost}. Un paiement ne peut pas répondre à deux sociétés : dpay s’est arrêté. Rien n’a été payé — demandez au commerçant son propre code de paiement.`,
-    tillPrice: (price, host) => `${price} · prix de ${host}`,
+    checkoutPrice: (price, host) => `${price} · prix de ${host}`,
     checkingTill: 'Vérification auprès du prestataire de paiement du commerçant…',
     badCode:
       'Ce code est abîmé, ou ce n’est pas un code de paiement. Demandez au commerçant de le montrer à nouveau, et vérifiez que rien ne le recouvre.',
@@ -273,8 +273,8 @@ export const receiveFr: ReceiveMessages = {
   retryBroadcast: 'Réessayer l’envoi',
   broadcasting: 'Envoi sur Solana — cela peut prendre jusqu’à une minute.',
 
-  till: {
-    tillCode: 'Affiche aussi un code pour les apps compatibles OpenCryptoPay (Binance Pay, MoonPay) — le payeur doit avoir l’application ouverte',
+  checkout: {
+    checkoutCode: 'Affiche aussi un code pour les apps compatibles OpenCryptoPay (Binance Pay, MoonPay) — le payeur doit avoir l’application ouverte',
 
     ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code payable',
     badAmount: reason =>
@@ -287,7 +287,7 @@ export const receiveFr: ReceiveMessages = {
     wrongAssetTitle: 'Un code de caisse se paie en VCHF',
     wrongAsset: (selected, network) =>
       `Un code de caisse se paie toujours en VCHF sur l’Internet Computer — dpay ne convertit jamais. Cette demande est en ${selected}${network ? ` sur ${network}` : ''}. Passez à VCHF pour encaisser, ou gardez le code dpay : n’importe quel appareil photo de téléphone l’ouvre, et il se paie en ${selected}.`,
-    noTillAsset:
+    noCheckoutAsset:
       'Ce portefeuille n’a pas de VCHF : il n’y a donc aucun compte pour un encaissement. Utilisez le code dpay — n’importe quel appareil photo de téléphone l’ouvre, et il accepte l’actif choisi.',
     switchTo: asset => `Passer à ${asset}`,
 

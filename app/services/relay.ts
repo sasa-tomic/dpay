@@ -7,7 +7,7 @@ import {relayAddresses, relayAddressesRevision} from './relayAddresses';
 export type DepositInfo = {min_confirmations: number; deposit_fee: string; deposit_min_amount: string | null};
 
 // Safety-net default for every relay fetch — bounds a caller that omits its own signal so a hung
-// relay can't produce an infinite spinner. `fetchWithTimeout` (used DIRECTLY only by the till
+// relay can't produce an infinite spinner. `fetchWithTimeout` (used DIRECTLY only by the checkout
 // client) forwards a caller signal AS-IS and arms the backstop only when it is absent — the
 // caller owns the deadline outright. The multi-address walk (`relayFetch`) instead arms an
 // internal per-ATTEMPT deadline on EVERY attempt (attempt 0 included, at the full `timeoutMs`)
@@ -98,7 +98,7 @@ export async function readJsonOrEmpty(r: Response): Promise<any> {
   }
 }
 
-export type RelayCapabilities = {till: boolean; demoFaucet: boolean};
+export type RelayCapabilities = {checkout: boolean; demoFaucet: boolean};
 
 // ── R1: ordered multi-address selection (spec 2026-09-09 §"Direction 2 — several relays") ────
 // One relay client at more than one address — NOT a fallback: no second code path, no behavior
@@ -123,10 +123,10 @@ export type RelayCapabilities = {till: boolean; demoFaucet: boolean};
 //     refused, and asking a different replica would be asking a different question. No failover.
 //
 // Every read-only relay surface (catalog, balances, history, deposit info, onramp params, swap
-// quote, capabilities, the till-adjacent reads) routes through here. Ledger-effecting POSTs (the
+// quote, capabilities, the checkout-adjacent reads) routes through here. Ledger-effecting POSTs (the
 // demo faucet) stay single-address: an idempotent-looking retry against a second replica is not
-// ours to decide. The TILL client deliberately does NOT route through here — till charges are
-// relay-held, session-affine state (see services/till.ts for the pin).
+// ours to decide. The CHECKOUT client deliberately does NOT route through here — checkout charges are
+// relay-held, session-affine state (see services/checkout.ts for the pin).
 //
 // Build drift is a HARD error, never a silent mix: replicas must agree on /api/v1/version AND
 // /api/v1/integrity. Before the FIRST data answer from a non-preferred address, both addresses'
@@ -420,9 +420,9 @@ export async function relayFetch(primaryUrl: string, path: string, init?: Reques
 }
 
 // What every caller starts from and what every failure path below falls back to: a relay that has
-// told us nothing offers nothing. The ONE literal — a hand-written `{till: false, demoFaucet:
+// told us nothing offers nothing. The ONE literal — a hand-written `{checkout: false, demoFaucet:
 // false}` elsewhere is the same claim written twice.
-export const NO_RELAY_CAPABILITIES: RelayCapabilities = {till: false, demoFaucet: false};
+export const NO_RELAY_CAPABILITIES: RelayCapabilities = {checkout: false, demoFaucet: false};
 
 // Capability discovery is advisory and fail-closed. Older, unreachable, or malformed relays must
 // never make the wallet advertise a cashier or demo-faucet action that can only end in an error.
@@ -434,17 +434,17 @@ export async function relayCapabilities(relayUrl: string): Promise<RelayCapabili
   try {
     const r = await relayFetch(relayUrl, '/api/v1/capabilities');
     if (!r.ok) {
-      console.warn(`relayCapabilities: ${url} answered HTTP ${r.status} — assuming no till and no demo faucet`);
+      console.warn(`relayCapabilities: ${url} answered HTTP ${r.status} — assuming no checkout and no demo faucet`);
       return NO_RELAY_CAPABILITIES;
     }
     const j = await readJsonOrEmpty(r);
-    if (typeof j?.till !== 'boolean' || typeof j?.demo_faucet !== 'boolean') {
-      console.warn(`relayCapabilities: ${url} returned ${JSON.stringify(j)}, not the {till, demo_faucet} booleans — assuming no till and no demo faucet`);
+    if (typeof j?.checkout !== 'boolean' || typeof j?.demo_faucet !== 'boolean') {
+      console.warn(`relayCapabilities: ${url} returned ${JSON.stringify(j)}, not the {checkout, demo_faucet} booleans — assuming no checkout and no demo faucet`);
       return NO_RELAY_CAPABILITIES;
     }
-    return {till: j.till, demoFaucet: j.demo_faucet};
+    return {checkout: j.checkout, demoFaucet: j.demo_faucet};
   } catch (e: unknown) {
-    console.warn(`relayCapabilities: ${url} unreachable — assuming no till and no demo faucet:`, e instanceof Error ? e.message : String(e));
+    console.warn(`relayCapabilities: ${url} unreachable — assuming no checkout and no demo faucet:`, e instanceof Error ? e.message : String(e));
     return NO_RELAY_CAPABILITIES;
   }
 }

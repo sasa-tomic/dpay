@@ -88,8 +88,8 @@ export type OcpSubmitResult =
    *  English diagnostic for the console and must not reach a screen; `said` may, quoted. */
   | {kind: 'rejected'; detail: string; said: string | null}
   /** The provider TOOK the report and its own body says it has not matched the transfer yet.
-   *  MEASURED on dpay's own till, which answers `202 {"status":"PENDING", …}` until it sees the
-   *  transfer in the merchant's ledger history (`dfx/till_wire.json`, `submit_pending`). Neither
+   *  MEASURED on dpay's own checkout, which answers `202 {"status":"PENDING", …}` until it sees the
+   *  transfer in the merchant's ledger history (`dfx/checkout_wire.json`, `submit_pending`). Neither
    *  accepted nor refused, and it must never be collapsed into either: rendering it as accepted
    *  claims a completed sale on the strength of an answer that says the opposite, and rendering it
    *  as refused would alarm a payer whose payment is simply a moment from being credited. */
@@ -208,11 +208,11 @@ function failureMessage(host: string, status: number, body: {ok: true; json: unk
   return M.pay.ocp.providerRefused(host, said);
 }
 
-/** Step 2 — the live quote and what the till is charging. `timeout=0` asks for the current charge
+/** Step 2 — the live quote and what the checkout is charging. `timeout=0` asks for the current charge
  *  instead of long-polling for one.
  *
  *  The provider returns TWO different 404s and the user needs different instructions for each:
- *   - the payment-link payload with no charge on it — the till simply has not rung anything up yet,
+ *   - the payment-link payload with no charge on it — the checkout simply has not rung anything up yet,
  *     so the honest screen names the merchant and says to ask them to start the payment;
  *   - `{"statusCode":404,"message":"Payment link not found",…}` — the code is stale or not this
  *     provider's, which is an error, not something waiting to happen.
@@ -405,7 +405,7 @@ export async function submitProof(
     return {kind: 'unknown', detail: `${target.url.host} answered HTTP ${r.status}; transfer ${txId} is on-chain and unreported`};
   }
   // THE PROVIDER'S VERDICT, NOT THE HTTP CODE. A 2xx says the report was taken, not that the sale
-  // was credited: dpay's own till answers `202 {"status":"PENDING"}` while it has yet to see the
+  // was credited: dpay's own checkout answers `202 {"status":"PENDING"}` while it has yet to see the
   // transfer in the merchant's ledger history, and reading that as "paid" would put a completed sale
   // on screen on the strength of an answer that says the opposite. Only the MEASURED spelling is
   // special-cased — inventing verdicts for providers nobody has recorded would be the same class of
@@ -460,8 +460,8 @@ export type OcpTarget = {
   rawAmount: string;
   /** The provider's own reference for this sale, to be carried as the transfer's ON-CHAIN memo, or
    *  null when it named none. It is how the provider matches the payment to the charge it belongs
-   *  to (dpay's till mints one per charge), so a payment that dropped it could move money and leave
-   *  the sale uncredited. Null is not a gap: the rail mints its own nonce, which is what every till
+   *  to (dpay's checkout mints one per charge), so a payment that dropped it could move money and leave
+   *  the sale uncredited. Null is not a gap: the rail mints its own nonce, which is what every checkout
    *  payment carried before references existed. The IC rail is the only one that can have one —
    *  Solana Pay has no equivalent field, and this integration signs no SPL memo. */
   reference: string | null;
@@ -478,8 +478,8 @@ export type OcpTarget = {
 
 export type OcpResolveResult =
   | {kind: 'ok'; target: OcpTarget}
-  /** The till does not take the SELECTED asset, but it does take others this wallet carries on the
-   *  SAME rail. An OCP till quotes a MENU (unlike a dpay request, which names one asset the payer
+  /** The checkout does not take the SELECTED asset, but it does take others this wallet carries on the
+   *  SAME rail. An OCP checkout quotes a MENU (unlike a dpay request, which names one asset the payer
    *  may not change), so the honest answer is to show that menu rather than send the payer to
    *  Balances to guess and re-aim a camera at a checkout. Choosing is still explicit: the payer
    *  picks, then approves a review naming that asset — dpay never substitutes one for them. */
@@ -503,11 +503,11 @@ type OcpResolveCtx = {
 };
 
 /**
- * Resolve a scanned till code into the exact payment this wallet would make — or into the reason it
+ * Resolve a scanned checkout code into the exact payment this wallet would make — or into the reason it
  * cannot make one. Reads only: no signature is produced and no funds move here.
  *
  * The SELECTED asset decides what is paid (spec: `docs/specs/2026-09-01-opencryptopay-implementation.md`
- * "Unit C"). dpay never swaps, so an asset the till does not take is refused with the list of the
+ * "Unit C"). dpay never swaps, so an asset the checkout does not take is refused with the list of the
  * ones it does — the user switches in Balances and scans again.
  *
  * The provider's transfer instruction is then checked against what we asked for, because the URI is
@@ -534,11 +534,11 @@ export async function resolveOcpScan(
   const offer = payable.find(o => o.assetId === ctx.selected.id) ?? null;
   if (offer !== null) return resolveOcpOffer(scan.host, details, offer, ctx);
 
-  // The menu is the right answer only when the till's list simply does NOT NAME the selected asset.
+  // The menu is the right answer only when the checkout's list simply does NOT NAME the selected asset.
   // When it does name it and dpay refused it for a specific reason — Solana USDC's ambiguous
   // destination, a method the provider has switched off, an expired quote — that reason is the
-  // thing the payer needs, and a menu headed "this till doesn't take USDC" would be false about a
-  // till that plainly does. So the specific refusal wins and the menu is not offered.
+  // thing the payer needs, and a menu headed "this checkout doesn't take USDC" would be false about a
+  // checkout that plainly does. So the specific refusal wins and the menu is not offered.
   const named = refused.some(r => offerNamesAsset(r, ctx.selected));
   if (!named) {
     // Same rail only: the wallet mounts ONE rail's Pay surface at a time, so an offer on the other
@@ -554,7 +554,7 @@ export async function resolveOcpScan(
 /**
  * Resolve ONE chosen offer down to the exact transfer this wallet would sign — the half of the
  * sequence that runs after WHICH asset pays is settled, whether that was the payer's standing
- * selection or a pick from the till's menu.
+ * selection or a pick from the checkout's menu.
  *
  * The provider's transfer instruction is checked against what we asked for, because the URI is the
  * one place a hostile or broken provider could redirect the payment: the LEDGER must be the paying
@@ -636,7 +636,7 @@ export function ocpTimeRefusal(target: {expiresAt: number; payableUntil: number}
   return nowMs >= target.payableUntil ? M.pay.ocp.notEnoughTime : null;
 }
 
-/** Why the selected asset cannot pay this till, in the order the reasons matter to the user. Every
+/** Why the selected asset cannot pay this checkout, in the order the reasons matter to the user. Every
  *  branch names what to do next (founder rule 2026-08-29); none of them silently drops an asset. */
 function unpayableMessage(
   details: OcpDetails,
@@ -646,16 +646,16 @@ function unpayableMessage(
 ): string {
   // An expired quote refuses everything, so it is the whole story — say that, not "wrong asset".
   if (ctx.nowMs >= details.quoteExpiresAt) return M.pay.ocp.quoteExpired;
-  // The one asset this wallet CARRIES and the till TAKES but dpay will not pay: tokens on Solana
+  // The one asset this wallet CARRIES and the checkout TAKES but dpay will not pay: tokens on Solana
   // ('solana-usdc-unsupported' is the provider's own reason literal — the refusal the relay still
   // sends for the USDC case), whose destination token account is ambiguous in the provider's URI.
   if (ctx.selected.id === 'solana:USDC' && refused.some(r => r.reason === 'solana-usdc-unsupported')) {
     return M.pay.ocp.solanaTokenUnsupported(ctx.selected.symbol);
   }
-  // The till DOES take the selected asset, but the provider says it cannot settle that method right
+  // The checkout DOES take the selected asset, but the provider says it cannot settle that method right
   // now. Matched against the selected asset, never "some method was unavailable": the live provider
   // marks methods this wallet has no rail for unavailable on every response, so an unmatched check
-  // would tell a payer their asset was blocked when the till simply never offered it.
+  // would tell a payer their asset was blocked when the checkout simply never offered it.
   if (refused.some(r => r.reason === 'method-unavailable' && offerNamesAsset(r, ctx.selected))) {
     return M.pay.ocp.methodUnavailable(
       ctx.selected.symbol,
@@ -666,7 +666,7 @@ function unpayableMessage(
   return M.pay.ocp.assetNotAccepted(ctx.selected.symbol, walletAssetList(payable, ctx.assets));
 }
 
-/** The till's own asset spelling, deduped, for the case where the wallet can pay none of them. */
+/** The checkout's own asset spelling, deduped, for the case where the wallet can pay none of them. */
 function offeredAssetList(details: OcpDetails): string {
   const names: string[] = [];
   for (const entry of details.transferAmounts) {
@@ -723,7 +723,7 @@ async function destinationOf(
       // transfer dpay reports; every `to` this provider has been measured sending is a bare
       // principal (`docs/specs/2026-09-01-opencryptopay-findings.md`), and whether its matcher would
       // recognise a credit to a SUBACCOUNT of that principal is simply unknown — unmeasurable
-      // except by spending a real payment on a real till, which is the loss the same doc records.
+      // except by spending a real payment on a real checkout, which is the loss the same doc records.
       // So the form is refused BEFORE consent instead of paid on a guess. A SIBLING `subaccount=`
       // parameter, which names the same thing from outside the `to` value, is refused by the parser
       // itself (`unexpected-parameter`).

@@ -20,7 +20,7 @@ import {M} from '../i18n';
  * suite's contract for the pay path is unchanged by construction.
  *
  * What varies between entries is passed as `notes`, rendered under the payee block: an
- * OpenCryptoPay till adds its one quote line, practice adds its fee row and the sentence about one
+ * OpenCryptoPay checkout adds its one quote line, practice adds its fee row and the sentence about one
  * phone playing both sides. The component itself knows nothing about where a payment came from, so
  * no entry can quietly grow its own review.
  *
@@ -29,7 +29,7 @@ import {M} from '../i18n';
  * wrong.
  *
  * The headline is the TOTAL DEBIT (founder rule 2026-09-13): `totalRaw` carries amount + ledger
- * fee when the caller knows the fee (a dpay till prices the fee IN, so the total IS the shelf
+ * fee when the caller knows the fee (a dpay checkout prices the fee IN, so the total IS the shelf
  * price; a p2p request adds the fee on top). Absent/null (fee unknown — offline, or DEMO play
  * money) it falls back to the intent's own amount. Either way it renders COMPACT — the same
  * best-effort rounding every glanceable surface uses; the exact padded form survives only where a

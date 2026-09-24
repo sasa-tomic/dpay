@@ -5,7 +5,7 @@ import {DpayCore} from './native';
  *
  * WHY. Everything this app reports goes to `console.*`, which on Android means logcat: an
  * in-memory rolling buffer, readable only while a cable is attached. That is fine at a desk and
- * useless for the case that matters most — a real payment at a real till, half an hour from any
+ * useless for the case that matters most — a real payment at a real checkout, half an hour from any
  * computer, where the one thing worth knowing is what the payment provider answered AFTER the money
  * moved. By the time the phone is plugged back in, the buffer may have rolled and the answer is
  * gone. `DpayCore.appendLog` writes to a file instead (`/sdcard/Android/data/<pkg>/files/dpay.log`,

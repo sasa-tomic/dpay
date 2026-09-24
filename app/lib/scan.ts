@@ -10,7 +10,7 @@ import {parseOcpScan, type OcpScan} from './opencryptopay';
 //     only worked when the OS delivered it as an App Link. Scanned with dpay's own camera it failed.
 //   • a plain wallet ADDRESS — what every receive QR contains, dpay's own "My address" screen
 //     included. The wallet could show you an address it could not then read back.
-//   • an OPENCRYPTOPAY till code — the static LNURL a real merchant's till displays. It is not a
+//   • an OPENCRYPTOPAY checkout code — the static LNURL a real merchant's checkout displays. It is not a
 //     dpay artefact at all; recognising it is what lets dpay pay a shop that never heard of dpay.
 //
 // This module is the second opinion, consulted ONLY after the active rail's own payment codec has
@@ -26,7 +26,7 @@ export type ScanFallback =
   /** A wallet address, with the namespace it belongs to. The send-to-address surface decides
    *  whether it is usable for the selected asset and says so — one refusal, one place. */
   | {kind: 'address'; shape: AddressShape}
-  /** An OpenCryptoPay merchant till code. It carries the PARSE RESULT, not just the success, because
+  /** An OpenCryptoPay merchant checkout code. It carries the PARSE RESULT, not just the success, because
    *  a damaged or `http` LNURL is still that merchant's code: saying "your code is scuffed, ask for
    *  it again" needs the refusal, and the camera's generic shrug would throw it away. Only a string
    *  with no LNURL in it at all falls through to the checks below. */
@@ -59,7 +59,7 @@ export type CoinUriScheme = 'bitcoin' | 'ethereum';
  *     a `solana:` prefix is the same kind of test with the colon guarding the scheme boundary, and
  *     only ever routes: the SOL rail parses it, the IC rail refuses it by name;
  *   • an address is a loose shape regex — and an UPPERCASE `LNURL1…` is inside the base58 alphabet,
- *     so testing addresses first would classify a perfectly good till code as a Solana address and
+ *     so testing addresses first would classify a perfectly good checkout code as a Solana address and
  *     send the payer to a send form.
  *
  * A MALFORMED payment link still answers `link`, and a damaged LNURL still answers `opencryptopay`:

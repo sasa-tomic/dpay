@@ -92,10 +92,10 @@ export async function prepareTransfer(
 
 /** Build + sign a PULL: collect an allowance a payer granted THIS wallet, via `icrc2_transfer_from`.
  *
- *  The one caller is a shop collecting a till charge an ICRC-2 allowance wallet (Oisy) approved it
+ *  The one caller is a shop collecting a checkout charge an ICRC-2 allowance wallet (Oisy) approved it
  *  for: that wallet approves the shop as spender and reports its own principal, and only the shop's
  *  device can spend the allowance — the relay holds no key and never will. `PullClaim` in
- *  `crates/dpay-relay/src/till.rs` owns the trust model; this is the signing half of it.
+ *  `crates/dpay-relay/src/checkout.rs` owns the trust model; this is the signing half of it.
  *
  *  Same envelope discipline as `prepareTransfer` (clock-gated, resubmit verbatim, never re-sign),
  *  and the same memo rule: `nonceHex` is the charge's reference, which is the ONLY thing that

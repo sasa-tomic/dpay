@@ -10,9 +10,9 @@ import {M} from '../i18n';
  * The two things an OpenCryptoPay review must say that no other review does — rendered ONCE, here,
  * so both rails' review screens say them identically (CLAUDE.md's same-surfaces rule).
  *
- *   • ONE LINE carrying the till's PRICE and WHO SET IT: `CHF 1 · price from api.dfx.swiss`.
+ *   • ONE LINE carrying the checkout's PRICE and WHO SET IT: `CHF 1 · price from api.dfx.swiss`.
  *     - The price, because `0.0000162 BTC` is uncheckable on its own: the number printed on the
- *       till and read out by the cashier is "CHF 1", so without it the payer approves an amount
+ *       checkout and read out by the cashier is "CHF 1", so without it the payer approves an amount
  *       they have no way to compare against the sale. Absent when the provider sent none, and then
  *       the line is the host alone — display context never blocks a payment.
  *     - The host, because a scanned LNURL can name any host on earth, and the host then supplies
@@ -34,7 +34,7 @@ import {M} from '../i18n';
  *     instant Approve may be pressed (`OcpTarget.payableUntil`), not the quote's own expiry — so
  *     the parent can disable Approve while the payer is still looking at the screen. What changed
  *     is only the DISPLAY: with four minutes left a countdown changes nothing a payer would do, and
- *     is one more thing to read at a till; inside the last minute it is the reason they hurry. So
+ *     is one more thing to read at a checkout; inside the last minute it is the reason they hurry. So
  *     it renders exactly there, in the warn tone it already had for that branch.
  *
  * The countdown reuses the request-QR expiry copy (`M.receive.expiresIn`): the same fact — this
@@ -50,7 +50,7 @@ export function OcpQuoteLines({
   onTooLate,
 }: {
   host: string;
-  /** What the till asked for in ITS OWN unit (`OcpDetails.requestedAmount`), or null when the
+  /** What the checkout asked for in ITS OWN unit (`OcpDetails.requestedAmount`), or null when the
    *  provider sent none or sent it unreadably. */
   requested: OcpAssetAmount | null;
   payableUntil: number;
@@ -75,7 +75,7 @@ export function OcpQuoteLines({
   return (
     <>
       <Text testID="ocp-price" style={S.dim2}>
-        {requested ? M.pay.ocp.tillPrice(ocpPriceText(requested), host) : M.pay.ocp.providerHost(host)}
+        {requested ? M.pay.ocp.checkoutPrice(ocpPriceText(requested), host) : M.pay.ocp.providerHost(host)}
       </Text>
       {remaining < URGENT_S ? (
         <View style={{flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6}}>
