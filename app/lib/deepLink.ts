@@ -237,7 +237,7 @@ export function readPayLink(): PayLinkParse | null {
 }
 
 // --- the checkout code: `https://<origin>/pl/?lightning=<LNURL…>` -----------------------------------
-// The OTHER https URL this wallet mints: the QR a dpay checkout (OpenCryptoPay) prints for a rung-up
+// The OTHER https URL this wallet mints: the QR a dpay checkout (OpenCryptoPay) prints for a sale
 // sale — `{origin}/pl/?lightning=<LNURL of the charge>`. The path itself serves a static landing
 // page for a GENERIC camera (a stranger without the app still learns whose checkout it is), while the
 // Android App Link claim on the same path (AndroidManifest, `pathPrefix="/pl/"`) opens the app on

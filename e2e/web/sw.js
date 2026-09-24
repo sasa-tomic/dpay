@@ -19,7 +19,7 @@
  *     with no worker installed, and the app's own state machine reports that.
  *
  *  2. Same-origin `/api/**` — NOT INTERCEPTED. Balances, the currency catalog, capabilities,
- *     transactions, swap quotes, the till, and the `/api/v2` IC envelope gateway. Every one is a
+ *     transactions, swap quotes, the checkout, and the `/api/v2` IC envelope gateway. Every one is a
  *     live fact or a value operation. Offline they fail, and failing is the honest answer: the
  *     wallet's `online` flag starts false and only flips on a successful read, so a cold cached
  *     boot shows the "approx." marker on the balance rather than a confident number.

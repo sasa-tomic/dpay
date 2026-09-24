@@ -393,7 +393,7 @@ check(_sig.hex() == _g["sig_hex"], "checkout_open_signature reproduces dfx/check
 check(d.keypair_from_secret(bytes.fromhex(_g["secret_hex"])).public.hex() == _g["merchant_pubkey_hex"],
       "the signature covers the seed's OWN public key (never a caller-supplied one)")
 # The EMPTY note signs the note-less v1 encoding — the golden's own legacy half pins that the
-# note-less ring-up never requires a relay upgrade.
+# note-less charge never requires a relay upgrade.
 check(d.checkout_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"], bytes.fromhex(_g["nonce_hex"]),
                             _g["issued_at"], _g["merchant_name"], "").hex() == _v1["sig_hex"],
       "checkout_open_signature(empty note) reproduces legacy_v1.sig_hex (the v1 encoding)")

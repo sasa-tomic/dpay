@@ -56,11 +56,11 @@ const DAMAGED_CODE = 'This code is damaged';
 
 // A real OpenCryptoPay checkout code with ONE data symbol corrupted: still an `lnurl1…` string (so the
 // app knows what KIND of code it is), but the checksum no longer verifies.
-const DAMAGED_TILL = damageLnurl(encodeLnurl('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e'));
+const DAMAGED_CHECKOUT = damageLnurl(encodeLnurl('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e'));
 
 const PAYLOADS = [
   { label: 'non-base64 garbage', payload: 'this is definitely not a valid request QR!!!', expect: NOT_A_PAYMENT_CODE },
-  { label: 'damaged checkout code', payload: DAMAGED_TILL, expect: DAMAGED_CODE },
+  { label: 'damaged checkout code', payload: DAMAGED_CHECKOUT, expect: DAMAGED_CODE },
   { label: 'valid base64, wrong length', payload: 'AAAA', expect: NOT_A_PAYMENT_CODE },
 ];
 
