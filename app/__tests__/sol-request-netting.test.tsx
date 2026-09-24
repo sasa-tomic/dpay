@@ -4,7 +4,7 @@
  *
  * The merchant's request screen is the ONE producer of a SOL payee-quoted wire: `makeRequest`
  * builds the solreq:v2 (and the payment LINK the QR actually renders derives from that request),
- * so the netting — native wire amt = typed price − SOL_FEE_LAMPORTS, the SOL twin of the till's
+ * so the netting — native wire amt = typed price − SOL_FEE_LAMPORTS, the SOL twin of the checkout's
  * `amount_raw = price − fee` — must land exactly there. Every downstream signer/verifier is
  * byte-exact against the request, so the payer cannot change the amount at sign time — which is
  * also why this suite proves the payer half needs NO change: their displayed total (wire + fee)
@@ -131,7 +131,7 @@ function mount(over: {selectedToken?: string; selectedAssetId?: string} = {}) {
         onSubModeChange={jest.fn()}
         codeForm="dpay"
         onCodeFormChange={jest.fn()}
-        tillAvailable={false}
+        checkoutAvailable={false}
         catalog={CATALOG}
         selectedToken={over.selectedToken ?? 'SOL'}
         assets={ASSETS}

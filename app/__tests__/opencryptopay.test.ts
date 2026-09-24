@@ -28,8 +28,8 @@ import {ICP_LEDGER_PRINCIPAL} from '../config/constants';
 const LNURL_EXAMPLE =
   'LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLVFJK2ERYVG6RZCMYX33RVEPEV5YEJ9WT';
 const API_URL = 'https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e';
-// RECORDED: the till's QR is the api URL's `app.` sibling with the LNURL in a `lightning` parameter.
-const TILL_QR = `https://app.dfx.swiss/pl/?lightning=${LNURL_EXAMPLE}`;
+// RECORDED: the checkout's QR is the api URL's `app.` sibling with the LNURL in a `lightning` parameter.
+const CHECKOUT_QR = `https://app.dfx.swiss/pl/?lightning=${LNURL_EXAMPLE}`;
 // The same code with its final checksum character flipped (T → Q) — one scuff on a printed sticker.
 const LNURL_CORRUPT = `${LNURL_EXAMPLE.slice(0, -1)}Q`;
 // Fixture LNURLs, encoded the same way, carrying payloads the wallet must refuse:
@@ -45,7 +45,7 @@ const BECH32_OTHER_HRP = 'split1checkupstagehandshakeupstreamerranterredcaperred
 const ICP_URI =
   'icp:ly36x-wiaaa-aaaai-aqj7q-cai/transfer?to=ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae&amount=1.';
 const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
-// A per-charge reference in the shape dpay's own till mints (32 hex = the 16-byte ICRC memo).
+// A per-charge reference in the shape dpay's own checkout mints (32 hex = the 16-byte ICRC memo).
 const REF = '19ff3250469370d21a04c100ad5ab8bb';
 const ICP_URI_TO = 'ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae';
 // RECORDED: `solana:2eQ2Somiat…?amount=1.246922`. The findings doc elides the address, so the tail
@@ -63,7 +63,7 @@ const WALLET_ASSETS: SelectableAsset[] = buildSelectableAssets(icpCatalogOf(BUND
   solanaTokens: true,
 });
 
-// A step-2 body. RECORDED: the payment id `pl_beeddb41cd4b6d9e`, the CHF-1 fixed-amount till, the
+// A step-2 body. RECORDED: the payment id `pl_beeddb41cd4b6d9e`, the CHF-1 fixed-amount checkout, the
 // methods `InternetComputer` / `Solana`, the assets each accepts, the per-method `available` flag,
 // and the Solana USDC amount 1.246922 (from the recorded destination URI). FIXTURE: the merchant
 // name (never captured), the expiration instant, and every other per-asset amount. A VERBATIM
@@ -74,7 +74,7 @@ const BEFORE_EXPIRY = EXPIRES_AT_MS - 60_000;
 
 function detailsBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    displayName: 'Test Till',
+    displayName: 'Test Checkout',
     callback: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',
     quote: {id: 'q-8f31c2', expiration: EXPIRATION},
     requestedAmount: {asset: 'CHF', amount: 1},
@@ -146,10 +146,10 @@ describe('decodeLnurl', () => {
 });
 
 describe('parseOcpScan', () => {
-  it('accepts the till QR and the bare code, returning the provider URL verbatim plus its host', () => {
+  it('accepts the checkout QR and the bare code, returning the provider URL verbatim plus its host', () => {
     // The host is what the review screen shows: an LNURL can name any server, so the payer must be
     // able to see whose quote they are about to pay.
-    expect(parseOcpScan(TILL_QR)).toEqual({ok: true, apiUrl: API_URL, host: 'api.dfx.swiss'});
+    expect(parseOcpScan(CHECKOUT_QR)).toEqual({ok: true, apiUrl: API_URL, host: 'api.dfx.swiss'});
     expect(parseOcpScan(LNURL_EXAMPLE)).toEqual({ok: true, apiUrl: API_URL, host: 'api.dfx.swiss'});
   });
 
@@ -158,7 +158,7 @@ describe('parseOcpScan', () => {
     expect(parseOcpScan(`https://app.dfx.swiss/pl/?lightning=${LNURL_HTTP}`)).toEqual({ok: false, reason: 'not-https'});
   });
 
-  it('accepts the spellings a real till may print, not just the one we developed against', () => {
+  it('accepts the spellings a real checkout may print, not just the one we developed against', () => {
     // AUDITED 2026-09-02 against DFX's own frontend (`DFXswiss/services`: the sticker generator
     // prints `<host>/pl?lightning=<LNURL>`), so the wrapper URL is the shape a SPAR counter shows.
     // These are the OTHER spellings the wider LNURL world uses, each of which this parser refused
@@ -177,7 +177,7 @@ describe('parseOcpScan', () => {
     expect(parseOcpScan(API_URL)).toEqual(expected);
   });
 
-  it('does not mistake other https codes for a till just because they are URLs', () => {
+  it('does not mistake other https codes for a checkout just because they are URLs', () => {
     // The bare-URL branch above is admitted ONLY for an LNURL-pay endpoint path (`/lnurlp/`). dpay's
     // own payment link is also an https URL and must keep routing to the link parser, and a random
     // site must stay "not a payment code" rather than becoming a provider this wallet would call.
@@ -210,7 +210,7 @@ describe('parseOcpScan', () => {
 describe('parseIcpUri', () => {
   it('parses the recorded IC destination URI, trailing bare decimal point and all', () => {
     // `ref` is null: the measured provider names none, and its absence is not a failure — the
-    // wallet mints its own memo (`PayMode`). A till that DOES name one is the case below.
+    // wallet mints its own memo (`PayMode`). A checkout that DOES name one is the case below.
     expect(parseIcpUri(ICP_URI)).toEqual({ok: true, ledger: VCHF_LEDGER, to: ICP_URI_TO, amount: '1.', ref: null});
   });
 
@@ -255,10 +255,10 @@ describe('parseIcpUri', () => {
     });
   });
 
-  it('carries the till’s reference, and refuses one it could not put in a memo', () => {
+  it('carries the checkout’s reference, and refuses one it could not put in a memo', () => {
     // `ref` is the provider's name for the sale, echoed back as the transfer's ON-CHAIN memo — how
-    // dpay's own till matches a payment to the charge it belongs to
-    // (`crates/dpay-relay/src/till.rs`). Honoured, not ignored: dropping it moves the money and
+    // dpay's own checkout matches a payment to the charge it belongs to
+    // (`crates/dpay-relay/src/checkout.rs`). Honoured, not ignored: dropping it moves the money and
     // leaves the sale uncredited.
     expect(parseIcpUri(`icp:${VCHF_LEDGER}/transfer?to=${ICP_URI_TO}&amount=1.&ref=${REF}`)).toEqual({
       ok: true,
@@ -337,7 +337,7 @@ describe('parseSolanaUri', () => {
     // instruction this rail does not build, and `label`/`message` are stranger-supplied text this
     // review never renders — accepting one means approving a URI that says something the payer was
     // not shown. The live provider sends none of them, so refusing costs a real payment nothing.
-    for (const param of ['reference=8Fw45', 'memo=order-12', 'label=Till', 'message=Thanks', 'unknown=1']) {
+    for (const param of ['reference=8Fw45', 'memo=order-12', 'label=Checkout', 'message=Thanks', 'unknown=1']) {
       expect(parseSolanaUri(`solana:${SOL_ADDR}?amount=1.246922&${param}`)).toEqual({
         ok: false,
         reason: 'unexpected-parameter',
@@ -412,7 +412,7 @@ describe('claimedMerchantNameOf', () => {
     // The scanned code names the host and the host writes this string, so it is hostile input by
     // construction. React Native `Text` renders newlines: unbounded, thirty of them push the
     // provider host, the countdown and the destination account off the visible screen — deleting
-    // exactly the lines that make a sticker-over-the-till answerable. Neutralised, not dropped, so
+    // exactly the lines that make a sticker-over-the-checkout answerable. Neutralised, not dropped, so
     // the name still reads as its own words.
     expect(claimedMerchantNameOf({displayName: 'Kiosk\n\n\n\n\n\n\n\n\n\nam Bahnhof'})).toBe('Kiosk am Bahnhof');
     expect(claimedMerchantNameOf({displayName: 'Kiosk  \tam\r\nBahnhof'})).toBe('Kiosk am Bahnhof');
@@ -439,7 +439,7 @@ describe('claimedMerchantNameOf', () => {
 });
 
 describe('parsePaymentDetails', () => {
-  it('narrows the till’s answer and derives the submission URL from the callback', () => {
+  it('narrows the checkout’s answer and derives the submission URL from the callback', () => {
     const parsed = parsePaymentDetails(detailsBody());
     if (!parsed.ok) throw new Error(`expected a parse, got ${parsed.reason}`);
     const d = parsed.details;
@@ -450,7 +450,7 @@ describe('parsePaymentDetails', () => {
     expect(d.quoteId).toBe('q-8f31c2');
     expect(d.quoteExpiresAt).toBe(EXPIRES_AT_MS);
     expect(d.callbackUrl).toBe('https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e');
-    expect(d.claimedMerchantName).toBe('Test Till');
+    expect(d.claimedMerchantName).toBe('Test Checkout');
     expect(d.requestedAmount).toEqual({asset: 'CHF', amount: '1'});
     expect(d.transferAmounts.map(t => t.method)).toEqual(['InternetComputer', 'Solana']);
     expect(d.transferAmounts[1].assets.map(a => a.asset)).toEqual(['SOL', 'USDC', 'USDT']);
@@ -489,7 +489,7 @@ describe('parsePaymentDetails', () => {
     });
   });
 
-  it('reads the till’s note as claimed display context, never as a reason to refuse', () => {
+  it('reads the checkout’s note as claimed display context, never as a reason to refuse', () => {
     // What the charge is FOR ("2× Kafi, Tisch 4") — the SAME contract as the merchant name: shown
     // as claimed, null on absence or garbage, and never a refusal. The fixture body carries no
     // `note` field (the measured provider sends none), so the default parse IS the absence case.
@@ -519,15 +519,15 @@ describe('parsePaymentDetails', () => {
     // and the folded string is the provider's rendering, not the payer's. Asserted as an absence
     // — no metadata-derived value exists on the narrowed details — with a metadata body present,
     // so the pin is that it is IGNORED, not that it cannot arrive.
-    const withBoth = detailsOf({note: '2× Kafi, Tisch 4', metadata: '[["text/plain","Test Till - CHF 1 - 2× Kafi, Tisch 4"]]'}) as OcpDetails & {metadata?: unknown};
+    const withBoth = detailsOf({note: '2× Kafi, Tisch 4', metadata: '[["text/plain","Test Checkout - CHF 1 - 2× Kafi, Tisch 4"]]'}) as OcpDetails & {metadata?: unknown};
     expect(withBoth.claimedNote).toBe('2× Kafi, Tisch 4');
     expect(Object.keys(withBoth)).not.toContain('metadata');
   });
 
-  it('keeps paying a till that advertises methods it cannot currently settle', () => {
+  it('keeps paying a checkout that advertises methods it cannot currently settle', () => {
     // MEASURED against the live provider on 2026-09-01: every response carries `TaprootAsset`,
     // `Spark` and `Arkade` as `{available: false, assets: []}`. Refusing the whole body over them —
-    // which is what this parser did until this test was written — made EVERY real till unpayable
+    // which is what this parser did until this test was written — made EVERY real checkout unpayable
     // while the entire suite stayed green, because no fixture here or in `e2e/harness/ocp.mjs` ever
     // carried an empty list. The entry names nothing this wallet could select, so it is dropped and
     // the payable methods beside it survive.
@@ -582,9 +582,9 @@ describe('parsePaymentDetails', () => {
     }
   });
 
-  it('treats the till’s own price as display context — never as a reason to refuse the payment', () => {
+  it('treats the checkout’s own price as display context — never as a reason to refuse the payment', () => {
     // It is the MERCHANT's figure ("CHF 1"), shown beside the asset amount so the payer can check
-    // it against the price on the till. Like the merchant name it is display context, so its
+    // it against the price on the checkout. Like the merchant name it is display context, so its
     // absence yields null and the payment proceeds — a body without it used to refuse the WHOLE
     // payment on a field nothing read, which is a refusal that buys the payer nothing.
     for (const requestedAmount of [undefined, null, {asset: 'CHF'}, {asset: '', amount: 1}, {amount: 1}, 'CHF 1']) {
@@ -600,7 +600,7 @@ describe('parsePaymentDetails', () => {
 });
 
 describe('ocpPriceText', () => {
-  it('spells the till’s own price for the review line, without touching a digit', () => {
+  it('spells the checkout’s own price for the review line, without touching a digit', () => {
     // The ordinary case, from the measured body: a JSON number 1 → "CHF 1".
     expect(ocpPriceText({asset: 'CHF', amount: '1'})).toBe('CHF 1');
     // No rounding and no re-precision: a long amount survives whole, which is what makes this a
@@ -628,7 +628,7 @@ describe('ocpPriceText', () => {
     const long = ocpPriceText({asset: 'CHF', amount: '9'.repeat(1000)});
     expect(long.endsWith('…')).toBe(true);
     expect(long.length).toBeLessThan(40);
-    // A cap that never cuts a real price: the mark appears only on a figure no till would send.
+    // A cap that never cuts a real price: the mark appears only on a figure no checkout would send.
     expect(ocpPriceText({asset: 'CHF', amount: '1234567.89'})).toBe('CHF 1234567.89');
   });
 
@@ -647,13 +647,13 @@ describe('ocpPriceText', () => {
 
   it('refuses a callback that yields no submission URL — BEFORE anything can be paid', () => {
     // The loss path's worst shape: a callback with no `/cb/` segment means a payment made against
-    // this till could never be reported. Discovering that after the transfer leaves irreversible
+    // this checkout could never be reported. Discovering that after the transfer leaves irreversible
     // funds on-chain with no request even issued, so it is refused here, at parse time, while
     // nothing has moved. Its OWN reason, not `malformed-details`: rescanning yields the same
     // callback, so the two facts do not share an instruction.
     for (const callback of [
       'https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', // the segment is simply absent
-      'https://api.dfx.swiss/v1/lnurlp/cb/',                 // present, but names no till
+      'https://api.dfx.swiss/v1/lnurlp/cb/',                 // present, but names no checkout
       'https://api.dfx.swiss/cb',                            // not a segment: no trailing slash
       'https://api.dfx.swiss/',
     ]) {
@@ -698,7 +698,7 @@ describe('selectPayableOffers', () => {
     // the belief that the provider verified every Internet Computer payment against the ICP ledger;
     // the real cause was the IDENTIFIER dpay reported, and it is fixed in `ocpIcTxId` — measured
     // 2026-09-04 (`just ocp-ledger-probe`). VEUR LEFT the payable set with the 2026-09-19 row
-    // retirement: the wallet no longer carries ic:9, so the till's VEUR offer is refused, not paid.
+    // retirement: the wallet no longer carries ic:9, so the checkout's VEUR offer is refused, not paid.
     expect(payable).toEqual([
       {method: 'InternetComputer', asset: 'ckBTC', amount: '0.000016', assetId: 'ic:1', rawAmount: '1600'},
       {method: 'InternetComputer', asset: 'VCHF', amount: '1', assetId: 'ic:7', rawAmount: '100000000'},
@@ -720,7 +720,7 @@ describe('selectPayableOffers', () => {
 
   it('names the offered assets this wallet does not carry', () => {
     // Since the 2026-09-19 VEUR retirement the wallet no longer carries every IC asset the
-    // default till lists: the till's VEUR offer — its legacy row lives on until the founder's
+    // default checkout lists: the checkout's VEUR offer — its legacy row lives on until the founder's
     // redeploy — is refused by name, exactly like USDT (Solana) and XAU, an asset no dpay row
     // realises.
     const details = detailsOf({
@@ -814,7 +814,7 @@ describe('selectPayableOffers', () => {
 
   it('refuses every offer once the quote has expired, with the one reason that matters', () => {
     // The quote is the price; past its expiry nothing on the list can be taken, and the single
-    // actionable instruction is to rescan the till.
+    // actionable instruction is to rescan the checkout.
     const details = detailsOf();
     const {payable, refused} = selectPayableOffers(details, WALLET_ASSETS, EXPIRES_AT_MS);
     expect(payable).toEqual([]);
@@ -840,7 +840,7 @@ describe('selectPayableOffers', () => {
     });
   });
 
-  it('returns two empty lists when the till offers nothing, without inventing an option', () => {
+  it('returns two empty lists when the checkout offers nothing, without inventing an option', () => {
     const details = detailsOf();
     expect(selectPayableOffers({...details, transferAmounts: []}, WALLET_ASSETS, BEFORE_EXPIRY)).toEqual({
       payable: [],

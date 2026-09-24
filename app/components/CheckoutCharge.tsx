@@ -672,13 +672,13 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
           always-tappable Show code. An empty or malformed total is refused by `priceCents` with the
           honest badAmount error, not by a greyed-out button that reads as broken. */}
       <Pressable
-        testID="btn-checkout-ring-up"
+        testID="btn-checkout-open"
         style={[S.primaryWide, opening && S.disabledFlat]}
         disabled={opening}
         onPress={ringUp}
         accessibilityRole="button"
         accessibilityLabel={M.receive.request}
-        accessibilityHint={M.receive.checkout.ringUpHint}
+        accessibilityHint={M.receive.checkout.openChargeHint}
         accessibilityState={{disabled: opening}}>
         <Text style={[S.primaryText, opening && S.disabledText]}>{opening ? M.receive.creating : M.receive.request}</Text>
       </Pressable>

@@ -908,7 +908,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
             </View>
             {/* The checkout lookup is two network reads and can take tens of seconds. IC twin:
                 PayMode's `ocp-checking`. */}
-            {ocpBusy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingTill}</Text> : null}
+            {ocpBusy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingCheckout}</Text> : null}
             {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
           </>
         ) : null}

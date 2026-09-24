@@ -51,8 +51,8 @@ const realFetch = globalThis.fetch;
  */
 function installDeferredRelay() {
   const faucetPosts: string[] = [];
-  let release!: (capabilities: {till: boolean; demo_faucet: boolean}) => void;
-  const answered = new Promise<{till: boolean; demo_faucet: boolean}>(r => { release = r; });
+  let release!: (capabilities: {checkout: boolean; demo_faucet: boolean}) => void;
+  const answered = new Promise<{checkout: boolean; demo_faucet: boolean}>(r => { release = r; });
   const fetchMock = jest.fn((url: string, init?: RequestInit) => {
     if (String(url).includes('/api/v1/capabilities')) {
       return answered.then(body => ({ok: true, status: 200, json: () => Promise.resolve(body)} as unknown as Response));
@@ -97,7 +97,7 @@ describe('Onboarding — demo funding waits for the relay to answer', () => {
     // The probe has not answered yet, so nothing has been asked of the faucet.
     expect(faucetPosts).toEqual([]);
 
-    await act(async () => { release({till: false, demo_faucet: true}); });
+    await act(async () => { release({checkout: false, demo_faucet: true}); });
 
     expect(faucetPosts).toHaveLength(1);
     expect(faucetPosts[0]).toContain(PUBLIC_HEX);
@@ -110,7 +110,7 @@ describe('Onboarding — demo funding waits for the relay to answer', () => {
     const {faucetPosts, release} = installDeferredRelay();
     const tree = await createUpToContinue();
 
-    await act(async () => { release({till: false, demo_faucet: false}); });
+    await act(async () => { release({checkout: false, demo_faucet: false}); });
 
     expect(faucetPosts).toEqual([]);
     // Wallet creation never depended on funding: the user lands on the same beat, with $0.
@@ -129,7 +129,7 @@ describe('Onboarding — demo funding waits for the relay to answer', () => {
     expect(isPresent(tree, 'onboard-finishing')).toBe(true);
     expect(isPresent(tree, 'recovery-saved-stamp')).toBe(false);
 
-    await act(async () => { release({till: false, demo_faucet: false}); });
+    await act(async () => { release({checkout: false, demo_faucet: false}); });
 
     expect(isPresent(tree, 'onboard-finishing')).toBe(false);
     act(() => { tree.unmount(); });

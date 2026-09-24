@@ -76,7 +76,7 @@ jest.mock('../services/opencryptopay', () => ({
 import {encodeSolReq, type SolReqInput} from '../solana/qr';
 import {getSolSignatureStatus, sendSol, sendSolanaPay, signSolPayment, signSplPayment, type SolanaSignatureStatus} from '../solana';
 import {payAndReport, resolveOcpOffer, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
-// Spied (not mocked) in the till-note test, as in the IC twin (PayMode.test.tsx): only the SEAM's
+// Spied (not mocked) in the checkout-note test, as in the IC twin (PayMode.test.tsx): only the SEAM's
 // arguments matter here; the store's own behaviour is txNotes.test.ts's to pin.
 import * as txNotes from '../services/txNotes';
 import {buildSelectableAssets} from '../config/assets';
@@ -321,7 +321,7 @@ describe('SolPayMode — sign status shows the short destination under a merchan
   // 32-character cap bounds its length, but length was never the weapon — React Native `Text`
   // renders newlines, so a name of blank lines pushes the destination address (the ONLY checkable
   // thing on this screen) out of view, and the payer approves a payment whose payee they cannot
-  // see. Same helper as the IC wire request, a payment link's label/memo and a till's merchant
+  // see. Same helper as the IC wire request, a payment link's label/memo and a checkout's merchant
   // name: one rule for display text, wherever it came from.
   test('a name and memo of blank lines are neutralised — the destination stays on screen', async () => {
     throwOnSign();
@@ -567,14 +567,14 @@ describe('SolPayMode — an in-flight send owns its surface (the gates defer, 20
 });
 
 // ---------------------------------------------------------------------------------------------
-// OpenCryptoPay — the same till code, scanned while SOL is the selected asset
+// OpenCryptoPay — the same checkout code, scanned while SOL is the selected asset
 // ---------------------------------------------------------------------------------------------
 // Same camera, same gesture, same review shape as the IC rail (CLAUDE.md's same-surfaces rule);
 // only the settlement differs — a native SOL transfer instead of a signed ICRC envelope. The rules
 // that make it safe are identical and are what these tests pin: never auto-signed, and a transfer
 // whose outcome is unknown is never reported to the provider.
 
-const TILL_QR = 'LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLVFJK2ERYVG6RZCMYX33RVEPEV5YEJ9WT';
+const CHECKOUT_QR = 'LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLVFJK2ERYVG6RZCMYX33RVEPEV5YEJ9WT';
 const OCP_TARGET: OcpTarget = {
   details: {
     submitUrl: 'https://api.dfx.swiss/v1/lnurlp/tx/pl_beeddb41cd4b6d9e',
@@ -584,7 +584,7 @@ const OCP_TARGET: OcpTarget = {
     quoteExpiresAt: Date.now() + 300_000,
     callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',
     claimedMerchantName: 'Test Shop',
-    // The dpay till's own note — the same fixture contract as the IC twin in PayMode.test.tsx.
+    // The dpay checkout's own note — the same fixture contract as the IC twin in PayMode.test.tsx.
     claimedNote: '2× Kafi, Tisch 4',
     requestedAmount: {asset: 'CHF', amount: '1'},
     transferAmounts: [{method: 'Solana', available: true, assets: [{asset: 'SOL', amount: '0.01221422'}]}],
@@ -607,18 +607,18 @@ const OCP_TARGET: OcpTarget = {
   payableUntil: Date.now() + 180_000,
 };
 
-/** The wallet's REAL Solana rows — the selection the till payment is made WITH. */
+/** The wallet's REAL Solana rows — the selection the checkout payment is made WITH. */
 const SOL_ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {
   showTestnet: false,
   solanaEnabled: true,
   solanaTokens: true,
 });
 
-function mountTill(props: Partial<SolPayModeProps> = {}) {
+function mountCheckout(props: Partial<SolPayModeProps> = {}) {
   return mountSolPay({assets: SOL_ASSETS, ...props});
 }
 
-async function scanTill(tree: renderer.ReactTestRenderer, code = TILL_QR) {
+async function scanCheckout(tree: renderer.ReactTestRenderer, code = CHECKOUT_QR) {
   pressByTestID(tree, 'btn-sol-start-scan');
   const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
   await act(async () => {
@@ -627,7 +627,7 @@ async function scanTill(tree: renderer.ReactTestRenderer, code = TILL_QR) {
   await act(async () => {});
 }
 
-describe('SolPayMode — OpenCryptoPay till', () => {
+describe('SolPayMode — OpenCryptoPay checkout', () => {
   beforeEach(() => {
     jest.mocked(resolveOcpScan).mockReset().mockResolvedValue({kind: 'ok', target: OCP_TARGET});
     jest.mocked(payAndReport).mockReset().mockResolvedValue({kind: 'paid'});
@@ -635,19 +635,19 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     jest.mocked(sendSol).mockReset().mockResolvedValue('5ig'.repeat(10));
   });
 
-  test('offers the till’s own menu on this rail too, and pays what was picked', async () => {
+  test('offers the checkout’s own menu on this rail too, and pays what was picked', async () => {
     // RAIL PARITY, not a nice-to-have: CLAUDE.md makes a per-rail divergence on a money surface a
-    // bug, and the IC rail answers a not-taken asset with the till's menu (flow 111). The same
+    // bug, and the IC rail answers a not-taken asset with the checkout's menu (flow 111). The same
     // component renders it here, so the payer meets one surface whichever asset they had selected.
     const offer = {method: 'Solana', asset: 'SOL', amount: '0.01221422', assetId: 'solana:SOL' as const, rawAmount: '12214220'};
     jest.mocked(resolveOcpScan).mockResolvedValue({
       kind: 'choose', details: OCP_TARGET.details, host: 'api.dfx.swiss', options: [offer],
     });
     jest.mocked(resolveOcpOffer).mockResolvedValue({kind: 'ok', target: OCP_TARGET});
-    // USDC selected: the one asset this rail carries that a till may decline. Funded, so the Pay
+    // USDC selected: the one asset this rail carries that a checkout may decline. Funded, so the Pay
     // tab reaches the scan surface rather than the fund-first panel.
-    const tree = mountTill({selectedToken: 'USDC', tokenBalance: '5000000', tokenBalances: {[USDC_MINT_ADDRESS]: {amount: '5000000', status: 'balance'}}});
-    await scanTill(tree);
+    const tree = mountCheckout({selectedToken: 'USDC', tokenBalance: '5000000', tokenBalances: {[USDC_MINT_ADDRESS]: {amount: '5000000', status: 'balance'}}});
+    await scanCheckout(tree);
 
     expect(textByTestID(tree, 'ocp-choose')).toBe(M.pay.ocp.chooseAsset('USDC'));
     // The amount is stated in the asset's OWN units — picking blind is not consent. Fee-inclusive
@@ -666,15 +666,15 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     expect(jest.mocked(payAndReport)).not.toHaveBeenCalled();
   });
 
-  test('refuses to approve a till the wallet cannot cover, instead of signing a doomed transfer', async () => {
-    // The IC rail has gated a till payment on the selected asset's balance since it shipped; this
+  test('refuses to approve a checkout the wallet cannot cover, instead of signing a doomed transfer', async () => {
+    // The IC rail has gated a checkout payment on the selected asset's balance since it shipped; this
     // rail did not (review row 12), which is a divergence on a money surface — CLAUDE.md's
     // same-surfaces rule makes that a bug, not an exception. An OCP payer is ONLINE by construction
     // (two provider reads got them here), so the balance is fresh and the gate BLOCKS rather than
     // warns — unlike the offline dpay-request path, where a stale local balance only earns a warning.
     // The fee is included: a transfer of exactly the balance cannot pay for itself.
-    const tree = mountTill({solBalance: '12214220'}); // the amount exactly — short by the fee
-    await scanTill(tree);
+    const tree = mountCheckout({solBalance: '12214220'}); // the amount exactly — short by the fee
+    await scanCheckout(tree);
 
     expect(textByTestID(tree, 'sol-pay-lowbal')).toBe(M.pay.notEnoughBalance);
     expect(tree.root.findByProps({testID: 'btn-approve'}).props.disabled).toBe(true);
@@ -683,32 +683,32 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     expect(jest.mocked(payAndReport)).not.toHaveBeenCalled();
   });
 
-  test('approves a till the wallet can cover, with no low-balance warning', async () => {
+  test('approves a checkout the wallet can cover, with no low-balance warning', async () => {
     // The positive half: one lamport past amount+fee is enough, and nothing about the gate shows.
-    const tree = mountTill({solBalance: String(12214220 + 5000)});
-    await scanTill(tree);
+    const tree = mountCheckout({solBalance: String(12214220 + 5000)});
+    await scanCheckout(tree);
 
     expect(hasTestID(tree, 'sol-pay-lowbal')).toBe(false);
     expect(tree.root.findByProps({testID: 'btn-approve'}).props.disabled).toBe(false);
   });
 
-  test('a scanned till lands on a review with the amount, the full address and the host — nothing is sent', async () => {
-    const tree = mountTill();
-    await scanTill(tree);
+  test('a scanned checkout lands on a review with the amount, the full address and the host — nothing is sent', async () => {
+    const tree = mountCheckout();
+    await scanCheckout(tree);
 
     expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.01221922');
     expect(textByTestID(tree, 'sol-pay-payee')).toBe(MERCHANT);
     expect(textByTestID(tree, 'ocp-price')).toContain('api.dfx.swiss');
     expect(hasTestID(tree, 'review-claimed')).toBe(false);
-    // The one-press rule does NOT reach a till: every value here came from a stranger's server.
+    // The one-press rule does NOT reach a checkout: every value here came from a stranger's server.
     expect(hasTestID(tree, 'btn-approve')).toBe(true);
     expect(sendSol).not.toHaveBeenCalled();
     expect(payAndReport).not.toHaveBeenCalled();
   });
 
   test('Approve runs the one-shot sequence for the Solana method and shows Paid on acceptance', async () => {
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
     await pressByLabel(tree, M.pay.approveA11y);
 
     expect(payAndReport).toHaveBeenCalledTimes(1);
@@ -719,12 +719,12 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('0.01221922 SOL'));
   });
 
-  test('the till’s claimed note rides the review’s memo line and the SOL seam’s annotation', async () => {
+  test('the checkout’s claimed note rides the review’s memo line and the SOL seam’s annotation', async () => {
     // RAIL PARITY with the IC twin (PayMode.test.tsx): the note shows on the review's memo line
     // and reaches the payer's history row as `msg` beside the claimed name — keyed by the
     // signature here (this rail signs no memo to key by), by the on-chain memo there.
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
     expect(textByTestID(tree, 'sol-pay-memo')).toBe('2× Kafi, Tisch 4');
 
     // The seam lives in the rail-side send, which only runs when the captured sender is invoked.
@@ -741,16 +741,16 @@ describe('SolPayMode — OpenCryptoPay till', () => {
       kind: 'ok',
       target: {...OCP_TARGET, details: {...OCP_TARGET.details, claimedNote: null}},
     });
-    const bare = mountTill();
-    await scanTill(bare);
+    const bare = mountCheckout();
+    await scanCheckout(bare);
     expect(hasTestID(bare, 'sol-pay-memo')).toBe(false);
   });
 
   test('an outcome that is neither paid nor failed renders as neither, carrying the transaction', async () => {
     const message = M.pay.ocp.submitUnknown(M.pay.ocp.ref.solTransaction('5ig'.repeat(10)));
     jest.mocked(payAndReport).mockResolvedValue({kind: 'unresolved', message});
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
     await pressByLabel(tree, M.pay.approveA11y);
 
     expect(textByTestID(tree, 'ocp-outcome')).toBe(message);
@@ -758,8 +758,8 @@ describe('SolPayMode — OpenCryptoPay till', () => {
   });
 
   test('the Solana rail reports a CONFIRMED signature, and a broadcast it cannot confirm as unknown', async () => {
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
     await pressByLabel(tree, M.pay.approveA11y);
     const send = jest.mocked(payAndReport).mock.calls[0][3] as () => Promise<OcpSendResult>;
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -791,24 +791,24 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     warn.mockRestore();
   });
 
-  test('the review states the till’s price and its host in ONE line, in the IC rail’s words', async () => {
-    // `0.01221422 SOL` is uncheckable against a price tag; "CHF 1" is what the till prints. One
+  test('the review states the checkout’s price and its host in ONE line, in the IC rail’s words', async () => {
+    // `0.01221422 SOL` is uncheckable against a price tag; "CHF 1" is what the checkout prints. One
     // component renders it for both rails (`OcpQuoteLines`), so the payer meets the same line
     // whichever asset is selected — CLAUDE.md's same-surfaces rule — and naming the host is what
     // marks the price as the MERCHANT's rather than dpay's.
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
 
-    expect(textByTestID(tree, 'ocp-price')).toBe(M.pay.ocp.tillPrice('CHF 1', 'api.dfx.swiss'));
+    expect(textByTestID(tree, 'ocp-price')).toBe(M.pay.ocp.checkoutPrice('CHF 1', 'api.dfx.swiss'));
   });
 
-  test('a till that states no price of its own still names the host, and still pays', async () => {
+  test('a checkout that states no price of its own still names the host, and still pays', async () => {
     jest.mocked(resolveOcpScan).mockResolvedValue({
       kind: 'ok',
       target: {...OCP_TARGET, details: {...OCP_TARGET.details, requestedAmount: null}},
     });
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
 
     expect(textByTestID(tree, 'ocp-price')).toBe(M.pay.ocp.providerHost('api.dfx.swiss'));
     expect(hasTestID(tree, 'btn-approve')).toBe(true);
@@ -816,8 +816,8 @@ describe('SolPayMode — OpenCryptoPay till', () => {
 
   test('a refusal from the provider sequence stays on the scan screen, and nothing is sent', async () => {
     jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'refused', message: M.pay.ocp.solanaTokenUnsupported('USDC')});
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
 
     expect(texts(tree)).toContain(M.pay.ocp.solanaTokenUnsupported('USDC'));
     expect(hasTestID(tree, 'btn-approve')).toBe(false);
@@ -828,8 +828,8 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     // The System Program transfer below moves SOL, so a token target would pay SOL against a token
     // price. The resolver already refuses Solana USDC by name; this is the second lock.
     jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'ok', target: {...OCP_TARGET, assetId: 'solana:USDC'}});
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
 
     expect(texts(tree)).toContain(M.pay.ocp.solanaTokenUnsupported('USDC'));
     expect(hasTestID(tree, 'btn-approve')).toBe(false);
@@ -841,8 +841,8 @@ describe('SolPayMode — OpenCryptoPay till', () => {
   // honest-unknown asymmetry pointing the wrong way. The distinguishing fact was in the thrown
   // message all along (`confirmTransaction` throws `transaction failed: <err>`).
   test('a transaction the network included and FAILED is a definite failure, not an unknown one', async () => {
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
     await pressByLabel(tree, M.pay.approveA11y);
     const send = jest.mocked(payAndReport).mock.calls[0][3] as () => Promise<OcpSendResult>;
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -867,8 +867,8 @@ describe('SolPayMode — OpenCryptoPay till', () => {
       kind: 'ok',
       target: {...OCP_TARGET, expiresAt: Date.now() + 30_000, payableUntil: Date.now() - 1_000},
     });
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
     expect(textByTestID(tree, 'sol-pay-err')).toBe(M.pay.ocp.notEnoughTime);
     expect(tree.root.findAll(n => n.props && n.props.testID === 'btn-approve')[0].props.disabled).toBe(true);
 
@@ -886,16 +886,16 @@ describe('SolPayMode — OpenCryptoPay till', () => {
       kind: 'ok',
       target: {...OCP_TARGET, expiresAt: now + 300_000, payableUntil: now + 185_000},
     });
-    let tree = mountTill();
-    await scanTill(tree);
+    let tree = mountCheckout();
+    await scanCheckout(tree);
     expect(hasTestID(tree, 'ocp-expiry')).toBe(false);
 
     jest.mocked(resolveOcpScan).mockResolvedValue({
       kind: 'ok',
       target: {...OCP_TARGET, expiresAt: now + 120_000, payableUntil: now + 42_000},
     });
-    tree = mountTill();
-    await scanTill(tree);
+    tree = mountCheckout();
+    await scanCheckout(tree);
     expect(textByTestID(tree, 'ocp-expiry')).toMatch(/^Expires in 0:4[01]$/);
   });
 
@@ -903,8 +903,8 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     // `sendSolForOcp` wraps the WHOLE send — blockhash, broadcast, confirmation — in
     // `withTimeout(SOL_SEND_TIMEOUT_MS)`, so that constant IS this rail's worst case. Naming it here
     // rather than a number keeps the deadline moving with the bound it is meant to cover.
-    const tree = mountTill();
-    await scanTill(tree);
+    const tree = mountCheckout();
+    await scanCheckout(tree);
     expect(jest.mocked(resolveOcpScan).mock.calls[0][1].sequenceBudgetMs).toBe(SOL_SEND_TIMEOUT_MS);
   });
 });
@@ -912,8 +912,8 @@ describe('SolPayMode — OpenCryptoPay till', () => {
 // ---------------------------------------------------------------------------------------------
 // An OpenCryptoPay transfer the Solana rail could not resolve — the RECOVERABLE loss
 // ---------------------------------------------------------------------------------------------
-// The IC twin of this suite is PayMode's "an unresolved till transfer stays recoverable", and the
-// situation is the same one: the likeliest failure of a till payment is not a refusal, it is a
+// The IC twin of this suite is PayMode's "an unresolved checkout transfer stays recoverable", and the
+// situation is the same one: the likeliest failure of a checkout payment is not a refusal, it is a
 // flaky connection while the transaction is already landing. The network accepted it, the provider
 // was not told, the quote is still alive and the chain can still be asked what became of it — so
 // throwing the broadcast signature away turns the recoverable case into the unrecoverable one.
@@ -921,7 +921,7 @@ describe('SolPayMode — OpenCryptoPay till', () => {
 // `payAndReport` is stubbed with its OWN contract (report a settled send, never an unknown one), so
 // "was the provider told?" is answerable by looking at which calls' sends settled — and the
 // one-shot rule is checked by counting them.
-describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
+describe('SolPayMode — an unresolved checkout transfer stays recoverable', () => {
   const SIGNATURE = '5ig'.repeat(10);
   /** Every send verdict `payAndReport` was handed, in order. */
   let sends: OcpSendResult[];
@@ -953,9 +953,9 @@ describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
 
   afterEach(() => { warn.mockRestore(); });
 
-  /** Approve a till payment whose confirmation leaves the outcome indefinite. */
+  /** Approve a checkout payment whose confirmation leaves the outcome indefinite. */
   async function approveIntoUnknown(tree: renderer.ReactTestRenderer) {
-    await scanTill(tree);
+    await scanCheckout(tree);
     await pressByLabel(tree, M.pay.approveA11y);
     await act(async () => {}); // the claim's first re-poll tick
   }
@@ -967,7 +967,7 @@ describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
   }
 
   test('a transaction that turns out to have CONFIRMED is reported — once — and the sale completes', async () => {
-    const tree = mountTill();
+    const tree = mountCheckout();
     await approveIntoUnknown(tree);
     // Indefinite: the provider was NOT told, so the one submission is still unspent. The first
     // re-poll already ran and found nothing — a signature the cluster has not seen proves nothing.
@@ -993,7 +993,7 @@ describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
   });
 
   test('a transaction the chain FAILED says nothing was paid, and tells nobody', async () => {
-    const tree = mountTill();
+    const tree = mountCheckout();
     jest.mocked(getSolSignatureStatus).mockResolvedValue({err: {InstructionError: [0, {Custom: 1}]}});
     await approveIntoUnknown(tree);
 
@@ -1018,7 +1018,7 @@ describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
       kind: 'ok',
       target: {...OCP_TARGET, expiresAt: base + 60_000, payableUntil: base + 30_000},
     });
-    const tree = mountTill();
+    const tree = mountCheckout();
     await approveIntoUnknown(tree);
     expect(textByTestID(tree, 'ocp-outcome')).toBe(M.pay.ocp.transferUnknown);
 
@@ -1036,7 +1036,7 @@ describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
   test('a transaction that is only "processed" stays indefinite — one node, one fork deep', async () => {
     // Not a verdict: a processed transaction can still be rolled back, and the provider verifies
     // the identifier against the chain, so reporting it would spend the attempt on a maybe.
-    const tree = mountTill();
+    const tree = mountCheckout();
     await approveIntoUnknown(tree);
     jest.mocked(getSolSignatureStatus).mockClear().mockResolvedValue({confirmationStatus: 'processed'});
     await tick(tree);
@@ -1054,7 +1054,7 @@ describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
     // would resume together and each would spend the one submission we are granted.
     let release!: (s: SolanaSignatureStatus) => void;
     jest.mocked(getSolSignatureStatus).mockReturnValue(new Promise<SolanaSignatureStatus>(r => { release = r; }));
-    const tree = mountTill();
+    const tree = mountCheckout();
     await approveIntoUnknown(tree); // the first read starts and hangs
 
     await tick(tree); // two more ticks fire while it is still in flight
@@ -1245,7 +1245,7 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
 describe('SolPayMode — the fund-first surfaces: the camera, and the funded account (X1/X3)', () => {
   test('a USDC-zero surface with a funded ckUSDC sibling names it and offers the one-tap switch', () => {
     const onSwitchRail = jest.fn();
-    const tree = mountTill({
+    const tree = mountCheckout({
       homeCurrency: 'USD',
       balances: {'ic:2': {displayText: '5.00 ckUSDC', status: 'ok', failure: null}},
       payGate: 'token-zero',
@@ -1262,7 +1262,7 @@ describe('SolPayMode — the fund-first surfaces: the camera, and the funded acc
   test('X1: a SOL gate now points too — the funded account is a fact whatever the rail group', () => {
     // Was "points nowhere": SOL belongs to no home currency, so the same-currency pointer had
     // nothing to say and the gate stayed a dead end while the wallet held dollars one tap away.
-    const tree = mountTill({
+    const tree = mountCheckout({
       homeCurrency: 'USD',
       balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok', failure: null}},
       payGate: 'sol-zero',
@@ -1277,7 +1277,7 @@ describe('SolPayMode — the fund-first surfaces: the camera, and the funded acc
     // IC twin: PayMode's X3 test, same reason. A `solreq:v2` carries its own currency and mint, so
     // the selection cannot decide whether it is payable — and hiding the lens stopped the payer
     // reading a code they could have settled. The sign gate stays per-request (`solSplSignGate`).
-    const tree = mountTill({payGate: 'sol-zero', selectedToken: 'SOL', balances: {}});
+    const tree = mountCheckout({payGate: 'sol-zero', selectedToken: 'SOL', balances: {}});
     expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
     expect(hasTestID(tree, 'sol-pay-fund')).toBe(true);
     pressByTestID(tree, 'btn-sol-start-scan');
@@ -1289,7 +1289,7 @@ describe('SolPayMode — the fund-first surfaces: the camera, and the funded acc
   test('X3: an ABSENT token account keeps its setup card AND the camera', () => {
     // The same class: the account this wallet lacks is the SELECTED one, and a request naming SOL
     // or any other mint is perfectly payable from here.
-    const tree = mountTill({payGate: 'token-absent', selectedToken: 'USDC', balances: {}});
+    const tree = mountCheckout({payGate: 'token-absent', selectedToken: 'USDC', balances: {}});
     expect(hasTestID(tree, 'sol-pay-ata-instructions')).toBe(true);
     expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
     pressByTestID(tree, 'btn-sol-start-scan');
@@ -1299,7 +1299,7 @@ describe('SolPayMode — the fund-first surfaces: the camera, and the funded acc
 
   test('X1: the practice balance is named on this rail too — one pointer, both engines', () => {
     const onSwitchRail = jest.fn();
-    const tree = mountTill({
+    const tree = mountCheckout({
       homeCurrency: 'CHF',
       payGate: 'sol-zero',
       selectedToken: 'SOL',

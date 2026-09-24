@@ -16,10 +16,10 @@ const ICP_ACCOUNT_ID = 'a'.repeat(64);
 const EVM = '0x2D39863d5A1E1B1e8b7b0b8c7c9d0e1f2a3b4c5d';
 const BTC = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
 const SOLANA = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
-// The OpenCryptoPay till code (see opencryptopay.test.ts — it decodes to the DFX api URL). Kept
+// The OpenCryptoPay checkout code (see opencryptopay.test.ts — it decodes to the DFX api URL). Kept
 // uppercase, as a QR encodes it, which is exactly the case that overlaps the base58 alphabet.
 const LNURL = 'LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLVFJK2ERYVG6RZCMYX33RVEPEV5YEJ9WT';
-const TILL_QR = `https://app.dfx.swiss/pl/?lightning=${LNURL}`;
+const CHECKOUT_QR = `https://app.dfx.swiss/pl/?lightning=${LNURL}`;
 const OCP_API_URL = 'https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e';
 const PAY_LINK = 'https://dpay.kalaj.org/wallet/pay/k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae?asset=VCHF&network=internet-computer&amount=1.5';
 
@@ -44,9 +44,9 @@ describe('classifyScan — payment links', () => {
   });
 });
 
-describe('classifyScan — OpenCryptoPay till codes', () => {
-  test("a till's QR (the LNURL in a `lightning` parameter) resolves to the provider API URL + host", () => {
-    expect(classifyScan(TILL_QR)).toEqual({
+describe('classifyScan — OpenCryptoPay checkout codes', () => {
+  test("a checkout's QR (the LNURL in a `lightning` parameter) resolves to the provider API URL + host", () => {
+    expect(classifyScan(CHECKOUT_QR)).toEqual({
       kind: 'opencryptopay',
       ocp: {ok: true, apiUrl: OCP_API_URL, host: 'api.dfx.swiss'},
     });
@@ -60,13 +60,13 @@ describe('classifyScan — OpenCryptoPay till codes', () => {
   });
 
   test('an UPPERCASE LNURL is NOT read as a Solana address — the OCP test runs first', () => {
-    // The bech32 uppercase alphabet overlaps base58, so ordering is what keeps a merchant's till
+    // The bech32 uppercase alphabet overlaps base58, so ordering is what keeps a merchant's checkout
     // code out of the send-to-address form.
     const verdict = classifyScan(LNURL);
     expect(verdict.kind).toBe('opencryptopay');
   });
 
-  test('a DAMAGED till code is still an OCP verdict, carrying the checksum refusal', () => {
+  test('a DAMAGED checkout code is still an OCP verdict, carrying the checksum refusal', () => {
     // One scuffed character on a printed sticker. "Your code is damaged" is actionable; the
     // camera's generic "not a payment code" is not.
     expect(classifyScan(`${LNURL.slice(0, -1)}Q`)).toEqual({
@@ -132,7 +132,7 @@ describe('classifyScan — Solana Pay requests', () => {
   });
 
   test('a DAMAGED solana: URI is still a solana-pay verdict — the SOL rail names the broken part', () => {
-    // Same discipline as the damaged till code: "the recipient isn't valid" is actionable, the
+    // Same discipline as the damaged checkout code: "the recipient isn't valid" is actionable, the
     // camera's generic "not a payment code" is not.
     expect(classifyScan('solana:notanaddress?amount=abc')).toEqual({kind: 'solana-pay'});
   });

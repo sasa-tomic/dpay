@@ -139,7 +139,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // a camera scan of the same QR takes (an honest refusal for a code that carries nothing payable;
   // an explicit review — never an auto-sign — for one that does). Cleared by the consumer, exactly
   // like every prefill above.
-  const [pendingTill, setPendingTill] = useState<string | null>(null);
+  const [pendingCheckout, setPendingCheckout] = useState<string | null>(null);
   // The symmetric `dpay:pay/<blob>` (NFC-less receipt hand-back): a payer who settled online shares
   // the rail proof {ledger, block_index, request_id} back to the merchant. This holds the raw blob;
   // ReceiveMode consumes it via its verify effect (format-check → request_id binding → on-chain
@@ -744,8 +744,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     setPrefillReceipt(blob);
     setMode('receive');
   }, []);
-  const applyTill = useCallback((url: string) => {
-    setPendingTill(url);
+  const applyCheckout = useCallback((url: string) => {
+    setPendingCheckout(url);
     setMode('pay');
   }, []);
   const handleUrl = useCallback((url: string) => {
@@ -754,8 +754,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     const dl = decodeDeeplink(url);
     if (dl) { applyReceipt(dl.blob); return; }
     const checkout = parseCheckoutCode(url);
-    if (checkout) applyTill(checkout);
-  }, [applyLink, applyReceipt, applyTill]);
+    if (checkout) applyCheckout(checkout);
+  }, [applyLink, applyReceipt, applyCheckout]);
 
   useEffect(() => {
     let alive = true;
@@ -1452,7 +1452,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
             />
           : mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} tokenBalance={selectedTokenBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solState, selectedTokenState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingTill} onPrefillScanConsumed={() => setPendingTill(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} />
+              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} tokenBalance={selectedTokenBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solState, selectedTokenState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} shownBalance={shownBalance}
@@ -1467,7 +1467,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
                   withdrawBalance={displayAssetBalances[selectedCurrency] ?? null}
                   subMode={paySubMode} onSubModeChange={setPaySubMode}
                   prefillIntent={prefillIntent} onPrefillConsumed={() => setPrefillIntent(null)}
-                  prefillScan={pendingTill} onPrefillScanConsumed={() => setPendingTill(null)}
+                  prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)}
                   onScannedLink={handleUrl}
                   onLockChange={setSelectionLocked}
                   onOpenAddressBook={openAddresses}

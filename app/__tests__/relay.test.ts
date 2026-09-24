@@ -208,20 +208,20 @@ describe('relayCapabilities', () => {
   } as unknown as Response);
 
   test('accepts only the explicit boolean capability shape', async () => {
-    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => Promise.resolve(response(true, {till: true, demo_faucet: false})));
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => Promise.resolve(response(true, {checkout: true, demo_faucet: false})));
     const {relayCapabilities} = require('../services/relay');
-    await expect(relayCapabilities('http://relay.example')).resolves.toEqual({till: true, demoFaucet: false});
+    await expect(relayCapabilities('http://relay.example')).resolves.toEqual({checkout: true, demoFaucet: false});
   });
 
   test.each([
     ['non-OK response', response(false, {})],
-    ['missing field', response(true, {till: true})],
-    ['wrong field type', response(true, {till: 'yes', demo_faucet: true})],
+    ['missing field', response(true, {checkout: true})],
+    ['wrong field type', response(true, {checkout: 'yes', demo_faucet: true})],
   ])('fails closed for %s', async (_name, result) => {
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => Promise.resolve(result));
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const {relayCapabilities} = require('../services/relay');
-    await expect(relayCapabilities('http://relay.example')).resolves.toEqual({till: false, demoFaucet: false});
+    await expect(relayCapabilities('http://relay.example')).resolves.toEqual({checkout: false, demoFaucet: false});
     warn.mockRestore();
   });
 
@@ -229,7 +229,7 @@ describe('relayCapabilities', () => {
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => Promise.reject(new Error('offline')));
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const {relayCapabilities} = require('../services/relay');
-    await expect(relayCapabilities('http://relay.example')).resolves.toEqual({till: false, demoFaucet: false});
+    await expect(relayCapabilities('http://relay.example')).resolves.toEqual({checkout: false, demoFaucet: false});
     warn.mockRestore();
   });
 
@@ -239,7 +239,7 @@ describe('relayCapabilities', () => {
   // naming the URL that was asked and what came back.
   test.each([
     ['non-OK response', response(false, {}), ['404']],
-    ['malformed body', response(true, {till: true}), ['till']],
+    ['malformed body', response(true, {checkout: true}), ['checkout']],
     ['network error', Promise.reject(new Error('offline')), ['offline']],
   ])('logs the URL and the reason for %s', async (_name, result, mustMention) => {
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() =>

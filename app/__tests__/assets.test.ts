@@ -674,7 +674,7 @@ describe('linkNetworkOf — the settlement chain a link must name', () => {
 
 describe('tokenEq — the ONE definition of asset-token identity', () => {
   // Collapsed 2026-09-01 from two copies (this module's and `lib/opencryptopay.ts`'s). It decides
-  // WHICH ASSET a payment link or a merchant till's offer names, so a second copy free to drift is
+  // WHICH ASSET a payment link or a merchant checkout's offer names, so a second copy free to drift is
   // a payment matched to the wrong asset. Covered directly here because the two callers reach only
   // the tokens their own fixtures carry: the null and whitespace edges below are unreachable
   // through `resolvePayLink`, which is where the drift would have hidden.

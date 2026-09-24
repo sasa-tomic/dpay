@@ -1338,7 +1338,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
           )}
           {/* The checkout lookup is two network reads and can take tens of seconds — on a screen the
               payer just pointed at a QR code. Say what is happening rather than freezing. */}
-          {ocpBusy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingTill}</Text> : null}
+          {ocpBusy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingCheckout}</Text> : null}
           {err ? <Text style={S.err}>{err}</Text> : null}
         </>
       ) : null}

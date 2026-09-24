@@ -119,7 +119,7 @@ function installRelay(opts: {balance?: string; demoFaucet?: boolean; faucet?: {o
         : Promise.reject(new Error('offline'));
     }
     if (u.includes('/api/v1/capabilities')) {
-      return Promise.resolve({ok: true, status: 200, json: () => Promise.resolve({till: false, demo_faucet: opts.demoFaucet ?? true})} as unknown as Response);
+      return Promise.resolve({ok: true, status: 200, json: () => Promise.resolve({checkout: false, demo_faucet: opts.demoFaucet ?? true})} as unknown as Response);
     }
     if (u.includes('/api/v1/faucet')) {
       const f = opts.faucet ?? {ok: true, body: {balance: '10000'}};

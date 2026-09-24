@@ -57,7 +57,7 @@ export function OcpAssetChoice({declined, options, busy, labelOf, onPick, onCanc
           <Text style={[S.secondaryBtnText, busy && S.disabledText]}>{M.pay.payAmount(labelOf(o))}</Text>
         </Pressable>
       ))}
-      {busy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingTill}</Text> : null}
+      {busy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingCheckout}</Text> : null}
       <Pressable
         testID="btn-ocp-choose-cancel"
         style={S.ghostBtn}

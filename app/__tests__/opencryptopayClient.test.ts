@@ -3,7 +3,7 @@
  * `docs/specs/2026-09-01-opencryptopay-implementation.md`.
  *
  * Every fixture below is a VERBATIM body recorded from the live provider on 2026-09-01 against the
- * public test till `pl_beeddb41cd4b6d9e`, except where a comment says otherwise. No test touches the
+ * public test checkout `pl_beeddb41cd4b6d9e`, except where a comment says otherwise. No test touches the
  * network: `globalThis.fetch` is replaced at the boundary and restored afterwards, exactly as
  * `relay.test.ts` does for the relay clients (which this file does not otherwise overlap — that
  * suite covers `fetchWithTimeout` itself, this one covers what the OCP client does with its answers).
@@ -45,12 +45,12 @@ import {join} from 'path';
 
 const realFetch = globalThis.fetch;
 
-/** dpay's OWN till answers step 4 while it has not yet seen the transfer in the merchant's ledger
+/** dpay's OWN checkout answers step 4 while it has not yet seen the transfer in the merchant's ledger
  *  history. READ from the committed golden rather than copied into a literal here — that file is the
- *  single statement of what this relay puts on the wire (`dfx/till_wire.json`), and a copy is a
- *  place for the two to drift. Loaded at test time exactly as `tillWire.test.ts` loads it. */
-const TILL_PENDING_BODY = (JSON.parse(
-  readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8'),
+ *  single statement of what this relay puts on the wire (`dfx/checkout_wire.json`), and a copy is a
+ *  place for the two to drift. Loaded at test time exactly as `checkoutWire.test.ts` loads it. */
+const CHECKOUT_PENDING_BODY = (JSON.parse(
+  readFileSync(join(__dirname, '..', '..', 'dfx', 'checkout_wire.json'), 'utf8'),
 ) as {submit_pending: Record<string, unknown>}).submit_pending;
 
 afterEach(() => {
@@ -70,7 +70,7 @@ const DETAILS_200 = JSON.parse(
 /** The provider's error envelope is NestJS's. Recorded for an unknown link id. */
 const LINK_NOT_FOUND_404 = {statusCode: 404, message: 'Payment link not found', error: 'Not Found'};
 
-/** CONSTRUCTED, not recorded: the public test till always has a charge on it, so the "no pending
+/** CONSTRUCTED, not recorded: the public test checkout always has a charge on it, so the "no pending
  *  payment" 404 could not be reproduced. Built from the findings doc's measurement that this 404
  *  "still carries the merchant identity" — i.e. the payment-link payload above with the quote and
  *  the transfer amounts absent. What the client keys on is the payload marker (`tag`/`displayName`),
@@ -525,23 +525,23 @@ describe('submitProof', () => {
   });
 
   test('a provider that says PENDING is not accepted — its own verdict outranks the 2xx', async () => {
-    // The body is dpay's own till's (`dfx/till_wire.json`): it TOOK the report and has not yet seen
+    // The body is dpay's own checkout's (`dfx/checkout_wire.json`): it TOOK the report and has not yet seen
     // the transfer in the merchant's ledger history. Reading the 202 alone would put "Paid ✓" on
     // screen on the strength of an answer that says the opposite.
-    const mock = installResponse(202, TILL_PENDING_BODY);
+    const mock = installResponse(202, CHECKOUT_PENDING_BODY);
     const out = await submitProof(DETAILS, 'InternetComputer', 'VCHF', '81001');
     expect(out.kind).toBe('pending');
     if (out.kind !== 'pending') return;
     // The diagnostic carries the transfer AND what the provider said, because that is the whole
     // post-mortem for a payment made far from any computer.
     expect(out.detail).toContain('81001');
-    expect(out.detail).toContain(String(TILL_PENDING_BODY.message));
+    expect(out.detail).toContain(String(CHECKOUT_PENDING_BODY.message));
     expect(mock).toHaveBeenCalledTimes(1);
   });
 
   test('a 2xx that reports a SETTLED status is accepted — only the pending verdict is special', async () => {
     // The other direction, and the reason the check reads the FIELD instead of distrusting 2xx as a
-    // class: dpay's till answers `{"status":"OK","paid":<block>}` once it has seen the transfer, and
+    // class: dpay's checkout answers `{"status":"OK","paid":<block>}` once it has seen the transfer, and
     // that is a credited sale. (A 2xx with no status at all is the case above this describe's
     // earlier test — DFX's shape — and stays accepted for the same reason.)
     installResponse(200, {status: 'OK', paid: 81001});
@@ -675,7 +675,7 @@ function assetById(id: string): SelectableAsset {
 /** The relay this wallet is configured to talk to. NOT the scanned host: every case in this file is
  *  DFX's provider, which is exactly the party the wallet cannot vouch for. The trust rule itself is
  *  `selectPayableOffers`' business (`opencryptopay.test.ts`); what this constant does here is keep
- *  every case below on the untrusted side of it, which is where a stranger's till belongs. */
+ *  every case below on the untrusted side of it, which is where a stranger's checkout belongs. */
 const RELAY_URL = 'https://dpay.kalaj.org';
 
 function ctx(id: string, nowMs = NOW) {
@@ -683,7 +683,7 @@ function ctx(id: string, nowMs = NOW) {
 }
 
 describe('resolveOcpScan', () => {
-  test('the recorded till + the selected asset produce the exact transfer the payer will approve', async () => {
+  test('the recorded checkout + the selected asset produce the exact transfer the payer will approve', async () => {
     const mock = installRoutes([
       {match: '/lnurlp/cb/', status: 200, body: CB_ICP_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
@@ -712,7 +712,7 @@ describe('resolveOcpScan', () => {
   });
 
   test('a destination on ANOTHER ledger is refused — never paid because the amount looked right', async () => {
-    // ICP is on the till's list and is a wallet asset, but the provider answers with the VCHF
+    // ICP is on the checkout's list and is a wallet asset, but the provider answers with the VCHF
     // ledger's address. Paying it would send ICP to a VCHF ledger account: a different asset —
     // and, since the reported identifier is spelled from the URI's ledger, it would also be
     // reported as a VCHF block. Refused at the URI, long before either could happen.
@@ -767,10 +767,10 @@ describe('resolveOcpScan', () => {
     expect(out.target.rawAmount).toBe('12214220');
   });
 
-  test('an asset the till does not take offers the ones it does, on the rail the payer is on', async () => {
+  test('an asset the checkout does not take offers the ones it does, on the rail the payer is on', async () => {
     // ckUSDC is dpay's stated launch rail and the live provider does not accept it — the refusal a
     // real payer hits at a checkout. Sending them to Balances to switch and re-aim a camera is a
-    // round trip a queue does not allow, so the till's own menu is offered instead. Only the IC
+    // round trip a queue does not allow, so the checkout's own menu is offered instead. Only the IC
     // offers: SOL is payable, but taking it would mean unmounting this rail's Pay screen.
     const mock = installRoutes([{match: '/lnurlp/pl_', status: 200, body: DETAILS_200}]);
     const out = await resolveOcpScan(SCAN, ctx('ic:2'));
@@ -778,9 +778,9 @@ describe('resolveOcpScan', () => {
     expect(out.kind).toBe('choose');
     if (out.kind !== 'choose') return;
     expect(out.host).toBe('api.dfx.swiss');
-    // Every IC asset the till lists and this wallet carries — since the 2026-09-19 VEUR retirement
-    // that no longer includes VEUR (the till's legacy line is skipped, not paid), and the menu
-    // follows the till's own order for the rest.
+    // Every IC asset the checkout lists and this wallet carries — since the 2026-09-19 VEUR retirement
+    // that no longer includes VEUR (the checkout's legacy line is skipped, not paid), and the menu
+    // follows the checkout's own order for the rest.
     expect(out.options.map(o => o.assetId)).toEqual(['ic:1', 'ic:7', 'ic:8']);
     // The amount is IN ITS OWN UNITS — the price differs per asset, so a menu of bare names would
     // be a choice made blind.
@@ -790,7 +790,7 @@ describe('resolveOcpScan', () => {
     expect(mock.mock.calls.length).toBe(1);
   });
 
-  test('an asset the till does not take is refused by name when the menu is on the OTHER rail', async () => {
+  test('an asset the checkout does not take is refused by name when the menu is on the OTHER rail', async () => {
     // Nothing on the IC rail here, so there is no menu this Pay screen could offer — and the
     // instruction goes back to being "switch in Balances", which is the only way to reach SOL.
     const solOnly = {
@@ -801,7 +801,7 @@ describe('resolveOcpScan', () => {
     const out = await resolveOcpScan(SCAN, ctx('ic:2'));
     expect(out).toEqual({
       kind: 'refused',
-      // Named as the WALLET names them, in the order the till listed them.
+      // Named as the WALLET names them, in the order the checkout listed them.
       message: M.pay.ocp.assetNotAccepted('USDC', 'SOL'),
     });
   });
@@ -855,7 +855,7 @@ describe('resolveOcpScan', () => {
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.quoteExpired});
   });
 
-  test('a till whose every asset is unpayable here says so, instead of pointing at Balances', async () => {
+  test('a checkout whose every asset is unpayable here says so, instead of pointing at Balances', async () => {
     // "Switch asset in Balances" is only an instruction when there IS one to switch to.
     const onlyForeign = {
       ...DETAILS_200,
@@ -866,9 +866,9 @@ describe('resolveOcpScan', () => {
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.noPayableAsset('USDT')});
   });
 
-  test('a method the provider marks unavailable is refused as that, with what the till can still take', async () => {
+  test('a method the provider marks unavailable is refused as that, with what the checkout can still take', async () => {
     // MEASURED: `transferAmounts[].available` is false for methods the provider currently cannot
-    // service. "This till doesn't take VCHF" would be a lie here — it does; the provider just
+    // service. "This checkout doesn't take VCHF" would be a lie here — it does; the provider just
     // can't settle it right now — so the copy has to say that and name the way out.
     const icDown = {
       ...DETAILS_200,
@@ -895,10 +895,10 @@ describe('resolveOcpScan', () => {
     });
   });
 
-  test('an unavailable method is not blamed for an asset the till never offered', async () => {
+  test('an unavailable method is not blamed for an asset the checkout never offered', async () => {
     // The refusal must be matched to the SELECTED asset. The live provider marks methods this
     // wallet has no rail for unavailable on every response, so an unmatched check would tell a
-    // ckUSDC payer their asset was blocked when the till simply does not take it.
+    // ckUSDC payer their asset was blocked when the checkout simply does not take it.
     const solDown = {
       ...DETAILS_200,
       transferAmounts: DETAILS_200.transferAmounts.map((t: {method: string}) =>
@@ -907,9 +907,9 @@ describe('resolveOcpScan', () => {
     };
     installRoutes([{match: '/lnurlp/pl_', status: 200, body: solDown}]);
     const out = await resolveOcpScan(SCAN, ctx('ic:2'));
-    // The till never named ckUSDC, so the answer is its menu — and the down Solana method is simply
+    // The checkout never named ckUSDC, so the answer is its menu — and the down Solana method is simply
     // absent from it rather than blamed for an asset it never offered. VEUR is NOT on the menu
-    // since the 2026-09-19 retirement (the wallet no longer carries ic:9); the rest keep the till's
+    // since the 2026-09-19 retirement (the wallet no longer carries ic:9); the rest keep the checkout's
     // listing order.
     expect(out.kind).toBe('choose');
     if (out.kind !== 'choose') return;
@@ -917,10 +917,10 @@ describe('resolveOcpScan', () => {
   });
 
   test('Solana USDC is refused BY NAME rather than buried under a menu', async () => {
-    // The till DOES take USDC on Solana; dpay will not pay it because the provider's URI names no
-    // token account. Offering "pay SOL instead" under a heading that says the till doesn't take
-    // USDC would be false about the till AND would drop the safety reason. The specific refusal
-    // wins over the menu whenever the till's list names the selected asset.
+    // The checkout DOES take USDC on Solana; dpay will not pay it because the provider's URI names no
+    // token account. Offering "pay SOL instead" under a heading that says the checkout doesn't take
+    // USDC would be false about the checkout AND would drop the safety reason. The specific refusal
+    // wins over the menu whenever the checkout's list names the selected asset.
     installRoutes([{match: '/lnurlp/pl_', status: 200, body: DETAILS_200}]);
     const out = await resolveOcpScan(SCAN, ctx('solana:USDC'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.solanaTokenUnsupported('USDC')});
@@ -979,7 +979,7 @@ describe('resolveOcpScan', () => {
       .toEqual({kind: 'refused', message: M.pay.ocp.notEnoughTime});
   });
 
-  test('a till whose callback yields no submission URL never reaches the payer at all', async () => {
+  test('a checkout whose callback yields no submission URL never reaches the payer at all', async () => {
     // Finding 1, end to end: the funds must not move for a provider that could never be told about
     // them. Refused BEFORE the review, with its own instruction — another scan gets the same
     // callback, so "scan again" would be a dead end; the way out is another payment method.
@@ -993,7 +993,7 @@ describe('resolveOcpScan', () => {
     warn.mockRestore();
   });
 
-  test('a till whose callback points at another host never reaches the destination call', async () => {
+  test('a checkout whose callback points at another host never reaches the destination call', async () => {
     // End to end: the divergence stops the sequence at the FIRST read. The `/cb/` route below is
     // fixtured and must stay untouched — asking that host for a destination address would already
     // be following the redirect this refusal exists to stop.
@@ -1008,7 +1008,7 @@ describe('resolveOcpScan', () => {
     warn.mockRestore();
   });
 
-  test('a till with no charge on it names the merchant and what the cashier must do', async () => {
+  test('a checkout with no charge on it names the merchant and what the cashier must do', async () => {
     installRoutes([{match: '/lnurlp/pl_', status: 404, body: NO_PENDING_404}]);
     const out = await resolveOcpScan(SCAN, ctx('ic:8'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.noPendingCharge('Test Shop')});
@@ -1091,7 +1091,7 @@ describe('payAndReport', () => {
     const out = await payAndReport(DETAILS, 'InternetComputer', 'VCHF', settled);
     // The provider's OWN sentence is quoted into the message, not just logged. After the money has
     // moved it is the only statement of WHY the sale went uncredited, and it is what the payer
-    // repeats at the till — a payer holding a phone that says only "it was refused" has nothing to
+    // repeats at the checkout — a payer holding a phone that says only "it was refused" has nothing to
     // say to the cashier. It is still framed by dpay's localized instruction, never presented bare.
     expect(out.kind).toBe('unresolved');
     if (out.kind !== 'unresolved') return;
@@ -1109,7 +1109,7 @@ describe('payAndReport', () => {
     // It must not borrow the never-answered sentence either: that one sends the payer to chase the
     // merchant with a reference, which is the wrong instruction when the provider already has it.
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const mock = installResponse(202, TILL_PENDING_BODY);
+    const mock = installResponse(202, CHECKOUT_PENDING_BODY);
     const out = await payAndReport(DETAILS, 'InternetComputer', 'VCHF', settled);
     expect(out).toEqual({kind: 'unresolved', message: M.pay.ocp.submitPending(REFERENCE)});
     expect(out.kind === 'unresolved' && out.message).not.toBe(M.pay.ocp.submitUnknown(REFERENCE));

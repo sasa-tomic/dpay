@@ -5,7 +5,7 @@
  * Every affordability gate in the wallet reads this hook's output, and the hard refusals
  * ("Not enough balance to cover this payment.", no sign control at all) are computed from it. So
  * the hook's contract is not a display detail: if it ever answered `'0'` where it means "the relay
- * did not tell me", a payer holding the money would be refused at a till. The relay is honest here
+ * did not tell me", a payer holding the money would be refused at a checkout. The relay is honest here
  * by construction — `balances` in `crates/dpay-relay/src/app.rs` OMITS a currency whose ledger
  * query errored or timed out rather than reporting zero — and these tests pin the app half of that
  * contract:

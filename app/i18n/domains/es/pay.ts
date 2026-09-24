@@ -92,7 +92,7 @@ export const payEs: PayMessages = {
     proofElsewhere: (quoteHost, proofHost) =>
       `El precio de este código viene de ${quoteHost}, pero el comprobante de tu pago iría a ${proofHost}. Un pago no puede responder ante dos empresas, así que dpay se ha detenido. No se ha pagado nada: pide al comercio su propio código de pago.`,
     checkoutPrice: (price, host) => `${price} · precio de ${host}`,
-    checkingTill: 'Comprobando con el proveedor de pagos del comercio…',
+    checkingCheckout: 'Comprobando con el proveedor de pagos del comercio…',
     badCode:
       'Este código está dañado, o no es un código de pago. Pide al comercio que lo muestre otra vez y comprueba que no lo tape nada.',
     notHttps:
@@ -274,7 +274,7 @@ export const receiveEs: ReceiveMessages = {
   checkout: {
     checkoutCode: 'Muestra también un código para apps compatibles con OpenCryptoPay (Binance Pay, MoonPay) — el pagador debe tener la app abierta',
 
-    ringUpHint: 'Abrir este importe en tu caja y mostrar al cliente un código pagable',
+    openChargeHint: 'Abrir este importe en tu caja y mostrar al cliente un código pagable',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'Un importe de caja llega hasta el céntimo: pon 10.50 en lugar de 10.505.'
@@ -298,8 +298,8 @@ export const receiveEs: ReceiveMessages = {
       `La caja rechazó este importe: «${said}» No hay nada que pagar. Corrígelo y vuelve a cobrar.`,
     refusedNoReason: status =>
       `La caja rechazó este importe (HTTP ${status}) sin motivo, así que no hay nada que pagar. Vuelve a cobrar; si lo rechaza dos veces, avisa a quien gestiona el relay.`,
-    mispriced: (rung, quoted) =>
-      `Cobraste ${rung}, pero la caja respondió con ${quoted}. dpay no mostrará un código con una cifra que nadie ha elegido: no hay nada que pagar. Vuelve a cobrar; si ocurre otra vez, avisa a quien gestiona el relay antes de aceptar dinero.`,
+    mispriced: (cobrado, quoted) =>
+      `Cobraste ${cobrado}, pero la caja respondió con ${quoted}. dpay no mostrará un código con una cifra que nadie ha elegido: no hay nada que pagar. Vuelve a cobrar; si ocurre otra vez, avisa a quien gestiona el relay antes de aceptar dinero.`,
     unsigned:
       'Este teléfono no pudo firmar el importe, así que no hay nada que pagar. Cierra dpay, ábrelo otra vez y vuelve a cobrar.',
     servedOther: (served, picked) =>

@@ -140,7 +140,7 @@ export type PayMessages = {
     checkoutPrice: (price: string, host: string) => string;
     /** Shown while the two provider reads are in flight — up to half a minute of nothing, on a
      *  screen the payer just pointed at a QR code. */
-    checkingTill: string;
+    checkingCheckout: string;
     badCode: string;
     notHttps: string;
     providerUnreachable: string;
@@ -390,7 +390,7 @@ export const payEn: PayMessages = {
     proofElsewhere: (quoteHost, proofHost) =>
       `This code’s price comes from ${quoteHost}, but your payment proof would go to ${proofHost}. One payment can’t answer to two companies, so dpay stopped. Nothing has been paid — ask the merchant for their own payment code.`,
     checkoutPrice: (price, host) => `${price} · price from ${host}`,
-    checkingTill: 'Checking with the merchant’s payment provider…',
+    checkingCheckout: 'Checking with the merchant’s payment provider…',
     badCode:
       'This code is damaged, or it isn’t a payment code. Ask the merchant to show it again, and check nothing is covering it.',
     notHttps:
@@ -400,7 +400,7 @@ export const payEn: PayMessages = {
     badDestination: host =>
       `${host} returned a payment address that doesn’t match what you chose, so dpay stopped. Nothing has been paid — don’t pay this code. Ask the merchant for their own code again.`,
     providerRefused: (host, detail) =>
-      `The merchant’s payment provider (${host}) refused this payment. Nothing has been paid. Ask the merchant to ring up the sale again, then scan the code. If it keeps failing, show them what their provider said: “${detail}”.`,
+      `The merchant’s payment provider (${host}) refused this payment. Nothing has been paid. Ask the merchant to open a fresh charge, then scan the code. If it keeps failing, show them what their provider said: “${detail}”.`,
     providerFailed: (host, status) =>
       `The merchant’s payment provider (${host}) returned an error (${status}) with no reason. Nothing has been paid. Wait a moment and scan again; if it keeps failing, ask the merchant for another way to pay.`,
     badAnswer: (host, part) =>
@@ -412,7 +412,7 @@ export const payEn: PayMessages = {
       expiry: 'a readable expiry time',
     },
     noPendingCharge: merchant =>
-      `${merchant}’s checkout has no charge waiting. Ask the cashier to ring up the sale first, then scan again.`,
+      `${merchant}’s checkout has no charge waiting. Ask the cashier to open a charge first, then scan again.`,
     ref: {
       icBlock: index => `ledger block ${index}`,
       solTransaction: signature => `Solana transaction ${signature}`,
@@ -612,7 +612,7 @@ export type ReceiveMessages = {
      *  scan — and that the payer must be online (this is an online-payer standard). */
     checkoutCode: string;
 
-    ringUpHint: string;
+    openChargeHint: string;
     /** Why the typed total cannot be a checkout charge. Three causes, three different corrections. */
     badAmount: (reason: 'too-precise' | 'not-a-number' | 'too-large') => string;
 
@@ -624,7 +624,7 @@ export type ReceiveMessages = {
     noCheckoutAsset: string;
     switchTo: (asset: string) => string;
 
-    /** The ring-up did not happen. Nothing is payable in any of these — say so, then say what next. */
+    /** Opening a charge did not happen. Nothing is payable in any of these — say so, then say what next. */
     failedTitle: string;
     notServed: (host: string) => string;
     unreachable: (host: string) => string;
@@ -632,10 +632,10 @@ export type ReceiveMessages = {
      *  the reused nonce), and it is what the merchant repeats to whoever runs the relay. */
     refused: (said: string) => string;
     refusedNoReason: (status: number) => string;
-    /** The checkout answered with a price that is not the one that was rung up. */
-    mispriced: (rung: string, quoted: string) => string;
+    /** The checkout answered with a price that is not the one that was opened. */
+    mispriced: (entered: string, quoted: string) => string;
     /** The checkout opened the charge in an asset OTHER than the one picked — it serves what it
-     *  serves, and nothing is shown for a charge the counter did not ring up. `served` names the
+     *  serves, and nothing is shown for a charge the counter did not open. `served` names the
      *  asset the checkout DID open, `picked` the currency the cashier chose. */
     servedOther: (served: string, picked: string) => string;
     unsigned: string;
@@ -763,36 +763,36 @@ export const receiveEn: ReceiveMessages = {
   checkout: {
     checkoutCode: 'Also show a code for OpenCryptoPay-compatible apps (Binance Pay, MoonPay) — the payer must have the app open',
 
-    ringUpHint: 'Open this charge on your checkout and show the customer a payable code',
+    openChargeHint: 'Open this charge on your checkout and show the customer a payable code',
     badAmount: reason =>
       reason === 'too-precise'
-        ? 'A checkout charge is in whole rappen — ring up 10.50 rather than 10.505.'
+        ? 'A checkout charge is in whole rappen — enter 10.50 rather than 10.505.'
         : reason === 'too-large'
-        ? 'That total is too large to ring up. Enter what this customer owes.'
+        ? 'That total is too large to open a charge with. Enter what this customer owes.'
         : 'Enter the total to charge, like 10.50.',
 
     wrongAssetTitle: 'A checkout code is paid in VCHF',
     wrongAsset: (selected, network) =>
-      `A checkout code is always paid in VCHF on the Internet Computer — dpay never swaps. This request is in ${selected}${network ? ` on ${network}` : ''}. Switch to VCHF to ring one up, or keep the dpay code: any phone camera opens it, and it is paid in ${selected}.`,
+      `A checkout code is always paid in VCHF on the Internet Computer — dpay never swaps. This request is in ${selected}${network ? ` on ${network}` : ''}. Switch to VCHF to open one, or keep the dpay code: any phone camera opens it, and it is paid in ${selected}.`,
     noCheckoutAsset:
       'This wallet has no VCHF, so there is no account for a checkout charge. Use the dpay code instead — any phone camera opens it, and it takes the asset you chose.',
     switchTo: asset => `Switch to ${asset}`,
 
-    failedTitle: 'The charge was not rung up',
+    failedTitle: 'The charge was not opened',
     notServed: host =>
-      `${host} does not serve checkout codes, so nothing was rung up. Ask whoever runs that relay to turn the checkout on, or use the dpay code — it needs no checkout.`,
+      `${host} does not serve checkout codes, so nothing was opened. Ask whoever runs that relay to turn the checkout on, or use the dpay code — it needs no checkout.`,
     unreachable: host =>
-      `dpay could not reach ${host}, so nothing was rung up. Checkout codes are created online. Check the connection and try again — or use the dpay code, which this phone can show while offline.`,
+      `dpay could not reach ${host}, so nothing was opened. Checkout codes are created online. Check the connection and try again — or use the dpay code, which this phone can show while offline.`,
     refused: said =>
-      `The checkout refused this charge: “${said}” Nothing is payable. Put that right, then ring up again.`,
+      `The checkout refused this charge: “${said}” Nothing is payable. Put that right, then open a fresh charge.`,
     refusedNoReason: status =>
-      `The checkout refused this charge (HTTP ${status}) without a reason, so nothing is payable. Ring up again; if it refuses twice, tell whoever runs the relay.`,
-    mispriced: (rung, quoted) =>
-      `You rang up ${rung}, but the checkout answered with ${quoted}. dpay won’t show a code for a number nobody chose, so nothing is payable. Ring up again; if it happens twice, tell whoever runs the relay before taking money.`,
+      `The checkout refused this charge (HTTP ${status}) without a reason, so nothing is payable. Open a fresh charge; if it refuses twice, tell whoever runs the relay.`,
+    mispriced: (entered, quoted) =>
+      `You entered ${entered}, but the checkout answered with ${quoted}. dpay won’t show a code for a number nobody chose, so nothing is payable. Open a fresh charge; if it happens twice, tell whoever runs the relay before taking money.`,
     servedOther: (served, picked) =>
-      `The checkout opened this charge in ${served}, not ${picked} — it does not settle ${picked} yet, so nothing is payable. Ring up again in ${served}, or ask whoever runs the relay to serve it.`,
+      `The checkout opened this charge in ${served}, not ${picked} — it does not settle ${picked} yet, so nothing is payable. Open a fresh charge in ${served}, or ask whoever runs the relay to serve it.`,
     unsigned:
-      'This phone could not sign the charge, so nothing is payable. Close and reopen dpay, then ring up again.',
+      'This phone could not sign the charge, so nothing is payable. Close and reopen dpay, then open a fresh charge.',
     tryAgain: 'Try again',
 
     settleOption: (token, currency) => `${token} · ${currency}`,
@@ -813,7 +813,7 @@ export const receiveEn: ReceiveMessages = {
       nfc === 'tap'
         ? 'Show this to the customer — any phone camera opens it, and a dpay phone can tap it too.'
         : nfc === 'expired'
-        ? 'Show this to the customer — any phone camera opens it. Tapping has timed out on this code; ring up again if they want to tap.'
+        ? 'Show this to the customer — any phone camera opens it. Tapping has timed out on this code; open a fresh charge if they want to tap.'
         : 'Show this to the customer — any phone camera opens it and pays.',
     waiting: 'Waiting for the payment…',
     cantCheck:
@@ -836,12 +836,12 @@ export const receiveEn: ReceiveMessages = {
       : 'The checkout no longer has this charge',
     endedBody: reason =>
       reason === 'expired'
-        ? 'Nothing arrived for it, and nobody can pay it now. Ring up again to show the customer a fresh code.'
+        ? 'Nothing arrived for it, and nobody can pay it now. Open a fresh charge to show the customer a new code.'
         : reason === 'cancelled'
-        ? 'Nothing is owed on it and nobody can pay it. Ring up again when the next customer is ready.'
+        ? 'Nothing is owed on it and nobody can pay it. Open a fresh charge when the next customer is ready.'
         : reason === 'superseded'
-        ? 'Another charge was rung up on this checkout, so this code no longer takes money. Ring up again to show a fresh one.'
-        : 'The relay no longer has it — most likely it restarted. Nothing was credited here. Ring up again; if the customer says they paid, check your VCHF balance and Transactions first.',
+        ? 'Another charge was opened on this checkout, so this code no longer takes money. Open a fresh charge to show a new one.'
+        : 'The relay no longer has it — most likely it restarted. Nothing was credited here. Open a fresh charge; if the customer says they paid, check your VCHF balance and Transactions first.',
     ringUpNext: 'Next customer',
 
     paidAmount: price => `Paid ${price}`,

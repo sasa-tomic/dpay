@@ -25,7 +25,7 @@ function goldenHex(name: string): string {
 }
 
 /** Structural view of the three exports under test (the shim targets the browser build, so it is
- *  `require`d rather than statically imported — the tillOpenSignature.test.ts seam). */
+ *  `require`d rather than statically imported — the checkoutOpenSignature.test.ts seam). */
 interface SwapCore {
   icpDepositAndSwapArg(
     amountIn: string, amountOutMinimum: string, tokenInFee: string, tokenOutFee: string, zeroForOne: boolean,

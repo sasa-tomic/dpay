@@ -4,7 +4,7 @@
  * WHAT BROKE, AND WHY A TEST IS THE FIX. Palette v5 (2026-09-08) re-grounded every accent for WCAG
  * AA and moved the tangerine. The app moved with it. The relay's four static pages did not: each
  * carried its OWN hand-typed copy of the light+dark var block, so the website kept painting v4 —
- * and `till.html`/`till-code.html` had drifted off v4 *before* that change, with their own `--ok`,
+ * and `checkout.html`/`checkout-code.html` had drifted off v4 *before* that change, with their own `--ok`,
  * `--panel`, `--line` and a dark `--ink` set to the LIGHT page colour. Four copies of one fact is
  * four places to forget, and nothing failed when three of them were forgotten.
  *
@@ -30,7 +30,7 @@ import {relayPaletteCss} from '../config/relayPaletteCss';
 
 const REPO = join(__dirname, '..', '..');
 const ASSETS = join(REPO, 'crates', 'dpay-relay', 'assets');
-const PAGES = ['landing.html', 'privacy.html', 'till.html', 'till-code.html'] as const;
+const PAGES = ['landing.html', 'privacy.html', 'checkout.html', 'checkout-code.html'] as const;
 
 const read = (name: string) => readFileSync(join(ASSETS, name), 'utf8');
 
@@ -53,7 +53,7 @@ describe('the relay palette is GENERATED from the app palette', () => {
 
   test('it serves BOTH theme mechanisms, so no page had to change how it resolves the theme', () => {
     const css = read('palette.css');
-    // till/till-code follow the OS (class="scheme-auto", no script); landing/privacy resolve the
+    // checkout/checkout-code follow the OS (class="scheme-auto", no script); landing/privacy resolve the
     // theme themselves and set data-theme-mode pre-paint. One block, both hooks.
     expect(css).toContain('@media (prefers-color-scheme: dark)');
     expect(css).toContain('html.scheme-auto');

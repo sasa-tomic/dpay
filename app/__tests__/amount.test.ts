@@ -185,7 +185,7 @@ describe('rejections — typed err codes matching Rust AmountError', () => {
 
 // The payee-quoted wire under the exact-price rule (founder 2026-09-12: if something costs $1,
 // the customer pays exactly $1 — the merchant pays the fees). `nettedWireRaw` is the p2p
-// request's half of what the dpay till does at quote time (`till_raw_units` in the relay): the
+// request's half of what the dpay checkout does at quote time (`checkout_raw_units` in the relay): the
 // wire carries price − fee, so the payer — who pays the wire verbatim — moves their account by
 // exactly the price. An unknowable fee nets nothing (the payer then pays price+fee, honestly
 // displayed); a price that does not clear the fee refuses the request outright — a zero/negative

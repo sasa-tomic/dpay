@@ -55,7 +55,7 @@ const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency'
   fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
   onramp: 'Unavailable', offramp: 'Unavailable', liquidity: null, ramp_partner: null, testnet: false, ...d,
 });
-// VCHF — the asset a dpay till settles in, and the one a merchant reader is realistically armed on.
+// VCHF — the asset a dpay checkout settles in, and the one a merchant reader is realistically armed on.
 const CATALOG: CurrencyDescriptor[] = [mk({
   currency: 7, minter_family: null, ledger: 'ly36x-wiaaa-aaaai-aqj7q-cai', symbol: 'CHF', decimals: 8,
   wrapper_name: 'VCHF', backing_symbol: 'CHF', network: 'Internet Computer', display_decimals: 2,

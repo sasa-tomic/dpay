@@ -93,7 +93,7 @@ export const payFr: PayMessages = {
     proofElsewhere: (quoteHost, proofHost) =>
       `Le prix de ce code vient de ${quoteHost}, mais la preuve de votre paiement partirait vers ${proofHost}. Un paiement ne peut pas répondre à deux sociétés : dpay s’est arrêté. Rien n’a été payé — demandez au commerçant son propre code de paiement.`,
     checkoutPrice: (price, host) => `${price} · prix de ${host}`,
-    checkingTill: 'Vérification auprès du prestataire de paiement du commerçant…',
+    checkingCheckout: 'Vérification auprès du prestataire de paiement du commerçant…',
     badCode:
       'Ce code est abîmé, ou ce n’est pas un code de paiement. Demandez au commerçant de le montrer à nouveau, et vérifiez que rien ne le recouvre.',
     notHttps:
@@ -276,7 +276,7 @@ export const receiveFr: ReceiveMessages = {
   checkout: {
     checkoutCode: 'Affiche aussi un code pour les apps compatibles OpenCryptoPay (Binance Pay, MoonPay) — le payeur doit avoir l’application ouverte',
 
-    ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code payable',
+    openChargeHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code payable',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'Un montant de caisse s’arrête au centime — saisissez 10.50 plutôt que 10.505.'
@@ -300,8 +300,8 @@ export const receiveFr: ReceiveMessages = {
       `La caisse a refusé ce montant : « ${said} » Rien n’est payable. Corrigez cela, puis recommencez.`,
     refusedNoReason: status =>
       `La caisse a refusé ce montant (HTTP ${status}) sans raison : rien n’est payable. Recommencez ; si elle refuse deux fois, prévenez la personne qui exploite le relais.`,
-    mispriced: (rung, quoted) =>
-      `Vous avez encaissé ${rung}, mais la caisse a répondu ${quoted}. dpay n’affichera pas un code pour un montant que personne n’a choisi : rien n’est payable. Recommencez ; si cela se reproduit, prévenez la personne qui exploite le relais avant d’accepter de l’argent.`,
+    mispriced: (encaisse, quoted) =>
+      `Vous avez encaissé ${encaisse}, mais la caisse a répondu ${quoted}. dpay n’affichera pas un code pour un montant que personne n’a choisi : rien n’est payable. Recommencez ; si cela se reproduit, prévenez la personne qui exploite le relais avant d’accepter de l’argent.`,
     unsigned:
       'Ce téléphone n’a pas pu signer le montant : rien n’est payable. Fermez puis rouvrez dpay, et recommencez.',
     servedOther: (served, picked) =>

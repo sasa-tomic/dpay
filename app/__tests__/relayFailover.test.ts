@@ -16,7 +16,7 @@
  *     burning every caller budget forever; a single-address walk is still byte-for-byte pre-R1.
  *
  * `globalThis.fetch` is replaced at the boundary with a URL-aware handler and restored afterwards
- * (the same convention as relay.test.ts / till.test.ts).
+ * (the same convention as relay.test.ts / checkout.test.ts).
  */
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';

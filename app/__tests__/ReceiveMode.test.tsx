@@ -40,23 +40,23 @@ jest.mock('../components/QrScanner', () => ({
   QrScanner: (_props: {onScan: (raw: string) => void}) => null,
 }));
 jest.mock('../components/NfcTap', () => ({NfcTap: jest.fn(() => null)}));
-// The till routes, at their module boundary: what this suite asserts is what the counter is HANDED
-// (the ring-up's note), not what the relay then does with it — `TillCharge.test.tsx` owns the
+// The checkout routes, at their module boundary: what this suite asserts is what the counter is HANDED
+// (the charge-open's note), not what the relay then does with it — `CheckoutCharge.test.tsx` owns the
 // counter's own outcomes, and e2e flow 114 owns the route end to end.
-jest.mock('../services/till', () => {
-  const actual = jest.requireActual('../services/till') as Record<string, unknown>;
+jest.mock('../services/checkout', () => {
+  const actual = jest.requireActual('../services/checkout') as Record<string, unknown>;
   return {
-    ...actual, // TILL_OFFER / chfCents / tillRawUnits / tillPriceUnits stay REAL — they are the rules
-    openTillCharge: jest.fn(),
-    tillChargeStatus: jest.fn(),
-    cancelTillCharge: jest.fn(),
+    ...actual, // CHECKOUT_OFFER / chfCents / checkoutRawUnits / checkoutPriceUnits stay REAL — they are the rules
+    openCheckoutCharge: jest.fn(),
+    checkoutChargeStatus: jest.fn(),
+    cancelCheckoutCharge: jest.fn(),
   };
 });
 
 import {DpayCore, DpayNfc} from '../services/native';
 import {icStampExpiry} from '../services/icp';
 import {confirmIncomingTransfer, fetchLedgerFee} from '../services/rail';
-import {openTillCharge, tillChargeStatus} from '../services/till';
+import {openCheckoutCharge, checkoutChargeStatus} from '../services/checkout';
 // Spied (not mocked): the store's own write behaviour is txNotes.test.ts's to pin; here only the
 // SEAM's arguments matter, and the real write keeps the rest honest.
 import * as txNotes from '../services/txNotes';
@@ -111,11 +111,11 @@ function fullProps(over: Partial<ReceiveModeProps> = {}): ReceiveModeProps {
     subMode: 'request',
     onSubModeChange: () => {},
     // The code form this suite is about is the dpay one (the share affordance lives on its request
-    // QR). The till form's own behaviour is `TillCharge.test.tsx`; a relay that serves no till
+    // QR). The checkout form's own behaviour is `CheckoutCharge.test.tsx`; a relay that serves no checkout
     // hides the selector entirely, which is also this fixture's posture.
     codeForm: 'dpay',
     onCodeFormChange: () => {},
-    tillAvailable: false,
+    checkoutAvailable: false,
     selectedCurrency: 0,
     assets: [DEMO_ASSET],
     selectedAssetId: 'ic:0',
@@ -540,7 +540,7 @@ describe('ReceiveMode — a form is laid out as a form, a code as a moment', () 
 // --- Exact-price fee netting (founder rule 2026-09-12) -------------------------------------------
 // If something costs $1, the customer pays exactly $1 — the merchant pays the fees. The p2p
 // request is the payee's QUOTE, so the WIRE it builds (the link `amount=`, the NFC machine code,
-// every confirm) carries price − ledger-fee, exactly like the relay's till (`till_raw_units`).
+// every confirm) carries price − ledger-fee, exactly like the relay's checkout (`checkout_raw_units`).
 // The payee-facing headline keeps saying the typed PRICE; ONE dim line discloses fee + net. A
 // price that does not clear the fee refuses the request before any wire exists. An unknowable
 // fee nets nothing — the payer then pays price+fee, honestly displayed, never a guessed number.
@@ -739,12 +739,12 @@ describe('ReceiveMode — payee-quoted fee netting (exact-price rule, 2026-09-12
 });
 
 // --- ONE message box, both code forms (founder 2026-09-14) ----------------------------------------
-// The papercut this replaces: the dpay form's memo unmounted when the till checkbox was checked
-// and the till rendered its OWN note input lower down — the box moved and its text reset on every
+// The papercut this replaces: the dpay form's memo unmounted when the checkout checkbox was checked
+// and the checkout rendered its OWN note input lower down — the box moved and its text reset on every
 // toggle. The truth now: ONE input, owned by this form, mounted between the amount row and the
 // checkbox in BOTH modes, text preserved across the toggle in both directions; what changes with
-// the checkbox is only what the BUTTON does with the text (payment-link memo vs signed till note).
-// `TillCharge.test.tsx` pins what the counter then does with the note; this pins the BOX.
+// the checkbox is only what the BUTTON does with the text (payment-link memo vs signed checkout note).
+// `CheckoutCharge.test.tsx` pins what the counter then does with the note; this pins the BOX.
 describe('ReceiveMode — the message box is one box, whatever the code form', () => {
   const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
   const VCHF_ASSET: SelectableAsset = {
@@ -752,10 +752,10 @@ describe('ReceiveMode — the message box is one box, whatever the code form', (
     networkLabel: 'Internet Computer', network: null, decimals: 8, minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'vchf',
   };
   const NOTE = '2× Kafi, Tisch 4';
-  // The props of the till-capable form, in both code forms — `codeForm` is wallet-owned, so a
+  // The props of the checkout-capable form, in both code forms — `codeForm` is wallet-owned, so a
   // toggle is a re-render with it flipped (exactly what the checkbox's onCodeFormChange does).
   // Annotated so the literals keep their narrow types (a bare const widens `7` to number).
-  const OVER: Partial<ReceiveModeProps> = {catalog: BUNDLED, selectedCurrency: 7, assets: [VCHF_ASSET], selectedAssetId: 'ic:7', tillAvailable: true};
+  const OVER: Partial<ReceiveModeProps> = {catalog: BUNDLED, selectedCurrency: 7, assets: [VCHF_ASSET], selectedAssetId: 'ic:7', checkoutAvailable: true};
   const CHARGE = {id: 'pl_ecd765908f264957', cents: '1050', qr: 'http://relay.test/pl/?lightning=LNURL1XYZ', reference: '19ff3250469370d21a04c100ad5ab8bb', createdSecs: 1_788_479_954, expiresAt: 1_788_483_554};
 
   /** The `memo-input` test instance — the ONE box. */
@@ -764,7 +764,7 @@ describe('ReceiveMode — the message box is one box, whatever the code form', (
   }
 
   /** The element's immediate neighbours in the form, as position evidence: the sibling BEFORE the
-   *  box must carry the amount row, the one AFTER must be the till checkbox's container. Holding in
+   *  box must carry the amount row, the one AFTER must be the checkout checkbox's container. Holding in
    *  BOTH code forms is what "same position in the form" means here. */
   function neighboursOfBox(tree: renderer.ReactTestRenderer) {
     const box = memoBox(tree);
@@ -791,12 +791,12 @@ describe('ReceiveMode — the message box is one box, whatever the code form', (
     act(() => { box.props.onChangeText(NOTE); });
 
     // …checked: the box is the SAME input, still between the amount row and the checkbox — not a
-    // till-owned twin rendered elsewhere — and the text typed a moment ago is still in it.
-    rerenderReceive(tree, {...OVER, codeForm: 'till'});
+    // checkout-owned twin rendered elsewhere — and the text typed a moment ago is still in it.
+    rerenderReceive(tree, {...OVER, codeForm: 'checkout'});
     expect(hasTestID(tree, 'memo-input')).toBe(true);
-    expect(hasTestID(tree, 'till-note-input')).toBe(false); // the twin is gone, not relocated
+    expect(hasTestID(tree, 'checkout-note-input')).toBe(false); // the twin is gone, not relocated
     expect(memoBox(tree).props.value).toBe(NOTE);
-    expect(hasTestID(tree, 'btn-till-ring-up')).toBe(true); // the BUTTON is what the checkbox flips
+    expect(hasTestID(tree, 'btn-checkout-open')).toBe(true); // the BUTTON is what the checkbox flips
     let around = neighboursOfBox(tree);
     expect(containsTestID(around.prev, 'amount-input')).toBe(true);
     expect(around.next.props?.testID).toBe('receive-code-form');
@@ -804,7 +804,7 @@ describe('ReceiveMode — the message box is one box, whatever the code form', (
     // …unchecked again: same box, same place, same text — the other direction of the toggle.
     rerenderReceive(tree, {...OVER, codeForm: 'dpay'});
     expect(hasTestID(tree, 'memo-input')).toBe(true);
-    expect(hasTestID(tree, 'till-note-input')).toBe(false);
+    expect(hasTestID(tree, 'checkout-note-input')).toBe(false);
     expect(memoBox(tree).props.value).toBe(NOTE);
     expect(hasTestID(tree, 'btn-request')).toBe(true);
     around = neighboursOfBox(tree);
@@ -814,35 +814,35 @@ describe('ReceiveMode — the message box is one box, whatever the code form', (
     act(() => { tree.unmount(); });
   });
 
-  test('a message typed while the till box is checked becomes the dpay memo on uncheck', () => {
-    // The other founding direction of the papercut: text typed while the till checkbox is checked
-    // (today it lived in the till's own input and VANISHED on uncheck) must survive into the dpay
+  test('a message typed while the checkout box is checked becomes the dpay memo on uncheck', () => {
+    // The other founding direction of the papercut: text typed while the checkout checkbox is checked
+    // (today it lived in the checkout's own input and VANISHED on uncheck) must survive into the dpay
     // form — and then ride the ordinary payment link as the memo.
-    const tree = mountReceive({...OVER, codeForm: 'till'});
+    const tree = mountReceive({...OVER, codeForm: 'checkout'});
     act(() => { memoBox(tree).props.onChangeText(NOTE); });
     rerenderReceive(tree, {...OVER, codeForm: 'dpay'});
     expect(memoBox(tree).props.value).toBe(NOTE);
     act(() => { tree.unmount(); });
   });
 
-  test('the till button rings up what the ONE box holds — the shared text is the signed note', async () => {
-    // The seam between the box and the counter: the parent's message rides the ring-up as the
+  test('the checkout button rings up what the ONE box holds — the shared text is the signed note', async () => {
+    // The seam between the box and the counter: the parent's message rides the charge-open as the
     // note (the same trip e2e flow 114 pins through the real route). Amount first, like a cashier.
-    jest.mocked(openTillCharge).mockResolvedValue({kind: 'open', charge: CHARGE});
+    jest.mocked(openCheckoutCharge).mockResolvedValue({kind: 'open', charge: CHARGE});
     // The open charge starts the merchant's poll — hand it a benign unpaid answer so the watch
     // loop inside the act flush settles instead of crashing on an undefined outcome.
-    jest.mocked(tillChargeStatus).mockResolvedValue({kind: 'status', status: {id: CHARGE.id, cents: '1050', state: 'open', createdSecs: CHARGE.createdSecs, expiresAt: CHARGE.expiresAt, paid: null, pull: null}});
+    jest.mocked(checkoutChargeStatus).mockResolvedValue({kind: 'status', status: {id: CHARGE.id, cents: '1050', state: 'open', createdSecs: CHARGE.createdSecs, expiresAt: CHARGE.expiresAt, paid: null, pull: null}});
     jest.mocked(icStampExpiry).mockResolvedValue('1800000240123456789');
     jest.mocked(DpayNfc.buildRequest).mockResolvedValue('nfc-request');
-    const tree = mountReceive({...OVER, codeForm: 'till'});
+    const tree = mountReceive({...OVER, codeForm: 'checkout'});
     act(() => {
       tree.root.findAll(node => node.props && node.props.testID === 'amount-input')[0].props.onChangeText('10.50');
       memoBox(tree).props.onChangeText(NOTE);
     });
     await act(async () => {
-      tree.root.findAll(node => node.props && node.props.testID === 'btn-till-ring-up')[0].props.onPress();
+      tree.root.findAll(node => node.props && node.props.testID === 'btn-checkout-open')[0].props.onPress();
     });
-    expect(openTillCharge).toHaveBeenCalledWith('http://relay.test', IDENTITY, '1050', 8, '10000', NOTE, 'VCHF');
+    expect(openCheckoutCharge).toHaveBeenCalledWith('http://relay.test', IDENTITY, '1050', 8, '10000', NOTE, 'VCHF');
     act(() => { tree.unmount(); });
   });
 });

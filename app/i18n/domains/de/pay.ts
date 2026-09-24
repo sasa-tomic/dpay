@@ -92,7 +92,7 @@ export const payDe: PayMessages = {
     proofElsewhere: (quoteHost, proofHost) =>
       `Der Preis dieses Codes kommt von ${quoteHost}, aber der Nachweis deiner Zahlung würde an ${proofHost} gehen. Eine Zahlung kann nicht zwei Firmen gegenüber gelten, deshalb hat dpay abgebrochen. Es wurde nichts bezahlt — bitte den Händler um seinen eigenen Zahlungscode.`,
     checkoutPrice: (price, host) => `${price} · Preis von ${host}`,
-    checkingTill: 'Wird beim Zahlungsanbieter des Händlers geprüft…',
+    checkingCheckout: 'Wird beim Zahlungsanbieter des Händlers geprüft…',
     badCode:
       'Dieser Code ist beschädigt oder gar kein Zahlungscode. Bitte den Händler, ihn erneut zu zeigen, und achte darauf, dass nichts ihn verdeckt.',
     notHttps:
@@ -281,7 +281,7 @@ export const receiveDe: ReceiveMessages = {
   checkout: {
     checkoutCode: 'Zeigt zusätzlich einen Code für OpenCryptoPay-kompatible Apps (Binance Pay, MoonPay) — der Sender muss die App geöffnet haben',
 
-    ringUpHint: 'Diesen Betrag auf deiner Kasse buchen und der Kundschaft einen zahlbaren Code zeigen',
+    openChargeHint: 'Diesen Betrag auf deiner Kasse buchen und der Kundschaft einen zahlbaren Code zeigen',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'Ein Kassenbetrag geht auf ganze Rappen — buche 10.50 statt 10.505.'
@@ -305,8 +305,8 @@ export const receiveDe: ReceiveMessages = {
       `Die Kasse hat diese Buchung abgelehnt: „${said}“ Nichts ist bezahlbar. Bring das in Ordnung und buche erneut.`,
     refusedNoReason: status =>
       `Die Kasse hat diese Buchung ohne Grund abgelehnt (HTTP ${status}); nichts ist bezahlbar. Buche erneut — lehnt sie zweimal ab, sag der Person Bescheid, die das Relay betreibt.`,
-    mispriced: (rung, quoted) =>
-      `Du hast ${rung} gebucht, die Kasse hat aber ${quoted} zurückgemeldet. dpay zeigt keinen Code für einen Betrag, den hier niemand gewählt hat — nichts ist bezahlbar. Buche erneut; wenn es wieder passiert, sag der Person Bescheid, die das Relay betreibt, bevor du Geld annimmst.`,
+    mispriced: (gebucht, gemeldet) =>
+      `Du hast ${gebucht} gebucht, die Kasse hat aber ${gemeldet} zurückgemeldet. dpay zeigt keinen Code für einen Betrag, den hier niemand gewählt hat — nichts ist bezahlbar. Buche erneut; wenn es wieder passiert, sag der Person Bescheid, die das Relay betreibt, bevor du Geld annimmst.`,
     unsigned:
       'Dieses Telefon konnte die Buchung nicht signieren; nichts ist bezahlbar. Schliesse dpay, öffne es neu und buche erneut.',
     servedOther: (served, picked) =>

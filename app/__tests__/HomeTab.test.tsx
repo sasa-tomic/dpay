@@ -238,7 +238,7 @@ describe('HomeTab — the accounts affordance IS the headline (2026-09-14)', () 
 });
 
 describe('HomeTab — the action row is three EQUAL cards (2026-09-14)', () => {
-  test('Pay is honestly named and hands off to the pay screen (the one-tap till gesture)', () => {
+  test('Pay is honestly named and hands off to the pay screen (the one-tap checkout gesture)', () => {
     const onPay = jest.fn();
     const tree = mountHome({onPay});
     const btn = pressable(tree, 'btn-home-pay');
