@@ -302,7 +302,11 @@ export const receiveEs: ReceiveMessages = {
       `Cobraste ${rung}, pero la caja respondió con ${quoted}. dpay no mostrará un código con una cifra que nadie ha elegido: no hay nada que pagar. Vuelve a cobrar; si ocurre otra vez, avisa a quien gestiona el relay antes de aceptar dinero.`,
     unsigned:
       'Este teléfono no pudo firmar el importe, así que no hay nada que pagar. Cierra dpay, ábrelo otra vez y vuelve a cobrar.',
+    servedOther: (served, picked) =>
+      `La caja abrió este cobro en ${served}, no en ${picked} — todavía no liquida ${picked}, así que no hay nada que pagar. Vuelve a cobrar en ${served} o avisa a quien gestiona el relay.`,
     tryAgain: 'Reintentar',
+
+    settleOption: (token, currency) => `${token} · ${currency}`,
 
     settlesAs: (amount, price) =>
       `Usted recibe ${amount} en Internet Computer. La comisión del libro mayor corre de su cuenta, así que el cliente paga exactamente ${price}.`,

@@ -841,7 +841,7 @@ describe('ReceiveMode — the message box is one box, whatever the code form', (
     await act(async () => {
       tree.root.findAll(node => node.props && node.props.testID === 'btn-till-ring-up')[0].props.onPress();
     });
-    expect(openTillCharge).toHaveBeenCalledWith('http://relay.test', IDENTITY, '1050', 8, '10000', NOTE);
+    expect(openTillCharge).toHaveBeenCalledWith('http://relay.test', IDENTITY, '1050', 8, '10000', NOTE, 'VCHF');
     act(() => { tree.unmount(); });
   });
 });

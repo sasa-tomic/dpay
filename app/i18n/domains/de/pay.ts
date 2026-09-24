@@ -309,7 +309,11 @@ export const receiveDe: ReceiveMessages = {
       `Du hast ${rung} gebucht, die Kasse hat aber ${quoted} zurückgemeldet. dpay zeigt keinen Code für einen Betrag, den hier niemand gewählt hat — nichts ist bezahlbar. Buche erneut; wenn es wieder passiert, sag der Person Bescheid, die das Relay betreibt, bevor du Geld annimmst.`,
     unsigned:
       'Dieses Telefon konnte die Buchung nicht signieren; nichts ist bezahlbar. Schliesse dpay, öffne es neu und buche erneut.',
+    servedOther: (served, picked) =>
+      `Die Kasse hat diese Buchung in ${served} eröffnet, nicht in ${picked} — sie unterstuetzt ${picked} noch nicht, also ist nichts bezahlbar. Buche erneut in ${served} oder sag der Person Bescheid, die das Relay betreibt.`,
     tryAgain: 'Erneut versuchen',
+
+    settleOption: (token, currency) => `${token} · ${currency}`,
 
     settlesAs: (amount, price) =>
       `Sie erhalten ${amount} auf dem Internet Computer. Die Ledger-Gebühr tragen Sie, die Kundschaft zahlt also genau ${price}.`,

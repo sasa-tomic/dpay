@@ -223,6 +223,56 @@ afterEach(() => {
   jest.mocked(tillChargeStatus).mockReset();
 });
 
+describe('the settlement picker (multi-currency build-out)', () => {
+  const CKUSDC = assetOf(a => a.linkToken === 'ckUSDC');
+  const CKUSDC_FEE = (() => {
+    const row = CATALOG.find(c => c.currency === 2);
+    if (row?.fee == null) throw new Error('the bundled catalog must state ckUSDC\u2019s ledger fee');
+    return row.fee;
+  })();
+
+  test('offers every asset the till can settle, naming the currency each price is read in', () => {
+    const tree = mount(VCHF);
+    expect(has(tree, 'till-settle')).toBe(true);
+    expect(has(tree, 'till-asset-vchf')).toBe(true);
+    expect(has(tree, 'till-asset-ckusdc')).toBe(true);
+    // A row that settles no home currency has no honest price unit — never offered.
+    expect(has(tree, 'till-asset-icp')).toBe(false);
+    expect(has(tree, 'till-asset-ckbtc')).toBe(false);
+    const said = visible(tree);
+    expect(said).toContain('VCHF · CHF');
+    expect(said).toContain('ckUSDC · USD');
+    act(() => { tree.unmount(); });
+  });
+
+  test('rings the charge up in the PICKED asset — decimals, fee and token follow it', async () => {
+    const tree = mount(VCHF);
+    act(() => { node(tree, 'till-asset-ckusdc').props.onPress(); });
+    await ringUp(tree);
+    expect(openTillCharge).toHaveBeenLastCalledWith(RELAY, IDENTITY, '1050', CKUSDC.decimals, CKUSDC_FEE, '', 'ckUSDC');
+    act(() => { tree.unmount(); });
+  });
+
+  test('a till that serves a different asset than the pick is a named refusal with the one-tap fix', async () => {
+    // Today's relay serves VCHF only; a ckUSDC pick comes back as exactly that fact, and the
+    // counter must never show a dollar pick as a franc charge (that would be an exchange nobody
+    // at the counter made).
+    jest.mocked(openTillCharge).mockResolvedValue({kind: 'served-other', served: 'VCHF'});
+    const tree = mount(CKUSDC);
+    await ringUp(tree);
+    expect(has(tree, 'btn-till-ring-up')).toBe(false);
+    const said = visible(tree);
+    expect(said).toContain('VCHF');  // what the till DID open
+    expect(said).toContain('USD');   // the currency the cashier picked
+    // One tap re-picks the served asset and returns to the entry form.
+    act(() => { node(tree, 'till-failed-go').props.onPress(); });
+    expect(has(tree, 'btn-till-ring-up')).toBe(true);
+    const pill = node(tree, 'till-asset-vchf');
+    expect(pill.props.accessibilityState).toMatchObject({checked: true});
+    act(() => { tree.unmount(); });
+  });
+});
+
 describe('which asset may ring up a till charge', () => {
   test('refuses an IC asset that is not the till’s, by name, with the one tap that fixes it', () => {
     const picked: AssetId[] = [];
@@ -285,7 +335,7 @@ describe('ringing up', () => {
   test('sends the exact whole rappen at the asset’s own precision, and shows the code', async () => {
     const tree = mount(VCHF);
     await ringUp(tree);
-    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '');
+    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '', 'VCHF');
     expect(node(tree, 'till-qr')).toBeDefined();
     const said = visible(tree);
     expect(said).toContain('10.50 CHF');       // the price the cashier reads out
@@ -350,7 +400,7 @@ describe('the note — what this charge is for', () => {
     const tree = mount(VCHF, () => {}, 'ready', CATALOG, '10.50', `  ${NOTE}  `);
     await ringUp(tree);
     // The whitespace is the cashier's, not the payer's: ONE trimmed spelling travels everywhere.
-    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, NOTE);
+    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, NOTE, 'VCHF');
     // …it is the tap request's DISPLAY memo — what the payer's phone shows while it asks them to
     // confirm. The SETTLEMENT memo stays the reference, asserted by the reader cases below.
     expect(mockBuildRequest.mock.calls[0][6]).toBe(NOTE);
@@ -365,7 +415,7 @@ describe('the note — what this charge is for', () => {
   test('no note typed: v1 ring-up, no display memo — but the price annotation still lands', async () => {
     const tree = mount(VCHF);
     await ringUp(tree);
-    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '');
+    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '', 'VCHF');
     expect(mockBuildRequest.mock.calls[0][6]).toBe('');
     // Founder rule 2026-09-14: even noteless, the ring-up records {gross, fee} against the
     // reference — the settled row headlines the price, not the netted wire.
@@ -376,7 +426,7 @@ describe('the note — what this charge is for', () => {
   test('whitespace the cashier typed is not a note — the price annotation still lands', async () => {
     const tree = mount(VCHF, () => {}, 'ready', CATALOG, '10.50', '   ');
     await ringUp(tree);
-    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '');
+    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '', 'VCHF');
     expect(mockSaveTxNote).toHaveBeenCalledWith(IDENTITY.publicHex, {k: REFERENCE, msg: undefined, gross: PRICE_RAW, fee: VCHF_FEE_RAW}, expect.any(Number));
     act(() => { tree.unmount(); });
   });
@@ -392,7 +442,7 @@ describe('the note — what this charge is for', () => {
     await act(async () => { node(tree, 'till-failed-go').props.onPress(); await flush(); });
     expect(has(tree, 'btn-till-ring-up')).toBe(true);
     await ringUp(tree);
-    expect(openTillCharge).toHaveBeenLastCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, NOTE);
+    expect(openTillCharge).toHaveBeenLastCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, NOTE, 'VCHF');
     act(() => { tree.unmount(); });
   });
 });

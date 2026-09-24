@@ -304,7 +304,11 @@ export const receiveFr: ReceiveMessages = {
       `Vous avez encaissé ${rung}, mais la caisse a répondu ${quoted}. dpay n’affichera pas un code pour un montant que personne n’a choisi : rien n’est payable. Recommencez ; si cela se reproduit, prévenez la personne qui exploite le relais avant d’accepter de l’argent.`,
     unsigned:
       'Ce téléphone n’a pas pu signer le montant : rien n’est payable. Fermez puis rouvrez dpay, et recommencez.',
+    servedOther: (served, picked) =>
+      `La caisse a ouvert ce montant en ${served}, pas en ${picked} — elle ne règle pas encore ${picked} : rien n’est payable. Recommencez en ${served} ou prévenez la personne qui gère le relais.`,
     tryAgain: 'Réessayer',
+
+    settleOption: (token, currency) => `${token} · ${currency}`,
 
     settlesAs: (amount, price) =>
       `Vous recevez ${amount} sur l’Internet Computer. Les frais du registre sont à votre charge, le client paie donc exactement ${price}.`,

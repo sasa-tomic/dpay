@@ -634,8 +634,17 @@ export type ReceiveMessages = {
     refusedNoReason: (status: number) => string;
     /** The till answered with a price that is not the one that was rung up. */
     mispriced: (rung: string, quoted: string) => string;
+    /** The till opened the charge in an asset OTHER than the one picked — it serves what it
+     *  serves, and nothing is shown for a charge the counter did not ring up. `served` names the
+     *  asset the till DID open, `picked` the currency the cashier chose. */
+    servedOther: (served: string, picked: string) => string;
     unsigned: string;
     tryAgain: string;
+
+    /** The settlement picker (multi-currency build-out): the label over the joined asset pills,
+     *  and one pill — `token` names the ledger token that settles, `currency` the currency the
+     *  price is read in. One line = the whole honest contract of a multi-asset till. */
+    settleOption: (token: string, currency: string) => string;
 
     /** The code is up. `settlesAs` states what the SHOP receives beside what the customer pays —
      *  two different numbers since 2026-09-12, because the shop absorbs the ledger fee, and a
@@ -780,9 +789,13 @@ export const receiveEn: ReceiveMessages = {
       `The till refused this charge (HTTP ${status}) without a reason, so nothing is payable. Ring up again; if it refuses twice, tell whoever runs the relay.`,
     mispriced: (rung, quoted) =>
       `You rang up ${rung}, but the till answered with ${quoted}. dpay won’t show a code for a number nobody chose, so nothing is payable. Ring up again; if it happens twice, tell whoever runs the relay before taking money.`,
+    servedOther: (served, picked) =>
+      `The till opened this charge in ${served}, not ${picked} — it does not settle ${picked} yet, so nothing is payable. Ring up again in ${served}, or ask whoever runs the relay to serve it.`,
     unsigned:
       'This phone could not sign the charge, so nothing is payable. Close and reopen dpay, then ring up again.',
     tryAgain: 'Try again',
+
+    settleOption: (token, currency) => `${token} · ${currency}`,
 
     settlesAs: (amount, price) =>
       `You receive ${amount} on the Internet Computer. The ledger fee is yours, so the customer pays exactly ${price}.`,

@@ -12,23 +12,21 @@ import {fmtAsset, fmtAssetCompact, nowSecs, short} from '../lib/format';
 import {offerNamesAsset} from '../lib/opencryptopay';
 import type {CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
+import {currencyOfAsset} from '../config/currency';
+import {tokenEq} from '../config/assets';
 import type {AssetId, Identity, NfcStatus} from '../lib/types';
 import {DpayCore, DpayNfc} from '../services/native';
 import {icStampExpiry} from '../services/icp';
 import {preparePull, submitTransfer} from '../services/rail';
 import {saveTxNote} from '../services/txNotes';
 import {
-  TILL_OFFER, cancelTillCharge, chfCents, openTillCharge, tillChargeStatus, tillPriceUnits, tillRawUnits,
+  TILL_OFFER, cancelTillCharge, openTillCharge, priceCents, tillChargeStatus, tillPriceUnits, tillRawUnits,
+  tillSettlementAssets, tillSettlementShape,
   type TillCharge as Charge, type TillOpenOutcome, type TillSettled, type TillVoidOutcome,
 } from '../services/till';
 import {useReportLock} from '../hooks/useReportLock';
 import {IconCheck, IconClock} from './icons';
 import {M} from '../i18n';
-
-/** The franc, as ISO 4217 writes it — the till's pricing unit, and the same three letters in every
- *  locale, so it is a unit like `BTC`/`SOL` rather than a translated word. Formatted by the wallet's
- *  own amount formatter (`fmtAsset`), never by string concatenation. */
-const CHF = 'CHF';
 
 /**
  * The counter: a cashier rings up a price in francs, shows a code, and watches it be paid.
@@ -169,21 +167,48 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   // business, and this boolean is only the local "can a tap happen at all" gate.
   const nfcReady = nfcStatus === 'ready';
 
-  // The asset a till code is paid in, matched by the SAME rule the payer half matches a provider's
-  // offer with (`offerNamesAsset`) — one statement of "does this row name that asset", not two.
-  const tillAsset = assets.find(a => offerNamesAsset(TILL_OFFER, a)) ?? null;
-  // The till's own row, narrowed to the IC variant. `offerNamesAsset` already decides the rail
-  // (TILL_OFFER's method IS the Internet Computer one), so the protocol test beside it asserts
-  // nothing new — it is what tells TYPESCRIPT this is the row that carries a `currency`, which is
-  // the field a tap request has to name.
-  const tillRow = asset !== null && asset.protocol === 'ic' && offerNamesAsset(TILL_OFFER, asset) ? asset : null;
-  // The LEDGER's transfer fee for that row, read from the catalog the relay itself serves — the
-  // fee the SHOP absorbs, so a customer's account moves by the price and nothing more
+  // THE SETTLEMENT RULE (multi-currency build-out, 2026-09). The till prices in the merchant's
+  // own currency and settles 1:1 into that currency's token, so the cashier PICKS the settlement
+  // asset at ring-up (`tillSettlementAssets` — the assets `services/till.ts` admits: IC, mainnet,
+  // catalog fee stated, a home currency). The PAYER keeps the fixed `TILL_OFFER` pair: a payer is
+  // told the asset by the code they scan, and never chooses.
+  //
+  // Three rows matter, and they are kept apart on purpose:
+  //   • `tillRows` — every asset this counter may ring up in (the picker's options);
+  //   • `servedRow` — the row the till's provider NAMES (`TILL_OFFER`, the relay's own served
+  //     pair) — the wrong-asset refusal's one-tap fix, exactly as before the picker existed;
+  //   • `picked` — the asset THIS ring-up settles in: the cashier's pick, defaulting to the row
+  //     the wallet is on when that row is a settlement asset itself. Price unit, ledger fee,
+  //     decimals and the armed tap all follow it.
+  const tillRows = tillSettlementAssets(assets, catalog);
+  const servedRow = tillRows.find(a => offerNamesAsset(TILL_OFFER, a)) ?? null;
+  // The asset the wallet is on, narrowed to the till's own shape (IC rail — `tillSettlementShape`
+  // decides the rest: mainnet, a home currency, a price the currency's two decimals can express).
+  // This is the ENTRY gate, unchanged in shape since the counter was single-asset: a till code is
+  // offered on the till's own rows, and every other row is refused by name (flow 115 pins that).
+  const tillRow = asset !== null && asset.protocol === 'ic' && tillSettlementShape(asset, catalog) ? asset : null;
+  // The LEDGER's transfer fee for the selected row, read from the catalog the relay itself serves —
+  // the fee the SHOP absorbs, so a customer's account moves by the price and nothing more
   // (`tillRawUnits`, `services/till.ts`). A row that states no fee cannot be priced honestly here:
   // quoting the full price would silently charge the customer the fee on top, which is the exact
   // thing this is for, so the counter refuses instead (`payable` below).
-  const tillFeeRaw = catalog.find(c => tillRow !== null && c.currency === tillRow.currency)?.fee ?? null;
-  const payable = tillRow !== null && tillFeeRaw !== null;
+  const tillFeeRaw = tillRow !== null ? catalog.find(c => c.currency === tillRow.currency)?.fee ?? null : null;
+  // The cashier's settlement pick. Kept as an id and re-resolved every render, so a catalog
+  // change can never leave it naming a row the wallet no longer carries.
+  const [settleId, setSettleId] = useState<AssetId | null>(null);
+  const picked = (settleId !== null ? tillRows.find(a => a.id === settleId) : null)
+    ?? tillRow // the wallet's own row, when it is a settlement asset — today's behaviour, unchanged
+    ?? servedRow;
+  // The picked row's own fee — the same honesty gate as the selected row's above. Non-null for
+  // every `tillSettlementRow` answer by construction; the null check keeps the ring-up honest even
+  // so (a fee guessed at would be a customer charged one).
+  const pickedFee = picked !== null && picked.protocol === 'ic'
+    ? catalog.find(c => c.currency === picked.currency)?.fee ?? null
+    : null;
+  const payable = picked !== null && pickedFee !== null && tillRow !== null && tillFeeRaw !== null;
+  // The picked asset's own currency — the PRICE unit. ISO 4217 letters in every locale, like the
+  // franc was when the counter was single-asset: a unit, never a translated word.
+  const priceUnit = picked !== null ? currencyOfAsset(picked) ?? 'CHF' : 'CHF';
 
   // Reported to the parent through the SAME hook every other engine reports its selection lock
   // with: the contract is identical (report each change, reset on unmount, parent's setter is a
@@ -268,7 +293,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
    * settlement owner. A pull that fails leaves the charge exactly as payable as it was.
    */
   async function collect(claim: {payer: string; atSecs: number}, charge: Charge) {
-    if (tillRow === null || tillFeeRaw === null) return;
+    if (picked === null || picked.protocol !== 'ic' || pickedFee === null) return;
     const key = `${claim.payer}@${claim.atSecs}`;
     if (tried.has(key)) return;
     tried.add(key);
@@ -279,8 +304,8 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
       const prepared = await preparePull(identity.secretHex, {currencies: catalog}, {
         fromAccount: claim.payer,
         toAccount: me,
-        amount: tillRawUnits(charge.cents, tillRow.decimals, tillFeeRaw),
-        currency: tillRow.currency,
+        amount: tillRawUnits(charge.cents, picked.decimals, pickedFee),
+        currency: picked.currency,
         nonceHex: charge.reference,
       });
       const outcome = await submitTransfer(
@@ -341,8 +366,8 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     // the time this runs (both are the render's own `payable` gate, which returns a panel instead
     // of this form), and neither is defaulted here: a fee guessed at would be a customer charged
     // one.
-    if (tillRow === null || tillFeeRaw === null) return;
-    const parsed = chfCents(amount);
+    if (picked === null || picked.protocol !== 'ic' || pickedFee === null) return;
+    const parsed = priceCents(amount);
     if (!parsed.ok) { setErr(M.receive.till.badAmount(parsed.reason)); return; }
     // One spelling of the note everywhere it travels: the signed body, the wire key, the payer's
     // tap-request display, and the history annotation below. Whitespace-only is nothing.
@@ -355,7 +380,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     setNfcKey(k => k + 1);
     setRung(parsed.cents);
     setPhase({k: 'opening'});
-    const outcome = await openTillCharge(relayUrl, identity, parsed.cents, tillRow.decimals, tillFeeRaw, noteVal);
+    const outcome = await openTillCharge(relayUrl, identity, parsed.cents, picked.decimals, pickedFee, noteVal, picked.linkToken ?? picked.symbol);
     if (outcome.kind !== 'open') { setPhase({k: 'failed', outcome}); return; }
     // The payee-side annotation, the same save the dpay form makes: keyed by the charge's
     // reference — the memo the incoming transfer carries, so the history row this sale settles
@@ -363,12 +388,12 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     // ring-up time. Founder rule 2026-09-14: the note carries the GROSS (the rung price — the row
     // headlines it) + the fee (its annotation line); the wire stays the ledger truth. The till's
     // fee gate above makes both non-null here — the save always carries them.
-    void saveTxNote(identity.publicHex, {k: outcome.charge.reference, msg: noteVal || undefined, gross: tillPriceUnits(parsed.cents, tillRow.decimals), fee: tillFeeRaw}, Date.now());
+    void saveTxNote(identity.publicHex, {k: outcome.charge.reference, msg: noteVal || undefined, gross: tillPriceUnits(parsed.cents, picked.decimals), fee: pickedFee}, Date.now());
     setNow(nowSecs());
     setPhase({k: 'showing', charge: outcome.charge});
     // The code goes up FIRST and the reader is armed after it: building the request needs a
     // certified IC instant, and a customer must never wait on the radio for a code they can scan.
-    setTap(await armReader(outcome.charge, tillRow, tillFeeRaw, noteVal));
+    setTap(await armReader(outcome.charge, picked, pickedFee, noteVal));
   }
 
   async function cancel() {
@@ -413,18 +438,19 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   }
 
   if (!payable) {
-    // Every asset reaches this control, and every asset that is not the till's own lands here by
-    // name. `tillAsset` is the one tap that fixes it — and when this wallet carries no VCHF row at
-    // all there is no tap to offer, so the panel says so instead of showing a button that cannot work.
+    // Every asset reaches this control, and every asset that is not one the till can settle lands
+    // here by name. `servedRow` is the one tap that fixes it — the row the till's provider NAMES —
+    // and when this wallet carries no settlement asset at all there is no tap to offer, so the
+    // panel says so instead of showing a button that cannot work.
     return (
       <InstructionPanel
         testID="till-refused"
         title={M.receive.till.wrongAssetTitle}
-        body={tillAsset === null
+        body={servedRow === null
           ? M.receive.till.noTillAsset
           : M.receive.till.wrongAsset(asset?.symbol ?? '', asset?.network ?? null)}
-        primaryLabel={tillAsset ? M.receive.till.switchTo(tillAsset.symbol) : undefined}
-        onPrimary={tillAsset ? () => onSelectAsset(tillAsset.id) : undefined}
+        primaryLabel={servedRow ? M.receive.till.switchTo(servedRow.symbol) : undefined}
+        onPrimary={servedRow ? () => onSelectAsset(servedRow.id) : undefined}
       />
     );
   }
@@ -454,12 +480,31 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     return <View style={S.center}>{tapNode}</View>;
   }
 
-  if (phase.k === 'failed') {
+  if (phase.k === 'failed' && phase.outcome.kind === 'served-other') {
+    // The till opened the charge in what IT serves, not what was picked. The money path is right
+    // (the charge pays this merchant) but the asset is not the one the counter chose, so nothing
+    // is shown; the fix is one tap — re-pick the served asset and ring up again.
+    const servedToken = phase.outcome.served;
+    const served = tillRows.find(a => tokenEq(a.linkToken ?? a.symbol, servedToken)) ?? null;
     return (
       <InstructionPanel
         testID="till-failed"
         title={M.receive.till.failedTitle}
-        body={failureBody(phase.outcome, fmtAsset(rung ?? '0', 2, CHF))}
+        body={M.receive.till.servedOther(servedToken, priceUnit)}
+        primaryLabel={served ? M.receive.till.switchTo(served.symbol) : M.receive.till.tryAgain}
+        onPrimary={served
+          ? () => { setSettleId(served.id); reset(); }
+          : reset}
+      />
+    );
+  }
+
+  if (phase.k === 'failed' && phase.outcome.kind !== 'served-other') {
+    return (
+      <InstructionPanel
+        testID="till-failed"
+        title={M.receive.till.failedTitle}
+        body={failureBody(phase.outcome, fmtAsset(rung ?? '0', 2, priceUnit))}
         primaryLabel={M.receive.till.tryAgain}
         onPrimary={reset}
       />
@@ -482,7 +527,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     return (
       <View style={S.center}>
         <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-        <Text testID="till-paid" style={S.paidText}>{M.receive.till.paidAmount(fmtAsset(phase.charge.cents, 2, CHF))}</Text>
+        <Text testID="till-paid" style={S.paidText}>{M.receive.till.paidAmount(fmtAsset(phase.charge.cents, 2, priceUnit))}</Text>
         {phase.paid ? <Text style={S.paidSub}>{M.receive.fromWho(short(phase.paid.from))}</Text> : null}
         {phase.paid ? <Text testID="till-paid-block" style={S.dim2}>{M.receive.till.paidBlock(phase.paid.block)}</Text> : null}
         {phase.late ? <Text testID="till-paid-late" style={S.dim2}>{M.receive.till.paidLate}</Text> : null}
@@ -502,13 +547,12 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   if (phase.k === 'showing') {
     const {charge} = phase;
     const remaining = charge.expiresAt - now;
-    // `payable` above narrows `tillRow` to the till's own row; this reads its precision for the
-    // settlement line, which is the only place the asset is needed once a charge exists. Two
-    // numbers, deliberately: what the SHOP receives, beside the price the customer pays — they
-    // differ by the ledger fee the shop now absorbs, and a cashier shown only the smaller one
-    // would read it as a misprice.
+    // `payable` above narrows the ring-up to a priced asset; `picked` is the asset THIS charge
+    // settles in, whose precision formats the settlement line. Two numbers, deliberately: what the
+    // SHOP receives, beside the price the customer pays — they differ by the ledger fee the shop
+    // now absorbs, and a cashier shown only the smaller one would read it as a misprice.
     const settles = fmtAssetCompact(
-      tillRawUnits(charge.cents, tillRow.decimals, tillFeeRaw), tillRow.decimals, tillRow.symbol, undefined, tillRow.minFractionDigits,
+      tillRawUnits(charge.cents, picked.decimals, pickedFee ?? '0'), picked.decimals, picked.symbol, undefined, picked.minFractionDigits,
     );
     return (
       <View style={S.center}>
@@ -530,8 +574,8 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
           <NfcStatusRow nfcStatus={nfcStatus} testID="till-nfc" />
         )}
         <View testID="till-qr" style={S.qrCard}><QrCode value={charge.qr} size={QR_SIZE} ecl="M" /></View>
-        <Text testID="till-amount" style={S.amountBig}>{fmtAsset(charge.cents, 2, CHF)}</Text>
-        <Text style={S.qrHint}>{M.receive.till.settlesAs(settles, fmtAsset(charge.cents, 2, CHF))}</Text>
+        <Text testID="till-amount" style={S.amountBig}>{fmtAsset(charge.cents, 2, priceUnit)}</Text>
+        <Text style={S.qrHint}>{M.receive.till.settlesAs(settles, fmtAsset(charge.cents, 2, priceUnit))}</Text>
         {remaining > 60 ? (
           <View style={{flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6}}>
             <IconClock size={14} color={C.sub}/>
@@ -577,7 +621,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   // phase 'entering' / 'opening' — the counter's entry tail. The amount row and the message row
   // above this are the PARENT's, shared with the dpay-code form (one box, both modes — founder
   // 2026-09-14); this component takes the typed price and the typed note from there and parses the
-  // price with the TILL's own rule (`chfCents` — two decimals, a third is refused rather than
+  // price with the TILL's own rule (`priceCents` — two decimals, a third is refused rather than
   // rounded, because a rounded price is a misprice). No submit-on-Enter from the shared rows: a
   // ring-up is signed, so the button stays the only thing that does it.
   const opening = phase.k === 'opening';
@@ -585,8 +629,35 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     <View style={S.centerTop}>
       {err ? <Text testID="till-err" style={S.err}>{err}</Text> : null}
       {opening ? <ActivityIndicator color={C.brandText} /> : null}
+      {/* THE SETTLEMENT PICKER — rendered only when more than one asset can settle (one option is
+          not a choice, and its row alone is the answer). Each pill names the asset and, beside it,
+          the currency the price is read in — the whole honest contract of a multi-asset till in
+          one line. Same joined-pill language as the mode toggle, deliberately quieter than the
+          ring-up button. */}
+      {tillRows.length > 1 ? (
+        <View testID="till-settle" style={S.railRow}>
+          {tillRows.map(r => {
+            const on = picked !== null && r.id === picked.id;
+            return (
+              <Pressable
+                key={r.id}
+                testID={`till-asset-${(r.linkToken ?? r.symbol).toLowerCase()}`}
+                style={[S.railPill, on && S.railPillActive]}
+                disabled={opening}
+                onPress={() => setSettleId(r.id)}
+                accessibilityRole="radio"
+                accessibilityState={{checked: on}}
+                accessibilityLabel={M.receive.till.settleOption(r.linkToken ?? r.symbol, currencyOfAsset(r) ?? '')}>
+                <Text style={[S.railPillText, on && S.railPillTextActive]}>
+                  {M.receive.till.settleOption(r.linkToken ?? r.symbol, currencyOfAsset(r) ?? '')}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
       {/* Never disabled for an empty amount (founder 2026-09-17): parity with the dpay form's
-          always-tappable Show code. An empty or malformed total is refused by `chfCents` with the
+          always-tappable Show code. An empty or malformed total is refused by `priceCents` with the
           honest badAmount error, not by a greyed-out button that reads as broken. */}
       <Pressable
         testID="btn-till-ring-up"
@@ -642,7 +713,7 @@ function relayHost(relayUrl: string): string {
  *  addresses come from the OUTCOME (the relay that answered / did not answer), never from the
  *  wallet's preferred URL — a walk or a pin may have made a different relay the one that owes the
  *  merchant an explanation. */
-function failureBody(outcome: Exclude<TillOpenOutcome, {kind: 'open'}>, rung: string): string {
+function failureBody(outcome: Exclude<TillOpenOutcome, {kind: 'open'} | {kind: 'served-other'}>, rung: string): string {
   switch (outcome.kind) {
     case 'not-served': return M.receive.till.notServed(relayHost(outcome.addr));
     case 'unreachable': return M.receive.till.unreachable(outcome.tried.map(relayHost).join(', '));

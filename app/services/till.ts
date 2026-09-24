@@ -40,6 +40,9 @@
 import {DpayCore} from './native';
 import {fetchWithTimeout} from './relay';
 import {relayAddresses, relayAddressesRevision} from './relayAddresses';
+import {tokenEq, type SelectableAsset} from '../config/assets';
+import {type CurrencyDescriptor} from '../config/catalog';
+import {currencyOfCatalogRow} from '../config/currency';
 import {parseDecimalToUnits} from '../lib/amount';
 import {canonicalizeDecimal} from '../i18n/intl';
 import {sanitiseDisplayText} from '../lib/deepLink';
@@ -50,11 +53,44 @@ import type {Identity} from '../lib/types';
  *  Spelled in the PROVIDER's vocabulary because that is what it is matched against: `offerNamesAsset`
  *  (`lib/opencryptopay.ts`) answers "does this provider row name that wallet asset?", and the
  *  merchant side asks the same question of the same pair rather than inventing a second rule.
- *  Pinned against the relay's real bytes by `app/__tests__/till.test.ts` via `dfx/till_wire.json`. */
+ *  Pinned against the relay's real bytes by `app/__tests__/till.test.ts` via `dfx/till_wire.json`.
+ *
+ *  This is the PAYER-side pair (what a till code quotes, and what `services/opencryptopay.ts`
+ *  resolves a provider offer with); it stays a fixed pair because the PAYER is told the asset by
+ *  the code it scans. The MERCHANT side picks the settlement asset at ring-up — see
+ *  `tillSettlementRow` below. */
 export const TILL_OFFER = {method: 'InternetComputer', asset: 'VCHF'} as const;
 
-/** CHF has two decimals, everywhere and forever — the scale a till charge is priced at. */
-const CHF_DECIMALS = 2;
+/** The price scale a till charge is typed at: two decimals, for EVERY currency a till can price —
+ *  francs, dollars and euros all carry a minor unit of 1/100, so one parser serves all three and
+ *  no asset outside a home currency can be priced at all (a price settled in BTC or ICP would need
+ *  an exchange rate, and dpay has none to quote — `tillSettlementRow`). */
+const PRICE_DECIMALS = 2;
+
+/** What the cashier typed, as whole minor units (rappen/cents) of the settlement asset's own
+ *  currency — or which rule it broke. Integer end to end: the same exact BigInt parser every other
+ *  amount field in this app uses, at the currency's two decimals, so a price can never be wrong in
+ *  the last digit. The input goes through `canonicalizeDecimal` first for the same reason every
+ *  other amount field does: a decimal-pad renders a COMMA key on a German, French or Spanish
+ *  device, and without the rewrite `10,50` would be refused as not-a-number — the till's entry
+ *  price, untypeable across most of Europe. `too-precise` is told apart from `not-a-number`
+ *  because they send the cashier to do different things (round the smallest coin vs type a
+ *  number). */
+export function priceCents(text: string): {ok: true; cents: string} | {ok: false; reason: 'too-precise' | 'not-a-number' | 'too-large'} {
+  const parsed = parseDecimalToUnits(canonicalizeDecimal(text.trim()), PRICE_DECIMALS);
+  if (!parsed.ok) {
+    // `overflow` is a SIZE, not a shape: the parser reached a value no u64 can hold. Telling that
+    // cashier to "type a number" would be telling them the wrong thing about the number they typed.
+    if (parsed.err === 'too_many_decimals') return {ok: false, reason: 'too-precise'};
+    return {ok: false, reason: parsed.err === 'overflow' ? 'too-large' : 'not-a-number'};
+  }
+  if (parsed.raw === '0') return {ok: false, reason: 'not-a-number'};
+  // The wire's `cents` is a bare JSON `u64`, so it crosses as a `number`. Anything past the exact
+  // integer range would be signed as one value and sent as another — refused here, where the
+  // cashier can still fix it, rather than becoming a charge for a price nobody typed.
+  if (!Number.isSafeInteger(Number(parsed.raw))) return {ok: false, reason: 'too-large'};
+  return {ok: true, cents: parsed.raw};
+}
 
 /** A charge as the ring-up answered it. `cents` is what THIS device signed (the open response does
  *  not echo it), `qr` is the string that belongs in a QR — the `?lightning=` wrapper a generic
@@ -103,6 +139,11 @@ export type TillOpenOutcome =
   | {kind: 'open'; charge: TillCharge}
   /** The till answered with a price that is not the one that was rung up. Nothing is shown. */
   | {kind: 'mispriced'; quoted: string}
+  /** The till opened the charge in a DIFFERENT asset than the one the cashier picked — the relay
+   *  serves what it serves, and this app does not present a charge that is not the one the counter
+   *  rang up (a dollar pick served as a franc charge would be an exchange the shop never made).
+   *  `served` names the asset the till DID open; the screen's fix is one tap on the picker. */
+  | {kind: 'served-other'; served: string}
   /** The relay serves no till (`DPAY_ENABLE_TILL=false` — its routes are not registered, so the
    *  POST 404s with nothing to say; since 2026-09-10 that is an explicit operator refusal, not
    *  the default). A first-class state, not an error: this relay simply is not a
@@ -140,16 +181,7 @@ export type TillVoidOutcome =
   | {kind: 'unreachable'; detail: string; tried: string[]}
   | {kind: 'unsigned'; detail: string};
 
-/** What the cashier typed, as whole CHF cents — or which rule it broke. Integer end to end: the
- *  same exact BigInt parser every other amount field in this app uses, at CHF's two decimals, so a
- *  price can never be wrong in the last digit. The input goes through `canonicalizeDecimal` first
- *  for the same reason every other amount field does: a decimal-pad renders a COMMA key on a
- *  German, French or Spanish device, and without the rewrite `10,50` would be refused as
- *  not-a-number — the till's entry price, untypeable across most of Europe. `too-precise` is told
- *  apart from `not-a-number` because they send the cashier to do different things (round the
- *  rappen vs type a number). */
-export function chfCents(text: string): {ok: true; cents: string} | {ok: false; reason: 'too-precise' | 'not-a-number' | 'too-large'} {
-  const parsed = parseDecimalToUnits(canonicalizeDecimal(text.trim()), CHF_DECIMALS);
+/** What the cashier typed, as whole minor units (rappen/cents) of the settlement asset's own
   if (!parsed.ok) {
     // `overflow` is a SIZE, not a shape: the parser reached a value no u64 can hold. Telling that
     // cashier to "type a number" would be telling them the wrong thing about the number they typed.
@@ -175,16 +207,17 @@ export function chfCents(text: string): {ok: true; cents: string} | {ok: false; 
  *  this is the app's own statement of it, and the two are held together by the ring-up price check
  *  below — a relay that quoted anything else is refused rather than displayed.
  *
- *  The till prices 1:1 with the franc, so there is no rate anywhere and nothing to be wrong about.
- *  Throws on an asset whose precision cannot express a rappen, and on a fee that would swallow the
- *  price: a wallet that formatted a charge it cannot represent, or one that asks for nothing, would
- *  be printing a lie. */
+ *  The till prices 1:1 with the settlement asset's OWN currency — francs into VCHF, dollars into
+ *  ckUSDC (`tillSettlementRow` admits no other shape) — so there is no rate anywhere and nothing to
+ *  be wrong about. Throws on an asset whose precision cannot express the currency's smallest coin,
+ *  and on a fee that would swallow the price: a wallet that formatted a charge it cannot
+ *  represent, or one that asks for nothing, would be printing a lie. */
 export function tillRawUnits(cents: string, decimals: number, feeRaw: string): string {
-  if (!Number.isInteger(decimals) || decimals < CHF_DECIMALS) {
-    throw new Error(`till: an asset with ${decimals} decimals cannot express a CHF rappen`);
+  if (!Number.isInteger(decimals) || decimals < PRICE_DECIMALS) {
+    throw new Error(`till: an asset with ${decimals} decimals cannot express a ${PRICE_DECIMALS}-decimal price`);
   }
   let scale = 1n;
-  for (let i = CHF_DECIMALS; i < decimals; i++) scale *= 10n;
+  for (let i = PRICE_DECIMALS; i < decimals; i++) scale *= 10n;
   const settles = BigInt(cents) * scale - BigInt(feeRaw);
   if (settles <= 0n) {
     throw new Error(`till: a ${cents}-rappen price does not cover the ${feeRaw}-unit ledger fee the shop pays`);
@@ -199,12 +232,48 @@ export function tillRawUnits(cents: string, decimals: number, feeRaw: string): s
  * settlement truth everywhere money moves.
  */
 export function tillPriceUnits(cents: string, decimals: number): string {
-  if (!Number.isInteger(decimals) || decimals < CHF_DECIMALS) {
-    throw new Error(`till: an asset with ${decimals} decimals cannot express a CHF rappen`);
+  if (!Number.isInteger(decimals) || decimals < PRICE_DECIMALS) {
+    throw new Error(`till: an asset with ${decimals} decimals cannot express a ${PRICE_DECIMALS}-decimal price`);
   }
   let scale = 1n;
-  for (let i = CHF_DECIMALS; i < decimals; i++) scale *= 10n;
+  for (let i = PRICE_DECIMALS; i < decimals; i++) scale *= 10n;
   return (BigInt(cents) * scale).toString(10);
+}
+
+/** The MERCHANT-side settlement SHAPE (multi-currency build-out, 2026-09): which wallet assets a
+ *  till charge could ever be RUNG UP in, on the shape of the row alone. Three honest gates, each
+ *  excluding a row for a stated reason:
+ *   1. it settles on the Internet Computer — the till's method (`METHOD` in the relay's till.rs);
+ *   2. it is a mainnet row — a charge real money settles is never rung up against a testnet token;
+ *   3. it settles a HOME CURRENCY — francs, dollars or euros. The price is typed in the
+ *      merchant's own currency and settles 1:1 into that currency's token; a charge priced in
+ *      francs and settled in BTC or ICP would need an exchange rate, and dpay has none to quote
+ *      and none may be added. No FX, ever, by construction.
+ * The PAYER side keeps the fixed `TILL_OFFER` pair above: the payer is TOLD the asset by the code
+ * it scans, and never chooses. */
+export function tillSettlementShape(asset: SelectableAsset, catalog: readonly CurrencyDescriptor[]): boolean {
+  if (asset.protocol !== 'ic') return false;
+  const row = catalog.find(c => c.currency === asset.currency);
+  if (row == null || row.testnet) return false;
+  if (row.decimals == null || row.decimals < PRICE_DECIMALS) return false;
+  return currencyOfCatalogRow(row) !== null;
+}
+
+/** The full settlement rule: the shape above AND a catalog row that STATES its ledger fee — the
+ *  shop absorbs that fee out of the price (`tillRawUnits`), so a fee-less row has no honest price
+ *  to quote (the same `tillFeeRaw != null` gate the counter's UI applies). This is the picker's
+ *  rule; the shape alone gates the counter's entry so a fee-less row is told apart from a
+ *  wrong-asset one (they send the merchant to different places). */
+export function tillSettlementRow(asset: SelectableAsset, catalog: readonly CurrencyDescriptor[]): boolean {
+  if (asset.protocol !== 'ic') return false;
+  const row = catalog.find(c => c.currency === asset.currency);
+  return row != null && row.fee != null && tillSettlementShape(asset, catalog);
+}
+
+/** Every asset the till may be rung up in, in the wallet's own catalog order — the cashier's
+ *  settlement picker, and empty exactly when this wallet can serve no till at all. */
+export function tillSettlementAssets(assets: readonly SelectableAsset[], catalog: readonly CurrencyDescriptor[]): SelectableAsset[] {
+  return assets.filter(a => tillSettlementRow(a, catalog));
 }
 
 function errText(e: unknown): string {
@@ -394,8 +463,16 @@ async function tillFetch(relayUrl: string, path: string, init: RequestInit, time
  *  nobody at the counter chose is refused instead of displayed. Both come from the catalog row the
  *  relay itself serves, which is what makes the check meaningful rather than circular.
  *
+ * `settleToken` is the asset the cashier PICKED (`tillSettlementRow`): the answer names the asset
+ *  it actually opened (`asset` on the wire), and a mismatch is refused whole — a dollar pick shown
+ *  as a franc charge would be an exchange nobody at the counter made. The pick deliberately does
+ *  NOT ride the request body: the ring-up's signed bytes are pinned (`dfx/till_open_signing.json`)
+ *  and an unsigned field inside a signed request is one the relay cannot attribute — the day the
+ *  relay serves more than its own pair, the asset enters the signature, and until then the answer
+ *  check fails this client closed.
+ *
  * `note` is what the charge is for, already the cashier's raw typing: trimmed here, and empty
- *  treated as absent (see `signedBody`).
+ * treated as absent (see `signedBody`).
  */
 export async function openTillCharge(
   relayUrl: string,
@@ -404,6 +481,7 @@ export async function openTillCharge(
   decimals: number,
   feeRaw: string,
   note: string,
+  settleToken: string,
 ): Promise<TillOpenOutcome> {
   let body: Record<string, unknown>;
   try {
@@ -454,6 +532,17 @@ export async function openTillCharge(
     const detail = `ring-up answered without {id, qr, amount, reference, created_secs, expires_at}: ${JSON.stringify(o).slice(0, 200)}`;
     console.warn(`till: ${detail}`);
     return {kind: 'unreachable', detail, tried: [addr]};
+  }
+  // THE ASSET CHECK. The answer names the asset it opened the charge in (`asset`, the relay's own
+  // `ASSET` constant on the wire). When it names something other than the asset the cashier
+  // picked, the charge is refused WHOLE: presenting a dollar pick as a franc charge would be an
+  // exchange nobody at the counter made. Absent — an older till recording that predates the
+  // field — no claim is made either way, and the price check below still pins the amount at the
+  // picked asset's own scale.
+  const served = str(o, 'asset');
+  if (served !== null && !tokenEq(served, settleToken)) {
+    console.warn(`till: picked ${settleToken}, the till answered "${served}" — refusing to show it`);
+    return {kind: 'served-other', served};
   }
   // THE PRICE CHECK. The till states its price as a decimal and means an integer number of raw
   // units; the cashier rang up cents. The charge is only honest when the two land on the same

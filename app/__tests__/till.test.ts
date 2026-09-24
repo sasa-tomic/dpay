@@ -43,9 +43,11 @@ jest.mock('../services/native', () => ({
 }));
 
 import {
-  TILL_OFFER, cancelTillCharge, chfCents, openTillCharge, tillChargeStatus, tillRawUnits,
+  TILL_OFFER, cancelTillCharge, openTillCharge, priceCents, tillChargeStatus, tillRawUnits,
+  tillSettlementAssets, tillSettlementRow,
 } from '../services/till';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import type {Identity} from '../lib/types';
 import {applyFormatLocale} from '../i18n/intl';
 
@@ -129,10 +131,10 @@ describe('the pair a dpay till serves', () => {
 
 describe('a franc price, in integers', () => {
   test('becomes whole rappen', () => {
-    expect(chfCents('10.50')).toEqual({ok: true, cents: '1050'});
-    expect(chfCents('10')).toEqual({ok: true, cents: '1000'});
-    expect(chfCents('0.05')).toEqual({ok: true, cents: '5'});
-    expect(chfCents(' 4.5 ')).toEqual({ok: true, cents: '450'});
+    expect(priceCents('10.50')).toEqual({ok: true, cents: '1050'});
+    expect(priceCents('10')).toEqual({ok: true, cents: '1000'});
+    expect(priceCents('0.05')).toEqual({ok: true, cents: '5'});
+    expect(priceCents(' 4.5 ')).toEqual({ok: true, cents: '450'});
   });
 
   test("takes the comma key a German, French or Spanish decimal-pad renders", () => {
@@ -142,34 +144,34 @@ describe('a franc price, in integers', () => {
     // literally untypeable — a total loss of the merchant surface across most of Europe.
     try {
       applyFormatLocale('de-DE');
-      expect(chfCents('10,50')).toEqual({ok: true, cents: '1050'});
-      expect(chfCents(',5')).toEqual({ok: true, cents: '50'});
+      expect(priceCents('10,50')).toEqual({ok: true, cents: '1050'});
+      expect(priceCents(',5')).toEqual({ok: true, cents: '50'});
       applyFormatLocale('fr-FR');
-      expect(chfCents('4,5')).toEqual({ok: true, cents: '450'});
+      expect(priceCents('4,5')).toEqual({ok: true, cents: '450'});
       applyFormatLocale('es-ES');
-      expect(chfCents('0,05')).toEqual({ok: true, cents: '5'});
+      expect(priceCents('0,05')).toEqual({ok: true, cents: '5'});
     } finally {
       applyFormatLocale('en-US');
     }
     // In English the canonicalizer is a no-op, so a comma is still refused rather than guessed at.
-    expect(chfCents('10,50')).toEqual({ok: false, reason: 'not-a-number'});
+    expect(priceCents('10,50')).toEqual({ok: false, reason: 'not-a-number'});
   });
 
   test('refuses what a till cannot charge, and says which rule it broke', () => {
     // Three causes, three corrections — round the rappen, type a number, charge less.
-    expect(chfCents('10.505')).toEqual({ok: false, reason: 'too-precise'});
-    expect(chfCents('')).toEqual({ok: false, reason: 'not-a-number'});
-    expect(chfCents('coffee')).toEqual({ok: false, reason: 'not-a-number'});
-    expect(chfCents('-5')).toEqual({ok: false, reason: 'not-a-number'});
+    expect(priceCents('10.505')).toEqual({ok: false, reason: 'too-precise'});
+    expect(priceCents('')).toEqual({ok: false, reason: 'not-a-number'});
+    expect(priceCents('coffee')).toEqual({ok: false, reason: 'not-a-number'});
+    expect(priceCents('-5')).toEqual({ok: false, reason: 'not-a-number'});
     // Zero is not a charge. It is also how a CANCELLATION is signed, so a till that accepted it
     // here would let a mis-typed total clear the counter instead of opening one.
-    expect(chfCents('0')).toEqual({ok: false, reason: 'not-a-number'});
+    expect(priceCents('0')).toEqual({ok: false, reason: 'not-a-number'});
     // TOO BIG, twice over, and both are a SIZE rather than a shape — a cashier told to "type a
     // number" would go looking for a typo that is not there. The first passes the u64 parser and
     // dies on the wire's exact-integer range (its `cents` is a bare JSON number, so a value past
     // 2^53 would be SENT as a different price than was SIGNED); the second overflows u64 itself.
-    expect(chfCents('99999999999999999')).toEqual({ok: false, reason: 'too-large'});
-    expect(chfCents('999999999999999999')).toEqual({ok: false, reason: 'too-large'});
+    expect(priceCents('99999999999999999')).toEqual({ok: false, reason: 'too-large'});
+    expect(priceCents('999999999999999999')).toEqual({ok: false, reason: 'too-large'});
   });
 
   test('converts to the raw ledger units the relay itself says it means', () => {
@@ -185,8 +187,8 @@ describe('a franc price, in integers', () => {
   });
 
   test('refuses an asset too coarse to hold a rappen instead of rounding one away', () => {
-    expect(() => tillRawUnits('1050', 0, VCHF_FEE_RAW)).toThrow('cannot express a CHF rappen');
-    expect(() => tillRawUnits('1050', 1, VCHF_FEE_RAW)).toThrow('cannot express a CHF rappen');
+    expect(() => tillRawUnits('1050', 0, VCHF_FEE_RAW)).toThrow('cannot express a 2-decimal price');
+    expect(() => tillRawUnits('1050', 1, VCHF_FEE_RAW)).toThrow('cannot express a 2-decimal price');
   });
 
   test('the customer is debited the price and the shop is the one short by the fee', () => {
@@ -216,7 +218,7 @@ describe('a franc price, in integers', () => {
 describe('ringing up a charge', () => {
   test('signs the price with the merchant’s own seed and returns the relay’s charge', async () => {
     serve(200, GOLDEN.open);
-    const outcome = await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW, '');
+    const outcome = await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF');
     expect(outcome).toEqual({
       kind: 'open',
       charge: {
@@ -268,7 +270,7 @@ describe('ringing up a charge', () => {
     // shape between signing and sending would have the payer confirming a different sale than the
     // one the till opened.
     serve(200, GOLDEN.open);
-    await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW, GOLDEN.input.note);
+    await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW, GOLDEN.input.note, 'VCHF');
     expect(postedBody().note).toBe(GOLDEN.input.note);
     expect(mockSignatureCalls[0][5]).toBe(GOLDEN.input.note);
 
@@ -277,14 +279,14 @@ describe('ringing up a charge', () => {
     mockSignatureCalls.length = 0;
     requests.length = 0;
     serve(200, GOLDEN.open);
-    await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, `  ${GOLDEN.input.note}  `);
+    await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, `  ${GOLDEN.input.note}  `, 'VCHF');
     expect(postedBody().note).toBe(GOLDEN.input.note);
     expect(mockSignatureCalls[0][5]).toBe(GOLDEN.input.note);
   });
 
   test('a note of nothing but whitespace is no note: v1 bytes, no wire key', async () => {
     serve(200, GOLDEN.open);
-    await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '   ');
+    await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '   ', 'VCHF');
     expect('note' in postedBody()).toBe(false);
     expect(mockSignatureCalls[0][5]).toBe('');
   });
@@ -294,17 +296,17 @@ describe('ringing up a charge', () => {
     // Showing it would put a code in front of a customer that charges what nobody at the counter
     // chose — so nothing is shown, and the merchant is told both numbers.
     serve(200, {...GOLDEN.open, amount: '1.'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '')).toEqual({kind: 'mispriced', quoted: '1.'});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF')).toEqual({kind: 'mispriced', quoted: '1.'});
   });
 
   test('tells a relay that serves no till apart from a till that refused', async () => {
     // An unregistered route 404s with nothing to say (`DPAY_ENABLE_TILL=false`) — a first-class
     // state with its own instruction. A live till's 404 carries the envelope and a sentence.
     serve(404, null, {unreadable: true});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '')).toEqual({kind: 'not-served', addr: RELAY});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF')).toEqual({kind: 'not-served', addr: RELAY});
 
     serve(404, {statusCode: 404, message: 'Payment link not found', error: 'Not Found'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '')).toEqual({
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF')).toEqual({
       kind: 'refused', said: 'Payment link not found', status: 404,
     });
   });
@@ -312,23 +314,23 @@ describe('ringing up a charge', () => {
   test('carries the till’s own refusal, because it already names the fix', async () => {
     const message = 'issued_at is 400 s from this till\'s clock, which allows ±120 s. Re-sync the device clock, then sign and send again';
     serve(401, {statusCode: 401, message, error: 'Unauthorized'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '')).toEqual({kind: 'refused', said: message, status: 401});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF')).toEqual({kind: 'refused', said: message, status: 401});
 
     // A refusal with no sentence in it is still a refusal — never a null message rendered raw.
     serve(429, {statusCode: 429, error: 'Too Many Requests'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '')).toEqual({kind: 'refused', said: null, status: 429});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF')).toEqual({kind: 'refused', said: null, status: 429});
   });
 
   test('never throws at the caller: an unreachable relay is an outcome', async () => {
     serveDead('ECONNREFUSED');
-    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '');
+    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF');
     expect(outcome.kind).toBe('unreachable');
     expect(outcome.kind === 'unreachable' && outcome.detail).toContain('ECONNREFUSED');
   });
 
   test('sends nothing at all when this device cannot sign', async () => {
     serve(200, GOLDEN.open);
-    const outcome = await openTillCharge(RELAY, {...MERCHANT, secretHex: mockBrokenSeed}, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '');
+    const outcome = await openTillCharge(RELAY, {...MERCHANT, secretHex: mockBrokenSeed}, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF');
     expect(outcome.kind).toBe('unsigned');
     // The nonce is single-use and the relay would refuse an unsigned body anyway; issuing the
     // request would burn a round trip and log a merchant's key as having tried to ring up.
@@ -337,7 +339,7 @@ describe('ringing up a charge', () => {
 
   test('answers unreachable rather than inventing a charge from a half-formed body', async () => {
     serve(200, {id: GOLDEN.open.id, amount: '10.'}); // no qr, no reference, no clock
-    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '');
+    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF');
     expect(outcome.kind).toBe('unreachable');
   });
 
@@ -347,9 +349,53 @@ describe('ringing up a charge', () => {
     // match — money moved, sale still open. So the shape is checked, not just the presence.
     for (const reference of ['', 'not-hex', 'ABCDEF0123456789ABCDEF0123456789', '0123456789abcdef']) {
       serve(200, {...GOLDEN.open, reference});
-      expect((await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW, '')).kind)
+      expect((await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW, '', 'VCHF')).kind)
         .toBe('unreachable');
     }
+  });
+});
+
+describe('the settlement rule (multi-currency build-out)', () => {
+  const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
+  const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true});
+  const id = (linkToken: string): string => byLink(linkToken).id;
+  const byLink = (linkToken: string): SelectableAsset => {
+    const a = ASSETS.find(a => a.linkToken === linkToken);
+    if (a == null) throw new Error(`the bundled catalog must carry ${linkToken}`);
+    return a;
+  };
+
+  test('admits exactly the IC rows that settle a home currency at a stated fee', () => {
+    expect(tillSettlementAssets(ASSETS, CATALOG).map(a => a.id).sort()).toEqual([id('ckUSDC'), id('VCHF')].sort());
+    // Per gate, one named exclusion:
+    expect(tillSettlementRow(byLink('ckBTC'), CATALOG)).toBe(false); // no currency to price in
+    expect(tillSettlementRow(byLink('ICP'), CATALOG)).toBe(false);   // no currency to price in
+    expect(tillSettlementRow(ASSETS.find(a => a.protocol === 'solana' && a.token === 'SOL')!, CATALOG)).toBe(false); // wrong method
+  });
+
+  test('a row the catalog prices too coarsely, or on testnet, or fee-less, is never offered', () => {
+    const vchfRow = CATALOG.find(c => c.currency === 7)!;
+    const coarse = CATALOG.map(c => (c.currency === 7 ? {...c, decimals: 1} : c));
+    expect(tillSettlementRow(byLink('VCHF'), coarse)).toBe(false); // one decimal cannot hold a rappen
+    const feeless = CATALOG.map(c => (c.currency === 7 ? {...c, fee: null} : c));
+    expect(tillSettlementRow(byLink('VCHF'), feeless)).toBe(false); // no fee stated, no honest price
+    const testnet = CATALOG.map(c => (c.currency === 7 ? {...c, testnet: true} : c));
+    expect(tillSettlementRow(byLink('VCHF'), testnet)).toBe(false); // no charge real money settles on a testnet token
+    expect(vchfRow.testnet).toBe(false); // the fixture's own VCHF row is mainnet — the gates above bite on the clones
+  });
+
+  test('a till that opened the charge in a DIFFERENT asset is refused, naming what it served', async () => {
+    // The relay answers `asset` with what it actually opened. A dollar pick served as a franc
+    // charge would be an exchange nobody at the counter made — refused whole.
+    serve(200, {...GOLDEN.open, asset: 'VCHF'});
+    const outcome = await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), 6, '10000', '', 'ckUSDC');
+    expect(outcome).toEqual({kind: 'served-other', served: 'VCHF'});
+  });
+
+  test('the served check is exact on the TOKEN, and an answer naming the picked token opens', async () => {
+    serve(200, {...GOLDEN.open, asset: 'vchf'}); // case-insensitive: casing is not identity
+    const outcome = await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW, '', 'VCHF');
+    expect(outcome.kind).toBe('open');
   });
 });
 
