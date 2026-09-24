@@ -25,21 +25,44 @@
 // disagreeing, is the UI form of the DRY violation.
 //
 // Both are now fixed at the source: amounts always render, and the order comes from
-// `orderAccounts` — the SAME exported policy function the accounts route uses, so the two cannot
+// `orderAccounts` — the SAME exported policy function the per-rail lists use, so the two cannot
 // drift. The `showAmount` and `variant` props that used to make this configurable are gone: no
-// caller passed either (the Balances sheet that wanted `variant='card'` was retired in the
-// 2026-09-08 accounts-route move), and a configurable answer to "should a list of money show the
-// money" is how the two lists diverged in the first place.
+// caller passed either, and a configurable answer to "should a list of money show the money" is
+// how the two lists diverged in the first place.
 import {Modal, Pressable, ScrollView, View, Text} from 'react-native';
 import {S} from '../styles';
 import {CurrencyRow} from './CurrencyRow';
-import {orderAccounts} from './AccountsTab';
 import {useEscapeToClose} from '../hooks/useHotkeys';
-import {type SelectableAsset} from '../config/assets';
+import {DEMO_ASSET_ID, type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
-import type {HomeCurrency} from '../config/currency';
+import {currencyOfAsset, preferredRail, type HomeCurrency} from '../config/currency';
 import type {AssetId} from '../lib/types';
 import {M} from '../i18n';
+
+/**
+ * X22 — the ASSET PICKER's order policy (moved here 2026-09-24: the accounts route became the
+ * currency list and its per-rail order policy now lives with its only consumer — the per-rail
+ * picker inside Pay/Receive). PURE and exported so it is testable without a renderer: the point
+ * of the function is that it is a stated policy rather than whatever order the catalog happened
+ * to have. Four buckets: the main currency's rails (preferred first), then funded accounts, then
+ * unfunded, then the practice rail. Every input asset appears exactly once.
+ */
+export function orderAccounts(
+  assets: SelectableAsset[],
+  balances: Readonly<Partial<Record<AssetId, BalanceView>>>,
+  homeCurrency: HomeCurrency,
+): SelectableAsset[] {
+  const homeRails = preferredRail(homeCurrency, assets) === null
+    ? []
+    : assets.filter(a => currencyOfAsset(a) === homeCurrency);
+  // Preferred rail first inside the home group; the rest keep catalog order.
+  const mainId = preferredRail(homeCurrency, assets)?.id ?? null;
+  const home = [...homeRails].sort((a, b) => (a.id === mainId ? -1 : 0) - (b.id === mainId ? -1 : 0));
+  const rest = assets.filter(a => !homeRails.includes(a) && a.id !== DEMO_ASSET_ID);
+  const holds = (a: SelectableAsset) => balances[a.id]?.status === 'ok';
+  const practice = assets.filter(a => a.id === DEMO_ASSET_ID);
+  return [...home, ...rest.filter(holds), ...rest.filter(a => !holds(a)), ...practice];
+}
 
 export type AssetPickerProps = {
   open: boolean;

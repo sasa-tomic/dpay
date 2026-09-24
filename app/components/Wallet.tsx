@@ -4,14 +4,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
 import {M} from '../i18n';
-import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY, PRACTICE_CURRENCY} from '../config/constants';
+import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, HIDDEN_CURRENCIES_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY, PRACTICE_CURRENCY} from '../config/constants';
 import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog';
 import {setIcClockRoutingCanister} from '../services/icp';
 import {base, randNonceHex, fmtTime} from '../lib/format';
 import {applyOffline} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
 import {buildSelectableAssets, chipLabel, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
-import {buildAssetBalances} from '../lib/assetBalances';
+import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {mergeHistoryByTime, mergePendingByTime, settledJoinKey} from '../lib/ledger';
 import type {AssetId, Identity, NfcStatus, PayIntent, Txn} from '../lib/types';
 import {DpayCore} from '../services/native';
@@ -56,7 +56,8 @@ import {AppModal} from './AppModal';
 import {IconArrowDownLeft, IconChevronDown, IconClock, IconHome, IconMoon, IconQr, IconSettings, IconSun} from './icons';
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 import {HomeCurrencyChooser} from './HomeCurrencyChooser';
-import {type HomeCurrency, currencyName, currencyOfAsset, preferredRail} from '../config/currency';
+import {AddCurrencyTab} from './AddCurrencyTab';
+import {type HomeCurrency, chooseRail, currencyName, currencyOfAsset, offerableCurrencies, parseHiddenCurrencies, preferredRail} from '../config/currency';
 import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 import {modeForScreen, screenForMode, type WalletMode, type WalletRoute} from '../lib/walletRoute';
@@ -277,8 +278,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
       openAddresses();
     } else {
       setMode(modeForScreen(r.screen));
-    }
-    // Only the named screen's sub-mode is applied. Resetting the other tab's sub-mode would make a
+    }    // Only the named screen's sub-mode is applied. Resetting the other tab's sub-mode would make a
     // Back press quietly discard a choice the user made on a screen the URL says nothing about.
     if (r.screen === 'pay') setPaySubMode(r.sub === 'send' ? 'send' : 'scan');
     if (r.screen === 'receive') setReceiveSubMode(r.sub === 'address' ? 'address' : 'request');
@@ -711,6 +711,30 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     });
   }, []);
 
+  // ── Hidden currencies (the 2026-09-24 Remove semantics) ──────────────────────────────────────
+  // The currencies the user removed from the currency LIST, device-persisted and re-addable from
+  // the add-currency route. Hiding is a list operation only: the rails still poll, payment links
+  // still route, and nothing on chain is touched. Best-effort persistence (the showTestnet
+  // pattern); parse is fail-closed (config/currency.ts).
+  const [hiddenCurrencies, setHiddenCurrencies] = useState<HomeCurrency[]>([]);
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(HIDDEN_CURRENCIES_STORAGE_KEY)
+      .then(v => { if (alive) setHiddenCurrencies(parseHiddenCurrencies(v)); })
+      .catch((e: unknown) => { console.log(`[dpay] failed to load hidden currencies: ${e instanceof Error ? e.message : String(e)}`); });
+    return () => { alive = false; };
+  }, []);
+  const restoreCurrency = useCallback((c: HomeCurrency) => {
+    setHiddenCurrencies(prev => {
+      if (!prev.includes(c)) return prev;
+      const next = prev.filter(x => x !== c);
+      AsyncStorage.setItem(HIDDEN_CURRENCIES_STORAGE_KEY, JSON.stringify(next)).catch((e: unknown) => {
+        console.log(`[dpay] failed to persist hidden currencies: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      return next;
+    });
+  }, []);
+
   // Inbound links (2026-08-29): the wallet accepts exactly three, and this effect is the ONE door.
   //   • a PAYMENT LINK `…/wallet/pay/<recipient>?asset=…&network=…&amount=…` — parsed here, resolved
   //     against the catalog by the effect below, and pre-filled into the Pay tab. It NEVER signs.
@@ -1031,7 +1055,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // __DPAY_TEST_BALANCE_STALE_MS) — IC per atByCurrency, SOL per the rail's
   // freshAt (never-read tokens inherit approx honestly). The nowTick keeps the marker
   // firing while every poll is failing; a fresh read re-renders on its own.
-  const balances = useMemo(() => {
+  const approxFlags = useMemo(() => {
     const approx: Partial<Record<AssetId, boolean>> = {};
     for (const a of assets) {
       if (a.id.startsWith('ic:')) {
@@ -1041,14 +1065,47 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
         approx[a.id] = solFreshAt === 0 || nowTick - solFreshAt > balanceStaleMs();
       }
     }
+    return approx;
+  }, [assets, online, atByCurrency, nowTick, solFreshAt]);
+  const balances = useMemo(() => {
     return buildAssetBalances({
       catalog, assets,
       icBalances: displayAssetBalances,
       primaryBalance: shownBalance,
-      approx,
+      approx: approxFlags,
       solState: solShownState, tokenStates: tokenShownStates,
     });
-  }, [catalog, assets, displayAssetBalances, shownBalance, online, atByCurrency, nowTick, solFreshAt, solShownState, tokenShownStates]);
+  }, [catalog, assets, displayAssetBalances, shownBalance, approxFlags, solShownState, tokenShownStates]);
+  // ── Currency-first balances (forks #2 + #4) ──────────────────────────────────────────────────
+  // The VISIBLE currency list, in presentation order (stables, then Other): every currency the
+  // catalog can realise, minus the ones the user removed. The main currency is always computed
+  // even if it is hidden — Home headlines it whatever the list shows.
+  const visibleCurrencies = useMemo(
+    () => offerableCurrencies(assets).filter(c => !hiddenCurrencies.includes(c)),
+    [assets, hiddenCurrencies],
+  );
+  const sumCurrencies = useMemo(
+    () => Array.from(new Set<HomeCurrency>([...visibleCurrencies, ...(homeCurrency != null ? [homeCurrency] : [])])),
+    [visibleCurrencies, homeCurrency],
+  );
+  // The SPL amounts for the sum: the SHOWN token states (the pending-outbox deduction applied),
+  // flattened to amounts keyed by mint — the same facts the per-asset token views render.
+  const solTokenAmountsForSum = useMemo(() => {
+    const next: Record<string, string | null> = {};
+    for (const [mint, state] of Object.entries(tokenShownStates)) next[mint] = state.amount;
+    return next;
+  }, [tokenShownStates]);
+  // The per-currency SUMMED map (buildCurrencyBalances) — the currency list's row amounts and the
+  // Home headline's number. Same inputs the per-asset views above read, one layer up.
+  const currencyBalances = useMemo(() => buildCurrencyBalances({
+    currencies: sumCurrencies,
+    assets, catalog,
+    views: balances,
+    icBalances: displayAssetBalances,
+    solBalance: solShownState.balance ?? null,
+    tokenAmounts: solTokenAmountsForSum,
+    approx: approxFlags,
+  }), [sumCurrencies, assets, catalog, balances, displayAssetBalances, solShownState.balance, solTokenAmountsForSum, approxFlags]);
   // Trip Ready J5b — fundsReady: awarded ONCE at the first sight of any spendable balance
   // (DEMO counts; `—` unknowns do not). Reads the memo above; ref-guarded against poll spam.
   useFundsReady(balances);
@@ -1135,6 +1192,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // idea of where Back goes.
   const leaveRoute = useCallback((): boolean => {
     if (mode === 'accounts') { closeAccounts(); return true; }
+    // The add-currency route is only ever entered FROM the accounts route, so Back returns there
+    // — set directly, so the accounts route's own "where was I entered from" memory is untouched.
+    if (mode === 'add-currency') { setMode('accounts'); return true; }
     if (mode === 'convert') { openAccounts(); return true; }
     if (mode === 'addresses') { closeAddresses(); return true; }
     return false;
@@ -1193,6 +1253,28 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     setPaySubMode('scan');
     setDepositReturnTo(null); // a manual switch supersedes any fund-funnel resume origin
   }, [selectionLocked]);
+
+  // ── The currency-first gestures (2026-09-24 redesign) ────────────────────────────────────────
+  // [Add new currency] — the route. Only ever entered from the accounts route.
+  const openAddCurrency = useCallback(() => setMode('add-currency'), []);
+  // A currency-row tap: set that currency as MAIN and go Home — the spec's deliberate gesture
+  // (it supersedes the old tap-protection rule). The rail resolution is dpay's job and happens
+  // downstream (homeAsset / chooseRail); this only records the preference and navigates.
+  const openCurrencyAsMain = useCallback((c: HomeCurrency) => {
+    onSetHomeCurrency(c);
+    setMode('home');
+  }, [onSetHomeCurrency]);
+  // A row's Convert: open the convert surface with THAT currency as the source — resolved to its
+  // concrete rail through `chooseRail` (the funded rail, else the stated preference), which is the
+  // same policy every spend surface uses. A user gesture, so it respects the selection lock.
+  const openConvertForCurrency = useCallback((c: HomeCurrency) => {
+    if (!shouldAllowUserSelect(selectionLocked)) return;
+    const choice = chooseRail(c, assets, balances);
+    const rail = choice != null ? choice.rail : preferredRail(c, assets);
+    if (rail == null) return;
+    selectAsset(rail.id);
+    setMode('convert');
+  }, [selectionLocked, assets, balances, selectAsset]);
 
   // The rail flip inside Receive ▸ "My address" (Objective 2, currency-first wallet): switching
   // WHICH rail of the home-currency group the address surface shows. Deliberately NOT handleSelect
@@ -1426,21 +1508,31 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
           : mode === 'accounts'
           ? <AccountsTab
               assets={assets}
-              selectedId={effectiveSelectedId}
               balances={balances}
+              currencyBalances={currencyBalances}
               homeCurrency={homeCurrency}
+              visibleCurrencies={visibleCurrencies}
+              selectedId={effectiveSelectedId}
               demoFaucetAvailable={capabilities.demoFaucet}
               topUpBusy={topUpBusy}
               hasTestnet={hasTestnet}
               showTestnet={showTestnet}
               onToggleTestnet={toggleTestnet}
               onBack={closeAccounts}
+              onOpenCurrency={openCurrencyAsMain}
+              onConvertCurrency={openConvertForCurrency}
+              onOpenAddCurrency={openAddCurrency}
               onSelect={handleSelect}
-              onSwitchRail={payRailSwitch}
               onTopUp={topUp}
-              onConvert={() => setMode('convert')}
               onOpenSettings={openSettingsFromOutage}
             />
+           : mode === 'add-currency'
+           ? <AddCurrencyTab
+               assets={assets}
+               hiddenCurrencies={hiddenCurrencies}
+               onBack={() => setMode('accounts')}
+               onAdd={restoreCurrency}
+             />
            : mode === 'addresses'
            ? <AddressesTab
                assets={assets}

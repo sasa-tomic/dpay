@@ -70,13 +70,22 @@ export const walletEs: WalletMessages = {
 
   accounts: {
     title: 'Cuentas',
-    intro: 'Toca una cuenta para usarla en Pagar y Recibir.',
+    intro: 'Toca una moneda para convertirla en tu principal.',
     back: 'Atrás',
     practice: 'Dinero de práctica. Solo funciona dentro de dpay, y ninguna tienda lo acepta.',
     convertHint: 'Convertir en un servicio externo',
-    groupHome: name => `Principal · ${name}`,
-    groupOther: 'Otros activos',
-    switchRail: rail => `Cambiar a ${rail}`,
+    setMainHint: 'La convierte en tu moneda principal',
+    addCurrency: 'Añadir nueva moneda',
+  },
+
+  addCurrency: {
+    title: 'Añadir moneda',
+    search: 'Buscar',
+    stable: 'Monedas estables',
+    other: 'Otras',
+    inWallet: 'En la cartera',
+    add: 'Añadir',
+    none: 'Ninguna moneda coincide.',
   },
 
   addressBook: {

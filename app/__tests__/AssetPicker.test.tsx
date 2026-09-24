@@ -23,8 +23,7 @@ import React from 'react';
 import {Modal} from 'react-native';
 import renderer, {act} from 'react-test-renderer';
 import type {ReactTestInstance} from 'react-test-renderer';
-import {AssetPicker} from '../components/AssetPicker';
-import {orderAccounts} from '../components/AccountsTab';
+import {AssetPicker, orderAccounts} from '../components/AssetPicker';
 import type {SelectableAsset} from '../config/assets';
 import {USDC_MINT_ADDRESS} from '../solana/tokens';
 import type {BalanceView} from '../lib/assetBalances';
@@ -222,7 +221,7 @@ describe('AssetPicker', () => {
     const rendered = tree.root
       .findAll(node => node.props && typeof node.props.testId === 'string' && node.props.testId.startsWith('req-pick-'))
       .map(node => node.props.testId);
-    const expected = orderAccounts(ASSETS, BALANCES, 'USD').map(a => `req-pick-${a.testKey}`);
+    const expected = orderAccounts(ASSETS, BALANCES, 'USD').map((a: SelectableAsset) => `req-pick-${a.testKey}`);
     expect(rendered).toEqual(expected);
     // And the practice rail is last, which is the visible consequence users notice.
     expect(rendered[rendered.length - 1]).toBe('req-pick-demo');

@@ -436,3 +436,53 @@ export function chooseRail(
   }
   return {rail: rails[0], reason: 'preference'};
 }
+
+// ── Hidden currencies (the 2026-09-24 Remove semantics) ────────────────────────────────────────
+//
+// Remove HIDES a currency from the wallet's currency list: device-persisted, re-addable from
+// Add new currency, and it never touches money on chain — the rails still poll, payments still
+// route, and a re-add is a list operation, not a recovery. Two guards bind the remove (founder
+// approved as part of the recorded design), plus one reading of the honesty rule:
+//   • a KNOWN nonzero summed balance refuses — the user is told to move or convert it first;
+//   • a balance the wallet cannot currently read refuses too — unknown is not zero, and hiding
+//     money the wallet cannot see is the failure the nonzero guard exists to prevent;
+//   • the LAST visible currency cannot be removed — the wallet is always "in" one currency.
+// The practice rail is not part of this mechanism at all (DEMO is not a currency here).
+
+/** Parse a persisted hidden-currency list. Fail-closed: anything unknown, wrongly typed or
+ *  duplicated is dropped, so a hand-edited or future-build value can only ever shrink the list.
+ *  DEMO can never be hidden this way — it is not a currency. */
+export function parseHiddenCurrencies(v: string | null | undefined): HomeCurrency[] {
+  if (v == null || v.length === 0) return [];
+  let j: unknown;
+  try { j = JSON.parse(v); } catch { return []; }
+  if (!Array.isArray(j)) return [];
+  const seen = new Set<HomeCurrency>();
+  for (const item of j) {
+    const c = parseHomeCurrency(typeof item === 'string' ? item : null);
+    if (c !== null) seen.add(c);
+  }
+  return WALLET_CURRENCIES.filter(c => seen.has(c));
+}
+
+/** Why remove is refused, so the copy can give the practical next step. */
+export type RemoveRefusal = 'nonzero' | 'unreadable' | 'last';
+export type RemoveVerdict = {ok: true} | {ok: false; reason: RemoveRefusal};
+
+/** The remove guard, pure and total: everything the caller needs to say yes or say why not. */
+export function removeCurrencyGuard(args: {
+  currency: HomeCurrency;
+  /** The currency's SUMMED balance view (buildCurrencyBalances), or null when it has none. */
+  balance: BalanceView | null;
+  /** How many currencies are visible in the list INCLUDING this one. */
+  visibleCount: number;
+}): RemoveVerdict {
+  const {balance, visibleCount} = args;
+  if (visibleCount <= 1) return {ok: false, reason: 'last'};
+  if (balance == null) return {ok: false, reason: 'unreadable'};
+  if (balance.status === 'ok') return {ok: false, reason: 'nonzero'};
+  // 'ok' is the ONE known-positive status; zero/absent are known zeros. Everything else
+  // (loading/unavailable/error) is an UNKNOWN balance — not a zero, so not removable yet.
+  if (balance.status !== 'zero' && balance.status !== 'absent') return {ok: false, reason: 'unreadable'};
+  return {ok: true};
+}

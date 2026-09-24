@@ -18,15 +18,15 @@
 // Keeping the mapping pure is what makes "does Back land where the user expects" a unit test rather
 // than a screenshot.
 
-/** The wallet's linkable surfaces. Four are tabs, three are routes; the URL does not distinguish
- *  them, because to a user typing or bookmarking one they are all just places. `transactions` is
- *  spelled the way the tab is LABELLED, not the way the mode is named internally ('ledger') — a URL
- *  is user-facing text. `Wallet` owns that one-word translation. */
-export type WalletScreen = 'home' | 'pay' | 'receive' | 'transactions' | 'accounts' | 'convert' | 'addresses';
+/** The wallet's linkable surfaces. Four are tabs; the rest are routes (entered from a control,
+ *  left by Back). `transactions` is spelled the way the tab is LABELLED, not the way the mode is
+ *  named internally ('ledger') — a URL is user-facing text. `Wallet` owns that one-word
+ *  translation. */
+export type WalletScreen = 'home' | 'pay' | 'receive' | 'transactions' | 'accounts' | 'convert' | 'addresses' | 'add-currency';
 
 /** Every screen, in tab order. Exported so a test can assert the mapping is total rather than
  *  spot-checking whichever screens someone remembered. */
-export const ALL_SCREENS: readonly WalletScreen[] = ['home', 'pay', 'receive', 'transactions', 'accounts', 'convert', 'addresses'];
+export const ALL_SCREENS: readonly WalletScreen[] = ['home', 'pay', 'receive', 'transactions', 'accounts', 'convert', 'addresses', 'add-currency'];
 
 /** The non-default within-tab sub-modes. These are destinations, not view state: a user who follows
  *  a link to "Send to address" must arrive at that form, not at the scanner with a toggle to press.
@@ -60,12 +60,12 @@ export type WalletRoute = {
  * Back, never a bottom-bar destination). The URL does not distinguish the two, because to a user
  * bookmarking one they are all just places.
  */
-export type WalletMode = 'pay' | 'receive' | 'ledger' | 'home' | 'accounts' | 'convert' | 'addresses';
+export type WalletMode = 'pay' | 'receive' | 'ledger' | 'home' | 'accounts' | 'convert' | 'addresses' | 'add-currency';
 
 /** The one word the two vocabularies disagree on: the tab is LABELLED "Transactions" and the mode
  *  is named `ledger`. A URL is user-facing text, so it uses the label. */
 const MODE_TO_SCREEN: Readonly<Record<WalletMode, WalletScreen>> = {
-  home: 'home', pay: 'pay', receive: 'receive', ledger: 'transactions', accounts: 'accounts', convert: 'convert', addresses: 'addresses',
+  home: 'home', pay: 'pay', receive: 'receive', ledger: 'transactions', accounts: 'accounts', convert: 'convert', addresses: 'addresses', 'add-currency': 'add-currency',
 };
 
 export function screenForMode(mode: WalletMode): WalletScreen {

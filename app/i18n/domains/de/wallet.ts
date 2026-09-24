@@ -69,13 +69,22 @@ export const walletDe: WalletMessages = {
 
   accounts: {
     title: 'Konten',
-    intro: 'Tippe auf ein Konto, um es in Bezahlen und Empfangen zu verwenden.',
+    intro: 'Tippe auf eine Währung, um sie zur Hauptwährung zu machen.',
     back: 'Zurück',
     practice: 'Übungsgeld. Es funktioniert nur in dpay — kein Geschäft nimmt es an.',
     convertHint: 'Bei einem externen Handelsplatz tauschen',
-    groupHome: name => `Haupt · ${name}`,
-    groupOther: 'Andere Assets',
-    switchRail: rail => `Zu ${rail} wechseln`,
+    setMainHint: 'Macht diese Währung zur Hauptwährung',
+    addCurrency: 'Neue Währung',
+  },
+
+  addCurrency: {
+    title: 'Währung hinzufügen',
+    search: 'Suchen',
+    stable: 'Stable-Währungen',
+    other: 'Andere',
+    inWallet: 'In der Wallet',
+    add: 'Hinzufügen',
+    none: 'Keine Währung gefunden.',
   },
 
   addressBook: {

@@ -1,64 +1,100 @@
 /**
- * The ACCOUNTS route (`AccountsTab`) — the per-asset balance list, moved off the Home tab
- * 2026-09-08 (it was ~80% of that surface, nine of ten rows zero on a new wallet — X2). Rows are
- * byte-identical to the Home-inlined era; only the container name changed. The tests that used to
- * live here for the Home tab moved with the rows, verbatim where the contract did not change.
+ * The CURRENCY LIST route (`AccountsTab`) — the 2026-09-24 redesign of the 2026-09-08 accounts
+ * route. One row per VISIBLE currency, not one per rail. What is pinned:
  *
- * The list is a PURE renderer over the Wallet-owned selection contract. What is pinned:
- *   • zero-balance VCHF/ICP rows REMAIN VISIBLE with honest "0.00 VCHF"/"0 ICP" amounts (the
- *     asset-first rule survives the move: nothing hides behind a positive balance);
- *   • the DEMO faucet (`btn-topup`) is still the only per-row funding action;
- *   • the home-currency group is MARKED, never summed: MAIN on the preferred rail, the sibling
- *     badged with its own rail line;
- *   • ORDER (X22): home rails, then funded accounts, then unfunded, then the practice rail under
- *     a divider that says in a sentence what it is;
- *   • Convert (`btn-accounts-convert`) is on the SELECTED row and nowhere else — uniform for every
- *     asset by the same gesture, with no inert buttons on the other nine.
+ *   • ORDER: the fiat stables (CHF, USD, EUR), then the token currencies ("Other": BTC, ETH, ICP,
+ *     SOL) — and the practice rail LAST, outside the list, under a divider that says in a whole
+ *     sentence what it is (practice money is not a currency and never becomes main);
+ *   • every visible currency renders, zero balance included, with its SUMMED currency-unit
+ *     figure ("0.00 Fr" — fork #2 + #4; the sum itself is buildCurrencyBalances' contract, tested
+ *     in currencyBalances.test.ts);
+ *   • the gestures: a row tap SETS MAIN (`onOpenCurrency`), Convert rides EVERY row
+ *     (`btn-accounts-convert-<CODE>`), and [Add new currency] opens its route;
+ *   • the MAIN badge sits on the home-currency row only;
+ *   • an outage belongs to a NETWORK and is stated ONCE, above the first affected row (X9);
+ *   • a KNOWN-absent token account on the preferred rail still grows the "needs setup" badge.
  *
- * Uses react-test-renderer (the project's only renderer); no module mocks needed — the list is a
- * pure renderer and the assets/balances inputs are built with the REAL pure builders.
+ * Uses react-test-renderer (the project's only renderer); the fixtures run the REAL pure
+ * pipeline (buildSelectableAssets → buildAssetBalances → buildCurrencyBalances), the same one
+ * Wallet wires.
  */
 import {describe, test, expect, jest} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
-import {AccountsTab, orderAccounts} from '../components/AccountsTab';
+import {AccountsTab} from '../components/AccountsTab';
 import {DEMO_ASSET_ID, buildSelectableAssets} from '../config/assets';
-import {preferredRail} from '../config/currency';
-import {buildAssetBalances} from '../lib/assetBalances';
+import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
-import {M} from '../i18n';
+import {offerableCurrencies} from '../config/currency';
 
 const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
+const ASSETS = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: BUNDLED_NETWORKS});
+const VISIBLE = offerableCurrencies(ASSETS); // stables then tokens, offerable only — the Wallet-derived list
+
+/** The REAL per-asset views over the bundled catalog. */
+function assetViews(over: Partial<Parameters<typeof buildAssetBalances>[0]> = {}) {
+  return buildAssetBalances({
+    catalog: BUNDLED,
+    assets: ASSETS,
+    icBalances: {},
+    primaryBalance: '12345',
+    solState: {balance: null, status: 'unavailable'},
+    tokenStates: {},
+    ...over,
+  });
+}
+
+/** The REAL per-currency sums over those views. */
+function currencyViews(views: ReturnType<typeof assetViews>, over: Partial<Parameters<typeof buildCurrencyBalances>[0]> = {}) {
+  return buildCurrencyBalances({
+    currencies: VISIBLE,
+    assets: ASSETS,
+    catalog: BUNDLED,
+    views,
+    icBalances: {},
+    solBalance: null,
+    tokenAmounts: {},
+    approx: {},
+    ...over,
+  });
+}
 
 function mount(
-  assets: ReturnType<typeof buildSelectableAssets>,
-  balances: ReturnType<typeof buildAssetBalances>,
+  views: ReturnType<typeof assetViews>,
+  currencyViewsMap: ReturnType<typeof currencyViews>,
   props: Partial<Parameters<typeof AccountsTab>[0]> = {},
 ): renderer.ReactTestRenderer {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(
       <AccountsTab
-        assets={assets}
-        selectedId={DEMO_ASSET_ID}
-        balances={balances}
+        assets={ASSETS}
+        balances={views}
+        currencyBalances={currencyViewsMap}
         homeCurrency="CHF"
+        visibleCurrencies={VISIBLE}
+        selectedId={DEMO_ASSET_ID}
         demoFaucetAvailable={true}
         topUpBusy={false}
         hasTestnet={false}
         showTestnet={false}
         onToggleTestnet={jest.fn()}
         onBack={jest.fn()}
+        onOpenCurrency={jest.fn()}
+        onConvertCurrency={jest.fn()}
+        onOpenAddCurrency={jest.fn()}
         onSelect={jest.fn()}
         onTopUp={jest.fn()}
-        onConvert={jest.fn()}
         {...props}
       />,
     );
   });
   return tree;
 }
+
+const pressable = (tree: renderer.ReactTestRenderer, testID: string) =>
+  tree.root.findAll(n => n.props?.testID === testID && typeof n.props.onPress === 'function')[0];
 
 const rowText = (tree: renderer.ReactTestRenderer, testID: string): string =>
   tree.root
@@ -70,271 +106,139 @@ const rowText = (tree: renderer.ReactTestRenderer, testID: string): string =>
 const has = (tree: renderer.ReactTestRenderer, testID: string): boolean =>
   tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
 
-const pressable = (tree: renderer.ReactTestRenderer, testID: string) =>
-  tree.root.findAll(n => n.props?.testID === testID && typeof n.props.onPress === 'function')[0];
+/** The rendered currency rows, in order — the row CONTAINER testIDs. */
+const currencyRowOrder = (tree: renderer.ReactTestRenderer): string[] =>
+  tree.root
+    .findAll(n => typeof n.props?.testID === 'string' && n.props.testID.startsWith('accounts-currency-') && typeof n.type === 'string')
+    .map(n => String(n.props.testID).replace('accounts-currency-', ''));
 
-describe('AccountsTab — bundled VCHF/ICP rows (zero-balance visible, no ramp actions)', () => {
-  const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
-  // Never-polled IC balances: every IC asset (incl. VCHF/ICP) reads '0' → status 'zero' (dimmed)
-  // but still renders — this is exactly the cold-start wallet state for the two new rows.
-  const balances = buildAssetBalances({
-    catalog: BUNDLED,
-    assets,
-    icBalances: {},
-    primaryBalance: null,
-    solState: {balance: null, status: 'unavailable'},
-    tokenStates: {},
-  });
+describe('AccountsTab — one row per VISIBLE currency, stables then Other', () => {
+  const views = assetViews();
+  const sums = currencyViews(views);
 
-  test('zero-balance VCHF + ICP rows remain visible with honest "0 VCHF"/"0 ICP" amounts', () => {
-    const tree = mount(assets, balances);
-    const vchf = rowText(tree, 'asset-vchf');
-    const icp = rowText(tree, 'asset-icp');
-    expect(vchf).toContain('0.00 VCHF');
-    expect(icp).toContain('0 ICP');
-    // The network label distinguishes the IC rows honestly (M.wallet.asset.networkLabel renders
-    // "VCHF · Internet Computer" from the descriptor's own network string).
-    expect(vchf).toContain('Internet Computer');
-    expect(icp).toContain('Internet Computer');
-    expect(vchf).not.toMatch(/Bitcoin|Ethereum/);
-    act(() => { tree.unmount(); });
-  });
-
-  test('NO Add money / Cash out action is emitted for VCHF/ICP (only DEMO keeps its faucet)', () => {
-    const tree = mount(assets, balances);
-    // The DEMO faucet (`btn-topup`) is the list's ONLY per-row funding action: it renders inside
-    // the DEMO row (findAll matches layered composite+host nodes per Pressable, so presence — not
-    // count — is the assertion) and inside NEITHER direct-ICRC row.
-    const demoRow = tree.root.findAll(node => node.props && node.props.testID === 'asset-demo')[0]!;
-    expect(demoRow.findAll(node => node.props && node.props.testID === 'btn-topup').length).toBeGreaterThan(0);
-    for (const testID of ['asset-vchf', 'asset-icp']) {
-      const row = tree.root.findAll(node => node.props && node.props.testID === testID)[0]!;
-      expect(row.findAll(node => node.props && node.props.testID === 'btn-topup')).toHaveLength(0);
-    }
-    act(() => { tree.unmount(); });
-  });
-
-  test('the container is `accounts-list`, and a row select hands its id up', () => {
-    const onSelect = jest.fn();
-    const tree = mount(assets, balances, {onSelect});
-    expect(has(tree, 'accounts-list')).toBe(true);
-    expect(has(tree, 'home-accounts')).toBe(false);
-    act(() => { pressable(tree, 'asset-vchf-select').props.onPress(); });
-    expect(onSelect).toHaveBeenCalledWith('ic:7');
-    act(() => { tree.unmount(); });
-  });
-
-  test('Back hands off to the surface the route was entered from', () => {
-    const onBack = jest.fn();
-    const tree = mount(assets, balances, {onBack});
-    act(() => { pressable(tree, 'btn-accounts-back').props.onPress(); });
-    expect(onBack).toHaveBeenCalledTimes(1);
-    act(() => { tree.unmount(); });
-  });
-});
-
-describe('AccountsTab — home-currency rail badges (mark every rail, never sum the group)', () => {
-  // The full two-rail USD group: ckUSDC on the IC + USDC on Solana (solanaUsdc forced on so the
-  // row is present regardless of the offline test loop's empty RPC URL).
-  const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
-  const balances = buildAssetBalances({
-    catalog: BUNDLED,
-    assets,
-    icBalances: {},
-    primaryBalance: null,
-    solState: {balance: null, status: 'unavailable'},
-    tokenStates: {},
-  });
-
-  const badgeText = (tree: renderer.ReactTestRenderer, testID: string): string =>
-    tree.root
-      .findAll(node => node.props && node.props.testID === testID)[0]!
-      .findAllByType(Text)
-      .map(n => n.props.children)
-      .join(' ');
-
-  test('home=USD: MAIN on ckUSDC only; the Solana sibling wears a badge NAMING its rail', () => {
-    const tree = mount(assets, balances, {homeCurrency: 'USD'});
-    // The preferred rail keeps the one MAIN badge.
-    expect(has(tree, 'asset-ckusdc-main')).toBe(true);
-    expect(has(tree, 'asset-sol-usdc-main')).toBe(false);
-    expect(has(tree, 'asset-ckusdc-rail')).toBe(false);
-    // The sibling rail's badge names the rail with the S1 rail-line vocabulary — never "MAIN".
-    expect(has(tree, 'asset-sol-usdc-rail')).toBe(true);
-    expect(badgeText(tree, 'asset-sol-usdc-rail')).toBe('USDC · Solana');
-    // No OTHER row gains a badge: VCHF settles CHF (a different currency), ICP/ckETH settle none.
-    for (const key of ['asset-vchf', 'asset-icp', 'asset-cketh', 'asset-sol', 'asset-sol-eurc', 'asset-demo']) {
-      expect(has(tree, `${key}-rail`)).toBe(false);
-      expect(has(tree, `${key}-main`)).toBe(false);
-    }
-    act(() => { tree.unmount(); });
-  });
-
-  test('home=CHF: single-rail group renders exactly as before — MAIN on VCHF, no rail badges', () => {
-    const tree = mount(assets, balances, {homeCurrency: 'CHF'});
-    expect(has(tree, 'asset-vchf-main')).toBe(true);
-    for (const key of ['asset-vchf', 'asset-ckusdc', 'asset-sol-usdc', 'asset-icp', 'asset-cketh', 'asset-sol', 'asset-sol-eurc', 'asset-demo']) {
-      expect(has(tree, `${key}-rail`)).toBe(false);
-    }
-    act(() => { tree.unmount(); });
-  });
-});
-
-describe('AccountsTab — Convert lives on the selected row (X15)', () => {
-  const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
-  const balances = buildAssetBalances({
-    catalog: BUNDLED, assets, icBalances: {}, primaryBalance: null,
-    solState: {balance: null, status: 'unavailable'}, tokenStates: {},
-  });
-
-  test('EVERY asset reaches Convert by the SAME gesture — select the row, tap Convert', () => {
-    // The uniform-IA hard rule reads on RAILS, not on button counts: no asset may have a path to
-    // Convert that another asset lacks. Selecting any row puts the identical control on it.
-    for (const asset of assets) {
-      const onConvert = jest.fn();
-      const tree = mount(assets, balances, {selectedId: asset.id, onConvert});
-      const row = tree.root.findAll(n => n.props && n.props.testID === `asset-${asset.testKey}`)[0]!;
-      expect(row.findAll(n => n.props?.testID === 'btn-accounts-convert').length).toBeGreaterThan(0);
-      act(() => { pressable(tree, 'btn-accounts-convert').props.onPress(); });
-      expect(onConvert).toHaveBeenCalledTimes(1);
-      act(() => { tree.unmount(); });
-    }
-  });
-
-  test('exactly ONE Convert control exists — the other nine rows carry no inert button', () => {
-    const tree = mount(assets, balances, {selectedId: 'ic:7'});
-    const hosts = tree.root.findAll(n => n.props?.testID === 'btn-accounts-convert' && typeof n.props.onPress === 'function');
-    expect(hosts.length).toBe(1);
-    const vchfRow = tree.root.findAll(n => n.props && n.props.testID === 'asset-vchf')[0]!;
-    expect(vchfRow.findAll(n => n.props?.testID === 'btn-accounts-convert').length).toBeGreaterThan(0);
-    act(() => { tree.unmount(); });
-  });
-
-  test('no selection ⇒ no Convert control at all (nothing to convert)', () => {
-    const tree = mount(assets, balances, {selectedId: null});
-    expect(has(tree, 'btn-accounts-convert')).toBe(false);
-    act(() => { tree.unmount(); });
-  });
-});
-
-describe('AccountsTab — currency sections (labels, never totals; switch affordance)', () => {
-  const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
-  const balances = buildAssetBalances({
-    catalog: BUNDLED, assets, icBalances: {}, primaryBalance: null,
-    solState: {balance: null, status: 'unavailable'}, tokenStates: {},
-  });
-  // The Solana USDC rail FUNDED — token states are mint-keyed (the poll's own shape), mints read
-  // off the asset list, never hardcoded.
-  const fundedSol = buildAssetBalances({
-    catalog: BUNDLED, assets, icBalances: {}, primaryBalance: null,
-    solState: {balance: null, status: 'unavailable'},
-    tokenStates: Object.fromEntries(assets
-      .filter((a): a is Extract<typeof a, {protocol: 'solana'}> => a.protocol === 'solana' && a.token === 'USDC' && a.mint != null)
-      .map(a => [a.mint!, {amount: '123400', decimals: a.decimals, status: 'balance' as const}])),
-  });
-
-  test('section headers NAME the currency in list order, and no header renders a number', () => {
-    const tree = mount(assets, balances, {homeCurrency: 'USD'});
-    const list = tree.root.findAll(n => n.props && n.props.testID === 'accounts-list')[0]!;
-    const marks = [...new Set(list.findAll(n => n.props?.testID?.startsWith('accounts-group-') === true)
-      .map(n => String(n.props.testID)))];
-    // Stables first, then the token currencies (the generalized main, 2026-09-24), tail last.
-    expect(marks).toEqual(['accounts-group-usd', 'accounts-group-chf', 'accounts-group-eur', 'accounts-group-btc', 'accounts-group-eth', 'accounts-group-icp', 'accounts-group-sol', 'accounts-group-other']);
-    // A header is a LABEL: no digit may appear in any of them (no sums across assets, ever).
-    for (const testID of marks) {
-      const text = rowText(tree, testID);
-      expect(text).not.toMatch(/\d/);
-    }
-    expect(rowText(tree, 'accounts-group-usd')).toBe('Main · US dollars');
-    expect(rowText(tree, 'accounts-group-chf')).toBe('Swiss francs');
-    expect(rowText(tree, 'accounts-group-btc')).toBe('Bitcoin');
-    expect(rowText(tree, 'accounts-group-other')).toBe('Other assets');
-    act(() => { tree.unmount(); });
-  });
-
-  test('single-rail sections carry no switch affordance; the multi-rail one carries exactly one', () => {
-    const tree = mount(assets, balances, {homeCurrency: 'USD', selectedId: 'ic:7', onSwitchRail: jest.fn()});
-    for (const slug of ['chf', 'eur', 'other']) {
-      expect(has(tree, `btn-accounts-rail-${slug}`)).toBe(false);
-    }
-    // USD has two rails; the selection (VCHF) is outside the group, so the switch offers
-    // chooseRail's answer — the funded rail, else the preferred one (ckUSDC here).
-    expect(has(tree, 'btn-accounts-rail-usd')).toBe(true);
-    expect(rowText(tree, 'btn-accounts-rail-usd')).toBe('Switch to ckUSDC · Internet Computer');
-    act(() => { tree.unmount(); });
-  });
-
-  test('the switch resolves the FUNDED rail and selects the ASSET row — home currency untouched', () => {
-    const onSwitchRail = jest.fn();
-    const tree = mount(assets, fundedSol, {homeCurrency: 'USD', selectedId: 'ic:2', onSwitchRail});
-    expect(rowText(tree, 'btn-accounts-rail-usd')).toBe('Switch to USDC · Solana');
-    act(() => { pressable(tree, 'btn-accounts-rail-usd').props.onPress(); });
-    expect(onSwitchRail).toHaveBeenCalledWith('solana:USDC');
-    act(() => { tree.unmount(); });
-  });
-
-  test('no affordance when the resolved rail IS the selected row — a control that re-selects the same account is not a control', () => {
-    // ckUSDC selected + nothing funded ⇒ chooseRail answers the preferred rail = the selection.
-    const tree = mount(assets, balances, {homeCurrency: 'USD', selectedId: 'ic:2', onSwitchRail: jest.fn()});
-    expect(has(tree, 'btn-accounts-rail-usd')).toBe(false);
-    act(() => { tree.unmount(); });
-  });
-
-  test('a missing onSwitchRail (selection LOCKED, flow 71) renders the section without the button', () => {
-    const tree = mount(assets, fundedSol, {homeCurrency: 'USD', selectedId: 'ic:2'});
-    expect(has(tree, 'btn-accounts-rail-usd')).toBe(false);
-    act(() => { tree.unmount(); });
-  });
-});
-
-describe('orderAccounts — X22: play money is never the biggest number on screen', () => {
-  const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
-  const view = (displayText: string, status: 'ok' | 'zero') => ({displayText, status, failure: null});
-
-  test('the practice rail sorts LAST even when it is the only funded account', () => {
-    // The exact defect: a fresh wallet holds ∂100.00 and nothing else, and DEMO led the list with
-    // the largest number on screen, above BTC and USDC.
-    const balances = {[DEMO_ASSET_ID]: view('∂100.00', 'ok')} as Parameters<typeof orderAccounts>[1];
-    const order = orderAccounts(assets, balances, 'CHF');
-    expect(order[order.length - 1]!.id).toBe(DEMO_ASSET_ID);
-    expect(order[0]!.id).toBe(preferredRail('CHF', assets)!.id);
-  });
-
-  test('the home currency\'s rails lead, preferred first, then the group\'s siblings', () => {
-    const order = orderAccounts(assets, {}, 'USD');
-    expect(order[0]!.id).toBe(preferredRail('USD', assets)!.id);
-    expect(order[1]!.id).toBe('solana:USDC');
-  });
-
-  test('funded accounts precede unfunded ones, catalog order preserved inside each bucket', () => {
-    const balances = {
-      'ic:6': view('0.5 ETH', 'ok'),
-      'ic:1': view('0 BTC', 'zero'),
-    } as Parameters<typeof orderAccounts>[1];
-    const order = orderAccounts(assets, balances, 'CHF').map(a => a.id);
-    expect(order.indexOf('ic:6')).toBeLessThan(order.indexOf('ic:1'));
-    // The unfunded bucket keeps catalog order: ckBTC (1) before ckUSDC (2) before ICP (8).
-    expect(order.indexOf('ic:1')).toBeLessThan(order.indexOf('ic:2'));
-    expect(order.indexOf('ic:2')).toBeLessThan(order.indexOf('ic:8'));
-  });
-
-  test('every asset appears exactly once — the buckets partition the list', () => {
-    const order = orderAccounts(assets, {}, 'EUR');
-    expect(order).toHaveLength(assets.length);
-    expect(new Set(order.map(a => a.id)).size).toBe(assets.length);
-  });
-
-  test('the rendered list carries the practice divider immediately above the practice row', () => {
-    const balances = buildAssetBalances({
-      catalog: BUNDLED, assets, icBalances: {}, primaryBalance: '10000',
-      solState: {balance: null, status: 'unavailable'}, tokenStates: {},
-    });
-    const tree = mount(assets, balances);
-    const list = tree.root.findAll(n => n.props && n.props.testID === 'accounts-list')[0]!;
-    const marks = list.findAll(n => n.props?.testID === 'accounts-practice-note' || n.props?.testID === 'asset-demo')
+  test('stables first, then the token currencies; practice outside the list, last', () => {
+    const tree = mount(views, sums);
+    expect(currencyRowOrder(tree)).toEqual(['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL']);
+    const list = tree.root.findAll(n => n.props?.testID === 'accounts-list')[0]!;
+    const marks = list.findAll(n => (n.props?.testID === 'accounts-practice-note' || n.props?.testID === 'asset-demo') && typeof n.type === 'string')
       .map(n => String(n.props.testID));
-    expect(marks[0]).toBe('accounts-practice-note');
-    expect(rowText(tree, 'accounts-practice-note')).toBe(M.wallet.accounts.practice);
+    // The divider renders immediately above the practice row — and after every currency row.
+    expect(marks).toEqual(['accounts-practice-note', 'asset-demo']);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a zero-balance currency stays visible with its SUMMED currency-unit figure', () => {
+    const tree = mount(views, sums);
+    // CHF holds nothing: the row still renders, in the CURRENCY unit (fork #4), dimmable.
+    expect(rowText(tree, 'accounts-currency-CHF')).toContain('0.00 Fr');
+    expect(rowText(tree, 'accounts-currency-CHF')).toContain('Swiss francs');
+    // The row names its rails (the label is the currency; the subtitle says where it settles).
+    expect(rowText(tree, 'accounts-currency-CHF')).toContain('VCHF · Internet Computer');
+    act(() => { tree.unmount(); });
+  });
+
+  test('the practice row keeps the faucet and its select — and never a set-main gesture', () => {
+    const onSelect = jest.fn();
+    const tree = mount(views, sums, {onSelect});
+    const demoRow = tree.root.findAll(node => node.props?.testID === 'asset-demo')[0]!;
+    expect(demoRow.findAll(node => node.props?.testID === 'btn-topup').length).toBeGreaterThan(0);
+    act(() => { pressable(tree, 'asset-demo-select').props.onPress(); });
+    expect(onSelect).toHaveBeenCalledWith(DEMO_ASSET_ID);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the MAIN badge sits on the home-currency row only', () => {
+    const tree = mount(views, sums, {homeCurrency: 'USD'});
+    expect(has(tree, 'currency-USD-main')).toBe(true);
+    for (const c of ['CHF', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL']) {
+      expect(has(tree, `currency-${c}-main`)).toBe(false);
+    }
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('AccountsTab — the gestures', () => {
+  const views = assetViews();
+  const sums = currencyViews(views);
+
+  test('a row tap sets that currency MAIN — the deliberate gesture (spec supersedes tap protection)', () => {
+    const onOpenCurrency = jest.fn();
+    const tree = mount(views, sums, {onOpenCurrency});
+    act(() => { pressable(tree, 'btn-accounts-currency-BTC').props.onPress(); });
+    expect(onOpenCurrency).toHaveBeenCalledWith('BTC');
+    act(() => { tree.unmount(); });
+  });
+
+  test('Convert rides EVERY row and names its currency as the source', () => {
+    const onConvertCurrency = jest.fn();
+    const tree = mount(views, sums, {onConvertCurrency});
+    for (const c of VISIBLE) {
+      expect(has(tree, `btn-accounts-convert-${c}`)).toBe(true);
+      act(() => { pressable(tree, `btn-accounts-convert-${c}`).props.onPress(); });
+    }
+    expect(onConvertCurrency).toHaveBeenCalledTimes(VISIBLE.length);
+    expect(onConvertCurrency).toHaveBeenLastCalledWith(VISIBLE[VISIBLE.length - 1]);
+    act(() => { tree.unmount(); });
+  });
+
+  test('[Add new currency] closes the list into its route; Back hands off; testnet toggle reachable', () => {
+    const onOpenAddCurrency = jest.fn();
+    const onToggleTestnet = jest.fn();
+    const tree = mount(views, sums, {onOpenAddCurrency, onToggleTestnet, hasTestnet: true});
+    act(() => { pressable(tree, 'btn-accounts-add-currency').props.onPress(); });
+    expect(onOpenAddCurrency).toHaveBeenCalledTimes(1);
+    act(() => { pressable(tree, 'btn-toggle-testnet').props.onPress(); });
+    expect(onToggleTestnet).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('AccountsTab — an unreadable rail says so once, per network (X9)', () => {
+  test('a refusing Solana endpoint grows ONE banner above the first affected currency row', () => {
+    // Every Solana token errors at once (the measured HTTP 429): USD (USDC·Sol), EUR (EURC) and
+    // SOL rows are all affected — one banner.
+    const mints = ASSETS.flatMap(a => (a.protocol === 'solana' && a.mint != null ? [a.mint] : []));
+    const tokenStates = Object.fromEntries(mints.map(m => [m, {amount: null, decimals: null, status: 'error' as const}]));
+    const views = assetViews({solState: {balance: null, status: 'error'}, tokenStates});
+    const tree = mount(views, currencyViews(views, {
+      views,
+      solBalance: null,
+      tokenAmounts: Object.fromEntries(mints.map(m => [m, null])),
+    }));
+    expect(has(tree, 'rail-unreadable-solana')).toBe(true);
+    const count = tree.root.findAll(n => n.props?.testID === 'rail-unreadable-solana' && typeof n.type === 'string').length;
+    expect(count).toBe(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a first poll still in flight is NOT an outage — loading stays silent', () => {
+    const views = assetViews({solState: {balance: null, status: 'loading'}});
+    const tree = mount(views, currencyViews(views));
+    expect(has(tree, 'rail-unreadable-solana')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('AccountsTab — a KNOWN-absent token account grows the setup badge on its currency row', () => {
+  test('USD with a missing Solana ATA marks the row (the preferred-rail setup gate)', () => {
+    // A USD variant whose preferred rail is the SOLANA USDC row (no IC rail in this list), so
+    // 'absent' is reachable: the badge rides the currency row, naming the setup the surfaces
+    // will offer once this currency is main.
+    const usdOnly = buildSelectableAssets(BUNDLED.filter(c => c.currency !== 2), {showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: BUNDLED_NETWORKS});
+    const usdcRow = usdOnly.find(a => a.id === 'solana:USDC');
+    const mint = usdcRow != null && usdcRow.protocol === 'solana' ? usdcRow.mint : null;
+    const views = buildAssetBalances({
+      catalog: BUNDLED, assets: usdOnly, icBalances: {}, primaryBalance: '0',
+      solState: {balance: null, status: 'unavailable'},
+      tokenStates: {[mint ?? '']: {amount: null, decimals: null, status: 'absent' as const}},
+    });
+    const props = {
+      assets: usdOnly,
+      balances: views,
+      visibleCurrencies: offerableCurrencies(usdOnly),
+    } as Partial<Parameters<typeof AccountsTab>[0]>;
+    const tree = mount(views, currencyViews(views, {assets: usdOnly, currencies: props.visibleCurrencies!, tokenAmounts: {[mint ?? '']: null}}), props);
+    expect(has(tree, 'currency-USD-setup')).toBe(true);
     act(() => { tree.unmount(); });
   });
 });

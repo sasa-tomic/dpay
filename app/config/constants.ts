@@ -52,6 +52,11 @@ export const RELAY_LIST_STORAGE_KEY = 'dpay.relays.v1';
 // assets are hidden by default per the founder decision); persisted so the choice survives a
 // restart. Mirrors the identity/relay AsyncStorage pattern.
 export const SHOW_TESTNET_STORAGE_KEY = 'dpay.showTestnet';
+// The currencies the user REMOVED from the wallet's currency list (the 2026-09-24 Remove
+// semantics: hiding is device-local, reversible from Add new currency, and never touches money on
+// chain). Persisted as a JSON array of currency codes; parsed fail-closed by
+// `parseHiddenCurrencies` (config/currency.ts).
+export const HIDDEN_CURRENCIES_STORAGE_KEY = 'dpay.hiddenCurrencies.v1';
 // Wave 7 — manual theme choice ('light' | 'dark'; absent = follow the OS scheme) so the user can
 // pin light/dark regardless of the OS scheme. Same AsyncStorage pattern as identity/relay/showTestnet.
 export const THEME_STORAGE_KEY = 'dpay.theme.v1';

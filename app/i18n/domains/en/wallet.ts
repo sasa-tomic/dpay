@@ -148,26 +148,44 @@ export type WalletMessages = {
     };
   };
 
-  /** The ACCOUNTS route — the full per-asset balance list (the retired Balances sheet's body,
-   *  moved off Home 2026-09-08), one row per rail, never summed, never sorted by an FX-comparable
-   *  magnitude. */
+  /**
+   * The ACCOUNTS route — the CURRENCY LIST (the 2026-09-24 redesign): one row per visible
+   * currency, a summed currency-unit balance, Convert on every row; the row tap sets MAIN.
+   */
   accounts: {
     title: string;
+    /** States the list's one gesture: tapping a currency row sets it as the main currency. */
     intro: string;
     back: string;
-    /** The divider that separates the practice rail from the accounts holding real value. Whole
+    /** The divider that separates the practice rail from the currencies holding real value. Whole
      *  sentence, never a glyph (anti-scam rule R3: play money is labelled wherever it appears). */
     practice: string;
-    /** The per-asset Convert action, shown on the SELECTED row only. */
+    /** The per-row Convert action's hint — what the venue behind it is. */
     convertHint: string;
-    /** The currency-section headers over the ordered account list. Each NAMES the currency — a
-     *  section is a label, never a total: no sum is rendered anywhere in the list. */
-    groupHome: (name: string) => string;
-    /** The non-currency tail (ckBTC/ckETH/ICP/SOL): accounts that settle no home currency. */
-    groupOther: string;
-    /** The one switch affordance on a multi-rail currency section. `rail` is the target rail's
-     *  own line ("USDC · Solana") — routing between rails of one currency, never an exchange. */
-    switchRail: (rail: string) => string;
+    /** The row tap's hint — selection IS the action (the spec supersedes tap protection). */
+    setMainHint: string;
+    /** [Add new currency] — the button at the list's end and its route. */
+    addCurrency: string;
+  };
+
+  /**
+   * The ADD-CURRENCY route — the full supported-currency list (2026-09-24 redesign): search on
+   * top, split into stable currencies and Other; in-wallet currencies are marked, hidden ones
+   * carry their Add button (the Remove semantics' way back).
+   */
+  addCurrency: {
+    title: string;
+    /** The search field's placeholder. */
+    search: string;
+    /** The two sections: the fiat stables, then everything else. */
+    stable: string;
+    other: string;
+    /** The mark on a currency already in the wallet (not re-addable). */
+    inWallet: string;
+    /** The hidden currency's button. */
+    add: string;
+    /** The honest empty state: the search matched nothing. */
+    none: string;
   };
 
   /** The ADDRESS BOOK route — the browse/manage surface over the per-asset saved destinations
@@ -351,13 +369,22 @@ export const walletEn: WalletMessages = {
 
   accounts: {
     title: 'Accounts',
-    intro: 'Tap an account to use it in Pay and Receive.',
+    intro: 'Tap a currency to make it your main.',
     back: 'Back',
     practice: 'Practice money. It works only inside dpay — no shop takes it.',
     convertHint: 'Convert at an outside venue',
-    groupHome: name => `Main · ${name}`,
-    groupOther: 'Other assets',
-    switchRail: rail => `Switch to ${rail}`,
+    setMainHint: 'Makes this your main currency',
+    addCurrency: 'Add new currency',
+  },
+
+  addCurrency: {
+    title: 'Add currency',
+    search: 'Search',
+    stable: 'Stable currencies',
+    other: 'Other',
+    inWallet: 'In wallet',
+    add: 'Add',
+    none: 'No currency matches.',
   },
 
   addressBook: {

@@ -71,13 +71,22 @@ export const walletFr: WalletMessages = {
 
   accounts: {
     title: 'Comptes',
-    intro: 'Appuyez sur un compte pour l’utiliser dans Payer et Recevoir.',
+    intro: 'Appuyez sur une devise pour en faire votre principale.',
     back: 'Retour',
     practice: 'Argent d’entraînement. Il ne fonctionne que dans dpay — aucun commerce ne l’accepte.',
     convertHint: 'Convertir auprès d’une plateforme externe',
-    groupHome: name => `Principale · ${name}`,
-    groupOther: 'Autres actifs',
-    switchRail: rail => `Basculer sur ${rail}`,
+    setMainHint: 'Définit cette devise comme principale',
+    addCurrency: 'Ajouter une devise',
+  },
+
+  addCurrency: {
+    title: 'Ajouter une devise',
+    search: 'Rechercher',
+    stable: 'Devises stables',
+    other: 'Autres',
+    inWallet: 'Dans le portefeuille',
+    add: 'Ajouter',
+    none: 'Aucune devise ne correspond.',
   },
 
   addressBook: {

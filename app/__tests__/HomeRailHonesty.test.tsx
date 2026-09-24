@@ -29,10 +29,10 @@ import {HomeTab} from '../components/HomeTab';
 import {AccountsTab} from '../components/AccountsTab';
 import {IconAlert} from '../components/icons';
 import {buildSelectableAssets} from '../config/assets';
-import {buildAssetBalances} from '../lib/assetBalances';
+import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {C} from '../config/palette';
-import {preferredRail} from '../config/currency';
+import {offerableCurrencies, preferredRail} from '../config/currency';
 import {S} from '../styles';
 import {M} from '../i18n';
 import type {SolanaReadFailure} from '../solana';
@@ -166,25 +166,35 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
   return tree;
 }
 
-/** The accounts route, where the per-rail rows live since 2026-09-08. */
+/** The accounts route, where the currency list lives since 2026-09-24 (per-rail rows before). */
 function mountAccounts(props: Partial<Parameters<typeof AccountsTab>[0]> = {}): renderer.ReactTestRenderer {
+  const views = balancesFor({balance: '1500000000', status: 'ok'});
+  const sums = buildCurrencyBalances({
+    currencies: offerableCurrencies(ASSETS),
+    assets: ASSETS, catalog: CATALOG, views,
+    icBalances: {}, solBalance: null, tokenAmounts: {}, approx: {},
+  });
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(
       <AccountsTab
         assets={ASSETS}
-        selectedId="ic:0"
-        balances={balancesFor({balance: '1500000000', status: 'ok'})}
+        balances={views}
+        currencyBalances={sums}
         homeCurrency={HOME}
+        visibleCurrencies={offerableCurrencies(ASSETS)}
+        selectedId={"ic:0"}
         demoFaucetAvailable={true}
         topUpBusy={false}
         hasTestnet={false}
         showTestnet={false}
         onToggleTestnet={jest.fn()}
         onBack={jest.fn()}
+        onOpenCurrency={jest.fn()}
+        onConvertCurrency={jest.fn()}
+        onOpenAddCurrency={jest.fn()}
         onSelect={jest.fn()}
         onTopUp={jest.fn()}
-        onConvert={jest.fn()}
         {...props}
       />,
     );

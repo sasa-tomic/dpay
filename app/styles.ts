@@ -304,6 +304,9 @@ function buildStyles(p: Palette) {
   // Still seats the sentence immediately above its practice row (anti-scam rule R3 keeps them
   // unseparable by a scroll).
   accountsPractice: {fontSize: 13, color: p.sub, marginTop: 6, marginBottom: 8, fontFamily: FONT.sans},
+  // [Add new currency] — the full-width pill at the currency list's end (the assetActionBtn
+  // chrome, stretched to the list so the affordance reads as a list action, not a row's).
+  accountsAddCurrency: {alignSelf: 'stretch', marginTop: 18},
   // Convert — the delegated-conversion surface (spec 2026-09-07 §5). The checklist card carries
   // every transparency line on ONE surface before signing; the state panel renders the §4 machine.
   // Left-aligned instruction copy (not centered): these are lines to read closely before money

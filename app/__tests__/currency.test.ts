@@ -25,6 +25,7 @@ import {
   fundedAlternative,
   isStableCurrency,
   offerableCurrencies,
+  parseHiddenCurrencies,
   parseHomeCurrency,
   preferredRail,
   railFees,
@@ -32,6 +33,7 @@ import {
   railLiquidityLine,
   railRampLine,
   railsLabel,
+  removeCurrencyGuard,
   type RailBalances,
 } from '../config/currency';
 import type {CurrencyDescriptor} from '../config/catalog';
@@ -490,5 +492,55 @@ describe('fundedAlternative — the funded account a fund-blocked surface can na
   it('is null with nothing funded anywhere, and null before an asset is selected', () => {
     expect(ask({})).toBeNull();
     expect(ask({selectedAssetId: null, balances: {'ic:0': ok('∂100.00')}})).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Hidden currencies (the 2026-09-24 Remove semantics). parseHiddenCurrencies is the fail-closed
+// read of the persisted list; removeCurrencyGuard is the whole decision the Remove button makes,
+// so its refusals carry the copy the user needs.
+// ---------------------------------------------------------------------------------------------
+describe('parseHiddenCurrencies — a persisted list, read fail-closed', () => {
+  it('parses a JSON array of known codes, deduped, in model order', () => {
+    // Order is the model's (stables before tokens), never the stored list's.
+    expect(parseHiddenCurrencies('["BTC","EUR","BTC"]')).toEqual(['EUR', 'BTC']);
+  });
+
+  it('returns [] for absent, empty, malformed or wrongly-typed values', () => {
+    for (const v of [null, undefined, '', 'BTC', '{"a":1}', '{"currencies":["BTC"]}', '5']) {
+      expect(parseHiddenCurrencies(v as string | null)).toEqual([]);
+    }
+  });
+
+  it('drops unknown codes — a future build or a hand edit can only ever shrink the list', () => {
+    expect(parseHiddenCurrencies('["CHF","GBP","DEMO","chf"]')).toEqual(['CHF']);
+  });
+});
+
+describe('removeCurrencyGuard — the whole Remove decision', () => {
+  const bv = (status: BalanceView['status']): BalanceView => ({displayText: 'x', status, failure: null});
+
+  it('refuses a KNOWN nonzero balance — move or convert it first', () => {
+    expect(removeCurrencyGuard({currency: 'CHF', balance: bv('ok'), visibleCount: 3})).toEqual({ok: false, reason: 'nonzero'});
+  });
+
+  it('refuses an UNREADABLE balance — unknown is not zero', () => {
+    for (const status of ['loading', 'unavailable', 'error'] as const) {
+      expect(removeCurrencyGuard({currency: 'CHF', balance: bv(status), visibleCount: 3})).toEqual({ok: false, reason: 'unreadable'});
+    }
+    expect(removeCurrencyGuard({currency: 'CHF', balance: null, visibleCount: 3})).toEqual({ok: false, reason: 'unreadable'});
+  });
+
+  it('refuses the LAST visible currency — the wallet is always "in" one', () => {
+    expect(removeCurrencyGuard({currency: 'CHF', balance: bv('zero'), visibleCount: 1})).toEqual({ok: false, reason: 'last'});
+  });
+
+  it('allows a known-zero or known-absent balance while others remain visible', () => {
+    expect(removeCurrencyGuard({currency: 'CHF', balance: bv('zero'), visibleCount: 2})).toEqual({ok: true});
+    expect(removeCurrencyGuard({currency: 'CHF', balance: bv('absent'), visibleCount: 5})).toEqual({ok: true});
+  });
+
+  it('the last-currency check stands FIRST — one visible currency answers "last" even funded', () => {
+    expect(removeCurrencyGuard({currency: 'CHF', balance: bv('ok'), visibleCount: 1})).toEqual({ok: false, reason: 'last'});
   });
 });
