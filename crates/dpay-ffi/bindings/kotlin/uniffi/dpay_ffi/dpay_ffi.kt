@@ -859,7 +859,9 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 // when the library is loaded.
 internal interface IntegrityCheckingUniffiLib : Library {
     // Integrity check functions only
-    fun uniffi_dpay_ffi_checksum_func_decode_request(
+    fun uniffi_dpay_ffi_checksum_func_checkout_open_signature(
+): Short
+fun uniffi_dpay_ffi_checksum_func_decode_request(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_encode_request(
 ): Short
@@ -950,8 +952,6 @@ fun uniffi_dpay_ffi_checksum_func_nfc_request_bytes(
 fun uniffi_dpay_ffi_checksum_func_nfc_result_bytes(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_parse_amount(
-): Short
-fun uniffi_dpay_ffi_checksum_func_till_open_signature(
 ): Short
 fun uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision(
 ): Short
@@ -1078,6 +1078,8 @@ fun uniffi_dpay_ffi_fn_method_ffireaderconductor_reset_link(`ptr`: Pointer,uniff
 ): Unit
 fun uniffi_dpay_ffi_fn_method_ffireaderconductor_wire(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_checkout_open_signature(`secret`: RustBuffer.ByValue,`cents`: Long,`nonce`: RustBuffer.ByValue,`issuedAt`: Long,`merchantName`: RustBuffer.ByValue,`note`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_decode_request(`qr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_encode_request(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1170,8 +1172,6 @@ fun uniffi_dpay_ffi_fn_func_nfc_result_bytes(`secret`: RustBuffer.ByValue,`statu
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_parse_amount(`human`: RustBuffer.ByValue,`decimals`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
-fun uniffi_dpay_ffi_fn_func_till_open_signature(`secret`: RustBuffer.ByValue,`cents`: Long,`nonce`: RustBuffer.ByValue,`issuedAt`: Long,`merchantName`: RustBuffer.ByValue,`note`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
 fun ffi_dpay_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun ffi_dpay_ffi_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1298,6 +1298,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_dpay_ffi_checksum_func_checkout_open_signature() != 11257.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_func_decode_request() != 40068.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1394,7 +1397,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_dpay_ffi_checksum_func_icp_transfer_from_arg() != 32597.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_transfer_from_arg() != 23730.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id() != 26912.toShort()) {
@@ -1434,9 +1437,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_parse_amount() != 56752.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_dpay_ffi_checksum_func_till_open_signature() != 32289.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision() != 40082.toShort()) {
@@ -3723,6 +3723,32 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     }
 }
         /**
+         * Merchant side: the detached signature that proves this device holds the key its OpenCryptoPay
+         * checkout account is derived from, so `POST /api/v1/checkout` can refuse a charge-open for a key the caller
+         * does not own. The public key is DERIVED from `secret` rather than taken as an argument — the
+         * signer signs over their own key by construction, so there is no mismatch to get wrong.
+         *
+         * `nonce` is 16 bytes (single-use — the relay records it on acceptance); `issued_at` is unix
+         * seconds and must be within `dpay_core::CHECKOUT_OPEN_MAX_SKEW_SECS` of the relay's clock;
+         * `merchant_name` is the CLAIMED display name and is bound by the signature. `note` is the
+         * one-line purpose the payer reads on review ("2× Kafi, Tisch 4") — CLAIMED like the name and
+         * bound by the signature the same way. An EMPTY `note` signs the note-less (v1) encoding, so a
+         * merchant who rings up without a purpose needs no relay upgrade to be accepted; any non-empty
+         * note signs under `CHECKOUT_OPEN_DOMAIN_V2`. Returns the raw 64-byte Ed25519 signature. The
+         * canonical bytes are `dpay_core::CheckoutOpen::signing_bytes` — the relay rebuilds them and calls
+         * `dpay_core::validate_checkout_open`, so there is ONE encoding.
+         */
+    @Throws(DpayException::class) fun `checkoutOpenSignature`(`secret`: kotlin.ByteArray, `cents`: kotlin.ULong, `nonce`: kotlin.ByteArray, `issuedAt`: kotlin.ULong, `merchantName`: kotlin.String, `note`: kotlin.String): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_checkout_open_signature(
+        FfiConverterByteArray.lower(`secret`),FfiConverterULong.lower(`cents`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`issuedAt`),FfiConverterString.lower(`merchantName`),FfiConverterString.lower(`note`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Payer side: decode a scanned merchant request QR into its fields, so the app can show
          * "Pay $X to <to_name>" (with the memo) for the payer to approve before signing.
          */
@@ -4181,8 +4207,8 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
          * `icrc2_transfer_from` argument bytes — the PULL: spend an allowance somebody granted this
          * wallet, moving THEIR money to `to`.
          *
-         * dpay's one caller is a shop collecting a till charge an OpenCryptoPay wallet approved it for
-         * (`crates/dpay-relay/src/till.rs`), so the shape is deliberately narrow: the charge's reference
+         * dpay's one caller is a shop collecting a checkout charge an OpenCryptoPay wallet approved it for
+         * (`crates/dpay-relay/src/checkout.rs`), so the shape is deliberately narrow: the charge's reference
          * as `memo_hex` — without it the relay credits no sale — and no `created_at_time`, for the reason
          * spelled out above `icp_transfer_arg`. The ledger debits `from` the amount PLUS its fee and
          * credits `to` the amount; the allowance has to cover both, which is why the caller checks
@@ -4387,32 +4413,6 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_parse_amount(
         FfiConverterString.lower(`human`),FfiConverterUByte.lower(`decimals`),_status)
-}
-    )
-    }
-    
-
-        /**
-         * Merchant side: the detached signature that proves this device holds the key its OpenCryptoPay
-         * till account is derived from, so `POST /api/v1/till` can refuse a ring-up for a key the caller
-         * does not own. The public key is DERIVED from `secret` rather than taken as an argument — the
-         * signer signs over their own key by construction, so there is no mismatch to get wrong.
-         *
-         * `nonce` is 16 bytes (single-use — the relay records it on acceptance); `issued_at` is unix
-         * seconds and must be within `dpay_core::TILL_OPEN_MAX_SKEW_SECS` of the relay's clock;
-         * `merchant_name` is the CLAIMED display name and is bound by the signature. `note` is the
-         * one-line purpose the payer reads on review ("2× Kafi, Tisch 4") — CLAIMED like the name and
-         * bound by the signature the same way. An EMPTY `note` signs the note-less (v1) encoding, so a
-         * merchant who rings up without a purpose needs no relay upgrade to be accepted; any non-empty
-         * note signs under `TILL_OPEN_DOMAIN_V2`. Returns the raw 64-byte Ed25519 signature. The
-         * canonical bytes are `dpay_core::TillOpen::signing_bytes` — the relay rebuilds them and calls
-         * `dpay_core::validate_till_open`, so there is ONE encoding.
-         */
-    @Throws(DpayException::class) fun `tillOpenSignature`(`secret`: kotlin.ByteArray, `cents`: kotlin.ULong, `nonce`: kotlin.ByteArray, `issuedAt`: kotlin.ULong, `merchantName`: kotlin.String, `note`: kotlin.String): kotlin.ByteArray {
-            return FfiConverterByteArray.lift(
-    uniffiRustCallWithError(DpayException) { _status ->
-    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_till_open_signature(
-        FfiConverterByteArray.lower(`secret`),FfiConverterULong.lower(`cents`),FfiConverterByteArray.lower(`nonce`),FfiConverterULong.lower(`issuedAt`),FfiConverterString.lower(`merchantName`),FfiConverterString.lower(`note`),_status)
 }
     )
     }

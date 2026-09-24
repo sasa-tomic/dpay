@@ -86,7 +86,7 @@ type WasmExports = WebAssembly.Exports & {
   w_verify_receipt_sig(pubPtr: number, claimPtr: number, claimLen: number, sigPtr: number): number;
   w_build_request(toPtr: number, amountLo: number, amountHi: number, noncePtr: number, expiryLo: number, expiryHi: number, currency: number, toNamePtr: number, toNameLen: number, memoPtr: number, memoLen: number, outReqPtr: number): number;
   w_receipt_claim(noncePtr: number, fromPtr: number, toPtr: number, amountLo: number, amountHi: number, currency: number, blockLo: number, blockHi: number, tsLo: number, tsHi: number, outClaimPtr: number): number;
-  w_till_open_sig(seedPtr: number, centsLo: number, centsHi: number, noncePtr: number, iatLo: number, iatHi: number, namePtr: number, nameLen: number, outSigPtr: number): number;
+  w_checkout_open_sig(seedPtr: number, centsLo: number, centsHi: number, noncePtr: number, iatLo: number, iatHi: number, namePtr: number, nameLen: number, outSigPtr: number): number;
   // IC user-principal rail (additive, ABI v1): all strings are ptr+len pairs; decimal-string
   // numerics; structured results are compact JSON returned by length (0 = cap/bad input).
   w_icp_self_principal(seedPtr: number, outPtr: number, cap: number): number;
@@ -814,13 +814,13 @@ async function icpDecodeInt(argHex: string): Promise<string> {
   return readStr(ex, out, len);
 }
 
-/** Merchant side: sign a ring-up on dpay's own OpenCryptoPay till. The merchant pubkey is derived
+/** Merchant side: sign a charge-open on dpay's own OpenCryptoPay checkout. The merchant pubkey is derived
  *  from the seed INSIDE the core, so the signature always covers the key that will be paid. The
- *  canonical bytes and the anti-replay rule live in `dpay_core::TillOpen`; the golden is
- *  `dfx/till_open_signing.json`. A NON-EMPTY note signs the v2 encoding via `w_till_open_sig_note`
+ *  canonical bytes and the anti-replay rule live in `dpay_core::CheckoutOpen`; the golden is
+ *  `dfx/checkout_open_signing.json`. A NON-EMPTY note signs the v2 encoding via `w_checkout_open_sig_note`
  *  (feature-detected by symbol presence per the wasm ABI policy); an empty note signs the note-less
- *  v1 bytes through the frozen `w_till_open_sig`. Returns the 64-byte signature as hex. */
-async function tillOpenSignature(
+ *  v1 bytes through the frozen `w_checkout_open_sig`. Returns the 64-byte signature as hex. */
+async function checkoutOpenSignature(
   secretHex: string, cents: string, nonceHex: string, issuedAt: number, merchantName: string, note: string,
 ): Promise<string> {
   const ex = await core();
@@ -831,17 +831,17 @@ async function tillOpenSignature(
   const seedP = put(ex, seed);
   const nonceP = put(ex, nonce);
   const [nameP, nameLen] = putStr(ex, merchantName);
-  const out = outBuf(ex, SIG_LEN, 'tillOpenSignature');
+  const out = outBuf(ex, SIG_LEN, 'checkoutOpenSignature');
   const [centsLo, centsHi] = splitU64(cents);
   const [iatLo, iatHi] = splitU64(issuedAt);
   let status: number;
-  if (note !== '' && typeof ex.w_till_open_sig_note === 'function') {
+  if (note !== '' && typeof ex.w_checkout_open_sig_note === 'function') {
     const [noteP, noteLen] = putStr(ex, note);
-    status = ex.w_till_open_sig_note(seedP, centsLo, centsHi, nonceP, iatLo, iatHi, nameP, nameLen, noteP, noteLen, out);
-    if (status !== 0) bail(status, 'w_till_open_sig_note');
+    status = ex.w_checkout_open_sig_note(seedP, centsLo, centsHi, nonceP, iatLo, iatHi, nameP, nameLen, noteP, noteLen, out);
+    if (status !== 0) bail(status, 'w_checkout_open_sig_note');
   } else {
-    status = ex.w_till_open_sig(seedP, centsLo, centsHi, nonceP, iatLo, iatHi, nameP, nameLen, out);
-    if (status !== 0) bail(status, 'w_till_open_sig');
+    status = ex.w_checkout_open_sig(seedP, centsLo, centsHi, nonceP, iatLo, iatHi, nameP, nameLen, out);
+    if (status !== 0) bail(status, 'w_checkout_open_sig');
   }
   return bytesToHex(readBytes(ex, out, SIG_LEN));
 }
@@ -875,7 +875,7 @@ export const DpayCore = {
   buildRequestHex,
   decodeRequest,
   nfcStatus,
-  tillOpenSignature,
+  checkoutOpenSignature,
   icpSelfPrincipal,
   icpPrincipalFromPubkey,
   icpValidatePrincipal,

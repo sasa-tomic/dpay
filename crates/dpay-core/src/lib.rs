@@ -241,23 +241,23 @@ pub fn sign_withdraw(key: &SigningKey, auth: &WithdrawAuth) -> Signature {
     key.sign(&auth.signing_bytes())
 }
 
-// --- till-open authorization (a merchant proves the account they name is their own) ------------
+// --- checkout-open authorization (a merchant proves the account they name is their own) ------------
 //
-// dpay's OpenCryptoPay till (`crates/dpay-relay/src/till.rs`) takes a 32-byte Ed25519 public key and
+// dpay's OpenCryptoPay checkout (`crates/dpay-relay/src/checkout.rs`) takes a 32-byte Ed25519 public key and
 // DERIVES the account every payer is then instructed to send money to. Without a signature that
-// derivation is an assertion, not a proof: anyone who can reach `POST /api/v1/till` can ring up a
+// derivation is an assertion, not a proof: anyone who can reach `POST /api/v1/checkout` can open a
 // charge naming a key they do not hold — which is what a probe did on 2026-09-03 with
 // `deadbeef…deadbeef`, opening a live production charge for a key nobody owns. This is the proof:
-// the merchant signs the ring-up with the very key whose account will receive the money, so a
+// the merchant signs the checkout-open with the very key whose account will receive the money, so a
 // charge exists only if someone who can SPEND from that account asked for one.
 //
 // WHAT IS SIGNED, AND WHY EACH FIELD EARNS ITS PLACE
 //   * `merchant_pubkey` — the claim itself, and also the verify key. There is deliberately no
-//     separate "who signed" input: [`validate_till_open`] checks the signature under the key the
+//     separate "who signed" input: [`validate_checkout_open`] checks the signature under the key the
 //     payload NAMES, so a signature by any other key cannot open a charge for this one, and a caller
 //     cannot accidentally verify against a key other than the one that will be paid.
 //   * `cents` — the price. Left unsigned, a captured request could be re-opened at another amount
-//     against the same merchant, and their own till would show a sale they never rang up.
+//     against the same merchant, and their own checkout would show a sale they never rang up.
 //   * `merchant_name` — CLAIMED, and shown to every paying wallet as `displayName`. Signing the
 //     WHOLE request rather than most of it is the point: an unsigned field inside a signed request
 //     is a field the relay cannot attribute to anybody, and this is the one a payer reads.
@@ -266,7 +266,7 @@ pub fn sign_withdraw(key: &SigningKey, auth: &WithdrawAuth) -> Signature {
 //   * `issued_at` — the reason the seen-nonce set is FINITE, and why the shape carries a fourth
 //     field beyond `{pubkey, cents, nonce}`. Without a time, "have I seen this nonce?" must be
 //     answered against every nonce ever seen, forever; bound that set by memory instead and an
-//     evicted nonce silently becomes replayable. With the ±[`TILL_OPEN_MAX_SKEW_SECS`] window the
+//     evicted nonce silently becomes replayable. With the ±[`CHECKOUT_OPEN_MAX_SKEW_SECS`] window the
 //     verifier only has to remember the nonces inside that window, and "this cannot be replayed"
 //     becomes an argument rather than a hope. An `issued_at` is used instead of the `expiry` the
 //     payment types carry because the signer here has no interest in bounding validity — the
@@ -275,67 +275,67 @@ pub fn sign_withdraw(key: &SigningKey, auth: &WithdrawAuth) -> Signature {
 //
 // DOMAIN SEPARATION. This same device key also signs payment authorizations ([`Authorization`]),
 // withdrawals ([`WithdrawAuth`]), NFC settlement results (`nfc::NfcResult`) and IC ingress envelopes
-// (`dpay-icp`). The signing buffer therefore OPENS with [`TILL_OPEN_DOMAIN`], so every buffer
+// (`dpay-icp`). The signing buffer therefore OPENS with [`CHECKOUT_OPEN_DOMAIN`], so every buffer
 // verified here begins with those exact bytes, and a signature made elsewhere cannot land here:
 //   * `Authorization` / `WithdrawAuth` buffers begin with a 32-byte Ed25519 public key — colliding
 //     would need the signer's own key to start with the ASCII tag (136 bits of grinding, over a
 //     value the attacker does not choose);
 //   * `nfc::NfcResult` begins with `dpay-nfc-result-v2` — a different tag, diverging at byte 5;
 //   * an IC ingress envelope signs `\x0Aic-request ‖ request_id` — byte 0 is 0x0A, not `d`.
-// The reverse direction is closed by the same fact: a till-open buffer starts with the tag, so
+// The reverse direction is closed by the same fact: a checkout-open buffer starts with the tag, so
 // reading it as an `Authorization` would put the tag where `from` belongs and the signature (made by
 // the merchant's real key) does not verify under that. The version rides IN the tag rather than in a
 // separate version byte — one statement of "which format is this", not two that can disagree. A
-// request carrying a `note` (the sale's purpose, v2) signs under `dpay-till-open-v2`; a note-less
-// request signs under `dpay-till-open-v1`. Two tags, not one tag plus an optional field, so the
+// request carrying a `note` (the sale's purpose, v2) signs under `dpay-checkout-open-v2`; a note-less
+// request signs under `dpay-checkout-open-v1`. Two tags, not one tag plus an optional field, so the
 // two encodings cannot be confused for each other by any verifier that reads the tag it verifies.
 
-/// Domain-separation tag, and the first bytes of every note-less (v1) till-open signing buffer.
+/// Domain-separation tag, and the first bytes of every note-less (v1) checkout-open signing buffer.
 /// FROZEN: changing it invalidates every signature ever made, which is exactly what a version bump
-/// should mean. Requests carrying a `note` sign under [`TILL_OPEN_DOMAIN_V2`] instead — the version
+/// should mean. Requests carrying a `note` sign under [`CHECKOUT_OPEN_DOMAIN_V2`] instead — the version
 /// rides in the tag, so a v1 signature can never be re-read as v2 bytes or the other way round.
-pub const TILL_OPEN_DOMAIN: &[u8; 17] = b"dpay-till-open-v1";
+pub const CHECKOUT_OPEN_DOMAIN: &[u8; 21] = b"dpay-checkout-open-v1";
 
-/// Domain-separation tag for till-open requests that carry a `note` (the sale's purpose, shown to
+/// Domain-separation tag for checkout-open requests that carry a `note` (the sale's purpose, shown to
 /// the payer on review). A SEPARATE tag rather than an appended field under the old one: the tag is
 /// the one statement of "which format is this", and a v1 verifier (a relay not yet upgraded) must
 /// refuse v2 bytes as a bad signature rather than accept them as a different spelling of the same
 /// request — which is exactly what a different tag makes it do.
-pub const TILL_OPEN_DOMAIN_V2: &[u8; 17] = b"dpay-till-open-v2";
+pub const CHECKOUT_OPEN_DOMAIN_V2: &[u8; 21] = b"dpay-checkout-open-v2";
 
 /// How far a merchant's `issued_at` may sit from the verifier's clock, in EITHER direction.
 ///
 /// Two minutes: the signer is by definition online (it is POSTing to the relay), so its clock is
 /// network-synced, while the window still survives a phone that never corrected its clock over a
 /// short flight. It is the ONE number that bounds replay: a verifier that refuses outside this
-/// window only has to remember accepted nonces for `2 × TILL_OPEN_MAX_SKEW_SECS`.
-pub const TILL_OPEN_MAX_SKEW_SECS: u64 = 120;
+/// window only has to remember accepted nonces for `2 × CHECKOUT_OPEN_MAX_SKEW_SECS`.
+pub const CHECKOUT_OPEN_MAX_SKEW_SECS: u64 = 120;
 
-/// Fixed-width prefix of a note-less (v1) till-open signing buffer:
-/// `domain(17) | merchant_pubkey(32) | cents_le(8) | nonce(16) | issued_at_le(8)` = 81 bytes. The
+/// Fixed-width prefix of a note-less (v1) checkout-open signing buffer:
+/// `domain(21) | merchant_pubkey(32) | cents_le(8) | nonce(16) | issued_at_le(8)` = 85 bytes. The
 /// variable-length `merchant_name` follows, prefixed by its own u32-LE byte length.
-pub const TILL_OPEN_FIXED_LEN: usize =
-    TILL_OPEN_DOMAIN.len() + PUBKEY_LEN + 8 + NONCE_LEN + 8;
-/// Fixed-width prefix of a v2 (note-bearing) till-open signing buffer — same fields, one byte
+pub const CHECKOUT_OPEN_FIXED_LEN: usize =
+    CHECKOUT_OPEN_DOMAIN.len() + PUBKEY_LEN + 8 + NONCE_LEN + 8;
+/// Fixed-width prefix of a v2 (note-bearing) checkout-open signing buffer — same fields, one byte
 /// longer, because the v2 domain tag is.
-pub const TILL_OPEN_FIXED_LEN_V2: usize =
-    TILL_OPEN_DOMAIN_V2.len() + PUBKEY_LEN + 8 + NONCE_LEN + 8;
+pub const CHECKOUT_OPEN_FIXED_LEN_V2: usize =
+    CHECKOUT_OPEN_DOMAIN_V2.len() + PUBKEY_LEN + 8 + NONCE_LEN + 8;
 /// Width of the merchant-name length prefix (u32 LE) appended after the fixed prefix.
-pub const TILL_OPEN_NAME_LEN_BYTES: usize = 4;
+pub const CHECKOUT_OPEN_NAME_LEN_BYTES: usize = 4;
 /// Width of the note length prefix (u32 LE), appended after the name in v2 buffers only.
-pub const TILL_OPEN_NOTE_LEN_BYTES: usize = 4;
+pub const CHECKOUT_OPEN_NOTE_LEN_BYTES: usize = 4;
 
-/// A merchant's authenticated request to ring up one charge on dpay's own OpenCryptoPay till.
+/// A merchant's authenticated request to open one charge on dpay's own OpenCryptoPay checkout.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct TillOpen {
+pub struct CheckoutOpen {
     /// The merchant's Ed25519 public key — the account the charge will be paid to is derived from
     /// it, and it is also the key this request's signature must verify under.
     pub merchant_pubkey: [u8; PUBKEY_LEN],
-    /// The price in CHF cents (the till's own unit).
+    /// The price in CHF cents (the checkout's own unit).
     pub cents: u64,
     /// Single-use idempotency key: the verifier records it on acceptance and refuses a repeat.
     pub nonce: [u8; NONCE_LEN],
-    /// Unix seconds the merchant device built this request. Bounded by [`TILL_OPEN_MAX_SKEW_SECS`].
+    /// Unix seconds the merchant device built this request. Bounded by [`CHECKOUT_OPEN_MAX_SKEW_SECS`].
     pub issued_at: u64,
     /// What the merchant calls themselves — CLAIMED, shown to payers, and bound by the signature.
     pub merchant_name: String,
@@ -343,20 +343,20 @@ pub struct TillOpen {
     /// review, and bound by the signature for the same reason: an unsigned field inside a signed
     /// request is a field the relay cannot attribute to anybody. `None` signs the v1 buffer (the
     /// frozen encoding every deployed relay already verifies); `Some` signs the v2 buffer under
-    /// [`TILL_OPEN_DOMAIN_V2`]. `Some("")` is a v2 buffer with an empty note, NOT a v1 buffer —
+    /// [`CHECKOUT_OPEN_DOMAIN_V2`]. `Some("")` is a v2 buffer with an empty note, NOT a v1 buffer —
     /// the presence of the field is itself information the tag states.
     pub note: Option<String>,
 }
 
-impl TillOpen {
+impl CheckoutOpen {
     /// Canonical, deterministic signing message. Which buffer a request signs is stated by its own
     /// first bytes — the version rides IN the tag:
     ///
     /// * `note: None` (v1, FROZEN field order):
-    ///   `dpay-till-open-v1 | merchant_pubkey | cents_le | nonce | issued_at_le | name_len_le(4) |
+    ///   `dpay-checkout-open-v1 | merchant_pubkey | cents_le | nonce | issued_at_le | name_len_le(4) |
     ///   name_utf8`
     /// * `note: Some` (v2):
-    ///   `dpay-till-open-v2 | merchant_pubkey | cents_le | nonce | issued_at_le | name_len_le(4) |
+    ///   `dpay-checkout-open-v2 | merchant_pubkey | cents_le | nonce | issued_at_le | name_len_le(4) |
     ///   name_utf8 | note_len_le(4) | note_utf8`
     ///
     /// The domain tag is FIRST (see the module note above — that placement is what makes a signature
@@ -366,14 +366,14 @@ impl TillOpen {
     pub fn signing_bytes(&self) -> Vec<u8> {
         let name = self.merchant_name.as_bytes();
         match self.note.as_deref() {
-            // v1: the frozen buffer, byte for byte, so an upgraded relay still verifies the ring-ups
-            // of every already-deployed signer (and the frozen `w_till_open_sig` wasm export keeps
+            // v1: the frozen buffer, byte for byte, so an upgraded relay still verifies the checkout-opens
+            // of every already-deployed signer (and the frozen `w_checkout_open_sig` wasm export keeps
             // its documented semantics).
             None => {
                 let mut b = Vec::with_capacity(
-                    TILL_OPEN_FIXED_LEN + TILL_OPEN_NAME_LEN_BYTES + name.len(),
+                    CHECKOUT_OPEN_FIXED_LEN + CHECKOUT_OPEN_NAME_LEN_BYTES + name.len(),
                 );
-                b.extend_from_slice(TILL_OPEN_DOMAIN);
+                b.extend_from_slice(CHECKOUT_OPEN_DOMAIN);
                 b.extend_from_slice(&self.merchant_pubkey);
                 b.extend_from_slice(&self.cents.to_le_bytes());
                 b.extend_from_slice(&self.nonce);
@@ -387,13 +387,13 @@ impl TillOpen {
             Some(note) => {
                 let note = note.as_bytes();
                 let mut b = Vec::with_capacity(
-                    TILL_OPEN_FIXED_LEN_V2
-                        + TILL_OPEN_NAME_LEN_BYTES
+                    CHECKOUT_OPEN_FIXED_LEN_V2
+                        + CHECKOUT_OPEN_NAME_LEN_BYTES
                         + name.len()
-                        + TILL_OPEN_NOTE_LEN_BYTES
+                        + CHECKOUT_OPEN_NOTE_LEN_BYTES
                         + note.len(),
                 );
-                b.extend_from_slice(TILL_OPEN_DOMAIN_V2);
+                b.extend_from_slice(CHECKOUT_OPEN_DOMAIN_V2);
                 b.extend_from_slice(&self.merchant_pubkey);
                 b.extend_from_slice(&self.cents.to_le_bytes());
                 b.extend_from_slice(&self.nonce);
@@ -410,11 +410,11 @@ impl TillOpen {
     }
 }
 
-/// Why a till-open request was refused. Typed so the caller can tell the merchant what to DO —
+/// Why a checkout-open request was refused. Typed so the caller can tell the merchant what to DO —
 /// re-sync the clock, fix the key, re-sign, or stop retrying a request that already opened a charge.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TillOpenError {
-    /// `issued_at` is further than [`TILL_OPEN_MAX_SKEW_SECS`] from the verifier's clock, in either
+pub enum CheckoutOpenError {
+    /// `issued_at` is further than [`CHECKOUT_OPEN_MAX_SKEW_SECS`] from the verifier's clock, in either
     /// direction. Either the request is a replay of an old capture, or the device clock is wrong.
     Stale,
     /// `merchant_pubkey` does not decode as an Ed25519 point at all, so no signature could ever
@@ -430,14 +430,14 @@ pub enum TillOpenError {
     NonceReused,
 }
 
-/// Sign a till-open request (deterministic, no RNG). Single source of truth for the signing input —
+/// Sign a checkout-open request (deterministic, no RNG). Single source of truth for the signing input —
 /// the merchant's app calls this through the FFI / wasm export, the relay rebuilds the same
 /// `signing_bytes()` to verify.
-pub fn sign_till_open(key: &SigningKey, open: &TillOpen) -> Signature {
+pub fn sign_checkout_open(key: &SigningKey, open: &CheckoutOpen) -> Signature {
     key.sign(&open.signing_bytes())
 }
 
-/// The WHOLE acceptance rule for a till-open request, in one place so the signer and the verifier
+/// The WHOLE acceptance rule for a checkout-open request, in one place so the signer and the verifier
 /// cannot hold two versions of it. Pure: `now_secs` and `nonce_already_seen` are supplied by the
 /// caller (mirroring [`validate`], which takes `balance`/`nonce_already_seen` the same way), so this
 /// stays allocation-light and has no clock or storage of its own.
@@ -446,28 +446,28 @@ pub fn sign_till_open(key: &SigningKey, open: &TillOpen) -> Signature {
 /// of unauthenticated requests is refused without doing public-key maths. The nonce is checked LAST,
 /// after the signature has proven the request came from the key it names — a caller must record a
 /// nonce only on `Ok(())`, so nothing an unauthenticated stranger sends can grow that set.
-pub fn validate_till_open(
-    open: &TillOpen,
+pub fn validate_checkout_open(
+    open: &CheckoutOpen,
     sig: &[u8; SIG_LEN],
     now_secs: u64,
     nonce_already_seen: bool,
-) -> Result<(), TillOpenError> {
-    if now_secs.abs_diff(open.issued_at) > TILL_OPEN_MAX_SKEW_SECS {
-        return Err(TillOpenError::Stale);
+) -> Result<(), CheckoutOpenError> {
+    if now_secs.abs_diff(open.issued_at) > CHECKOUT_OPEN_MAX_SKEW_SECS {
+        return Err(CheckoutOpenError::Stale);
     }
     let vk = match VerifyingKey::from_bytes(&open.merchant_pubkey) {
         Ok(vk) => vk,
-        Err(_) => return Err(TillOpenError::MalformedKey),
+        Err(_) => return Err(CheckoutOpenError::MalformedKey),
     };
     // `verify_strict` rejects weak / small-order keys, matching `verify` / `verify_receipt`.
     if vk
         .verify_strict(&open.signing_bytes(), &Signature::from_bytes(sig))
         .is_err()
     {
-        return Err(TillOpenError::BadSignature);
+        return Err(CheckoutOpenError::BadSignature);
     }
     if nonce_already_seen {
-        return Err(TillOpenError::NonceReused);
+        return Err(CheckoutOpenError::NonceReused);
     }
     Ok(())
 }
@@ -1179,10 +1179,10 @@ mod tests {
         assert!(!auth.verify(&pk, &Signature::from_bytes(&[0u8; SIG_LEN])), "zero sig must fail");
     }
 
-    // --- till-open authorization (the merchant proves the account they name is theirs) ---------
+    // --- checkout-open authorization (the merchant proves the account they name is theirs) ---------
 
-    fn till_open(key: &SigningKey) -> TillOpen {
-        TillOpen {
+    fn checkout_open(key: &SigningKey) -> CheckoutOpen {
+        CheckoutOpen {
             merchant_pubkey: key.verifying_key().to_bytes(),
             cents: 1_000,
             nonce: [0x2a; NONCE_LEN],
@@ -1193,134 +1193,134 @@ mod tests {
     }
 
     #[test]
-    fn till_open_binds_the_key_and_every_field_it_carries() {
+    fn checkout_open_binds_the_key_and_every_field_it_carries() {
         let sk = generate_keypair();
-        let open = till_open(&sk);
-        let sig = sign_till_open(&sk, &open).to_bytes();
+        let open = checkout_open(&sk);
+        let sig = sign_checkout_open(&sk, &open).to_bytes();
         let now = open.issued_at;
 
-        assert_eq!(validate_till_open(&open, &sig, now, false), Ok(()));
+        assert_eq!(validate_checkout_open(&open, &sig, now, false), Ok(()));
         // The buffer is the documented fixed prefix + a length-prefixed name.
         assert_eq!(
             open.signing_bytes().len(),
-            TILL_OPEN_FIXED_LEN + TILL_OPEN_NAME_LEN_BYTES + open.merchant_name.len(),
+            CHECKOUT_OPEN_FIXED_LEN + CHECKOUT_OPEN_NAME_LEN_BYTES + open.merchant_name.len(),
             "signing_bytes = domain+pubkey+cents+nonce+issued_at, then 4-byte len + name"
         );
 
         // A signature by ANOTHER key never opens a charge for this one — the whole point.
         let other = generate_keypair();
-        let stolen = sign_till_open(&other, &open).to_bytes();
+        let stolen = sign_checkout_open(&other, &open).to_bytes();
         assert_eq!(
-            validate_till_open(&open, &stolen, now, false),
-            Err(TillOpenError::BadSignature),
-            "only the named key may ring up its own till"
+            validate_checkout_open(&open, &stolen, now, false),
+            Err(CheckoutOpenError::BadSignature),
+            "only the named key may open its own checkout"
         );
         // …and the same request re-pointed at another merchant's key does not verify either.
-        let repointed = TillOpen { merchant_pubkey: other.verifying_key().to_bytes(), ..open.clone() };
+        let repointed = CheckoutOpen { merchant_pubkey: other.verifying_key().to_bytes(), ..open.clone() };
         assert_eq!(
-            validate_till_open(&repointed, &sig, now, false),
-            Err(TillOpenError::BadSignature),
+            validate_checkout_open(&repointed, &sig, now, false),
+            Err(CheckoutOpenError::BadSignature),
             "swapping the destination key must invalidate the signature"
         );
 
         // Tampering with ANY carried field breaks verification: price, nonce, time, claimed name.
-        let t_cents = TillOpen { cents: open.cents + 1, ..open.clone() };
-        assert_eq!(validate_till_open(&t_cents, &sig, now, false), Err(TillOpenError::BadSignature));
+        let t_cents = CheckoutOpen { cents: open.cents + 1, ..open.clone() };
+        assert_eq!(validate_checkout_open(&t_cents, &sig, now, false), Err(CheckoutOpenError::BadSignature));
         let mut t_nonce = open.clone();
         t_nonce.nonce[0] ^= 0xFF;
-        assert_eq!(validate_till_open(&t_nonce, &sig, now, false), Err(TillOpenError::BadSignature));
-        let t_time = TillOpen { issued_at: open.issued_at + 1, ..open.clone() };
+        assert_eq!(validate_checkout_open(&t_nonce, &sig, now, false), Err(CheckoutOpenError::BadSignature));
+        let t_time = CheckoutOpen { issued_at: open.issued_at + 1, ..open.clone() };
         assert_eq!(
-            validate_till_open(&t_time, &sig, t_time.issued_at, false),
-            Err(TillOpenError::BadSignature)
+            validate_checkout_open(&t_time, &sig, t_time.issued_at, false),
+            Err(CheckoutOpenError::BadSignature)
         );
-        let t_name = TillOpen { merchant_name: "Migros".to_string(), ..open.clone() };
+        let t_name = CheckoutOpen { merchant_name: "Migros".to_string(), ..open.clone() };
         assert_eq!(
-            validate_till_open(&t_name, &sig, now, false),
-            Err(TillOpenError::BadSignature),
+            validate_checkout_open(&t_name, &sig, now, false),
+            Err(CheckoutOpenError::BadSignature),
             "the CLAIMED name is shown to payers, so it must be signed"
         );
     }
 
     #[test]
-    fn till_open_note_rides_its_own_tag_length_prefix_and_signature() {
+    fn checkout_open_note_rides_its_own_tag_length_prefix_and_signature() {
         let sk = generate_keypair();
         // Multi-byte note on purpose: the length prefix must count BYTES, not characters, exactly
         // like the name prefix beside it.
-        let open = TillOpen {
+        let open = CheckoutOpen {
             note: Some("2× Kafi, Tisch 4 ☕".to_string()),
-            ..till_open(&sk)
+            ..checkout_open(&sk)
         };
-        let sig = sign_till_open(&sk, &open).to_bytes();
+        let sig = sign_checkout_open(&sk, &open).to_bytes();
         let now = open.issued_at;
         let buf = open.signing_bytes();
         let note = open.note.as_deref().unwrap();
 
-        assert_eq!(&buf[..TILL_OPEN_DOMAIN_V2.len()], TILL_OPEN_DOMAIN_V2.as_slice());
+        assert_eq!(&buf[..CHECKOUT_OPEN_DOMAIN_V2.len()], CHECKOUT_OPEN_DOMAIN_V2.as_slice());
         assert_eq!(
             buf.len(),
-            TILL_OPEN_FIXED_LEN_V2
-                + TILL_OPEN_NAME_LEN_BYTES
+            CHECKOUT_OPEN_FIXED_LEN_V2
+                + CHECKOUT_OPEN_NAME_LEN_BYTES
                 + open.merchant_name.len()
-                + TILL_OPEN_NOTE_LEN_BYTES
+                + CHECKOUT_OPEN_NOTE_LEN_BYTES
                 + note.len()
         );
         // The declared note length counts bytes, and the note lands after the name's bytes.
-        let note_len_at = TILL_OPEN_FIXED_LEN_V2 + TILL_OPEN_NAME_LEN_BYTES + open.merchant_name.len();
+        let note_len_at = CHECKOUT_OPEN_FIXED_LEN_V2 + CHECKOUT_OPEN_NAME_LEN_BYTES + open.merchant_name.len();
         let declared = u32::from_le_bytes(
-            buf[note_len_at..note_len_at + TILL_OPEN_NOTE_LEN_BYTES].try_into().unwrap(),
+            buf[note_len_at..note_len_at + CHECKOUT_OPEN_NOTE_LEN_BYTES].try_into().unwrap(),
         );
         assert_eq!(declared as usize, note.len());
         assert!(declared as usize > note.chars().count(), "the golden note is multi-byte");
-        assert_eq!(&buf[note_len_at + TILL_OPEN_NOTE_LEN_BYTES..], note.as_bytes());
-        assert_eq!(validate_till_open(&open, &sig, now, false), Ok(()));
+        assert_eq!(&buf[note_len_at + CHECKOUT_OPEN_NOTE_LEN_BYTES..], note.as_bytes());
+        assert_eq!(validate_checkout_open(&open, &sig, now, false), Ok(()));
 
         // Tampering with the note breaks verification — it is payer-read text, same class as the
         // claimed name, so it must be attribution-bearing the same way.
-        let t_note = TillOpen { note: Some("1× Kafi".to_string()), ..open.clone() };
-        assert_eq!(validate_till_open(&t_note, &sig, now, false), Err(TillOpenError::BadSignature));
+        let t_note = CheckoutOpen { note: Some("1× Kafi".to_string()), ..open.clone() };
+        assert_eq!(validate_checkout_open(&t_note, &sig, now, false), Err(CheckoutOpenError::BadSignature));
 
         // v1/v2 confusion is impossible by construction: the same fields with the note REMOVED sign
         // a different buffer (different tag), so a v2 signature never validates a v1 request and a
         // v1 signature never validates a v2 one — in either direction.
-        let v1 = TillOpen { note: None, ..open.clone() };
-        let v1_sig = sign_till_open(&sk, &v1).to_bytes();
+        let v1 = CheckoutOpen { note: None, ..open.clone() };
+        let v1_sig = sign_checkout_open(&sk, &v1).to_bytes();
         assert_ne!(v1.signing_bytes(), open.signing_bytes());
-        assert_eq!(validate_till_open(&v1, &sig, now, false), Err(TillOpenError::BadSignature));
-        assert_eq!(validate_till_open(&open, &v1_sig, now, false), Err(TillOpenError::BadSignature));
+        assert_eq!(validate_checkout_open(&v1, &sig, now, false), Err(CheckoutOpenError::BadSignature));
+        assert_eq!(validate_checkout_open(&open, &v1_sig, now, false), Err(CheckoutOpenError::BadSignature));
 
         // An EMPTY note is still v2 — the field's presence is information the tag states, and an
         // upgraded signer cannot silently fall back to the v1 buffer by clearing the note.
-        let empty = TillOpen { note: Some(String::new()), ..open };
-        let empty_sig = sign_till_open(&sk, &empty).to_bytes();
-        assert_eq!(validate_till_open(&empty, &empty_sig, now, false), Ok(()));
+        let empty = CheckoutOpen { note: Some(String::new()), ..open };
+        let empty_sig = sign_checkout_open(&sk, &empty).to_bytes();
+        assert_eq!(validate_checkout_open(&empty, &empty_sig, now, false), Ok(()));
         assert_eq!(
-            validate_till_open(&empty, &v1_sig, now, false),
-            Err(TillOpenError::BadSignature),
+            validate_checkout_open(&empty, &v1_sig, now, false),
+            Err(CheckoutOpenError::BadSignature),
             "Some(\"\") and None sign different buffers"
         );
     }
 
     #[test]
-    fn till_open_is_domain_separated_from_everything_else_this_key_signs() {
+    fn checkout_open_is_domain_separated_from_everything_else_this_key_signs() {
         let sk = generate_keypair();
-        let open = till_open(&sk);
+        let open = checkout_open(&sk);
         let buf = open.signing_bytes();
 
         // The tag is FIRST — that placement is what makes every other dpay signing buffer (which
         // starts with a pubkey, a different tag, or 0x0A) unusable here.
-        assert_eq!(&buf[..TILL_OPEN_DOMAIN.len()], TILL_OPEN_DOMAIN.as_slice());
+        assert_eq!(&buf[..CHECKOUT_OPEN_DOMAIN.len()], CHECKOUT_OPEN_DOMAIN.as_slice());
 
         // Signing the SAME fields without the tag produces a signature this validator refuses, so
         // some future untagged `{pubkey, cents, nonce, issued_at, name}` message can never be
-        // replayed into a till ring-up.
-        let untagged = sk.sign(&buf[TILL_OPEN_DOMAIN.len()..]).to_bytes();
+        // replayed into a checkout charge-open.
+        let untagged = sk.sign(&buf[CHECKOUT_OPEN_DOMAIN.len()..]).to_bytes();
         assert_eq!(
-            validate_till_open(&open, &untagged, open.issued_at, false),
-            Err(TillOpenError::BadSignature)
+            validate_checkout_open(&open, &untagged, open.issued_at, false),
+            Err(CheckoutOpenError::BadSignature)
         );
 
-        // A real payment authorization signed by the SAME device key is not a till ring-up.
+        // A real payment authorization signed by the SAME device key is not a checkout charge-open.
         let auth = Authorization {
             from: open.merchant_pubkey,
             to: [7u8; PUBKEY_LEN],
@@ -1334,59 +1334,59 @@ mod tests {
         };
         let pay_sig = sign(&sk, &auth).to_bytes();
         assert_eq!(
-            validate_till_open(&open, &pay_sig, open.issued_at, false),
-            Err(TillOpenError::BadSignature),
-            "a payment signature must not double as permission to open a till"
+            validate_checkout_open(&open, &pay_sig, open.issued_at, false),
+            Err(CheckoutOpenError::BadSignature),
+            "a payment signature must not double as permission to open a checkout"
         );
-        // …and the converse: the till signature is not a valid payment authorization.
-        let till_sig = sign_till_open(&sk, &open);
-        assert!(!verify(&open.merchant_pubkey, &auth, &till_sig));
+        // …and the converse: the checkout signature is not a valid payment authorization.
+        let checkout_sig = sign_checkout_open(&sk, &open);
+        assert!(!verify(&open.merchant_pubkey, &auth, &checkout_sig));
     }
 
     #[test]
-    fn till_open_accepts_only_inside_a_symmetric_clock_window() {
+    fn checkout_open_accepts_only_inside_a_symmetric_clock_window() {
         let sk = generate_keypair();
-        let open = till_open(&sk);
-        let sig = sign_till_open(&sk, &open).to_bytes();
+        let open = checkout_open(&sk);
+        let sig = sign_checkout_open(&sk, &open).to_bytes();
         let t = open.issued_at;
 
         // Inclusive at both edges: a device exactly at the limit is still served, not refused.
-        assert_eq!(validate_till_open(&open, &sig, t + TILL_OPEN_MAX_SKEW_SECS, false), Ok(()));
-        assert_eq!(validate_till_open(&open, &sig, t - TILL_OPEN_MAX_SKEW_SECS, false), Ok(()));
+        assert_eq!(validate_checkout_open(&open, &sig, t + CHECKOUT_OPEN_MAX_SKEW_SECS, false), Ok(()));
+        assert_eq!(validate_checkout_open(&open, &sig, t - CHECKOUT_OPEN_MAX_SKEW_SECS, false), Ok(()));
         // One second past, in either direction, is Stale — this is the bound that keeps the
         // verifier's seen-nonce set finite.
         assert_eq!(
-            validate_till_open(&open, &sig, t + TILL_OPEN_MAX_SKEW_SECS + 1, false),
-            Err(TillOpenError::Stale)
+            validate_checkout_open(&open, &sig, t + CHECKOUT_OPEN_MAX_SKEW_SECS + 1, false),
+            Err(CheckoutOpenError::Stale)
         );
         assert_eq!(
-            validate_till_open(&open, &sig, t - TILL_OPEN_MAX_SKEW_SECS - 1, false),
-            Err(TillOpenError::Stale)
+            validate_checkout_open(&open, &sig, t - CHECKOUT_OPEN_MAX_SKEW_SECS - 1, false),
+            Err(CheckoutOpenError::Stale)
         );
         // Staleness is checked BEFORE the signature, so a flood of garbage costs no key maths.
         assert_eq!(
-            validate_till_open(&open, &[0u8; SIG_LEN], t + 10_000, false),
-            Err(TillOpenError::Stale)
+            validate_checkout_open(&open, &[0u8; SIG_LEN], t + 10_000, false),
+            Err(CheckoutOpenError::Stale)
         );
     }
 
     #[test]
-    fn till_open_refuses_a_reused_nonce_a_garbage_signature_and_a_malformed_key() {
+    fn checkout_open_refuses_a_reused_nonce_a_garbage_signature_and_a_malformed_key() {
         let sk = generate_keypair();
-        let open = till_open(&sk);
-        let sig = sign_till_open(&sk, &open).to_bytes();
+        let open = checkout_open(&sk);
+        let sig = sign_checkout_open(&sk, &open).to_bytes();
         let now = open.issued_at;
 
         // Replay of a byte-identical, still-fresh request: the first one already opened the charge.
-        assert_eq!(validate_till_open(&open, &sig, now, true), Err(TillOpenError::NonceReused));
+        assert_eq!(validate_checkout_open(&open, &sig, now, true), Err(CheckoutOpenError::NonceReused));
         // Garbage / truncated signatures are refused, never panicked over.
         assert_eq!(
-            validate_till_open(&open, &[0u8; SIG_LEN], now, false),
-            Err(TillOpenError::BadSignature)
+            validate_checkout_open(&open, &[0u8; SIG_LEN], now, false),
+            Err(CheckoutOpenError::BadSignature)
         );
         let mut clipped = sig;
         clipped[SIG_LEN - 1] ^= 0xFF;
-        assert_eq!(validate_till_open(&open, &clipped, now, false), Err(TillOpenError::BadSignature));
+        assert_eq!(validate_checkout_open(&open, &clipped, now, false), Err(CheckoutOpenError::BadSignature));
         // A key that is not a valid Ed25519 point is its own diagnosis: no signature could ever
         // verify under it, so the merchant is told THAT rather than "bad signature". The vector is
         // the literal `deadbeef…deadbeef` that opened a live production charge on 2026-09-03 —
@@ -1395,27 +1395,27 @@ mod tests {
         for chunk in deadbeef.chunks_exact_mut(4) {
             chunk.copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
         }
-        let bad_key = TillOpen { merchant_pubkey: deadbeef, ..open.clone() };
+        let bad_key = CheckoutOpen { merchant_pubkey: deadbeef, ..open.clone() };
         assert_eq!(
-            validate_till_open(&bad_key, &sig, now, false),
-            Err(TillOpenError::MalformedKey)
+            validate_checkout_open(&bad_key, &sig, now, false),
+            Err(CheckoutOpenError::MalformedKey)
         );
     }
 
     #[test]
-    fn till_open_name_is_length_prefixed_so_the_encoding_is_unambiguous() {
+    fn checkout_open_name_is_length_prefixed_so_the_encoding_is_unambiguous() {
         let sk = generate_keypair();
-        // An empty claimed name is a valid signing input (the till's `merchant_name` defaults to "").
-        let anon = TillOpen { merchant_name: String::new(), ..till_open(&sk) };
-        let anon_sig = sign_till_open(&sk, &anon).to_bytes();
-        assert_eq!(validate_till_open(&anon, &anon_sig, anon.issued_at, false), Ok(()));
-        assert_eq!(anon.signing_bytes().len(), TILL_OPEN_FIXED_LEN + TILL_OPEN_NAME_LEN_BYTES);
+        // An empty claimed name is a valid signing input (the checkout's `merchant_name` defaults to "").
+        let anon = CheckoutOpen { merchant_name: String::new(), ..checkout_open(&sk) };
+        let anon_sig = sign_checkout_open(&sk, &anon).to_bytes();
+        assert_eq!(validate_checkout_open(&anon, &anon_sig, anon.issued_at, false), Ok(()));
+        assert_eq!(anon.signing_bytes().len(), CHECKOUT_OPEN_FIXED_LEN + CHECKOUT_OPEN_NAME_LEN_BYTES);
 
         // The length prefix counts BYTES, not characters — a multi-byte name must not under-declare.
-        let open = till_open(&sk);
-        let name_len_at = TILL_OPEN_FIXED_LEN;
+        let open = checkout_open(&sk);
+        let name_len_at = CHECKOUT_OPEN_FIXED_LEN;
         let declared = u32::from_le_bytes(
-            open.signing_bytes()[name_len_at..name_len_at + TILL_OPEN_NAME_LEN_BYTES]
+            open.signing_bytes()[name_len_at..name_len_at + CHECKOUT_OPEN_NAME_LEN_BYTES]
                 .try_into()
                 .unwrap(),
         );
@@ -1424,13 +1424,13 @@ mod tests {
 
         // Two DIFFERENT names cannot produce the same buffer even when one is a prefix of the other
         // — the property a bare concatenation would lose.
-        let short = TillOpen { merchant_name: "ab".to_string(), ..till_open(&sk) };
-        let long = TillOpen { merchant_name: "abc".to_string(), ..till_open(&sk) };
+        let short = CheckoutOpen { merchant_name: "ab".to_string(), ..checkout_open(&sk) };
+        let long = CheckoutOpen { merchant_name: "abc".to_string(), ..checkout_open(&sk) };
         assert_ne!(short.signing_bytes(), long.signing_bytes());
-        let short_sig = sign_till_open(&sk, &short).to_bytes();
+        let short_sig = sign_checkout_open(&sk, &short).to_bytes();
         assert_eq!(
-            validate_till_open(&long, &short_sig, long.issued_at, false),
-            Err(TillOpenError::BadSignature)
+            validate_checkout_open(&long, &short_sig, long.issued_at, false),
+            Err(CheckoutOpenError::BadSignature)
         );
     }
 
@@ -1439,27 +1439,27 @@ mod tests {
         /// `tamper_breaks_verify` pins for payments, proven here over the reconstructed fields so it
         /// covers the domain tag and the length prefix as well as the values.
         #[test]
-        fn till_open_tamper_breaks_verify(
-            idx in 0usize..TILL_OPEN_FIXED_LEN, xor in 1u8..=255,
+        fn checkout_open_tamper_breaks_verify(
+            idx in 0usize..CHECKOUT_OPEN_FIXED_LEN, xor in 1u8..=255,
         ) {
             let sk = generate_keypair();
-            let open = till_open(&sk);
-            let sig = sign_till_open(&sk, &open).to_bytes();
+            let open = checkout_open(&sk);
+            let sig = sign_checkout_open(&sk, &open).to_bytes();
             let mut bytes = open.signing_bytes();
             bytes[idx] ^= xor;
             // Rebuild the struct from the mutated buffer (the tag itself is not a struct field, so a
             // flip inside it is asserted directly against the constant instead).
-            if idx < TILL_OPEN_DOMAIN.len() {
-                prop_assert_ne!(&bytes[..TILL_OPEN_DOMAIN.len()], TILL_OPEN_DOMAIN.as_slice());
+            if idx < CHECKOUT_OPEN_DOMAIN.len() {
+                prop_assert_ne!(&bytes[..CHECKOUT_OPEN_DOMAIN.len()], CHECKOUT_OPEN_DOMAIN.as_slice());
                 return Ok(());
             }
-            let o = TILL_OPEN_DOMAIN.len();
-            let tampered = TillOpen {
+            let o = CHECKOUT_OPEN_DOMAIN.len();
+            let tampered = CheckoutOpen {
                 merchant_pubkey: bytes[o..o + PUBKEY_LEN].try_into().unwrap(),
                 cents: u64::from_le_bytes(bytes[o + PUBKEY_LEN..o + PUBKEY_LEN + 8].try_into().unwrap()),
                 nonce: bytes[o + PUBKEY_LEN + 8..o + PUBKEY_LEN + 8 + NONCE_LEN].try_into().unwrap(),
                 issued_at: u64::from_le_bytes(
-                    bytes[o + PUBKEY_LEN + 8 + NONCE_LEN..TILL_OPEN_FIXED_LEN].try_into().unwrap(),
+                    bytes[o + PUBKEY_LEN + 8 + NONCE_LEN..CHECKOUT_OPEN_FIXED_LEN].try_into().unwrap(),
                 ),
                 merchant_name: open.merchant_name.clone(),
                 // The proptest walks the v1 buffer (the range stops at the v1 fixed prefix), so the
@@ -1468,7 +1468,7 @@ mod tests {
             };
             // `now` follows the tampered time so a flipped `issued_at` fails on the SIGNATURE (the
             // property under test) rather than trivially on staleness.
-            prop_assert!(validate_till_open(&tampered, &sig, tampered.issued_at, false).is_err());
+            prop_assert!(validate_checkout_open(&tampered, &sig, tampered.issued_at, false).is_err());
         }
     }
 

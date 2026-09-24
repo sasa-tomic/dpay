@@ -41,8 +41,8 @@ export const DpayNfc = {
   // The 132-byte request the merchant ARMED reader mode with, kept so a flow can decode it and
   // check what the screen really asked for — the twin of `__DPAY_TEST_NFC_APPROVED_WIRE` on the
   // payer side. It exists because a merchant surface can arm the reader from something other than
-  // the QR beside it: a till charge's request carries the CHARGE's reference as its nonce, and the
-  // till's QR is an LNURL that does not contain it. Reading the armed payload is the only way to
+  // the QR beside it: a checkout charge's request carries the CHARGE's reference as its nonce, and the
+  // checkout's QR is an LNURL that does not contain it. Reading the armed payload is the only way to
   // assert the two agree without a second source of truth in the test.
   startReader: (requestHex: string) => {
     (globalThis as any).__DPAY_TEST_NFC_READER_REQUEST = requestHex;

@@ -26,8 +26,8 @@
 //   - w_receipt_claim: the payer/receipt-side claim assembler — the canonical golden hex (embedded
 //     below; produced by dpay-core's ReceiptClaim::signing_bytes via the crate's HOST test), a
 //     field-for-field rebuild of the wire_layout.json receipt golden, and u64 extremes.
-//   - w_till_open_sig: the merchant's OpenCryptoPay ring-up proof — the canonical signing buffer
-//     rebuilt independently in JS from dfx/till_open_signing.json's own offsets, the golden
+//   - w_checkout_open_sig: the merchant's OpenCryptoPay charge-open proof — the canonical signing buffer
+//     rebuilt independently in JS from dfx/checkout_open_signing.json's own offsets, the golden
 //     signature, field binding, u64 extremes, and the BAD_LEN / BAD_UTF8 error contract.
 //   - w_icp_* (IC user-principal rail): the additive-only export census, the minter_ok reply
 //     golden, and ARG-BUILD/SIGN GOLDENS — w_icp_transfer_arg / w_icp_approve_arg DIDL bytes and
@@ -348,7 +348,7 @@ for (const c of CASES) {
     // behind it, and the pool's own Result reply. Before these existed the web build hand-rolled
     // TS twins of all three — every e2e conversion flow signed bytes the compiled core never made.
     'w_icp_deposit_and_swap_arg', 'w_icp_swap_min_out', 'w_icp_decode_swap_result',
-    // The PULL (ICRC-2 transfer_from): a shop collecting a till charge an allowance wallet
+    // The PULL (ICRC-2 transfer_from): a shop collecting a checkout charge an allowance wallet
     // approved it for. Same additive-only rule — these are money-moving bytes, so they are
     // golden-pinned below rather than merely present.
     'w_icp_transfer_from_arg', 'w_icp_decode_transfer_from_result',
@@ -661,20 +661,20 @@ for (const c of CASES) {
   check('w_icp_decode_approve_result(non-DIDL garbage) == BAD_UTF8(2)', decodeApprove('deadbeef')[0] === 2);
 }
 
-// --- w_till_open_sig / w_till_open_sig_note: the ring-up proof, against the Rust-emitted golden -
+// --- w_checkout_open_sig / w_checkout_open_sig_note: the charge-open proof, against the Rust-emitted golden -
 //
-// The till's `POST /api/v1/till` refuses a ring-up unless the caller signs it with the key their
-// merchant account is DERIVED from (`dpay_core::TillOpen`; the relay verifies with
-// `validate_till_open`). This asserts the staged wasm — the core every web/merchant surface loads —
+// The checkout's `POST /api/v1/checkout` refuses a charge-open unless the caller signs it with the key their
+// merchant account is DERIVED from (`dpay_core::CheckoutOpen`; the relay verifies with
+// `validate_checkout_open`). This asserts the staged wasm — the core every web/merchant surface loads —
 // produces the exact bytes the Rust core does, so the app cannot sign something the relay rejects.
 //
 // The golden document carries BOTH spellings: `golden` is a v2 request (with a note), `legacy_v1`
-// the same fields signed note-less under the v1 tag. `w_till_open_sig` is FROZEN to v1 bytes;
-// `w_till_open_sig_note` produces the v2 ones. Each encoding is rebuilt INDEPENDENTLY here
+// the same fields signed note-less under the v1 tag. `w_checkout_open_sig` is FROZEN to v1 bytes;
+// `w_checkout_open_sig_note` produces the v2 ones. Each encoding is rebuilt INDEPENDENTLY here
 // (DataView, from the golden's own declared offsets) rather than taken on trust, so a change to
-// `TillOpen::signing_bytes` cannot pass by regenerating the golden alone.
+// `CheckoutOpen::signing_bytes` cannot pass by regenerating the golden alone.
 {
-  const T = JSON.parse(readFileSync(`${ROOT}dfx/till_open_signing.json`, 'utf8'));
+  const T = JSON.parse(readFileSync(`${ROOT}dfx/checkout_open_signing.json`, 'utf8'));
   const G = T.golden;
   const nameBytes = enc.encode(G.merchant_name);
 
@@ -692,9 +692,9 @@ for (const c of CASES) {
     dv.setBigUint64(T.fields.issued_at.offset, BigInt(G.issued_at), true);
     dv.setUint32(v1.fixed_len, nameBytes.length, true);
     want.set(nameBytes, v1.fixed_len + T.name_len_bytes);
-    check('till_open_signing.json legacy_v1.signing_hex == DataView-assembled v1 layout',
-      hexDiff('till-open v1 signing', fromHex(v1.signing_hex), want) === undefined,
-      hexDiff('till-open v1 signing', fromHex(v1.signing_hex), want));
+    check('checkout_open_signing.json legacy_v1.signing_hex == DataView-assembled v1 layout',
+      hexDiff('checkout-open v1 signing', fromHex(v1.signing_hex), want) === undefined,
+      hexDiff('checkout-open v1 signing', fromHex(v1.signing_hex), want));
   }
 
   // Independent JS assembly of the v2 buffer: the same fields under the v2 tag, then
@@ -712,77 +712,77 @@ for (const c of CASES) {
     want.set(nameBytes, T.fields.name_len.offset + T.name_len_bytes);
     dv.setUint32(T.fields.note_len.offset, noteBytes.length, true);
     want.set(noteBytes, T.fields.note_len.offset + T.note_len_bytes);
-    check('till_open_signing.json signing_hex == DataView-assembled v2 layout',
-      hexDiff('till-open v2 signing', fromHex(G.signing_hex), want) === undefined,
-      hexDiff('till-open v2 signing', fromHex(G.signing_hex), want));
+    check('checkout_open_signing.json signing_hex == DataView-assembled v2 layout',
+      hexDiff('checkout-open v2 signing', fromHex(G.signing_hex), want) === undefined,
+      hexDiff('checkout-open v2 signing', fromHex(G.signing_hex), want));
     // Both strings are multi-byte UTF-8 on purpose: each length prefix counts BYTES, not characters.
-    check('till-open name and note length prefixes count bytes, not characters',
+    check('checkout-open name and note length prefixes count bytes, not characters',
       nameBytes.length > [...G.merchant_name].length && noteBytes.length > [...G.note].length,
       `name=${JSON.stringify(G.merchant_name)}/${nameBytes.length}B note=${JSON.stringify(G.note)}/${noteBytes.length}B`);
     check('v1 and v2 buffers differ (two tags, not one tag plus an optional field)',
       v1.signing_hex !== G.signing_hex);
   }
 
-  const signTillOpen = (secretHex, cents, nonceHex, issuedAt, name, outPtr) => {
+  const signCheckoutOpen = (secretHex, cents, nonceHex, issuedAt, name, outPtr) => {
     const [clo, chi] = split64(cents), [ilo, ihi] = split64(issuedAt);
     const nb = enc.encode(name);
     const out = outPtr ?? ex.w_alloc(64);
-    const rc = ex.w_till_open_sig(writeBytes(fromHex(secretHex)), clo, chi,
+    const rc = ex.w_checkout_open_sig(writeBytes(fromHex(secretHex)), clo, chi,
       writeBytes(fromHex(nonceHex)), ilo, ihi, writeBytes(nb), nb.length, out);
     return [rc, readBytes(out, 64)];
   };
-  const signTillOpenNote = (secretHex, cents, nonceHex, issuedAt, name, note, outPtr) => {
+  const signCheckoutOpenNote = (secretHex, cents, nonceHex, issuedAt, name, note, outPtr) => {
     const [clo, chi] = split64(cents), [ilo, ihi] = split64(issuedAt);
     const nb = enc.encode(name), tb = enc.encode(note);
     const out = outPtr ?? ex.w_alloc(64);
-    const rc = ex.w_till_open_sig_note(writeBytes(fromHex(secretHex)), clo, chi,
+    const rc = ex.w_checkout_open_sig_note(writeBytes(fromHex(secretHex)), clo, chi,
       writeBytes(fromHex(nonceHex)), ilo, ihi, writeBytes(nb), nb.length, writeBytes(tb), tb.length, out);
     return [rc, readBytes(out, 64)];
   };
   {
     // FROZEN semantics: the note-less export signs the v1 golden even though the document's main
     // golden is now a v2 one — an old caller's bytes must never change under it.
-    const [rc, got] = signTillOpen(G.secret_hex, BigInt(G.cents), G.nonce_hex, BigInt(G.issued_at), G.merchant_name);
-    check('w_till_open_sig(golden fields, no note) == legacy_v1.sig_hex (FROZEN v1 bytes)',
+    const [rc, got] = signCheckoutOpen(G.secret_hex, BigInt(G.cents), G.nonce_hex, BigInt(G.issued_at), G.merchant_name);
+    check('w_checkout_open_sig(golden fields, no note) == legacy_v1.sig_hex (FROZEN v1 bytes)',
       rc === 0 && hex(got) === v1.sig_hex, `rc=${rc}\n    got:  ${hex(got)}\n    want: ${v1.sig_hex}`);
   }
   {
-    const [rc, got] = signTillOpenNote(G.secret_hex, BigInt(G.cents), G.nonce_hex, BigInt(G.issued_at), G.merchant_name, G.note);
-    check('w_till_open_sig_note(golden) == dfx/till_open_signing.json sig_hex',
+    const [rc, got] = signCheckoutOpenNote(G.secret_hex, BigInt(G.cents), G.nonce_hex, BigInt(G.issued_at), G.merchant_name, G.note);
+    check('w_checkout_open_sig_note(golden) == dfx/checkout_open_signing.json sig_hex',
       rc === 0 && hex(got) === G.sig_hex, `rc=${rc}\n    got:  ${hex(got)}\n    want: ${G.sig_hex}`);
   }
   // Determinism + field binding: one changed CENT is a different signature (ed25519 is deterministic,
   // so "same inputs → same bytes, different inputs → different bytes" is a real assertion here).
   {
-    const [rc, got] = signTillOpenNote(G.secret_hex, BigInt(G.cents) + 1n, G.nonce_hex, BigInt(G.issued_at), G.merchant_name, G.note);
-    check('w_till_open_sig_note binds the price (one more cent → a different signature)',
+    const [rc, got] = signCheckoutOpenNote(G.secret_hex, BigInt(G.cents) + 1n, G.nonce_hex, BigInt(G.issued_at), G.merchant_name, G.note);
+    check('w_checkout_open_sig_note binds the price (one more cent → a different signature)',
       rc === 0 && hex(got) !== G.sig_hex, `rc=${rc}`);
   }
-  // The note is bound: same ring-up, different purpose → different bytes.
+  // The note is bound: same charge-open, different purpose → different bytes.
   {
-    const [rc, got] = signTillOpenNote(G.secret_hex, BigInt(G.cents), G.nonce_hex, BigInt(G.issued_at), G.merchant_name, '1× Kafi');
-    check('w_till_open_sig_note binds the note (a different purpose → a different signature)',
+    const [rc, got] = signCheckoutOpenNote(G.secret_hex, BigInt(G.cents), G.nonce_hex, BigInt(G.issued_at), G.merchant_name, '1× Kafi');
+    check('w_checkout_open_sig_note binds the note (a different purpose → a different signature)',
       rc === 0 && hex(got) !== G.sig_hex, `rc=${rc}`);
   }
   // u64 extremes through the (lo, hi) halves must not wrap into the golden's signature.
   {
-    const [rc, got] = signTillOpenNote(G.secret_hex, 18446744073709551615n, G.nonce_hex, 18446744073709551615n, G.merchant_name, G.note);
-    check('w_till_open_sig_note(u64::MAX cents + issued_at) signs without wrapping',
+    const [rc, got] = signCheckoutOpenNote(G.secret_hex, 18446744073709551615n, G.nonce_hex, 18446744073709551615n, G.merchant_name, G.note);
+    check('w_checkout_open_sig_note(u64::MAX cents + issued_at) signs without wrapping',
       rc === 0 && hex(got) !== G.sig_hex, `rc=${rc}`);
   }
   // Error contract: an out-of-bounds output pointer is BAD_LEN, never a wild write.
-  check('w_till_open_sig_note(out-of-bounds out_sig_ptr) == BAD_LEN(1)',
-    signTillOpenNote(G.secret_hex, BigInt(G.cents), G.nonce_hex, BigInt(G.issued_at), G.merchant_name, G.note, 0xffff0000)[0] === 1);
+  check('w_checkout_open_sig_note(out-of-bounds out_sig_ptr) == BAD_LEN(1)',
+    signCheckoutOpenNote(G.secret_hex, BigInt(G.cents), G.nonce_hex, BigInt(G.issued_at), G.merchant_name, G.note, 0xffff0000)[0] === 1);
   // …and a non-UTF-8 name OR note is BAD_UTF8, never a signature over replacement characters.
   {
     const bad = writeBytes(new Uint8Array([0xff, 0xfe]));
     const goodName = writeBytes(enc.encode(G.merchant_name));
-    check('w_till_open_sig_note(non-UTF-8 note) == BAD_UTF8(2)',
-      ex.w_till_open_sig_note(writeBytes(fromHex(G.secret_hex)), 1, 0,
+    check('w_checkout_open_sig_note(non-UTF-8 note) == BAD_UTF8(2)',
+      ex.w_checkout_open_sig_note(writeBytes(fromHex(G.secret_hex)), 1, 0,
         writeBytes(fromHex(G.nonce_hex)), 1, 0, goodName, enc.encode(G.merchant_name).length, bad, 2, ex.w_alloc(64)) === 2);
     const badName = bad;
-    check('w_till_open_sig_note(non-UTF-8 merchant name) == BAD_UTF8(2)',
-      ex.w_till_open_sig_note(writeBytes(fromHex(G.secret_hex)), 1, 0,
+    check('w_checkout_open_sig_note(non-UTF-8 merchant name) == BAD_UTF8(2)',
+      ex.w_checkout_open_sig_note(writeBytes(fromHex(G.secret_hex)), 1, 0,
         writeBytes(fromHex(G.nonce_hex)), 1, 0, badName, 2, writeBytes(enc.encode(G.note)), enc.encode(G.note).length, ex.w_alloc(64)) === 2);
   }
 }

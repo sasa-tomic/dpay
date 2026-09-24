@@ -460,6 +460,8 @@ def _uniffi_check_contract_api_version(lib):
         raise InternalError("UniFFI contract version mismatch: try cleaning and rebuilding your project")
 
 def _uniffi_check_api_checksums(lib):
+    if lib.uniffi_dpay_ffi_checksum_func_checkout_open_signature() != 11257:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_decode_request() != 40068:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_encode_request() != 10328:
@@ -524,7 +526,7 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_from_arg() != 32597:
+    if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_from_arg() != 23730:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id() != 26912:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -551,8 +553,6 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_dpay_ffi_checksum_func_nfc_result_bytes() != 64123:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_parse_amount() != 56752:
-        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_till_open_signature() != 32289:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision() != 40082:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -804,6 +804,16 @@ _UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_wire.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_wire.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_checkout_open_signature.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_checkout_open_signature.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_decode_request.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1102,16 +1112,6 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_parse_amount.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_parse_amount.restype = ctypes.c_uint64
-_UniffiLib.uniffi_dpay_ffi_fn_func_till_open_signature.argtypes = (
-    _UniffiRustBuffer,
-    ctypes.c_uint64,
-    _UniffiRustBuffer,
-    ctypes.c_uint64,
-    _UniffiRustBuffer,
-    _UniffiRustBuffer,
-    ctypes.POINTER(_UniffiRustCallStatus),
-)
-_UniffiLib.uniffi_dpay_ffi_fn_func_till_open_signature.restype = _UniffiRustBuffer
 _UniffiLib.ffi_dpay_ffi_rustbuffer_alloc.argtypes = (
     ctypes.c_uint64,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1380,6 +1380,9 @@ _UniffiLib.ffi_dpay_ffi_rust_future_complete_void.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.ffi_dpay_ffi_rust_future_complete_void.restype = None
+_UniffiLib.uniffi_dpay_ffi_checksum_func_checkout_open_signature.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_checkout_open_signature.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_decode_request.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_decode_request.restype = ctypes.c_uint16
@@ -1518,9 +1521,6 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_result_bytes.restype = ctypes.c_uin
 _UniffiLib.uniffi_dpay_ffi_checksum_func_parse_amount.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_parse_amount.restype = ctypes.c_uint16
-_UniffiLib.uniffi_dpay_ffi_checksum_func_till_open_signature.argtypes = (
-)
-_UniffiLib.uniffi_dpay_ffi_checksum_func_till_open_signature.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision.restype = ctypes.c_uint16
@@ -3490,6 +3490,45 @@ class _UniffiConverterTypeFfiReaderConductor:
 
 # Async support
 
+def checkout_open_signature(secret: "bytes",cents: "int",nonce: "bytes",issued_at: "int",merchant_name: "str",note: "str") -> "bytes":
+    """
+    Merchant side: the detached signature that proves this device holds the key its OpenCryptoPay
+    checkout account is derived from, so `POST /api/v1/checkout` can refuse a charge-open for a key the caller
+    does not own. The public key is DERIVED from `secret` rather than taken as an argument — the
+    signer signs over their own key by construction, so there is no mismatch to get wrong.
+
+    `nonce` is 16 bytes (single-use — the relay records it on acceptance); `issued_at` is unix
+    seconds and must be within `dpay_core::CHECKOUT_OPEN_MAX_SKEW_SECS` of the relay's clock;
+    `merchant_name` is the CLAIMED display name and is bound by the signature. `note` is the
+    one-line purpose the payer reads on review ("2× Kafi, Tisch 4") — CLAIMED like the name and
+    bound by the signature the same way. An EMPTY `note` signs the note-less (v1) encoding, so a
+    merchant who rings up without a purpose needs no relay upgrade to be accepted; any non-empty
+    note signs under `CHECKOUT_OPEN_DOMAIN_V2`. Returns the raw 64-byte Ed25519 signature. The
+    canonical bytes are `dpay_core::CheckoutOpen::signing_bytes` — the relay rebuilds them and calls
+    `dpay_core::validate_checkout_open`, so there is ONE encoding.
+    """
+
+    _UniffiConverterBytes.check_lower(secret)
+    
+    _UniffiConverterUInt64.check_lower(cents)
+    
+    _UniffiConverterBytes.check_lower(nonce)
+    
+    _UniffiConverterUInt64.check_lower(issued_at)
+    
+    _UniffiConverterString.check_lower(merchant_name)
+    
+    _UniffiConverterString.check_lower(note)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_checkout_open_signature,
+        _UniffiConverterBytes.lower(secret),
+        _UniffiConverterUInt64.lower(cents),
+        _UniffiConverterBytes.lower(nonce),
+        _UniffiConverterUInt64.lower(issued_at),
+        _UniffiConverterString.lower(merchant_name),
+        _UniffiConverterString.lower(note)))
+
+
 def decode_request(qr: "str") -> "PaymentRequestData":
     """
     Payer side: decode a scanned merchant request QR into its fields, so the app can show
@@ -4019,8 +4058,8 @@ def icp_transfer_from_arg(from_owner_text: "str",from_subaccount_hex: "typing.Op
     `icrc2_transfer_from` argument bytes — the PULL: spend an allowance somebody granted this
     wallet, moving THEIR money to `to`.
 
-    dpay's one caller is a shop collecting a till charge an OpenCryptoPay wallet approved it for
-    (`crates/dpay-relay/src/till.rs`), so the shape is deliberately narrow: the charge's reference
+    dpay's one caller is a shop collecting a checkout charge an OpenCryptoPay wallet approved it for
+    (`crates/dpay-relay/src/checkout.rs`), so the shape is deliberately narrow: the charge's reference
     as `memo_hex` — without it the relay credits no sale — and no `created_at_time`, for the reason
     spelled out above `icp_transfer_arg`. The ledger debits `from` the amount PLUS its fee and
     credits `to` the amount; the allowance has to cover both, which is why the caller checks
@@ -4268,45 +4307,6 @@ def parse_amount(human: "str",decimals: "int") -> "int":
         _UniffiConverterUInt8.lower(decimals)))
 
 
-def till_open_signature(secret: "bytes",cents: "int",nonce: "bytes",issued_at: "int",merchant_name: "str",note: "str") -> "bytes":
-    """
-    Merchant side: the detached signature that proves this device holds the key its OpenCryptoPay
-    till account is derived from, so `POST /api/v1/till` can refuse a ring-up for a key the caller
-    does not own. The public key is DERIVED from `secret` rather than taken as an argument — the
-    signer signs over their own key by construction, so there is no mismatch to get wrong.
-
-    `nonce` is 16 bytes (single-use — the relay records it on acceptance); `issued_at` is unix
-    seconds and must be within `dpay_core::TILL_OPEN_MAX_SKEW_SECS` of the relay's clock;
-    `merchant_name` is the CLAIMED display name and is bound by the signature. `note` is the
-    one-line purpose the payer reads on review ("2× Kafi, Tisch 4") — CLAIMED like the name and
-    bound by the signature the same way. An EMPTY `note` signs the note-less (v1) encoding, so a
-    merchant who rings up without a purpose needs no relay upgrade to be accepted; any non-empty
-    note signs under `TILL_OPEN_DOMAIN_V2`. Returns the raw 64-byte Ed25519 signature. The
-    canonical bytes are `dpay_core::TillOpen::signing_bytes` — the relay rebuilds them and calls
-    `dpay_core::validate_till_open`, so there is ONE encoding.
-    """
-
-    _UniffiConverterBytes.check_lower(secret)
-    
-    _UniffiConverterUInt64.check_lower(cents)
-    
-    _UniffiConverterBytes.check_lower(nonce)
-    
-    _UniffiConverterUInt64.check_lower(issued_at)
-    
-    _UniffiConverterString.check_lower(merchant_name)
-    
-    _UniffiConverterString.check_lower(note)
-    
-    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_till_open_signature,
-        _UniffiConverterBytes.lower(secret),
-        _UniffiConverterUInt64.lower(cents),
-        _UniffiConverterBytes.lower(nonce),
-        _UniffiConverterUInt64.lower(issued_at),
-        _UniffiConverterString.lower(merchant_name),
-        _UniffiConverterString.lower(note)))
-
-
 __all__ = [
     "InternalError",
     "DpayError",
@@ -4325,6 +4325,7 @@ __all__ = [
     "NfcBundleData",
     "NfcCardResult",
     "PaymentRequestData",
+    "checkout_open_signature",
     "decode_request",
     "encode_request",
     "format_amount",
@@ -4371,7 +4372,6 @@ __all__ = [
     "nfc_request_bytes",
     "nfc_result_bytes",
     "parse_amount",
-    "till_open_signature",
     "FfiCardSession",
     "FfiReaderConductor",
 ]

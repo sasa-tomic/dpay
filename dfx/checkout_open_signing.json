@@ -1,0 +1,65 @@
+{
+  "_doc": "The canonical bytes a merchant signs to open a charge on dpay's own OpenCryptoPay checkout, and the ONE statement of that encoding outside dpay_core::CheckoutOpen. Two spellings live here: `golden` is the v2 buffer (domain dpay-checkout-open-v2) a request carrying a sale's `note` signs — the note rides its own u32-LE length prefix after the name — and `legacy_v1` is the frozen note-less buffer (domain dpay-checkout-open-v1) the wasm export w_checkout_open_sig must keep producing under the additive-only ABI policy. Emitted from the real core by `just wire-layout`; read back by crates/dpay-fixture (which rebuilds the golden struct from these offsets alone) and by scripts/check-wasm-core.mjs (which reproduces both buffers field-by-field in JS and checks the committed wasm's w_checkout_open_sig against legacy_v1.sig_hex and w_checkout_open_sig_note against golden.sig_hex). The relay verifies with dpay_core::validate_checkout_open, so it shares the encoding rather than a copy of it. Same convention as dfx/wire_layout.json — regenerated when the encoding deliberately changes, never hand-edited to make a test pass.",
+  "domain": "dpay-checkout-open-v2",
+  "domain_hex": "647061792d636865636b6f75742d6f70656e2d7632",
+  "max_skew_secs": 120,
+  "fixed_len": 85,
+  "name_len_bytes": 4,
+  "note_len_bytes": 4,
+  "sig_len": 64,
+  "fields": {
+    "domain": {
+      "offset": 0,
+      "len": 21,
+      "endian": null
+    },
+    "merchant_pubkey": {
+      "offset": 21,
+      "len": 32,
+      "endian": null
+    },
+    "cents": {
+      "offset": 53,
+      "len": 8,
+      "endian": "le"
+    },
+    "nonce": {
+      "offset": 61,
+      "len": 16,
+      "endian": null
+    },
+    "issued_at": {
+      "offset": 77,
+      "len": 8,
+      "endian": "le"
+    },
+    "name_len": {
+      "offset": 85,
+      "len": 4,
+      "endian": "le"
+    },
+    "note_len": {
+      "offset": 106,
+      "len": 4,
+      "endian": "le"
+    }
+  },
+  "golden": {
+    "secret_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+    "merchant_pubkey_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+    "cents": 1000,
+    "nonce_hex": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+    "issued_at": 1786815398,
+    "merchant_name": "Café Bahnhof ☕",
+    "note": "2× Kafi, Tisch 4 ☕",
+    "signing_hex": "647061792d636865636b6f75742d6f70656e2d7632ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1e8030000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2aa6a3806a0000000011000000436166c3a9204261686e686f6620e298951500000032c397204b6166692c205469736368203420e29895",
+    "sig_hex": "c7ce62b1432c6f162da3fd42dfc6a2d20ac77ff1e99bc224a1ac7662600bc9a18cc7dc8f12bd725faf41104c4451767ce98d3b9fae0742713955c8a821346804"
+  },
+  "legacy_v1": {
+    "domain": "dpay-checkout-open-v1",
+    "domain_hex": "647061792d636865636b6f75742d6f70656e2d7631",
+    "fixed_len": 85,
+    "signing_hex": "647061792d636865636b6f75742d6f70656e2d7631ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1e8030000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2aa6a3806a0000000011000000436166c3a9204261686e686f6620e29895",
+    "sig_hex": "ff5c2f6df92d737ec2c3c8b872d3d5e2ca6c652a0bfa13b55a43e2ff0ab2d562ac89176054334bade3e96a232d24bad3a947da1339e1fb862a0ea52eab4d9a02"
+  }
+}

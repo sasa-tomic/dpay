@@ -224,9 +224,9 @@ pub fn icp_ingress_expiry(now_ns: String, ahead_s: u64) -> Result<String, DpayEr
 // signing is not the obstacle and must not be blamed for this: both signing paths already hold
 // certified IC time (`icStampExpiry`; the NFC payer uses the merchant's stamp off the wire).
 //
-// EXACTLY-ONCE IS THE PAYEE'S JOB, and dpay does it where dpay is the payee: the till credits a
+// EXACTLY-ONCE IS THE PAYEE'S JOB, and dpay does it where dpay is the payee: the checkout credits a
 // sale from its own settlement record and spends the ledger row it credited
-// (`crates/dpay-relay/src/till.rs`, "ONE TRANSFER, ONE SALE").
+// (`crates/dpay-relay/src/checkout.rs`, "ONE TRANSFER, ONE SALE").
 
 /// `icrc1_transfer` argument bytes (DIDL record): `to` account, amount, optional
 /// fee/memo/from_subaccount. `amount`/`fee` are decimal strings.
@@ -256,8 +256,8 @@ pub fn icp_transfer_arg(
 /// `icrc2_transfer_from` argument bytes — the PULL: spend an allowance somebody granted this
 /// wallet, moving THEIR money to `to`.
 ///
-/// dpay's one caller is a shop collecting a till charge an OpenCryptoPay wallet approved it for
-/// (`crates/dpay-relay/src/till.rs`), so the shape is deliberately narrow: the charge's reference
+/// dpay's one caller is a shop collecting a checkout charge an OpenCryptoPay wallet approved it for
+/// (`crates/dpay-relay/src/checkout.rs`), so the shape is deliberately narrow: the charge's reference
 /// as `memo_hex` — without it the relay credits no sale — and no `created_at_time`, for the reason
 /// spelled out above `icp_transfer_arg`. The ledger debits `from` the amount PLUS its fee and
 /// credits `to` the amount; the allowance has to cover both, which is why the caller checks

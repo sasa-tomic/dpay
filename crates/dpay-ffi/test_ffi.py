@@ -373,54 +373,54 @@ check(d.parse_amount(".5", 2) == 50, "parse_amount('.5', 2) == 50 (calculator-st
 check(d.parse_amount("5.", 2) == 500, "parse_amount('5.', 2) == 500 (calculator-style trailing dot)")
 
 
-# 9) OpenCryptoPay till: the merchant's ring-up proof ------------------------------------------
-# `till_open_signature` is what stops `POST /api/v1/till` from opening a charge for a key the caller
+# 9) OpenCryptoPay checkout: the merchant's charge-open proof ------------------------------------------
+# `checkout_open_signature` is what stops `POST /api/v1/checkout` from opening a charge for a key the caller
 # does not hold (a probe did exactly that with `deadbeef…deadbeef` on 2026-09-03). The signature
 # covers the SEED's own public key — the app never supplies one — plus the price, nonce, timestamp,
 # the CLAIMED merchant name and the note. Pinned here against the committed golden emitted from the
 # same core by `just wire-layout`, so a green run proves the phone signs what the relay verifies.
 import json, pathlib
 _golden = json.loads(
-    (pathlib.Path(__file__).resolve().parents[2] / "dfx" / "till_open_signing.json").read_text()
+    (pathlib.Path(__file__).resolve().parents[2] / "dfx" / "checkout_open_signing.json").read_text()
 )
 _g = _golden["golden"]
 _v1 = _golden["legacy_v1"]
-_sig = d.till_open_signature(
+_sig = d.checkout_open_signature(
     bytes.fromhex(_g["secret_hex"]), _g["cents"], bytes.fromhex(_g["nonce_hex"]),
     _g["issued_at"], _g["merchant_name"], _g["note"],
 )
-check(_sig.hex() == _g["sig_hex"], "till_open_signature reproduces dfx/till_open_signing.json sig_hex (v2, with note)")
+check(_sig.hex() == _g["sig_hex"], "checkout_open_signature reproduces dfx/checkout_open_signing.json sig_hex (v2, with note)")
 check(d.keypair_from_secret(bytes.fromhex(_g["secret_hex"])).public.hex() == _g["merchant_pubkey_hex"],
       "the signature covers the seed's OWN public key (never a caller-supplied one)")
 # The EMPTY note signs the note-less v1 encoding — the golden's own legacy half pins that the
 # note-less ring-up never requires a relay upgrade.
-check(d.till_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"], bytes.fromhex(_g["nonce_hex"]),
+check(d.checkout_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"], bytes.fromhex(_g["nonce_hex"]),
                             _g["issued_at"], _g["merchant_name"], "").hex() == _v1["sig_hex"],
-      "till_open_signature(empty note) reproduces legacy_v1.sig_hex (the v1 encoding)")
+      "checkout_open_signature(empty note) reproduces legacy_v1.sig_hex (the v1 encoding)")
 # Ed25519 is deterministic, so a differing signature proves the field entered the signed bytes.
-check(d.till_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"] + 1,
+check(d.checkout_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"] + 1,
                             bytes.fromhex(_g["nonce_hex"]), _g["issued_at"],
                             _g["merchant_name"], _g["note"]).hex() != _g["sig_hex"],
-      "till_open_signature binds the price")
-check(d.till_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"],
+      "checkout_open_signature binds the price")
+check(d.checkout_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"],
                             bytes.fromhex(_g["nonce_hex"]), _g["issued_at"],
                             "Migros", _g["note"]).hex() != _g["sig_hex"],
-      "till_open_signature binds the CLAIMED merchant name")
-check(d.till_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"],
+      "checkout_open_signature binds the CLAIMED merchant name")
+check(d.checkout_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"],
                             bytes.fromhex(_g["nonce_hex"]), _g["issued_at"],
                             _g["merchant_name"], "1× Kafi").hex() != _g["sig_hex"],
-      "till_open_signature binds the note")
+      "checkout_open_signature binds the note")
 # Malformed inputs are typed errors, never a silently wrong signature.
 try:
-    d.till_open_signature(b"\x00" * 31, 1, bytes(16), 1, "", "")
+    d.checkout_open_signature(b"\x00" * 31, 1, bytes(16), 1, "", "")
     raise AssertionError("FAILED: short seed should have raised")
 except d.DpayError.BadSecretLength:
-    check(True, "till_open_signature(short seed) -> DpayError.BadSecretLength")
+    check(True, "checkout_open_signature(short seed) -> DpayError.BadSecretLength")
 try:
-    d.till_open_signature(b"\x00" * 32, 1, bytes(15), 1, "", "")
+    d.checkout_open_signature(b"\x00" * 32, 1, bytes(15), 1, "", "")
     raise AssertionError("FAILED: short nonce should have raised")
 except d.DpayError.BadNonceLength:
-    check(True, "till_open_signature(short nonce) -> DpayError.BadNonceLength")
+    check(True, "checkout_open_signature(short nonce) -> DpayError.BadNonceLength")
 
 
 # 10) ICPSwap conversion surface (delegated-conversion PoC, spec 2026-09-07) -------------------

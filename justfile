@@ -19,8 +19,8 @@ default:
 
 # core unit + property tests (native, sub-second). dpay-fixture rides along because its tests ARE
 # the core's golden drift alarms: each rebuilds a signing layout (pay / withdraw / receipt /
-# till-open) from the emitted offsets ALONE and asserts the core still produces those exact bytes,
-# and the till-open one additionally compares the COMMITTED dfx/till_open_signing.json against what
+# checkout-open) from the emitted offsets ALONE and asserts the core still produces those exact bytes,
+# and the checkout-open one additionally compares the COMMITTED dfx/checkout_open_signing.json against what
 # today's core emits. They were previously on no recipe at all, so that drift could land green.
 test-core:
     python3 scripts/testruns.py run test-core --sh 'cargo nextest run -p dpay-core --features rng --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}" && cargo nextest run -p dpay-fixture --message-format libtest-json >> "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
@@ -82,11 +82,11 @@ test-relay: web
     python3 scripts/testruns.py run test-relay --sh 'cargo nextest run -p dpay-relay --features test-helpers --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # emit the committed core goldens from the real Rust core: the wire layout (single source of truth
-# for the JS ed25519 signing shim) and the till-open signing document (the merchant's ring-up proof,
-# read by scripts/check-wasm-core.mjs). `just test-core` fails when the till-open file is stale.
+# for the JS ed25519 signing shim) and the checkout-open signing document (the merchant's charge-open proof,
+# read by scripts/check-wasm-core.mjs). `just test-core` fails when the checkout-open file is stale.
 wire-layout:
     cargo run -p dpay-fixture --release -- wire-layout dfx/wire_layout.json
-    cargo run -p dpay-fixture --release -- till-open dfx/till_open_signing.json
+    cargo run -p dpay-fixture --release -- checkout-open dfx/checkout_open_signing.json
 
 # radical e2e: drive the REAL app (App.tsx via react-native-web) + REAL relay (FakeLedger) + REAL
 # browser (chrome-headless-shell), offline + seconds-fast. The inner-loop UI/flow gate — it BOTH
@@ -257,11 +257,11 @@ trocador-probe:
     node scripts/trocador_live_probe.mjs
 
 # OPT-IN live OpenCryptoPay probe (NEEDS NETWORK, never in check/verify): drives the REAL app
-# against the REAL provider's public CHF-1 test till and stops at the review, having signed
+# against the REAL provider's public CHF-1 test checkout and stops at the review, having signed
 # nothing. Reads only — a quote costs nothing and commits nothing, and the wallet it drives is a
 # throwaway funded by the local relay's faucet, so no real money is reachable. Exists because
 # flows 111/112 run against a fail-closed stub: a wrong belief about the provider's payload is
-# invisible to them BY CONSTRUCTION, and one such belief made every real till unpayable behind a
+# invisible to them BY CONSTRUCTION, and one such belief made every real checkout unpayable behind a
 # fully green suite (review ledger row 16). Run it after any change to the OCP parser or client.
 live-ocp:
     node e2e/live-ocp-probe.mjs
