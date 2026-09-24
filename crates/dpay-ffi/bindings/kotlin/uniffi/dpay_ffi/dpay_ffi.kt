@@ -1298,7 +1298,7 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
-    if (lib.uniffi_dpay_ffi_checksum_func_checkout_open_signature() != 11257.toShort()) {
+    if (lib.uniffi_dpay_ffi_checksum_func_checkout_open_signature() != 24523.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_decode_request() != 40068.toShort()) {

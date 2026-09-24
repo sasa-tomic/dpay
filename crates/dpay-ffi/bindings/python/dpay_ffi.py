@@ -460,7 +460,7 @@ def _uniffi_check_contract_api_version(lib):
         raise InternalError("UniFFI contract version mismatch: try cleaning and rebuilding your project")
 
 def _uniffi_check_api_checksums(lib):
-    if lib.uniffi_dpay_ffi_checksum_func_checkout_open_signature() != 11257:
+    if lib.uniffi_dpay_ffi_checksum_func_checkout_open_signature() != 24523:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_decode_request() != 40068:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")

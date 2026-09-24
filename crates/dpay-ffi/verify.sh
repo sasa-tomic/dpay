@@ -52,4 +52,12 @@ fi
 echo "== dpay-ffi: Python roundtrip against the real compiled core =="
 PYTHONPATH="$PY_DIR" python3 "$CRATE_DIR/test_ffi.py"
 
+# The committed bindings must be exactly what the current core produces. A stale literal here
+# only explodes ON DEVICE (UniFFI checksum mismatch at load), so fail loud right here instead.
+if ! git diff --quiet -- "$ROOT_DIR/crates/dpay-ffi/bindings"; then
+  echo "FAIL: dpay-ffi bindings are STALE — regenerated output differs from the committed files."
+  git --no-pager diff --stat -- "$ROOT_DIR/crates/dpay-ffi/bindings"
+  exit 1
+fi
+
 echo "== dpay-ffi: OK =="
