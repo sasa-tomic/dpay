@@ -122,7 +122,7 @@ export const convertFr: ConvertMessages = {
   abortedFee: 'Vous avez déjà payé des petits frais d’approbation.',
   abortedWatching: 'L’échange peut encore passer. Vérifiez Soldes plus tard.',
   abortedProvider:
-    'Surveillance arrêtée. Si vous n’avez jamais envoyé le dépôt, rien ne peut bouger — l’ordre meurt sans fonds chez la plateforme. Si vous l’avez déjà envoyé, l’échange peut encore aboutir : vérifiez Soldes et la page de statut de la plateforme (ID du shift ci-dessus).',
+    'Surveillance arrêtée. Si vous n’avez jamais envoyé le dépôt, rien ne peut bouger — l’ordre meurt sans fonds chez la plateforme. Si vous l’avez déjà envoyé, l’échange peut encore aboutir : vérifiez Soldes et la page de statut de la plateforme \u2014 l\u2019ID du shift est juste en dessous.',
   stuckBody:
     'L’échange a été envoyé, mais la réponse du pool n’est pas arrivée. Ne lance pas un second échange avec les mêmes fonds. Si le versement arrive, cet écran passera tout seul à « Converti ».',
   stuckSigned: (amount, minAmount, venue) =>

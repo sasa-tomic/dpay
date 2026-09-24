@@ -573,7 +573,7 @@ export const convertEn: ConvertMessages = {
   abortedFee: 'You already paid a tiny approval fee.',
   abortedWatching: 'The swap may still go through. Check Balances later.',
   abortedProvider:
-    'Watching stopped. If you never sent the deposit, nothing can move — the order dies unfunded at the venue. If you already sent it, the trade may still settle: check Balances and the venue\u2019s own status page (shift id above).',
+    'Watching stopped. If you never sent the deposit, nothing can move — the order dies unfunded at the venue. If you already sent it, the trade may still settle: check Balances and the venue\u2019s own status page \u2014 the shift id is right below.',
   stuckBody:
     'The swap was submitted, but the pool\u2019s answer did not arrive. Do not start a second swap with the same funds. If the payout arrives, this screen flips to done on its own.',
   stuckSigned: (amount, minAmount, venue) =>

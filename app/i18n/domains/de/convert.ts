@@ -123,7 +123,7 @@ export const convertDe: ConvertMessages = {
   abortedFee: 'Du hast bereits eine kleine Genehmigungsgebühr bezahlt.',
   abortedWatching: 'Der Tausch kann noch durchgehen. Sieh später unter Guthaben nach.',
   abortedProvider:
-    'Beobachtung gestoppt. Hast du die Einzahlung nie geschickt, kann sich nichts bewegen — die Order verfällt unbezahlt beim Anbieter. Hast du sie schon geschickt, kann der Tausch noch abschließen: Sieh unter Guthaben nach und auf der Statusseite des Anbieters (Shift-ID oben).',
+    'Beobachtung gestoppt. Hast du die Einzahlung nie geschickt, kann sich nichts bewegen — die Order verfällt unbezahlt beim Anbieter. Hast du sie schon geschickt, kann der Tausch noch abschließen: Sieh unter Guthaben nach und auf der Statusseite des Anbieters \u2014 die Shift-ID steht direkt darunter.',
   stuckBody:
     'Der Tausch wurde übermittelt, aber die Antwort des Pools kam nicht an. Starte keinen zweiten Tausch mit denselben Mitteln. Wenn die Auszahlung eintrifft, springt dieser Bildschirm von selbst auf „Getauscht".',
   stuckSigned: (amount, minAmount, venue) =>

@@ -142,8 +142,8 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
               : convertAbortFlavor(record) === 'fee' ? M.convert.abortedFee
               : M.convert.abortedClean}
           </Text>
-          {/* The provider abort's copy points at "the shift id above" — make that TRUE: the
-              venue handle the user needs for the venue's own status page renders here. */}
+          {/* The provider abort's copy points at the shift id ("right below") — the venue
+              handle the user needs for the venue's own status page renders here. */}
           {convertAbortFlavor(record) === 'provider' && record.providerRef != null ? (
             <Text testID="convert-aborted-shift-id" style={S.convertStateMeta} selectable>
               {M.convert.cefi.shiftId(record.providerRef.orderId)}
@@ -275,7 +275,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
                 </Text>
               ) : (
                 // The venue published NO expiry (e.g. Trocador orders): say so, instead of
-                // letting an unfunded order read as quietly abandoned. The shift id above
+                // letting an unfunded order read as quietly abandoned. The shift id below
                 // is the handle; the watch is the commitment.
                 <Text testID="convert-deposit-no-expiry" style={S.convertStateMeta}>
                   {M.convert.cefi.noExpiryLine}

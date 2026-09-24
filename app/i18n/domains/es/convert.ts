@@ -122,7 +122,7 @@ export const convertEs: ConvertMessages = {
   abortedFee: 'Ya pagaste una pequeña comisión de aprobación.',
   abortedWatching: 'El intercambio puede completarse igual. Revisa Saldos más tarde.',
   abortedProvider:
-    'Vigilancia detenida. Si nunca enviaste el depósito, nada puede moverse — la orden muere sin fondos en el proveedor. Si ya lo enviaste, el intercambio aún puede completarse: revisa Saldos y la página de estado del proveedor (ID de shift arriba).',
+    'Vigilancia detenida. Si nunca enviaste el depósito, nada puede moverse — la orden muere sin fondos en el proveedor. Si ya lo enviaste, el intercambio aún puede completarse: revisa Saldos y la página de estado del proveedor \u2014 el ID de shift está justo debajo.',
   stuckBody:
     'El intercambio se envió, pero la respuesta del pool no llegó. No inicies un segundo intercambio con los mismos fondos. Si el pago llega, esta pantalla pasará a «Convertido» por sí sola.',
   stuckSigned: (amount, minAmount, venue) =>
