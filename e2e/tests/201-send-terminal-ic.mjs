@@ -150,6 +150,9 @@ export async function run() {
       assert(disarm.ok, 'the knob disarms for teardown');
       console.log('[201-send-terminal-ic] ✓ deadline-forced unknown: honest pending, no resend invite');
     } finally {
+      // The leg's page polls balances every 2.5s; close it BEFORE killing r2 so the
+      // shutdown window can't record that poll as an unexpected connection failure.
+      await driver.close();
       await r2.stop();
     }
 
