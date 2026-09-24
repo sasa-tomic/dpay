@@ -1,7 +1,10 @@
 # 2026-09-24 — Currency-first radical redesign + swap as a first-class action
 
-**Status:** founder objective, recorded verbatim this day. Open forks at the end are with the
-founder (questions sent 2026-09-24); the build follows the verbatim text plus the answers.
+**Status:** founder objective, recorded verbatim this day. Open forks ANSWERED by the founder
+(2026-09-24). **HARD RULE (founder, 2026-09-24): this design and these decisions are
+user-provided hard requirements. No agent may change them without an EXPLICIT, clear request
+from the user. They take effect over everything agreed earlier and after; the only way they can
+be changed is through an explicit and clear request from the user.**
 
 ## The objective, verbatim (founder, 2026-09-24)
 
@@ -101,10 +104,19 @@ objective-2 model — a currency is a set of rails, dpay picks one for the user)
    SUPERSEDES the 2026-09-04 token-is-the-unit rule for balance display; the peg disclosure
    stays where fees/quotes are shown. (History rows keep their own token units.)
 
-**Proposed Remove semantics** (not a question unless the founder corrects it): Remove hides the
-currency from the wallet's list (device-persisted, re-addable from Add new currency); refused
-with a practical explanation while the currency holds a nonzero balance, and the last currency
-cannot be removed.
+**Proposed Remove semantics** (founder-approved as part of the recorded design; a nonzero
+balance refuses with a practical explanation, and the last currency cannot be removed): Remove
+hides the currency from the wallet's list (device-persisted, re-addable from Add new currency).
+
+## HARD RULE — binding status (founder, 2026-09-24)
+
+This design — the currency-first IA, the four answered forks, the Remove semantics, and the
+supersessions above — is a **user-provided hard requirement**. Agents implement it; they do not
+relitigate it. No agent (implementer, verifier, validator, or future session) may change,
+soften, or work around any of it **without an EXPLICIT and clear request from the user.** It
+takes effect over everything agreed earlier and after. If an agent believes a detail here
+conflicts with another standing rule, the conflict is surfaced to the user — never resolved
+unilaterally.
 
 ## What does NOT change
 
