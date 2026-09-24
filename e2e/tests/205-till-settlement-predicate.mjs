@@ -69,6 +69,11 @@ export async function run() {
     // --- 3. the one-tap fix: re-pick the served asset, ring up again — flow 114's result ----------
     await driver.click('till-failed-go', {timeoutMs: 4_000});
     await driver.findByTestID('btn-till-ring-up', {timeoutMs: 6_000});
+    // The one-tap fix re-picks the wallet's asset too — the badge names francs again, never the
+    // dollar the refused pick left behind (the badge follows the pills, and it follows the fix).
+    const prefixAfterFix = await driver.readText('req-prefix');
+    assertIncludes(prefixAfterFix, 'VCHF', 'the one-tap fix moves the wallet asset back too — the badge names the franc unit again');
+    assert(!prefixAfterFix.includes('$'), 'the dollar badge is gone with the dollar pick');
     assertIncludes(await driver.readInputValue('amount-input'), '10.50', 'the typed price survives the round trip, ready for the re-ring');
     // The pick is proven by BEHAVIOUR, not by an attribute: the re-ring opens the charge.
     await driver.click('btn-till-ring-up', {timeoutMs: 4_000});

@@ -138,6 +138,7 @@ function mount(over: {selectedToken?: string; selectedAssetId?: string} = {}) {
         selectedAssetId={(over.selectedAssetId ?? 'solana:SOL') as AssetId}
         balances={{} as Record<AssetId, BalanceView>}
         onSelectAsset={jest.fn()}
+        onSelectAssetProgrammatic={jest.fn()}
       />,
     );
   });

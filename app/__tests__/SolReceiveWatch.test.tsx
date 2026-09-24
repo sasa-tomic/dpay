@@ -82,6 +82,7 @@ function solReceiveProps(over: {subMode?: 'request' | 'address'; selectedToken?:
     selectedAssetId: 'solana:SOL' as AssetId,
     balances: {} as Record<AssetId, BalanceView>,
     onSelectAsset: jest.fn(),
+    onSelectAssetProgrammatic: jest.fn(),
     onRefreshSol: over.onRefreshSol,
     onRefreshToken: over.onRefreshToken,
   };

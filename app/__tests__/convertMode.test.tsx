@@ -1057,7 +1057,7 @@ describe('the CeFi panel lines — no-expiry honesty + the last-checked timestam
   });
 
   test('the aborted provider card carries the two-sided truth AND the venue handle it points at', async () => {
-    // The copy says "shift id above" — the card renders the id so the instruction is TRUE.
+    // The copy says the shift id is "right below" — the card renders it there, so the instruction is TRUE.
     jest.mocked(convertResumeSnapshot).mockReturnValue({[cefiBase.id]: cefiBase}); // live → adopted
     const tree = await mountConvert('250000000', null);
     jest.mocked(convertAbortFlavor).mockReturnValue('provider');

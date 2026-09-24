@@ -87,7 +87,7 @@ function solGrossOf(cur: string, amt: string): string {
  * new token (EURC, …) renders here with no component change. `selectedToken` stays as the
  * native-vs-SPL discriminator ('SOL' ⇔ mint null).
  */
-export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, tokenAtaStatus = 'balance', tokenAtaFailure = null, tokenAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshToken, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; catalog: CurrencyDescriptor[]; selectedToken: string; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; tokenAtaStatus?: SolTokenStatus; tokenAtaFailure?: SolanaReadFailure | null; tokenAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshToken?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
+export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, onSelectAssetProgrammatic, tokenAtaStatus = 'balance', tokenAtaFailure = null, tokenAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshToken, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; catalog: CurrencyDescriptor[]; selectedToken: string; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onSelectAssetProgrammatic: (id: AssetId) => void; tokenAtaStatus?: SolTokenStatus; tokenAtaFailure?: SolanaReadFailure | null; tokenAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshToken?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
   onReturnFromDeposit?: () => void;
   onLockChange?: (locked: boolean) => void;
   homeCurrency?: HomeCurrency | null;
@@ -680,7 +680,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           assets={assets}
           catalog={catalog}
           nfcStatus={nfcStatus}
-          onSelectAsset={onSelectAsset}
+          onRepickAsset={onSelectAssetProgrammatic}
           amount={amount}
           note={memo}
         />

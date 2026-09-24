@@ -121,6 +121,7 @@ function fullProps(over: Partial<ReceiveModeProps> = {}): ReceiveModeProps {
     selectedAssetId: 'ic:0',
     balances: BALANCES,
     onSelectAsset: () => {},
+    onSelectAssetProgrammatic: () => {},
     ...over,
   };
 }

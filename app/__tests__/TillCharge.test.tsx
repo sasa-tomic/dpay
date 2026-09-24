@@ -164,7 +164,7 @@ async function flush() {
 
 function mount(
   asset: SelectableAsset,
-  onSelectAsset: (id: AssetId) => void = () => {},
+  onRepickAsset: (id: AssetId) => void = () => {},
   nfcStatus: NfcStatus = 'ready',
   catalog: CurrencyDescriptor[] = CATALOG,
   /** What the PARENT's shared amount row holds — the price the cashier typed there. */
@@ -184,7 +184,7 @@ function mount(
         assets={ASSETS}
         catalog={catalog}
         nfcStatus={nfcStatus}
-        onSelectAsset={onSelectAsset}
+        onRepickAsset={onRepickAsset}
         amount={amount}
         note={note}
       />,
@@ -258,7 +258,8 @@ describe('the settlement picker (multi-currency build-out)', () => {
     // counter must never show a dollar pick as a franc charge (that would be an exchange nobody
     // at the counter made).
     jest.mocked(openTillCharge).mockResolvedValue({kind: 'served-other', served: 'VCHF'});
-    const tree = mount(CKUSDC);
+    const picked: AssetId[] = [];
+    const tree = mount(CKUSDC, id => picked.push(id));
     await ringUp(tree);
     expect(has(tree, 'btn-till-ring-up')).toBe(false);
     const said = visible(tree);
@@ -269,6 +270,8 @@ describe('the settlement picker (multi-currency build-out)', () => {
     expect(has(tree, 'btn-till-ring-up')).toBe(true);
     const pill = node(tree, 'till-asset-vchf');
     expect(pill.props.accessibilityState).toMatchObject({checked: true});
+    // The fix re-picks the wallet's asset too — one truth, the same move the pills make.
+    expect(picked).toEqual([VCHF.id]);
     act(() => { tree.unmount(); });
   });
 });

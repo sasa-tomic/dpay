@@ -1487,6 +1487,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
                   selectedAssetId={effectiveSelectedId}
                   balances={balances}
                   onSelectAsset={handleSelect}
+                  onSelectAssetProgrammatic={selectAsset}
                   tokenAtaStatus={selectedTokenState?.status ?? 'loading'}
                   tokenAtaFailure={selectedTokenState?.failure ?? null}
                   tokenAmount={selectedTokenState?.amount ?? null}
@@ -1542,6 +1543,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
                     selectedAssetId={effectiveSelectedId}
                     balances={balances}
                     onSelectAsset={handleSelect}
+                    onSelectAssetProgrammatic={selectAsset}
                     onLockChange={setSelectionLocked}
                     homeCurrency={homeCurrency}
                     onReceiveRailChange={receiveRailSelect}

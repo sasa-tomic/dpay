@@ -99,7 +99,7 @@ type Phase =
    *  failed — the four causes send the merchant to do four different things. */
   | {k: 'failed'; outcome: Exclude<TillOpenOutcome, {kind: 'open'}>};
 
-export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatus, onSelectAsset, amount, note, onHoldsForm}: {
+export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatus, onRepickAsset, amount, note, onHoldsForm}: {
   identity: Identity;
   relayUrl: string;
   /** The asset the wallet is currently on — the one the whole Receive tab is about. */
@@ -112,7 +112,12 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
    *  cashier to three different places, and `NfcStatusRow` owns those instructions for every
    *  surface in the app. */
   nfcStatus: NfcStatus;
-  onSelectAsset: (id: AssetId) => void;
+  // The till's OWN re-pick (the pills, the wrong-asset fix, the served-other fix): the charge
+  // re-decides which asset it is about, and the wallet's selection FOLLOWS it — one truth. This is
+  // the programmatic move (Wallet's selectAsset), never the user-gesture handler: the served-other
+  // fix fires while the held form still holds the selection lock, and a lock-respecting select
+  // would silently bounce, leaving a dollar badge over a franc charge (found 2026-09-24).
+  onRepickAsset: (id: AssetId) => void;
   /** The price typed into the SHARED amount row above (the parent owns the input; this component
    *  owns what a till charge does with it). In francs, like every till input — parsed here by the
    *  till's own 2-decimal rule, never by the parent's per-asset one. */
@@ -450,7 +455,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
           ? M.receive.till.noTillAsset
           : M.receive.till.wrongAsset(asset?.symbol ?? '', asset?.network ?? null)}
         primaryLabel={servedRow ? M.receive.till.switchTo(servedRow.symbol) : undefined}
-        onPrimary={servedRow ? () => onSelectAsset(servedRow.id) : undefined}
+        onPrimary={servedRow ? () => onRepickAsset(servedRow.id) : undefined}
       />
     );
   }
@@ -493,7 +498,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
         body={M.receive.till.servedOther(servedToken, priceUnit)}
         primaryLabel={served ? M.receive.till.switchTo(served.symbol) : M.receive.till.tryAgain}
         onPrimary={served
-          ? () => { setSettleId(served.id); onSelectAsset(served.id); reset(); } // re-pick moves the wallet's asset too — one truth (see the pills)
+          ? () => { setSettleId(served.id); onRepickAsset(served.id); reset(); } // re-pick moves the wallet's asset too — one truth (see the pills)
           : reset}
       />
     );
@@ -650,7 +655,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
                   // unit badge above names the currency the price is ACTUALLY read in — a dollar
                   // pick must never sit under a franc badge (the same one-truth move the
                   // wrong-asset panel's "Switch to" button makes).
-                  onSelectAsset(r.id);
+                  onRepickAsset(r.id);
                 }}
                 accessibilityRole="radio"
                 accessibilityState={{checked: on}}
