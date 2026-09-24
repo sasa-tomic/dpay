@@ -75,6 +75,9 @@ export const walletFr: WalletMessages = {
     back: 'Retour',
     practice: 'Argent d’entraînement. Il ne fonctionne que dans dpay — aucun commerce ne l’accepte.',
     convertHint: 'Convertir auprès d’une plateforme externe',
+    groupHome: name => `Principale · ${name}`,
+    groupOther: 'Autres actifs',
+    switchRail: rail => `Basculer sur ${rail}`,
   },
 
   addressBook: {

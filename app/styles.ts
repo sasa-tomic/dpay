@@ -287,6 +287,14 @@ function buildStyles(p: Palette) {
   // line mid-glyph at rest (visual-audit round 2, 2026-09-22).
   accountsHeader: {...ROUTE_HEADER_ROW, marginBottom: 10},
   accountsList: {alignSelf: 'stretch', marginTop: 8},
+  // Currency-section chrome (groupAccountsByCurrency render): a quiet label naming the currency —
+  // a section is a label, never a total. The head row carries the optional rail-switch link on
+  // the same line (space-between), so one multi-rail currency costs one row, not two.
+  accountsGroupHead: {
+    alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: 14, marginBottom: 2,
+  },
+  accountsGroupLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, flexShrink: 1},
   // Still seats the sentence immediately above its practice row (anti-scam rule R3 keeps them
   // unseparable by a scroll).
   accountsPractice: {fontSize: 13, color: p.sub, marginTop: 6, marginBottom: 8, fontFamily: FONT.sans},

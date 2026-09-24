@@ -74,6 +74,9 @@ export const walletEs: WalletMessages = {
     back: 'Atrás',
     practice: 'Dinero de práctica. Solo funciona dentro de dpay, y ninguna tienda lo acepta.',
     convertHint: 'Convertir en un servicio externo',
+    groupHome: name => `Principal · ${name}`,
+    groupOther: 'Otros activos',
+    switchRail: rail => `Cambiar a ${rail}`,
   },
 
   addressBook: {

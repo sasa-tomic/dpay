@@ -181,6 +181,50 @@ export function railFees(rail: SelectableAsset, catalog: readonly CurrencyDescri
 }
 
 /**
+ * One ACCOUNTS-ROUTE section: the ordered account list partitioned by the currency each account
+ * settles, so the route reads as currencies first and loose assets after. `currency: null` is the
+ * non-currency tail (ckBTC/ckETH/ICP/SOL — held and spent, just not what the wallet is "in").
+ */
+export type CurrencyAccountGroup = {currency: HomeCurrency | null; assets: SelectableAsset[]};
+
+/**
+ * Presentation-only grouping OVER the `orderAccounts` output — the order inside every section is
+ * exactly the order handed in, and the sections themselves are fixed: the HOME currency's rails
+ * first, then every other offered currency's rails in HOME_CURRENCIES order, then the
+ * non-currency tail. No section is emitted for a currency the list carries no rail for.
+ *
+ * It exists because a flat list answers "how much is in each account" while the wallet's own
+ * question is "what am I in": the section header NAMES the currency (the label is the currency,
+ * the token is the unit — rule 2 at the top of this module), which is what lets a USD wallet read
+ * its two dollar rails as one group and its bitcoin as something else. What it deliberately does
+ * NOT do is sum a section or reorder anything by magnitude — the rows keep their own units and the
+ * no-FX-quote rule untouched.
+ */
+export function groupAccountsByCurrency(
+  ordered: SelectableAsset[],
+  homeCurrency: HomeCurrency,
+): CurrencyAccountGroup[] {
+  const buckets = new Map<HomeCurrency | 'other', SelectableAsset[]>();
+  for (const a of ordered) {
+    const key = currencyOfAsset(a) ?? 'other';
+    const bucket = buckets.get(key);
+    if (bucket == null) buckets.set(key, [a]);
+    else bucket.push(a);
+  }
+  const sections: CurrencyAccountGroup[] = [];
+  const home = buckets.get(homeCurrency);
+  if (home != null) sections.push({currency: homeCurrency, assets: home});
+  for (const c of HOME_CURRENCIES) {
+    if (c === homeCurrency) continue;
+    const bucket = buckets.get(c);
+    if (bucket != null) sections.push({currency: c, assets: bucket});
+  }
+  const other = buckets.get('other');
+  if (other != null) sections.push({currency: null, assets: other});
+  return sections;
+}
+
+/**
  * The rail's catalogued liquidity tier — a FACT carried by the catalog row ('deep' | 'thin'), or
  * null when the row says nothing (SOL, native assets, unknown). The tier feeds the rail-health
  * lines (`railLiquidityLine`) and nothing else: it is never a verdict and never a comparison.

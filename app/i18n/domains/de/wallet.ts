@@ -73,6 +73,9 @@ export const walletDe: WalletMessages = {
     back: 'Zurück',
     practice: 'Übungsgeld. Es funktioniert nur in dpay — kein Geschäft nimmt es an.',
     convertHint: 'Bei einem externen Handelsplatz tauschen',
+    groupHome: name => `Haupt · ${name}`,
+    groupOther: 'Andere Assets',
+    switchRail: rail => `Zu ${rail} wechseln`,
   },
 
   addressBook: {

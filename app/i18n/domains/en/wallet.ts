@@ -158,6 +158,14 @@ export type WalletMessages = {
     practice: string;
     /** The per-asset Convert action, shown on the SELECTED row only. */
     convertHint: string;
+    /** The currency-section headers over the ordered account list. Each NAMES the currency — a
+     *  section is a label, never a total: no sum is rendered anywhere in the list. */
+    groupHome: (name: string) => string;
+    /** The non-currency tail (ckBTC/ckETH/ICP/SOL): accounts that settle no home currency. */
+    groupOther: string;
+    /** The one switch affordance on a multi-rail currency section. `rail` is the target rail's
+     *  own line ("USDC · Solana") — routing between rails of one currency, never an exchange. */
+    switchRail: (rail: string) => string;
   };
 
   /** The ADDRESS BOOK route — the browse/manage surface over the per-asset saved destinations
@@ -345,6 +353,9 @@ export const walletEn: WalletMessages = {
     back: 'Back',
     practice: 'Practice money. It works only inside dpay — no shop takes it.',
     convertHint: 'Convert at an outside venue',
+    groupHome: name => `Main · ${name}`,
+    groupOther: 'Other assets',
+    switchRail: rail => `Switch to ${rail}`,
   },
 
   addressBook: {

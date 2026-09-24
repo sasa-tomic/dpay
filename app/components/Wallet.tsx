@@ -1436,6 +1436,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               onToggleTestnet={toggleTestnet}
               onBack={closeAccounts}
               onSelect={handleSelect}
+              onSwitchRail={payRailSwitch}
               onTopUp={topUp}
               onConvert={() => setMode('convert')}
               onOpenSettings={openSettingsFromOutage}

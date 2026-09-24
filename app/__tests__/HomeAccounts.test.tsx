@@ -217,6 +217,74 @@ describe('AccountsTab — Convert lives on the selected row (X15)', () => {
   });
 });
 
+describe('AccountsTab — currency sections (labels, never totals; switch affordance)', () => {
+  const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
+  const balances = buildAssetBalances({
+    catalog: BUNDLED, assets, icBalances: {}, primaryBalance: null,
+    solState: {balance: null, status: 'unavailable'}, tokenStates: {},
+  });
+  // The Solana USDC rail FUNDED — token states are mint-keyed (the poll's own shape), mints read
+  // off the asset list, never hardcoded.
+  const fundedSol = buildAssetBalances({
+    catalog: BUNDLED, assets, icBalances: {}, primaryBalance: null,
+    solState: {balance: null, status: 'unavailable'},
+    tokenStates: Object.fromEntries(assets
+      .filter((a): a is Extract<typeof a, {protocol: 'solana'}> => a.protocol === 'solana' && a.token === 'USDC' && a.mint != null)
+      .map(a => [a.mint!, {amount: '123400', decimals: a.decimals, status: 'balance' as const}])),
+  });
+
+  test('section headers NAME the currency in list order, and no header renders a number', () => {
+    const tree = mount(assets, balances, {homeCurrency: 'USD'});
+    const list = tree.root.findAll(n => n.props && n.props.testID === 'accounts-list')[0]!;
+    const marks = [...new Set(list.findAll(n => n.props?.testID?.startsWith('accounts-group-') === true)
+      .map(n => String(n.props.testID)))];
+    expect(marks).toEqual(['accounts-group-usd', 'accounts-group-chf', 'accounts-group-eur', 'accounts-group-other']);
+    // A header is a LABEL: no digit may appear in any of them (no sums across assets, ever).
+    for (const testID of marks) {
+      const text = rowText(tree, testID);
+      expect(text).not.toMatch(/\d/);
+    }
+    expect(rowText(tree, 'accounts-group-usd')).toBe('Main · US dollars');
+    expect(rowText(tree, 'accounts-group-chf')).toBe('Swiss francs');
+    expect(rowText(tree, 'accounts-group-other')).toBe('Other assets');
+    act(() => { tree.unmount(); });
+  });
+
+  test('single-rail sections carry no switch affordance; the multi-rail one carries exactly one', () => {
+    const tree = mount(assets, balances, {homeCurrency: 'USD', selectedId: 'ic:7', onSwitchRail: jest.fn()});
+    for (const slug of ['chf', 'eur', 'other']) {
+      expect(has(tree, `btn-accounts-rail-${slug}`)).toBe(false);
+    }
+    // USD has two rails; the selection (VCHF) is outside the group, so the switch offers
+    // chooseRail's answer — the funded rail, else the preferred one (ckUSDC here).
+    expect(has(tree, 'btn-accounts-rail-usd')).toBe(true);
+    expect(rowText(tree, 'btn-accounts-rail-usd')).toBe('Switch to ckUSDC · Internet Computer');
+    act(() => { tree.unmount(); });
+  });
+
+  test('the switch resolves the FUNDED rail and selects the ASSET row — home currency untouched', () => {
+    const onSwitchRail = jest.fn();
+    const tree = mount(assets, fundedSol, {homeCurrency: 'USD', selectedId: 'ic:2', onSwitchRail});
+    expect(rowText(tree, 'btn-accounts-rail-usd')).toBe('Switch to USDC · Solana');
+    act(() => { pressable(tree, 'btn-accounts-rail-usd').props.onPress(); });
+    expect(onSwitchRail).toHaveBeenCalledWith('solana:USDC');
+    act(() => { tree.unmount(); });
+  });
+
+  test('no affordance when the resolved rail IS the selected row — a control that re-selects the same account is not a control', () => {
+    // ckUSDC selected + nothing funded ⇒ chooseRail answers the preferred rail = the selection.
+    const tree = mount(assets, balances, {homeCurrency: 'USD', selectedId: 'ic:2', onSwitchRail: jest.fn()});
+    expect(has(tree, 'btn-accounts-rail-usd')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a missing onSwitchRail (selection LOCKED, flow 71) renders the section without the button', () => {
+    const tree = mount(assets, fundedSol, {homeCurrency: 'USD', selectedId: 'ic:2'});
+    expect(has(tree, 'btn-accounts-rail-usd')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});
+
 describe('orderAccounts — X22: play money is never the biggest number on screen', () => {
   const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
   const view = (displayText: string, status: 'ok' | 'zero') => ({displayText, status, failure: null});

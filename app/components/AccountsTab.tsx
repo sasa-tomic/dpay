@@ -3,7 +3,10 @@ import {S} from '../styles';
 import {C} from '../config/palette';
 import {M} from '../i18n';
 import {DEMO_ASSET_ID, type SelectableAsset} from '../config/assets';
-import {currencyOfAsset, preferredRail, railLineLabel, type HomeCurrency} from '../config/currency';
+import {
+  chooseRail, currencyName, currencyOfAsset, currencyRails, groupAccountsByCurrency, preferredRail,
+  railLineLabel, type HomeCurrency,
+} from '../config/currency';
 import {linkNetworkOf} from '../config/assets';
 import {CurrencyRow} from './CurrencyRow';
 import {HotkeyHint} from './HotkeyHint';
@@ -40,9 +43,16 @@ import type {BalanceView} from '../lib/assetBalances';
 // ranking 0.0005 BTC against 100 USDC is an FX comparison, and dpay does not quote FX (no-swap
 // non-negotiable). "Holds something" is a boolean fact about one asset; a magnitude ordering
 // across unlike assets would be a claim.
+//
+// SECTIONS (multi-currency build-out, 2026-09): the ordered list above is then partitioned by the
+// currency each account settles — `groupAccountsByCurrency` (config/currency.ts), presentation
+// only over `orderAccounts`' order. Each section is headed by the CURRENCY'S NAME ("Main · Swiss
+// francs", "US dollars", "Other assets"): the header is a label, never a total — the rows keep
+// their own units and nothing is summed. A multi-rail currency section carries ONE switch
+// affordance (below), because moving between rails of one currency is routing, not exchange.
 export function AccountsTab({
   assets, selectedId, balances, homeCurrency, demoFaucetAvailable, topUpBusy,
-  hasTestnet, showTestnet, onToggleTestnet, onBack, onSelect, onTopUp, onConvert, onOpenSettings,
+  hasTestnet, showTestnet, onToggleTestnet, onBack, onSelect, onSwitchRail, onTopUp, onConvert, onOpenSettings,
 }: {
   assets: SelectableAsset[];
   selectedId: AssetId | null;
@@ -55,6 +65,10 @@ export function AccountsTab({
   onToggleTestnet: () => void;
   onBack: () => void;
   onSelect: (id: AssetId) => void;
+  /** The currency-level rail switch (Wallet's `payRailSwitch` — the SAME lock-gated gesture the
+   *  Pay fund gates use). Absent while the selection is LOCKED, so the affordance disappears
+   *  instead of appearing dead — the same contract `FundedSiblingRail` renders by. */
+  onSwitchRail?: (id: AssetId) => void;
   onTopUp: () => void;
   onConvert: () => void;
   /** Opens Settings — the unreachable rail note's Settings ▸ Advanced escape (founder UX
@@ -68,6 +82,10 @@ export function AccountsTab({
   // "USDC · Solana") so a sibling row says which rail it is instead of wearing a second MAIN.
   const mainId = preferredRail(homeCurrency, assets)?.id ?? null;
   const ordered = orderAccounts(assets, balances, homeCurrency);
+  // The currency sections over that order (module header): home first, then every other offered
+  // currency, then the non-currency tail. Presentation only — the row order inside a section is
+  // exactly `ordered`'s.
+  const sections = groupAccountsByCurrency(ordered, homeCurrency);
   // The testnet toggle renders only when there's at least one testnet currency to reveal OR
   // testnet rows are currently shown. `hasTestnet` is computed upstream from the FULL catalog
   // (the assets list is already filtered, so it cannot answer this on its own).
@@ -99,119 +117,167 @@ export function AccountsTab({
       </View>
       <Text style={S.dim2}>{M.wallet.accounts.intro}</Text>
       <View style={S.accountsList} testID="accounts-list">
-        {ordered.map(asset => {
-          // The pre-resolved balance view for this row. The displayText is the fully-formatted
-          // amount; `status !== 'ok'` is the unified dim rule (zero/absent/unavailable/error/
-          // loading all dim — only a confirmed non-zero balance reads at full color).
-          const view = balances[asset.id];
-          const rowIsDemo = asset.id === DEMO_ASSET_ID;
-          const isSelected = asset.id === selectedId;
-          // Convert — the per-asset delegated-conversion entry, on the SELECTED row only. It left
-          // the Home action row (X15): it is honest-but-inert for most accounts, and a top-level
-          // slot on the landing screen is not what an action that mostly explains itself earns.
-          // Rendering it per-row-when-selected is uniform (every asset reaches it by the SAME
-          // gesture — select the row, tap Convert) without minting eight inert buttons. The venue
-          // check still happens INSIDE the Convert surface, never here.
-          const convert = isSelected ? (
-            <Pressable
-              testID="btn-accounts-convert"
-              style={S.assetActionBtn}
-              onPress={onConvert}
-              accessibilityRole="button"
-              accessibilityLabel={M.convert.actionConvert}
-              accessibilityHint={M.wallet.accounts.convertHint}
-              accessibilityState={{disabled: false}}
-            >
-              <IconSwap size={16} color={C.brandText} />
-              <Text style={S.assetActionText}>{M.convert.actionConvert}</Text>
-            </Pressable>
-          ) : null;
-          // The DEMO faucet button — the practice rail's own top-up. Passed via `actions` so
-          // tapping it doesn't fire select. D5b: carries the T HotkeyHint (the web keyboard
-          // top-up) so the shortcut is discoverable — same badge pattern as the tab bar.
-          const faucet = rowIsDemo && demoFaucetAvailable ? (
-            <Pressable
-              testID="btn-topup"
-              style={[S.assetActionBtn, topUpBusy && S.dim]}
-              disabled={topUpBusy}
-              onPress={onTopUp}
-              accessibilityRole="button"
-              accessibilityLabel={M.wallet.balances.demoFundsLabel}
-              accessibilityHint={M.wallet.balances.demoFundsHint}
-              accessibilityState={{disabled: topUpBusy}}
-            >
-              {topUpBusy
-                ? <ActivityIndicator size="small" color={C.brandText} />
-                : <><IconPlus size={16} color={C.brandText} /><Text style={S.assetActionText}>{M.wallet.balances.demoFunds}</Text><HotkeyHint k="T" /></>}
-            </Pressable>
-          ) : null;
-          // 'Needs setup' badge — Solana USDC with a KNOWN-absent token account ('absent' is a
-          // USDC-only status: no ATA on chain). One tap on the row selects it, and every USDC
-          // surface then offers the one-tap account create. Known-absent only: loading/error/
-          // unavailable never claim setup is needed (offline-first honesty rule).
-          const setupBadge = view?.status === 'absent'
-            ? <Text testID="asset-sol-usdc-badge" style={S.assetBadge}>{M.wallet.balances.needsSetup}</Text>
-            : null;
-          // A balance the wallet could not READ ('error': the chain's endpoint refused or failed).
-          // It rendered the same bare "—" as a first poll still in flight, which told the user
-          // nothing about which of the two it was. The network-level banner (built below, above
-          // this row) says what happened, that nothing moved, that the other accounts still work,
-          // and that the retry is automatic — no button is promised because none would help.
-          // Status-driven, never rail-specific: any rail that reports 'error' gets the same line,
-          // once, for its network.
-          const netSlug = linkNetworkOf(asset);
-          const outage = railUnreadable(view) && !bannered.has(netSlug);
-          if (outage) bannered.add(netSlug);
-          const banner = outage ? <RailUnreadableNote key={`outage-${netSlug}`} asset={asset} failure={view?.failure ?? null} onOpenSettings={onOpenSettings} /> : null;
-          // The MAIN badge — the account the wallet opens with, and the one a payment defaults to.
-          const mainBadge = asset.id === mainId
-            ? <Text testID={`asset-${asset.testKey}-main`} style={S.assetBadgeMain}>{M.wallet.homeCurrency.mainBadge}</Text>
-            : null;
-          // The sibling-rail badge — a rail of the home currency's group that is NOT the preferred
-          // one. Its text NAMES the rail (railLineLabel: ledger token · settlement chain), never
-          // "MAIN", so the two USD rows read as two named rails of one currency, each with its own
-          // balance — the opposite of a merged group total.
-          const railBadge = asset.id !== mainId && currencyOfAsset(asset) === homeCurrency
-            ? <Text testID={`asset-${asset.testKey}-rail`} style={S.assetBadge}>{railLineLabel(asset)}</Text>
-            : null;
-          const row = (
-            <CurrencyRow
-              key={asset.testKey}
-              testId={`asset-${asset.testKey}`}
-              asset={asset}
-              amount={view?.displayText}
-              active={isSelected}
-              zero={view ? view.status !== 'ok' : true}
-              onPress={() => onSelect(asset.id)}
-              accessibilityLabel={M.wallet.balances.select(asset.symbol)}
-              accessibilityHint={asset.protocol === 'solana'
-                ? M.wallet.balances.selectSolanaHint(asset.symbol)
-                : M.wallet.balances.selectHint}
-              variant="card"
-              actions={convert || faucet ? <>{convert}{faucet}</> : null}
-            >
-              {mainBadge}
-              {railBadge}
-              {setupBadge}
-              {/* The rail-health footer — ONE shared slot under the badge stack, rendered by the
-                  same component everywhere so a thin rail's statement reads with one
-                  voice. Warn tone: only THIN rails carry it; deep/untiered rows render nothing
-                  (no badge colours change — the note is text, not chrome). */}
-              <RailLiquidityNote asset={asset} tone="warn" />
-            </CurrencyRow>
+        {sections.map(section => {
+          // The section header NAMES the currency — the label is the currency, the token is the
+          // unit (config/currency.ts rule 2). It is never a total: no number is rendered here.
+          const isHome = section.currency === homeCurrency;
+          const slug = section.currency === null ? 'other' : section.currency.toLowerCase();
+          const header = (
+            <View key={`group-${slug}`} style={S.accountsGroupHead}>
+              <Text testID={`accounts-group-${slug}`} style={S.accountsGroupLabel}>
+                {section.currency === null
+                  ? M.wallet.accounts.groupOther
+                  : isHome
+                  ? M.wallet.accounts.groupHome(currencyName(section.currency))
+                  : currencyName(section.currency)}
+              </Text>
+              {/* The currency-level rail switch (E2): ONE affordance per MULTI-RAIL currency
+                  section, resolving `chooseRail` to the funded — else preferred — rail of THIS
+                  currency. Routing between rails of one currency, never an exchange, never a
+                  home-currency change (Settings owns that). A single-rail section gets none (its
+                  row is the only rail — selecting the row IS the switch), and it hides when the
+                  resolved rail is already the selected row (a control that would re-select the
+                  same account is not a control) or while the selection is LOCKED (onSwitchRail is
+                  then undefined — the same contract the Pay fund gates' sibling pointer renders
+                  by, flow 71). */}
+              {section.currency !== null && currencyRails(section.currency, assets).length > 1 && onSwitchRail != null
+                ? (() => {
+                    const choice = chooseRail(section.currency, assets, balances);
+                    if (choice == null || choice.rail.id === selectedId) return null;
+                    return (
+                      <Pressable
+                        testID={`btn-accounts-rail-${slug}`}
+                        style={S.linkBtn}
+                        onPress={() => onSwitchRail(choice.rail.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel={M.wallet.accounts.switchRail(railLineLabel(choice.rail))}
+                        accessibilityState={{disabled: false}}>
+                        <Text style={S.linkText}>{M.wallet.accounts.switchRail(railLineLabel(choice.rail))}</Text>
+                      </Pressable>
+                    );
+                  })()
+                : null}
+            </View>
           );
-          // The practice divider sits IMMEDIATELY above the practice row, so the sentence and the
-          // thing it describes cannot be separated by a scroll (anti-scam rule R3). The outage
-          // banner sits in the same position, above the first row of the network it is about.
-          return rowIsDemo || banner
-            ? (
-              <View key={asset.testKey}>
-                {banner}
-                {rowIsDemo ? <Text testID="accounts-practice-note" style={S.accountsPractice}>{M.wallet.accounts.practice}</Text> : null}
-                {row}
-              </View>
-            )
-            : row;
+          return (
+            <View key={`section-${slug}`}>
+              {header}
+              {section.assets.map(asset => {
+                // The pre-resolved balance view for this row. The displayText is the fully-formatted
+                // amount; `status !== 'ok'` is the unified dim rule (zero/absent/unavailable/error/
+                // loading all dim — only a confirmed non-zero balance reads at full color).
+                const view = balances[asset.id];
+                const rowIsDemo = asset.id === DEMO_ASSET_ID;
+                const isSelected = asset.id === selectedId;
+                // Convert — the per-asset delegated-conversion entry, on the SELECTED row only. It left
+                // the Home action row (X15): it is honest-but-inert for most accounts, and a top-level
+                // slot on the landing screen is not what an action that mostly explains itself earns.
+                // Rendering it per-row-when-selected is uniform (every asset reaches it by the SAME
+                // gesture — select the row, tap Convert) without minting eight inert buttons. The venue
+                // check still happens INSIDE the Convert surface, never here.
+                const convert = isSelected ? (
+                  <Pressable
+                    testID="btn-accounts-convert"
+                    style={S.assetActionBtn}
+                    onPress={onConvert}
+                    accessibilityRole="button"
+                    accessibilityLabel={M.convert.actionConvert}
+                    accessibilityHint={M.wallet.accounts.convertHint}
+                    accessibilityState={{disabled: false}}
+                  >
+                    <IconSwap size={16} color={C.brandText} />
+                    <Text style={S.assetActionText}>{M.convert.actionConvert}</Text>
+                  </Pressable>
+                ) : null;
+                // The DEMO faucet button — the practice rail's own top-up. Passed via `actions` so
+                // tapping it doesn't fire select. D5b: carries the T HotkeyHint (the web keyboard
+                // top-up) so the shortcut is discoverable — same badge pattern as the tab bar.
+                const faucet = rowIsDemo && demoFaucetAvailable ? (
+                  <Pressable
+                    testID="btn-topup"
+                    style={[S.assetActionBtn, topUpBusy && S.dim]}
+                    disabled={topUpBusy}
+                    onPress={onTopUp}
+                    accessibilityRole="button"
+                    accessibilityLabel={M.wallet.balances.demoFundsLabel}
+                    accessibilityHint={M.wallet.balances.demoFundsHint}
+                    accessibilityState={{disabled: topUpBusy}}
+                  >
+                    {topUpBusy
+                      ? <ActivityIndicator size="small" color={C.brandText} />
+                      : <><IconPlus size={16} color={C.brandText} /><Text style={S.assetActionText}>{M.wallet.balances.demoFunds}</Text><HotkeyHint k="T" /></>}
+                  </Pressable>
+                ) : null;
+                // 'Needs setup' badge — Solana USDC with a KNOWN-absent token account ('absent' is a
+                // USDC-only status: no ATA on chain). One tap on the row selects it, and every USDC
+                // surface then offers the one-tap account create. Known-absent only: loading/error/
+                // unavailable never claim setup is needed (offline-first honesty rule).
+                const setupBadge = view?.status === 'absent'
+                  ? <Text testID="asset-sol-usdc-badge" style={S.assetBadge}>{M.wallet.balances.needsSetup}</Text>
+                  : null;
+                // A balance the wallet could not READ ('error': the chain's endpoint refused or failed).
+                // It rendered the same bare "—" as a first poll still in flight, which told the user
+                // nothing about which of the two it was. The network-level banner (built below, above
+                // this row) says what happened, that nothing moved, that the other accounts still work,
+                // and that the retry is automatic — no button is promised because none would help.
+                // Status-driven, never rail-specific: any rail that reports 'error' gets the same line,
+                // once, for its network.
+                const netSlug = linkNetworkOf(asset);
+                const outage = railUnreadable(view) && !bannered.has(netSlug);
+                if (outage) bannered.add(netSlug);
+                const banner = outage ? <RailUnreadableNote key={`outage-${netSlug}`} asset={asset} failure={view?.failure ?? null} onOpenSettings={onOpenSettings} /> : null;
+                // The MAIN badge — the account the wallet opens with, and the one a payment defaults to.
+                const mainBadge = asset.id === mainId
+                  ? <Text testID={`asset-${asset.testKey}-main`} style={S.assetBadgeMain}>{M.wallet.homeCurrency.mainBadge}</Text>
+                  : null;
+                // The sibling-rail badge — a rail of the home currency's group that is NOT the preferred
+                // one. Its text NAMES the rail (railLineLabel: ledger token · settlement chain), never
+                // "MAIN", so the two USD rows read as two named rails of one currency, each with its own
+                // balance — the opposite of a merged group total.
+                const railBadge = asset.id !== mainId && currencyOfAsset(asset) === homeCurrency
+                  ? <Text testID={`asset-${asset.testKey}-rail`} style={S.assetBadge}>{railLineLabel(asset)}</Text>
+                  : null;
+                const row = (
+                  <CurrencyRow
+                    key={asset.testKey}
+                    testId={`asset-${asset.testKey}`}
+                    asset={asset}
+                    amount={view?.displayText}
+                    active={isSelected}
+                    zero={view ? view.status !== 'ok' : true}
+                    onPress={() => onSelect(asset.id)}
+                    accessibilityLabel={M.wallet.balances.select(asset.symbol)}
+                    accessibilityHint={asset.protocol === 'solana'
+                      ? M.wallet.balances.selectSolanaHint(asset.symbol)
+                      : M.wallet.balances.selectHint}
+                    variant="card"
+                    actions={convert || faucet ? <>{convert}{faucet}</> : null}
+                  >
+                    {mainBadge}
+                    {railBadge}
+                    {setupBadge}
+                    {/* The rail-health footer — ONE shared slot under the badge stack, rendered by the
+                        same component everywhere so a thin rail's statement reads with one
+                        voice. Warn tone: only THIN rails carry it; deep/untiered rows render nothing
+                        (no badge colours change — the note is text, not chrome). */}
+                    <RailLiquidityNote asset={asset} tone="warn" />
+                  </CurrencyRow>
+                );
+                // The practice divider sits IMMEDIATELY above the practice row, so the sentence and the
+                // thing it describes cannot be separated by a scroll (anti-scam rule R3). The outage
+                // banner sits in the same position, above the first row of the network it is about.
+                return rowIsDemo || banner
+                  ? (
+                    <View key={asset.testKey}>
+                      {banner}
+                      {rowIsDemo ? <Text testID="accounts-practice-note" style={S.accountsPractice}>{M.wallet.accounts.practice}</Text> : null}
+                      {row}
+                    </View>
+                  )
+                  : row;
+              })}
+            </View>
+          );
         })}
         {showToggle ? (
           <Pressable
