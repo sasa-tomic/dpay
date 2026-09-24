@@ -213,7 +213,7 @@ export async function run() {
     await driver.findByTestID('receive-code-form', { timeoutMs: 4_000 });
     assert(await driver.isPresent('receive-code-form'), 'the checkbox returns once nothing is live');
     // The note is the shared box's (the parent's), so "Next customer" keeps it exactly as it keeps
-    // the price — a re-ring is almost always for the same thing, and the cashier edits, not retypes.
+    // the price — the next charge is almost always for the same thing, and the cashier edits, not retypes.
     assertEq(await driver.readInputValue('memo-input'), NOTE, 'the shared message box keeps its text for the next customer');
 
     console.log(`[114-checkout-open] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);

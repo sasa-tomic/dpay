@@ -1,7 +1,7 @@
 // The MERCHANT half of dpay's own OpenCryptoPay checkout — the three routes only a shop calls.
 //
 // Everything else in this app PAYS a checkout (`services/opencryptopay.ts`, the payer's four provider
-// reads). This module is the other side of the counter: ring a charge up, clear it, and watch it.
+// reads). This module is the other side of the counter: open a charge, clear it, and watch it.
 // The routes and every rule behind them are `crates/dpay-relay/src/checkout.rs`; nothing about the
 // checkout's behaviour is restated here, only consumed.
 //
@@ -172,7 +172,7 @@ export type CheckoutStatusOutcome =
 export type CheckoutVoidOutcome =
   | {kind: 'cancelled'; status: CheckoutStatus}
   /** Includes the one refusal that matters: the charge was already PAID, with the block that paid
-   *  it named in `said`. Money moved, so nothing rings it away. */
+   *  it named in `said`. Money moved, so nothing voids it. */
   | {kind: 'refused'; said: string | null; status: number}
   /** Same attribution as the open path's `unreachable`: the addresses actually asked — the pin
    *  ALONE once a session is pinned to an address still in the configured list, else the whole

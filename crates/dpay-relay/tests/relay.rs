@@ -3339,7 +3339,7 @@ async fn checkout_serves_the_standard_and_settles_only_on_a_real_transfer() {
 /// into the LUD-06 description a third-party wallet renders instead. A note-less checkout-open must not
 /// grow a `note` key: that body is the one every older wallet already parses.
 #[tokio::test]
-async fn a_noted_ring_up_serves_the_note_and_a_noteless_one_serves_nothing_new() {
+async fn a_noted_checkout_open_serves_the_note_and_a_noteless_one_serves_nothing_new() {
     let (state, _fake) = checkout_state();
     let merchant = SigningKey::from_bytes(&[0x0b; 32]);
 
@@ -3739,7 +3739,7 @@ async fn checkout_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_wo
 /// things: re-sync the clock, fix the key, sign again, or stop signing and go poll the charge that
 /// already exists.
 #[tokio::test]
-async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
+async fn a_checkout_open_is_refused_unless_the_merchant_signs_it() {
     let (state, _fake) = checkout_state();
     let merchant = SigningKey::from_bytes(&[31u8; 32]);
     let attacker = SigningKey::from_bytes(&[32u8; 32]);
@@ -3929,10 +3929,10 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
     // A checkout-open signature aimed at the cancel route is refused before anything else happens: the
     // two actions are told apart by the SIGNED `cents`, which is what stops one being replayed as
     // the other. (The reverse is pinned by the `cents = 0` case in the refusals test.)
-    let ring_up = checkout_body(&merchant, 10_000, "Bahnhof Kiosk", fresh_nonce(), now);
+    let open_body = checkout_body(&merchant, 10_000, "Bahnhof Kiosk", fresh_nonce(), now);
     let (status, body) = call(
         &state,
-        checkout_post("/api/v1/checkout/void", &ring_up, "checkout.example", "http"),
+        checkout_post("/api/v1/checkout/void", &open_body, "checkout.example", "http"),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
@@ -4006,7 +4006,7 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
             .as_str()
             .unwrap_or_default()
             .contains("POST /api/v1/checkout"),
-        "an idle checkout is pointed at the route that rings one up: {body}"
+        "an idle checkout is pointed at the route that opens a charge: {body}"
     );
 
     // A CREDITED charge is not cancellable, and the refusal names the block that paid. Telling a
@@ -4104,7 +4104,7 @@ async fn the_checkout_is_not_served_unless_the_relay_is_told_to() {
     // signs afresh because a merchant's signature is single-use.
     //
     // The two POSTs name a DIFFERENT merchant than the charge the other six requests are about,
-    // because ringing one up voids that merchant's previous charge — the other six would then be
+    // because opening one voids that merchant's previous charge — the other six would then be
     // asking about a superseded code and meet a handler's honest 404 instead of its answer, which
     // is not what this test is measuring. They also run in this order on the serving relay: the
     // cancel has a charge to clear because the checkout-open above it just made one.

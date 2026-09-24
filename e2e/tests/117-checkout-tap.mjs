@@ -1,6 +1,6 @@
 // Flow 117 — a dpay payer TAPS a dpay checkout, and the shop's own charge is credited.
 //
-// Flow 114 already proves a shop can ring a sale up and be paid for it: a customer resolves the
+// Flow 114 already proves a shop can open a charge and be paid for it: a customer resolves the
 // checkout code through the OpenCryptoPay routes and sends a VCHF transfer carrying the charge's `ref`.
 // This is the OTHER way that money can arrive at the same charge, and until now it could not: the
 // payer never touches a provider endpoint at all. They tap, and the IC protocol-v2 exchange the two

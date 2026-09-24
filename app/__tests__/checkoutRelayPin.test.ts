@@ -8,7 +8,7 @@
  *
  * The failures this suite exists for:
  *   • a mid-session failover would ask a replica that never heard of the charge — the cashier sees
- *     "not found" for a charge that is open elsewhere, and either re-rings it or turns the payer
+ *     "not found" for a charge that is open elsewhere, and either opens it again or turns the payer
  *     away;
  *   • a PIN that outlived its MEMBERSHIP would keep talking to an address the operator just
  *     removed — a shadow connection no list edit can reach (e2e flow 116's stage 1 hung exactly

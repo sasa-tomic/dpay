@@ -383,6 +383,14 @@ FLOWS.md regenerated; android bridge + manifest; all living docs. History: the s
 keys: none existed under `dpay.till*`, so nothing needed to die. Validation round (2026-09-24): the
 zero-match criterion's `ring[- ]?up` missed the INFLECTED "rings up"/"ringing up" — ~30 sites swept
 (incl. the SERVED cashier page's "never rings up" and the regenerated FFI bindings' doc), gates re-run green.
+Re-validation round (2026-09-24): the criterion's word list missed more INFLECTED and participle
+forms — ~25 sites swept ("rings one up", "rings the charge up", "ring a sale/charge up", "rung
+anything up", "re-ring(s)"/"re-ringing", "rings it/that away", plus the underscore-fused
+identifiers a test-local `ring_up` helper and five ring-up test/variable names carried) and one
+doubled-word artifact the sweep's own edit left in `app/lib/deepLink.ts`; all reworded to plain
+open/void charge language, FLOWS.md regenerated, gates re-run green. Sanctioned remaining
+records: the item narrative above, the verbatim prod curl at line 486 (marked "named 'till' at
+the time"), and the glossary row.
 
 **7. IC hub 2-hop generalization — DONE (2026-09-18, closed by the convert-hub slice).** What
 shipped: `hubRoutes(catalog, fromLedger)` in `app/routes.ts` walks the REGISTRY (no hardcoded

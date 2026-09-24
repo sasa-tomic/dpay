@@ -212,7 +212,7 @@ function failureMessage(host: string, status: number, body: {ok: true; json: unk
  *  instead of long-polling for one.
  *
  *  The provider returns TWO different 404s and the user needs different instructions for each:
- *   - the payment-link payload with no charge on it — the checkout simply has not rung anything up yet,
+ *   - the payment-link payload with no charge on it — the checkout simply has nothing open yet,
  *     so the honest screen names the merchant and says to ask them to start the payment;
  *   - `{"statusCode":404,"message":"Payment link not found",…}` — the code is stale or not this
  *     provider's, which is an error, not something waiting to happen.

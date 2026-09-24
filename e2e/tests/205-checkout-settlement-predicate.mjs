@@ -20,7 +20,7 @@ export const meta = {
   name: 'checkout-settlement-predicate',
   journey: 'pay',
   covers: ['checkout', 'merchant-checkout', 'settlement-predicate', 'currency-groups', 'honest-refusal', 'vchf', 'ckusdc', 'no-fx-sum'],
-  verifies: 'The checkout counter offers exactly the assets an honest multi-currency checkout can settle (VCHF · CHF, ckUSDC · USD — never ICP/ckBTC, which have no currency to price in); a ckUSDC pick answered by the VCHF-only checkout is refused whole with no code shown and a one-tap fix naming both assets; re-picking VCHF rings the charge up exactly as flow 114 does.',
+  verifies: 'The checkout counter offers exactly the assets an honest multi-currency checkout can settle (VCHF · CHF, ckUSDC · USD — never ICP/ckBTC, which have no currency to price in); a ckUSDC pick answered by the VCHF-only checkout is refused whole with no code shown and a one-tap fix naming both assets; re-picking VCHF opens the charge exactly as flow 114 does.',
   timeoutMs: 120_000,
 };
 
@@ -74,8 +74,8 @@ export async function run() {
     const prefixAfterFix = await driver.readText('req-prefix');
     assertIncludes(prefixAfterFix, 'VCHF', 'the one-tap fix moves the wallet asset back too — the badge names the franc unit again');
     assert(!prefixAfterFix.includes('$'), 'the dollar badge is gone with the dollar pick');
-    assertIncludes(await driver.readInputValue('amount-input'), '10.50', 'the typed price survives the round trip, ready for the re-ring');
-    // The pick is proven by BEHAVIOUR, not by an attribute: the re-ring opens the charge.
+    assertIncludes(await driver.readInputValue('amount-input'), '10.50', 'the typed price survives the round trip, ready for the next charge');
+    // The pick is proven by BEHAVIOUR, not by an attribute: the retry opens the charge.
     await driver.click('btn-checkout-open', {timeoutMs: 4_000});
     await driver.findByTestID('checkout-qr', {timeoutMs: 15_000});
     assertIncludes(await driver.bodyText(), '10.50 CHF', 'the VCHF checkout-open reads the franc price exactly as flow 114\'s');

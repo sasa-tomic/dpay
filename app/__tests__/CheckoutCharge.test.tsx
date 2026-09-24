@@ -245,7 +245,7 @@ describe('the settlement picker (multi-currency build-out)', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('rings the charge up in the PICKED asset — decimals, fee and token follow it', async () => {
+  test('opens the charge in the PICKED asset — decimals, fee and token follow it', async () => {
     const tree = mount(VCHF);
     act(() => { node(tree, 'checkout-asset-ckusdc').props.onPress(); });
     await openCharge(tree);

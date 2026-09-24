@@ -514,7 +514,7 @@ pub enum VoidRefusal {
     /// This merchant has no charge in this store at all. Nothing was opened, or the last one was
     /// swept — either way there is no code out there for a customer to be holding.
     NothingOpened,
-    /// The charge was CREDITED on the ledger. Money moved, so nothing rings it away; the merchant
+    /// The charge was CREDITED on the ledger. Money moved, so no void takes that back; the merchant
     /// is told which block paid them so they can act on the real thing that happened.
     AlreadyPaid(Settled),
 }
@@ -557,8 +557,8 @@ impl CheckoutStore {
     ///
     /// AUTHORISATION IS THE CALLER'S: this takes a merchant account and believes it. The one route
     /// that reaches it puts [`CheckoutStore::authorize`] first, which is what makes the void above
-    /// safe — before that, an anonymous POST naming somebody else's key could keep re-ringing
-    /// their checkout and force a cashier to open a fresh charge on every attempt.
+    /// safe — before that, an anonymous POST naming somebody else's key could keep re-opening
+    /// their checkout and force a cashier to start a fresh charge on every attempt.
     pub fn open(
         &mut self,
         id: String,
@@ -619,7 +619,7 @@ impl CheckoutStore {
 
     /// Stop this merchant's current charge being payable, for the stated reason, and return it as
     /// it now stands. Unpaid only: a settled charge is a record of money that moved, and nothing
-    /// rings that away.
+    /// voids that.
     ///
     /// THE ONE VOID MECHANISM, with the reason as a parameter — the next checkout-open supersedes, the
     /// cashier cancels, and both land in the same field so `Charge::state` has one thing to read.
@@ -1119,7 +1119,7 @@ mod tests {
 
     /// Open a charge, or fail the test with the refusal. The store's `Result` is about the
     /// per-merchant bound, which only its own test provokes.
-    fn ring_up(
+    fn open_charge(
         s: &mut CheckoutStore,
         id: &str,
         merchant: &str,
@@ -1153,7 +1153,7 @@ mod tests {
             cents,
             created,
         )
-        .expect("an empty store rings one up")
+        .expect("an empty store opens a charge")
     }
 
     /// One incoming ledger row carrying the charge's own reference — i.e. a payment somebody was
@@ -1342,8 +1342,8 @@ mod tests {
         // consumption out of this store's own settlements — so consumption is what keeps "one
         // transfer, one sale" from depending on a stranger's field being unforgeable.
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 450, 1_000);
-        ring_up(&mut s, "pl_b", MERCHANT, [7u8; 32], 450, 1_001);
+        open_charge(&mut s, "pl_a", MERCHANT, [7u8; 32], 450, 1_000);
+        open_charge(&mut s, "pl_b", MERCHANT, [7u8; 32], 450, 1_001);
         let rows = [paying_row(MERCHANT, 450, 1_010, 12)];
 
         let first = s.settle_from_history("pl_a", &rows).expect("a live charge");
@@ -1401,7 +1401,7 @@ mod tests {
             450,
             1_000,
         )
-        .expect("a fresh store rings one up");
+        .expect("a fresh store opens a charge");
         s.open(
             "pl_b".into(),
             second.clone(),
@@ -1471,7 +1471,7 @@ mod tests {
         // The idempotence that lets a payer re-report safely: a second observation must not be able
         // to change who paid. Re-reporting is a RETRY here, not a second chance to lose the money.
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
+        open_charge(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         let first = s
             .settle_from_history("pl_a", &[paying_row(MERCHANT, 100, 10, 1)])
             .unwrap();
@@ -1514,7 +1514,7 @@ mod tests {
     #[test]
     fn only_a_quote_this_checkout_issued_and_has_not_expired_is_accepted() {
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
+        open_charge(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         s.quote("pl_a", "plq_1".into(), 0).unwrap();
 
         // The expiry comes BACK, because step 3 states the quote's own deadline rather than
@@ -1541,7 +1541,7 @@ mod tests {
         // wallet that reads twice must not find its first quote dead. Bounded, though: a looping
         // wallet must not be able to grow this map without limit.
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
+        open_charge(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         for i in 0..MAX_LIVE_QUOTES {
             s.quote("pl_a", format!("plq_{i}"), 0).unwrap();
         }
@@ -1558,7 +1558,7 @@ mod tests {
     #[test]
     fn a_opened_charge_stops_being_payable_when_it_goes_stale() {
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
+        open_charge(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         assert!(s.quote("pl_a", "plq_1".into(), CHARGE_TTL_SECS - 1).is_ok());
         assert_eq!(
             s.quote("pl_a", "plq_2".into(), CHARGE_TTL_SECS),
@@ -1576,7 +1576,7 @@ mod tests {
         // seconds left is good for ten seconds — and says so, rather than promising a deadline
         // this checkout would refuse to honour.
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
+        open_charge(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         let late = CHARGE_TTL_SECS - 10;
         let (_, expires) = s.quote("pl_a", "plq_late".into(), late).unwrap();
         assert_eq!(
@@ -1592,12 +1592,12 @@ mod tests {
     }
 
     #[test]
-    fn ringing_up_a_new_charge_voids_the_merchants_previous_one() {
+    fn opening_a_new_charge_voids_the_merchants_previous_one() {
         // ONE LIVE CHARGE PER MERCHANT, as a policy over a store that holds many: the old charge
         // is still here, still readable, just no longer payable.
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_first", MERCHANT, [7u8; 32], 450, 100);
-        ring_up(&mut s, "pl_second", MERCHANT, [7u8; 32], 900, 200);
+        open_charge(&mut s, "pl_first", MERCHANT, [7u8; 32], 450, 100);
+        open_charge(&mut s, "pl_second", MERCHANT, [7u8; 32], 900, 200);
 
         assert_eq!(
             s.get("pl_first").unwrap().state(200),
@@ -1616,7 +1616,7 @@ mod tests {
 
         // ANOTHER merchant's charge is untouched — the policy is per merchant, and the store is
         // not a one-charge box.
-        ring_up(&mut s, "pl_other", OTHER_MERCHANT, [8u8; 32], 450, 300);
+        open_charge(&mut s, "pl_other", OTHER_MERCHANT, [8u8; 32], 450, 300);
         assert_eq!(s.get("pl_second").unwrap().state(300), ChargeState::Open);
         assert_eq!(s.get("pl_other").unwrap().state(300), ChargeState::Open);
     }
@@ -1627,8 +1627,8 @@ mod tests {
         // re-opened. Voiding must close the door to NEW payers, never blind the checkout to a transfer
         // that already happened — that would lose a real payment.
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_first", MERCHANT, [7u8; 32], 450, 100);
-        ring_up(&mut s, "pl_second", MERCHANT, [7u8; 32], 450, 200);
+        open_charge(&mut s, "pl_first", MERCHANT, [7u8; 32], 450, 100);
+        open_charge(&mut s, "pl_second", MERCHANT, [7u8; 32], 450, 200);
         let rows = [paying_row(MERCHANT, 450, 150, 21)];
 
         let paid = s.settle_from_history("pl_first", &rows).unwrap();
@@ -1647,7 +1647,7 @@ mod tests {
         // Quoting a settled charge invites a SECOND payment for the same sale, which nothing would
         // ever credit — the payer's money would simply sit on the ledger unclaimed.
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
+        open_charge(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         s.settle_from_history("pl_a", &[paying_row(MERCHANT, 100, 10, 31)])
             .unwrap();
         assert_eq!(
@@ -1667,7 +1667,7 @@ mod tests {
         // mainnet ledger walks. Whoever asks first claims the walk; everyone else inside the
         // window is answered from what it found.
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 1_000);
+        open_charge(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 1_000);
         assert!(matches!(s.observe("pl_a", 1_000), Ok(Observation::Walk(_))));
         assert!(matches!(
             s.observe("pl_a", 1_000),
@@ -1708,7 +1708,7 @@ mod tests {
                 100,
                 0,
             )
-            .expect("a fresh store rings one up")
+            .expect("a fresh store opens a charge")
         };
         let c = named(&mut s, "pl_a", "A".repeat(1_000_000));
         assert_eq!(c.merchant_name.len(), MERCHANT_NAME_BYTES);
@@ -1727,8 +1727,8 @@ mod tests {
         // A stale unpaid charge is litter; a credited one is the merchant's record of a sale AND
         // the mark that keeps its ledger row from paying anything else. Neither is kept forever.
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_paid", MERCHANT, [7u8; 32], 100, 0);
-        ring_up(&mut s, "pl_stale", OTHER_MERCHANT, [8u8; 32], 100, 0);
+        open_charge(&mut s, "pl_paid", MERCHANT, [7u8; 32], 100, 0);
+        open_charge(&mut s, "pl_stale", OTHER_MERCHANT, [8u8; 32], 100, 0);
         s.settle_from_history("pl_paid", &[paying_row(MERCHANT, 100, 5, 51)])
             .unwrap();
 
@@ -1779,7 +1779,7 @@ mod tests {
     #[test]
     fn the_unauthenticated_status_body_is_exactly_these_fields() {
         let mut s = CheckoutStore::default();
-        let charge = ring_up(
+        let charge = open_charge(
             &mut s,
             "pl_0123456789abcdef",
             MERCHANT,
@@ -1877,7 +1877,7 @@ mod tests {
         );
         // And a quote is clamped to exactly that instant rather than to a second derivation of it.
         let mut s = CheckoutStore::default();
-        let opened = ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 1_000);
+        let opened = open_charge(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 1_000);
         let (_, quote_expires) = s
             .quote("pl_a", "plq_1".into(), 1_000 + CHARGE_TTL_SECS - 5)
             .unwrap();
@@ -1891,7 +1891,7 @@ mod tests {
         // itself, so another merchant's checkout is unaffected by a neighbour at its limit.
         let mut s = CheckoutStore::default();
         for i in 0..MAX_CHARGES_PER_MERCHANT {
-            ring_up(&mut s, &format!("pl_{i}"), MERCHANT, [7u8; 32], 100, 0);
+            open_charge(&mut s, &format!("pl_{i}"), MERCHANT, [7u8; 32], 100, 0);
         }
         assert_eq!(
             s.open(
@@ -1986,7 +1986,7 @@ mod tests {
     }
 
     #[test]
-    fn a_forged_ring_up_is_refused_and_leaves_nothing_behind() {
+    fn a_forged_checkout_open_is_refused_and_leaves_nothing_behind() {
         // THE HOLE THIS CLOSES. `POST /api/v1/checkout` took any 32 bytes of hex as the account every
         // payer would then be sent to; a probe opened a live production charge with
         // `deadbeef…deadbeef` on 2026-09-03. The acceptance rule itself is the core's
@@ -2079,7 +2079,7 @@ mod tests {
         // it stayed payable for an hour, and the only way out was to open something else and
         // leave THAT payable instead.
         let mut s = CheckoutStore::default();
-        ring_up(&mut s, "pl_oops", MERCHANT, [7u8; 32], 10_000, 100);
+        open_charge(&mut s, "pl_oops", MERCHANT, [7u8; 32], 10_000, 100);
         let cancelled = s
             .void(MERCHANT, VoidCause::Cancelled)
             .expect("a live charge is cancellable");
@@ -2095,7 +2095,7 @@ mod tests {
         // FIRST cause survives a later checkout-open, so a cancelled charge is never described as merely
         // replaced.
         assert!(s.void(MERCHANT, VoidCause::Cancelled).is_ok());
-        ring_up(&mut s, "pl_next", MERCHANT, [7u8; 32], 100, 200);
+        open_charge(&mut s, "pl_next", MERCHANT, [7u8; 32], 100, 200);
         assert_eq!(
             s.get("pl_oops").expect("still readable").state(200),
             ChargeState::Cancelled

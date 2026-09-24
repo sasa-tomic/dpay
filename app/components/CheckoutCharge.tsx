@@ -126,7 +126,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
    *  same place, whether or not the checkout checkbox is checked (founder 2026-09-14: the box must not
    *  move, restyle or reset on the toggle; the parent owns input + state, this component owns what
    *  a checkout charge does with it). It is the charge's signed note: what the payer sees on review,
-   *  trimmed here, and kept across a re-ring for the same reason the amount is. */
+   *  trimmed here, and kept for the next charge for the same reason the amount is. */
   note: string;
   /** Fires from the first checkout-open attempt until the cashier presses "next customer" — every phase
    *  that is not the entry tail — so the parent can hide the shared amount row and the checkbox and
@@ -415,7 +415,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
 
   /** Back to an empty counter. The amount and the note are the PARENT's (the shared rows above)
    *  and are kept untouched — a mis-keyed total is retyped, a refused one is usually opened
-   *  again unchanged, and a re-ring is almost always for the same thing. */
+   *  again unchanged, and the next charge is almost always for the same thing. */
   function reset() {
     setPhase({k: 'entering'});
     setUnchecked(null);
