@@ -405,7 +405,7 @@ object DpayNfc {
      * never kill the session (the JS state machine treats an `error` event as terminal and stops
      * reacting to everything, i.e. "stops scanning"). Transient failures (tag lost, failed
      * exchange) therefore return to the `listening` phase — reader mode stays enabled and the next
-     * physical re-tap starts a fresh onTag. Only hopeless cases terminate with an error: bring-up
+     * physical re-tap starts a fresh onTag. Only hopeless cases terminate with an error: startup
      * failure, a recovery window that expired while the field still held, or an unexpected throw.
      */
     private fun onTag(tag: Tag, session: ReaderSession) {

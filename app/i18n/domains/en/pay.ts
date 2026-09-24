@@ -682,7 +682,7 @@ export type ReceiveMessages = {
      *  they send the cashier — and the customer standing there — to do different things. */
     endedTitle: (reason: 'expired' | 'cancelled' | 'superseded' | 'gone') => string;
     endedBody: (reason: 'expired' | 'cancelled' | 'superseded' | 'gone') => string;
-    ringUpNext: string;
+    openChargeNext: string;
 
     paidAmount: (price: string) => string;
     /** The ledger row that paid — the merchant's proof, and the reason no other charge can claim it. */
@@ -842,7 +842,7 @@ export const receiveEn: ReceiveMessages = {
         : reason === 'superseded'
         ? 'Another charge was opened on this checkout, so this code no longer takes money. Open a fresh charge to show a new one.'
         : 'The relay no longer has it — most likely it restarted. Nothing was credited here. Open a fresh charge; if the customer says they paid, check your VCHF balance and Transactions first.',
-    ringUpNext: 'Next customer',
+    openChargeNext: 'Next customer',
 
     paidAmount: price => `Paid ${price}`,
     paidBlock: block => `Ledger block ${block}`,

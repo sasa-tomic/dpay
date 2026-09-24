@@ -71,14 +71,14 @@ import {M} from '../i18n';
  * The tap window is SHORTER than the code's life and says so. The request carries a certified IC
  * ingress expiry (`NFC_UPDATE_AHEAD_S`, minutes) while a charge stays payable for the relay's own
  * hour, so a code outlives its own tappability — stated on screen rather than left to fail silently,
- * with the next action named (scan it, or ring up again).
+ * with the next action named (scan it, or open a fresh charge).
  */
 
 type EndReason = 'expired' | 'cancelled' | 'superseded' | 'gone';
 
 /** The armed reader, built from a live charge. `expiry` is the request's own certified deadline —
  *  held beside the hex because it is what decides whether a NEW tap can still start. `reqInfo.amount`
- *  stays the settlement wire; `displayAmount` is the rung price the readout headlines (founder rule
+ *  stays the settlement wire; `displayAmount` is the opened price the readout headlines (founder rule
  *  2026-09-14). */
 type Tap = {requestHex: string; reqInfo: {amount: string; displayAmount?: string; nonce: string; who: string; currency: number}; expiry: number};
 
@@ -95,7 +95,7 @@ type Phase =
    *  said out loud, because the alternative is dropping a real payment for being slow. */
   | {k: 'paid'; charge: Charge; paid: CheckoutSettled | null; late: boolean}
   | {k: 'ended'; reason: EndReason}
-  /** The ring-up did not happen. The outcome is carried whole so the panel can say WHICH way it
+  /** The checkout-open did not happen. The outcome is carried whole so the panel can say WHICH way it
    *  failed — the four causes send the merchant to do four different things. */
   | {k: 'failed'; outcome: Exclude<CheckoutOpenOutcome, {kind: 'open'}>};
 
@@ -128,7 +128,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
    *  a checkout charge does with it). It is the charge's signed note: what the payer sees on review,
    *  trimmed here, and kept across a re-ring for the same reason the amount is. */
   note: string;
-  /** Fires from the first ring-up attempt until the cashier presses "next customer" — every phase
+  /** Fires from the first checkout-open attempt until the cashier presses "next customer" — every phase
    *  that is not the entry tail — so the parent can hide the shared amount row and the checkbox and
    *  lock the asset selection. Flipping away from a live code would leave a payable charge on
    *  screen nowhere, and leaving the row up under a Paid screen would answer a question nobody
@@ -136,10 +136,10 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
   onHoldsForm?: (held: boolean) => void;
 }) {
   const [phase, setPhase] = useState<Phase>({k: 'entering'});
-  /** The price the last ring-up ATTEMPTED, in cents — what a failure panel quotes back. Kept beside
+  /** The price the last checkout-open ATTEMPTED, in cents — what a failure panel quotes back. Kept beside
    *  the charge rather than re-parsed from the input, so the number in the message is the number
    *  that was actually signed and sent. */
-  const [rung, setRung] = useState<string | null>(null);
+  const [entered, setEntered] = useState<string | null>(null);
   /** The poll could not reach the checkout. NOT a payment state — see the component doc. */
   const [unchecked, setUnchecked] = useState<string | null>(null);
   /** The relay says the code has expired and we are still watching for a late transfer. */
@@ -174,15 +174,15 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
 
   // THE SETTLEMENT RULE (multi-currency build-out, 2026-09). The checkout prices in the merchant's
   // own currency and settles 1:1 into that currency's token, so the cashier PICKS the settlement
-  // asset at ring-up (`checkoutSettlementAssets` — the assets `services/checkout.ts` admits: IC, mainnet,
+  // asset at open (`checkoutSettlementAssets` — the assets `services/checkout.ts` admits: IC, mainnet,
   // catalog fee stated, a home currency). The PAYER keeps the fixed `CHECKOUT_OFFER` pair: a payer is
   // told the asset by the code they scan, and never chooses.
   //
   // Three rows matter, and they are kept apart on purpose:
-  //   • `checkoutRows` — every asset this counter may ring up in (the picker's options);
+  //   • `checkoutRows` — every asset this counter may open a charge in (the picker's options);
   //   • `servedRow` — the row the checkout's provider NAMES (`CHECKOUT_OFFER`, the relay's own served
   //     pair) — the wrong-asset refusal's one-tap fix, exactly as before the picker existed;
-  //   • `picked` — the asset THIS ring-up settles in: the cashier's pick, defaulting to the row
+  //   • `picked` — the asset THIS checkout-open settles in: the cashier's pick, defaulting to the row
   //     the wallet is on when that row is a settlement asset itself. Price unit, ledger fee,
   //     decimals and the armed tap all follow it.
   const checkoutRows = checkoutSettlementAssets(assets, catalog);
@@ -205,7 +205,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
     ?? checkoutRow // the wallet's own row, when it is a settlement asset — today's behaviour, unchanged
     ?? servedRow;
   // The picked row's own fee — the same honesty gate as the selected row's above. Non-null for
-  // every `checkoutSettlementRow` answer by construction; the null check keeps the ring-up honest even
+  // every `checkoutSettlementRow` answer by construction; the null check keeps the checkout-open honest even
   // so (a fee guessed at would be a customer charged one).
   const pickedFee = picked !== null && picked.protocol === 'ic'
     ? catalog.find(c => c.currency === picked.currency)?.fee ?? null
@@ -346,14 +346,14 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
     try {
       const expiryNs = await icStampExpiry(identity.secretHex, NFC_UPDATE_AHEAD_S);
       const expiry = Number(BigInt(expiryNs) / 1_000_000_000n);
-      // The rung note rides the tap request as its DISPLAY memo — what the payer's phone shows
+      // The opened-note rides the tap request as its DISPLAY memo — what the payer's phone shows
       // while it asks them to confirm. The SETTLEMENT memo is and stays `charge.reference`.
       const requestHex = await DpayNfc.buildRequest(
         identity.publicHex, amountRaw, charge.reference, expiry, row.currency, identity.username, note,
       );
       return {
         requestHex,
-        // `displayAmount` is the rung price (founder rule 2026-09-14): the merchant's tap readout
+        // `displayAmount` is the opened price (founder rule 2026-09-14): the merchant's tap readout
         // headlines it while `amount` stays the settlement wire the ledger-match uses.
         reqInfo: {amount: amountRaw, displayAmount: checkoutPriceUnits(charge.cents, row.decimals), nonce: charge.reference, who: M.receive.payer, currency: row.currency},
         expiry,
@@ -364,7 +364,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
     }
   }
 
-  async function ringUp() {
+  async function openCharge() {
     // The checkout's own row is what makes a charge both priceable and tappable: its precision turns
     // rappen into raw units, and its currency is what the tap request names. Its LEDGER FEE is
     // what makes the price honest — the shop pays it out of the price. Neither can be missing by
@@ -383,14 +383,14 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
     setTap(null);
     setNfcActive(false);
     setNfcKey(k => k + 1);
-    setRung(parsed.cents);
+    setEntered(parsed.cents);
     setPhase({k: 'opening'});
     const outcome = await openCheckoutCharge(relayUrl, identity, parsed.cents, picked.decimals, pickedFee, noteVal, picked.linkToken ?? picked.symbol);
     if (outcome.kind !== 'open') { setPhase({k: 'failed', outcome}); return; }
     // The payee-side annotation, the same save the dpay form makes: keyed by the charge's
     // reference — the memo the incoming transfer carries, so the history row this sale settles
     // into shows what it was for. No `who`: whoever pays is exactly what a checkout does not know at
-    // ring-up time. Founder rule 2026-09-14: the note carries the GROSS (the rung price — the row
+    // checkout-open time. Founder rule 2026-09-14: the note carries the GROSS (the opened price — the row
     // headlines it) + the fee (its annotation line); the wire stays the ledger truth. The checkout's
     // fee gate above makes both non-null here — the save always carries them.
     void saveTxNote(identity.publicHex, {k: outcome.charge.reference, msg: noteVal || undefined, gross: checkoutPriceUnits(parsed.cents, picked.decimals), fee: pickedFee}, Date.now());
@@ -414,7 +414,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
   }
 
   /** Back to an empty counter. The amount and the note are the PARENT's (the shared rows above)
-   *  and are kept untouched — a mis-keyed total is retyped, a refused one is usually rung up
+   *  and are kept untouched — a mis-keyed total is retyped, a refused one is usually opened
    *  again unchanged, and a re-ring is almost always for the same thing. */
   function reset() {
     setPhase({k: 'entering'});
@@ -422,7 +422,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
     setWatchingLate(false);
     setErr(null);
     // The reader was armed for the charge that just ended. Dropping it (and remounting on the next
-    // ring-up) is what stops a tap arriving against a request whose reference names a dead sale.
+    // checkout-open) is what stops a tap arriving against a request whose reference names a dead sale.
     setTap(null);
     setNfcActive(false);
     setNfcKey(k => k + 1);
@@ -488,7 +488,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
   if (phase.k === 'failed' && phase.outcome.kind === 'served-other') {
     // The checkout opened the charge in what IT serves, not what was picked. The money path is right
     // (the charge pays this merchant) but the asset is not the one the counter chose, so nothing
-    // is shown; the fix is one tap — re-pick the served asset and ring up again.
+    // is shown; the fix is one tap — re-pick the served asset and open a fresh charge.
     const servedToken = phase.outcome.served;
     const served = checkoutRows.find(a => tokenEq(a.linkToken ?? a.symbol, servedToken)) ?? null;
     return (
@@ -509,7 +509,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
       <InstructionPanel
         testID="checkout-failed"
         title={M.receive.checkout.failedTitle}
-        body={failureBody(phase.outcome, fmtAsset(rung ?? '0', 2, priceUnit))}
+        body={failureBody(phase.outcome, fmtAsset(entered ?? "0", 2, priceUnit))}
         primaryLabel={M.receive.checkout.tryAgain}
         onPrimary={reset}
       />
@@ -522,7 +522,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
         testID="checkout-ended"
         title={M.receive.checkout.endedTitle(phase.reason)}
         body={M.receive.checkout.endedBody(phase.reason)}
-        primaryLabel={M.receive.checkout.ringUpNext}
+        primaryLabel={M.receive.checkout.openChargeNext}
         onPrimary={reset}
       />
     );
@@ -541,9 +541,9 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
           style={[S.ghostBtn, S.ghostBtnMuted]}
           onPress={reset}
           accessibilityRole="button"
-          accessibilityLabel={M.receive.checkout.ringUpNext}
+          accessibilityLabel={M.receive.checkout.openChargeNext}
           accessibilityState={{disabled: false}}>
-          <Text style={S.ghostBtnText}>{M.receive.checkout.ringUpNext}</Text>
+          <Text style={S.ghostBtnText}>{M.receive.checkout.openChargeNext}</Text>
         </Pressable>
       </View>
     );
@@ -552,7 +552,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
   if (phase.k === 'showing') {
     const {charge} = phase;
     const remaining = charge.expiresAt - now;
-    // `payable` above narrows the ring-up to a priced asset; `picked` is the asset THIS charge
+    // `payable` above narrows the checkout-open to a priced asset; `picked` is the asset THIS charge
     // settles in, whose precision formats the settlement line. Two numbers, deliberately: what the
     // SHOP receives, beside the price the customer pays — they differ by the ledger fee the shop
     // now absorbs, and a cashier shown only the smaller one would read it as a misprice.
@@ -628,7 +628,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
   // 2026-09-14); this component takes the typed price and the typed note from there and parses the
   // price with the CHECKOUT's own rule (`priceCents` — two decimals, a third is refused rather than
   // rounded, because a rounded price is a misprice). No submit-on-Enter from the shared rows: a
-  // ring-up is signed, so the button stays the only thing that does it.
+  // checkout-open is signed, so the button stays the only thing that does it.
   const opening = phase.k === 'opening';
   return (
     <View style={S.centerTop}>
@@ -638,7 +638,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
           not a choice, and its row alone is the answer). Each pill names the asset and, beside it,
           the currency the price is read in — the whole honest contract of a multi-asset checkout in
           one line. Same joined-pill language as the mode toggle, deliberately quieter than the
-          ring-up button. */}
+          checkout-open button. */}
       {checkoutRows.length > 1 ? (
         <View testID="checkout-settle" style={S.railRow}>
           {checkoutRows.map(r => {
@@ -675,7 +675,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
         testID="btn-checkout-open"
         style={[S.primaryWide, opening && S.disabledFlat]}
         disabled={opening}
-        onPress={ringUp}
+        onPress={openCharge}
         accessibilityRole="button"
         accessibilityLabel={M.receive.request}
         accessibilityHint={M.receive.checkout.openChargeHint}
@@ -720,17 +720,17 @@ function relayHost(relayUrl: string): string {
   }
 }
 
-/** Why the ring-up did not happen, in the merchant's terms. Each arm ends somewhere different: turn
+/** Why the checkout-open did not happen, in the merchant's terms. Each arm ends somewhere different: turn
  *  the checkout on, check the connection, fix what the checkout named, or stop trusting this code. The
  *  addresses come from the OUTCOME (the relay that answered / did not answer), never from the
  *  wallet's preferred URL — a walk or a pin may have made a different relay the one that owes the
  *  merchant an explanation. */
-function failureBody(outcome: Exclude<CheckoutOpenOutcome, {kind: 'open'} | {kind: 'served-other'}>, rung: string): string {
+function failureBody(outcome: Exclude<CheckoutOpenOutcome, {kind: 'open'} | {kind: 'served-other'}>, entered: string): string {
   switch (outcome.kind) {
     case 'not-served': return M.receive.checkout.notServed(relayHost(outcome.addr));
     case 'unreachable': return M.receive.checkout.unreachable(outcome.tried.map(relayHost).join(', '));
     case 'unsigned': return M.receive.checkout.unsigned;
-    case 'mispriced': return M.receive.checkout.mispriced(rung, outcome.quoted);
+    case 'mispriced': return M.receive.checkout.mispriced(entered, outcome.quoted);
     case 'refused':
       return outcome.said !== null
         ? M.receive.checkout.refused(outcome.said)

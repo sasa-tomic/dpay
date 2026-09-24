@@ -360,7 +360,7 @@ export const receiveDe: ReceiveMessages = {
         : reason === 'superseded'
         ? 'Auf dieser Kasse wurde eine neuere Buchung erfasst, dieser Code nimmt kein Geld mehr an. Buche erneut und zeig einen frischen Code.'
         : 'Das Relay hat sie nicht mehr — höchstwahrscheinlich wurde es neu gestartet. Hier wurde nichts gutgeschrieben. Buche erneut; sagt die Kundschaft, sie habe bezahlt, prüfe erst deinen VCHF-Bestand und die Transaktionen.',
-    ringUpNext: 'Nächste Kundschaft',
+    openChargeNext: 'Nächste Kundschaft',
 
     paidAmount: price => `Bezahlt ${price}`,
     paidBlock: block => `Ledger-Block ${block}`,

@@ -44,7 +44,7 @@ const liftSm = (p: Palette) => ({
 // it is mounted in, and a column that centers its children (`alignItems:'center'`) sizes a
 // non-stretched item to its own MAX-CONTENT — which flexbox does not clamp to the parent's width.
 // A nested surface therefore grew WIDER than the column it sits in and hung off both edges: the
-// cashier ring-up form measured 533 px inside a 358 px column (x = −71.7) with the `CHF` prefix and
+// cashier checkout-open form measured 533 px inside a 358 px column (x = −71.7) with the `CHF` prefix and
 // the button's corner radii off-screen. Stretching states the contract the surface always had —
 // it fills the content column — at every mount point instead of only where the parent happens to
 // default to `stretch`.
@@ -751,7 +751,7 @@ function buildStyles(p: Palette) {
   // argument: these two are one surface with one difference — where the content sits vertically.
   // Letting them differ in a SECOND property is precisely the drift that produced the measured
   // overflows the stretch was introduced to kill (the IC send form at 424.7 px in a 358 px column,
-  // the cashier ring-up at 533 px). This one already measured x 16 / w 358 with zero overflow, and
+  // the cashier checkout-open at 533 px). This one already measured x 16 / w 358 with zero overflow, and
   // it MEASURES THE SAME WITH THE LINE ADDED — checked on both call sites in the running app: the
   // ckERC20 deposit sheet (x 16 / w 358 / right 374 in a 390 px column, nothing off-viewport) and
   // the Settings scroller, where this is a ScrollView contentContainer and `align-self` was already

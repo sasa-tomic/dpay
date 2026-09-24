@@ -80,7 +80,7 @@ docker compose logs cloudflared | grep -i "Registered tunnel connection"   # tun
 `just compose-down` stops it. `docker compose logs -f` follows both services.
 
 Nothing is published to the host — the relay is reachable only to cloudflared over the compose network,
-and cloudflared only reaches out. To hit the relay directly (e.g. a relay-only bring-up with
+and cloudflared only reaches out. To hit the relay directly (e.g. a relay-only startup with
 `docker compose up -d relay`, or the local-replica rehearsal), uncomment the loopback `ports` mapping
 in `docker-compose.yml`.
 
@@ -128,7 +128,7 @@ move minting under governance or an explicit minter allowance.
 ## Rehearse against a local replica before mainnet
 
 The pre-mainnet gate: the real container, the real ic-agent path, a replica you own — no Cloudflare
-account needed (bring up the relay alone and hit it on loopback). One catch: a container reaches a
+account needed (start the relay alone and hit it on loopback). One catch: a container reaches a
 host replica through `host.docker.internal`, so the replica must listen **beyond loopback** — start
 it with `--host 0.0.0.0:4943`, not dfx's default `127.0.0.1` (otherwise the relay can't reach it and
 — correctly — refuses to start).
@@ -141,7 +141,7 @@ cargo run -q -p dpay-fixture                     # deterministic init args → d
 dfx deploy dpay_canister --argument-file dfx/args/init.arg
 CID=$(dfx canister id dpay_canister)
 
-# 2. point the relay at it; bring up the relay alone (uncomment the loopback `ports` in compose):
+# 2. point the relay at it; start the relay alone (uncomment the loopback `ports` in compose):
 cd deploy && cat > .env <<EOF
 DPAY_LEDGER=ic
 DPAY_CANISTER_ID=$CID

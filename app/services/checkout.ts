@@ -7,7 +7,7 @@
 //
 // FOUR THINGS DECIDE THIS FILE.
 //
-// 1. **A RING-UP IS SIGNED, and the signature is the merchant's claim on the money.** The checkout pays
+// 1. **A CHARGE-OPEN IS SIGNED, and the signature is the merchant's claim on the money.** The checkout pays
 //    the account DERIVED from `merchant_pubkey`, so naming a key is claiming an account. The core
 //    signs the canonical bytes (`DpayCore.checkoutOpenSignature`, encoding pinned in
 //    `dfx/checkout_open_signing.json`) over the merchant's OWN seed — this module never sees a
@@ -27,7 +27,7 @@
 //    place a JSON `number` is accepted is the wire's `cents` (the relay's field is a bare `u64`,
 //    not the app's usual decimal string), and it is guarded by `Number.isSafeInteger` at both ends.
 //
-// 4. **THE PRICE THE CHECKOUT ANSWERS WITH IS CHECKED AGAINST THE PRICE THAT WAS RUNG UP.** A ring-up
+// 4. **THE PRICE THE CHECKOUT ANSWERS WITH IS CHECKED AGAINST THE PRICE THAT WAS OPENED.** A checkout-open
 //    that comes back quoting a different amount than the cashier typed is refused as `mispriced`
 //    rather than shown: the code would charge a customer a number nobody at the counter chose.
 //
@@ -57,7 +57,7 @@ import type {Identity} from '../lib/types';
  *
  *  This is the PAYER-side pair (what a checkout code quotes, and what `services/opencryptopay.ts`
  *  resolves a provider offer with); it stays a fixed pair because the PAYER is told the asset by
- *  the code it scans. The MERCHANT side picks the settlement asset at ring-up — see
+ *  the code it scans. The MERCHANT side picks the settlement asset at open — see
  *  `checkoutSettlementRow` below. */
 export const CHECKOUT_OFFER = {method: 'InternetComputer', asset: 'VCHF'} as const;
 
@@ -92,7 +92,7 @@ export function priceCents(text: string): {ok: true; cents: string} | {ok: false
   return {ok: true, cents: parsed.raw};
 }
 
-/** A charge as the ring-up answered it. `cents` is what THIS device signed (the open response does
+/** A charge as the checkout-open answered it. `cents` is what THIS device signed (the open response does
  *  not echo it), `qr` is the string that belongs in a QR — the `?lightning=` wrapper a generic
  *  phone camera opens as a web page — and the two instants are the charge's own clock, so the
  *  cashier's countdown needs no copy of the relay's lifetime constant.
@@ -137,7 +137,7 @@ export type CheckoutStatus = {
 
 export type CheckoutOpenOutcome =
   | {kind: 'open'; charge: CheckoutCharge}
-  /** The checkout answered with a price that is not the one that was rung up. Nothing is shown. */
+  /** The checkout answered with a price that is not the one that was opened. Nothing is shown. */
   | {kind: 'mispriced'; quoted: string}
   /** The checkout opened the charge in a DIFFERENT asset than the one the cashier picked — the relay
    *  serves what it serves, and this app does not present a charge that is not the one the counter
@@ -204,7 +204,7 @@ export type CheckoutVoidOutcome =
  *  the price is for the shop to quote the price minus that fee — which is what a card terminal does
  *  and what this checkout does (founder, 2026-09-12). The relay computes the same number from the same
  *  catalog fee (`Charge::amount_raw`, `crates/dpay-relay/src/checkout.rs`, which owns the reasoning);
- *  this is the app's own statement of it, and the two are held together by the ring-up price check
+ *  this is the app's own statement of it, and the two are held together by the checkout-open price check
  *  below — a relay that quoted anything else is refused rather than displayed.
  *
  *  The checkout prices 1:1 with the settlement asset's OWN currency — francs into VCHF, dollars into
@@ -226,7 +226,7 @@ export function checkoutRawUnits(cents: string, decimals: number, feeRaw: string
 }
 
 /**
- * The rung PRICE in raw units — the same scaling as `checkoutRawUnits` with NO fee netted out. This is
+ * The opened PRICE in raw units — the same scaling as `checkoutRawUnits` with NO fee netted out. This is
  * the GROSS the checkout's displays headline (founder rule 2026-09-14: both devices read the typed
  * price; the fee rides only the log row's annotation line). The wire (`checkoutRawUnits`) remains the
  * settlement truth everywhere money moves.
@@ -241,10 +241,10 @@ export function checkoutPriceUnits(cents: string, decimals: number): string {
 }
 
 /** The MERCHANT-side settlement SHAPE (multi-currency build-out, 2026-09): which wallet assets a
- *  checkout charge could ever be RUNG UP in, on the shape of the row alone. Three honest gates, each
+ *  checkout charge could ever be OPENED in, on the shape of the row alone. Three honest gates, each
  *  excluding a row for a stated reason:
  *   1. it settles on the Internet Computer — the checkout's method (`METHOD` in the relay's checkout.rs);
- *   2. it is a mainnet row — a charge real money settles is never rung up against a testnet token;
+ *   2. it is a mainnet row — a charge real money settles is never opened against a testnet token;
  *   3. it settles a HOME CURRENCY — francs, dollars or euros. The price is typed in the
  *      merchant's own currency and settles 1:1 into that currency's token; a charge priced in
  *      francs and settled in BTC or ICP would need an exchange rate, and dpay has none to quote
@@ -270,7 +270,7 @@ export function checkoutSettlementRow(asset: SelectableAsset, catalog: readonly 
   return row != null && row.fee != null && checkoutSettlementShape(asset, catalog);
 }
 
-/** Every asset the checkout may be rung up in, in the wallet's own catalog order — the cashier's
+/** Every asset the checkout may be opened in, in the wallet's own catalog order — the cashier's
  *  settlement picker, and empty exactly when this wallet can serve no checkout at all. */
 export function checkoutSettlementAssets(assets: readonly SelectableAsset[], catalog: readonly CurrencyDescriptor[]): SelectableAsset[] {
   return assets.filter(a => checkoutSettlementRow(a, catalog));
@@ -318,12 +318,12 @@ function whole(o: Record<string, unknown>, key: string): number | null {
 
 const STATES: readonly CheckoutChargeState[] = ['open', 'paid', 'superseded', 'cancelled', 'expired'];
 
-/** The merchant's signed request — a ring-up (`cents ≥ 1`) or a cancellation (`cents = 0`), told
+/** The merchant's signed request — a checkout-open (`cents ≥ 1`) or a cancellation (`cents = 0`), told
  *  apart by the SIGNED price and by nothing else. `note` is what the charge is for, and it rides
  *  the SIGNATURE, not just the body: an unsigned field inside a signed request is one the relay
  *  cannot attribute, and this text is payer-read on review. Trimmed empty — the cashier typed
  *  nothing but whitespace — signs the legacy note-less v1 bytes and OMITS the wire key, so a
- *  note-less ring-up is byte-for-byte the request every older app sends; anything else signs under
+ *  note-less checkout-open is byte-for-byte the request every older app sends; anything else signs under
  *  the v2 tag and crosses as the trimmed text, one spelling of it everywhere. Throws when the core
  *  cannot sign, which every caller turns into `unsigned`: an unsigned request is one the relay
  *  would refuse anyway, and sending it would burn a nonce for nothing. */
@@ -348,7 +348,7 @@ async function signedBody(identity: Identity, cents: string, note: string): Prom
   return body;
 }
 
-/** How long a merchant route may take. Generous next to a balance poll because a ring-up is a
+/** How long a merchant route may take. Generous next to a balance poll because a checkout-open is a
  *  person standing at a counter waiting to be told a number is live, and short next to the
  *  submission budget on the payer side — nothing here has moved any money yet, so giving up early
  *  costs a retry rather than a payment. */
@@ -455,7 +455,7 @@ async function checkoutFetch(relayUrl: string, path: string, init: RequestInit, 
 }
 
 /**
- * `POST /api/v1/checkout` — ring up a charge on the merchant's own account.
+ * `POST /api/v1/checkout` — open a charge on the merchant's own account.
  *
  * `decimals` and `feeRaw` are the checkout asset's precision and its ledger's transfer fee, and they
  *  are here for one job: the answer's price is converted back to raw units and checked against what
@@ -466,7 +466,7 @@ async function checkoutFetch(relayUrl: string, path: string, init: RequestInit, 
  * `settleToken` is the asset the cashier PICKED (`checkoutSettlementRow`): the answer names the asset
  *  it actually opened (`asset` on the wire), and a mismatch is refused whole — a dollar pick shown
  *  as a franc charge would be an exchange nobody at the counter made. The pick deliberately does
- *  NOT ride the request body: the ring-up's signed bytes are pinned (`dfx/checkout_open_signing.json`)
+ *  NOT ride the request body: the checkout-open's signed bytes are pinned (`dfx/checkout_open_signing.json`)
  *  and an unsigned field inside a signed request is one the relay cannot attribute — the day the
  *  relay serves more than its own pair, the asset enters the signature, and until then the answer
  *  check fails this client closed.
@@ -488,7 +488,7 @@ export async function openCheckoutCharge(
     body = await signedBody(identity, cents, note);
   } catch (e) {
     const detail = errText(e);
-    console.warn(`checkout: could not sign a ring-up: ${detail}`);
+    console.warn(`checkout: could not sign a checkout-open: ${detail}`);
     return {kind: 'unsigned', detail};
   }
   let r: Response;
@@ -503,7 +503,7 @@ export async function openCheckoutCharge(
   } catch (e) {
     const detail = errText(e);
     const tried = e instanceof CheckoutUnreachable ? e.tried : [base(relayUrl)];
-    console.warn(`checkout: ring-up could not reach ${tried.join(', ')}: ${detail}`);
+    console.warn(`checkout: checkout-open could not reach ${tried.join(', ')}: ${detail}`);
     return {kind: 'unreachable', detail, tried};
   }
   const json = await readJson(r);
@@ -514,7 +514,7 @@ export async function openCheckoutCharge(
     return {kind: 'refused', said: said(json), status: r.status};
   }
   if (typeof json !== 'object' || json === null) {
-    return {kind: 'unreachable', detail: `ring-up answered HTTP ${r.status} with an unreadable body`, tried: [addr]};
+    return {kind: 'unreachable', detail: `checkout-open answered HTTP ${r.status} with an unreadable body`, tried: [addr]};
   }
   const o = json as Record<string, unknown>;
   const id = str(o, 'id');
@@ -529,7 +529,7 @@ export async function openCheckoutCharge(
   const expiresAt = whole(o, 'expires_at');
   if (id === null || qr === null || amount === null || createdSecs === null || expiresAt === null
       || reference === null || !/^[0-9a-f]{32}$/.test(reference)) {
-    const detail = `ring-up answered without {id, qr, amount, reference, created_secs, expires_at}: ${JSON.stringify(o).slice(0, 200)}`;
+    const detail = `checkout-open answered without {id, qr, amount, reference, created_secs, expires_at}: ${JSON.stringify(o).slice(0, 200)}`;
     console.warn(`checkout: ${detail}`);
     return {kind: 'unreachable', detail, tried: [addr]};
   }
@@ -634,7 +634,7 @@ function parseSettled(value: unknown): CheckoutSettled | null {
 }
 
 /** `POST /api/v1/checkout/void` — the cashier clears a mis-keyed total. The same signed shape as a
- *  ring-up with `cents = 0`, which is what stops a captured ring-up being replayed as one. */
+ *  checkout-open with `cents = 0`, which is what stops a captured checkout-open being replayed as one. */
 export async function cancelCheckoutCharge(relayUrl: string, identity: Identity): Promise<CheckoutVoidOutcome> {
   let body: Record<string, unknown>;
   try {

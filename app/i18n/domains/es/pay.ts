@@ -353,7 +353,7 @@ export const receiveEs: ReceiveMessages = {
         : reason === 'superseded'
         ? 'En esta caja se abrió un cobro más reciente, así que este código ya no acepta dinero. Vuelve a cobrar para enseñar uno nuevo.'
         : 'El relay ya no lo tiene, casi seguro porque se reinició. Aquí no se abonó nada. Vuelve a cobrar; si el cliente dice que pagó, mira primero tu saldo de VCHF y las Transacciones.',
-    ringUpNext: 'Siguiente cliente',
+    openChargeNext: 'Siguiente cliente',
 
     paidAmount: price => `Pagado ${price}`,
     paidBlock: block => `Bloque del registro ${block}`,

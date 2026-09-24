@@ -131,7 +131,7 @@ export type DpayCoreApi = {
   // Optional so an app built before the native method exists degrades to 'unknown' (chip hidden).
   nfcStatus?(): Promise<string>;
   // Merchant side: the detached Ed25519 signature that proves this device holds the key its
-  // OpenCryptoPay checkout account is derived from, so `POST /api/v1/checkout` can refuse a ring-up for a
+  // OpenCryptoPay checkout account is derived from, so `POST /api/v1/checkout` can refuse a checkout-open for a
   // key the caller does not own. The merchant pubkey is derived from `secretHex` inside the core —
   // never passed in. `cents` is a raw-u64 decimal string; `issuedAt` is unix SECONDS and must be
   // inside the relay's skew window (`dpay_core::CHECKOUT_OPEN_MAX_SKEW_SECS`); `merchantName` is the

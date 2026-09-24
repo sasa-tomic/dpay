@@ -122,7 +122,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
     return () => { alive = false; };
   }, [identity.secretHex]);
 
-  // CheckoutCharge HOLDS THE FORM: from the first ring-up attempt until the cashier presses "next
+  // CheckoutCharge HOLDS THE FORM: from the first checkout-open attempt until the cashier presses "next
   // customer" — a live code, a paid screen, an ended one, a failed one. Reported by CheckoutCharge
   // (which owns the charge) and folded into the lock below, because everything that is true of an
   // open request QR is true of it — plus one thing that is not: the charge outlives this screen,
@@ -175,7 +175,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   const reqPrefix = currencySymbol(catalog, selectedCurrency);
 
   // The asset this whole tab is about — the merchant's chosen settlement asset. Read once and used
-  // by both code forms: the dpay link names it, and the checkout answers whether a charge can be rung
+  // by both code forms: the dpay link names it, and the checkout answers whether a charge can be opened
   // up in it at all.
   const activeAsset = assets.find(a => a.id === selectedAssetId) ?? null;
 
@@ -713,7 +713,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
                 Enter in the last field of a short form does the thing the form is for; this one made
                 them reach for the mouse, and the keyboard shortcuts that DO exist stop at the tab
                 level. `onSubmitEditing` is the RN-native spelling of it, so the same key works on a
-                hardware keyboard attached to a phone. The DPAY form only: a ring-up is signed and
+                hardware keyboard attached to a phone. The DPAY form only: a checkout-open is signed and
                 supersedes the live charge, so the shared field does not submit while the checkout
                 checkbox is checked — the checkout's own button is the one that rings up. */}
             <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} onSubmitEditing={(checkoutAvailable || checkoutHeld) && codeForm === 'checkout' ? undefined : makeRequest} returnKeyType="done" />
@@ -722,7 +722,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
               same place under the shared amount row, same text across the checkout-checkbox toggle. In
               the dpay form its text rides the payment link as the memo; in the checkout form it is the
               charge's signed note (passed to CheckoutCharge below). Submit-on-Enter is the DPAY form's
-              only — the shared amount row above says why (a ring-up is signed; the checkout's own
+              only — the shared amount row above says why (a checkout-open is signed; the checkout's own
               button is the one that rings up). */}
           <TextInput
             testID="memo-input"

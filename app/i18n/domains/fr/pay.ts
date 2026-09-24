@@ -355,7 +355,7 @@ export const receiveFr: ReceiveMessages = {
         : reason === 'superseded'
         ? 'Un montant plus récent a été ouvert sur cette caisse : ce code n’accepte plus de paiement. Recommencez pour en montrer un tout neuf.'
         : 'Le relais ne l’a plus — très probablement parce qu’il a redémarré. Rien n’a été crédité ici. Recommencez ; si le client dit avoir payé, vérifiez d’abord votre solde VCHF et vos Transactions.',
-    ringUpNext: 'Client suivant',
+    openChargeNext: 'Client suivant',
 
     paidAmount: price => `Payé ${price}`,
     paidBlock: block => `Bloc du registre ${block}`,

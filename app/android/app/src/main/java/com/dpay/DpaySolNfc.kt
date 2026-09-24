@@ -398,7 +398,7 @@ object DpaySolNfc {
      * Error policy mirrors the IC rail: a tag discovered during a sloppy approach often fails its
      * first exchange at the RF margin — expected physics, so it returns to `listening` (reader mode
      * stays enabled; the next coupling fires a fresh onTag) instead of killing the merchant session
-     * with a terminal error. Only hopeless cases terminate: bring-up failure, a SELECT that never
+     * with a terminal error. Only hopeless cases terminate: startup failure, a SELECT that never
      * succeeded while the field held, or an unexpected throw.
      */
     private fun runReader(tag: Tag, solreqUri: String) {
