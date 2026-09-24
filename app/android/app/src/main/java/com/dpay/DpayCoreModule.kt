@@ -197,15 +197,15 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     }
 
     /** Merchant side: the detached signature proving this device holds the key its OpenCryptoPay
-     *  till account is derived from, so the relay can refuse a ring-up for a key the caller does not
+     *  checkout account is derived from, so the relay can refuse a charge-open for a key the caller does not
      *  own. The merchant pubkey is DERIVED from the seed inside Rust — never passed in, so there is
      *  no mismatch to get wrong. `cents` is a raw-u64 decimal STRING (MC1); `issuedAt` is unix
      *  seconds and must be inside the relay's skew window; `merchantName` is the CLAIMED display
      *  name and is bound by the signature; `note` is the one-line purpose the payer reads on
      *  review — an EMPTY string signs the note-less (v1) encoding, any non-empty note signs under
-     *  `TILL_OPEN_DOMAIN_V2`. Resolves the 64-byte signature as hex. */
+     *  `CHECKOUT_OPEN_DOMAIN_V2`. Resolves the 64-byte signature as hex. */
     @ReactMethod
-    fun tillOpenSignature(
+    fun checkoutOpenSignature(
         secretHex: String,
         cents: String,
         nonceHex: String,
@@ -218,7 +218,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         try {
             promise.resolve(
                 hex(
-                    uniffi.dpay_ffi.tillOpenSignature(
+                    uniffi.dpay_ffi.checkoutOpenSignature(
                         unhex(secretHex),
                         centsU,
                         unhex(nonceHex),
@@ -806,7 +806,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
      *
      * WHY THIS EXISTS. Everything this app logs goes to `console.*` → logcat, which lives only in a
      * rolling in-memory buffer on the device and only while a cable is attached to read it. That is
-     * fine at a desk and useless for the case it matters most: a real payment at a real till,
+     * fine at a desk and useless for the case it matters most: a real payment at a real checkout,
      * minutes or hours from any computer, where the ONE thing worth knowing is what the payment
      * provider actually answered after the money moved. A file survives the walk home.
      *

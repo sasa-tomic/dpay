@@ -42,7 +42,7 @@ OUT_DIR = ROOT / "e2e/web/fonts"
 FACES = ["plex_mono_500", "space_grotesk_500", "space_grotesk_600", "space_grotesk_700"]
 
 # Source trees whose text can reach a glyph: the whole app (every i18n locale lives here) and the
-# relay's compiled catalog/till strings (server-supplied display text).
+# relay's compiled catalog/checkout strings (server-supplied display text).
 SCAN = [(ROOT / "app", (".ts", ".tsx")), (ROOT / "crates/dpay-relay/src", (".rs",))]
 SCAN_SKIP = {"node_modules", "android", "ios", ".e2e-dist", "build", "shots"}
 

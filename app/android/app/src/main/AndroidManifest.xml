@@ -63,11 +63,11 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" android:host="dpay.kalaj.org" android:pathPrefix="/wallet/pay/" />
         </intent-filter>
-        <!-- Android App Link for a TILL code (https://dpay.kalaj.org/pl/?lightning=<LNURL…>) — the
-             QR a dpay till prints when the merchant rings a sale up (`TILL_CODE_PATH` in
-             crates/dpay-relay/src/till.rs mints it; the same assetlinks.json verification covers
+        <!-- Android App Link for a CHECKOUT code (https://dpay.kalaj.org/pl/?lightning=<LNURL…>) — the
+             QR a dpay checkout prints when the merchant opens a charge (`CHECKOUT_CODE_PATH` in
+             crates/dpay-relay/src/checkout.rs mints it; the same assetlinks.json verification covers
              it, host-wide). Without this filter a phone WITH the app still opened the browser's
-             static landing page when its camera read the till QR — the app could only pay a till
+             static landing page when its camera read the checkout QR — the app could only pay a checkout
              through its own in-app scanner. With it, the camera opens the app straight into the
              OpenCryptoPay payer flow; every other camera still gets the /pl/ landing page, which
              is why the path stays https rather than a private scheme. Wallet routes the URL into
