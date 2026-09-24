@@ -438,7 +438,7 @@ fix, which is correct today but means multi-asset checkout needs the asset INSID
 new signing domain version, regenerate the pin via `just wire-layout`, relay echoes it. Value 7,
 effort M (wire+relay+app).
 
-Beyond item 6 (item 7 is DONE, above) the remaining list is the physical/outer-loop gates (below, founder-run) and the
+Beyond item 6 (both now DONE, above) the remaining list is the physical/outer-loop gates (below, founder-run) and the
 DO-NOT-NAG set.
 
 **Objective state (compressed history — the currency-first frame, founder 2026-09-04):**
