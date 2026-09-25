@@ -1264,9 +1264,7 @@ export function ConvertMode({
                     <Text testID={`convert-venue-${r.rowId}-err`} style={S.err}>{err}</Text>
                   ) : r.kind === 'hub' ? (
                     <Text style={S.convertMetaLine}>{M.convert.multihop.hubShape()}</Text>
-                  ) : r.kind === 'crossrail' ? (
-                    <Text style={S.convertMetaLine}>{M.convert.multihop.mechViaCctp}</Text>
-                  ) : (
+                  ) : (/* crossrail: the label IS the mechanism line — no meta echo */
                     <View style={S.convertBtnBusyRow}>
                       <ActivityIndicator color={C.sub} />
                     </View>
