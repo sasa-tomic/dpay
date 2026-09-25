@@ -108,7 +108,7 @@ export async function run() {
     // seed: without it a zero balance parks the Pay tab on the fund panel and there is no scanner to
     // point at the checkout — a green flow that proved nothing.
     assert(await driver.waitForText(SEED_TEXT, {timeoutMs: 10_000}),
-      'the app must see the VCHF seed before the Pay tab can scan');
+      'the app must see the VCHF seed — the CHF currency row shows the summed figure (fork #4)');
     await driver.click('tab-pay');
     assert(!(await driver.isPresent('pay-fund')), 'a funded asset must reach the scan surface, not the fund-first panel');
     await scanCheckout(driver, checkout.qr);

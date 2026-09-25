@@ -52,7 +52,7 @@ export async function run() {
     // is not rendered there (it names the SELECTION, which is a different fact; see flow 158).
     // `home-headline-label` is the currency statement on this surface.
     await driver.click('tab-home', {timeoutMs: 5_000});
-    assertIncludes(await driver.readText('home-headline-label'), 'US dollars',
+    assertIncludes(await driver.readText('home-headline-label'), 'Balance USD',
       'home=USD must start on the preferred ckUSDC rail');
 
     // The SOL RPC stub: USDC FUNDED (2.5 USDC — the sibling is the richer rail here, tempting any

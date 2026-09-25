@@ -121,7 +121,7 @@ export async function run() {
     // The header carries the ACTIVE asset's balance, so this is the gate that the app has seen the
     // seed — without it a zero balance would park the Pay tab on the fund panel and there would be
     // no scanner to point at the checkout (a green flow that proved nothing about the refusal).
-    assert(await driver.waitForText('5.00 USDC', {timeoutMs: 10_000}), 'the app must see the ckUSDC seed before the Pay tab can scan');
+    assert(await driver.waitForText('$5.00', {timeoutMs: 10_000}), 'the app must see the ckUSDC seed — the USD currency row shows the summed $5.00 (fork #4)');
     await driver.click('tab-pay');
     assert(!(await driver.isPresent('pay-fund')), 'a funded asset must reach the scan surface, not the fund-first panel');
     await scanCheckout(driver);

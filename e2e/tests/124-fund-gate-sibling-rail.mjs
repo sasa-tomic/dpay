@@ -40,7 +40,7 @@ export async function run() {
     await openBalances(driver);
     await selectCurrency(driver, 'ckusdc');
 
-    assertIncludes(await driver.readText('active-asset-label'), 'US dollars',
+    assertIncludes(await driver.readText('active-asset-label'), 'Balance USD',
       'home=USD must start on the preferred ckUSDC rail');
 
     // Fund the SIBLING rail only: 2.5 USDC on Solana (live install — no navigation follows). The

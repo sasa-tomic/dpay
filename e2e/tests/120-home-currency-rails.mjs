@@ -93,7 +93,7 @@ export async function run() {
     // header chip is not rendered there (it names the SELECTION, which is a different fact; see
     // flow 158). `home-headline-label` is the currency statement on this surface.
     const label = await driver.readText('home-headline-label');
-    assertIncludes(label, 'US dollars', 'choosing USD must land the wallet on its preferred rail, in the currency\'s name');
+    assertIncludes(label, 'Balance USD', 'choosing USD lands the wallet on its preferred rail — the headline names the CURRENCY (eyebrow grammar)');
     console.log(`[120-home-currency-rails] ✓ continue works: ${JSON.stringify(label)}`);
 
     // --- 5. Settings shows the same group shape for the main currency ----------------------------
