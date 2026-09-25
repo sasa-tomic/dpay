@@ -88,15 +88,16 @@ export async function run() {
     // which the filter already excluded; the disabled-state contract is pinned by the
     // swapTargets jest suite and flow 190's ckETH leg.)
 
-    // --- 3. the standing pair arms on its own: single venue → attributed line --------------------
+    // --- 3. the standing pair arms on its own: stable-first USD (the 2026-09-25 founder
+    // rule), single venue → attributed line --------------------------------------------------
     await driver.click('btn-convert-target', {timeoutMs: 3_000}); // close the list
     await driver.type('convert-amount', '1');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-    assert(await driver.findByTestID('convert-venue-icpswap', {timeoutMs: 4_000}) != null,
-      'the standing ICP pair\'s direct pool is the standing pick (one venue, nothing withheld)');
+    assert(await driver.findByTestID('convert-venue-icpswap-vchf-ckusdc', {timeoutMs: 4_000}) != null,
+      'the standing USD pair\'s direct pool is the standing pick (one venue, nothing withheld)');
     assert(await driver.findByTestID('convert-venue-none', {timeoutMs: 1_000}).catch(() => null) == null,
       'no none-selected line — the single venue leaves nothing to choose');
-    console.log('[206-convert-target-currencies] ✓ standing pair: direct pool armed, attributed headline');
+    console.log('[206-convert-target-currencies] ✓ standing pair (stable-first USD): direct pool armed, attributed headline');
 
     // --- 4. the USD pair: kind order (direct pool, hub, Route B) and NO cash-out row -------------
     await pickSwapTarget(driver, 'USD');

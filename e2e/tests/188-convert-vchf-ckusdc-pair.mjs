@@ -15,8 +15,9 @@
 //   * VCHF → ckUSDC DIRECT quote: venue_id icpswap-vchf-ckusdc, zero_for_one TRUE (the pool's
 //     token0 is VCHF), the venue's own 0.30% tier, a 6-decimal ckUSDC amount_out shape.
 //   * ckUSDC → VCHF reverse quote: zero_for_one FALSE, an 8-decimal VCHF amount_out shape.
-//   * UI: the VCHF direct form is untouched (row-0 pool principals, no fail-closed panel), the
-//     new pool surfaces as the destination-picker's Route A row — and because the hop is THE
+//   * UI: the VCHF direct form is untouched (no fail-closed panel); the standing pair is now
+//     stable-first CHF → USD through THIS pool (the 2026-09-25 founder rule), and the new pool
+//     surfaces as the destination-picker's Route A row — and because the hop is THE
 //     canonical USDC row, the full cross-rail composition rides the SAME venue (Route B +CCTP,
 //     Route C +jupiter): a three-route picker, so the one-route honesty line stays quiet.
 //     Picking Route A quotes the hop through THIS pool: the min-you'll-receive is the hop
@@ -32,7 +33,7 @@ const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
 const CKUSDC_LEDGER = 'xevnm-gaaaa-aaaar-qafnq-cai';
 const VCHF_USDC_POOL = 'hx7nb-diaaa-aaaar-qbxsa-cai'; // venue icpswap-vchf-ckusdc's OWN pool
-const VCHF_ICP_POOL = '65mrh-fqaaa-aaaar-qapoa-cai'; // the row-0 venue's pool (the direct form's)
+const VCHF_ICP_POOL = '65mrh-fqaaa-aaaar-qapoa-cai'; // the row-0 venue's pool (the ICP pass winner — flow 173)
 const VENUE = 'icpswap-vchf-ckusdc';
 const ROUTE_ROW = 'convert-dest-route-multihop:icpswap-vchf-ckusdc:2';
 const DEST = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'; // lowercase 0x+40hex — valid
@@ -114,15 +115,16 @@ export async function run() {
 
     await openConvertFor(driver, 'vchf');
     await driver.type('convert-amount', '10');
-    // Registry-first resolution: VCHF's direct form STILL lands on the row-0 VCHF ↔ ICP venue
-    // (the new row must not hijack it — pinned server-side by convert.test.ts, pinned HERE in
-    // the running app through the pool principal the checklist quotes).
+    // Stable-first standing (the 2026-09-25 founder rule): the VCHF surface opens on the USD
+    // pair, and its direct pool — THIS flow's new venue — is the standing pick, quoted through
+    // the pool principal the checklist renders. The row-0 VCHF ↔ ICP pool still wins WITHIN
+    // its own pass (pinned server-side by convert.test.ts, live in flow 173).
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     assert(await driver.findByTestID('convert-unavailable', {timeoutMs: 500}).catch(() => null) == null,
       'VCHF is venue-PAIRED (no fail-closed panel — the direct form renders)');
     await driver.click('convert-details', {timeoutMs: 5_000}); // the folded census (verbosity pass 2026-09-16)
-    assertEq((await driver.readText('convert-pool-principal')).trim(), VCHF_ICP_POOL,
-      'the direct form still quotes through the row-0 VCHF ↔ ICP pool');
+    assertEq((await driver.readText('convert-pool-principal')).trim(), VCHF_USDC_POOL,
+      'the standing form quotes through the stable pair (VCHF ↔ ckUSDC) pool');
     // The new pool's app surface, currency-first: the USD target's venue area carries the
     // direct pool, the via-ICP hub, Route B (+CCTP) and the CeFi row — kind order; the
     // external-address Route A is not offered (the swap converts between the user's own

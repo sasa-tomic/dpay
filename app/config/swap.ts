@@ -186,10 +186,11 @@ export function resolveSwapTargets(args: {
 }
 
 /** The STANDING target: for a STABLE source, the stable pair (CHF→USD, not CHF→a volatile) —
- *  the conversion a fiat holder is there to make, one fewer tap than the historical registry
- *  pick. A categorical preference, not a ranking: the founder's no-ranking rule governs VENUES
- *  (fork 3 — venues are the things a price could rank), and within each pass the winner is
- *  still the FIRST registered rail-local row (an ic_amm pool or a Solana venue — registry
+ *  the founder's decision (2026-09-25, recorded in the redesign spec) after visual validation
+ *  surfaced the volatile historical default: a fiat holder is there for the other stable, one
+ *  fewer tap. A categorical preference, not a ranking: the founder's no-ranking rule governs
+ *  VENUES (fork 3 — venues are the things a price could rank), and within each pass the winner
+ *  is still the FIRST registered rail-local row (an ic_amm pool or a Solana venue — registry
  *  order). Falls back through non-stable direct targets, then the first reachable target for a
  *  source with no direct row (a hub-only source). Null when the source reaches nothing. */
 export function standingTarget(targets: SwapTarget[]): SwapTarget | null {

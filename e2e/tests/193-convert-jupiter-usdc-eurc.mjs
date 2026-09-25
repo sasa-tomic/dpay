@@ -22,7 +22,7 @@
 // (harness/jupiter.mjs configures it — the dials go through dpay's relay proxy) and the
 // __DPAY_TEST_SOLANA_RPC_STUB, with the getTransaction detail carrying the EURC mint row
 // (the realized-payout oracle matches the record's own out mint).
-import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor} from '../harness/lib.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
   configureJupiterStub, jupiterStubState, EURC_MINT, USDC_MINT,
@@ -117,17 +117,13 @@ export async function run() {
       lastValidBlockHeight: 300000000,
     });
 
-    // §1 — the target list carries every reachable CURRENCY; the standing target is the
-    // registry-row-0 venue's other side (SOL — the jupiter SOL-pair venue).
+    // §1 — the target list carries every reachable CURRENCY; the standing target is
+    // stable-first (USD → EUR through the FX venue — the 2026-09-25 founder rule).
     await openConvertFor(driver, 'sol-usdc');
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for USDC(Solana)');
-    assertIncludes(await driver.readText('convert-screen'), 'Convert USD → SOL', 'the standing pair is USD→SOL (first venue in registry order)');
+    assertIncludes(await driver.readText('convert-screen'), 'Convert USD → EUR', 'the standing pair is USD→EUR (stable-first)');
 
-    // §2 — the pick re-targets the pair: the FX venue's own USD → EUR route.
-    await pickSwapTarget(driver, 'EUR');
-    assertIncludes(await driver.readText('convert-screen'), 'Convert USD → EUR', 'the heading names the picked pair');
-
-    // §3 — Jupiter's own digits for the FX pair, verbatim through the relay proxy.
+    // §2 — Jupiter's own digits for the standing FX pair, verbatim through the relay proxy.
     await driver.type('convert-amount', '1');
     assert(await driver.findByTestID('convert-quote-source', {timeoutMs: 10_000}) != null, 'a quote arrived (through the relay proxy)');
     assertIncludes(await driver.readText('convert-quote-source'), 'Jupiter', 'attribution names the venue');

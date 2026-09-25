@@ -18,7 +18,7 @@
 //     the pair (checklist on the angxa pool, attributed ICPSwap) and the ICP→ckETH quote
 //     renders an 18-decimal amount_out — no execution on this leg.
 // Private relay (startRelay, the flow-168 pattern): execution mutates pool state.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor, pickSwapTarget,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
@@ -82,11 +82,14 @@ export async function run() {
 
     // --- ckUSDC→ICP: discover the pair on the Convert surface -----------------------------------
     await openConvertFor(driver, 'ckusdc');
+    // The standing pair is stable-first CHF (the 2026-09-25 founder rule); this flow's facts
+    // live on the ckUSDC ↔ ICP pair, so it is picked explicitly.
+    await pickSwapTarget(driver, 'ICP');
     await driver.type('convert-amount', '100');
     // ONE VENUE on this pair → no venue CHOICE: the direct pool is the standing pick (the
     // single-venue rule), the checklist surfaces directly, quoting through the pool. The
-    // venue area still renders the composed via-VCHF hub as an explicit opt-in row (the D2
-    // standing-default rule: a hub is an explicit switch away, never chosen for the user).
+    // venue area still renders the composed via-VCHF hub as an explicit opt-in row (a hub is
+    // an explicit switch away, never chosen for the user).
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     assert(await driver.findByTestID('convert-venue-icpswap-ckusdc', {timeoutMs: 4_000}) != null,
       'the direct pool row renders (the standing pick — one venue, nothing to choose)');

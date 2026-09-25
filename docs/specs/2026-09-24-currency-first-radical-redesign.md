@@ -128,3 +128,15 @@ unilaterally.
 - **The uniform-IA hard rule**: every currency, every rail, through the same surfaces.
 - **The honest-instruction rule** on every screen and error path (2026-08-29).
 - **The offline-pay rails** (IC NFC v2, SOL recent-blockhash v2) — untouched.
+
+## Amendment — stable-first standing target (founder decision, 2026-09-25)
+
+The swap screen's STANDING (preselected) target for a STABLE source (CHF, USD, EUR) is the
+stable pair — CHF→USD, USD→EUR, EURC→USDC — not the volatile pair the venue registry used to
+open on. Asked directly ("when a user opens Convert with a stable source, which target should
+be preselected?"), the founder chose **stable-first** (2026-09-25). This is an explicit user
+request under the HARD RULE above; it amends the hub-UX D2 standing-pair default (2026-09-18)
+for stable sources only. Volatile sources keep their registry standing pair unchanged. Within
+each preference pass the winner is still the first registered rail-local row — the
+no-ranking/no-preselection venue rule (fork 3) is untouched; the categorical choice is between
+CURRENCIES, never between venues.

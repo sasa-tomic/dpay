@@ -108,13 +108,13 @@ export async function run() {
     const passOrigins = [new URL(r2.baseURL).origin, new URL(webBaseURL).origin, new URL(env.relayBaseURL).origin];
     await installSideShiftStub(driver, {passOrigins, initialStatus: 'waiting'});
 
-    // --- §1 the target list: the standing target is SOL (the row-0 venue's other side), and
-    // the ICP target carries the cefi venue — the SAME surfaces the IC source sees.
+    // --- §1 the target list: the standing target is stable-first USD (the 2026-09-25 founder
+    // rule), and the ICP target carries the cefi venue — the SAME surfaces the IC source sees.
     await openEurcConvert(driver);
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for EURC(Solana)');
     assert(await driver.findByTestID('convert-unavailable', {timeoutMs: 500}).catch(() => null) == null,
       'the EURC source is paired (no fail-closed panel)');
-    assertIncludes(await driver.readText('convert-screen'), 'Convert EUR → SOL', 'the standing pair is EUR→SOL (registry order, no surprise preselection)');
+    assertIncludes(await driver.readText('convert-screen'), 'Convert EUR → USD', 'the standing pair is EUR→USD (stable-first, no surprise preselection)');
 
     // --- §2 the cefi target: derived payout address FIRST, venue quote verbatim
     await pickSwapTarget(driver, 'ICP');

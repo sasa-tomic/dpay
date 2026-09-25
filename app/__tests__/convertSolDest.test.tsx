@@ -231,11 +231,11 @@ describe('SOL source target-currency picker (the swap screen)', () => {
     expect(textOf(tree, 'convert-headline')).not.toContain('USDC');
   });
 
-  test('USDC input (USD on the SOL rail): the source row is disabled, the standing target is SOL via jupiter', async () => {
+  test('USDC input (USD on the SOL rail): the source row is disabled, the standing target is the stable pair EUR via jupiter-usdc-eurc', async () => {
     const tree = await mount(USDC_ASSET);
     expect(exists(tree, 'convert-unavailable')).toBe(false);
-    // The targets: SOL (jupiter, registry row 0 — the standing pair), EUR (the rail-local FX
-    // venue), ICP (the CeFi venues). The source's own currency (USD) renders DISABLED.
+    // The targets: EUR (the stable-first FX pair — the standing pair), SOL (jupiter), ICP (the
+    // CeFi venues). The source's own currency (USD) renders DISABLED.
     await act(async () => {
       present(tree, 'btn-convert-target')[0].props.onPress();
     });
@@ -243,7 +243,7 @@ describe('SOL source target-currency picker (the swap screen)', () => {
     expect((sameRow.props.accessibilityState as {disabled?: boolean}).disabled).toBe(true);
     expect(exists(tree, 'convert-target-EUR')).toBe(true);
     expect(exists(tree, 'convert-target-ICP')).toBe(true);
-    expect(checked(tree, 'convert-target-SOL')).toBe(true);
+    expect(checked(tree, 'convert-target-EUR')).toBe(true);
     await act(async () => {
       present(tree, 'btn-convert-target')[0].props.onPress(); // close it again
     });
@@ -251,16 +251,7 @@ describe('SOL source target-currency picker (the swap screen)', () => {
     await act(async () => {
       input.props.onChangeText('1');
     });
-    // The standing pair quotes the row-0 venue from the USDC mint.
-    expect(lastQuoteCall()).toEqual({
-      venueId: 'jupiter',
-      inputMint: USDC_MINT_ADDRESS,
-      outputMint: WRAPPED_SOL_MINT_ADDRESS,
-      amount: '1000000',
-    });
-    expect(textOf(tree, 'convert-screen')).toContain('Convert USD → SOL');
-    // Pick EUR: the rail-local FX venue's own pair, quoted from the USDC mint.
-    await pickTarget(tree, 'EUR');
+    // The standing pair quotes the stable FX venue from the USDC mint.
     expect(lastQuoteCall()).toEqual({
       venueId: 'jupiter-usdc-eurc',
       inputMint: USDC_MINT_ADDRESS,
@@ -268,16 +259,24 @@ describe('SOL source target-currency picker (the swap screen)', () => {
       amount: '1000000',
     });
     expect(textOf(tree, 'convert-screen')).toContain('Convert USD → EUR');
-    expect(textOf(tree, 'convert-headline')).toContain('0.87 EURC');
+    // Pick SOL: the volatile leg stays one pick away, quoted from the USDC mint.
+    await pickTarget(tree, 'SOL');
+    expect(lastQuoteCall()).toEqual({
+      venueId: 'jupiter',
+      inputMint: USDC_MINT_ADDRESS,
+      outputMint: WRAPPED_SOL_MINT_ADDRESS,
+      amount: '1000000',
+    });
+    expect(textOf(tree, 'convert-screen')).toContain('Convert USD → SOL');
   });
 
-  test('EURC input: standing SOL via jupiter-eurc, USD second via jupiter-usdc-eurc', async () => {
+  test('EURC input: standing USD via jupiter-usdc-eurc (stable-first), SOL second via jupiter-eurc', async () => {
     const tree = await mount(EURC_ASSET);
     expect(exists(tree, 'convert-unavailable')).toBe(false);
     await act(async () => {
       present(tree, 'btn-convert-target')[0].props.onPress();
     });
-    expect(checked(tree, 'convert-target-SOL')).toBe(true);
+    expect(checked(tree, 'convert-target-USD')).toBe(true);
     await act(async () => {
       present(tree, 'btn-convert-target')[0].props.onPress(); // close it again
     });
@@ -285,21 +284,7 @@ describe('SOL source target-currency picker (the swap screen)', () => {
     await act(async () => {
       input.props.onChangeText('1');
     });
-    expect(lastQuoteCall()).toEqual({
-      venueId: 'jupiter-eurc',
-      inputMint: EURC_MINT_ADDRESS,
-      outputMint: WRAPPED_SOL_MINT_ADDRESS,
-      amount: '1000000',
-    });
-    // Pick USD: the FX venue's own pair, quoted from the EURC mint. The pick closes the
-    // list; re-open it to read the radio states.
-    await pickTarget(tree, 'USD');
-    await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
-    });
-    expect(checked(tree, 'convert-target-SOL')).toBe(false);
-    expect(checked(tree, 'convert-target-USD')).toBe(true);
-    expect(present(tree, 'convert-amount')[0].props.value).toBe('1');
+    // The standing pair is the stable-first FX pair, quoted from the EURC mint.
     expect(lastQuoteCall()).toEqual({
       venueId: 'jupiter-usdc-eurc',
       inputMint: EURC_MINT_ADDRESS,
@@ -307,7 +292,22 @@ describe('SOL source target-currency picker (the swap screen)', () => {
       amount: '1000000',
     });
     expect(textOf(tree, 'convert-screen')).toContain('Convert EUR → USD');
-    expect(textOf(tree, 'convert-headline')).toContain('1.149 USDC');
+    // Pick SOL: the volatile leg is one pick away, quoted from the EURC mint. The pick closes
+    // the list; re-open it to read the radio states.
+    await pickTarget(tree, 'SOL');
+    await act(async () => {
+      present(tree, 'btn-convert-target')[0].props.onPress();
+    });
+    expect(checked(tree, 'convert-target-USD')).toBe(false);
+    expect(checked(tree, 'convert-target-SOL')).toBe(true);
+    expect(present(tree, 'convert-amount')[0].props.value).toBe('1');
+    expect(lastQuoteCall()).toEqual({
+      venueId: 'jupiter-eurc',
+      inputMint: EURC_MINT_ADDRESS,
+      outputMint: WRAPPED_SOL_MINT_ADDRESS,
+      amount: '1000000',
+    });
+    expect(textOf(tree, 'convert-screen')).toContain('Convert EUR → SOL');
   });
 
   test('a failed confirm leaves an error line that picking another target clears', async () => {

@@ -141,8 +141,11 @@ export async function run() {
       assert(await driver.findByTestID(`convert-target-${code}`, {timeoutMs: 5_000}) != null,
         `the ${code} target row is offered`);
     }
-    // The ICP pair carries BOTH mechanisms that reach it: the direct pool and the via-ckUSDC
-    // hub route — kind order puts the direct pool first, and one venue = the standing pick.
+    // The standing pair is stable-first USD (the 2026-09-25 founder rule); the ICP pair is
+    // picked explicitly. It carries BOTH mechanisms that reach it: the direct pool and the
+    // via-ckUSDC hub route — kind order puts the direct pool first, and one venue = the
+    // standing pick.
+    await pickSwapTarget(driver, 'ICP');
     await driver.findByTestID(STANDING_HUB_ROW, {timeoutMs: 8_000});
     await driver.findByTestID('convert-venue-icpswap', {timeoutMs: 5_000});
 

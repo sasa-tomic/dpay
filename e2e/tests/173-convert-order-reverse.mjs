@@ -17,7 +17,7 @@
 //
 // Private relay (startRelay, the flow-164/166/167 pattern): the venue knob + pool mutations
 // cannot reach any sibling flow.
-import {setup, assert, assertEq, assertIncludes, assertDisabled, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor,
+import {setup, assert, assertEq, assertIncludes, assertDisabled, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor, pickSwapTarget,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
@@ -88,9 +88,12 @@ export async function run() {
     assert(arm.ok, `venue knob armed (status ${arm.status})`);
 
     // The REVERSE direction: VCHF is the from-asset. selectCurrency leaves the app on Pay;
-    // re-open the accounts route so Convert renders on the SELECTED (VCHF) row — resolveLegs then
-    // resolves in=VCHF / out=ICP and every venue row quotes its output in ICP.
+    // re-open the accounts route so Convert renders on the SELECTED (VCHF) row. The standing
+    // pair is stable-first (CHF → USD — the 2026-09-25 founder rule); this flow's venue facts
+    // live on the VCHF ↔ ICP pair, so it is picked explicitly — then every venue row quotes
+    // its output in ICP.
     await openConvertFor(driver, 'vchf');
+    await pickSwapTarget(driver, 'ICP');
     await driver.type('convert-amount', '1');
     await driver.findByTestID(`convert-venue-${FIXTURE_VENUE}-quote`, {timeoutMs: 10_000});
     await driver.findByTestID('convert-venue-icpswap-quote', {timeoutMs: 10_000});
