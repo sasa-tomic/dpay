@@ -44,12 +44,12 @@ export async function run() {
     assert(!(await driver.isPresent('pay-scan')), 'the accounts route replaces the surface, it does not float over it');
     console.log('[150-accounts-route] ✓ one tap from the Pay scanner opened the accounts route');
 
-    // (b) Every enabled asset, zero balances included. The wallet is cold apart from the practice
-    //     faucet, so all but one row read zero — and all of them are here.
-    for (const key of ['vchf', 'icp', 'ckbtc', 'ckusdc', 'cketh', 'sol', 'demo']) {
-      assert(await driver.isPresent(`asset-${key}`), `asset-${key} must render in the accounts route`);
+    // (b) Every wallet CURRENCY renders, zero balances included — one row per currency (fork #2).
+    for (const code of ['CHF', 'USD', 'BTC', 'ETH', 'ICP', 'SOL']) {
+      assert(await driver.isPresent(`accounts-currency-${code}`), `accounts-currency-${code} must render in the accounts route`);
     }
-    assertIncludes(await driver.readText('asset-icp'), '0 ICP', 'a zero-balance row states its zero honestly');
+    assert(await driver.isPresent('asset-demo'), 'the practice row renders under its divider');
+    assertIncludes(await driver.readText('accounts-currency-ICP'), '0 ICP', 'a zero-balance row states its zero honestly');
     console.log('[150-accounts-route] ✓ every enabled asset renders, zero-balance rows included');
 
     // (d) It is a ROUTE: no modal overlay, and the bottom navigation is still there. A modal would

@@ -219,6 +219,23 @@ export function AccountsTab({
             />
           </View>
         ) : null}
+        {/* The testnet rows, behind their existing toggle (the spec keeps the toggle): these are
+            per-RAIL rows — a testnet row is a catalog curiosity, not a wallet currency — with the
+            same select gesture the route has always carried. */}
+        {showTestnet ? assets.filter(a => a.symbol.endsWith(' testnet')).map(a => (
+          <CurrencyRow
+            key={a.id}
+            testId={`asset-${a.testKey}`}
+            asset={a}
+            amount={balances[a.id]?.displayText}
+            active={selectedId === a.id}
+            zero={balances[a.id] ? balances[a.id]!.status !== 'ok' : true}
+            onPress={() => onSelect(a.id)}
+            accessibilityLabel={M.wallet.balances.select(a.symbol)}
+            accessibilityHint={M.wallet.balances.selectHint}
+            variant="card"
+          />
+        )) : null}
         <Pressable
           testID="btn-accounts-add-currency"
           style={[S.assetActionBtn, S.accountsAddCurrency]}

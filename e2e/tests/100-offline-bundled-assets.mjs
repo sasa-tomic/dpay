@@ -55,16 +55,17 @@ export async function run() {
     // Offline indicator (header shows "approx." when online === false).
     assert(await driver.waitForText('approx.', { timeoutMs: 6_000 }), 'header shows the offline approx. indicator');
 
-    // The shared asset selector must show BOTH bundled native rows with exact unit · network.
-    console.log('[100-offline-bundled-assets] assert bundled VCHF + ICP rows offline…');
+    // The currency list must show the bundled rows offline: ONE row per currency (fork #2),
+    // whose rail label names the token + its settlement chain ("VCHF · Internet Computer").
+    console.log('[100-offline-bundled-assets] assert bundled CHF + ICP currency rows offline…');
     await openBalances(driver);
-    const vchfRow = await driver.findByTestID('asset-vchf', { timeoutMs: 6_000 });
-    assert(vchfRow != null, 'offline cold start renders the bundled VCHF row');
-    assertIncludes(await driver.readText('asset-vchf'), 'VCHF · Internet Computer', 'offline VCHF row unit · network');
-    const icpRow = await driver.findByTestID('asset-icp', { timeoutMs: 6_000 });
+    const chfRow = await driver.findByTestID('accounts-currency-CHF', { timeoutMs: 6_000 });
+    assert(chfRow != null, 'offline cold start renders the bundled CHF row');
+    assertIncludes(await driver.readText('accounts-currency-CHF'), 'VCHF · Internet Computer', 'offline CHF row rail label: token · network');
+    const icpRow = await driver.findByTestID('accounts-currency-ICP', { timeoutMs: 6_000 });
     assert(icpRow != null, 'offline cold start renders the bundled ICP row');
-    assertIncludes(await driver.readText('asset-icp'), 'ICP · Internet Computer', 'offline ICP row unit · network');
-    assertIncludes(await driver.bodyText(), 'Internet Computer', 'selector shows the IC network name');
+    assertIncludes(await driver.readText('accounts-currency-ICP'), 'ICP · Internet Computer', 'offline ICP row rail label: token · network');
+    assertIncludes(await driver.bodyText(), 'Internet Computer', 'the list shows the IC network name');
 
     // No per-asset ramp actions offline — scoped to the ACCOUNTS LIST, the route the header
     // balance chip opens. That route carries no "Add money" / "Cash out" action of its own, so a

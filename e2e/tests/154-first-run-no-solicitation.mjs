@@ -43,7 +43,7 @@ const SOLICITATIONS = [
   'pay-fund',             // the Pay tab's fund-first instruction panel
   'pay-fund-go',          // …and its "Show my address" primary
   'btn-topup',            // the accounts route's demo top-up
-  'btn-home-add-money',   // Home's Add money action
+  'btn-home-add-funds',   // Home's Add funds action
   'btn-receive-address',  // the Receive tab's "My address" toggle
 ];
 
@@ -122,8 +122,8 @@ export async function run() {
     // POSITIVE CONTROL. Funding is one deliberate tap away for a user who wants it — the Add money
     // action is right there on Home. Without this the flow would pass on a build that had simply
     // lost the ability to fund anything.
-    await driver.findByTestID('btn-home-add-money', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
-    console.log('[154-first-run-no-solicitation] ✓ positive control: Home DOES offer Add money, as a choice');
+    await driver.findByTestID('btn-home-add-funds', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    console.log('[154-first-run-no-solicitation] ✓ positive control: Home DOES offer Add funds, as a choice');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[154-first-run-no-solicitation] GREEN in ${elapsed}s`);

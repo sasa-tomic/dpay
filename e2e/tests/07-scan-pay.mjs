@@ -16,7 +16,7 @@
 // spent, atomic debit/credit). B needs no browser: its balance is read straight off the ledger.
 //
 // Selector contract: `tab-pay` (default), `btn-new`, `balance`.
-import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText , armPayScan} from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText , armPayScan, openBalances} from '../harness/lib.mjs';
 import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
@@ -75,10 +75,16 @@ export async function run() {
     assert(!/\bmerchant\b/i.test(paidBody), 'Paid ✓ confirmation must not use the generic "merchant" label (L6)');
     console.log('[07-scan-pay] ✓ A reached "Paid ✓" to Bob straight from the scan (L6: real recipient name)');
 
-    // --- A's `$` balance decreased by the amount (the 2.5s poll reconciles). ------------------
+    // --- A's practice balance decreased by the amount (the 2.5s poll reconciles). The settled
+    //     figure lives on the accounts route's practice row (currency-first: the header chip
+    //     headlines the MAIN currency, not the practice rail) and the chip is locked while the
+    //     Paid card is up — reset to scan first, then read the row.
+    await driver.click('btn-new', { timeoutMs: 5_000 });
+    await armPayScan(driver);
+    await openBalances(driver);
     const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });
     assert(aliceDown, `payer A balance should be ∂75.00 (∂100 − ∂25) after the settle`);
-    console.log('[07-scan-pay] ✓ A balance ∂100.00 → ∂75.00');
+    console.log('[07-scan-pay] ✓ A balance ∂100.00 → ∂75.00 (the practice row)');
 
     // --- B was credited (read straight off the ledger — no second browser). -------------------
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, 0);

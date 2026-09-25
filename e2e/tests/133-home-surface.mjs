@@ -52,14 +52,15 @@ export async function run() {
     await driver.findByTestID('tab-pay', { timeoutMs: 4_000 });
     console.log('[133-home-surface] ✓ cold start lands on Home, scanner not mounted');
 
-    // (b) The headline is the HOME CURRENCY (the harness picks CHF), in the VCHF token unit. The
-    //     wallet holds ∂100.00 of practice money and it does NOT reach the headline — the home
-    //     currency owns that number, and nothing else can rewrite it (X4).
-    assertEq(await driver.readText('home-headline-label'), 'Swiss francs · Main', 'the headline names the home CURRENCY');
+    // (b) The headline is the HOME CURRENCY (the harness picks CHF) in the CURRENCY unit —
+    //     fork #4's "Balance CHF / 4.54 Fr" grammar (the 2026-09-24 redesign supersedes the
+    //     token-unit headline). The wallet holds ∂100.00 of practice money and it does NOT
+    //     reach the headline — the home currency owns that number (X4).
+    assertEq(await driver.readText('home-headline-label'), 'Balance CHF', 'the headline names the home CURRENCY (the sketch\'s eyebrow grammar)');
     const headline = await driver.readText('home-headline-amount');
-    assertIncludes(headline, 'VCHF', 'the headline amount carries the home rail\'s OWN token unit');
+    assert(!headline.includes('VCHF'), 'the headline amount is the CURRENCY figure, not the rail token');
     assert(!headline.includes('∂'), `the practice balance must never reach the headline. Got: ${JSON.stringify(headline)}`);
-    console.log(`[133-home-surface] ✓ headline: Swiss francs · Main / ${headline}`);
+    console.log(`[133-home-surface] ✓ headline: Balance CHF / ${headline}`);
 
     // (d) The accounts AFFORDANCE is here — since 2026-09-14 it IS the headline (the balance is
     //     the button; the "Accounts · N" pill is gone); the LIST is not.
@@ -75,16 +76,34 @@ export async function run() {
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
     console.log('[133-home-surface] ✓ tapping the balance opens accounts and Back returns');
 
-    // (b′) X4's regression pin: choosing another ACCOUNT must not rewrite the home currency. Pick
-    //      ckBTC — the header chip follows it, the headline does not.
+    // (b′) X4's regression pin: the working rail moving must not rewrite the home currency. The
+    //      practice row selects DEMO — the chip follows the practice selection, the headline
+    //      does not (the currency-first chip headlines the MAIN currency's summed figure).
+    // (b″) The currency-first gesture (the 2026-09-24 spec supersedes the old X4 row rule):
+    // tapping a CURRENCY row sets it as the wallet's main — the headline follows, deliberately.
     await openBalances(driver);
     await selectCurrency(driver, 'ckbtc');
-    assertEq(await driver.readText('active-asset-label'), 'BTC balance', 'the header chip follows the selected account');
     await driver.click('tab-home', { timeoutMs: 4_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
-    assertEq(await driver.readText('home-headline-label'), 'Swiss francs · Main',
-      'an account tap must NOT rewrite the home currency the headline states (X4)');
-    console.log('[133-home-surface] ✓ selecting ckBTC left the home headline in francs');
+    assertEq(await driver.readText('home-headline-label'), 'Balance BTC',
+      'the currency-row tap sets main — the headline follows it (the spec\'s deliberate gesture)');
+    console.log('[133-home-surface] ✓ currency-row tap re-pointed the headline to BTC (set-main)');
+    // ...and the X4 core survives where it actually matters: a practice-row tap (DEMO — never
+    // main) re-points the working selection without touching the headline.
+    await openBalances(driver);
+    await driver.click('asset-demo-select', { timeoutMs: 5_000 });
+    await driver.click('tab-home', { timeoutMs: 4_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
+    assertEq(await driver.readText('home-headline-label'), 'Balance BTC',
+      'a practice tap must NOT rewrite the home currency the headline states (X4)');
+    console.log('[133-home-surface] ✓ the practice tap left the headline in BTC');
+    // Restore ckBTC as main + the working rail (the Pay tab's send toggle below needs a real
+    // send-capable asset; DEMO cannot send).
+    await openBalances(driver);
+    await selectCurrency(driver, 'ckbtc');
+    await driver.click('tab-home', { timeoutMs: 4_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
+    assertEq(await driver.readText('home-headline-label'), 'Balance BTC', 'ckBTC is main again for the send leg');
 
     // (c) Leave the Pay tab on "Send to address", come back to Home, and tap Pay: the camera must
     //     be live. Without the sub-mode pin this is two taps, which is the regression the primary
@@ -94,14 +113,16 @@ export async function run() {
     await driver.findByTestID('btn-pay-send', { timeoutMs: 4_000 });
     await driver.click('tab-home', { timeoutMs: 4_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
-    await driver.click('btn-home-pay', { timeoutMs: 4_000 });
+    // (d′) Pay/Receive stay EXACTLY where the spec pinned them: bottom tabs (fork #1 — the
+    // Home action row is Add funds / Convert / Withdraw funds / [...], no Pay card). The
+    // within-tab sub-mode survives (the pin from (c)); one toggle tap returns to the scanner.
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
+    await driver.click('btn-pay-scan', { timeoutMs: 4_000 });
     await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
-    console.log('[133-home-surface] ✓ Pay reached a live scanner in ONE tap from Home');
+    console.log('[133-home-surface] ✓ Pay back on the live scanner (sub-mode pin + one toggle tap)');
 
     // (e) Receive still opens the request form.
-    await driver.click('tab-home', { timeoutMs: 4_000 });
-    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
-    await driver.click('btn-home-receive', { timeoutMs: 4_000 });
+    await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.findByTestID('req-prefix', { timeoutMs: 5_000 });
 
     await driver.click('tab-home', { timeoutMs: 4_000 });

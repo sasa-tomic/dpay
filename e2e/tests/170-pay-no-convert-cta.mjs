@@ -57,9 +57,12 @@ export async function run() {
     await openBalances(driver);
     await selectCurrency(driver, 'icp');
     await openBalances(driver);
+    // Currency-first (2026-09-24): Convert is a per-currency row action — one entry PER
+    // visible currency row (the probe counts the prefixed testIDs).
     const accountsHasConvert = await driver.eval(() =>
-      document.querySelectorAll('[data-testid="btn-accounts-convert"]').length);
-    assert(accountsHasConvert === 1, `control: the Accounts list carries the one legit Convert entry (found ${accountsHasConvert})`);
+      Array.from(document.querySelectorAll('[data-testid]'))
+        .filter(el => el.getAttribute('data-testid').startsWith('btn-accounts-convert-')).length);
+    assert(accountsHasConvert >= 1, `control: the Accounts list carries the per-currency Convert entries (found ${accountsHasConvert})`);
 
     await driver.screenshot('170-pay-no-convert-cta');
     console.log(`[170-pay-no-convert] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);

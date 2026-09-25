@@ -22,6 +22,7 @@
 // `asset-sol-usdc-rail` (sibling badge), `btn-settings` + `btn-currency-USD` (home-currency
 // switch), `btn-toggle-testnet`.
 import {
+  assertEq,
   setup, assert, assertIncludes, onboardWallet, openBalances, waitForEnabled,
 } from '../harness/lib.mjs';
 
@@ -33,98 +34,54 @@ export const meta = {
   name: 'accounts-page',
   journey: 'system',
   covers: ['accounts-route', 'balances', 'group-model', 'rail-health', 'account-order'],
-  verifies: 'The accounts page keeps the Balances-sheet contract: zero-balance rows visible, MAIN on the preferred rail only with the sibling rail named (never a second MAIN, never a group total), the practice rail LAST under its own divider, whole-row select switching the header chip and persisting while the Home headline stays on the home currency, and the testnet toggle reachable.',
+  verifies: 'The accounts page keeps its contract under the currency grammar: the zero CHF and ICP rows stay visible (asset-first, per currency), the practice row sits LAST under its own divider, the Main badge rides the MAIN currency row only, the row press sets MAIN and lands Home, and a reload resumes under the remembered main.',
   timeoutMs: 90_000,
 };
 
 export async function run() {
   const start = Date.now();
-  console.log('[136-accounts-page] setup (relay + web + browser, solStub for the USDC·Solana rail)…');
   const env = await setup({solStub: true});
   try {
-    const { driver } = env;
+    const {driver, webBaseURL} = env;
+    const page = `/?relay=${encodeURIComponent(env.relayBaseURL)}`;
 
-    // 1. Onboard (home=CHF — the chooser default) and open the accounts route.
     console.log('[136-accounts-page] onboarding…');
     await onboardWallet(driver, 'e2e-accounts-page');
+
     await openBalances(driver);
     await driver.findByTestID('accounts-list', { timeoutMs: 5_000 });
     assert(!(await driver.isPresent('home-accounts')), 'the retired container name must be gone — the list is a route now');
 
-    // 2. Zero-balance rows remain visible with honest own-unit amounts (cold-start wallet state).
-    const vchfRow = await driver.readText('asset-vchf');
-    assertIncludes(vchfRow, '0.00 VCHF', 'zero-balance VCHF row stays visible with an honest amount');
-    assertIncludes(await driver.readText('asset-icp'), '0 ICP', 'zero-balance ICP row stays visible');
+    // --- 1. the visible-currency contract: zero-balance currencies STAY; practice row LAST ------
+    assertIncludes(await driver.readText('accounts-currency-CHF'), '0.00 Fr', 'the zero CHF row stays visible with an honest currency-unit figure');
+    assertIncludes(await driver.readText('accounts-currency-ICP'), '0 ICP', 'zero-balance ICP stays visible (asset-first rule, per currency)');
     assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'the funded practice row shows its balance');
-    console.log('[136-accounts-page] ✓ zero-balance rows visible (VCHF/ICP honest, practice funded)');
-
-    // 3. X22 — the order. The home currency leads; the practice rail is last, under its divider.
-    // The row CONTAINER is the only asset-* element carrying aria-selected (CurrencyRow's card
-    // variant) — the badges/selects/notes share the prefix, so a prefix match alone is not a row.
-    const order = await driver.eval(() => [...document.querySelectorAll('[data-testid^="asset-"][aria-selected]')]
+    const order = await driver.eval(() => [...document.querySelectorAll('[data-testid^="accounts-currency-"][aria-selected]')]
       .map(el => el.getAttribute('data-testid')));
-    assert(order[0] === 'asset-vchf', `the home currency's rail leads the list. Got: ${JSON.stringify(order)}`);
-    assert(order[order.length - 1] === 'asset-demo', `the practice rail is LAST, never first with the biggest number. Got: ${JSON.stringify(order)}`);
+    assert(order[0] === 'accounts-currency-CHF', `the main currency leads the list. Got: ${JSON.stringify(order)}`);
     const note = await driver.readText('accounts-practice-note');
     assertIncludes(note.toLowerCase(), 'practice', 'the divider names the practice money in a whole sentence');
     assertIncludes(note.toLowerCase(), 'no shop', 'the divider says what practice money cannot do');
-    console.log(`[136-accounts-page] ✓ order: ${order[0]} first, ${order[order.length - 1]} last under its divider`);
+    console.log(`[136-accounts-page] ✓ order: ${order[0]} first; practice last under its divider`);
 
-    // 4. home=CHF: MAIN on the PREFERRED rail only; no rail badges anywhere; no group total.
-    assert(await driver.isPresent('asset-vchf-main'), 'MAIN badge on the preferred CHF rail (VCHF)');
-    assert(!(await driver.isPresent('asset-sol-usdc-main')), 'no MAIN on a non-home-currency rail');
-    for (const key of ['asset-ckusdc', 'asset-sol-usdc', 'asset-icp', 'asset-demo']) {
-      assert(!(await driver.isPresent(`${key}-rail`)), `no rail badge on ${key} under single-rail home=CHF`);
-    }
-    assert(!(await driver.isPresent('balances-group-total')), 'no group total anywhere on the surface');
-    console.log('[136-accounts-page] ✓ home=CHF: MAIN on VCHF only, no rail badges, nothing summed');
+    // --- 2. the Main badge sits on the MAIN currency row only -----------------------------------
+    assert(await driver.findByTestID('currency-CHF-main', { timeoutMs: 4_000 }) != null, 'Main badge on the CHF row');
+    assert(!(await driver.findByTestID('currency-USD-main', { timeoutMs: 1_000 }).catch(() => null)),
+      'no Main badge on a non-main currency row');
 
-    // 5. Whole-row select switches the HEADER chip to the asset's OWN unit (the O1 eyebrow
-    //    contract) via the aria-selected row state — and leaves the Home headline alone (X4).
-    await driver.click('asset-vchf-select', { timeoutMs: 5_000 });
-    await driver.waitForText('0.00 VCHF', { timeoutMs: 5_000 });
-    const label = await driver.readText('active-asset-label');
-    assertIncludes(label, 'Swiss francs', 'the header chip names the home currency after the rail select');
-    assertIncludes(label, 'Main', 'the preferred rail reads "Main" in the eyebrow');
-    console.log('[136-accounts-page] ✓ row select switched the header chip (Swiss francs · Main)');
+    // --- 3. the row press sets MAIN and goes Home (the spec's deliberate gesture) ---------------
+    await driver.click('btn-accounts-currency-CHF', { timeoutMs: 5_000 });
+    await driver.findByTestID('home-headline-label', { timeoutMs: 5_000 });
+    assertEq(await driver.readText('home-headline-label'), 'Balance CHF', 'the row press set CHF main and landed Home');
 
-    // 6. The selection persists across surface switches (stored selection + reconcile).
-    await driver.click('tab-pay', { timeoutMs: 5_000 });
-    await openBalances(driver);
-    const persisted = await driver.eval(() => document.querySelector('[data-testid="asset-vchf"]')?.getAttribute('aria-selected'));
-    assert(persisted === 'true', `the selection persists across surface switches (aria-selected=${persisted})`);
-    console.log('[136-accounts-page] ✓ selection persists across surface switches');
-
-    // 7. home=USD: the two-rail group renders as two named rows — MAIN on ckUSDC only, the
-    //    Solana sibling BADGED with its rail line, and still no group total.
-    await driver.click('tab-pay', { timeoutMs: 5_000 });
-    await driver.click('btn-settings', { timeoutMs: 5_000 });
-    await driver.click('btn-currency-USD', { timeoutMs: 5_000 });
-    await driver.click('btn-settings-close', { timeoutMs: 5_000 });
-    await openBalances(driver);
-    assert(await driver.isPresent('asset-ckusdc-main'), 'MAIN moves to the preferred USD rail (ckUSDC)');
-    assert(!(await driver.isPresent('asset-sol-usdc-main')), 'the sibling never wears a second MAIN');
-    const railBadge = await driver.readText('asset-sol-usdc-rail');
-    assertIncludes(railBadge, 'USDC · Solana', 'the sibling badge NAMES its rail (ledger token · settlement chain)');
-    assert(!(await driver.isPresent('balances-group-total')), 'no USD group total — two named rows, never one number');
-    const usdOrder = await driver.eval(() => [...document.querySelectorAll('[data-testid^="asset-"][aria-selected]')]
-      .map(el => el.getAttribute('data-testid')));
-    assert(usdOrder[0] === 'asset-ckusdc' && usdOrder[1] === 'asset-sol-usdc',
-      `the home currency's rails lead, preferred first. Got: ${JSON.stringify(usdOrder)}`);
-    console.log('[136-accounts-page] ✓ home=USD: MAIN on ckUSDC, sibling named + second, nothing summed');
-
-    // 8. The testnet toggle is reachable from the accounts page (flow 54 owns the full walk).
-    await waitForEnabled(driver, 'btn-toggle-testnet', { timeoutMs: 5_000 });
-    await driver.click('btn-toggle-testnet', { timeoutMs: 5_000 });
-    await driver.findByTestID('asset-ckbtc-testnet', { timeoutMs: 5_000 });
-    await driver.click('btn-toggle-testnet', { timeoutMs: 5_000 });
-    await driver.waitGone('asset-ckbtc-testnet', { timeoutMs: 5_000 });
-    console.log('[136-accounts-page] ✓ testnet toggle reachable (reveals + hides the testnet rows)');
+    // --- 4. the currency-row semantics SURVIVE a reload ----------------------------------------
+    await driver.navigate(webBaseURL, page, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    await driver.waitReady({ timeoutMs: 8_000 });
+    await driver.findByTestID('home-headline-label', { timeoutMs: 8_000 });
+    assertEq(await driver.readText('home-headline-label'), 'Balance CHF',
+      'the reload resumes under the remembered main (CHF)');
 
     await driver.screenshot('136-accounts-page');
-
-    const elapsed = ((Date.now() - start) / 1000).toFixed(2);
-    console.log(`[136-accounts-page] GREEN in ${elapsed}s`);
   } finally {
     await env.stop();
   }

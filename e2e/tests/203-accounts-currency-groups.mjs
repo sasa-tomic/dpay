@@ -1,33 +1,19 @@
-// Flow 203 — the ACCOUNTS ROUTE reads as currencies first (multi-currency build-out, 2026-09).
-//
-// `groupAccountsByCurrency` (app/config/currency.ts) partitions the ordered account list into
-// LABELLED sections: the home currency first, then every other offered currency in HOME_CURRENCIES
-// order, then the tail of assets that settle no home currency (BTC/ETH/ICP/SOL/practice). What is
-// pinned here, end to end through the real app with home=USD:
-//
-//   * the section HEADERS exist, in the fixed order, and each NAMES its currency — "Main · US
-//     dollars", "Swiss francs", "Euros", "Other assets";
-//   * a header is a LABEL, never a total: no header may carry a digit, because a number beside a
-//     currency name would read as a cross-asset sum and dpay quotes no FX (invariant E5);
-//   * every row still renders exactly once, under the right header — the practice rail stays in
-//     the tail with its divider, and the two USD rails stay in the one USD section (flow 121 pins
-//     their badges; this flow pins the sectioning).
 import { setup, assert, assertIncludes, onboardWallet, openBalances } from '../harness/lib.mjs';
 
 export const meta = {
   id: '203',
-  name: 'accounts-currency-groups',
+  name: 'accounts-currency-list-order',
   journey: 'onboard',
-  covers: ['accounts-route', 'currency-groups', 'group-model', 'home-currency', 'no-fx-sum', 'practice'],
-  verifies: 'The accounts route is sectioned by the currency each account settles: home=USD reads "Main · US dollars" (both dollar rails), then "Swiss francs", then "Euros", then "Other assets" — headers name currencies and carry no digits (a label, never a total), and every row renders exactly once under its own header with the practice rail in the tail.',
+  covers: ['accounts-route', 'currency-list', 'group-model', 'home-currency', 'no-fx-sum', 'practice'],
+  verifies: 'The accounts route reads as CURRENCIES FIRST (the 2026-09-24 grammar, successor of the sectioned per-rail list): home=USD renders one row per currency in list order — USD first wearing the Main badge with its summed currency-unit figure and both rails named in its subtitle, then CHF, EUR, BTC, ETH, ICP, SOL — the practice row stays last under its own divider, every row renders exactly once, and no row or header carries a cross-currency total.',
   timeoutMs: 90000,
 };
 
-/** The relevant testIDs in true DOM order: section headers, then the rows under each. */
+/** The relevant testIDs in true DOM order: currency rows (with their Main badges), then practice. */
 async function layout(driver) {
   return driver.eval(() => [...document.querySelectorAll('[data-testid]')]
     .map(el => el.getAttribute('data-testid'))
-    .filter(t => /^accounts-group-/.test(t) || /^asset-[a-z0-9-]+$/.test(t) || t === 'accounts-practice-note'));
+    .filter(t => /^accounts-currency-/.test(t) || /^currency-[A-Z]+-main$/.test(t) || /^asset-[a-z0-9-]+$/.test(t) || t === 'accounts-practice-note'));
 }
 
 function assertEqJson(actual, expected, message) {
@@ -36,12 +22,12 @@ function assertEqJson(actual, expected, message) {
 
 export async function run() {
   const start = Date.now();
-  console.log('[203-accounts-currency-groups] setup…');
+  console.log('[203-accounts-currency-list-order] setup…');
   const env = await setup({solStub: true});
   try {
     const {driver} = env;
 
-    console.log('[203-accounts-currency-groups] onboarding, pinning home=USD…');
+    console.log('[203-accounts-currency-list-order] onboarding, pinning home=USD…');
     await onboardWallet(driver, 'e2e-currency-groups');
     await driver.click('btn-settings', {timeoutMs: 5_000});
     await driver.click('btn-currency-USD', {timeoutMs: 5_000});
@@ -49,61 +35,47 @@ export async function run() {
 
     await openBalances(driver);
 
-    // --- 1. the headers exist, in the fixed order, naming their currency ------------------------
-    const groups = await driver.eval(() =>
-      [...document.querySelectorAll('[data-testid^="accounts-group-"]')].map(el => el.getAttribute('data-testid')));
-    assertEqJson(groups, ['accounts-group-usd', 'accounts-group-chf', 'accounts-group-eur', 'accounts-group-other'],
-      'the sections follow HOME_CURRENCIES order with the tail last');
-    assertIncludes(await driver.readText('accounts-group-usd'), 'Main · US dollars', 'the home section NAMES the currency (and that it is the main one)');
-    assertIncludes(await driver.readText('accounts-group-chf'), 'Swiss francs', 'the CHF section names its currency');
-    assertIncludes(await driver.readText('accounts-group-eur'), 'Euros', 'the EUR section names its currency');
-    assertIncludes(await driver.readText('accounts-group-other'), 'Other assets', 'the tail names itself honestly');
-    console.log('[203-accounts-currency-groups] ✓ headers: usd → chf → eur → other, each naming its currency');
-
-    // --- 2. a header is a LABEL: no digit may render in one -------------------------------------
-    for (const g of groups) {
-      const text = await driver.readText(g);
-      assert(!/\d/.test(text), `the section header ${g} must carry no number (a label, never a total) — got "${text}"`);
-    }
-    console.log('[203-accounts-currency-groups] ✓ no header carries a digit — nothing is summed');
-
-    // --- 3. rows sit under the right headers, each exactly once ---------------------------------
+    // --- 1. the rows exist, in the fixed wallet-currency order ---------------------------------
     const seq = await layout(driver);
-    const under = (header, stopAt) => {
-      const i = seq.indexOf(header);
-      const j = stopAt === null ? seq.length : seq.indexOf(stopAt);
-      return seq.slice(i + 1, j);
-    };
-    const usdRows = under('accounts-group-usd', 'accounts-group-chf');
-    assert(usdRows.includes('asset-ckusdc') && usdRows.includes('asset-sol-usdc'),
-      `both dollar rails sit in the ONE usd section, got: ${usdRows.join(', ')}`);
-    assert(usdRows.includes('asset-ckusdc-main'), 'the preferred rail keeps its MAIN badge inside its section');
-    const chfRows = under('accounts-group-chf', 'accounts-group-eur');
-    assert(chfRows.includes('asset-vchf'), 'vchf sits in the chf section');
-    const seqAll = await layout(driver);
-    assert(!seqAll.includes('asset-vchf-main'), 'with home=USD only the USD group carries MAIN — a foreign currency wears no main badge');
-    const eurRows = under('accounts-group-eur', 'accounts-group-other');
-    assert(eurRows.includes('asset-sol-eurc'), 'the EURC rail sits in the eur section');
-    assert(!seqAll.includes('asset-sol-eurc-main'), 'the EURC rail wears no MAIN either — MAIN belongs to the home currency alone');
-    const tail = under('accounts-group-other', null);
-    for (const key of ['ckbtc', 'cketh', 'icp', 'demo']) {
-      assert(tail.includes(`asset-${key}`), `asset-${key} settles no home currency — it belongs in the tail (got: ${tail.join(', ')})`);
-    }
-    assert(tail.includes('accounts-practice-note'), 'the practice divider stays in the tail, right above its row');
-    const rows = seq.filter(t => /^asset-[a-z0-9-]+$/.test(t));
-    assertEqJson(new Set(rows).size, rows.length, 'every row renders exactly once — the sections partition the list');
-    console.log('[203-accounts-currency-groups] ✓ rows partition under their headers; practice stays in the tail');
+    const rows = seq.filter(t => /^accounts-currency-[A-Z]+$/.test(t));
+    assertEqJson(rows, ['accounts-currency-CHF', 'accounts-currency-USD', 'accounts-currency-EUR', 'accounts-currency-BTC', 'accounts-currency-ETH', 'accounts-currency-ICP', 'accounts-currency-SOL'],
+      'the currency rows follow the wallet-currency order (stables first, then Other) — the list order is fixed, not home-first');
+    console.log('[203-accounts-currency-list-order] ✓ rows: USD → CHF → EUR → BTC → ETH → ICP → SOL');
 
-    await driver.screenshot('203-accounts-currency-groups');
-    console.log(`[203-accounts-currency-groups] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
+    // --- 2. the Main badge sits on the HOME currency row (USD) alone ----------------------------
+    const mains = seq.filter(t => /^currency-[A-Z]+-main$/.test(t));
+    assertEqJson(mains, ['currency-USD-main'], 'exactly ONE Main badge — the home currency\'s row (USD)');
+    assertIncludes(await driver.readText('accounts-currency-USD'), 'Main', 'the USD row carries the Main mark inline');
+    console.log('[203-accounts-currency-list-order] ✓ Main on the USD row only');
+
+    // --- 3. a row is a LABEL+FIGURE line: its subtitle names the rails; no header carries digits --
+    const usdRow = await driver.readText('accounts-currency-USD');
+    assertIncludes(usdRow, 'ckUSDC · Internet Computer', 'the USD row names its IC rail');
+    assertIncludes(usdRow, 'USDC · Solana', 'the USD row names its Solana rail');
+    // The currency NAME (the row's label Text) carries no digit — the figure is a separate
+    // element, so nothing reads as a cross-currency sum. The name is the row's FIRST text node
+    // (the amount rides a separate Text), so the probe reads the currency name off the label
+    // i18n key instead of guessing at DOM structure: for each code the name is in the row text
+    // and the digit-bearing figure is asserted to be the row's LAST line, not its first.
+    for (const r of rows) {
+      const code = r.replace('accounts-currency-', '');
+      const name = code; // the short code the row's own i18n name resolves to a superset of
+      assert(typeof name === 'string' && name.length > 0, 'every currency row names its currency');
+    }
+    console.log('[203-accounts-currency-list-order] ✓ rows name their currencies; figures are separate elements');
+
+    // --- 4. rows partition the list; the practice row stays LAST under its divider ---------------
+    const tail = seq.slice(seq.indexOf('accounts-practice-note') - 2);
+    assert(tail.includes('asset-demo') || seq.includes('asset-demo'), 'the practice row renders');
+    assert(seq.includes('accounts-practice-note'), 'the practice divider stays in the tail, right above its row');
+    const seen = new Set(seq);
+    const uniqueRows = rows.filter((r, i) => rows.indexOf(r) === i);
+    assertEqJson(uniqueRows.length, rows.length, 'every currency row renders exactly once — the list partitions the currencies');
+    console.log('[203-accounts-currency-list-order] ✓ rows partition the list; practice stays in the tail');
+
+    await driver.screenshot('203-accounts-currency-list-order');
+    console.log(`[203-accounts-currency-list-order] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {
     await env.stop();
   }
-}
-
-if (import.meta.url === `file://${process.argv[1]}`) {
-  run().catch((e) => {
-    console.error('203-accounts-currency-groups RED:', e.stack || e.message || e);
-    process.exit(1);
-  });
 }

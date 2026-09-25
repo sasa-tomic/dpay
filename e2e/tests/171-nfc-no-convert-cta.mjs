@@ -45,7 +45,7 @@ export const meta = {
   * Accounts-Convert entry point, and any button/radio/link whose full label is "Convert". */
 function convertCtaCount(driver) {
   return driver.eval(() => {
-    const byTestID = document.querySelectorAll('[data-testid^="convert-"], [data-testid="btn-accounts-convert"]').length;
+    const byTestID = document.querySelectorAll('[data-testid^="convert-"], [data-testid^="btn-accounts-convert-"]').length;
     const byLabel = Array.from(document.querySelectorAll('button, [role="button"], [role="radio"], a'))
       .filter(el => (el.textContent ?? '').trim() === 'Convert').length;
     return byTestID + byLabel;
@@ -191,9 +191,9 @@ export async function run() {
     await selectCurrency(driver, 'icp');
     await openBalances(driver);
     const control = await driver.eval(() =>
-      document.querySelectorAll('[data-testid="btn-accounts-convert"]').length);
-    assertEq(control, 1, `probe control: the Accounts list (ICP selected) carries the one legit Convert entry (found ${control})`);
-    console.log('[171-nfc-no-convert] ✓ probe control: Accounts/ICP shows exactly 1 convert affordance');
+      document.querySelectorAll('[data-testid^="btn-accounts-convert-"]').length);
+    assert(control >= 1, `probe control: the Accounts list carries per-currency Convert entries (found ${control})`);
+    console.log(`[171-nfc-no-convert] ✓ probe control: Accounts shows ${control} per-currency convert affordances`);
 
     // --- SOL card: idle armed SolPayMode, then the tap phases + the receipt-bound paid phase. ----
     await openBalances(driver);

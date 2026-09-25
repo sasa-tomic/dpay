@@ -17,7 +17,15 @@
 // assert ∂100 → ∂200 → ∂300 because the offline fixture faucet had no cooldown at all; it now has
 // the same one production has, so what a tap proves is that the button and the hotkey reach the
 // relay and that its own refusal reaches the user. The successful credit is flow 01's ∂100.
-import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency } from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  onboardWallet,
+  openBalances,
+  selectCurrency,
+  assertEq,
+} from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -43,26 +51,18 @@ export async function run() {
     await driver.click('tab-home', { timeoutMs: 4_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
 
-    // (a) DEMO is the SELECTED asset after the harness preamble, and the home currency is CHF. The
-    //     headline names francs, and Add money must fund francs — not the selection.
-    assertIncludes(await driver.readText('home-headline-label'), 'Swiss francs', 'the home rail names the CURRENCY');
-    assertIncludes(await driver.readText('home-headline-label'), 'Main', 'the home rail carries the Main badge');
-    assertIncludes(await driver.readText('home-headline-amount'), 'VCHF', 'the amount stays in the VCHF token unit — the currency is only the NAME');
-    // The SELECTION is a different fact from the home currency, and Home deliberately states only
-    // the latter — so this reads it where the wallet does state it (the Pay header chip), then
-    // returns to Home for the Add money tap. That round trip IS the assertion: two facts, two
-    // surfaces, neither one overwriting the other.
-    await driver.click('tab-pay', { timeoutMs: 4_000 });
-    assertIncludes(await driver.readText('active-asset-label'), 'DEMO', 'the SELECTED account is still the practice rail');
-    await driver.click('tab-home', { timeoutMs: 4_000 });
-    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
+    // (a) The home currency is CHF. The headline states "Balance CHF" in the currency unit
+    //     (fork #4) — practice money ∂100 does not reach it — and Add funds opens the home
+    //     rail's deposit surface (the currency-first action row).
+    assertEq(await driver.readText('home-headline-label'), 'Balance CHF', 'the headline names the home CURRENCY');
+    assert(!(await driver.readText('home-headline-amount')).includes('∂'), 'practice money never reaches the headline');
 
-    console.log('[134-home-add-money] tapping add-money (deposit path)…');
-    await driver.click('btn-home-add-money', { timeoutMs: 4_000 });
+    console.log('[134-home-add-money] tapping add-funds (deposit path)…');
+    await driver.click('btn-home-add-funds', { timeoutMs: 4_000 });
     await driver.findByTestID('deposit-address', { timeoutMs: 5_000 });
     const addr = await driver.readText('deposit-address');
     assert(addr.length > 0, 'the VCHF deposit address must render');
-    assertIncludes(await driver.readText('active-asset-label'), 'Swiss francs',
+    assertIncludes(await driver.readText('active-asset-label'), 'Balance CHF',
       'funding the home rail SELECTS it — the account you asked to fund is the account you land on');
     console.log(`[134-home-add-money] ✓ add-money landed the home rail's deposit surface (address ${addr.slice(0, 12)}…)`);
 

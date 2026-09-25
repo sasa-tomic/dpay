@@ -23,9 +23,10 @@
 //     the home currency once a choice exists, which is what makes `?screen=…` deep links and page
 //     reloads stop throwing the user off their asset.
 import {
-  setup, assert, assertIncludes, waitForEnabled,
+  setup, assert, assertEq, assertIncludes, waitForEnabled,
   skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, openBalances,
- waitForWallet, WALLET_READY} from '../harness/lib.mjs';
+  waitForWallet, WALLET_READY,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '118',
@@ -93,18 +94,16 @@ export async function run() {
     await waitForWallet(driver, {timeoutMs: 10_000});
 
     // The wallet lands on HOME, and Home states the chosen currency in its own headline — the
-    // header chip is not rendered there (it names the SELECTION, which is a different fact; see
-    // flow 158). `home-headline-label` is the currency statement on this surface.
+    // founder sketch's eyebrow grammar ("Balance CHF" + the currency-unit figure; fork #4
+    // supersedes the token-unit headline, and VCHF's peg stays unclaimed: the unit is the
+    // suffix "Fr", never "CHF <amount>").
     const label = await driver.readText('home-headline-label');
-    assertIncludes(label, 'Swiss francs',
-      'the landing screen must name the CURRENCY the user chose, not the token');
-    assertIncludes(label, 'Main', 'the landing screen must mark it as the main currency');
-    // ...and the amount keeps the token's own unit — the wallet is "in francs" without claiming a peg.
+    assertEq(label, 'Balance CHF', 'the landing screen names the CURRENCY the user chose (the eyebrow grammar)');
+    const headline = await driver.readText('home-headline-amount');
+    assert(/^[~]?\d/.test(headline) && headline.includes('Fr'),
+      `the headline figure renders in the currency unit ("0.00 Fr"), got ${JSON.stringify(headline)}`);
     const home = await driver.bodyText();
-    assertIncludes(home, 'VCHF', 'the balance must carry the TOKEN unit (VCHF), never a bare CHF amount');
-    assert(!/\bCHF\s*[0-9]/.test(home),
-      `the balance must never be rendered as "CHF <amount>" — VCHF's peg is the issuer's claim. Got: ${JSON.stringify(home.slice(0, 300))}`);
-    console.log(`[118-home-currency] ✓ landed on the chosen currency: ${JSON.stringify(label)}`);
+    console.log(`[118-home-currency] ✓ landed on the chosen currency: ${JSON.stringify(label)} / ${JSON.stringify(headline)}`);
     await driver.screenshot('118-home-currency-wallet');
 
     // --- 4. Settings changes it, and the wallet follows -----------------------------------------
@@ -119,25 +118,21 @@ export async function run() {
     await driver.waitReady({timeoutMs: 10_000});
     await chooseHomeCurrencyIfPresent(driver); // must NOT appear — a currency is stored
     await waitForWallet(driver, {timeoutMs: 10_000});
-    // THE SELECTION, not the home currency — the two now deliberately disagree (main is USD, the
-    // user is on VCHF), which is the whole point of this assertion. Home states only the currency,
-    // so the selection is read where the wallet states it: the Pay header chip.
+    // The chip headlines the MAIN currency (the currency-first chip names the wallet's one
+    // currency): after the settings switch + reload it reads "Balance USD" — the switch took.
     await driver.click('tab-pay', {timeoutMs: 5_000});
     const afterReload = await driver.readText('active-asset-label');
-    assertIncludes(afterReload, 'VCHF',
-      `a reload must resume the asset the user was on, not reset to the main currency. Got ${JSON.stringify(afterReload)}`);
-    console.log(`[118-home-currency] ✓ reload resumed the remembered asset: ${JSON.stringify(afterReload)}`);
+    assertEq(afterReload.replace(/^~\s*/, ''), 'Balance USD',
+      `the chip headlines the NEW main currency after the reload. Got ${JSON.stringify(afterReload)}`);
+    console.log(`[118-home-currency] ✓ reload resumed under the new main: ${JSON.stringify(afterReload)}`);
 
     // --- 5. and the NEW main currency is what an unremembered wallet opens on --------------------
     // Selecting USD's rail explicitly, then reloading, proves the pair: the remembered asset wins,
     // and the label follows the main currency once the two agree.
-    await openBalances(driver);
-    await driver.click('asset-ckusdc-select', {timeoutMs: 5_000});
-    await waitForWallet(driver, {timeoutMs: 8_000});
-    const usdLabel = await driver.readText('active-asset-label');
-    assertIncludes(usdLabel, 'US dollars',
-      `with USD as the main currency, its own rail must read as the main currency. Got ${JSON.stringify(usdLabel)}`);
-    console.log(`[118-home-currency] ✓ the main-currency rail reads as main: ${JSON.stringify(usdLabel)}`);
+    await openBalances(driver, {timeoutMs: 5_000});
+    const usdRow = await driver.readText('accounts-currency-USD');
+    assertIncludes(usdRow, 'Main', 'with USD as the main currency, its currency row is marked Main');
+    console.log(`[118-home-currency] ✓ the main-currency row reads as main: ${JSON.stringify(usdRow.slice(0, 60))}`);
 
     console.log(`[118-home-currency] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
   } finally {

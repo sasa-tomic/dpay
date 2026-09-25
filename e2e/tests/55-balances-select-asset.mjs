@@ -27,7 +27,7 @@ export const meta = {
   name: 'balances-select-asset',
   journey: 'system',
   covers: ['asset-select', 'header-balance-binding', 'active-asset-label'],
-  verifies: 'Selecting an asset in Balances binds the header: label DEMO→ckBTC→SOL and the balance text follows the active-rail branch.',
+  verifies: 'The currency-first header chip binds to the MAIN currency: it headlines Balance CHF on a fresh wallet (never the practice rail), a ckBTC currency-row tap re-points it to Balance BTC, a SOL tap to Balance SOL with the RPC-unavailable figure, and the accounts route\'s currency rows carry their own summed figures (0 BTC unfunded).',
   timeoutMs: 90000,
 };
 
@@ -42,41 +42,42 @@ export async function run() {
     console.log('[55-balances-select-asset] onboarding…');
     await onboardWallet(driver, 'e2e-select');
 
-    // 2. Baseline: the header asset label reads 'DEMO balance' (selectedAssetId reconciles to ic:0).
+    // 2. Baseline (currency-first chip): the header chip headlines the MAIN currency — the
+    //    wallet is "in" CHF — regardless of the practice ∂100 seeded onboarding. The per-asset
+    //    'DEMO balance' / 'BTC balance' header labels are gone with the per-rail header; the
+    //    per-asset name+balance binding now lives on the accounts route's currency rows and
+    //    inside the Pay/Receive engines.
     let label = await driver.readText('active-asset-label');
-    assertEq(label, 'DEMO balance', 'baseline active-asset-label (DEMO)');
+    assertEq(label, 'Balance CHF', 'baseline chip: the MAIN currency (CHF), never the practice rail');
 
-    // 3. Select ckBTC (testKey 'ckbtc') — tap its whole-row select in the accounts route.
-    //    handleSelect('ic:1') sets selectedAssetId; the header then reads the unfunded
-    //    balances['ic:1'].
-    console.log('[55-balances-select-asset] selecting ckBTC…');
+    // 3. Tap the ckBTC CURRENCY row — the spec's set-main gesture. The chip follows main.
+    console.log('[55-balances-select-asset] selecting ckBTC (currency row)…');
     await openBalances(driver);
     await selectCurrency(driver, 'ckbtc');
 
-    // 4. Primary: the label switches to the backing_symbol 'BTC balance' (selectedAsset.symbol).
+    // 4. The chip now headlines BTC — the currency the wallet is "in" (fork #4: currency unit).
     label = await driver.readText('active-asset-label');
-    assertEq(label, 'BTC balance', 'active-asset-label after selecting ckBTC (uses backing_symbol, not wrapper_name)');
+    assertEq(label, 'Balance BTC', 'chip after the ckBTC row tap (main follows the gesture)');
 
-    // 5. Secondary: the header balance text follows — ckBTC is unfunded, so balances['ic:1']
-    //    renders fmtCurrencyAmount(...'0') = "0 BTC" (fmtAsset's zero special-case).
-    const btcHeader = await driver.readText('balance');
-    assertIncludes(btcHeader, '0 BTC', 'header balance after selecting ckBTC (unfunded → "0 BTC")');
-    console.log('[55-balances-select-asset] ✓ header bound to ckBTC (label "BTC balance", balance "0 BTC")');
-
-    // 6. Select SOL — the SOL row's select Pressable carries `asset-sol-select`. handleSelect
-    //    ('solana:SOL') sets selectedAssetId + closes the sheet; the header then reads SOL.
-    console.log('[55-balances-select-asset] selecting SOL…');
+    // 5. The BTC currency row on the accounts route carries the summed balance in currency
+    //    unit — ckBTC is unfunded, so the row reads "0 BTC" (its only rail's token unit).
     await openBalances(driver);
-    await driver.click('asset-sol-select', { timeoutMs: 5_000 });
+    const btcRow = await driver.readText('accounts-currency-BTC');
+    assertIncludes(btcRow, '0 BTC', 'the BTC currency row shows the unfunded 0 (its rail\'s token unit)');
+    console.log('[55-balances-select-asset] ✓ chip bound to main; BTC row shows its unfunded 0 BTC');
 
-    // 7. Primary: the label switches to 'SOL balance' (selectedAsset.symbol).
+    // 6. Select SOL via its currency row — the working rail follows the main.
+    console.log('[55-balances-select-asset] selecting SOL…');
+    await selectCurrency(driver, 'sol');
+
+    // 7. The chip headlines SOL.
     label = await driver.readText('active-asset-label');
-    assertEq(label, 'SOL balance', 'active-asset-label after selecting SOL');
+    assertEq(label, 'Balance SOL', 'chip after the SOL row tap (main follows the gesture)');
 
-    // 8. Secondary: the header balance is SOL — RPC disabled in e2e so solState is unavailable → "—".
+    // 8. Secondary: the header figure is SOL — RPC disabled in e2e so solState is unavailable → "—".
     const solHeader = await driver.readText('balance');
-    assertIncludes(solHeader, '—', 'header balance after selecting SOL (RPC disabled → "—")');
-    console.log('[55-balances-select-asset] ✓ header bound to SOL (label "SOL balance", balance "—")');
+    assertIncludes(solHeader, '—', 'header figure after selecting SOL (RPC disabled → "—")');
+    console.log('[55-balances-select-asset] ✓ chip bound to SOL (figure "—")');
 
     await driver.screenshot('55-balances-select-asset');
 

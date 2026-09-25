@@ -38,41 +38,39 @@ export async function run() {
     await driver.click('btn-settings-close', {timeoutMs: 5_000});
     await waitForWallet(driver, {timeoutMs: 8_000});
 
-    // --- 2. one rail, one row: EURC with MAIN, no VEUR anything ---------------------------------
+    // --- 2. the EUR currency row: ONE row (fork #2), Main badge, rail label names EURC --------
     await openBalances(driver);
-    assert(await driver.isPresent('asset-sol-eurc'),
-      'the EUR rail (EURC@Solana) must have its own row');
-    assert(await driver.isPresent('asset-sol-eurc-main'),
-      'EURC carries the MAIN badge — it is the only EUR rail there is');
-    assert(!(await driver.isPresent('asset-sol-eurc-rail')),
-      'EURC carries MAIN only — a rail badge names a SIBLING rail, and EUR has none');
-    assert(!(await driver.isPresent('asset-veur')),
-      'the retired VEUR rail must render NO row — not MAIN, not a named sibling, nothing');
-    assert(!(await driver.isPresent('asset-veur-main')) && !(await driver.isPresent('asset-veur-rail')),
-      'no VEUR badge may survive either');
-    console.log('[130-eur-single-rail-balances] ✓ EUR group: one row (EURC · MAIN), no VEUR trace');
+    assert(await driver.isPresent('accounts-currency-EUR'),
+      'the EUR currency row exists (the currency list\'s one-row-per-currency grammar)');
+    assert(await driver.findByTestID('currency-EUR-main', {timeoutMs: 4_000}) != null,
+      'EUR carries the Main badge — it is the wallet\'s one currency');
+    assert(!(await driver.isPresent('asset-sol-eurc')),
+      'the per-rail EURC row is GONE — the currency row replaces it');
+    assert(!(await driver.isPresent('asset-veur')) && !(await driver.isPresent('asset-veur-main')),
+      'the retired VEUR rail renders NO row or badge (gone since 2026-09-19)');
+    const eurLabel = await driver.readText('accounts-currency-EUR');
+    assertIncludes(eurLabel, 'EURC · Solana', 'the row\'s rail label names the EURC@Solana rail');
+    console.log('[130-eur-single-rail-balances] ✓ EUR: one currency row (Main + EURC rail label), no VEUR trace');
 
-    // --- 3. the health note: on NO bundled row ---------------------------------------------------
-    const eurcRow = await driver.readText('asset-sol-eurc');
+    // --- 3. the health note: on NO row -----------------------------------------------------------
+    const eurcRow = await driver.readText('accounts-currency-EUR');
     assert(!eurcRow.includes('Thin liquidity') && !eurcRow.includes('Circulates widely'),
       `the deep rail carries NO health line (warn tone gates to thin, and VEUR — the only thin row — is gone). Got: ${JSON.stringify(eurcRow)}`);
-    const vchfRow = await driver.readText('asset-vchf');
+    const vchfRow = await driver.readText('accounts-currency-CHF');
     assert(!vchfRow.includes('Thin liquidity') && !vchfRow.includes('Circulates widely'),
-      `an untiered row (VCHF) states nothing — no tier, no copy. Got: ${JSON.stringify(vchfRow)}`);
-    const solRow = await driver.readText('asset-sol');
+      `an untiered row (CHF) states nothing — no tier, no copy. Got: ${JSON.stringify(vchfRow)}`);
+    const solRow = await driver.readText('accounts-currency-SOL');
     assert(!solRow.includes('Thin liquidity') && !solRow.includes('Circulates widely'),
       `native SOL states nothing either. Got: ${JSON.stringify(solRow)}`);
     assert(!(await driver.isPresent('rail-liquidity-note')),
-      'the rail-health footer renders on NO bundled row — VEUR was the only thin rail in the catalog');
+      'the rail-health footer renders on NO row — VEUR was the only thin rail in the catalog');
     await driver.screenshot('130-eur-balance-rails');
 
-    // --- 4. nothing summed, no chrome change -------------------------------------------------------
+    // --- 4. the row's figure is the summed currency unit; no separate total -----------------------
     const sheet = await driver.bodyText();
-    assert(!/\btotal\b/i.test(sheet),
-      `a currency's rails must never be summed. Got: ${JSON.stringify(sheet.slice(0, 400))}`);
-    assert(!(await driver.isPresent('balances-group-total')),
-      'no group-total element may exist for the EUR row');
-    console.log('[130-eur-single-rail-balances] ✓ health note renders nowhere; nothing summed');
+    assert(!/\bgroup total\b/i.test(sheet),
+      `no group-total element may exist beyond the row\'s own summed figure. Got: ${JSON.stringify(sheet.slice(0, 400))}`);
+    console.log('[130-eur-single-rail-balances] ✓ health note renders nowhere; the row figure IS the sum');
 
     console.log(`[130-eur-single-rail-balances] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
   } finally {

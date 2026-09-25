@@ -26,7 +26,7 @@
 //
 // Selector contract: `request-qr`, `sol-req-qr`, `pay-amount`, `review-payee`, `btn-approve`,
 // `sol-send-address-input`, `sol-send-amount-input`, `btn-sol-send-confirm`, `sol-send-outcome`.
-import {setup, getSession, assert, assertEq, assertIncludes, onboardWallet, railPrincipalText, openBalances, armPayScan, accountOf} from '../harness/lib.mjs';
+import {setup, getSession, assert, assertEq, assertIncludes, onboardWallet, railPrincipalText, openBalances, armPayScan, accountOf, selectCurrency} from '../harness/lib.mjs';
 import {parsePayLink} from '../harness/paylink.mjs';
 import {Driver} from '../harness/driver.mjs';
 
@@ -104,11 +104,21 @@ export async function run() {
     // --- Approve → sign + settle. The link's `ref` rides as the on-chain memo.
     await payer.click('btn-approve', {timeoutMs: 5_000});
     assert(await payer.waitForText('Paid', {timeoutMs: 10_000}), 'payer should reach the Paid screen');
-    assert(await payer.waitForText('∂96.50', {timeoutMs: 10_000}), 'payer balance ∂100 − ∂3.50 = ∂96.50');
-    console.log('[176-paylink-camera-loop] ✓ paid (memo = ref)');
-    // Return the payer's pay tab to the scan surface for the SOL leg below (btn-new = reset).
+    // The settled balance: currency-first (2026-09-24) the practice balance lives on the
+    // accounts route's practice row (the header chip headlines the MAIN currency now).
+    console.log('[176] DEBUG: payer back to scan; the practice-row balance read follows the unlock…');
+    await payer.findByTestID('btn-new', {timeoutMs: 8_000});
     await payer.click('btn-new', {timeoutMs: 5_000});
-    await payer.findByTestID('pay-scan', {timeoutMs: 6_000});
+    await armPayScan(payer);
+    // The settled balance: currency-first (2026-09-24) the practice balance lives on the
+    // accounts route's practice row (the header chip headlines the MAIN currency now), and the
+    // chip is locked while the Paid card is up — read the row after btn-new releases the lock.
+    await openBalances(payer);
+    assert(await payer.waitForText('∂96.50', {timeoutMs: 10_000}), 'payer balance ∂100 − ∂3.50 = ∂96.50 (the practice row)');
+    console.log('[176] DEBUG: practice row read ok');
+    await payer.click('tab-pay', {timeoutMs: 5_000});
+    console.log('[176-paylink-camera-loop] ✓ paid (memo = ref)');
+    // (The pay tab's return-to-scan + the settled-balance read happen above.)
 
     // --- The merchant's OPEN request auto-confirms from the memo — the reconciliation the
     //     founder decision preserved (ref = nonce = memo, one key). The merchant context has
@@ -138,9 +148,10 @@ export async function run() {
     }
 
     // --- Merchant opens a SOL request (select SOL → Receive → make). ------------------------
+    console.log('[176] DEBUG: merchant openBalances (SOL request leg)…');
+    // Currency-first: SOL is selected via its CURRENCY row (the working rail follows the main).
     await openBalances(driver, {timeoutMs: 5_000});
-    await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
-    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await driver.click('btn-accounts-currency-SOL', {timeoutMs: 8_000});
     await driver.click('tab-receive', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-amount-input', {timeoutMs: 5_000});
     await driver.type('sol-req-amount-input', SOL_AMOUNT, {timeoutMs: 5_000});

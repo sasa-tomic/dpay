@@ -26,7 +26,7 @@ export const meta = {
   name: 'home-currency-balance-rails',
   journey: 'onboard',
   covers: ['home-currency', 'balances', 'ckusdc', 'solana-usdc', 'vchf', 'group-model'],
-  verifies: 'The accounts route marks every rail of the home-currency group without summing it: home=USD keeps ckUSDC (MAIN) and USDC · Solana (named rail badge) as distinct rows with no group total; home=CHF renders exactly as before (MAIN on VCHF, no rail badges).',
+  verifies: 'The accounts route is ONE row per CURRENCY (fork #2, the 2026-09-24 redesign superseding the per-rail rows): home=USD renders a single summed currency-unit row whose rail label names BOTH rails (ckUSDC · Internet Computer, USDC · Solana), the Main badge sits on the USD row, no per-rail rows remain, and home=CHF renders its single rail the same way.',
   timeoutMs: 90000,
 };
 
@@ -37,7 +37,7 @@ export async function run() {
   try {
     const {driver} = env;
 
-    // --- 1. onboard seeded, pin home=USD, land on its preferred rail ------------------------------
+    // --- 1. onboard seeded, pin home=USD -----------------------------------------------
     console.log('[121-home-currency-balance-rails] onboarding, pinning home=USD…');
     await onboardWallet(driver, 'e2e-balance-rails');
     await driver.click('btn-settings', {timeoutMs: 5_000});
@@ -45,51 +45,38 @@ export async function run() {
     await driver.click('btn-settings-close', {timeoutMs: 5_000});
     await waitForWallet(driver, {timeoutMs: 8_000});
 
-    // --- 2. home=USD: BOTH rails visible, MAIN on ckUSDC only, sibling named, nothing summed ------
+    // --- 2. home=USD: ONE currency row, summed figure, both rails named in the label ----
     await openBalances(driver);
-    assert(await driver.isPresent('asset-ckusdc'),
-      'the IC rail of the USD group must have its own row in the accounts list');
-    assert(await driver.isPresent('asset-sol-usdc'),
-      'the Solana rail of the USD group must ALSO have its own row — a two-rail currency is two rows, never one');
-    assert(await driver.isPresent('asset-ckusdc-main'),
-      'the preferred rail (ckUSDC) carries the MAIN badge');
-    assert(!(await driver.isPresent('asset-sol-usdc-main')),
-      'the sibling rail must NOT wear a second MAIN badge — two Mains would read as one merged account');
-    assert(!(await driver.isPresent('asset-ckusdc-rail')),
-      'the preferred rail carries MAIN only, not both badges');
-    assert(await driver.isPresent('asset-sol-usdc-rail'),
-      'the sibling rail carries a rail badge');
-    const siblingBadge = await driver.readText('asset-sol-usdc-rail');
-    assertIncludes(siblingBadge, 'USDC · Solana',
-      'the sibling badge NAMES its rail with the rail-line vocabulary (ledger token · settlement chain), never "MAIN"');
-    console.log('[121-home-currency-balance-rails] ✓ USD group: two rows, MAIN on ckUSDC, sibling named');
-
-    // No summed/combined-total line: the route's text carries no total vocabulary, and no badge or
-    // row merges the two rails' balances into one number.
+    assert(await driver.isPresent('accounts-currency-USD'),
+      'the USD currency row exists (fork #2: one row per currency, not per rail)');
+    assert(!(await driver.isPresent('asset-ckusdc')),
+      'the per-rail ckUSDC row is GONE — the currency row replaces it');
+    assert(!(await driver.isPresent('asset-sol-usdc')),
+      'the per-rail USDC·Solana row is GONE too — the wallet reads one USD account');
+    assert(await driver.findByTestID('currency-USD-main', {timeoutMs: 4_000}) != null,
+      'the USD row carries the Main badge (it is the wallet\'s one currency)');
+    const usdLabel = await driver.readText('accounts-currency-USD');
+    assertIncludes(usdLabel, 'ckUSDC · Internet Computer', 'the row\'s rail label names the IC rail');
+    assertIncludes(usdLabel, 'USDC · Solana', 'the row\'s rail label names the Solana rail');
+    // The summed figure is the row's own amount (currency unit) — no separate group-total line.
     const sheet = await driver.bodyText();
-    assert(!/\btotal\b/i.test(sheet),
-      `a two-rail currency must never be summed — no group-total line may exist. Got: ${JSON.stringify(sheet.slice(0, 400))}`);
-    assert(!(await driver.isPresent('balances-group-total')),
-      'no group-total element may exist for the home currency');
+    assert(!/\bgroup total\b/i.test(sheet),
+      `no group-total vocabulary may exist beyond the row\'s own summed figure. Got: ${JSON.stringify(sheet.slice(0, 400))}`);
     await driver.screenshot('121-balance-rails-usd');
 
-    // --- 3. home=CHF: single rail, nothing changed vs before ---------------------------------------
+    // --- 3. home=CHF: single rail, the same one-row grammar -----------------------------
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.click('btn-settings', {timeoutMs: 5_000});
     await driver.click('btn-currency-CHF', {timeoutMs: 5_000});
     await driver.click('btn-settings-close', {timeoutMs: 5_000});
     await waitForWallet(driver, {timeoutMs: 8_000});
     await openBalances(driver);
-    assert(await driver.isPresent('asset-vchf-main'),
-      'the single-rail home currency keeps its MAIN badge on VCHF');
-    assert(!(await driver.isPresent('asset-vchf-rail')),
-      'a one-rail group carries no rail badge — the badge exists to NAME a sibling, and VCHF has none');
-    assert(!(await driver.isPresent('asset-ckusdc-rail')),
-      'with home=CHF the USD rows are not home-rails either — no rail badges anywhere');
-    assert(!(await driver.isPresent('asset-sol-usdc-rail')),
-      'with home=CHF the Solana USDC row carries no rail badge');
+    assert(await driver.findByTestID('currency-CHF-main', {timeoutMs: 4_000}) != null,
+      'home=CHF carries the Main badge on its currency row');
+    assert(await driver.isPresent('accounts-currency-CHF'),
+      'the CHF currency row exists (single rail — exactly the row the currency list always had)');
     await driver.screenshot('121-balance-rails-chf');
-    console.log('[121-home-currency-balance-rails] ✓ CHF: single rail, exactly as before');
+    console.log('[121-home-currency-balance-rails] ✓ CHF: single rail, same one-row grammar');
 
     console.log(`[121-home-currency-balance-rails] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
   } finally {

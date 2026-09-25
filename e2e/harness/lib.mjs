@@ -881,7 +881,11 @@ export async function selectCurrency(driver, key, opts = {}) {
   try {
     await driver.click(`btn-accounts-currency-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
   } catch (e) {
-    const rows = await driver.eval(() => [...new Set(Array.from(document.querySelectorAll('[data-testid]')).map(n => n.getAttribute('data-testid')).filter(t => t.startsWith('btn-accounts-currency-') || t === 'accounts-list' || t.startsWith('asset-')))]);
+    const rows = await driver.eval(() => ({
+      url: location.href.slice(-40),
+      testids: document.querySelectorAll('[data-testid]').length,
+      rows: [...new Set(Array.from(document.querySelectorAll('[data-testid]')).map(n => n.getAttribute('data-testid')).filter(t => t.startsWith('btn-accounts-currency-') || t === 'accounts-list' || t.startsWith('asset-')))],
+    }));
     console.log(`[selectCurrency] surface after miss: ${JSON.stringify(rows)}`);
     throw e;
   }
