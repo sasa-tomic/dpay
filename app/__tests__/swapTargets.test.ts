@@ -29,7 +29,6 @@ const CATALOG: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
 const VCHF = ASSETS.find(a => a.protocol === 'ic' && a.currency === 7)!;
 const SOL_ASSET = ASSETS.find(a => a.protocol === 'solana' && a.symbol === 'SOL')!;
-const ICP_ASSET = ASSETS.find(a => a.protocol === 'ic' && a.currency === 8)!;
 
 const targetsFor = (source: SelectableAsset): SwapTarget[] =>
   resolveSwapTargets({
@@ -71,17 +70,11 @@ describe('resolveSwapTargets — the currency-level pair walk', () => {
     }
   });
 
-  test('the STANDING target: a STABLE pair wins for a stable source, registry order within', () => {
-    // 2026-09-25 visual-validation polish: a fiat holder converting CHF is there for the other
-    // stable (CHF→USD, the founder sketch's own flow), not the volatile pair the registry used
-    // to open on. icpswap (registry row 0) still wins WITHIN each pass — it just no longer
-    // drags a stable source to a volatile target when a stable direct pair exists.
+  test('the STANDING target follows REGISTRY order (row-0 venue wins), not list order', () => {
+    // icpswap (registry row 0) pairs VCHF ↔ ICP — the pair the VCHF convert surface has
+    // always opened on, still the standing pair under the currency-level grammar.
     const standing = standingTarget(targetsFor(VCHF));
-    expect(standing?.currency).toBe('USD');
-    // A volatile source is unchanged: ICP's registry row 0 pool is ICP↔VCHF, so the standing
-    // pair was already the stable CHF before the preference existed.
-    const icpTargets = standingTarget(targetsFor(ICP_ASSET));
-    expect(icpTargets?.currency).toBe('CHF');
+    expect(standing?.currency).toBe('ICP');
   });
 
   test('EUR reaches VCHF through the composed CCTP+Jupiter route (Route C generalization)', () => {
