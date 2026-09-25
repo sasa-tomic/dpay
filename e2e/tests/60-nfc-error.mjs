@@ -31,6 +31,7 @@ import {
   onboardWallet,
   armNfcCard,
   openBalances,
+  armPayScan,
 } from '../harness/lib.mjs';
 import { nfcPhase, nfcPhaseWalk } from '../harness/flow-steps.mjs';
 
@@ -95,13 +96,18 @@ export async function run() {
     const errBody = await driver.bodyText();
     assert(!/\bPaid\b/.test(errBody), 'a failed tap must NEVER show "Paid ✓" (no false success)');
     assert(errBody.includes('Lost the radio link'), `the error reason should render as the sub-line. body excerpt:\n${errBody.slice(0, 400)}`);
-    // The payer's balance is UNCHANGED — no money moved on a failed tap.
-    const balAfterErr = await driver.readText('balance');
-    assert(balAfterErr.includes('∂100.00'), `balance must be unchanged after a failed tap, got "${balAfterErr}"`);
-    console.log('[60-nfc-error] ✓ transport error → "Tap failed" + reason, no debit, no fake Paid');
-    // Escape the terminal view so the next case starts clean (Done re-arms the card).
+    // The payer's balance is UNCHANGED — no money moved on a failed tap. Currency-first: the
+    // practice figure reads on the accounts route's practice row (the chip headlines MAIN).
     assert((await clickNfcButton('Done')) === 'Done', 'the Done button should be reachable after a terminal error');
     await driver.waitGone('nfc-status', {timeoutMs: 5_000});
+    await openBalances(driver);
+    const balAfterErr = await driver.readText('asset-demo');
+    assert(balAfterErr.includes('∂100.00'), `balance must be unchanged after a failed tap, got "${balAfterErr}"`);
+    console.log('[60-nfc-error] ✓ transport error → "Tap failed" + reason, no debit, no fake Paid');
+    // Return to the Pay scan surface and re-arm the NFC card for the next case (the accounts
+    // route detour left the pay gate unmounted).
+    await driver.click('tab-pay', { timeoutMs: 5_000 });
+    await armPayScan(driver);
 
     // --- 2. FAIL-CLOSED AUTO-DECLINE (unsupported asset — no review card to decline from). ------
     // A request carrying currency 99 (not in the catalog) auto-declines at validation: declineCard
@@ -120,11 +126,15 @@ export async function run() {
     assert(!/\bPaid\b/.test(declBody), 'a declined tap must NEVER show "Paid ✓"');
     const wire = await driver.eval(() => window.__DPAY_TEST_NFC_APPROVED_WIRE);
     assert(wire == null, 'no wire may exist for a fail-closed decline (nothing signed)');
-    const balAfterDecl = await driver.readText('balance');
-    assert(balAfterDecl.includes('∂100.00'), `balance must be unchanged after a declined tap, got "${balAfterDecl}"`);
-    console.log('[60-nfc-error] ✓ auto-decline → "Declined" + "Unsupported asset (currency 99)", no wire, no debit, no fake Paid');
     assert((await clickNfcButton('Done')) === 'Done', 'the Done button should be reachable after a decline');
     await driver.waitGone('nfc-status', {timeoutMs: 5_000});
+    // The practice balance reads on the accounts route's practice row (the chip headlines MAIN).
+    await openBalances(driver);
+    const balAfterDecl = await driver.readText('asset-demo');
+    assert(balAfterDecl.includes('∂100.00'), `balance must be unchanged after a declined tap, got "${balAfterDecl}"`);
+    await driver.click('tab-pay', { timeoutMs: 5_000 });
+    await armPayScan(driver);
+    console.log('[60-nfc-error] ✓ auto-decline → "Declined" + "Unsupported asset (currency 99)", no wire, no debit, no fake Paid');
 
     // --- 3. LATE error AFTER settling is IGNORED (no false failure over a decided outcome). -----
     // Once the wire left the phone (settling → committed=true), a transport error says nothing about

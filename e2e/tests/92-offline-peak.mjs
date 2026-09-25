@@ -26,6 +26,7 @@ import {
   setRelay,
   armPayScan,
   openBalances,
+  selectCurrency,
 } from '../harness/lib.mjs';
 import {generateKeypair, buildRequestQR, randNonceHex} from '../harness/wire.mjs';
 
@@ -59,6 +60,11 @@ export async function run() {
     await faucetAccount(env.relayBaseURL, bob.publicHex, 10_000);
     await onboardWallet(driver, 'e2e-alice');
     const alice = await accountOf(driver);
+    // The payer pays PRACTICE money offline (∂25 of ∂100) — select the practice rail before
+    // going offline (currency-first: the wallet opens on the MAIN currency, VCHF, which has no
+    // practice balance and would gate the pay tab).
+    await openBalances(driver);
+    await selectCurrency(driver, 'demo');
     await goOffline(driver, {keepGateway: true});
     assert(await driver.waitForText('approx.', {timeoutMs: 8_000}), 'A should show the offline approx. banner');
 

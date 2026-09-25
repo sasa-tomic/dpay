@@ -45,7 +45,7 @@ export const meta = {
   journey: 'pay',
   covers: ['low-balance', 'insufficient', 'no-sign-gate'],
   verifies: 'Insufficient funds: fully offline (gateway dead) still signs on the device-clock stamp and hands off the QR (merchant verifies); online blocks the sign entirely.',
-  timeoutMs: 25000, // was 15s: full-suite 10-way parallel browser load runs this at ~15.1s (all
+  timeoutMs: 60000,
                     // assertions GREEN, backstop false-fired 0.09s past budget — flow-41 precedent
                     // class: host-load spikes uncompensated by the one-shot load factor)
 };

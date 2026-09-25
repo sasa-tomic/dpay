@@ -35,7 +35,7 @@ import {
   assertIncludes,
   assertDisabled,
   waitForEnabled,
-  openBalances,
+  openBalances, assertEq,
   onboardWallet,
   armPayScan,
   selectCurrency,
@@ -110,12 +110,12 @@ export async function run() {
     assert(reviewGone, 'navigating away mid-review abandons the review (engine unmounted — pre-existing tab semantics)');
     await driver.click('btn-home-accounts', { timeoutMs: 5_000 });
     await driver.findByTestID('accounts-list', { timeoutMs: 5_000 });
+    // Currency grammar: the row tap SETS MAIN and lands Home — the tap taking effect (Home
+    // headlines the picked currency) IS the proof the rows select again.
     await selectCurrency(driver, 'vchf', { timeoutMs: 5_000 });
-    const vchfSelected = await driver.eval((id) => {
-      const el = document.querySelector(`[data-testid="${id}"]`);
-      return el ? el.getAttribute('aria-selected') : null;
-    }, 'asset-vchf');
-    assert(vchfSelected === 'true', 'rows select again once the engine unmount released the lock (aria-selected=true)');
+    await driver.findByTestID('home-headline-label', { timeoutMs: 5_000 });
+    assertEq(await driver.readText('home-headline-label'), 'Balance CHF',
+      'rows select again once the engine unmount released the lock — the row tap set CHF main and landed Home');
     console.log('[71-selection-lock] ✓ lock releases on engine unmount; rows selectable in the accounts route');
 
     // 6. Back to Pay (scan) — the released lock left the chip re-enabled, and it opens the route.

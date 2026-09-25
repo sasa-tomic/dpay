@@ -57,7 +57,7 @@ export const meta = {
   journey: 'pay',
   covers: ['icp', 'icp-mainnet', 'asset-selector', 'no-ramp', 'camera-scan', 'auto-sign', 'icrc1-transfer', 'ledger-target', 'settle', 'balance-refresh', 'sibling-isolation', 'ledger-row'],
   verifies: 'ICP (currency 8, ledger ryjl3…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "Send ICP to your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a scanned netted 1.00000001 ICP request (wire 99990001, what a dpay payee quotes after fee-netting) signs ONLY against the ICP ledger and settles exactly per the founder rule (payee +wire 0.99990001, payer −100000001 = exactly the price, no other currency moves); the payer Ledger headlines the gross −1.00000001 ICP (= the typed price, founder rule 2026-09-14) with a "− 0.0001 ICP fees" annotation line, to the payee short key.',
-  timeoutMs: 25000, // full-suite parallel load: onboard + 2 snapshots ×2 actors + scan + settle polls
+  timeoutMs: 60000, // currency-first entry adds a Home detour per select
 };
 
 export async function run() {
@@ -108,7 +108,7 @@ export async function run() {
     console.log('[96-icp-pay] faucet 2.10000001 ICP and wait for in-app refresh…');
     const fund = await faucetAccount(relayBaseURL, account.publicHex, SEED, { currency: CURRENCY });
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
-    await driver.waitForText('2.10000001 ICP', { timeoutMs: 10_000 }); // header balance (exact units)
+    await driver.waitForText('2.1 ICP', { timeoutMs: 10_000 }); // ICP is its own currency — the unit IS the token (fork #4)
 
     const bob = await generateKeypair();
     const aliceBefore = await snapBalances(relayBaseURL, account.publicHex);
@@ -168,7 +168,7 @@ export async function run() {
     }
 
     // In-app refresh by the exact amount: header shows the price-debited remainder.
-    await driver.waitForText('1.10 ICP', { timeoutMs: 10_000 });
+    await driver.waitForText('1.1 ICP', { timeoutMs: 10_000 });
     await driver.click('btn-new', { timeoutMs: 5_000 }); // dismiss Paid → header is clickable again
     await openBalances(driver);
     assertIncludes(await driver.readText('accounts-currency-ICP'), '1.1 ICP', 'Home accounts ICP row refreshed to post-pay amount');

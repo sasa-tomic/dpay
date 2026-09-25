@@ -61,7 +61,7 @@ export const meta = {
   journey: 'pay',
   covers: ['vchf', 'icp-mainnet', 'asset-selector', 'no-ramp', 'deeplink', 'explicit-approve', 'icrc1-transfer', 'ledger-target', 'settle', 'balance-refresh', 'sibling-isolation', 'ledger-row'],
   verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "first receive VCHF at your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a netted 1.00000001 VCHF price deeplink (amount=0.99990001, the wire a dpay payee quotes after fee-netting) reviews with the total debit = the typed price exactly (netted wire + ledger fee, compact) in exact unit and signs ONLY against the VCHF ledger; the transfer settles exactly per the founder rule (payee +wire 0.99990001, payer −100000001 = exactly the price, no other currency moves); the payer Ledger headlines the gross −1.00000001 VCHF (= the typed price, founder rule 2026-09-14) with a "− 0.0001 VCHF fees" annotation line, to the payee short key.',
-  timeoutMs: 25000, // full-suite parallel load: onboard + 2 snapshots ×2 actors + deeplink reload + settle polls
+  timeoutMs: 60000, // currency-first entry adds a Home detour per select (selectCurrency → row → Home → Pay); full-suite parallel load: onboard + 2 snapshots ×2 actors + settle polls
 };
 
 export async function run() {
@@ -118,7 +118,9 @@ export async function run() {
     console.log('[95-vchf-pay] faucet 2.10000001 VCHF and wait for in-app refresh…');
     const fund = await faucetAccount(relayBaseURL, account.publicHex, SEED, { currency: CURRENCY });
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
-    await driver.waitForText('2.10000001 VCHF', { timeoutMs: 10_000 }); // header balance (exact units)
+    // Fork #4: the header figure is the CURRENCY-unit sum ('2.1 Fr' — compact 2-decimal stables);
+    // the exact raw seed is asserted flow-side via snapBalances below.
+    await driver.waitForText('2.1 Fr', { timeoutMs: 10_000 });
 
     const bob = await generateKeypair();
     const aliceBefore = await snapBalances(relayBaseURL, account.publicHex);
@@ -196,11 +198,13 @@ export async function run() {
       }
     }
 
-    // In-app refresh by the exact amount: header shows the price-debited remainder, payee row in the accounts list.
-    await driver.waitForText('1.10 VCHF', { timeoutMs: 10_000 });
+    // In-app refresh: the header shows the price-debited remainder in the currency unit.
+    await driver.waitForText('1.10 Fr', { timeoutMs: 10_000 });
     await driver.click('btn-new', { timeoutMs: 5_000 }); // dismiss Paid → header is clickable again
     await openBalances(driver);
-    assertIncludes(await driver.readText('accounts-currency-CHF'), '1.10 VCHF', 'accounts-list VCHF row refreshed to post-pay amount');
+    const chfRowTxt = await driver.readText('accounts-currency-CHF');
+    console.log('[95] CHF row after pay: ' + chfRowTxt.slice(0, 120));
+    assertIncludes(chfRowTxt, '1.10 Fr', 'accounts-list CHF row refreshed to the post-pay currency-unit figure (fork #4 — stables render 2-decimal money style)');
     assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'DEMO row unchanged in the accounts list');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
 
