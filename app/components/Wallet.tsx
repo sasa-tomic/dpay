@@ -93,6 +93,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // difference that rots when it is declared in two files.
   type Mode = WalletMode;
   const [mode, setMode] = useState<Mode>('home');
+  // One ScrollView hosts every mode, so the browser's scroll position survives a mode
+  // swap: entering add-currency from the BOTTOM of the (long) accounts list landed that
+  // surface scrolled, with its route header + search field clipped above the viewport
+  // (founder's sketch: search field ON TOP). Every mode change re-lands at the top.
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(() => { scrollRef.current?.scrollTo({ y: 0, animated: false }); }, [mode]);
   // Where the accounts ROUTE was entered from, so Back returns there instead of guessing 'home'.
   // A ref, not state: nothing renders from it, and it must be written during the same tick as the
   // mode change that reads it.
@@ -1523,7 +1529,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
           what is going on). The testID is unchanged, so the flows that read it still do. */}
       {topUpErr ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text> : null}
 
-      <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'home'
           ? <HomeTab
               assets={assets}
