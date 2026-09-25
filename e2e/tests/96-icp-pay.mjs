@@ -75,10 +75,10 @@ export async function run() {
     // (1) Shared asset selector: exact unit/network, no ramp actions.
     console.log('[96-icp-pay] assert accounts-route ICP row (exact unit/network, no ramps)…');
     await openBalances(driver);
-    const icpRow = await driver.findByTestID('asset-icp', { timeoutMs: 6_000 });
+    const icpRow = await driver.findByTestID('accounts-currency-ICP', { timeoutMs: 6_000 });
     assert(icpRow != null, 'asset-icp row present in the shared accounts list');
-    assertIncludes(await driver.readText('asset-icp'), 'ICP · Internet Computer', 'ICP row unit · network');
-    assertIncludes(await driver.readText('asset-vchf'), 'VCHF · Internet Computer', 'VCHF sibling row unit · network');
+    assertIncludes(await driver.readText('accounts-currency-ICP'), 'ICP · Internet Computer', 'ICP row unit · network');
+    assertIncludes(await driver.readText('accounts-currency-CHF'), 'VCHF · Internet Computer', 'VCHF sibling row unit · network');
     const sheetBody = await driver.bodyText();
     assert(!sheetBody.includes('Add money'), 'no on-ramp ("Add money") action on ICP row');
     assert(!sheetBody.includes('Cash out'), 'no off-ramp ("Cash out") action on ICP row');
@@ -88,7 +88,7 @@ export async function run() {
     // Select ICP; unfunded selection parks the Pay tab on the fund panel (real top-up
     // instructions — founder hard rule 2026-08-29).
     await selectCurrency(driver, 'icp');
-    assertEq(await driver.readText('active-asset-label'), 'ICP balance', 'header active-asset label after ICP select');
+    assertEq(await driver.readText('active-asset-label'), 'Balance ICP', 'chip after the ICP row select (main ICP)');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
     const fundPanel = await driver.findByTestID('pay-fund', { timeoutMs: 6_000 });
     assert(fundPanel != null, 'unfunded ICP selection parks Pay tab on the fund panel');
@@ -171,7 +171,7 @@ export async function run() {
     await driver.waitForText('1.10 ICP', { timeoutMs: 10_000 });
     await driver.click('btn-new', { timeoutMs: 5_000 }); // dismiss Paid → header is clickable again
     await openBalances(driver);
-    assertIncludes(await driver.readText('asset-icp'), '1.1 ICP', 'Home accounts ICP row refreshed to post-pay amount');
+    assertIncludes(await driver.readText('accounts-currency-ICP'), '1.1 ICP', 'Home accounts ICP row refreshed to post-pay amount');
     assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'DEMO row unchanged in the accounts list');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
 

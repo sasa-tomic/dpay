@@ -22,7 +22,15 @@
 // test relay (relay-config reads it at module load; the link parser ignores unknown params).
 //
 // Selector contract: `pay-amount`, `review-payee`, `btn-approve`, `btn-new`, `balance`.
-import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText } from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  getBalance,
+  onboardWallet,
+  railPrincipalText,
+  openBalances,
+} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex } from '../harness/wire.mjs';
 
 const PAY_AMOUNT = '25';   // decimal display units — what the link carries
@@ -101,6 +109,7 @@ export async function run() {
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payer should reach the Paid screen after the ledger settles the linked payment');
+    await openBalances(driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });
     assert(aliceDown, 'payer A balance should be ∂75.00 (∂100 − ∂25) after the settle');
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, 0);

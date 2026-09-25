@@ -81,7 +81,7 @@ export async function run() {
     // The Balances sheet's per-asset row is the assertion surface (the Home tab's own headline
     // reads the HOME currency, not the selected asset).
     await openBalances(driver);
-    await driver.findByTestID('asset-icp', { timeoutMs: 6_000 });
+    await driver.findByTestID('accounts-currency-ICP', { timeoutMs: 6_000 });
     let sheet = await driver.bodyText();
     assertIncludes(sheet, '1.1 ICP', 'the deducted balance renders on the sheet');
     assert(!sheet.includes('~1.1 ICP'), 'a freshly offline figure must NOT be approx-marked yet (the >1 min rule)');

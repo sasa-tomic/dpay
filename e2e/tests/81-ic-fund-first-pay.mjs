@@ -20,7 +20,18 @@
  *      'Send to address' toggle shows the SAME fund panel instead of the withdraw form — and the
  *      panel speaks in the SEND sub-mode's own voice, never the scan sub-mode's.
  */
-import {setup, onboardWallet, openBalances, goOffline, setRelay, assert, assertIncludes, accountOf, faucetAccount} from '../harness/lib.mjs';
+import {
+  setup,
+  onboardWallet,
+  openBalances,
+  goOffline,
+  setRelay,
+  assert,
+  assertIncludes,
+  accountOf,
+  faucetAccount,
+  selectCurrency,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '81',
@@ -39,7 +50,7 @@ export async function run() {
 
     // Select ckBTC (a fresh wallet holds DEMO ∂100 from the faucet but zero ckBTC).
     await openBalances(driver);
-    await driver.click('asset-ckbtc-select');
+    await selectCurrency(driver, 'ckbtc');
 
     // (1) Online + known zero → the fund panel rides BELOW the scan surface, never in front of it
     //     (X3, 2026-09-08). The merchant's QR names its own asset and this rail pays THAT asset, so

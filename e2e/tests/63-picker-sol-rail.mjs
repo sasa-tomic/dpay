@@ -39,7 +39,7 @@ export async function run() {
 
     // 1. Baseline: the active rail is DEMO (selectedAssetId reconciles to ic:0).
     let label = await driver.readText('active-asset-label');
-    assertEq(label, 'DEMO balance', 'baseline active-asset-label (DEMO)');
+    assertEq(label, 'Balance CHF', 'baseline chip: the MAIN currency (CHF)');
 
     // 2. Open the Receive tab + the compact currency picker (via the amount prefix glyph).
     console.log('[63-picker-sol-rail] opening the Receive currency picker…');
@@ -60,7 +60,7 @@ export async function run() {
 
     // 5. The header asset label flips to 'SOL balance' (selectedAsset.symbol — the rail switched).
     label = await driver.readText('active-asset-label');
-    assertEq(label, 'SOL balance', 'active-asset-label after picking SOL in the Receive picker');
+    assertEq(label, 'Balance CHF', 'the picker pick moves the WORKING rail — the chip keeps the main currency');
 
     // 6. SolReceiveMode mounted — its amount input is present (proves the SOL receive form is the
     //    active surface, not the IC ReceiveMode). Phase 4: this mount now happens via Wallet's

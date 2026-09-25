@@ -116,7 +116,7 @@ export async function run() {
 
     // ---- (c) Solana: the same shape, with no descriptor behind it ----------------------------
     await openBalances(driver);
-    await driver.click('asset-sol-select', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'sol', { timeoutMs: 5_000 });
     await driver.click('tab-receive', { timeoutMs: 5_000 });
     await driver.click('btn-receive-address', { timeoutMs: 5_000 });
     await driver.findByTestID('sol-receive-qr', { timeoutMs: 10_000 });

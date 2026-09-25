@@ -151,7 +151,7 @@ export async function run() {
     //    pre-withdraw 1000 USDC.
     await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
-    const reduced = await driver.waitForText('998.99 USDC', { timeoutMs: 10_000 });
+    const reduced = await driver.waitForText('$998.99', { timeoutMs: 10_000 }) // the USD currency row: summed balance in the currency unit (fork #4);
     // Scoped to the ACCOUNTS LIST: the Home activity feed legitimately keeps the +1,000.00 USDC
     // faucet-seed row — history, not a stale balance. The rows live on the accounts route, reached
     // by the header balance chip.

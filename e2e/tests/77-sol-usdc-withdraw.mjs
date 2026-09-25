@@ -30,7 +30,16 @@
 // Selector contract: `asset-sol-usdc-select`, `btn-pay-send`, `sol-send-address-input`,
 // `sol-send-amount-input`, `sol-send-review-amount`, `sol-send-ata-note`, `btn-sol-send-confirm`,
 // `sol-send-outcome`, `sol-send-signature`, `sol-send-err`.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertEq,
+  assertIncludes,
+  onboardWallet,
+  openBalances,
+  selectCurrency,
+  selectSolRail,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '77',
@@ -87,8 +96,7 @@ export async function run() {
     // 1. Select USDC·Solana via Balances (the same whole-row IA every asset uses).
     console.log('[77-sol-usdc-withdraw] selecting USDC·Solana via Balances…');
     await openBalances(driver);
-    await driver.findByTestID('asset-sol-usdc-select', {timeoutMs: 8_000});
-    await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
+    await selectSolRail(driver, 'sol-usdc', {timeoutMs: 5_000});
 
     // 2. Pay tab → "Send to address": the sheet mounts with token='USDC' (device ATA exists → no
     //    gate) and renders in USDC units.

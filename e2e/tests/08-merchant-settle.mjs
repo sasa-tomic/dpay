@@ -15,7 +15,17 @@
 //     are name-less; memo is the reconciliation key).
 //
 // Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`, `balance`.
-import { setup, assert, getBalance, faucetAccount, icpCatalog, railPrincipalText, onboardWallet, accountOf } from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  getBalance,
+  faucetAccount,
+  icpCatalog,
+  railPrincipalText,
+  onboardWallet,
+  accountOf,
+  openBalances,
+} from '../harness/lib.mjs';
 import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode } from '../harness/wire.mjs';
 import { parsePayLink } from '../harness/paylink.mjs';
@@ -99,6 +109,7 @@ export async function run() {
     console.log('[08-merchant-settle] ✓ B app shows "Received ∂30.00" (ledger-sourced confirmation)');
 
     // --- B's `$` balance grew by the amount. --------------------------------------------------
+    await openBalances(driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const bobUp = await driver.waitForText('∂130.00', { timeoutMs: 10_000});
     assert(bobUp, `merchant B balance should be ∂130.00 (∂100 + ∂30) after the settle`);
     const bobLedger = await getBalance(relayBaseURL, bobHex, 0);

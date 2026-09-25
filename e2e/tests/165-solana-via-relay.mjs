@@ -97,7 +97,7 @@ export async function run() {
     // USDC padded to "3.00 USDC"). ASSERTED waits: waitForText returns false on timeout, it does
     // not throw.
     assert(await driver.waitForText('2 SOL', {timeoutMs: 15_000}), 'the SOL row renders 2 SOL from the stub upstream');
-    assert(await driver.waitForText('3.00 USDC', {timeoutMs: 15_000}), 'the USDC row renders 3.00 USDC from the stub upstream');
+    assert(await driver.waitForText('$3.00', {timeoutMs: 15_000}), 'the USD currency row renders the summed $3.00 from the stub upstream (fork #4: currency unit)');
     console.log('[165-solana-via-relay] ✓ SOL and USDC rows render from the stub upstream');
 
     // …and the upstream really was reached THROUGH the proxy: the stub's envelope counter is

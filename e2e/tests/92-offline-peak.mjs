@@ -13,7 +13,20 @@
 // to catch after the ~2s moment), `first-offline-stamp` (the settled remnant mark), and
 // The honesty core: the
 // pending "Sent" hand-off view (btn-paid) must carry NEITHER the peak NOR the stamp.
-import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf, goOffline, setRelay, armPayScan} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  getBalance,
+  faucetAccount,
+  icpCatalog,
+  onboardWallet,
+  accountOf,
+  goOffline,
+  setRelay,
+  armPayScan,
+  openBalances,
+} from '../harness/lib.mjs';
 import {generateKeypair, buildRequestQR, randNonceHex} from '../harness/wire.mjs';
 
 export const meta = {
@@ -144,6 +157,7 @@ export async function run() {
 
     // --- The ONLINE paid path never peaks — but the calm stamp rides the confirmed card. -------
     await driver.click('btn-new', {timeoutMs: 4_000});
+    await openBalances(driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     assert(await driver.waitForText('∂50.00', {timeoutMs: 10_000}), 'A is back online (live balance ∂50.00)');
     nonce = randNonceHex();
     expiry = Math.floor(Date.now() / 1000) + 600;

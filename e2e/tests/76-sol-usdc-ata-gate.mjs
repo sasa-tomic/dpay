@@ -16,7 +16,16 @@
 // The stub seam (__DPAY_TEST_SOLANA_RPC_STUB) routes all RPC through an in-memory simulator —
 // the inner loop stays fully offline. getAccountInfo null/absent ↔ funded token account flips the
 // ATA status exactly as production's getSolanaUsdcBalance does.
-import {setup, assert, assertIncludes, assertEq, onboardWallet, openBalances} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  assertEq,
+  onboardWallet,
+  openBalances,
+  selectCurrency,
+  selectSolRail,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '76',
@@ -62,7 +71,8 @@ export async function run() {
 
     console.log('[76-sol-usdc-ata-gate] selecting solana:USDC as the active asset…');
     await openBalances(driver);
-    await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
+    await selectSolRail(driver, 'sol-usdc', {timeoutMs: 5_000});
+    await driver.click('btn-receive-request', { timeoutMs: 5_000 }); // these flows drive the REQUEST form on the Solana-USDC rail
 
     // ---- 1. ABSENT: the request form shows the inline setup card and Request is BLOCKED ----
     console.log('[76-sol-usdc-ata-gate] request form: inline setup card + Request blocked…');

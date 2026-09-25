@@ -129,11 +129,14 @@ export async function run() {
     // balance. The rows live on the accounts route, reached by the header balance chip.
     await driver.click('btn-send-done', { timeoutMs: 5_000 });
     await openBalances(driver);
-    const reduced = await driver.waitForText('3.7499 VCHF', { timeoutMs: 10_000 });
+    // Fork #4: the CHF currency row shows the SUMMED balance in the currency unit ("3.74 Fr" —
+    // 2-decimal Fr, token unit retired for balance display). The exact raw ledger truth is
+    // asserted flow-side below via getBalance.
+    const reduced = await driver.waitForText('3.74 Fr', { timeoutMs: 10_000 });
     const balBody = await driver.readText('accounts-list');
-    assert(reduced, `Balances VCHF row should show the reduced 3.7499 VCHF. accounts excerpt:\n${balBody.slice(0, 500)}`);
-    assert(!balBody.includes('5.00 VCHF'), 'Balances must NOT still show the pre-send 5.00 VCHF (stale cache?)');
-    console.log('[104-send-to-address] ✓ UI VCHF balance dropped to 3.7499 VCHF');
+    assert(reduced, `Balances CHF row should show the reduced balance in the currency unit. accounts excerpt:\n${balBody.slice(0, 500)}`);
+    assert(!balBody.includes('5.00 Fr'), 'Balances must NOT still show the pre-send 5.00 Fr (stale cache?)');
+    console.log('[104-send-to-address] ✓ UI CHF balance dropped to 3.74 Fr (currency unit)');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[104-send-to-address] GREEN in ${elapsed}s`);

@@ -12,7 +12,19 @@
 // require a username fails THIS test loudly, forcing a conscious update rather than silent drift.
 //
 // Selector contract: `username-input` (M6), `btn-create`, `balance`.
-import { setup, assert, assertEq, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset, waitForWallet} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertEq,
+  accountOf,
+  waitForEnabled,
+  skipWalkthroughIfPresent,
+  skipPracticeIfPresent,
+  chooseHomeCurrencyIfPresent,
+  selectDemoAsset,
+  waitForWallet,
+  openBalances,
+} from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -58,6 +70,7 @@ export async function run() {
     // The wallet opens on the chosen CURRENCY; this flow is about the DEMO rail, so say so.
     await selectDemoAsset(driver);
     await waitForWallet(driver, { timeoutMs: 10_000 });
+    await openBalances(driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const funded = await driver.waitForText('∂100.00', { timeoutMs: 12_000 });
     const body = await driver.bodyText();
     assert(funded, `wallet should fund ∂100 with the default username. body excerpt:\n${body.slice(0, 500)}`);

@@ -18,7 +18,15 @@
 // Selector contract: `pay-err` (IC rail refusal), `sol-pay-scan`, `sol-pay-amount`, `sol-pay-payee`,
 // `sol-spay-message`, `btn-approve`, `btn-sol-pay-cancel`, `sol-pay-status`, `sol-spay-signature`,
 // `sol-spay-ata-note`, `sol-pay-err`, `btn-sol-pay-done`.
-import {setup, assert, assertEq, onboardWallet, openBalances, armPayScan} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertEq,
+  onboardWallet,
+  openBalances,
+  armPayScan,
+  selectCurrency,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '119',
@@ -75,8 +83,7 @@ export async function run() {
     // 2. Switch to the SOL rail: Balances → select SOL → Pay tab.
     console.log('[119-solana-pay-scan] switching to the SOL rail…');
     await openBalances(driver);
-    await driver.findByTestID('asset-sol-select', {timeoutMs: 8_000});
-    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await selectCurrency(driver, 'sol', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
 

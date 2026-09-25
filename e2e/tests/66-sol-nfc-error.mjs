@@ -21,7 +21,15 @@
 //
 // Selector contract: `sol-nfc-status`, `asset-sol-select`, `sol-pay-scan`, `tab-receive`,
 // `sol-req-amount-input`, `btn-sol-req-make`, `sol-req-qr`.
-import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  onboardWallet,
+  armNfcCard,
+  waitForWallet,
+  openBalances,
+  selectCurrency,
+} from '../harness/lib.mjs';
 import { nfcPhase, nfcPhaseWalk } from '../harness/flow-steps.mjs';
 
 export const meta = {
@@ -88,8 +96,7 @@ export async function run() {
     console.log('[66-sol-nfc-error] selecting SOL (card mounts immediately, no setup)…');
     await waitForWallet(driver, {timeoutMs: 8_000});
     await openBalances(driver, {timeoutMs: 5_000});
-    await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
-    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await selectCurrency(driver, 'sol', {timeoutMs: 5_000});
     // The accounts list is inline on Home (O4 S3) — the row select no longer closes any sheet,
     // so the flow owns the return to Pay.
     await driver.click('tab-pay', {timeoutMs: 5_000});

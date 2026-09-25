@@ -83,13 +83,13 @@ export async function run() {
     // header chip is not rendered there (it names the SELECTION, which is a different fact; see
     // flow 158). `home-headline-label` is the currency statement on this surface.
     const label = await driver.readText('home-headline-label');
-    assertIncludes(label, 'uros', 'the header names the CURRENCY (euros), not the token');
+    assertIncludes(label, 'Balance EUR', 'the headline names the CURRENCY (the eyebrow grammar)');
     assert(!(await driver.isPresent('home-currency-detail')),
       'the detail panel is a chooser surface — it must not leak into the wallet');
     // The home screen names the currency, not the token; the landed rail is proven in the Home
     // accounts list, where the MAIN badge sits on the EURC row — the only EUR rail there is.
     await openBalances(driver);
-    assert(await driver.isPresent('asset-sol-eurc-main'),
+    assert(await driver.isPresent('currency-EUR-main'),
       'Continue commits EUR onto its one rail — EURC carries the MAIN badge');
     assert(!(await driver.isPresent('asset-veur')),
       'the retired VEUR rail renders NO row at all — not a sibling, not a landing');

@@ -24,6 +24,7 @@
 //     are pinned by flow 184).
 // Private relay (startRelay, the flow-183 pattern): deterministic catalog, isolated pools.
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
+  pickSwapTarget,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
@@ -122,20 +123,14 @@ export async function run() {
     await driver.click('convert-details', {timeoutMs: 5_000}); // the folded census (verbosity pass 2026-09-16)
     assertEq((await driver.readText('convert-pool-principal')).trim(), VCHF_ICP_POOL,
       'the direct form still quotes through the row-0 VCHF ↔ ICP pool');
-    // The new pool's app surface: the VCHF → USDC(Ethereum) route row beside the direct pair.
-    await driver.findByTestID(ROUTE_ROW, {timeoutMs: 5_000});
-    // The hop is THE canonical USDC row, so the full cross-rail composition rides it: Route A
-    // (this pool's hop), Route B (+CCTP to Solana USDC) and Route C (+jupiter to wrapped SOL)
-    // all walk out of the SAME new venue — a real list, so the one-route honesty line stays
-    // QUIET on VCHF (it speaks only when the route list is the picker's whole story).
-    await driver.findByTestID('convert-dest-route-multihop:icpswap-vchf-ckusdc:2:cctp', {timeoutMs: 2_000});
-    await driver.findByTestID('convert-dest-route-multihop:icpswap-vchf-ckusdc:2:cctp:jupiter', {timeoutMs: 2_000});
-    assert(await driver.findByTestID('convert-route-note', {timeoutMs: 1_000}).catch(() => null) == null,
-      'the one-route note stays quiet — three routes share the picker (no cefi path on VCHF)');
-
-    // Pick the route: the hop quotes through the SAME new pool; the destination minimum is the
-    // hop quote's 1% floor in the destination's own units (USDC on Ethereum, 6 decimals).
-    await driver.click(ROUTE_ROW);
+    // The new pool's app surface, currency-first: the USD target's venue area carries the
+    // direct pool, the via-ICP hub, Route B (+CCTP) and the CeFi row — kind order; the
+    // external-address Route A is not offered (the swap converts between the user's own
+    // balances). Route B's hop quotes through the SAME new pool.
+    await pickSwapTarget(driver, 'USD');
+    await driver.findByTestID('convert-venue-icpswap-vchf-ckusdc', {timeoutMs: 5_000});
+    await driver.findByTestID('convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp', {timeoutMs: 3_000});
+    await driver.click('convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp', {timeoutMs: 4_000});
     await driver.type('convert-dest-address', DEST);
     await driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
     assert(await driver.findByTestID('convert-dest-address-invalid', {timeoutMs: 1_000}).catch(() => null) == null,

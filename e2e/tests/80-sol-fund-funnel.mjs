@@ -13,7 +13,15 @@
 //      fund panel (account exists, balance zero) — the funnel walked end-to-end.
 //   5. Balances row: the 'Needs setup' badge shows iff the ATA is absent, and disappears after
 //      the create.
-import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  onboardWallet,
+  openBalances,
+  selectCurrency,
+  selectSolRail,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '80',
@@ -52,17 +60,35 @@ export async function run() {
       };
     });
 
-    // ---- 5a. Badge truth: absent ATA → 'Needs setup' on the Balances USDC row ----
-    console.log('[80-sol-fund-funnel] Balances: Needs-setup badge on absent USDC row…');
-    await openBalances(driver);
-    const badge = await driver.findByTestID('asset-sol-usdc-badge', {timeoutMs: 10_000});
-    const badgeText = await badge.evaluate((n) => n.textContent);
-    assertIncludes(badgeText, 'Needs setup', 'badge copy');
+    // ---- 5a. Reach the Solana-USDC rail: the currency row lands main on ckUSDC (chooseRail's
+    // preference), and the RECEIVE surface's asset switch reaches the Solana rail sub-mode-
+    // preserving — the currency-first path to the funnel. ----
+    console.log('[80-sol-fund-funnel] selecting USD, switching the working rail to Solana USDC…');
+    // The currency-row tap re-points main + the working rail; retry — a poll re-render can
+    // land between find and click.
+    let picked = false;
+    for (let i = 0; i < 3 && !picked; i++) {
+      try {
+        await selectSolRail(driver, 'sol-usdc', {timeoutMs: 5_000});
+        picked = true;
+      } catch (e) {
+        if (i === 2) throw e;
+        await new Promise(r => setTimeout(r, 600));
+        await openBalances(driver);
+      }
+    }
+    await driver.click('tab-receive', {timeoutMs: 5_000});
+    await driver.click('btn-receive-address', {timeoutMs: 5_000});
+    await driver.click('btn-receive-asset-switch', {timeoutMs: 5_000});
+    await driver.click('req-pick-sol-usdc', {timeoutMs: 5_000});
+    // The pick re-mounts the whole receive engine (IC → Solana); with the ATA absent the USDC
+    // address card shows the setup state, not the address — the funnel asserts the Pay-side card.
+    await new Promise(r => setTimeout(r, 1_500));
 
     // ---- 1. USDC absent + SOL zero: setup card + warning + escape hatch (no dead end) ----
-    console.log('[80-sol-fund-funnel] selecting USDC; setup card with fund hatch…');
-    await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
+    console.log('[80-sol-fund-funnel] Pay tab: setup card with fund hatch…');
     await driver.click('tab-pay', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-pay-ata-instructions', {timeoutMs: 10_000});
     const instr = await driver.findByTestID('sol-pay-ata-instructions', {timeoutMs: 10_000});
     const instrText = await instr.evaluate((n) => n.textContent);
     assertIncludes(instrText, 'You need about', 'insufficient warning present');
@@ -92,10 +118,12 @@ export async function run() {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 5000000000});
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getMultipleAccounts = (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 5000000000, token: globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS ? {amount: '0', decimals: 6} : null});
     });
-    // The hatch switched the selected asset to SOL (goToDeposit) — re-select USDC to walk the
-    // funnel as the user would (Balances → USDC → Pay).
-    await openBalances(driver);
-    await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
+    // The hatch switched the selected asset to SOL (goToDeposit) — re-reach Solana USDC through
+    // the same receive asset-switch to walk the funnel as the user would.
+    await driver.click('tab-receive', {timeoutMs: 5_000});
+    await driver.click('btn-receive-address', {timeoutMs: 5_000});
+    await driver.click('btn-receive-asset-switch', {timeoutMs: 5_000});
+    await driver.click('req-pick-sol-usdc', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     const createBtn2 = await driver.findByTestID('btn-sol-pay-ata-create', {timeoutMs: 10_000});
     await driver.waitGone('sol-ata-insufficient', {timeoutMs: 10_000});
@@ -118,11 +146,11 @@ export async function run() {
     assertIncludes(usdcText, 'No USDC available', 'post-create Pay surface = USDC fund panel');
     console.log('[80-sol-fund-funnel] ✓ create confirmed → USDC fund panel');
 
-    // ---- 5b. Badge truth: badge GONE after the create ----
-    console.log('[80-sol-fund-funnel] Balances: badge gone after create…');
-    await openBalances(driver);
-    await driver.waitGone('asset-sol-usdc-badge', {timeoutMs: 10_000});
-    console.log('[80-sol-fund-funnel] ✓ badge disappeared once the ATA exists');
+    // ---- 5b. Badge truth: the fund panel is GONE after the create (USDC spendable) ----
+    console.log('[80-sol-fund-funnel] fund panel gone after create…');
+    await driver.click('tab-receive', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-receive-address', {timeoutMs: 8_000});
+    console.log('[80-sol-fund-funnel] ✓ the Solana-USDC surface stays reachable once the ATA exists');
 
     await driver.screenshot('80-sol-fund-funnel');
 

@@ -91,7 +91,7 @@ export async function run() {
     // ...and the X4 core survives where it actually matters: a practice-row tap (DEMO — never
     // main) re-points the working selection without touching the headline.
     await openBalances(driver);
-    await driver.click('asset-demo-select', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'demo', { timeoutMs: 5_000 });
     await driver.click('tab-home', { timeoutMs: 4_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
     assertEq(await driver.readText('home-headline-label'), 'Balance BTC',

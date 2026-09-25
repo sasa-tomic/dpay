@@ -9,7 +9,8 @@
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency,
   armPayScan,
- waitForWallet} from '../harness/lib.mjs';
+  waitForWallet, selectSolRail,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '132',
@@ -43,9 +44,9 @@ export async function run() {
     // `home-headline-label` is the currency statement on this surface.
     await driver.click('tab-home', {timeoutMs: 5_000});
     const label = await driver.readText('home-headline-label');
-    assertIncludes(label, 'uros', 'home=EUR names the currency in the header');
+    assertIncludes(label, 'Balance EUR', 'home=EUR names the currency in the headline');
     await openBalances(driver);
-    await selectCurrency(driver, 'sol-eurc');
+    await selectSolRail(driver, 'sol-eurc');
 
     // The SOL RPC simulator (same seam as flow 119): 5 SOL for fees, 2 units (6 dec) of the
     // requested token, token accounts present so sender and merchant ATAs exist — no create leg.

@@ -79,10 +79,10 @@ export async function run() {
     // (1) Shared asset selector: exact unit/network, no ramp actions.
     console.log('[95-vchf-pay] assert accounts-route VCHF row (exact unit/network, no ramps)…');
     await openBalances(driver);
-    const vchfRow = await driver.findByTestID('asset-vchf', { timeoutMs: 6_000 });
+    const vchfRow = await driver.findByTestID('accounts-currency-CHF', { timeoutMs: 6_000 });
     assert(vchfRow != null, 'asset-vchf row present in the shared accounts list');
-    assertIncludes(await driver.readText('asset-vchf'), 'VCHF · Internet Computer', 'VCHF row unit · network');
-    assertIncludes(await driver.readText('asset-icp'), 'ICP · Internet Computer', 'ICP sibling row unit · network');
+    assertIncludes(await driver.readText('accounts-currency-CHF'), 'VCHF · Internet Computer', 'VCHF row unit · network');
+    assertIncludes(await driver.readText('accounts-currency-ICP'), 'ICP · Internet Computer', 'ICP sibling row unit · network');
     const sheetBody = await driver.bodyText();
     assert(!sheetBody.includes('Add money'), 'no on-ramp ("Add money") action on VCHF row');
     assert(!sheetBody.includes('Cash out'), 'no off-ramp ("Cash out") action on VCHF row');
@@ -97,7 +97,7 @@ export async function run() {
     // header names the CURRENCY, not the token (the home-currency model, 2026-09-04; flow 118 owns
     // that behaviour). The AMOUNT below still carries the VCHF unit, which the balance assertions
     // in this flow check directly.
-    assertEq(await driver.readText('active-asset-label'), 'Swiss francs · Main', 'header active-asset label after VCHF select');
+    assertEq(await driver.readText('active-asset-label'), 'Balance CHF', 'chip after the VCHF row select (main CHF)');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
     const fundPanel = await driver.findByTestID('pay-fund', { timeoutMs: 6_000 });
     assert(fundPanel != null, 'unfunded VCHF selection parks Pay tab on the fund panel');
@@ -200,7 +200,7 @@ export async function run() {
     await driver.waitForText('1.10 VCHF', { timeoutMs: 10_000 });
     await driver.click('btn-new', { timeoutMs: 5_000 }); // dismiss Paid → header is clickable again
     await openBalances(driver);
-    assertIncludes(await driver.readText('asset-vchf'), '1.10 VCHF', 'accounts-list VCHF row refreshed to post-pay amount');
+    assertIncludes(await driver.readText('accounts-currency-CHF'), '1.10 VCHF', 'accounts-list VCHF row refreshed to post-pay amount');
     assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'DEMO row unchanged in the accounts list');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
 

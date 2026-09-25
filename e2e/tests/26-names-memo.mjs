@@ -15,7 +15,16 @@
 //     memo="coffee" — the PAYEE sees the PAYER's name (N6/H3 core fix).
 //
 // Selector contract: `balance`, `tab-transactions` (stable surfaces — the sign status is transient).
-import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText , armPayScan} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  getBalance,
+  onboardWallet,
+  railPrincipalText,
+  armPayScan,
+  openBalances,
+} from '../harness/lib.mjs';
 import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
@@ -84,6 +93,7 @@ export async function run() {
     console.log(`[26-names-memo] ✓ A reached "Paid ✓" to ${PAYEE_NAME}`);
 
     // --- A's balance decreased by the amount. ------------------------------------------------
+    await openBalances(driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });
     assert(aliceDown, `payer A balance should be ∂75.00 (∂100 − ∂25) after the settle`);
 

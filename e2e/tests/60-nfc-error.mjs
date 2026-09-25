@@ -25,7 +25,13 @@
 //
 // Selector contract: `nfc-status` (the NfcTapView surface), `balance` (unchanged), the Done link
 // (aria-label="Done" — terminal-phase Cancel flips its label).
-import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  onboardWallet,
+  armNfcCard,
+  openBalances,
+} from '../harness/lib.mjs';
 import { nfcPhase, nfcPhaseWalk } from '../harness/flow-steps.mjs';
 
 export const meta = {

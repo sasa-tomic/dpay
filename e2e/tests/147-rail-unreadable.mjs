@@ -125,7 +125,7 @@ export async function run() {
     assert((await outageBanners(driver)) === 1, 'one network outage renders exactly ONE banner');
 
     // The failure is scoped to the rail that failed — the IC rows claim nothing about it.
-    const vchfRow = await driver.readText('asset-vchf');
+    const vchfRow = await driver.readText('accounts-currency-CHF');
     assert(!vchfRow.includes('unreadable'), 'an IC row on the same screen is untouched by a Solana endpoint failure');
     // Bring the row itself into frame so the artifact shows the state it documents.
     await driver.eval(() => document.querySelector('[data-testid="asset-sol"]')?.scrollIntoView({block: 'center'}));

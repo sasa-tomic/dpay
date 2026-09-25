@@ -89,8 +89,8 @@ export async function run() {
     await driver.click('tab-home', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.click('btn-fund-sibling-switch', {timeoutMs: 8_000});
-    assertEq(await driver.readText('active-asset-label'), 'DEMO balance',
-      'one tap on the pointer really selects the practice account');
+    assertEq(await driver.readText('active-asset-label'), 'Balance CHF',
+      'the practice tap moves the WORKING selection — the chip keeps the main currency (X4)');
     console.log('[148-pay-camera-and-funded-account] ✓ one tap switched to the practice account');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);

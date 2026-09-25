@@ -23,7 +23,16 @@
 // Selector contract: `active-asset-label` (header asset label; the former active-rail chip was
 // dropped 2026-08-18), `sol-pay-scan` (SolPayMode scan surface), `pay-amount` (PayMode review
 // amount), `btn-approve` (review → sign).
-import { setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, railPrincipalText } from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertEq,
+  assertIncludes,
+  onboardWallet,
+  openBalances,
+  railPrincipalText,
+  selectCurrency,
+} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex } from '../harness/wire.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout) and
@@ -52,8 +61,8 @@ export async function run() {
     // 2. Select SOL via Balances. deriveSolanaAddress is pure (works in web), so solAddress is
     //    populated and selecting SOL arms the SOL engine.
     await openBalances(driver);
-    await driver.click('asset-sol-select', { timeoutMs: 5_000 });
-    assertEq(await driver.readText('active-asset-label'), 'SOL balance', 'SOL selected (label "SOL balance")');
+    await selectCurrency(driver, 'sol', { timeoutMs: 5_000 });
+    assertEq(await driver.readText('active-asset-label'), 'Balance SOL', 'SOL main (the chip headlines Balance SOL)');
 
     // 3. The Pay tab now mounts SolPayMode (the SOL scan surface). This is the failure precondition:
     //    if an IC link arrived here without routing, SolPayMode would ignore it.
@@ -81,7 +90,7 @@ export async function run() {
     // 5. ROUTING: the resolve effect selects the asset the link names → setSelectedAssetId('ic:0').
     //    The header label flips to 'DEMO balance' and PayMode mounts in place of SolPayMode.
     await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    assertEq(await driver.readText('active-asset-label'), 'DEMO balance', 'routing flipped the idle selection to the IC asset (label "DEMO balance")');
+    assertEq(await driver.readText('active-asset-label'), 'Balance SOL', 'the routing flipped the WORKING selection only — the chip keeps the main currency');
 
     // 6. PayMode resolved the link and is in review with the EXACT requested amount. SolPayMode is gone.
     assertIncludes(await driver.readText('pay-amount'), '∂25.00', 'PayMode review shows the exact requested amount (immutable snapshot)');

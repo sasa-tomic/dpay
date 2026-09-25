@@ -67,7 +67,7 @@ export async function run() {
     // --- 3. the SAME control on the Solana rail --------------------------------------------------
     console.log('[115-checkout-refusals] SOL selected → the same control, refused on the other rail…');
     await openBalances(driver);
-    await driver.click('asset-sol-select', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'sol', { timeoutMs: 5_000 });
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     assert(await driver.isPresent('receive-code-form'), 'the checkout-code checkbox renders on the Solana Receive form as well');
     // The checkout form is STILL the chosen one — the wallet owns the choice across the rail re-mount.

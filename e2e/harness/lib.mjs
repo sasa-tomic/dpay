@@ -956,6 +956,25 @@ export async function pickSwapVenue(driver, rowId, opts = {}) {
   await driver.click(`convert-venue-${rowId}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
 }
 
+
+/**
+ * Select a MULTI-RAIL currency's SPECIFIC Solana rail (the 2026-09-24 grammar): the currency row
+ * lands main + the chooseRail preference rail, and the Receive surface's asset switch (sub-mode
+ * preserving) reaches the named Solana rail. Ends on the Receive screen with that rail live.
+ */
+export async function selectSolRail(driver, key, opts = {}) {
+  const CODE = { 'sol-usdc': 'USD', 'sol-eurc': 'EUR' }[key];
+  if (CODE == null) throw new Error(`selectSolRail: no currency for "${key}"`);
+  await openBalances(driver, opts);
+  await driver.click(`btn-accounts-currency-${CODE}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.findByTestID('home-headline-label', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.click('tab-receive', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.click('btn-receive-address', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.click('btn-receive-asset-switch', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.click(`req-pick-${key}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+}
+
+
 export async function openConvertFor(driver, key, opts = {}) {
   await openBalances(driver, { timeoutMs: opts.timeoutMs ?? 5_000 });
   const currency = ASSET_KEY_TO_CURRENCY[key] ?? (key.length <= 4 ? key.toUpperCase() : null);

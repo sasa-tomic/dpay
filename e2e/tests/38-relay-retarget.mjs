@@ -22,7 +22,14 @@
 //
 // Selector contract: `btn-settings`, `btn-advanced-toggle`, `settings-relay`, `btn-relay-apply`,
 // `btn-settings-close`.
-import { setup, assert, faucetAccount, onboardWallet, accountOf } from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  faucetAccount,
+  onboardWallet,
+  accountOf,
+  openBalances,
+} from '../harness/lib.mjs';
 import { startRelay } from '../harness/relay.mjs';
 
 const FUND_RAW_DEMO_B = 50_000; // ∂500.00 on relay B (distinct from A's ∂100.00 faucet)
@@ -79,6 +86,7 @@ export async function run() {
     // The header balance must change to relay B's ∂500.00 — proving the poll now hits B (not A's
     // ∂100.00). The fast-poll seam (150ms) surfaces the new value within ~1s.
     console.log('[38-relay-retarget] waiting for the balance to retarget to B (∂500.00)…');
+    await openBalances(driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const retargeted = await driver.waitForText('∂500.00', { timeoutMs: 9_000 });
     assert(retargeted, 'balance should retarget to relay B\'s ∂500.00 after the relay switch (poll must follow the live URL)');
     console.log('[38-relay-retarget] ✓ balance now reflects relay B (∂500.00) — poll retargeted');

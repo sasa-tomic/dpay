@@ -20,7 +20,13 @@
 // phase) and `sol-send-outcome` (the "Sent ✓" headline, done phase). The two are deliberately
 // DIFFERENT ids: flow 77 asserts the outcome's ABSENCE to prove nothing was sent, which a shared id
 // would silently satisfy from the form. The IC rail splits them the same way.
-import {setup, assert, onboardWallet, openBalances} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  onboardWallet,
+  openBalances,
+  selectCurrency,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '52',
@@ -69,8 +75,7 @@ export async function run() {
     //    send surface lives in the Pay tab now.
     console.log('[52-sol-withdraw] opening Balances; selecting SOL…');
     await openBalances(driver);
-    await driver.findByTestID('asset-sol-select', {timeoutMs: 8_000});
-    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await selectCurrency(driver, 'sol', {timeoutMs: 5_000});
 
     // 2. Switch to the Pay tab. SolPayMode mounts; its mount effect reads the seeded nonce →
     //    phase='scan' (the scan screen, not the setup gate).

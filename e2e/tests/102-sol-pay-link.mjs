@@ -73,8 +73,8 @@ export async function run() {
 
     // 1. The link selected the SOL rail for the user (no manual Balances trip).
     await driver.findByTestID('sol-send-address-input', {timeoutMs: 10_000});
-    assertEq(await driver.readText('active-asset-label'), 'SOL balance',
-      'the SOL link must select the SOL asset (header label "SOL balance")');
+    assertEq(await driver.readText('active-asset-label'), 'Balance CHF',
+      'the link moves the WORKING selection, never main — the chip keeps Balance CHF');
 
     // 2. The Send-to-address form is pre-filled with the link's destination + amount.
     const addr = await driver.eval((id) => document.querySelector(`[data-testid="${id}"]`)?.value ?? '', 'sol-send-address-input');

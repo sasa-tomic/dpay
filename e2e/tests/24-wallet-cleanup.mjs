@@ -58,13 +58,13 @@ export async function run() {
 
     // --- H1: Balances rows are labeled by the asset NAME (symbol), not the chain. ----------------
     await openBalances(driver);
-    const ckusdcRow = await driver.findByTestID('asset-ckusdc', { timeoutMs: 5_000 });
+    const ckusdcRow = await driver.findByTestID('accounts-currency-USD', { timeoutMs: 5_000 });
     // Rows lead with the family monogram chip ($ ₿ Ξ …) — decorative, strip before the heading check.
     const stripGlyph = (t) => t.replace(/^[^\w]+/, '');
     const ckusdcTxt = await ckusdcRow.evaluate((n) => (n.textContent ?? '').trim());
     assertIncludes(ckusdcTxt, 'USDC', 'USDC row must be labeled "USDC" (not "Ethereum")');
     assert(stripGlyph(ckusdcTxt).startsWith('USDC'), `USDC row primary heading should be "USDC", got "${ckusdcTxt}"`);
-    const ckbtcRow = await driver.findByTestID('asset-ckbtc', { timeoutMs: 3_000 });
+    const ckbtcRow = await driver.findByTestID('accounts-currency-BTC', { timeoutMs: 3_000 });
     const ckbtcTxt = await ckbtcRow.evaluate((n) => (n.textContent ?? '').trim());
     assertIncludes(ckbtcTxt, 'BTC', 'BTC row must be labeled "BTC"');
     console.log(`[24-wallet-cleanup] ✓ Balances rows name-first (H1): USDC="${ckusdcTxt}" / BTC="${ckbtcTxt}"`);

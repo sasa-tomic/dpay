@@ -15,7 +15,18 @@
 // reads ∂100.00 — NOT ∂0.00. Asserting ∂0.00 would require disabling the faucet, which would break
 // the "use the REAL relay + REAL FakeLedger" rule. We assert ∂100.00 (proves faucet→balance
 // end-to-end) and note this deviation. Empty history is asserted verbatim (no payments settled yet).
-import { setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset, waitForWallet} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  waitForEnabled,
+  skipWalkthroughIfPresent,
+  skipPracticeIfPresent,
+  chooseHomeCurrencyIfPresent,
+  selectDemoAsset,
+  waitForWallet,
+  openBalances,
+} from '../harness/lib.mjs';
 
 const ONBOARD_USERNAME = 'e2e-alice';
 const ONBOARD_PLACEHOLDER = 'e.g. Alice';
@@ -92,6 +103,7 @@ export async function run() {
     // be selected explicitly. Flow 118 is where the currency landing itself is proven.
     await selectDemoAsset(driver);
     // The poll runs every 2.5s; allow up to 12s for the first successful poll to land on ∂100.00.
+    await openBalances(driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const got = await driver.waitForText('∂100.00', { timeoutMs: 12_000 });
     const body = await driver.bodyText();
     assert(got, `wallet balance should read ∂100.00 (faucet-funded on onboarding). body excerpt:\n${body.slice(0, 500)}`);

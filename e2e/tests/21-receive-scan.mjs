@@ -7,7 +7,17 @@
 // (submitted by B's own app), exactly the production confirm path.
 //
 // This is the envelope-twin of flow 08 (which drives the same settle from a fresh request).
-import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  getBalance,
+  faucetAccount,
+  icpCatalog,
+  onboardWallet,
+  accountOf,
+  openBalances,
+} from '../harness/lib.mjs';
 import {generateKeypair, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode} from '../harness/wire.mjs';
 import {railPrincipalText} from '../harness/lib.mjs';
 import {parsePayLink} from '../harness/paylink.mjs';
@@ -76,6 +86,7 @@ export async function run() {
     console.log(`[${meta.name}] ✓ ledger: B 12500 / alice 7500`);
 
     // --- B's on-screen balance picked up the credit (poll-driven). -----------------------------
+    await openBalances(env.driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const bobUp = await env.driver.waitForText('∂125.00', {timeoutMs: 10_000});
     assert(bobUp, 'B on-screen balance should be ∂125.00 after the scan-settle');
 

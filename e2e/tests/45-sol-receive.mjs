@@ -11,7 +11,16 @@
 // RPC is DISABLED in e2e (`__DPAY_TEST_SOLANA_RPC_URL=''`) so the balance shows "—" and no devnet
 // call is ever made — the inner loop stays fully offline. The deposit address renders inline (no
 // overlay sheet); the SOL per-row Balances buttons are gone (uniform with IC).
-import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, armPayScan} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertEq,
+  assertIncludes,
+  onboardWallet,
+  openBalances,
+  armPayScan,
+  selectCurrency,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '45',
@@ -40,17 +49,17 @@ export async function run() {
 
     // 1. The SOL card renders as a SEPARATE concern from the catalog loop. It must show the asset
     //    label and the offline balance placeholder "—" (RPC disabled → no devnet call).
-    console.log('[45-sol-receive] waiting for the SOL asset card…');
-    const solCard = await driver.findByTestID('asset-sol', {timeoutMs: 8_000});
+    console.log('[45-sol-receive] waiting for the SOL currency row…');
+    const solCard = await driver.findByTestID('accounts-currency-SOL', { timeoutMs: 8_000 });
     const cardTxt = await solCard.evaluate((n) => (n.textContent ?? '').trim());
-    assertIncludes(cardTxt, 'SOL', 'SOL card should show the SOL asset label');
-    assertIncludes(cardTxt, '—', 'SOL card should show "—" balance when RPC is disabled (offline)');
-    console.log('[45-sol-receive] ✓ SOL card renders with offline "—" balance');
+    assertIncludes(cardTxt, 'SOL', 'SOL row should show the SOL asset label');
+    assertIncludes(cardTxt, '—', 'SOL row should show "—" balance when RPC is disabled (offline)');
+    console.log('[45-sol-receive] ✓ SOL row renders with offline "—" balance');
 
     // 2. Select SOL as the active asset (the whole-row select; SOL === IC — no per-row Receive/Send
     //    buttons anymore). The Balances sheet auto-closes; SOL becomes the active rail.
     console.log('[45-sol-receive] selecting SOL as the active asset…');
-    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await selectCurrency(driver, 'sol', {timeoutMs: 5_000});
 
     // 3. Switch to the Receive tab. SolReceiveMode mounts; the "My address" sub-mode toggle (the
     //    right segment of the receive-mode-toggle) is always rendered for SOL.

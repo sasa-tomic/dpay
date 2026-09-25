@@ -142,7 +142,7 @@ export async function run() {
     console.log('[175-checkout-deeplink] leg 2 — SOL: the same link on the twin rail…');
     await installSolStub(driver);
     await openBalances(driver);
-    await driver.click('asset-sol-select', {timeoutMs: 8_000});
+    await selectCurrency(driver, 'sol', {timeoutMs: 8_000});
     await driver.eval((u) => { window.__DPAY_TEST_DEEPLINK(u); }, CHECKOUT_LINK);
 
     await driver.findByTestID('sol-pay-amount', {timeoutMs: 15_000});

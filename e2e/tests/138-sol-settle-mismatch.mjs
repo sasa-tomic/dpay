@@ -20,7 +20,15 @@
 // proves the other three classifications reach the merchant UI with honest copy.
 //
 // Selector contract: same as flow 51 + `sol-req-reconcile` (durable unknown-state card).
-import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  onboardWallet,
+  armNfcCard,
+  waitForWallet,
+  openBalances,
+  selectCurrency,
+} from '../harness/lib.mjs';
 import { nfcPhaseWalk } from '../harness/flow-steps.mjs';
 import {solTxDetailFromSolpay} from '../harness/soltx.mjs';
 
@@ -153,8 +161,7 @@ export async function run() {
 
     await waitForWallet(driver, {timeoutMs: 8_000});
     await openBalances(driver, {timeoutMs: 5_000});
-    await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
-    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await selectCurrency(driver, 'sol', {timeoutMs: 5_000});
 
     // ---- Leg (a): confirmed body ≠ canonical → MISMATCH (3) --------------------------------
     console.log('[138-sol-settle-mismatch] leg a: mismatching confirmed body…');

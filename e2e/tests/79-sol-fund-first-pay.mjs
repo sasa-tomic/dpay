@@ -14,7 +14,15 @@
 //   4. fail-open           → stub getBalance errors / RPC unavailable: the scanner stays live
 //                            (offline-first — an unknown balance never gates).
 //   5. USDC zero (balance) → same panel with the USDC copy + Show-my-SOL-address secondary.
-import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  onboardWallet,
+  openBalances,
+  selectCurrency,
+  selectSolRail,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '79',
@@ -53,7 +61,7 @@ export async function run() {
 
     console.log('[79-sol-fund-first-pay] selecting solana:SOL as the active asset…');
     await openBalances(driver);
-    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await selectCurrency(driver, 'sol', {timeoutMs: 5_000});
 
     // ---- 1. KNOWN-ZERO: the fund panel replaces the scanner + NFC ----
     console.log('[79-sol-fund-first-pay] known-zero: fund panel replaces the scanner…');
@@ -90,7 +98,7 @@ export async function run() {
     // PAY TAB (origin remembered), fund SOL, and assert the "Back to paying USDC" resume link
     // appears on My-address and returns to the USDC Pay tab in one tap.
     await openBalances(driver);
-    await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
+    await selectSolRail(driver, 'sol-usdc', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-fund', {timeoutMs: 10_000});
     // "Show my SOL address" secondary on the USDC panel carries the USDC origin.
@@ -111,7 +119,7 @@ export async function run() {
     console.log('[79-sol-fund-first-pay] ✓ resume funnel: USDC origin → SOL deposit → back to USDC pay');
     // Now the plain zero→scan release from the SOL rail (original invariant).
     await openBalances(driver);
-    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await selectCurrency(driver, 'sol', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 15_000});
     await driver.waitGone('sol-pay-fund', {timeoutMs: 5_000});
@@ -134,7 +142,7 @@ export async function run() {
     // ---- 5. USDC ZERO: same panel, USDC copy + SOL-address secondary ----
     console.log('[79-sol-fund-first-pay] USDC zero: panel + SOL-address secondary…');
     await openBalances(driver);
-    await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
+    await selectSolRail(driver, 'sol-usdc', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     const usdcPanel = await driver.findByTestID('sol-pay-fund', {timeoutMs: 10_000});
     const usdcText = await usdcPanel.evaluate((n) => n.textContent);

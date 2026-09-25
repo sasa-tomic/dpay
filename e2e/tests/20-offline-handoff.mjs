@@ -8,7 +8,20 @@
 // Rail semantics: the offline branch never POSTs (nothing to dedup on A's side); the envelope QR
 // IS the payment; reconciliation is by request_id via read_state — the same terminal state the
 // online path reaches, just submitted by the counterparty.
-import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf, goOffline, setRelay, armPayScan} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  getBalance,
+  faucetAccount,
+  icpCatalog,
+  onboardWallet,
+  accountOf,
+  goOffline,
+  setRelay,
+  armPayScan,
+  openBalances,
+} from '../harness/lib.mjs';
 import {generateKeypair, decodeRequest, buildRequestQR, randNonceHex} from '../harness/wire.mjs';
 
 export const meta = {
@@ -91,6 +104,7 @@ export async function run() {
     // --- A's balance reflects the debit (100 − 25). --------------------------------------------
     const aliceBal = await getBalance(env.relayBaseURL, alice.publicHex, 0);
     assert(aliceBal === '7500', `A ledger balance must be 7500 after the offline pay, got ${aliceBal}`);
+    await openBalances(env.driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const shown = await env.driver.waitForText('∂75.00', {timeoutMs: 10_000});
     assert(shown, 'A on-screen balance should show ∂75.00');
 

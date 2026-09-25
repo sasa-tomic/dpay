@@ -31,7 +31,15 @@
 //
 // Selector contract: `asset-sol-usdc-select`, `tab-pay`, `btn-pay-send`, `sol-send-instructions`,
 // `btn-sol-send-ata-create`, `sol-ata-busy`, `sol-ata-err`, `sol-send-address-input`.
-import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  onboardWallet,
+  openBalances,
+  selectCurrency,
+  selectSolRail,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '72',
@@ -92,8 +100,7 @@ export async function run() {
     //    with selectedToken='USDC'. The Pay tab will now drive the SPL send path, not native SOL.
     console.log('[72-sol-usdc-send] selecting Solana USDC via Balances…');
     await openBalances(driver);
-    await driver.findByTestID('asset-sol-usdc-select', {timeoutMs: 8_000});
-    await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
+    await selectSolRail(driver, 'sol-usdc', {timeoutMs: 5_000});
 
     // 2. Switch to the Pay tab. SolPayMode mounts; it reads the seeded nonce (if any) → phase='setup'
     //    (first-use gate) since we did NOT seed a nonce. That's fine — we're driving the "Send to

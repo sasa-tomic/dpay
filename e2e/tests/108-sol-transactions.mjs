@@ -22,7 +22,15 @@
 //
 // Selector contract: `asset-sol-select`, `tab-receive`, `btn-receive-address`, `sol-receive-address`,
 // `tab-transactions`, `ledger-view`, `ledger-filter-sol`, `ledger-filter-$`.
-import {setup, assert, assertIncludes, onboardWallet, openBalances, openReceiveAddress} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  onboardWallet,
+  openBalances,
+  openReceiveAddress,
+  selectCurrency,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '108',
@@ -94,7 +102,7 @@ export async function run() {
     // signing account rather than to a fixture that merely looks like one.
     console.log('[108-sol-transactions] selecting SOL and reading its derived address…');
     await openBalances(driver);
-    await driver.click('asset-sol-select', {timeoutMs: 8_000});
+    await selectCurrency(driver, 'sol', {timeoutMs: 8_000});
     await openReceiveAddress(driver);
     const solAddress = await driver.readText('sol-receive-address');
     assert(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(solAddress), `expected a base58 Solana address, got "${solAddress}"`);

@@ -30,8 +30,20 @@
 // Not drivable here: the practice payment (F3) and the convert legs (F6) — the practice screen
 // needs a first-run identity and the convert legs need a venue-pool fixture; both seams are
 // pinned in jest (Practice.test.tsx / convert.test.ts) instead.
-import { setup, assert, assertIncludes, onboardWallet, accountOf, faucetAccount, railTransfer,
-  railPrincipalText, armPayScan, armNfcCard, openBalances } from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  onboardWallet,
+  accountOf,
+  faucetAccount,
+  railTransfer,
+  railPrincipalText,
+  armPayScan,
+  armNfcCard,
+  openBalances,
+  selectCurrency,
+} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const SOL_MERCHANT = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
@@ -234,7 +246,7 @@ export async function run() {
 
     // ── (c) Solana-Pay with label + message → the SOL row is named by its signature ─────────
     await openBalances(driver);
-    await driver.click('asset-sol-select', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'sol', { timeoutMs: 5_000 });
     await driver.click('tab-pay', { timeoutMs: 4_000 });
     await driver.findByTestID('sol-pay-scan', { timeoutMs: 5_000 });
     await armPayScan(driver); // funnels btn-sol-start-scan on the SOL rail

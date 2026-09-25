@@ -69,7 +69,7 @@ export async function run() {
     // Receive "My address" sub-mode keys off it.
     console.log('[05-deposit-credited] opening Balances…');
     await openBalances(driver);
-    const zeroCard = await driver.findByTestID('asset-ckbtc', { timeoutMs: 5_000 });
+    const zeroCard = await driver.findByTestID('accounts-currency-BTC', { timeoutMs: 5_000 });
     const zeroTxt = await zeroCard.evaluate((n) => (n.textContent ?? '').trim());
     assertIncludes(zeroTxt, '0 BTC', `the BTC card should show the zero balance before any top-up. card text:\n${zeroTxt}`);
     assertIncludes(zeroTxt, 'BTC', `the BTC card should be clearly labeled "BTC". card text:\n${zeroTxt}`);
@@ -166,7 +166,7 @@ export async function run() {
     await driver.click('btn-receive-request', { timeoutMs: 5_000 });
     await driver.waitGone('deposit-address', { timeoutMs: 4_000 });
     await openBalances(driver);
-    const assetEl = await driver.findByTestID('asset-ckbtc', { timeoutMs: 8_000 });
+    const assetEl = await driver.findByTestID('accounts-currency-BTC', { timeoutMs: 8_000 });
     const assetTxt = await assetEl.evaluate((n) => (n.textContent ?? '').trim());
     assertIncludes(assetTxt, '0.0005 BTC', `the wallet's visible BTC card should show the minted BTC after the sheet closes. card text:\n${assetTxt}`);
     assertIncludes(assetTxt, 'BTC', 'the BTC card should be clearly labeled "BTC" (the deposited asset name, H1)');

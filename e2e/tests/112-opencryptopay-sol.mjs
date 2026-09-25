@@ -42,8 +42,7 @@
 // `btn-approve`, `sol-pay-status`, `ocp-outcome`, `btn-sol-pay-done`,
 // `btn-sol-start-scan` (via armPayScan).
 import {
-  setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, armPayScan,
-} from '../harness/lib.mjs';
+  setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, armPayScan, selectCurrency} from '../harness/lib.mjs';
 import {
   installCheckoutStub, ocpStubState,
   CLAIMED_MERCHANT, PAYMENT_ID, PROVIDER_HOST, CHECKOUT_QR,
@@ -113,8 +112,15 @@ const setSolStatus = (driver, mode) => driver.eval((m) => { globalThis.__E2E_SOL
 
 /** Select an asset in Balances and land on its Pay scan surface. */
 async function selectAndScan(driver, assetKey) {
-  await openBalances(driver);
-  await driver.click(`asset-${assetKey}-select`, {timeoutMs: 8_000});
+  await selectCurrency(driver, assetKey, {timeoutMs: 8_000});
+  if (assetKey !== 'sol') {
+    // Multi-rail currency: the currency row lands on chooseRail's preference rail (the IC one);
+    // the SOL-rail USDC surface is reached through the receive asset switch (sub-mode preserving).
+    await driver.click('tab-receive', {timeoutMs: 5_000});
+    await driver.click('btn-receive-address', {timeoutMs: 5_000});
+    await driver.click('btn-receive-asset-switch', {timeoutMs: 5_000});
+    await driver.click(`req-pick-${assetKey}`, {timeoutMs: 5_000});
+  }
   await driver.click('tab-pay', {timeoutMs: 5_000});
   await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
   await armPayScan(driver); // the pay-intent gate — the shared choke point for every injected scan

@@ -16,7 +16,15 @@
 // Selector contract: asset-ckusdc-select, tab-receive, req-prefix, req-pick-ckusdc, req-pick-sol,
 // req-pick-sol-usdc, amount-input, memo-input, sol-req-prefix, sol-req-amount-input,
 // btn-sol-req-make.
-import {setup, assertEq, assertIncludes, onboardWallet, waitForWallet, openBalances} from '../harness/lib.mjs';
+import {
+  setup,
+  assertEq,
+  assertIncludes,
+  onboardWallet,
+  waitForWallet,
+  openBalances,
+  selectCurrency,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '69',
@@ -56,8 +64,7 @@ export async function run() {
     console.log('[69-sol-usdc-selection] selecting IC USDC (ckUSDC) via Balances…');
     await waitForWallet(driver, {timeoutMs: 8_000});
     await openBalances(driver, {timeoutMs: 5_000});
-    await driver.findByTestID('asset-ckusdc-select', {timeoutMs: 5_000});
-    await driver.click('asset-ckusdc-select', {timeoutMs: 5_000});
+    await selectCurrency(driver, 'ckusdc', {timeoutMs: 5_000});
     await driver.click('tab-receive', {timeoutMs: 5_000});
 
     // 2. ReceiveMode (IC rail) mounted. The amount prefix reflects the IC USDC glyph ($). Type an

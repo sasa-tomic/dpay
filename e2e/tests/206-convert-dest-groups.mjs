@@ -101,7 +101,7 @@ export async function run() {
     // --- 4. the USD pair: kind order (direct pool, hub, Route B) and NO cash-out row -------------
     await pickSwapTarget(driver, 'USD');
     await driver.findByTestID('convert-venues', {timeoutMs: 8_000});
-    const usdRows = (await targetLayout(driver)).filter(t => t.startsWith('convert-venue-') && !/-quote$|-err$|-slow$/.test(t) && t !== 'convert-venue-none');
+    const usdRows = (await targetLayout(driver)).filter(t => t.startsWith('convert-venue-') && !/-quote$|-err$|-slow$/.test(t) && t !== 'convert-venue-none' && t !== 'convert-venue-details');
     assertEqJson(usdRows, [
       'convert-venue-icpswap-vchf-ckusdc',                 // direct pool
       'convert-venue-hub:icpswap:8:icpswap-ckusdc',        // via the ICP hub

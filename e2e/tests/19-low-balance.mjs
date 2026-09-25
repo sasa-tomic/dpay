@@ -22,7 +22,16 @@
 //
 // Selector contract: `btn-paid`, `btn-notpaid`, `review-err` (offline leg), `pay-amount`,
 // `review-lowbal`, `btn-review-cancel`, `btn-settings`, `settings-relay`, `btn-settings-close`.
-import { setup, assert, onboardWallet, goOffline, setRelay, waitForScanner , armPayScan} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  onboardWallet,
+  goOffline,
+  setRelay,
+  waitForScanner,
+  armPayScan,
+  openBalances,
+} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const OVER_CENTS = 20_000; // ∂200.00 — exceeds the ∂100.00 faucet-funded balance

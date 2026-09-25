@@ -29,7 +29,17 @@
 // `balance` (header → the accounts route, disabled while locked), `accounts-list` (route landed),
 // `btn-home-accounts` (the Home affordance into the same route), `asset-vchf-select` (row whole-row
 // select), `btn-review-cancel` (review → scan, releases the lock).
-import { setup, assert, assertIncludes, assertDisabled, waitForEnabled, openBalances, onboardWallet , armPayScan} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  assertDisabled,
+  waitForEnabled,
+  openBalances,
+  onboardWallet,
+  armPayScan,
+  selectCurrency,
+} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout) and
@@ -100,7 +110,7 @@ export async function run() {
     assert(reviewGone, 'navigating away mid-review abandons the review (engine unmounted — pre-existing tab semantics)');
     await driver.click('btn-home-accounts', { timeoutMs: 5_000 });
     await driver.findByTestID('accounts-list', { timeoutMs: 5_000 });
-    await driver.click('asset-vchf-select', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'vchf', { timeoutMs: 5_000 });
     const vchfSelected = await driver.eval((id) => {
       const el = document.querySelector(`[data-testid="${id}"]`);
       return el ? el.getAttribute('aria-selected') : null;

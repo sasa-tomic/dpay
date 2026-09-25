@@ -24,7 +24,15 @@
 //
 // Selector contract: `asset-sol-select`, `tab-receive`, `tab-pay`, `sol-req-amount-input`,
 // `btn-sol-req-make`, `sol-req-qr`, `sol-req-status`, `sol-req-sig`, `sol-pay-scan`.
-import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  onboardWallet,
+  armNfcCard,
+  waitForWallet,
+  openBalances,
+  selectCurrency,
+} from '../harness/lib.mjs';
 import { nfcPhaseWalk } from '../harness/flow-steps.mjs';
 import {solTxDetailFromSolpay} from '../harness/soltx.mjs';
 
@@ -99,8 +107,7 @@ export async function run() {
     console.log('[51-sol-merchant-broadcast] selecting SOL + switching to Receive…');
     await waitForWallet(driver, {timeoutMs: 8_000});
     await openBalances(driver, {timeoutMs: 5_000});
-    await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
-    await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    await selectCurrency(driver, 'sol', {timeoutMs: 5_000});
 
     await driver.click('tab-receive', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-amount-input', {timeoutMs: 5_000});

@@ -79,7 +79,7 @@ export async function run() {
     // PayMode's review gate reads it). Mirrors flow 27's pattern (open Balances, assert the row).
     console.log('[31-ckusdc-pay] opening Balances; waiting for A’s ckUSDC balance to render…');
     await openBalances(driver);
-    const seededShown = await driver.waitForText('0.06 USDC', { timeoutMs: 10_000 });
+    const seededShown = await driver.waitForText('$0.06', { timeoutMs: 10_000 }); // the USD currency row: summed balance in the currency unit (fork #4)
     assert(seededShown, 'A should render 0.06 USDC in the Balances USDC row after funding (assetBalances[2] populated)');
     console.log('[31-ckusdc-pay] ✓ A’s ckUSDC balance visible (assetBalances[2] populated)');
     // Back to Pay so the scanner is the top surface again before the camera scan.

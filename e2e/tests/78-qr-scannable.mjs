@@ -15,7 +15,13 @@
 import { strict as assert } from 'node:assert';
 import { PNG } from 'pngjs';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { setup, onboardWallet, openBalances } from '../harness/lib.mjs';
+import {
+  setup,
+  onboardWallet,
+  openBalances,
+  selectCurrency,
+  selectSolRail,
+} from '../harness/lib.mjs';
 
 const jsqrMod = await import(new URL('../web/vendor/jsQR.js', import.meta.url).href);
 const jsQR = jsqrMod.default;
@@ -66,7 +72,7 @@ export async function run() {
     // the Balances row tap would silently no-op and the sheet would never close.
     await driver.page.click('[aria-label="New request"]');
     await openBalances(driver);
-    await driver.click('asset-sol-select', { timeoutMs: 5_000 });
+    await selectCurrency(driver, 'sol', { timeoutMs: 5_000 });
     await driver.click('tab-receive', { timeoutMs: 5_000 });
     await driver.findByTestID('receive-mode-toggle', { timeoutMs: 5_000 });
     await driver.click('btn-receive-address', { timeoutMs: 5_000 });
@@ -92,7 +98,7 @@ export async function run() {
       };
     });
     await openBalances(driver);
-    await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
+    await selectSolRail(driver, 'sol-usdc', {timeoutMs: 5_000});
     await driver.click('tab-receive', {timeoutMs: 5_000});
     await driver.findByTestID('receive-mode-toggle', {timeoutMs: 5_000});
     await driver.click('btn-receive-address', {timeoutMs: 5_000});

@@ -10,7 +10,14 @@
 // stale auths; this flow pins the payer-side refusal the user actually sees.)
 //
 // Selector contract: `review-err`, `btn-review-cancel`, `balance`.
-import { setup, assert, assertIncludes, onboardWallet, armPayScan} from '../harness/lib.mjs';
+import {
+  setup,
+  assert,
+  assertIncludes,
+  onboardWallet,
+  armPayScan,
+  openBalances,
+} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0)
@@ -70,7 +77,13 @@ export async function run() {
     await driver.findByTestID('btn-review-cancel', { timeoutMs: 4_000 });
     console.log('[10-expired] no sign button; Cancel is the only way out (C1, structural)');
 
-    // The balance is UNCHANGED — nothing was signed or debited.
+    // The balance is UNCHANGED — nothing was signed or debited. The expiry refusal keeps the
+    // review card up (no Paid card, no lock): release the REVIEW first, then read the settled
+    // practice balance on the accounts route.
+    await driver.click('btn-review-cancel', { timeoutMs: 4_000 });
+    await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
+    await openBalances(driver);
+    await openBalances(driver);
     const unchanged = await driver.waitForText('∂100.00', { timeoutMs: 6_000 });
     assert(unchanged, 'balance must be unchanged after the expired refusal (∂100.00)');
     console.log('[10-expired] ✓ balance unchanged (∂100.00) — no debit on an expired request');

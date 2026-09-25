@@ -14,9 +14,18 @@
 //     states that the payment cannot settle if the account does not exist, and — because the device
 //     is online and the RAIL is what is down — does not tell the payer to go and find signal.
 import {
-  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
-  armPayScan, openBalances,
- waitForWallet} from '../harness/lib.mjs';
+  setup,
+  assert,
+  assertIncludes,
+  waitForEnabled,
+  skipWalkthroughIfPresent,
+  skipPracticeIfPresent,
+  armPayScan,
+  openBalances,
+  waitForWallet,
+  selectCurrency,
+  selectSolRail,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '137',
@@ -86,7 +95,7 @@ export async function run() {
     });
     console.log('[137-sol-cross-mint-sign-gate] reading the payer USDC ATA from Receive…');
     await openBalances(driver);
-    await driver.click('asset-sol-usdc-select');
+    await selectSolRail(driver, 'sol-usdc');
     await driver.click('tab-receive');
     await driver.click('btn-receive-address');
     await driver.findByTestID('sol-receive-address', {timeoutMs: 10_000});
@@ -125,7 +134,7 @@ export async function run() {
 
     // Back on the funded EURC rail — the scan surface is live again.
     await openBalances(driver);
-    await driver.click('asset-sol-eurc-select');
+    await selectSolRail(driver, 'sol-eurc');
     await driver.click('tab-pay');
     await driver.findByTestID('sol-pay-scan', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
 

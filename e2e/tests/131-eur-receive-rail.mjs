@@ -14,7 +14,8 @@
 //     independent ATA derivation — stability under one identity is the bound).
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency,
- waitForWallet} from '../harness/lib.mjs';
+  waitForWallet, selectSolRail,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '131',
@@ -42,7 +43,7 @@ export async function run() {
     await driver.click('btn-settings-close', {timeoutMs: 5_000});
     await waitForWallet(driver, {timeoutMs: 8_000});
     await openBalances(driver);
-    await selectCurrency(driver, 'sol-eurc');
+    await selectSolRail(driver, 'sol-eurc');
 
     // The Solana RPC simulator (same seam as every SOL flow): the EURC ATA EXISTS with a zero
     // balance, so the address surface is READY rather than the setup gate.
