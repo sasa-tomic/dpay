@@ -34,6 +34,8 @@
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance,
   openBalances, selectCurrency,
+  openConvertFor,
+  pickSwapTarget,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
@@ -43,12 +45,11 @@ const CKETH_LEDGER = 'ss2fx-dyaaa-aaaar-qacoq-cai';
 const POOL_VCHF_ICP = '65mrh-fqaaa-aaaar-qapoa-cai'; // venue icpswap's OWN pool (token0 = VCHF)
 const POOL_ICP_CKETH = 'angxa-baaaa-aaaag-qcvnq-cai'; // venue icpswap-cketh's OWN pool (token0 = ICP)
 
-const DIRECT_ROW = 'convert-dest-direct'; // the standing pair (ICP), direct + via-ckUSDC hub merged
-const CKUSDC_ROW = 'convert-dest-inwallet-2';
-const CKETH_ROW = 'convert-dest-inwallet-6';
-const CKBTC_ROW = 'convert-dest-inwallet-1';
-const STANDING_HUB_MECH = 'convert-dest-mech-hub:icpswap-vchf-ckusdc:2:icpswap-ckusdc'; // VCHF → ckUSDC → ICP
-const CKUSDC_HUB_MECH = 'convert-dest-mech-hub:icpswap:8:icpswap-ckusdc'; // VCHF → ICP → ckUSDC
+// The currency-level grammar: targets are CURRENCY rows (convert-target-<CODE>); the ways to
+// execute a pair are VENUE-AREA rows (convert-venue-<rowId>) — direct pool, via-hub route —
+// in kind order, the direct pool the standing pick when it is the pair's only venue.
+const STANDING_HUB_ROW = 'convert-venue-hub:icpswap-vchf-ckusdc:2:icpswap-ckusdc'; // VCHF → ckUSDC → ICP
+const CKUSDC_HUB_ROW = 'convert-venue-hub:icpswap:8:icpswap-ckusdc'; // VCHF → ICP → ckUSDC
 
 const SEED_VCHF = 2000000000; // 20 VCHF (plain Number — the faucet body is JSON)
 const AMOUNT_IN = 200000000n; // 2 VCHF
@@ -104,10 +105,7 @@ async function swapPoolKnob(relayBaseURL, body) {
 /** Open the Convert form on the VCHF account (selectCurrency leaves Pay on; re-open Balances
  *  so Convert — which renders on the SELECTED row only — is on screen). */
 async function openVchfConvert(driver) {
-  await openBalances(driver);
-  await selectCurrency(driver, 'vchf');
-  await openBalances(driver);
-  await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+  await openConvertFor(driver, 'vchf');
 }
 
 export const meta = {
@@ -135,49 +133,26 @@ export async function run() {
     const fund = await faucetAccount(r2.baseURL, account.publicHex, SEED_VCHF, {currency: 7});
     assert(fund.ok, `faucet VCHF credit ok (status ${fund.status})`);
 
-    // --- the destination picker (D1–D6): ONE row per in-wallet asset, in-wallet copy -------------
-    console.log('[190-convert-hub] destination picker: in-wallet rows from VCHF…');
+    // --- the target list (the currency grammar): ONE row per reachable CURRENCY ------------------
+    console.log('[190-convert-hub] target list: currency rows from VCHF…');
     await openVchfConvert(driver);
-    for (const [row, sym] of [[DIRECT_ROW, 'ICP'], [CKUSDC_ROW, 'USDC'], [CKETH_ROW, 'ETH'], [CKBTC_ROW, 'BTC']]) {
-      const el = await driver.findByTestID(row, {timeoutMs: 5_000});
-      assert(el != null, `the ${sym} destination row is offered`);
-      const label = await driver.readText(row);
-      assertIncludes(label, `${sym} — in this wallet`, `the ${sym} row is an in-wallet row`);
-      assert(!label.includes('to your'), `the ${sym} row carries NO cash-out-only copy`);
+    await driver.click('btn-convert-target', {timeoutMs: 5_000});
+    for (const code of ['ICP', 'USD', 'ETH', 'BTC', 'SOL']) {
+      assert(await driver.findByTestID(`convert-target-${code}`, {timeoutMs: 5_000}) != null,
+        `the ${code} target row is offered`);
     }
-    // The standing ICP group merges BOTH mechanisms that reach the ICP ledger: the direct pool
-    // and the via-ckUSDC hub route — direct first, and the direct pool is the shipped default
-    // (UX §6 red line 9), so the standing sub-picker renders on open with direct checked.
-    await driver.findByTestID(STANDING_HUB_MECH, {timeoutMs: 8_000});
-    const standing = await driver.eval((directId, hubId) => {
-      const q = (id) => document.querySelector(`[data-testid="${id}"]`);
-      const d = q(directId);
-      const h = q(hubId);
-      if (d == null || h == null) return null;
-      // RNW does not project accessibilityState → aria-checked (the flow-166 gap), so the
-      // checked row is read STRUCTURALLY: the radio dot (10×10px rounded View) renders only
-      // when the row is the active mechanism.
-      const hasDot = (row) => Array.from(row.querySelectorAll('div')).some((el) => {
-        const s = getComputedStyle(el);
-        return parseFloat(s.width) === 10 && parseFloat(s.height) === 10 && parseFloat(s.borderRadius) === 5;
-      });
-      return {
-        directFirst: !!(d.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING),
-        directChecked: hasDot(d),
-        hubChecked: hasDot(h),
-      };
-    }, 'convert-dest-mech-direct', STANDING_HUB_MECH);
-    assert(standing != null && standing.directFirst, 'the standing group lists the direct pool BEFORE the via-ckUSDC hub route');
-    assert(standing != null && standing.directChecked && !standing.hubChecked, 'the standing group defaults to the direct pool (radio-dot probe)');
+    // The ICP pair carries BOTH mechanisms that reach it: the direct pool and the via-ckUSDC
+    // hub route — kind order puts the direct pool first, and one venue = the standing pick.
+    await driver.findByTestID(STANDING_HUB_ROW, {timeoutMs: 8_000});
+    await driver.findByTestID('convert-venue-icpswap', {timeoutMs: 5_000});
 
-    // --- the hub-only destination: ckETH (no direct pool anywhere in the registry) ---------------
-    console.log('[190-convert-hub] hub-only dest ckETH: the composed quote branch…');
-    await driver.click(CKETH_ROW);
-    // Hub-only = exactly ONE mechanism → no sub-picker, and the hub mechanism auto-arms.
-    assert(await driver.findByTestID('convert-dest-mechs', {timeoutMs: 1_000}).catch(() => null) == null,
-      'a hub-only destination renders NO mechanism sub-picker (its only mechanism self-resolves)');
+    // --- the hub-only target: ETH (no direct pool anywhere in the registry) ----------------------
+    console.log('[190-convert-hub] hub-only target ETH: the composed quote branch…');
+    await pickSwapTarget(driver, 'ETH');
+    // Hub-only = exactly ONE row → the surface arms on it without a pick, and a hub adds NO
+    // address input (the dest IS this wallet).
     assert(await driver.findByTestID('convert-dest-address', {timeoutMs: 1_000}).catch(() => null) == null,
-      'a hub destination adds NO address input (the dest IS this wallet)');
+      'a hub target adds NO address input (the dest IS this wallet)');
     await driver.type('convert-amount', '2');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
 
@@ -272,41 +247,24 @@ export async function run() {
     assertEq(BigInt(await getBalance(r2.baseURL, account.publicHex, 6)),
       gross2, 'ckETH holds the full swap2 gross (the SEEN amount)');
 
-    // --- the mechanism sub-picker (D2/D5): ckUSDC has direct + via-ICP; selection only -----------
-    console.log('[190-convert-hub] mechanism sub-picker on ckUSDC (no execution)…');
+    // --- the USD pair's venue rows (D2/D5, currency grammar): direct pool + via-ICP hub; the
+    // direct pool is the standing pick, the hub an explicit opt-in. Selection only -------------
+    console.log('[190-convert-hub] USD pair rows (no execution)…');
     await openVchfConvert(driver);
-    await driver.click(CKUSDC_ROW);
-    await driver.findByTestID('convert-dest-mechs', {timeoutMs: 5_000});
-    const mechs = await driver.eval((directId, hubId) => {
-      const q = (id) => document.querySelector(`[data-testid="${id}"]`);
-      const d = q(directId);
-      const h = q(hubId);
-      if (d == null || h == null) return null;
-      const hasDot = (row) => Array.from(row.querySelectorAll('div')).some((el) => {
-        const s = getComputedStyle(el);
-        return parseFloat(s.width) === 10 && parseFloat(s.height) === 10 && parseFloat(s.borderRadius) === 5;
-      });
-      return {
-        directFirst: !!(d.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING),
-        directChecked: hasDot(d),
-        hubChecked: hasDot(h),
-      };
-    }, 'convert-dest-mech-direct', CKUSDC_HUB_MECH);
-    assert(mechs != null, 'the ckUSDC sub-picker shows the direct row and the Via-ICP hub row');
-    assert(mechs.directFirst, 'the sub-picker order is stable: Direct pool first, Via ICP second (registry order, never ranked)');
-    assert(mechs.directChecked && !mechs.hubChecked,
-      'the sub-picker defaults to the direct pool (a hub mechanism is an explicit switch away, UX §6 red line 9; radio-dot probe)');
-    const hubRow = await driver.readText(CKUSDC_HUB_MECH);
-    assertIncludes(hubRow, 'Via ICP', 'the unpicked hub row names its mechanism');
-    assertIncludes(hubRow, '2 swaps', 'the unpicked hub row carries its static shape line (D5; the hub is already the row label — no repeated via-ICP)');
+    await pickSwapTarget(driver, 'USD');
+    assert(await driver.findByTestID('convert-venue-icpswap-vchf-ckusdc', {timeoutMs: 8_000}) != null,
+      'the direct pool row is offered for the USD pair');
+    const hubRow = await driver.readText(CKUSDC_HUB_ROW);
+    assertIncludes(hubRow, 'Via ICP', 'the opt-in hub row names its mechanism');
+    assertIncludes(hubRow, '2 swaps', 'the opt-in hub row carries its static shape line (D5)');
     assert(await driver.findByTestID('convert-route-via', {timeoutMs: 1_000}).catch(() => null) == null,
-      'no hub surface is armed while the direct mechanism is the pick');
-    // Pick `Via ICP` → the SAME composed surface arms for ckUSDC. Selection-surface assertions
+      'no hub surface is armed while the direct pool is the standing pick');
+    // Pick `Via ICP` → the SAME composed surface arms for USD. Selection-surface assertions
     // only — this second conversion is deliberately NOT executed.
-    await driver.click(CKUSDC_HUB_MECH);
+    await driver.click(CKUSDC_HUB_ROW);
     await driver.type('convert-amount', '1');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-    assertIncludes(await driver.readText('convert-route-via'), 'via ICP · 2 swaps', 'picking Via ICP arms the composed surface for ckUSDC');
+    assertIncludes(await driver.readText('convert-route-via'), 'via ICP · 2 swaps', 'picking Via ICP arms the composed surface for USD');
     assert(await driver.findByTestID('convert-dest-address', {timeoutMs: 1_000}).catch(() => null) == null,
       'still no address input under a hub pick');
     await driver.screenshot('190-convert-hub-mechs');
@@ -318,7 +276,7 @@ export async function run() {
     // settle drains the queue, swap1 confirms, and swap2 walks into the degraded pool.
     console.log('[190-convert-hub] swap2 refusal: park on pending_withdrawal, degrade the hop pool, settle…');
     await openVchfConvert(driver);
-    await driver.click(CKETH_ROW);
+    await pickSwapTarget(driver, 'ETH');
     await driver.type('convert-amount', '2');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     let run2 = await hubOracle(r2.baseURL, AMOUNT_IN); // fresh: run 1 moved both pools

@@ -19,7 +19,8 @@
 // 164 uses): the second fixture venue `icpswap-fixture-b` is served by the test-helpers gateway
 // ONLY while POST /api/v1/test/venue arms it, so the shared suite relay (flows 140–145) never
 // sees a second venue and the default experience stays ONE venue per pair.
-import {setup, assert, assertEq, assertIncludes, assertDisabled, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, assertDisabled, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
 const SEED = 300000000; // 3 ICP (plain Number — the faucet body is JSON)
@@ -72,10 +73,7 @@ export async function run() {
     });
     assert(arm.ok, `venue knob armed (status ${arm.status}: ${await arm.text()})`);
 
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'icp');
     await driver.type('convert-amount', '1');
     await driver.findByTestID('convert-venues', {timeoutMs: 10_000});
     // Both rows must have their OWN quote before absence claims mean anything.

@@ -20,7 +20,7 @@
 //     charges no fee), and no history row appears for the attempt.
 import {
   setup, assert, assertEq, onboardWallet, accountOf, getBalance, faucetAccount,
-  openBalances, selectCurrency,
+  openBalances, selectCurrency, openConvertFor,
 } from '../harness/lib.mjs';
 import { generateKeypair } from '../harness/wire.mjs';
 import { startRelay } from '../harness/relay.mjs';
@@ -54,11 +54,7 @@ export async function run() {
     const fund = await faucetAccount(relayBaseURL, account.publicHex, SEED, { currency: 8 });
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
 
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.waitForText('Convert', { timeoutMs: 6_000 });
-    await driver.click('btn-accounts-convert', { timeoutMs: 5_000 });
+    await openConvertFor(driver, 'icp');
     assert(await driver.findByTestID('convert-screen', { timeoutMs: 8_000 }) != null, 'Convert surface opens for ICP');
     await driver.type('convert-amount', '1');
     await driver.findByTestID('convert-quote-source', { timeoutMs: 10_000 });

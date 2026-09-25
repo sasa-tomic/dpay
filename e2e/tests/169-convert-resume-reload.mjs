@@ -16,7 +16,7 @@
 // history tell the outcome (the pick rule: live or unacknowledged-stuck only).
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
-  openBalances, selectCurrency,
+  openBalances, selectCurrency, openConvertFor,
 } from '../harness/lib.mjs';
 
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
@@ -61,10 +61,7 @@ export async function run() {
     const fund = await faucetAccount(relayBaseURL, account.publicHex, SEED, {currency: 8});
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
 
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'icp');
     await driver.type('convert-amount', '1');
     await driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
 
@@ -131,10 +128,7 @@ export async function run() {
     assertEq(BigInt(await getBalance(relayBaseURL, account.publicHex, 7)), executedGross, 'VCHF credited the full gross out after the unmounted resume');
 
     // A terminal record is NOT resurrected: opening Convert shows the form, not a done panel.
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'icp');
     await driver.type('convert-amount', '1'); // fresh mount: the quote (and headline) need the amount
     await driver.findByTestID('convert-headline', {timeoutMs: 10_000});
     const doneGone = await driver.findByTestID('convert-done', {timeoutMs: 3_000}).catch(() => null);

@@ -21,7 +21,9 @@
 // founder's actual asset): five device-signed IC legs → wallet-signed CCTP burn → mint
 // watch → the rail-local Jupiter leg. Offline stand-ins identical to 186: the private
 // relay's fake-IC, the in-page Circle stub, the relay's Jupiter test-stub, the SOL RPC stub.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
+  pickSwapTarget,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
@@ -33,7 +35,7 @@ import {installCctpStub, cctpStubState, setCctpMessageState, cctpFeeExpectations
 const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
 const CKUSDC_LEDGER = 'xevnm-gaaaa-aaaar-qafnq-cai';
 const VCHF_USDC_POOL = 'hx7nb-diaaa-aaaar-qbxsa-cai'; // venue icpswap-vchf-ckusdc's OWN pool
-const ROUTE_C_ROW = 'convert-dest-route-multihop:icpswap-vchf-ckusdc:2:cctp:jupiter';
+const ROUTE_C_ROW = 'convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp:jupiter';
 const DEST = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'.toLowerCase();
 const BURN_HASH = '0x' + 'c7'.repeat(32);
 
@@ -176,21 +178,14 @@ export async function run() {
     });
     await installCctpStub(driver, {passOrigins, forwardTxHash: FORWARD_TX_HASH});
 
-    // --- §1 the picker row itself names the final leg's venue (before any quote exists)
-    await openBalances(driver);
-    await selectCurrency(driver, 'vchf');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    // --- §1 the composed route: VCHF→SOL is single-mechanism (no CeFi venue pairs it) — the
+    // route IS the one row, self-armed; its census names the final leg's venue before any quote.
+    await openConvertFor(driver, 'vchf');
+    await pickSwapTarget(driver, 'SOL');
     await driver.type('convert-amount', '10');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-
-    assert(await driver.findByTestID(ROUTE_C_ROW, {timeoutMs: 3_000}) != null, 'the Route C row is offered for VCHF');
-    const rowText = await driver.readText(ROUTE_C_ROW);
-    assertIncludes(rowText, 'SOL', 'the row names the destination asset');
-    assertIncludes(rowText, 'final step via Jupiter', 'the row names the FINAL leg\'s venue before any quote (the founder\'s "no venue anywhere")');
-    await driver.click(ROUTE_C_ROW);
-    // VCHF's SOL group is single-mechanism (no cefi venue pairs VCHF→SOL) — the route
-    // self-resolves and the destination address input appears directly.
+    // The destination address input appears directly (the route self-resolves); the census
+    // below names the final leg's venue before any confirm.
     await driver.type('convert-dest-address', DEST);
     await driver.findByTestID('convert-route-min', {timeoutMs: 20_000});
     assertIncludes(await driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset (USDC — not the SOL destination)');

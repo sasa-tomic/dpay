@@ -23,7 +23,8 @@
 //     quote's 1% floor. QUOTE-ONLY: nothing executes (the full multihop execution mechanics
 //     are pinned by flow 184).
 // Private relay (startRelay, the flow-183 pattern): deterministic catalog, isolated pools.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
@@ -110,10 +111,7 @@ export async function run() {
     const fund = await faucetAccount(r2.baseURL, account.publicHex, SEED_VCHF, {currency: 7});
     assert(fund.ok, `faucet VCHF credit ok (status ${fund.status})`);
 
-    await openBalances(driver);
-    await selectCurrency(driver, 'vchf');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'vchf');
     await driver.type('convert-amount', '10');
     // Registry-first resolution: VCHF's direct form STILL lands on the row-0 VCHF ↔ ICP venue
     // (the new row must not hijack it — pinned server-side by convert.test.ts, pinned HERE in

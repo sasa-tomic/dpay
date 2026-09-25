@@ -89,6 +89,15 @@ export type ConvertMessages = {
    *  the relay demoted the row to the tail — this line is the honest why, nothing more. */
   venueSlow: string;
 
+  // --- the swap screen's TARGET leg (2026-09-24 currency-first redesign) -----------------------
+  /** The target currency's tap affordance, shown when more than one target currency exists —
+   *  the currency the conversion lands in is a choice, and the choice is named. */
+  swapTargetPick: string;
+  /** The expanded target-currency list's label. */
+  swapTargetListLabel: string;
+  /** The SOURCE currency's own row in that list: rendered but disabled, with the honest why. */
+  swapTargetSame: string;
+
   // --- fail closed BEFORE the confirm (a swap that can only fail is never offered) ---------------
   /** Zero balance: the Pay tab's fund-gate shape, routed at the surface that can actually fund an
    *  IC asset. `receiveTab`/`myAddress` are the live labels of those controls, passed in from
@@ -517,6 +526,9 @@ export const convertEn: ConvertMessages = {
   venueChooserLabel: 'Venue',
   venueNoneSelected: 'Select a venue to see its full quote and continue.',
   venueSlow: 'Recently slow to settle.',
+  swapTargetPick: 'Change target currency',
+  swapTargetListLabel: 'Convert into',
+  swapTargetSame: 'This is the currency you are converting from.',
 
   sol: {
     heading: (inSym, outSym) => `Convert ${inSym} to ${outSym} (Solana)`,

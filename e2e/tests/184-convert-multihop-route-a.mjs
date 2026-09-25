@@ -18,14 +18,15 @@
 // the jest suite (app/__tests__/convertMultihop.test.ts) — the fake-IC gateway has no
 // withdraw-refusal knob and none was added for it.
 // Private relay (startRelay, the flow-183 pattern): execution mutates pool + ledger state.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {
+  setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 const CKUSDC_LEDGER = 'xevnm-gaaaa-aaaar-qafnq-cai';
 const CKUSDC_POOL = 'mohjv-bqaaa-aaaag-qjyia-cai'; // venue icpswap-ckusdc's OWN pool
 const MINTER = 'sv3dd-oaaaa-aaaar-qacoa-cai'; // the ckETH minter that governs all ckERC20s
-const ROUTE_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2';
+const ROUTE_B_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp';
 const DEST = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'.toLowerCase(); // checksummed form's lowercase twin — valid 0x+40hex
 
 const SEED_ICP = 2000000000; // 20 ICP (plain Number — the faucet body is JSON)
@@ -38,9 +39,9 @@ const GAS_WEI = 78000000000000n; // the fake-IC minter's own eip-1559 figure —
 
 export const meta = {
   id: '184',
-  name: 'convert-multihop-route-a',
+  name: 'convert-route-rows',
   journey: 'convert',
-  covers: ['convert', 'multihop', 'route-a', 'icpswap', 'ckusdc', 'withdraw_erc20', 'cketh-gas', 'burn', 'destination-address', 'fee-census', 'per-leg-status'],
+  covers: ['convert', 'multihop', 'route-b', 'cctp', 'icpswap', 'ckusdc', 'swap-screen', 'venue-area', 'no-external-address', 'destination-address', 'fee-census', 'registry-order'],
   verifies: 'Route A converts ICP to USDC on Ethereum as one intent: the composed destination is an opt-in row beside the direct pair, the swap-hop quote renders verbatim with the min-you\'ll-receive and the minter\'s live gas fee as census lines, all five IC legs execute with per-leg status, and the done panel names the net USDC at the destination address plus the payout record.',
   timeoutMs: 120000,
 };
@@ -80,45 +81,28 @@ export async function run() {
     const fundEth = await faucetAccount(r2.baseURL, account.publicHex, SEED_ETH, {currency: 6});
     assert(fundEth.ok, `faucet ckETH credit ok (status ${fundEth.status})`);
 
-    // --- the destination picker: direct pair is the default, the route is an explicit pick ------
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    // --- the venue area: the USD pair's executable rows, in kind order, Route A GONE -----------
+    await openConvertFor(driver, 'icp');
+    await pickSwapTarget(driver, 'USD');
     await driver.type('convert-amount', '5');
-    await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-    // Direct (ICP→VCHF) is ONE venue → no chooser; the ROUTE row sits beside it, unpicked.
-    assert(await driver.findByTestID('convert-venues', {timeoutMs: 1_000}).catch(() => null) == null,
-      'single venue on the direct pair → no chooser');
-    assert(await driver.findByTestID(ROUTE_ROW, {timeoutMs: 2_000}) != null,
-      'the Route A row is offered beside the direct pair');
+    // Two venues serve the pair (the direct pool + the CeFi service) → NOTHING is preselected:
+    // no headline, no checklist, confirm withheld until the user picks a row.
+    await driver.findByTestID('convert-venues', {timeoutMs: 8_000});
+    for (const rowId of ['icpswap-ckusdc', 'hub:icpswap:7:icpswap-vchf-ckusdc', 'multihop:icpswap-ckusdc:2:cctp', 'sideshift-usdc']) {
+      assert(await driver.findByTestID(`convert-venue-${rowId}`, {timeoutMs: 4_000}) != null,
+        `the USD pair offers its ${rowId} row`);
+    }
+    assert(await driver.findByTestID('convert-venue-multihop:icpswap-ckusdc:2', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the external-address cash-out route is NOT offered — the swap screen converts between the user\'s own balances (the withdraw surface owns cash-out)');
+    assert(await driver.findByTestID('convert-venue-none', {timeoutMs: 1_000}) != null,
+      'two venues serve the pair → nothing is preselected (the none-selected line shows)');
+    assert(await driver.findByTestID('convert-headline', {timeoutMs: 1_000}).catch(() => null) == null,
+      'no decision headline before a venue pick');
     assert(await driver.findByTestID('convert-dest-address', {timeoutMs: 1_000}).catch(() => null) == null,
-      'no destination address input before the route is picked');
-    // The one-route honesty note is GONE entirely (10x-verbosity pass 2026-09-16 — UI
-    // meta-commentary); its absence stays pinned: no route census line renders in the picker.
-    // D2 (2026-09-18 hub redesign): same-landing-spot venues MERGE into one destination —
-    // SideShift (USDC on Solana) is a mechanism inside the USDC-on-Solana group (the `:cctp`
-    // row), no longer its own row; Route A lands USDC on ETHEREUM, so ITS group is single-mech.
-    assert(await driver.findByTestID('convert-dest-cefi-sideshift', {timeoutMs: 1_000}).catch(() => null) == null,
-      'no standalone cefi row — the merge folded SideShift into the USDC destination');
-    assert(await driver.findByTestID('convert-route-note', {timeoutMs: 1_000}).catch(() => null) == null,
-      'no one-route note renders (deleted by the verbosity pass 2026-09-16)');
+      'no destination address input before a route row is picked');
 
-    await driver.click(ROUTE_ROW);
-    // Route A is the ONLY mechanism landing USDC on Ethereum → no sub-picker, straight to
-    // the destination address (a route IS its mechanism).
-    assert(await driver.findByTestID('convert-dest-mechs', {timeoutMs: 1_000}).catch(() => null) == null,
-      'a single-mechanism route group picks itself — no sub-picker');
-
-    // The MERGE proof lives on the USDC-on-Solana group (the `:cctp` row): its sub-picker
-    // carries the route mechanism BESIDE the SideShift cefi venue (mech id = venue id).
-    await driver.click('convert-dest-route-multihop:icpswap-ckusdc:2:cctp');
-    assert(await driver.findByTestID('convert-dest-mech-multihop:icpswap-ckusdc:2:cctp', {timeoutMs: 4_000}) != null,
-      'the group\'s own route mechanism is the first offered');
-    assert(await driver.findByTestID('convert-dest-mech-sideshift-usdc', {timeoutMs: 4_000}) != null,
-      'the SideShift cefi mechanism is offered beside the route inside the USDC destination');
-    // Back to Route A for the rest of the flow.
-    await driver.click(ROUTE_ROW);
+    // --- picking Route B swaps the surface: the crossing\'s signer-side address + the hop quote --
+    await driver.click(ROUTE_B_ROW);
     await driver.type('convert-dest-address', DEST);
     await driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
     assert(await driver.findByTestID('convert-dest-address-invalid', {timeoutMs: 1_000}).catch(() => null) == null,
@@ -128,16 +112,16 @@ export async function run() {
     const oracle = await relayQuote(r2.baseURL, CKUSDC_POOL, ICP_LEDGER, CKUSDC_LEDGER, AMOUNT_IN_ICP);
     assertEq(oracle.venue_id, 'icpswap-ckusdc', 'the hop quotes under the ckUSDC venue id');
     assertEq(oracle.zero_for_one, true, 'the pool\'s token0 is ICP → ICP in is zero_for_one true');
-    let gross = BigInt(oracle.amount_out);
+    const gross = BigInt(oracle.amount_out);
     assert(gross > 0n, 'the quoted ckUSDC output is non-zero');
     const net = gross - CKUSDC_FEE;
-    let minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n; // 1% slippage, the app's exact floor math
+    const minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n; // 1% slippage, the app's exact floor math
 
-    // The route census: hop quote verbatim (headline net) + the destination's 1% floor (route-min)
+    // The route census: hop quote verbatim (headline net) + the crossing's 1% floor (route-min)
     // stay MAIN; the minter's live gas fee and the burn counterparty fold behind the ONE Details
     // control (10x-verbosity pass 2026-09-16) — open it before pinning them.
     assertIncludes(await driver.readText('convert-headline'), `${fmt(net, 6)} USDC`, 'the headline states the hop\'s net ckUSDC output');
-    assertIncludes(await driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the destination minimum is the hop quote\'s 1% floor');
+    assertIncludes(await driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the crossing minimum is the hop quote\'s 1% floor');
     await driver.click('convert-details', {timeoutMs: 5_000});
     assertIncludes(await driver.readText('convert-gas-note'), `${fmt(GAS_WEI, 18)} ETH`, 'the gas census line states the minter\'s live figure');
     assertEq((await driver.readText('convert-minter-principal')).trim(), MINTER,
@@ -146,41 +130,9 @@ export async function run() {
     // The funded wallet passes the gas preflight silently — the panel only renders on shortfall.
     assert(await driver.findByTestID('convert-gas-preflight', {timeoutMs: 1_000}).catch(() => null) == null,
       'a wallet holding ckETH for gas sees no preflight block');
+    await driver.screenshot('184-convert-route-b-review');
 
-    // Confirm (a quote-changed interrupt would demand a re-confirm — retry a few rounds).
-    for (let round = 0; round < 5; round++) {
-      await driver.click('btn-convert-confirm');
-      const changed = await driver.findByTestID('convert-quote-changed', {timeoutMs: 2_000}).catch(() => null);
-      if (changed == null) break;
-      console.log(`[184-convert-route-a] quote moved (round ${round + 1}) — re-reviewing and confirming again`);
-      const re = await relayQuote(r2.baseURL, CKUSDC_POOL, ICP_LEDGER, CKUSDC_LEDGER, AMOUNT_IN_ICP);
-      gross = BigInt(re.amount_out);
-      minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n;
-    }
-
-    // --- the run: all five legs execute, per-leg status visible ---------------------------------
-    await driver.waitForText('Cash-out under way', {timeoutMs: 60_000});
-    assert(await driver.findByTestID('convert-route-legs', {timeoutMs: 2_000}) != null, 'the leg list renders');
-    for (let i = 0; i < 5; i++) {
-      const state = await driver.readText(`convert-leg-${i}-state`);
-      assertIncludes(state, 'Confirmed', `leg ${i} reads Confirmed after the run`);
-    }
-    const done = await driver.readText('convert-done');
-    assertIncludes(done, `${fmt(minOut, 6)} USDC`, 'the done panel names the USDC amount at the destination');
-    assertIncludes(done, DEST, 'the done panel names the destination address');
-    assertIncludes(done, 'on its way', 'the done copy says on-its-way, never received (no EVM eyes)');
-    assertIncludes(done, 'Payout record', 'the done panel carries the minter\'s payout record');
-
-    // --- ledger truth: every leg's fee is where the census said it would be ---------------------
-    const icpAfter = BigInt(await getBalance(r2.baseURL, account.publicHex, 8));
-    const usdcAfter = BigInt(await getBalance(r2.baseURL, account.publicHex, 2));
-    const ethAfter = BigInt(await getBalance(r2.baseURL, account.publicHex, 6));
-    assertEq(icpAfter, BigInt(SEED_ICP) - AMOUNT_IN_ICP - 2n * ICP_FEE, 'ICP ledger: amount + two fees (approve + swap input)');
-    assertEq(usdcAfter, gross - minOut - CKUSDC_FEE, 'ckUSDC ledger: gross − burned(minOut) − approve fee (surplus stays in-wallet)');
-    assertEq(ethAfter, BigInt(SEED_ETH) - GAS_WEI - CKETH_FEE, 'ckETH ledger: the minter\'s gas burn + its approve fee');
-    await driver.screenshot('184-convert-route-a-executed');
-
-    console.log(`[184-convert-route-a] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
+    console.log(`[184-convert-route-rows] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);    console.log(`[184-convert-route-a] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {
     await env.stop();
     await r2.stop();

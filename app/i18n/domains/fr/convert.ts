@@ -67,6 +67,9 @@ export const convertFr: ConvertMessages = {
   venueChooserLabel: 'Plateforme',
   venueNoneSelected: 'Choisis une plateforme pour voir son devis complet et continuer.',
   venueSlow: 'Récemment lent à régler.',
+  swapTargetPick: 'Changer la devise cible',
+  swapTargetListLabel: 'Convertir en',
+  swapTargetSame: 'C\'est la devise depuis laquelle vous convertissez.',
 
   sol: {
     heading: (inSym, outSym) => `Convertir ${inSym} en ${outSym} (Solana)`,

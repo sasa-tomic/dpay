@@ -22,7 +22,7 @@
 // (harness/jupiter.mjs configures it — the dials go through dpay's relay proxy) and the
 // __DPAY_TEST_SOLANA_RPC_STUB, with the getTransaction detail carrying the EURC mint row
 // (the realized-payout oracle matches the record's own out mint).
-import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
   configureJupiterStub, jupiterStubState, EURC_MINT, USDC_MINT,
@@ -117,21 +117,15 @@ export async function run() {
       lastValidBlockHeight: 300000000,
     });
 
-    // §1 — both destinations visible; the DEFAULT is the SOL-pair venue (registry order,
-    // no surprise preselection, no behavior change until the user picks).
-    await openBalances(driver);
-    await driver.click('asset-sol-usdc-select', {timeoutMs: 8_000});
-    await driver.waitForText('Convert', {timeoutMs: 6_000});
-    await driver.click('btn-accounts-convert', {timeoutMs: 5_000});
+    // §1 — the target list carries every reachable CURRENCY; the standing target is the
+    // registry-row-0 venue's other side (SOL — the jupiter SOL-pair venue).
+    await openConvertFor(driver, 'sol-usdc');
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for USDC(Solana)');
-    assert(await driver.findByTestID('convert-sol-dest', {timeoutMs: 5_000}) != null, 'the out-destination picker renders (two venues now hold the USDC mint)');
-    assert(await driver.findByTestID('convert-sol-dest-sol', {timeoutMs: 3_000}) != null, 'the SOL row is present (the jupiter SOL-pair venue)');
-    assert(await driver.findByTestID('convert-sol-dest-sol-eurc', {timeoutMs: 3_000}) != null, 'the EURC row is present (the FX venue)');
-    assertIncludes(await driver.readText('convert-screen'), 'Convert USDC to SOL', 'the default pair is still USDC→SOL (first venue in registry order)');
+    assertIncludes(await driver.readText('convert-screen'), 'Convert USD → SOL', 'the standing pair is USD→SOL (first venue in registry order)');
 
-    // §2 — the pick re-targets the pair: the FX venue's own USDC → EURC route.
-    await driver.click('convert-sol-dest-sol-eurc', {timeoutMs: 3_000});
-    assertIncludes(await driver.readText('convert-screen'), 'Convert USDC to EURC', 'the heading names the picked pair');
+    // §2 — the pick re-targets the pair: the FX venue's own USD → EUR route.
+    await pickSwapTarget(driver, 'EUR');
+    assertIncludes(await driver.readText('convert-screen'), 'Convert USD → EUR', 'the heading names the picked pair');
 
     // §3 — Jupiter's own digits for the FX pair, verbatim through the relay proxy.
     await driver.type('convert-amount', '1');
@@ -157,7 +151,9 @@ export async function run() {
       'the dpay paid-nothing line is gone (verbosity pass 2026-09-16)');
     assert(await driver.findByTestID('convert-net', {timeoutMs: 1_000}).catch(() => null) == null,
       'the net end-state line is gone (verbosity pass 2026-09-16): the headline IS the end state');
-    assertIncludes(await driver.readText('convert-balance'), '2.5 USDC', 'balance line is the USDC token balance');
+    // Fork #4: the balance line renders the CURRENCY-unit summed figure — for the USD wallet
+    // holding only the Solana USDC rail, that is $2.50.
+    assertIncludes(await driver.readText('convert-balance'), '$2.50', 'balance line is the currency-unit figure (USD, summed across the rails)');
     await driver.screenshot('193-convert-usdc-eurc-checklist');
 
     // §4 — confirm: re-quote, verbatim quoteResponse POST, EURC-ATA beneficiary check, one broadcast.

@@ -1690,21 +1690,17 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               catalog={catalog}
               selectedAsset={selectedAsset}
               assetBalances={displayAssetBalances}
-              // The Solana rail's own balances for the V11 convert surface (the fund gate and
-              // insufficient check read the same strings the Balances tab shows) — the IC map
-              // above is keyed by currency number and cannot carry them.
-              solana={{sol: solState.balance, tokens: solTokenAmounts}}
+              // The swap screen's TARGET scope: the visible currency list (a hidden currency is
+              // re-added via Add new currency first) and its SUMMED views — both balance lines
+              // render in the currency unit (fork #4).
+              visibleCurrencies={visibleCurrencies}
+              currencyBalances={currencyBalances}
               // Back goes where Convert is launched FROM — the accounts route (X15 moved the
-              // action onto the selected account's row). Returning to Home would drop the user
+              // action onto the selected currency's row). Returning to Home would drop the user
               // somewhere they never were.
               onBack={openAccounts}
               onActivity={onActivity}
               // The zero-balance gate's action — the SAME deposit trip the Pay tab's gate fires.
-              // No `returnTo`: that argument offers a "back to PAYING <asset>" resume once the
-              // balance lands (returnFromDeposit sets mode 'pay'), and this user came from
-              // Convert, not from Pay. Sending them somewhere they never were is worse than
-              // sending them nowhere. The asset id follows the SELECTION (ic:<n> or solana:<T>)
-              // — the gate lands the selected row's own deposit surface, whatever rail it is on.
               onShowDepositAddress={() =>
                 goToDeposit(selectedAsset != null ? selectedAsset.id : `ic:${selectedCurrency}`)
               }
@@ -1712,6 +1708,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               // a user gesture that respects the selection lock and leaves the tabs' sub-modes
               // alone. Withheld while locked, exactly as the Pay pointer's button is.
               onSwitchAsset={payRailSwitch}
+              // The Solana rail's own balances (the fund gate + insufficient check read the
+              // same strings the Balances tab shows).
+              solana={{sol: solState.balance, tokens: solTokenAmounts}}
             />
            : <Ledger history={walletHistory} catalog={catalog} assets={assets} dropped={solDropped} staleFailure={solHistoryFailure} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
       </ScrollView>

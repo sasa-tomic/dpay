@@ -15,7 +15,7 @@
 //      never talks to any venue origin — there is no page fetch stub at all.
 //   3. THE KEY-GATED STATUS POLL DRIVES THE LIFECYCLE through the SAME relay route the
 //      record's statusUrl names — including across a page reload.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
 import {icpAccountIdentifierHex} from '../harness/wire.mjs';
@@ -28,9 +28,8 @@ const SETTLE_TEXT = '0.0496 ICP';
 const DEPOSIT_ADDRESS = 'e2e-trocador-deposit-01';
 const SETTLE_HASH = 'sol-settle-sig-198';
 // The merged cefi group keeps the FIRST registry venue's id as its row testID.
-const CEFI_ROW = 'convert-sol-dest-cefi-sideshift';
-const TROCADOR_MECH = 'convert-sol-dest-mech-trocador';
-const AMM_ROW = 'convert-sol-dest-sol-usdc';
+const CEFI_ROW = 'convert-venue-trocador';
+const TROCADOR_MECH = 'convert-venue-trocador';
 
 export const meta = {
   id: '198',
@@ -79,34 +78,9 @@ async function installSolRpcStub(driver) {
   });
 }
 
-/** Enter the native SOL convert surface from the accounts route (flow 185's entry). */
+/** Enter the native SOL convert surface (the currency-row Convert button is the entry). */
 async function openSolConvert(driver) {
-  await openBalances(driver);
-  await driver.click('asset-sol-select', {timeoutMs: 8_000});
-  // The tap's state can lag the click by a render under pool contention (the wallet's reconcile
-  // effect answers a transient `assets` rebuild by latching the home rail), and this surface's
-  // identity is decided by WHICH row holds the selection when convert opens. So wait for the row
-  // to actually report aria-selected (the selectCurrency pattern in harness/lib.mjs) before
-  // asking for convert — otherwise the surface opens for the PREVIOUS selection and every
-  // SOL-surface assert below starves on a testID that never exists there.
-  const selDeadline = Date.now() + 8_000;
-  for (;;) {
-    const selected = await driver.eval((t) => {
-      const el = document.querySelector(`[data-testid="${t}"]`);
-      return el ? el.getAttribute('aria-selected') === 'true' : null;
-    }, 'asset-sol');
-    if (selected === true) break;
-    if (Date.now() > selDeadline) throw new Error('openSolConvert: asset-sol never reported aria-selected — the selection never landed');
-    await new Promise((r) => setTimeout(r, 150));
-  }
-  await driver.waitForText('Convert', {timeoutMs: 6_000});
-  let opened = false;
-  for (let i = 0; i < 3 && !opened; i++) {
-    try {
-      await driver.click('btn-accounts-convert', {timeoutMs: 8_000});
-      opened = true;
-    } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
-  }
+  await openConvertFor(driver, 'sol', {timeoutMs: 8_000});
 }
 
 export async function run() {
@@ -132,29 +106,16 @@ export async function run() {
     // every Trocador method rides the relay, and the audit below counts the key-bearing
     // calls server-side. Any surprise origin would be a bug this flow cannot silently pass.
 
-    // --- §1 the merged landing spot: row names the spot, sub-picker names the services
-    // Saturated-box lesson (2026-09-22, first full-suite RED here): the row testIDs below only
-    // mean something on the SOL surface, and the SOL surface also renders `convert-screen` — so
-    // pin the surface IDENTITY before any row lookup (12s text budget), then budget the row
-    // lookups for pool contention (10s), not for a quiet box (3s starved at 32.9s wall once).
+    // --- §1 the venue area: TWO CeFi services on the SOL→ICP pair, registry order, nothing
+    // preselected — the user picks the service (fork #3). The standing target is USD (the
+    // row-0 venue's other side); the walk first picks the ICP target.
     await openSolConvert(driver);
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for SOL');
-    assert(await driver.waitForText('Convert SOL to USDC', {timeoutMs: 12_000}),
-      'the convert surface is the SOL surface ("Convert SOL to USDC" header — the row testIDs below are SOL-surface facts)');
-    assert(await driver.findByTestID('convert-sol-dest', {timeoutMs: 8_000}) != null, 'the out-destination picker renders');
-    assert(await driver.findByTestID(AMM_ROW, {timeoutMs: 10_000}) != null, 'the in-wallet USDC row is present (amm surface unchanged)');
-    const cefiRow = await driver.findByTestID(CEFI_ROW, {timeoutMs: 8_000});
-    assert(cefiRow != null, 'the merged cefi ICP row is present');
-    const cefiRowText = await driver.readText(CEFI_ROW);
-    assertIncludes(cefiRowText, 'ICP', 'the merged row names the landing asset');
-    assert(!cefiRowText.includes('SideShift'), 'the merged row does NOT name one venue (two venues serve this spot)');
-    assertIncludes(await driver.readText('convert-screen'), 'Convert SOL to USDC', 'the default pair is still the first amm group (no surprise preselection)');
-
-    // --- §2 pick the cefi spot, then the Trocador SERVICE in the sub-picker
+    assertIncludes(await driver.readText('convert-screen'), 'Convert SOL → USD', 'the standing pair is SOL→USD (registry order)');
+    await pickSwapTarget(driver, 'ICP');
+    assert(await driver.findByTestID('convert-venues', {timeoutMs: 8_000}) != null, 'the venue area renders (two CeFi venues serve the ICP pair)');
+    assert(await driver.findByTestID('convert-venue-sideshift', {timeoutMs: 3_000}) != null, 'the registry-first venue (SideShift) is offered');
     await driver.click(CEFI_ROW, {timeoutMs: 3_000});
-    assert(await driver.findByTestID('convert-sol-dest-mechs', {timeoutMs: 3_000}) != null, 'the venue sub-picker appears for the merged spot');
-    assert(await driver.findByTestID('convert-sol-dest-mech-sideshift', {timeoutMs: 2_000}) != null, 'the registry-first venue is offered');
-    await driver.click(TROCADOR_MECH, {timeoutMs: 3_000});
     assertIncludes(await driver.readText('convert-screen'), 'Convert SOL → ICP', 'the heading names the picked pair');
     await driver.type('convert-amount', AMOUNT_TEXT);
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});

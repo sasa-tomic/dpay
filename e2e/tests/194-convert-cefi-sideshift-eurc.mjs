@@ -17,7 +17,10 @@
 //   2. The venue's EURC coin code end-to-end: the settle leg renders in EURC (the
 //      6-decimal EUR unit), the payout names the wallet's derived Solana address, and
 //      the record's outCurrency stays the venue's own world until settled.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
+  pickSwapTarget,
+  pickSwapVenue,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
 import {installSideShiftStub, setSideShiftStatus, sideShiftStubState} from '../harness/sideshift.mjs';
@@ -37,8 +40,8 @@ const SETTLE_HASH = 'sol-settle-sig-194';
 // (ICP → ckUSDC → USDC(Solana) → EURC via jupiter-usdc-eurc) AND the direct cefi venue
 // land on the same asset, so the group row carries the route's id and the cefi venue is
 // a mechanism sub-pick beside it — the exact pattern the SOL/USDC destinations use.
-const EURC_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc';
-const EURC_MECH = 'convert-dest-mech-sideshift-eurc';
+const EURC_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc';
+const EURC_MECH = 'convert-venue-sideshift-eurc';
 
 export const meta = {
   id: '194',
@@ -57,38 +60,12 @@ async function relayHits(relayBaseURL) {
   return res.json();
 }
 
-/** Re-enter the convert surface from the accounts route (post-terminal trips). */
-async function reopenConvert(driver) {
-  await openBalances(driver);
-  await selectCurrency(driver, 'icp');
-  await openBalances(driver); // back to the accounts route — the convert entry lives there
-  let opened = false;
-  for (let i = 0; i < 3 && !opened; i++) {
-    try {
-      await driver.click('btn-accounts-convert', {timeoutMs: 8_000});
-      opened = true;
-    } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
-  }
-}
-
-/** One full surface pass: pick the EURC destination group, the SideShift mechanism, quote,
- *  confirm, land at awaiting_deposit. Multi-mechanism group: the group tap reveals the
- *  sub-picker; the cefi venue is an explicit mechanism pick (D5 — nothing auto-quoted). */
-async function pickEurcAndConfirm(driver) {
-  await driver.type('convert-amount', AMOUNT_TEXT);
-  await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-  await driver.click(EURC_ROW, {timeoutMs: 5_000});
-  await driver.click(EURC_MECH, {timeoutMs: 5_000});
-  await driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
-  await driver.waitForText('SideShift', {timeoutMs: 8_000});
-  await driver.click('btn-convert-confirm', {timeoutMs: 5_000});
-  await driver.findByTestID('convert-awaiting-deposit', {timeoutMs: 30_000});
-}
-
 export async function run() {
   const start = Date.now();
   console.log('[194-sideshift-eurc] setup (own relay + shared web + browser)…');
-  const env = await setup();
+  // solStub: the EUR currency is offerable only when its EURC(Solana) rail exists in the
+  // wallet's asset list — the RPC stub answers the balance probe honestly offline.
+  const env = await setup({solStub: true});
   const r2 = await startRelay();
   try {
     const {driver, webBaseURL} = env;
@@ -112,24 +89,19 @@ export async function run() {
     await installSideShiftStub(driver, {passOrigins, initialStatus: 'waiting'});
 
     // --- §1 the venue row, the disclosure, and the verbatim quote
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'icp');
+    await pickSwapTarget(driver, 'EUR');
     await driver.type('convert-amount', AMOUNT_TEXT);
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
 
-    // The EURC destination group is offered beside its siblings — the ICP surface now
-    // carries THREE cefi-capable destinations (SOL, USDC, EURC). EURC is a MERGED group:
-    // the composed CCTP+jupiter route AND the direct cefi venue are two mechanisms of
-    // one destination (D4), so the group row is the route's id and selecting it reveals
-    // the sub-picker where sideshift-eurc sits beside the route.
-    assert(await driver.findByTestID(EURC_ROW, {timeoutMs: 3_000}) != null,
-      'the EURC destination group (route + SideShift merged) is offered');
-    await driver.click(EURC_ROW);
+    // The EUR pair's venue area: the composed CCTP+jupiter route AND the SideShift venue are
+    // SEPARATE rows now (the sub-picker is gone — each mechanism IS a row), registry/kind
+    // order, nothing preselected (two venues serve the pair).
+    assert(await driver.findByTestID('convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc', {timeoutMs: 3_000}) != null,
+      'the composed CCTP+jupiter route row is offered for the EUR pair');
     assert(await driver.findByTestID(EURC_MECH, {timeoutMs: 4_000}) != null,
-      'SideShift is a mechanism inside the merged EURC destination (D2/D4 merge)');
-    assertIncludes(await driver.readText(EURC_MECH), 'SideShift', 'the mech row names the venue');
+      'the SideShift venue row is offered beside the route');
+    assertIncludes(await driver.readText(EURC_MECH), 'SideShift', 'the venue row names the venue');
     await driver.click(EURC_MECH);
     const settle = await driver.readText('convert-settle-address');
     assertIncludes(settle, kp.address, 'the payout address is the wallet\'s OWN derived Solana address');
@@ -185,7 +157,9 @@ export async function run() {
     await driver.navigate(webBaseURL, page, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 8_000});
     await installSideShiftStub(driver, {passOrigins, initialStatus: 'multiple'}); // page stubs die with the page
-    await reopenConvert(driver);
+    // §5's reload re-enters the surface on the LIVE record — the record view IS the screen
+    // (the provider-processing panel); no form walk is involved.
+    await openConvertFor(driver, 'icp');
     await driver.findByTestID('convert-provider-processing', {timeoutMs: 45_000});
     const shiftsAfter = (await relayHits(r2.baseURL)).shiftCalls;
     assertEq(shiftsAfter, shiftsBefore, 'the order was NEVER re-created across the reload');

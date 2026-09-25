@@ -13,7 +13,10 @@
 //   2. FAIL-CLOSED: no trade is ever created for an unquoted pair (stub audit).
 //   3. The sibling mechanism (sideshift) stays fully pickable and quotes normally —
 //      the no-quote verdict is about ONE venue's live market, never the destination.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor,
+  pickSwapTarget,
+  pickSwapVenue,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {installSideShiftStub} from '../harness/sideshift.mjs';
 
@@ -26,9 +29,8 @@ const SETTLE_TEXT = '0.0495 SOL';
 // (its route testID is the group's identity) and the cefi venues merge into it (D4) —
 // the exact group flow 187 drives. The sub-picker picks the SERVICE (D2/D5 — nothing
 // auto-quoted in a multi-mechanism group).
-const CEFI_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter';
-const TROCADOR_MECH = 'convert-dest-mech-trocador';
-const SIDESHIFT_MECH = 'convert-dest-mech-sideshift';
+const TROCADOR_MECH = 'convert-venue-trocador';
+const SIDESHIFT_MECH = 'convert-venue-sideshift';
 
 export const meta = {
   id: '207',
@@ -76,17 +78,13 @@ export async function run() {
     const passOrigins = [new URL(r2.baseURL).origin, new URL(webBaseURL).origin, new URL(env.relayBaseURL).origin];
     await installSideShiftStub(driver, {passOrigins, initialStatus: 'waiting'});
 
-    // --- §1 the merged ICP→SOL cefi group offers both venues
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    // --- §1 the SOL pair's venue area: BOTH CeFi services as rows (registry order, nothing
+    // preselected — the sub-picker is gone, each service IS a row).
+    await openConvertFor(driver, 'icp');
+    await pickSwapTarget(driver, 'SOL');
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'the IC convert surface opens for ICP');
     await driver.type('convert-amount', AMOUNT_TEXT);
-    const cefiRow = await driver.findByTestID(CEFI_ROW, {timeoutMs: 8_000});
-    assert(cefiRow != null, 'the merged cefi SOL row is present');
-    await driver.click(CEFI_ROW, {timeoutMs: 5_000});
-    assert(await driver.findByTestID('convert-dest-mechs', {timeoutMs: 5_000}) != null, 'the venue sub-picker appears for the merged spot');
+    assert(await driver.findByTestID('convert-venues', {timeoutMs: 8_000}) != null, 'the venue area renders for the SOL pair');
     assert(await driver.findByTestID(SIDESHIFT_MECH, {timeoutMs: 3_000}) != null, 'the registry-first venue is offered');
     assert(await driver.findByTestID(TROCADOR_MECH, {timeoutMs: 3_000}) != null, 'the trocador aggregator is offered beside it');
 

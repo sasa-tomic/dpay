@@ -4,13 +4,11 @@
 // Solana surface), so it lives exactly once. The venue fail-closed constants stay in
 // ConvertMode.tsx (the IC form owns them); this file reads REGISTERED_VENUE_NAME from there.
 import {Linking, Pressable, Text, View} from 'react-native';
-import {icpCatalogOf, BUNDLED_NETWORKS, type CurrencyDescriptor} from '../config/catalog';
+import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
-import {WALLET_CURRENCIES, currencyOfCatalogRow, type HomeCurrency} from '../config/currency';
-import {resolveConvertDestinations, type ConvertDestination, type ConvertRouteOption} from '../config/convert';
-import {BUNDLED_VENUES, cefiOtherSide, venueDisplayName, venueOfId, type VenueEntry} from '../config/venues';
+import {BUNDLED_VENUES, venueDisplayName, venueOfId} from '../config/venues';
 import {deriveConvertMath, fetchConvertQuote, isTerminalConvertStep, type ConvertMath, type ConvertQuote, type ConvertRecord, type LegPlan} from '../convert';
-import type {HubRoute, MultihopRoute} from '../routes';
+import type {HubRoute} from '../routes';
 import {SOLANA_TOKENS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
@@ -18,222 +16,15 @@ import {fmtAssetCompact} from '../lib/format';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconChevronDown, IconSwap} from './icons';
-import {REGISTERED_VENUE_NAME} from './ConvertMode';
-import {solAssetOfMint} from './ConvertSolDest';
 
-/** Everything the quote panel needs about the two legs, resolved + validated from the bundled catalog. */
-export type ConvertLegs = {
-  inDesc: CurrencyDescriptor;
-  /** The STANDING pair's other leg — null for a hub-only asset (it converts with no direct
-   *  pair; every rendered number names the SELECTED destination instead). */
-  outDesc: CurrencyDescriptor | null;
-  /** The catalog's BACKING symbol for each leg (`backing_symbol`, falling back to `symbol`) — the
-   *  same string every other surface shows for that asset. For the PoC pair that is 'ICP' and
-   *  'VCHF': VCHF's own backing symbol IS "VCHF", because it is a third party's franc-denominated
-   *  token whose peg dpay does not verify, so nothing here may shorten it to "CHF". */
-  inSym: string;
-  outSym: string;
-  inDecimals: number;
-  outDecimals: number;
-  /** Raw-unit ledger fees straight from the catalog fee fields (never hardcoded literals). */
-  inFee: string;
-  outFee: string;
-};
-
-// --- destination GROUPS (2026-09-18 hub UX guidance D1–D6): the picker shows ONE row per
-//     destination ASSET — the direct pair first (the standing default), then every other
-//     in-wallet asset, then every external destination. Where a destination is reachable by
-//     MORE than one mechanism (direct pool vs via-hub; CCTP vs a CeFi venue — two routes to
-//     the same landing spot), selecting the row reveals an indented MECHANISM sub-picker:
-//     registry order, direct first, never ranked, nothing preselected beyond that order
-//     (the V5 venue rules one level down). Quotes fetch for the SELECTED mechanism only.
-/** One user pick in the mechanism sub-picker (what a row resolves to). */
-export type DestMechPick =
-  | {kind: 'direct'}
-  | {kind: 'hub'; routeId: string}
-  | {kind: 'route'; routeId: string}
-  | {kind: 'cefi'; venueId: string};
-
-/** The render-side option behind a mechanism row: the pick plus the object its copy and
- *  its quote flow need. */
-type DestMechOption =
-  | {kind: 'direct'}
-  | {kind: 'hub'; route: HubRoute}
-  | {kind: 'route'; route: MultihopRoute}
-  | {kind: 'cefi'; venue: VenueEntry};
-
-/** One destination-asset row: a stable identity key, the row's testID, its label, and the
- *  mechanisms that reach it (ONE mechanism = no sub-picker; more = the D2 sub-picker). */
-export type DestGroup = {
-  key: string;
-  testID: string;
-  label: string;
-  mechs: DestMechOption[];
-  /** For in-wallet groups: the destination ledger this row resolves to (the direct
-   *  mechanism's output leg). Absent for the standing group and external groups. */
-  destLedger?: string;
-};
-
-export const mechPickOf = (m: DestMechOption): DestMechPick =>
-  m.kind === 'direct' ? {kind: 'direct'}
-  : m.kind === 'hub' ? {kind: 'hub', routeId: m.route.routeId}
-  : m.kind === 'route' ? {kind: 'route', routeId: m.route.routeId}
-  : {kind: 'cefi', venueId: m.venue.venue_id};
-
-export const mechIdOf = (p: DestMechPick): string =>
-  p.kind === 'direct' ? 'direct'
-  : p.kind === 'cefi' ? p.venueId
-  : p.routeId;
-
-/** The D1 destination groups for one asset, in render order: the direct pair (standing
- *  default) first, then every other in-wallet asset, then every external destination.
- *  Mechanisms inside a group keep registry order — direct first, hub/CCTP/CeFi after —
- *  never ranked, nothing preselected beyond that order (V5 one level down). External
- *  routes and CeFi venues that land on the SAME asset merge into ONE group (D4):
- *  USDC-on-Solana via CCTP and via a CeFi venue are two mechanisms, one destination. */
-export const buildDestGroups = (
-  catalog: CurrencyDescriptor[],
-  legs: ConvertLegs,
-  convDests: ConvertDestination[],
-  hubRoutesAll: HubRoute[],
-  routes: MultihopRoute[],
-  cefiVenues: readonly VenueEntry[],
-): DestGroup[] => {
-  const inLedger = legs.inDesc.ledger;
-  if (inLedger == null) return [];
-  const symOf = (row: CurrencyDescriptor): string => row.backing_symbol ?? row.symbol ?? '';
-  const optOf = (o: ConvertRouteOption): DestMechOption | null => {
-    if (o.kind === 'direct') return {kind: 'direct'};
-    const hr = o.kind === 'hub' ? hubRoutesAll.find(r => r.routeId === o.routeId) : null;
-    return hr != null ? {kind: 'hub', route: hr} : null;
-  };
-  const mechsOf = (routes: ConvertRouteOption[]): DestMechOption[] => {
-    const mechs: DestMechOption[] = [];
-    for (const o of routes) {
-      const m = optOf(o);
-      if (m != null) mechs.push(m);
-    }
-    return mechs;
-  };
-  const groups: DestGroup[] = [];
-  const byKey = new Map<string, DestGroup>();
-  const push = (g: DestGroup): void => {
-    groups.push(g);
-    byKey.set(g.key, g);
-  };
-  // 1 — the STANDING group: the direct pair's other leg, the pinned `convert-dest-direct`
-  //     row. Every mechanism that reaches the SAME ledger (its direct venue + any via-hub
-  //     route) merges under it, direct first. A hub-only asset has NO direct pair — no
-  //     standing row exists; its destinations render as plain in-wallet rows (D2).
-  if (legs.outDesc != null) {
-    const standing = legs.outDesc;
-    const standingDests = convDests.find(d => d.destLedger === standing.ledger)
-      ?? ({destLedger: standing.ledger, routes: []} as ConvertDestination);
-    push({
-      key: 'direct',
-      testID: 'convert-dest-direct',
-      label: M.convert.multihop.destDirect(symOf(standing)),
-      mechs: mechsOf(standingDests.routes),
-    });
-  }
-  // 2 — every OTHER in-wallet destination (direct venue or via-hub — both land here).
-  for (const d of convDests) {
-    if (legs.outDesc != null && d.destLedger === legs.outDesc.ledger) continue;
-    const row = catalog.find(c => c.ledger === d.destLedger);
-    if (row == null) continue;
-    push({
-      key: `ic:${row.currency}`,
-      destLedger: d.destLedger,
-      testID: `convert-dest-inwallet-${row.currency}`,
-      label: M.convert.multihop.destInWallet(symOf(row)),
-      mechs: mechsOf(d.routes),
-    });
-  }
-  // 3 — external destinations, merged by where they LAND (`ext:<symbol>:<network>`):
-  //     composed routes first (their pinned `convert-dest-route-<routeId>` testIDs are the
-  //     group's identity), then CeFi venues folding into an existing landing spot or forming
-  //     their own group.
-  for (const r of routes) {
-    const key = `ext:${r.dest.symbol}:${r.dest.network}`;
-    const existing = byKey.get(key);
-    if (existing != null) {
-      existing.mechs.push({kind: 'route', route: r});
-      continue;
-    }
-    push({
-      key,
-      testID: `convert-dest-route-${r.routeId}`,
-      // A Route-C row names its FINAL leg's venue in the row itself (founder clarity fix
-      // 2026-09-22): the registry display name — the cefi destRow's source — never a literal,
-      // so the Jupiter tail is visible BEFORE any quote or confirm.
-      label: r.crossRail?.sol != null
-        ? M.convert.multihop.destRouteSol(r.dest.symbol, r.dest.network, venueDisplayName(r.crossRail.sol.venueId))
-        : M.convert.multihop.destRoute(r.dest.symbol, r.dest.network),
-      mechs: [{kind: 'route', route: r}],
-    });
-  }
-  for (const v of cefiVenues) {
-    const mint = cefiOtherSide(v, inLedger);
-    if (mint == null) continue;
-    const asset = solAssetOfMint(mint);
-    if (asset == null) continue;
-    const key = `ext:${asset.symbol}:Solana`;
-    const existing = byKey.get(key);
-    if (existing != null) {
-      existing.mechs.push({kind: 'cefi', venue: v});
-      continue;
-    }
-    push({
-      key,
-      testID: `convert-dest-cefi-${v.venue_id}`,
-      label: M.convert.cefi.destRow(asset.symbol, 'Solana', v.display_name),
-      mechs: [{kind: 'cefi', venue: v}],
-    });
-  }
-  return groups;
-};
-
-/** One currency SECTION over the destination picker (multi-currency build-out, 2026-09): the D1
- *  rows partitioned by the currency each DESTINATION settles, presentation only — the rows inside
- *  a section are exactly buildDestGroups' order (registry order, direct pair first). `currency:
- *  null` is the tail: every destination that settles no home currency — the other in-wallet
- *  assets (ckBTC/ckETH/ICP) AND the external-address payouts (burn routes to an EVM address, CeFi
- *  venues paying a Solana address), which name where money LANDS rather than a rail of the
- *  wallet. A section header is a label, never a total: rows carry no amounts here, so nothing can
- *  be summed and nothing is ranked — the no-FX-quote rule holds by construction. */
-export type DestSection = {currency: HomeCurrency | null; groups: DestGroup[]};
-
-export const groupDestSections = (
-  groups: DestGroup[],
-  catalog: CurrencyDescriptor[],
-  legs: ConvertLegs | null,
-): DestSection[] => {
-  const currencyOf = (g: DestGroup): HomeCurrency | null => {
-    // The standing direct row resolves through the standing output leg (its own destLedger slot
-    // is deliberately still absent — line `selGroup.key !== 'direct'` upstream leans on that);
-    // in-wallet rows carry their ledger; external rows resolve to nothing (they are not wallet
-    // assets) and fall to the tail.
-    const ledger = g.key === 'direct' ? legs?.outDesc?.ledger ?? null : g.destLedger ?? null;
-    if (ledger == null) return null;
-    const row = catalog.find(c => c.ledger === ledger);
-    return row != null ? currencyOfCatalogRow(row) : null;
-  };
-  const buckets = new Map<HomeCurrency | 'other', DestGroup[]>();
-  for (const g of groups) {
-    const key = currencyOf(g) ?? 'other';
-    const bucket = buckets.get(key);
-    if (bucket == null) buckets.set(key, [g]);
-    else bucket.push(g);
-  }
-  const sections: DestSection[] = [];
-  for (const c of WALLET_CURRENCIES) {
-    const bucket = buckets.get(c);
-    if (bucket != null) sections.push({currency: c, groups: bucket});
-  }
-  const other = buckets.get('other');
-  if (other != null) sections.push({currency: null, groups: other});
-  return sections;
-};
+/** The name of the one registered REAL conversion venue — for the fail-closed panel's honest
+ *  "what exists today" copy (a registry lookup, not a literal; the venue area itself renders
+ *  whatever the registry serves, V5). Lives here (shared chrome) since the 2026-09-24 swap
+ *  screen folded the per-rail surfaces into one. */
+export const REGISTERED_VENUE_NAME: string = (() => {
+  const id = BUNDLED_VENUES.find(v => v.kind === 'ic_amm' && !v.testnet)?.venue_id ?? '';
+  return venueDisplayName(id);
+})();
 
 /** The hub two-quote fetch (D9/D13): quote1 (from → hub) through the route's own first
  *  venue, quote2 (hub → dest) through the second, SIZED ON math1.minOut — the compounding
@@ -383,41 +174,6 @@ export function UnavailablePanel({selectedAsset, onBack}: {selectedAsset: Select
       </View>
     </View>
   );
-}
-
-/** Resolve the two legs from the bundled catalog; null when the selected asset has no venue or the
- *  catalog row is too incomplete to display honestly (fail closed — never guessed, never defaulted). */
-export function resolveLegs(catalog: CurrencyDescriptor[], asset: Extract<SelectableAsset, {protocol: 'ic'}>): ConvertLegs | null {
-  const inDesc = catalog.find((c) => c.currency === asset.currency);
-  if (inDesc == null || inDesc.ledger == null) return null;
-  // The entry gate (2026-09-18 hub widening): an asset converts when it has AT LEAST ONE
-  // destination — a direct pool pair OR any hub route (registry-derived, fail-closed on the
-  // same bar the engine prices at). A venue-less asset keeps the derived unavailable copy.
-  const dests = resolveConvertDestinations(inDesc.ledger, inDesc.testnet);
-  if (dests.length === 0) return null;
-  const inSym = inDesc.backing_symbol ?? inDesc.symbol;
-  if (inSym == null || inDesc.decimals == null || inDesc.fee == null) return null;
-  // The standing output leg is the FIRST direct destination, where one exists. A hub-only
-  // asset (ckETH today: hub-reachable from VCHF/ckUSDC, no direct venue) converts with NO
-  // standing out leg — the out* fields below carry the input row's own facts as inert
-  // fallbacks; no direct surface renders without a direct row, and every number such a
-  // screen shows names the selected hub destination.
-  const standing = dests.find((d) => d.routes.some((r) => r.kind === 'direct'));
-  const outDesc = standing != null
-    ? catalog.find((c) => c.ledger === standing.destLedger) ?? null
-    : null;
-  const outSym = outDesc?.backing_symbol ?? outDesc?.symbol ?? null;
-  if (outDesc != null && (outSym == null || outDesc.decimals == null || outDesc.fee == null)) return null;
-  return {
-    inDesc,
-    outDesc,
-    inSym,
-    outSym: outSym ?? inSym,
-    inDecimals: inDesc.decimals,
-    outDecimals: outDesc?.decimals ?? inDesc.decimals,
-    inFee: inDesc.fee,
-    outFee: outDesc?.fee ?? inDesc.fee,
-  };
 }
 
 /** price(out) per 1 DISPLAY unit of in, as raw units at the OUTPUT ledger's own scale, via BigInt

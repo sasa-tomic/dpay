@@ -24,7 +24,7 @@
 // Navigation mirrors flow 35 EXACTLY (already tuned — `tab-home` for the Home surface, the header
 // `balance` chip for the Accounts route, `btn-settings-close` to dismiss the Settings sheet). Capture filenames are DISTINCT from flow 35
 // (40-vr-<surface> vs 35-tour-<surface>) so the two flows never collide on disk.
-import { setup, onboardWallet, assert, openBalances, selectCurrency, accountOf, faucetAccount } from '../harness/lib.mjs';
+import { setup, onboardWallet, assert, openBalances, selectCurrency, accountOf, faucetAccount, openConvertFor } from '../harness/lib.mjs';
 import { startRelay } from '../harness/relay.mjs';
 import { comparePng } from '../harness/pixel.mjs';
 import { existsSync } from 'node:fs';
@@ -228,10 +228,7 @@ export async function run() {
     const fund = await faucetAccount(r2.baseURL, account.publicHex, SEED, {currency: 8});
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
 
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'icp');
     await driver.type('convert-amount', '1');
     await driver.findByTestID('convert-venue-icpswap-quote', {timeoutMs: 10_000});
     await driver.findByTestID(`convert-venue-${FIXTURE_VENUE}-quote`, {timeoutMs: 10_000});

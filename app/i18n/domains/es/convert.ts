@@ -67,6 +67,9 @@ export const convertEs: ConvertMessages = {
   venueChooserLabel: 'Sede',
   venueNoneSelected: 'Elige una sede para ver su cotización completa y continuar.',
   venueSlow: 'Recientemente lento para liquidar.',
+  swapTargetPick: 'Cambiar la moneda de destino',
+  swapTargetListLabel: 'Convertir a',
+  swapTargetSame: 'Esta es la moneda desde la que estás convirtiendo.',
 
   sol: {
     heading: (inSym, outSym) => `Convertir ${inSym} en ${outSym} (Solana)`,

@@ -1,9 +1,10 @@
-// The SOL-side CeFi surface (2026-09-20, live-sweep defect 1): a registered cefi venue whose
-// pair carries a SPL mint as the DEPOSIT side must be offered on the SOL convert screen exactly
-// as the IC surface offers it in the other direction — one destination group, the venue's own
-// quote figures, the user's own derived IC account identifier as the payout target, and the
-// order as the lock. Founder rule: every currency through the SAME UI surfaces — per-rail
-// divergence is a bug.
+// The SOL-side CeFi surface (2026-09-20, live-sweep defect 1), on the 2026-09-24 swap screen's
+// currency grammar: a registered cefi venue whose pair carries a SPL mint as the DEPOSIT side
+// is offered as a VENUE ROW under its TARGET CURRENCY (ICP for sideshift-eurc) — the same row
+// vocabulary the IC source sees in the other direction — with the venue's own quote figures,
+// the user's own derived IC account identifier as the payout target, and the order as the
+// lock. Founder rule: every currency through the SAME UI surfaces — per-rail divergence is a
+// bug; per-rail EXECUTION shapes are not (the CeFi row's engine is unchanged).
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {beforeEach, describe, expect, jest, test} from '@jest/globals';
@@ -76,9 +77,9 @@ const ORDER = {
   expiresAt: '2026-09-21T12:00:00.000Z',
 };
 
-function mount() {
+async function mount(): Promise<renderer.ReactTestRenderer> {
   let tree!: renderer.ReactTestRenderer;
-  act(() => {
+  await act(async () => {
     tree = renderer.create(
       <ConvertMode
         identity={IDENTITY}
@@ -86,6 +87,8 @@ function mount() {
         catalog={CATALOG}
         selectedAsset={EURC_ASSET}
         assetBalances={{}}
+        visibleCurrencies={['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'] as const}
+        currencyBalances={{}}
         solana={{sol: '5000000000', tokens: BALANCES}}
         onActivity={() => undefined}
         onBack={() => undefined}
@@ -108,14 +111,20 @@ const textOf = (node: {props: {children?: unknown}}): string => {
   return walk(node.props.children);
 };
 
-function mountWithCefiPicked(tree: renderer.ReactTestRenderer): void {
-  // Pick the cefi destination group, then type the amount.
-  act(() => {
-    present(tree, 'convert-sol-dest-cefi-sideshift-eurc')[0].props.onPress();
+async function mountWithCefiPicked(tree: renderer.ReactTestRenderer): Promise<void> {
+  // Pick the ICP target (the cefi venue's landing currency), then type the amount. ICP is
+  // reached by ONE cefi row here — a single row arms without a venue pick. Awaited acts: the
+  // pick re-keys the quote effect, and the cefi fetch must land before the assertions read.
+  await act(async () => {
+    present(tree, 'btn-convert-target')[0].props.onPress();
   });
-  act(() => {
+  await act(async () => {
+    present(tree, 'convert-target-ICP')[0].props.onPress();
+  });
+  await act(async () => {
     present(tree, 'convert-amount')[0].props.onChangeText('1');
   });
+  await act(async () => {});
 }
 
 describe('SOL-side CeFi destination (sideshift-eurc)', () => {
@@ -123,49 +132,71 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     jest.clearAllMocks();
   });
 
-  test('EURC screen offers the cefi destination group beside the in-wallet SPL group', () => {
+  test('EURC screen offers ICP as a target whose venue row is the cefi service', async () => {
     jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
-    const tree = mount();
-    // The asset-key testID contract (defect 3): in-wallet rows use sol-*/cefi rows use the venue id.
-    expect(present(tree, 'convert-sol-dest').length).toBeGreaterThan(0);
-    expect(present(tree, 'convert-sol-dest-sol-usdc').length).toBeGreaterThan(0);
-    const cefi = present(tree, 'convert-sol-dest-cefi-sideshift-eurc');
-    expect(cefi.length).toBeGreaterThan(0);
-    // The row says WHAT lands, on WHICH rail, through WHICH venue — the IC row's exact shape.
-    const label = textOf(cefi[0]);
-    expect(label).toContain('ICP');
-    expect(label).toContain('SideShift');
+    const tree = await mount();
+    // The currency grammar: the target list carries USD, SOL and ICP; the ICP target's row
+    // names the service that executes it (the venue id is the row identity).
+    // Open the target list: the currency grammar's two gestures (chip, then row).
+    await act(async () => {
+      present(tree, 'btn-convert-target')[0].props.onPress();
+    });
+    for (const code of ['USD', 'SOL', 'ICP']) {
+      expect(present(tree, `convert-target-${code}`).length).toBeGreaterThan(0);
+    }
+    // The venue-area row is a multi-row affordance; a single cefi row renders as the
+    // attributed line once quoted — its SideShift attribution is pinned here.
+    await act(async () => {
+      present(tree, 'convert-target-ICP')[0].props.onPress();
+    });
+    await act(async () => {
+      present(tree, 'convert-amount')[0].props.onChangeText('1');
+    });
+    await act(async () => {});
+    expect(present(tree, 'convert-quote-source').length).toBeGreaterThan(0);
+    expect(textOf(present(tree, 'convert-quote-source')[0])).toContain('SideShift');
   });
 
-  test('a relay-demoted (settlement-degraded) cefi row says so honestly: the slow line renders', () => {
+  test('a relay-demoted (settlement-degraded) cefi row says so honestly: the slow line renders', async () => {
     jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
     // The relay serves the degraded venue flagged and demoted to the tail; the overlay here
     // carries exactly that row — the app renders the honest slow line on it (2026-09-20 SLA gate).
     setRuntimeVenues(BUNDLED_VENUES.map(v => v.venue_id === 'sideshift-eurc'
       ? {...v, health: {status: 'degraded', settle_seconds: 7200, measured_at: 1758000000}}
       : v));
-    const tree = mount();
-    // RN's Pressable mirrors testIDs onto internal wrapper layers (the rowOrder precedent):
-    // what matters is the line EXISTS once the row renders, carrying the honest copy.
-    const slow = present(tree, 'convert-sol-dest-cefi-slow-sideshift-eurc');
+    const tree = await mount();
+    // Walk to the ICP target: its single cefi row carries the honesty line on the screen
+    // itself (the single-honesty area render) — no pick needed once the target is chosen.
+    await act(async () => {
+      present(tree, 'btn-convert-target')[0].props.onPress();
+    });
+    await act(async () => {
+      present(tree, 'convert-target-ICP')[0].props.onPress();
+    });
+    const slow = present(tree, 'convert-venue-sideshift-eurc-slow');
     expect(slow.length).toBeGreaterThan(0);
     expect(textOf(slow[0])).toContain('Recently slow to settle.');
     setRuntimeVenues(null);
   });
 
-  test('a healthy (never-demoted) cefi row carries NO slow line — absence is never invented', () => {
+  test('a healthy (never-demoted) cefi row carries NO slow line — absence is never invented', async () => {
     jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
     setRuntimeVenues(BUNDLED_VENUES);
-    const tree = mount();
-    expect(present(tree, 'convert-sol-dest-cefi-slow-sideshift-eurc').length).toBe(0);
+    const tree = await mount();
+    await act(async () => {
+      present(tree, 'btn-convert-target')[0].props.onPress();
+    });
+    await act(async () => {
+      present(tree, 'convert-target-ICP')[0].props.onPress();
+    });
+    expect(present(tree, 'convert-venue-sideshift-eurc-slow').length).toBe(0);
     setRuntimeVenues(null);
   });
 
   test('picked cefi group: venue quote verbatim, derived IC payout address, no slippage axis', async () => {
     jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
-    const tree = mount();
-    mountWithCefiPicked(tree);
-    await act(async () => {});
+    const tree = await mount();
+    await mountWithCefiPicked(tree);
     // The settle figure is the venue's own number, verbatim (V8): 0.0495 ICP raw = 4950000.
     expect(present(tree, 'convert-headline').length).toBeGreaterThan(0);
     expect(textOf(present(tree, 'convert-headline')[0])).toContain('0.0495');
@@ -184,9 +215,8 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
   test('confirm locks the ORDER: payout at the derived account identifier, handoff names the venue deposit', async () => {
     jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
     jest.mocked(createSideShiftFixedShift).mockResolvedValue(ORDER);
-    const tree = mount();
-    mountWithCefiPicked(tree);
-    await act(async () => {});
+    const tree = await mount();
+    await mountWithCefiPicked(tree);
     await act(async () => {
       present(tree, 'btn-convert-confirm')[0].props.onPress();
     });
@@ -225,9 +255,8 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
       .mockResolvedValueOnce({venueId: 'sideshift-eurc', quoteId: 'q-review', settleAmount: '0.0495', rate: null, fetchedAtMs: Date.now()})
       .mockResolvedValueOnce({venueId: 'sideshift-eurc', quoteId: 'q-confirm', settleAmount: '0.0400', rate: null, fetchedAtMs: Date.now()});
     jest.mocked(createSideShiftFixedShift).mockResolvedValue({...ORDER, settleAmount: '0.0400'});
-    const tree = mount();
-    mountWithCefiPicked(tree);
-    await act(async () => {});
+    const tree = await mount();
+    await mountWithCefiPicked(tree);
     await act(async () => {
       present(tree, 'btn-convert-confirm')[0].props.onPress();
     });
@@ -249,9 +278,8 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     jest.mocked(fetchSideShiftQuote)
       .mockResolvedValueOnce({venueId: 'sideshift-eurc', quoteId: 'q-review', settleAmount: '0.0495', rate: null, fetchedAtMs: Date.now()})
       .mockRejectedValueOnce('unreachable');
-    const tree = mount();
-    mountWithCefiPicked(tree);
-    await act(async () => {});
+    const tree = await mount();
+    await mountWithCefiPicked(tree);
     await act(async () => {
       present(tree, 'btn-convert-confirm')[0].props.onPress();
     });
@@ -272,9 +300,8 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
       .mockResolvedValueOnce({venueId: 'sideshift-eurc', quoteId: 'q-review', settleAmount: '0.0495', rate: null, fetchedAtMs: Date.now()})
       .mockImplementationOnce(() => slow({venueId: 'sideshift-eurc', quoteId: 'q-confirm', settleAmount: '0.0400', rate: null, fetchedAtMs: Date.now()}));
     jest.mocked(createSideShiftFixedShift).mockImplementationOnce(() => slow({...ORDER, settleAmount: '0.0400'}));
-    const tree = mount();
-    mountWithCefiPicked(tree);
-    await act(async () => {});
+    const tree = await mount();
+    await mountWithCefiPicked(tree);
     await act(async () => {
       present(tree, 'btn-convert-confirm')[0].props.onPress();
     });
@@ -310,9 +337,8 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     // amount is still refused (the value line below flips the adoption off).
     jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
     jest.mocked(createSideShiftFixedShift).mockResolvedValue({...ORDER, depositAmount: '1.00000000'});
-    const tree = mount();
-    mountWithCefiPicked(tree);
-    await act(async () => {});
+    const tree = await mount();
+    await mountWithCefiPicked(tree);
     await act(async () => {
       present(tree, 'btn-convert-confirm')[0].props.onPress();
     });

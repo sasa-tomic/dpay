@@ -15,7 +15,8 @@
 //
 // Private relay (startRelay, the flow-164 pattern): the venue knob + pool mutations cannot reach
 // any sibling flow.
-import {setup, assert, assertEq, assertIncludes, assertDisabled, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, assertDisabled, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
 const SEED = 300000000; // 3 ICP (plain Number — the faucet body is JSON)
@@ -80,10 +81,7 @@ export async function run() {
     });
     assert(arm.ok, `venue knob armed (status ${arm.status})`);
 
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'icp');
     await driver.type('convert-amount', '1');
     await driver.findByTestID(`convert-venue-${FIXTURE_VENUE}-quote`, {timeoutMs: 10_000});
 

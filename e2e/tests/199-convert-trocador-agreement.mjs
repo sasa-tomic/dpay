@@ -23,7 +23,9 @@
 //   4. THE ACCESS LOG EXISTS AND CORRELATES — one append-only JSONL line per proxied call
 //      carrying ip / user-agent / accept-language and the correlation ids, with the
 //      rate/trade/status/webhook/webhook-unmatched kinds all present.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances, pickSwapTarget,
+  openConvertFor,
+} from '../harness/lib.mjs';
 import {startRelay, pickFreePort} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
 import {icpAccountIdentifierHex} from '../harness/wire.mjs';
@@ -37,8 +39,8 @@ const AMOUNT_TEXT = '2';
 const SETTLE_TEXT = '0.0496 ICP';
 const DEPOSIT_ADDRESS = 'e2e-trocador-deposit-01';
 const SETTLE_HASH = 'sol-settle-sig-199';
-const TROCADOR_MECH = 'convert-sol-dest-mech-trocador';
-const CEFI_ROW = 'convert-sol-dest-cefi-sideshift';
+const TROCADOR_MECH = 'convert-venue-trocador';
+const CEFI_ROW = 'convert-venue-sideshift';
 const WEBHOOK_PATH = '/api/v1/trocador/webhook';
 // The rail ids the registered Trocador row trades (the relay's own catalog constants — the
 // same ids the app sends; the §5 protocol probe needs them node-side).
@@ -104,28 +106,7 @@ async function installSolRpcStub(driver) {
 
 /** Enter the native SOL convert surface from the accounts route (flow 198's entry). */
 async function openSolConvert(driver) {
-  await openBalances(driver);
-  await driver.click('asset-sol-select', {timeoutMs: 8_000});
-  // The tap's state can lag the click by a render under pool contention — wait for the row to
-  // actually report aria-selected before asking for convert (flow 198's note).
-  const selDeadline = Date.now() + 8_000;
-  for (;;) {
-    const selected = await driver.eval((t) => {
-      const el = document.querySelector(`[data-testid="${t}"]`);
-      return el ? el.getAttribute('aria-selected') === 'true' : null;
-    }, 'asset-sol');
-    if (selected === true) break;
-    if (Date.now() > selDeadline) throw new Error('openSolConvert: asset-sol never reported aria-selected — the selection never landed');
-    await new Promise((r) => setTimeout(r, 150));
-  }
-  await driver.waitForText('Convert', {timeoutMs: 6_000});
-  let opened = false;
-  for (let i = 0; i < 3 && !opened; i++) {
-    try {
-      await driver.click('btn-accounts-convert', {timeoutMs: 8_000});
-      opened = true;
-    } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
-  }
+  await openConvertFor(driver, 'sol', {timeoutMs: 8_000});
 }
 
 export async function run() {
@@ -163,8 +144,7 @@ export async function run() {
     // pin; here it only needs to reach a REAL trade through the UI)
     await openSolConvert(driver);
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for SOL');
-    assert(await driver.waitForText('Convert SOL to USDC', {timeoutMs: 12_000}),
-      'the convert surface is the SOL surface (the row testIDs below are SOL-surface facts)');
+    await pickSwapTarget(driver, 'ICP');
     await driver.click(CEFI_ROW, {timeoutMs: 8_000});
     await driver.click(TROCADOR_MECH, {timeoutMs: 8_000});
     assertIncludes(await driver.readText('convert-screen'), 'Convert SOL → ICP', 'the heading names the picked pair');

@@ -29,8 +29,11 @@ import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
 
-jest.mock('../convert', () => ({
-  isQuoteStale: () => false,
+jest.mock('../convert', () => {
+  const actual = jest.requireActual<typeof import('../convert')>('../convert');
+  return {
+    ...actual,
+    isQuoteStale: () => false,
   isTerminalConvertStep: (step: string) =>
     ['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded'].includes(step),
   TERMINAL_CONVERT_STEPS: new Set(['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded']),
@@ -43,8 +46,26 @@ jest.mock('../convert', () => ({
   fetchConvertQuote: jest.fn(),
   deriveConvertMath: jest.fn(),
   prepareConvertRecord: jest.fn(),
-  prepareMultihopConvertRecord: jest.fn(),
-  prepareHubConvertRecord: jest.fn(),
+    prepareMultihopConvertRecord: jest.fn(),
+    prepareHubConvertRecord: jest.fn(),
+    fetchCctpBurnFee: jest.fn(async () => ({
+      finalityThreshold: 1000,
+      minimumFeeBps: 8n,
+      forwardFeeSubunits: 282032n,
+    })),
+  };
+});
+
+// Circle's OWN published burn fee (the cross-fee census) + the destination wallet's ETH
+// probe (the gas-fund offer's measured have): both are live-API reads, mockable per test.
+jest.mock('../cctp', () => ({
+  ...jest.requireActual<typeof import('../cctp')>('../cctp'),
+  fetchCctpBurnFee: jest.fn(async () => ({
+    finalityThreshold: 1000,
+    minimumFeeBps: 8n,
+    forwardFeeSubunits: 282032n,
+  })),
+  fetchEthBalance: jest.fn(async () => null),
 }));
 
 // The burn-side rail services (gas quote + ledger fee): the minter's live figure is part of
@@ -92,7 +113,9 @@ import {convertFr} from '../i18n/domains/fr/convert';
 import {fmtAssetCompact} from '../lib/format';
 
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
-const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: false, solanaTokens: false});
+// The wallet's real asset list carries BOTH rails of every multi-rail currency — the swap
+// pair walk resolves cross-rail rows (CCTP routes, CeFi venues) through the SOL-side rails.
+const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
 const ICP_ASSET = ASSETS.find(a => a.protocol === 'ic' && a.currency === 8)!;
 const IDENTITY: Identity = {secretHex: 'aa'.repeat(32), publicHex: 'bb'.repeat(32), username: 'tester'};
 
@@ -154,6 +177,10 @@ async function mountConvert(
         identity={IDENTITY}
         relayUrl="http://relay"
         catalog={CATALOG}
+        visibleCurrencies={['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'] as const}
+        // The source currency's SUMMED view (fork #4): the balance line renders the currency
+        // unit — for ICP the unit IS the token, so the display equals the per-rail formatter.
+        currencyBalances={{ICP: {displayText: fmtAssetCompact(balanceRaw, 8, 'ICP'), status: balanceRaw !== '0' ? 'ok' : 'zero', failure: null}}}
         selectedAsset={ICP_ASSET}
         assetBalances={{8: balanceRaw}}
         onBack={jest.fn()}
@@ -1156,32 +1183,72 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
  * (never signed unvalidated), and the ckETH-gas preflight (a KNOWN shortfall names the
  * requirement in copy; an unknown balance stays fail-open, per spec §6).
  */
-describe('multihop — the composed destination is an explicit, gated opt-in', () => {
-  const ROUTE_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2';
+describe('multihop — the composed route is an explicit venue-area row (2026-09-24 swap screen)', () => {
+  // The external-address cash-out route (the old Route A row) left the swap screen with the
+  // destination picker: the swap converts BETWEEN the user's own balances, and cashing out to
+  // an external address is the withdraw surface's job. The IN-WALLET composites stay: Route B
+  // (+CCTP) and Route C (+CCTP+Jupiter) render as venue-area rows on the USD target, beside
+  // the direct pool and the CeFi venue — registry/kind order, nothing preselected (two venues
+  // serve this pair), every one an explicit pick.
+  const ROUTE_B_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp';
   const DEST = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'.toLowerCase();
 
-  test('the picker lists the direct pair (the standing default) plus every composed route; the one-route honesty line only speaks when it is literally true', async () => {
+  /** Open the USD target (the target chip, then the row) and pick a venue-area row. */
+  const pickRow = async (tree: renderer.ReactTestRenderer, rowId: string): Promise<void> => {
+    await act(async () => {
+      node(tree, 'btn-convert-target')!.props.onPress();
+    });
+    await act(async () => {
+      node(tree, 'convert-target-USD')!.props.onPress();
+    });
+    await act(async () => {
+      node(tree, rowId)!.props.onPress();
+    });
+  };
+
+  test('the venue area lists the pair rows in kind order — direct pool, hub, Route B, Route C, CeFi — and the external-address route is gone', async () => {
     const tree = await mountConvert('250000000', '1');
-    expect(present(tree, 'convert-dest')).toBe(true);
-    expect(present(tree, 'convert-dest-direct')).toBe(true);
-    expect(present(tree, ROUTE_ROW)).toBe(true);
-    // The ckUSDC hop composes THREE routes today (A burn-withdraw, B +CCTP, C +CCTP+Jupiter —
-    // the 2026-09-16 cross-rail widening) — all three are explicit picks, none preselected.
-    expect(present(tree, 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp')).toBe(true);
-    expect(present(tree, 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter')).toBe(true);
-    // Three routes ⇒ the "One route is registered…" line would lie; it stays hidden.
-    expect(present(tree, 'convert-route-note')).toBe(false);
-    // the default surface is UNCHANGED: the direct pair's own checklist, no route census
-    expect(present(tree, 'convert-min-out')).toBe(true);
-    expect(present(tree, 'convert-route-min')).toBe(false);
+    await act(async () => {
+      node(tree, 'btn-convert-target')!.props.onPress();
+    });
+    await act(async () => {
+      node(tree, 'convert-target-USD')!.props.onPress();
+    });
+    const ids = (t: renderer.ReactTestRenderer): string[] => {
+      const seen: string[] = [];
+      for (const n of t.root.findAll(x => x.props != null && typeof x.props.testID === 'string' && String(x.props.testID).startsWith('convert-venue-') && !/-quote$|-err$|-slow$|-source$/.test(String(x.props.testID)) && String(x.props.testID) !== 'convert-venue-none' && String(x.props.testID) !== 'convert-venue-details')) {
+        const id = String(n.props.testID);
+        if (!seen.includes(id)) seen.push(id);
+      }
+      return seen;
+    };
+    expect(ids(tree)).toEqual([
+      'convert-venue-icpswap-ckusdc',                       // direct pool
+      'convert-venue-hub:icpswap:7:icpswap-vchf-ckusdc',    // via the VCHF hub
+      'convert-venue-multihop:icpswap-ckusdc:2:cctp',       // Route B (in-wallet landing)
+      'convert-venue-sideshift-usdc',                       // the CeFi venue
+    ]);
+    // Route C (the +Jupiter composite) lands SOL — it is a row on the SOL target, not here.
+    await act(async () => {
+      node(tree, 'btn-convert-target')!.props.onPress();
+    });
+    await act(async () => {
+      node(tree, 'convert-target-SOL')!.props.onPress();
+    });
+    expect(present(tree, 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter')).toBe(true);
+    // The cash-out row does not exist anywhere on the surface.
+    expect(present(tree, 'convert-venue-multihop:icpswap-ckusdc:2')).toBe(false);
+    // Two venues serve the pair → NOTHING is preselected: no quote, no checklist, no confirm.
+    expect(present(tree, 'convert-headline')).toBe(false);
+    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
+    expect(present(tree, 'convert-venue-none')).toBe(true);
+    // No address input before a route row is picked.
     expect(present(tree, 'convert-dest-address')).toBe(false);
   });
 
-  test('opting in swaps the surface: route census, minter principal, gas line, address input', async () => {
+  test('opting into Route B swaps the surface: route census, minter principal, gas line, address input', async () => {
     const tree = await mountConvert('250000000', '1');
-    await act(async () => {
-      node(tree, ROUTE_ROW)!.props.onPress();
-    });
+    await pickRow(tree, ROUTE_B_ROW);
     expect(present(tree, 'convert-dest-address')).toBe(true);
     expect(present(tree, 'convert-route-min')).toBe(true);
     expect(present(tree, 'convert-min-out')).toBe(false);
@@ -1199,9 +1266,7 @@ describe('multihop — the composed destination is an explicit, gated opt-in', (
 
   test('a KNOWN ckETH shortfall blocks the confirm and names the requirement first', async () => {
     const tree = await mountConvert('250000000', '1', {assetBalances: {8: '250000000', 6: '1000000000'}});
-    await act(async () => {
-      node(tree, ROUTE_ROW)!.props.onPress();
-    });
+    await pickRow(tree, ROUTE_B_ROW);
     await act(async () => {
       node(tree, 'convert-dest-address')!.props.onChangeText(DEST);
     });
@@ -1213,9 +1278,7 @@ describe('multihop — the composed destination is an explicit, gated opt-in', (
   test('an unknown ckETH balance stays fail-open; a funded one offers the confirm, and confirming prepares the ROUTE record', async () => {
     // unknown: the wallet simply has no ckETH row yet — the requirement is shown, nothing is blocked
     const unknown = await mountConvert('250000000', '1');
-    await act(async () => {
-      node(unknown, ROUTE_ROW)!.props.onPress();
-    });
+    await pickRow(unknown, ROUTE_B_ROW);
     await act(async () => {
       node(unknown, 'convert-dest-address')!.props.onChangeText(DEST);
     });
@@ -1230,9 +1293,7 @@ describe('multihop — the composed destination is an explicit, gated opt-in', (
       inFee: '10000', outFee: '10000', slippageBps: 100, legs: [], legPlan: [],
     } as never);
     const tree = await mountConvert('250000000', '1', {assetBalances: {8: '250000000', 6: '100000000000000000'}});
-    await act(async () => {
-      node(tree, ROUTE_ROW)!.props.onPress();
-    });
+    await pickRow(tree, ROUTE_B_ROW);
     await act(async () => {
       node(tree, 'convert-dest-address')!.props.onChangeText(DEST);
     });
@@ -1252,7 +1313,10 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
   const VCHF_LEDGER = rowOf(7).ledger!;
   const ICP_LEDGER = rowOf(8).ledger!;
   const CKETH_LEDGER = rowOf(6).ledger!;
-  const CKETH_ROW = 'convert-dest-inwallet-6';
+  // The ETH target row (currency-level grammar): the chip opens the list, the row picks the
+  // target. ETH carries ONE hub route from VCHF and no direct venue — a single row, so the
+  // surface arms on it without a venue pick (the single-row attributed line).
+  const ETH_TARGET_ROW = 'convert-target-ETH';
   /** quote1: VCHF → ICP through icpswap; its 1% floor is what quote2 is SIZED on. */
   const HUB_Q1: ConvertQuote = {
     venueId: 'icpswap', pool: '65mrh-fqaaa-aaaar-qapoa-cai',
@@ -1298,7 +1362,10 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     });
     armHubMocks(); // drop the standing-surface direct fetch from the call history
     await act(async () => {
-      node(tree, CKETH_ROW)!.props.onPress();
+      node(tree, 'btn-convert-target')!.props.onPress();
+    });
+    await act(async () => {
+      node(tree, ETH_TARGET_ROW)!.props.onPress();
     });
     return tree;
   };
@@ -1312,8 +1379,8 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(textOf(tree, 'convert-route-min')).toBe(
       convertEn.multihop.routeMinWalletLine(fmtAssetCompact('2970000000000', 18, 'ETH'), '1%'));
     expect(present(tree, 'convert-min-out')).toBe(false);
-    // D12: the form heading names the SELECTED destination (ckETH row's symbol is ETH).
-    const headingTexts = tree.root.findAllByType(Text).filter(n => n.props.children === convertEn.heading('VCHF', 'ETH'));
+    // The heading names the CURRENCY pair (currency-first grammar): CHF → ETH.
+    const headingTexts = tree.root.findAllByType(Text).filter(n => n.props.children === convertEn.heading('CHF', 'ETH'));
     expect(headingTexts.length).toBeGreaterThanOrEqual(1);
     // D7/D8/D11: "You'll receive" (in-wallet), the composed net estimate, BOTH venues verbatim.
     expect(textOf(tree, 'convert-headline')).toContain(convertEn.receiveHeadline);
@@ -1509,21 +1576,35 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(present(tree, 'convert-insufficient')).toBe(false);
   });
 
-  test('hub-reachable input: ckETH converts — direct ICP row PLUS hub-only in-wallet rows', async () => {
+  test('hub-reachable input: ckETH converts — the direct ICP pair stands, hub-only targets are target rows', async () => {
     const CKETH_ASSET = ASSETS.find(a => a.protocol === 'ic' && a.currency === 6)!;
     jest.mocked(convertResumeSnapshot).mockReturnValue({});
     const tree = await mountConvert('1000000000000000000', null,
       {selectedAsset: CKETH_ASSET, assetBalances: {6: '1000000000000000000'}});
-    expect(present(tree, 'convert-dest')).toBe(true);
-    // ckETH's own direct pair (icpswap-cketh → ICP) stays the standing row…
-    expect(present(tree, 'convert-dest-direct')).toBe(true);
-    // …the hub-only destinations (ckUSDC, VCHF — reachable only through the ICP hub,
-    // no direct venue pairs them with ckETH) render as plain in-wallet rows (D2)…
-    expect(present(tree, 'convert-dest-inwallet-2')).toBe(true);
-    expect(present(tree, 'convert-dest-inwallet-7')).toBe(true);
-    // …and ckBTC is a NEW destination beside them (its row carries the MEASURED 2026-09-18
-    // fee): a DIRECT pair (icpswap-ckbtc-cketh), rendered as a second in-wallet row — the
-    // standing `convert-dest-direct` slot stays with ICP, the first direct destination.
-    expect(present(tree, 'convert-dest-inwallet-1')).toBe(true);
+    // The target list: the source's own row renders DISABLED (same-currency target), the
+    // hub-only targets (CHF, USD, BTC — reachable only through the ICP hub, no direct venue
+    // pairs them with ckETH) render as plain target rows.
+    const targets = (t: renderer.ReactTestRenderer): string[] => {
+      const seen: string[] = [];
+      for (const n of t.root.findAll(x => x.props != null && typeof x.props.testID === 'string' && String(x.props.testID).startsWith('convert-target-'))) {
+        const id = String(n.props.testID).replace('convert-target-', '');
+        if (!seen.includes(id)) seen.push(id);
+      }
+      return seen;
+    };
+    await act(async () => {
+      node(tree, 'btn-convert-target')!.props.onPress();
+    });
+    expect(present(tree, 'convert-target-list')).toBe(true);
+    // The source currency itself is in the list but DISABLED (same-currency target).
+    const same = node(tree, 'convert-target-ETH')!;
+    expect((same.props.accessibilityState as {disabled?: boolean}).disabled).toBe(true);
+    // The reachable set is exactly {USD, CHF, BTC, ICP}: ICP direct, the rest hub-only.
+    for (const code of ['USD', 'CHF', 'BTC', 'ICP']) {
+      expect(targets(tree).includes(code)).toBe(true);
+    }
+    for (const code of ['EUR', 'SOL']) {
+      expect(targets(tree).includes(code)).toBe(false);
+    }
   });
 });

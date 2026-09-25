@@ -17,7 +17,8 @@
 //
 // Private relay (startRelay, the flow-164/166/167 pattern): the venue knob + pool mutations
 // cannot reach any sibling flow.
-import {setup, assert, assertEq, assertIncludes, assertDisabled, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, assertDisabled, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
 const SEED = 1_000_000_000; // 10 VCHF (8 decimals, plain Number — the faucet body is JSON) — enough
@@ -89,10 +90,7 @@ export async function run() {
     // The REVERSE direction: VCHF is the from-asset. selectCurrency leaves the app on Pay;
     // re-open the accounts route so Convert renders on the SELECTED (VCHF) row — resolveLegs then
     // resolves in=VCHF / out=ICP and every venue row quotes its output in ICP.
-    await openBalances(driver);
-    await selectCurrency(driver, 'vchf');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'vchf');
     await driver.type('convert-amount', '1');
     await driver.findByTestID(`convert-venue-${FIXTURE_VENUE}-quote`, {timeoutMs: 10_000});
     await driver.findByTestID('convert-venue-icpswap-quote', {timeoutMs: 10_000});

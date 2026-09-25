@@ -16,7 +16,7 @@
 //   * NO HORIZONTAL OVERFLOW anywhere on the surface — the money screen never slides sideways.
 //   * Screenshots: the fund gate, the refusal, and the armed decision surface.
 import {
-  setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency,
+  setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor,
 } from '../harness/lib.mjs';
 
 const SEED = 50000000; // 0.5 ICP — enough to convert a little, never enough for the 2 ICP attempt
@@ -37,11 +37,7 @@ const confirmDisabled = (driver) =>
 async function openConvert(driver) {
   // selectCurrency makes ICP the active asset and leaves on Pay; re-open the accounts route so
   // Convert (which renders on the SELECTED row only) is on screen.
-  await openBalances(driver);
-  await selectCurrency(driver, 'icp');
-  await openBalances(driver);
-  await driver.waitForText('Convert', { timeoutMs: 6_000 });
-  await driver.click('btn-accounts-convert', { timeoutMs: 5_000 });
+  await openConvertFor(driver, 'icp');
   assert(await driver.findByTestID('convert-screen', { timeoutMs: 8_000 }) != null, 'Convert surface opens for ICP');
 }
 

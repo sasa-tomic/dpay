@@ -18,11 +18,14 @@
 // engine's cctp stub fail-closes unknown origins, and this flow layers a MUTABLE balance
 // answer on top so §3 can move the balance between rechecks.
 
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, isDisabled} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, isDisabled, openConvertFor,
+  pickSwapTarget,
+  pickSwapVenue,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {installCctpStub, FORWARD_TX_HASH} from '../harness/cctp.mjs';
 
-const ROUTE_C_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter';
+const ROUTE_C_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter';
 // The USDC token contract in checksummed form, a ONE-CHARACTER case corruption of it
 // (checksum-bad, shape-valid — the mixed-case typo class), and a lowercase lookalike with a
 // different final nibble for proving the re-entry gate actually COMPARES the two typings.
@@ -93,15 +96,13 @@ export async function run() {
     }, '0x' + SEED_ETH.toString(16));
 
     // --- §1 checksum at entry + the one-time re-type gate -----------------------------------
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', { timeoutMs: 6_000 });
+    await openConvertFor(driver, 'icp');
+    await pickSwapTarget(driver, 'SOL');
     await driver.type('convert-amount', '5');
-    await driver.findByTestID('convert-headline', { timeoutMs: 15_000 });
     assert(await driver.findByTestID(ROUTE_C_ROW, { timeoutMs: 3_000 }) != null, 'the Route C row is offered');
     await driver.click(ROUTE_C_ROW);
-    await driver.click('convert-dest-mech-multihop:icpswap-ckusdc:2:cctp:jupiter', { timeoutMs: 4_000 });
+    await driver.findByTestID('convert-headline', { timeoutMs: 15_000 });
+    await driver.click('convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter', { timeoutMs: 4_000 });
 
     console.log('[196-gas-fund] §1 checksum reject + re-entry confirm…');
     // Shape-valid but checksum-bad: refused AT ENTRY, minimal line, no re-type ask yet.

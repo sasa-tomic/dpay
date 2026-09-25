@@ -33,7 +33,7 @@
 // (harness/jupiter.mjs configures it — the dials go through dpay's relay proxy) and the SOL
 // RPC stub (the 185 seam, extended with a getTransaction keyed by which credit is being read:
 // Circle's forward tx → USDC token credit at the ATA; the swap signature → native SOL credit).
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
@@ -45,7 +45,7 @@ import {installCctpStub, cctpStubState, setCctpMessageState, cctpFeeExpectations
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 const CKUSDC_LEDGER = 'xevnm-gaaaa-aaaar-qafnq-cai';
 const CKUSDC_POOL = 'mohjv-bqaaa-aaaag-qjyia-cai';
-const ROUTE_C_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter';
+const ROUTE_C_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter';
 const DEST = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'.toLowerCase();
 const BURN_HASH = '0x' + '1b'.repeat(32);
 
@@ -203,22 +203,16 @@ export async function run() {
     });
     await installCctpStub(driver, {passOrigins, forwardTxHash: FORWARD_TX_HASH});
 
-    // --- §1 the composed destination is an explicit opt-in (three routes now — no "one route" lie)
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    // --- §1 the composed route is an explicit venue-row pick on the SOL target -----------------
+    await openConvertFor(driver, 'icp');
+    await pickSwapTarget(driver, 'SOL');
+    // Two CeFi venues serve the SOL pair (SideShift + Trocador) beside the composed route →
+    // NOTHING is preselected: the venue rows render, confirm withheld until a pick.
+    await driver.findByTestID('convert-venues', {timeoutMs: 8_000});
+    assert(await driver.findByTestID(ROUTE_C_ROW, {timeoutMs: 3_000}) != null, 'the Route C row is offered beside the CeFi venue rows');
+    await driver.click(ROUTE_C_ROW);
     await driver.type('convert-amount', '5');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-
-    assert(await driver.findByTestID(ROUTE_C_ROW, {timeoutMs: 3_000}) != null, 'the Route C row is offered beside the direct pair');
-    assert(await driver.isPresent('convert-route-note') === false, 'the one-route honesty line is HIDDEN (three routes exist)');
-    await driver.click(ROUTE_C_ROW);
-    // D2 merge (2026-09-18): the SOL destination group now carries TWO mechanisms (the
-    // Route C cross-rail + the SideShift cefi venue). A group with NO direct mechanism
-    // waits for an explicit pick — nothing is preselected — so select the route mech;
-    // only then does the destination address input appear.
-    await driver.click('convert-dest-mech-multihop:icpswap-ckusdc:2:cctp:jupiter', {timeoutMs: 4_000});
     await driver.type('convert-dest-address', DEST);
     await driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
     assertIncludes(await driver.readText('convert-dest-cross-note'), 'also the wallet that signs',
@@ -323,18 +317,9 @@ export async function run() {
     // Jupiter stub needs no reinstall: it is the relay's server-side test stub.
     await installSolRpcStub(driver, {forwardTxHash: FORWARD_TX_HASH, tokenDetail, nativeDetail});
     await installCctpStub(driver, {passOrigins, forwardTxHash: FORWARD_TX_HASH});
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    // The returning wallet mounts under continuous polls — give the convert entry a couple of
-    // tries (a re-render can detach the node mid-gesture).
-    await openBalances(driver); // back to the accounts route — the convert entry lives there, not on the asset view
-    let opened = false;
-    for (let i = 0; i < 3 && !opened; i++) {
-      try {
-        await driver.click('btn-accounts-convert', {timeoutMs: 8_000});
-        opened = true;
-      } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
-    }
+    // §5's reload re-enters on the LIVE crossrail record — the record view IS the screen; no
+    // form walk (the pick gestures are form-only).
+    await openConvertFor(driver, 'icp', {timeoutMs: 8_000});
     await driver.findByTestID('crossrail-crossing', {timeoutMs: 15_000});
     // One CDP round trip for all six leg states (a per-leg readText is its own eval — pure
     // latency ×6); the reads land in-page and the asserts stay in Node.

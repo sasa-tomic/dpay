@@ -14,7 +14,7 @@ import {
   onboardWallet,
   accountOf,
   faucetAccount,
-  openBalances,
+  openBalances, openConvertFor,
   selectCurrency,
 } from '../harness/lib.mjs';
 import { startRelay } from '../harness/relay.mjs';
@@ -62,18 +62,13 @@ export async function run() {
     const fund = await faucetAccount(relayBaseURL, account.publicHex, SEED, { currency: 8 });
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
 
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.waitForText('Convert', { timeoutMs: 6_000 });
-    await driver.click('btn-accounts-convert', { timeoutMs: 5_000 });
+    await openConvertFor(driver, 'icp');
     assert(
       (await driver.findByTestID('convert-screen', { timeoutMs: 8_000 })) != null,
       'the Convert surface opens for ICP',
     );
     await driver.type('convert-amount', '1');
     await driver.findByTestID('convert-quote-source', { timeoutMs: 10_000 });
-    await driver.click('convert-dest-direct', { timeoutMs: 5_000 });
 
     console.log('[192-convert-abort] arming the ic_delay knob — the swap reply stays pending 12 s…');
     const arm = await fetch(`${relayBaseURL}/api/v1/test/ic_delay`, {

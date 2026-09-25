@@ -1,46 +1,40 @@
-// ConvertMode — the delegated-conversion surface (spec 2026-09-07 §5), opened from the Accounts
-// route's SELECTED-row action (`btn-accounts-convert`) for EVERY asset — the SAME gesture for all
-// of them (uniform-IA hard rule; venue-less rows fail closed INSIDE this surface). One screen carries the whole
-// transparency checklist BEFORE anything is signed — no tap-to-reveal, no second surface:
-//   * counterparty: the venue's pool canister, named by its registry display name (autonomous
-//     contract, not a licensed provider, not dpay) + "your phone signs; the pool pulls exactly
-//     the approved amount";
-//   * the venue's own quote, attributed + timestamped, auto-refreshed when stale (>30 s) and
-//     re-quoted at confirm (a changed quote demands a fresh review, never a silent submit);
-//   * every fee on its own line (pool tier, input fee, output fee, dpay = nothing either way);
-//   * a per-venue disclosure sentence chosen by the venue registry's own `disclosure_key`
-//     (unknown keys fall back to honest generic copy — fail closed, never blank);
-//   * minimum-you'll-receive + the refusal outcome; the exact net end-state amount; and every
-//     failure branch names which asset the user is left holding and that dpay cannot reverse it.
-// There is deliberately NO price-impact line (V8, removed 2026-09-11): the venues dpay quotes
-// publish no impact figure, so none is fetched, computed, or displayed — the second per-venue
-// reference quote that used to feed it doubled quote traffic per keystroke and presented a
-// curve-slope estimate as venue fact.
-// When the pair has TWO+ venues (multi-venue readiness V5) a venue chooser renders above the
-// headline: N rows in REGISTRY order (never ranked by output), NONE preselected, each row
-// showing its OWN quote, attributed + timestamped; the checklist + confirm appear only under an
-// explicit pick, and execution follows the picked venue's own pool. With exactly one venue the
-// screen is unchanged — no chooser chrome, today's layout.
-// The SOLANA surface (multi-venue readiness V11, 2026-09-15) is a sibling branch below
-// (SolConvertMode): the same entry gesture, the same pre-sign transparency checklist, the same
-// engine-driven record view — with the venue being a keyless https aggregator (Jupiter) instead
-// of a pool canister: the quote is fetched DEVICE-DIRECT (no relay hop), rendered verbatim
-// (inAmount/outAmount/priceImpact exactly as published), and what gets signed is the venue's
-// own built transaction, beneficiary-checked before the signature (see app/solana/tx.ts).
-// The CeFi surface (founder decision 3, 2026-09-14 — SideShift first adapter, 2026-09-15) is
-// an IC-asset DESTINATION row in the picker below: the venue's quote arrives through the
-// relay's partner-key proxy (the device never sees the credential), the fixed order is created
-// through the same proxy with the user's OWN derived settle address, and the handoff is honest
-// CeFi — the user sends the deposit to the VENUE's address, shown verbatim, and the resume
-// engine polls the venue's keyless status endpoint device-direct. No dpay signature, no dpay
-// custody, commissionRate pinned "0" relay-side: dpay is not a party and is paid nothing.
-// Venue facts (display name, pool principal) are LOOKED UP from the record's/quote's own
-// `venueId` against the registry (../config/venues) — never module constants (V1). Venue-less
-// assets fail closed with honest copy that names what exists today (ICP ↔ VCHF), and ckUSDC's
-// copy additionally names the measured-saturated direct pool refusal (spec §1). The §4 state
-// machine lives in app/convert.ts; the DRIVERS live in app/convertResume.ts (the engine Wallet
-// mounts once per session, V6) — this screen only RENDERS records (a view onto the engine: it
-// subscribes for updates and hands freshly-prepared records to it, never running a private copy).
+// ConvertMode — the SWAP SCREEN (the currency-level Convert surface, 2026-09-24 redesign).
+//
+// The founder's sketch, verbatim grammar:
+//   <Source currency>             <amount sell, user enter>
+//   <Source balance>
+//   ---------------------------------------
+//   <Target currency>             <amount get, calculated>
+//   <Target balance>
+//
+// One surface for EVERY currency and EVERY rail (the uniform-IA hard rule — the old per-rail
+// SOL sibling screen is folded in as a row kind, not a separate UI). The source is the currency
+// the user came from (a currency-row Convert button, or Home's Convert for the main currency);
+// the target is a currency the user picks — the source's own row renders DISABLED. Both balance
+// lines render in the CURRENCY unit (fork #4); every quote-side number keeps the venue's own
+// token unit — the peg disclosure lives where fees and quotes are shown.
+//
+// Below the target row: THE VENUE AREA (fork #3, the 2026-09-11 no-ranking rule). The pair
+// (source rail → target currency) resolves through app/config/swap.ts into executable rows —
+// direct pools, hub compositions, CCTP cross-rail routes, CeFi venues, Solana venues — in
+// REGISTRY order. Several rows: side-by-side, each showing its own quote where its venue serves
+// one live (the V5 chooser rule), NONE preselected, the checklist + confirm withheld until the
+// user picks. One row: no chooser chrome — an attributed line. A venue's own listed-but-unquoted
+// verdict renders the honest attributed no-market state (the flow-207 pattern), never a red
+// error shaped like a quote.
+//
+// What does NOT change (the spec's own list): dpay is never a party — the user's phone signs
+// every value-moving call; the venue's quote is attributed + timestamped; every fee on its own
+// line; the minimum-you'll-receive; the failure branches naming what the user is left holding.
+// The whole transparency checklist lives behind the confirm button's review card, exactly as
+// before. The §4 state machine (app/convert.ts) and the record/resume engine are reused whole.
+//
+// Quote-fetch discipline (per venue kind, inherited unchanged): IC pool + Solana venue quotes
+// are public surfaces — one call per keystroke per RENDERED row, auto-refreshed when stale
+// (>30 s, test-seam overridable). Hub compositions re-quote BOTH hops fresh at confirm. CeFi
+// quotes ride the relay's partner-key proxy — fetched when the row is PICKED (and again at the
+// confirm gesture, which mints the order's own locked quote), NEVER on a timer and never for an
+// unpicked row (the 2026-09-22 partner agreement: no machine-generated demand).
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, TextInput, View} from 'react-native';
 import {isValidDestinationAddress, type CurrencyDescriptor} from '../config/catalog';
@@ -49,18 +43,23 @@ import {
   CONVERT_CEFI_CONFIRM_TIMEOUT_MS,
   CONVERT_SLIPPAGE_BPS_DEFAULT,
   CONVERT_SLIPPAGE_BPS_OPTIONS,
-  resolveConvertDestinations,
 } from '../config/convert';
-import {BUNDLED_VENUES, cefiOtherSide, cefiVenuesForLedger, venueDisplayName, venueEndpointOf, venueOfId, venuesForPair, type VenueEntry} from '../config/venues';
+import {currencyName, currencyOfAsset, type HomeCurrency} from '../config/currency';
+import {
+  resolveSwapTargets,
+  standingTarget,
+  type SwapRow,
+  type SwapTarget,
+} from '../config/swap';
+import {venueDisplayName, venueOfId, type VenueEntry} from '../config/venues';
 import {
   CeFiNoQuoteError,
   ceFiQuoteFromResult,
-  createCeFiOrder,
-  fetchCeFiQuoteResult,
-  type CeFiQuoteResult,
   ceFiServiceError,
+  createCeFiOrder,
   deriveConvertMath,
   fetchCeFiConvertQuote,
+  fetchCeFiQuoteResult,
   fetchConvertQuote,
   fetchCctpBurnFee,
   gasFundNeededWei,
@@ -70,10 +69,12 @@ import {
   prepareConvertRecord,
   prepareHubConvertRecord,
   prepareMultihopConvertRecord,
+  prepareSolanaConvertRecord,
   TERMINAL_CONVERT_STEPS,
   type ConvertMath,
   type ConvertQuote,
   type ConvertRecord,
+  type CeFiQuoteResult,
 } from '../convert';
 import {
   adoptConvertRecord,
@@ -82,332 +83,227 @@ import {
 } from '../convertResume';
 import {cctpMaxFee, cctpMintFloor, fetchEthBalance} from '../cctp';
 import {DpayCore} from '../services/native';
-import {fetchJupiterQuote} from '../services/jupiter';
-import {USDC_MINT_ADDRESS} from '../solana/tokens';
+import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
+import {USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 import {deriveSolanaAddress} from '../solana/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
-import {hubRoutes, multihopRoutesFrom, gasFundRoutes, type HubRoute, type MultihopRoute} from '../routes';
+import {gasFundRoutes} from '../routes';
 import {M} from '../i18n';
 import {fmtAssetCompact, parseUserAmount, randNonceHex, rawToDecimal} from '../lib/format';
 import {eip55ChecksumBad} from '../lib/eip55';
 import type {AssetId, Identity} from '../lib/types';
+import type {BalanceView} from '../lib/assetBalances';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {IconSwap} from './icons';
+import {IconChevronDown, IconSwap} from './icons';
 import {InstructionPanel} from './InstructionPanel';
 import {
-  buildDestGroups,
   ConvertHeader,
   DetailsToggle,
   fetchHubQuotes,
   formatBps,
   formatMillionthsPct,
-  groupDestSections,
   isLiveRecord,
-  mechIdOf,
-  mechPickOf,
   nonBreakingClock,
-  resolveLegs,
   scaledRate,
   UnavailablePanel,
   venueDisclosure,
-  type ConvertLegs,
-  type DestGroup,
-  type DestMechPick,
 } from './ConvertShared';
-import {currencyName} from '../config/currency';
 import {StatePanel} from './ConvertStatePanel';
 import {RouteStatePanel} from './ConvertRouteStatePanel';
 import {CrossRailStatePanel} from './ConvertCrossRailStatePanel';
-import {solAssetOfMint} from './ConvertSolDest';
-import {SolConvertMode} from './SolConvertMode';
+import {SolStatePanel} from './SolStatePanel';
 
 type Props = {
   identity: Identity;
   relayUrl: string;
   catalog: CurrencyDescriptor[];
+  /** The standing SOURCE rail — resolved by the entry gesture (chooseRail: the funded rail,
+   *  else the stated preference). Null renders the fail-closed panel. */
   selectedAsset: SelectableAsset | null;
   /** The user's spendable raw-unit balance strings for IC assets, if known. */
   assetBalances: Record<number, string>;
+  /** The VISIBLE currencies, in list order — the swap's target scope (a hidden currency is
+   *  re-added via Add new currency first; that is the list-first IA's own answer). */
+  visibleCurrencies: readonly HomeCurrency[];
+  /** The per-currency SUMMED views — both balance lines render in currency unit (fork #4). */
+  currencyBalances: Readonly<Partial<Record<HomeCurrency, BalanceView>>>;
   onBack: () => void;
   /** Fires when a swap reaches a terminal state so Wallet refreshes balances + history rows. */
   onActivity: () => void;
-  /** The zero-balance gate's one action: land the selected asset's own deposit surface
-   *  (Receive ▸ My address) — Wallet's `goToDeposit`, the SAME callback the Pay tab's fund gate
-   *  fires. The gate names that route in its copy, so it also offers it. */
+  /** The zero-balance gate's one action: land the selected asset's own deposit surface. */
   onShowDepositAddress: () => void;
-  /** Switch the wallet's selection to the venue pair's OTHER leg, so the empty account the user
-   *  is standing on becomes the conversion's DESTINATION. Wallet's `payRailSelect`: a user gesture
-   *  that respects the selection lock and does NOT reset the tabs' sub-modes — the user's goal
-   *  survives the switch, which is the whole point of a pointer. Absent while locked, in which
-   *  case the account is still NAMED and only the button is withheld (the Pay pointer's rule). */
+  /** Switch the wallet's selection (the funded-account pointer on the fund gate). Absent while
+   *  the wallet's selection is locked — the account is still named, the button withheld. */
   onSwitchAsset?: (id: AssetId) => void;
-  /** Solana-rail balances for the V11 surface (SolConvertMode): raw-unit spendable SOL
-   *  (lamports) + per-mint token amounts — the fund gate + insufficient check read these.
-   *  Absent/empty means "unknown" and the checks fail soft (no false 'insufficient'). */
+  /** Solana-rail balances: raw-unit spendable SOL (lamports) + per-mint token amounts. The
+   *  fund gate + insufficient check read these; absent/empty means "unknown" (fail soft). */
   solana?: {sol: string | null; tokens: Record<string, string | null>};
 };
 
-/** The name of the one registered REAL conversion venue — for the fail-closed panel's honest
- *  "what exists today" copy (a registry lookup, not a literal; the chooser itself renders
- *  whatever `venuesForPair` serves, V5). */
-const REGISTERED_VENUE_ID = BUNDLED_VENUES.find(v => v.kind === 'ic_amm' && !v.testnet)?.venue_id ?? '';
-export const REGISTERED_VENUE_NAME = venueDisplayName(REGISTERED_VENUE_ID);
+/** One hub row's two-quote bundle (quote1 from→hub, quote2 hub→dest sized on m1.minOut). */
+type HubBundle = {q1: ConvertQuote; m1: ConvertMath; q2: ConvertQuote; m2: ConvertMath};
 
-export function ConvertMode(props: Props) {
-  const {identity, relayUrl, catalog, selectedAsset, onBack, onShowDepositAddress, onSwitchAsset, solana} = props;
-  // THE V11 DISPATCH: every asset gets the same Convert gesture (uniform IA); the rail picks the
-  // surface. A Solana asset renders the Solana branch (Jupiter, through the relay proxy) with the
-  // same transparency rules; everything below is the IC rail unchanged. When no Solana venue
-  // serves the asset the branch itself fails closed with honest copy (never a blank form).
-  // The dispatcher carries NO hooks: in the monolith the SOL early-return sat ABOVE the IC form's
-  // useStates — a latent rules-of-hooks hazard (an asset switch on a mounted instance would flip
-  // the hook count). Both branches now render hook-consistent components, so every mount's hook
-  // order is legal by construction; no conditional-hooks pattern anywhere.
-  if (selectedAsset != null && selectedAsset.protocol === 'solana') {
-    return (
-      <SolConvertMode
-        identity={identity}
-        relayUrl={relayUrl}
-        asset={selectedAsset}
-        catalog={catalog}
-        solana={solana ?? {sol: null, tokens: {}}}
-        onBack={onBack}
-        onShowDepositAddress={onShowDepositAddress}
-        onSwitchAsset={onSwitchAsset}
-      />
-    );
+export function ConvertMode({
+  identity, relayUrl, catalog, selectedAsset, assetBalances, visibleCurrencies,
+  currencyBalances, onBack, onShowDepositAddress, onSwitchAsset, solana,
+}: Props) {
+  // ── Source facts ─────────────────────────────────────────────────────────────────────────────
+  // The standing rail's own unit (the thing the venue actually converts) plus the CURRENCY it
+  // settles (the unit both balance lines render in). DEMO carries no currency — the practice
+  // rail is not a currency in this model — and reaches no venue: the fail-closed panel is the
+  // honest screen for it, as it always was.
+  const sourceCurrency: HomeCurrency | null = selectedAsset != null ? currencyOfAsset(selectedAsset) : null;
+  const isSolSource = selectedAsset?.protocol === 'solana';
+  const sourceDesc: CurrencyDescriptor | null = selectedAsset != null && selectedAsset.protocol === 'ic'
+    ? catalog.find(c => c.currency === selectedAsset.currency) ?? null
+    : null;
+  const inMint: string | null = isSolSource ? (selectedAsset!.mint ?? WRAPPED_SOL_MINT_ADDRESS) : null;
+  const inSym: string = selectedAsset == null
+    ? ''
+    : isSolSource
+      ? selectedAsset.symbol
+      : sourceDesc?.backing_symbol ?? sourceDesc?.symbol ?? selectedAsset.symbol;
+  const inDecimals: number = selectedAsset?.decimals ?? 8;
+  const inFee: string = sourceDesc?.fee ?? '0';
+  // The SOURCE balance the gates compute against — the standing rail's own raw figure (the sell
+  // draws from THIS rail). The balance LINE renders the currency-unit sum above it.
+  const balanceRaw: string | null = selectedAsset == null
+    ? null
+    : isSolSource
+      ? (inMint === WRAPPED_SOL_MINT_ADDRESS ? solana?.sol ?? null : solana?.tokens[inMint ?? ''] ?? null)
+      : assetBalances[selectedAsset.currency];
+  const balanceN = balanceRaw != null && /^\d+$/.test(balanceRaw) ? BigInt(balanceRaw) : null;
+
+  // ── The resolved pair ────────────────────────────────────────────────────────────────────────
+  const targetScope = useMemo(
+    () => visibleCurrencies.filter(c => c !== sourceCurrency),
+    [visibleCurrencies, sourceCurrency],
+  );
+  // The relay's served venue registry (V5): what THIS relay serves, loaded once per relay;
+  // the bundled table is the fallback until it lands. Key input to the pair walk.
+  const [venueList, setVenueList] = useState<readonly VenueEntry[] | null>(null);
+  // `venueList` IS a dependency: when the relay's served registry lands (the knob-armed
+  // fixture venue, a new pool) the pairs re-resolve — the old chooser re-quoted per served
+  // row, and the currency-level walk inherits exactly that.
+  const targets: SwapTarget[] = useMemo(
+    () => selectedAsset != null
+      ? resolveSwapTargets({catalog, source: selectedAsset, targetCurrencies: targetScope}) ?? []
+      : [],
+    [selectedAsset, catalog, targetScope, venueList],
+  );
+  // The target pick. Keyed to the SOURCE asset like every per-pair state here: a different
+  // source re-derives the standing pair (render-phase adjustment — the SolConvertMode
+  // destMintKey precedent), and an explicit pick wins until the source changes.
+  const [targetSel, setTargetSel] = useState<HomeCurrency | null>(null);
+  const [pairKey, setPairKey] = useState<string | null>(null);
+  const [targetListOpen, setTargetListOpen] = useState(false);
+  const [selRowId, setSelRowId] = useState<string | null>(null);
+  if ((selectedAsset?.id ?? null) !== pairKey) {
+    setPairKey(selectedAsset?.id ?? null);
+    setTargetSel(null);
+    setTargetListOpen(false);
+    setSelRowId(null);
   }
-  return <ConvertModeIc {...props} />;
-}
+  const target: SwapTarget | null = targetSel != null
+    ? targets.find(t => t.currency === targetSel) ?? standingTarget(targets)
+    : standingTarget(targets);
+  const targetCode: HomeCurrency | null = target?.currency ?? null;
+  const rows: SwapRow[] = target?.rows ?? [];
+  // THE red line, expressed as data — scoped exactly as fork #3 states it: when SEVERAL VENUES
+  // (registry rows — pools, Solana venues, CeFi services) serve the pair, NOTHING is
+  // preselected and the checklist/confirm stay withheld until a user pick (the 2026-09-11
+  // no-ranking rule; venues are the things a price could rank). Composed routes (hub, CCTP)
+  // are not venues and cannot be ranked against one: under the standing-default rule (hub UX
+  // D2, 2026-09-18 — the direct pool is the standing surface, a hub is an explicit switch
+  // away) the single-venue pair arms on its one venue, and the route rows below render as
+  // explicit opt-ins. One row total → no chooser chrome at all: an attributed line, exactly
+  // the single-venue surface that always was.
+  const multiVenue = rows.filter(r => r.kind !== 'hub' && r.kind !== 'crossrail').length > 1;
+  const standingRow: SwapRow | null = multiVenue
+    ? null
+    : rows.find(r => r.kind !== 'hub' && r.kind !== 'crossrail') ?? rows[0] ?? null;
+  const activeRow: SwapRow | null = multiVenue
+    ? rows.find(r => r.rowId === selRowId) ?? null
+    : selRowId != null ? rows.find(r => r.rowId === selRowId) ?? standingRow : standingRow;
+  const directRow = activeRow != null && activeRow.kind === 'direct' ? activeRow : null;
+  const hubRow = activeRow != null && activeRow.kind === 'hub' ? activeRow : null;
+  const crossRow = activeRow != null && activeRow.kind === 'crossrail' ? activeRow : null;
+  const cefiRow = activeRow != null && activeRow.kind === 'cefi' ? activeRow : null;
+  const ammRow = activeRow != null && activeRow.kind === 'solamm' ? activeRow : null;
+  const hubMode = hubRow != null;
+  const routeMode = crossRow != null;
+  const cefiMode = cefiRow != null;
+  const ammMode = ammRow != null;
+  // The OUTPUT leg the form names (per active row): the direct pool's catalog row, the hub
+  // destination, the route's destination, the CeFi settle asset, the Solana venue's other mint.
+  const outSym: string =
+    directRow != null ? directRow.outDesc.backing_symbol ?? directRow.outDesc.symbol ?? ''
+    : hubRow != null ? hubRow.route.dest.symbol
+    : crossRow != null ? (crossRow.route.crossRail?.sol != null ? crossRow.route.crossRail.sol.outSymbol : crossRow.route.dest.symbol)
+    : cefiRow != null ? cefiRow.outSym
+    : ammRow != null ? ammRow.outSym
+    : inSym;
+  const outDecimals: number =
+    directRow != null ? directRow.outDesc.decimals ?? inDecimals
+    : hubRow != null ? hubRow.route.dest.decimals
+    : crossRow != null ? (crossRow.route.crossRail?.sol != null ? crossRow.route.crossRail.sol.outDecimals : crossRow.route.hop.decimals)
+    : cefiRow != null ? cefiRow.outDecimals
+    : ammRow != null ? ammRow.outDecimals
+    : inDecimals;
 
-// The IC form: the delegated-conversion surface for IC assets (venue checklist, destination
-// groups, hub/CCTP/CeFi confirm flows). Verbatim body of the pre-split ConvertMode minus the
-// SOL dispatch that moved up into the hooks-free dispatcher above.
-function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalances, onBack, onShowDepositAddress, onSwitchAsset, solana}: Props) {
+  // ── Screen state ─────────────────────────────────────────────────────────────────────────────
   const [amountText, setAmountText] = useState('');
   const [slippageBps, setSlippageBps] = useState<number>(CONVERT_SLIPPAGE_BPS_DEFAULT);
-  const [quote, setQuote] = useState<ConvertQuote | null>(null);
-  const [math, setMath] = useState<ConvertMath | null>(null);
-  const [quoteErr, setQuoteErr] = useState<string | null>(null);
-  // The venue's own listed-but-unquoted verdict (CeFi no-quote, 2026-09-22): NOT an error —
-  // when set, the surface renders the attributed no-market line instead of the red quote
-  // error. The two are mutually exclusive; every quoteErr write below clears this.
-  const [noQuoteVenue, setNoQuoteVenue] = useState<string | null>(null);
+  // Per-row quotes: direct pools + crossrail swap-hops + CeFi settle figures live here (all are
+  // ConvertQuote-shaped); Solana venue quotes in their own map (Jupiter's own shape, rendered
+  // verbatim); hub rows carry the two-quote bundle.
+  const [rowQuotes, setRowQuotes] = useState<Record<string, ConvertQuote>>({});
+  const [rowQuoteErrs, setRowQuoteErrs] = useState<Record<string, string>>({});
+  // The raw amount each row's quote was fetched AT — a row whose cached quote predates the
+  // current amount re-fetches; a pick that re-keys the effect does NOT disturb fresh quotes
+  // (the old chooser's pick was instant for exactly this reason). REF, not state: this is
+  // fetch bookkeeping, never a render fact — a state copy here would re-key the fetch effect
+  // by its own write (the maximum-update-depth loop).
+  const rowQuoteAmts = useRef<Record<string, string>>({});
+  const [jupQuotes, setJupQuotes] = useState<Record<string, JupiterQuote>>({});
+  const jupQuoteAmts = useRef<Record<string, string>>({});
+  const [hubBundles, setHubBundles] = useState<Record<string, HubBundle>>({});
+  const hubBundleAmts = useRef<Record<string, string>>({});
+  // The venue's own listed-but-unquoted verdict (CeFi no-quote, 2026-09-22): a STATE, not an
+  // error — it renders as the attributed no-market line for its row, never a red quote error.
+  const [noQuoteRow, setNoQuoteRow] = useState<{rowId: string; venueName: string} | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
+  const [quoteErr, setQuoteErr] = useState<string | null>(null);
   const [staleRefreshing, setStaleRefreshing] = useState(false);
   const [quoteChanged, setQuoteChanged] = useState<{oldAmt: string; newAmt: string} | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmErr, setConfirmErr] = useState<string | null>(null);
   const [record, setRecord] = useState<ConvertRecord | null>(null);
-  // The one Details disclosure on the quote-ready surface (10x-verbosity pass 2026-09-16):
-  // the venue/fee/signing census collapses behind it, default CLOSED for everyone.
   const [detailsOpen, setDetailsOpen] = useState(false);
-  // --- destination groups (2026-09-18 hub UX guidance D1–D6): the direct pair stays the
-  //     standing default; every destination is an EXPLICIT row pick — never preselected,
-  //     never auto-chosen. A multi-mechanism destination additionally gates its quote flow
-  //     on a MECHANISM pick (the V5 rules one level down): `destMech` is that pick, null
-  //     until a sub-row is tapped.
-  const [destSel, setDestSel] = useState<string | null>(null);
-  const [destMech, setDestMech] = useState<DestMechPick | null>(null);
-  const [destAddress, setDestAddress] = useState('');
-  // The gas-fund re-entry gate (2026-09-20): the offer below moves value to the destination
-  // string, so the address is confirmed by re-typing it once — keyed to the normalized
-  // address, so any later edit re-locks the gate.
-  const [destRetype, setDestRetype] = useState('');
-  const [destReentered, setDestReentered] = useState<string | null>(null);
-  // The gas-fund offer's measured have (2026-09-20): undefined = not measuring / card not
-  // wanted, null = measured UNKNOWN (publicnode unreachable — the card hides), else wei.
-  const [destEthWei, setDestEthWei] = useState<string | null | undefined>(undefined);
-  const [ethRecheckNonce, setEthRecheckNonce] = useState(0);
-  const [selfFundOpen, setSelfFundOpen] = useState(false);
-  // Bumped once when the offer card first becomes wanted — the NEED line re-quotes the
-  // minter's gas fresh at the moment the user is looking at it, never a stale review copy.
-  const [gasNonce, setGasNonce] = useState(0);
-  // The minter's live gas quote for the census + preflight — refreshed per route, re-queried
-  // fresh inside prepare at confirm (the signed number is never this cached one).
-  const [routeGas, setRouteGas] = useState<{feeWei: string; gasLedgerFee: string} | null>(null);
-  const [routeGasErr, setRouteGasErr] = useState<string | null>(null);
-  // Circle's OWN published fee for the crossing (fees API, med forward fee + fast bps) —
-  // shown in the census as the venue's own number; prepare re-fetches live at confirm.
-  const [crossFee, setCrossFee] = useState<{maxFee: string; floor: string} | null>(null);
-  const [crossFeeErr, setCrossFeeErr] = useState<string | null>(null);
-  // Route C's review-time destination estimate (founder clarity fix, 2026-09-22): the raw
-  // Jupiter out-amount (subunits) the mint floor would land as at the destination. NULL is
-  // the honest "no estimate yet / fetch failed" — the line is simply absent, never an error.
-  const [destEstimate, setDestEstimate] = useState<string | null>(null);
-  // The HUB two-quote flow (2026-09-18 hub UX, D7–D13): quote1 (from → hub), then quote2
-  // (hub → dest) QUOTED ON math1.minOut — the compounding floor the engine signs. The plain
-  // quote/math pair above stays null in hub mode; these carry the composed estimate.
-  const [hubQuote1, setHubQuote1] = useState<ConvertQuote | null>(null);
-  const [hubMath1, setHubMath1] = useState<ConvertMath | null>(null);
-  const [hubQuote2, setHubQuote2] = useState<ConvertQuote | null>(null);
-  const [hubMath2, setHubMath2] = useState<ConvertMath | null>(null);
-  const [hubErr, setHubErr] = useState<string | null>(null);
-  const [hubBusy, setHubBusy] = useState(false);
-  // --- the venue chooser (multi-venue readiness V5). RED LINES, structural by construction:
-  //     (1) rows render in REGISTRY order — `venuesForPair` never sorts by output; (2) nothing
-  //     is ever preselected — `selectedVenueId` starts null and only a USER tap sets it (no
-  //     "obviously better" shortcut, no last-used memory); (3) confirm stays withheld until a
-  //     row is picked. With exactly ONE venue on the pair the chooser chrome does not render
-  //     and the screen is byte-identical to the single-venue surface (flows 140–143).
-  const [venueList, setVenueList] = useState<readonly VenueEntry[] | null>(null);
-  const [selectedVenueId, setSelectedVenueId] = useState<string | null>(null);
-  const [venueQuotes, setVenueQuotes] = useState<Record<string, ConvertQuote>>({});
-  const [venueQuoteErrs, setVenueQuoteErrs] = useState<Record<string, string>>({});
+  // Sync latch for the confirm gesture: `confirmBusy` state lags a re-render, and a duplicate
+  // press delivered inside that window would run prepare twice (observed once under heavy host
+  // load, 2026-09-17). The ref closes it same-tick.
+  const confirmBusyRef = useRef(false);
   const mountedRef = useRef(true);
-  // WHICH record this screen is showing. Set on mount (the newest live one, if any) and again on
-  // confirm (the record this screen just built); engine updates for that id re-render it. The
-  // ENGINE (app/convertResume.ts, mounted by Wallet) owns all driving — mounted screen or not.
+  // WHICH record this screen is showing (the engine-view pick + the confirm handoff).
   const recordIdRef = useRef<string | null>(null);
-  const legs: ConvertLegs | null = selectedAsset != null && selectedAsset.protocol === 'ic'
-    ? resolveLegs(catalog, selectedAsset)
-    : null;
-  // Composed routes out of this asset (app/routes.ts — pure registry walk). The venue chooser
-  // never coexists with a route pick: a route IS a destination choice, and its swap hop runs
-  // through the route's own single registered venue.
-  const routes = legs != null ? multihopRoutesFrom(catalog, legs.inDesc.currency) : [];
-  // --- the CeFi destination venues (SideShift today): rows from the registry's cefi entries
-  //     whose pair carries this asset's ledger as one side. A CeFi venue is a MECHANISM of the
-  //     destination it pays out to — merged by landing spot in the D1 groups below.
-  const cefiVenues = legs != null ? cefiVenuesForLedger(legs.inDesc.ledger) : [];
-  // --- the destination GROUPS (D1–D4) and the user's selection. The standing group is the
-  //     default (`destSel == null`), and a single-mechanism group self-resolves its mechanism
-  //     — only a multi-mechanism group waits for an explicit sub-pick (D2/D5, V5 rules).
-  const convDests = legs != null
-    ? resolveConvertDestinations(legs.inDesc.ledger, legs.inDesc.testnet)
-    : [];
-  const hubRoutesAll = legs != null ? hubRoutes(catalog, legs.inDesc.ledger) : [];
-  const destGroups = legs != null
-    ? buildDestGroups(catalog, legs, convDests, hubRoutesAll, routes, cefiVenues)
-    : [];
-  const selGroup: DestGroup | null = destSel != null
-    ? destGroups.find(g => g.key === destSel) ?? null
-    : destGroups.length === 1 ? destGroups[0] // a single-destination asset selects its only row
-    : destGroups.find(g => g.key === 'direct') ?? null;
-  const selMechPick: DestMechPick | null =
-    selGroup == null ? null
-    : selGroup.mechs.length === 1 ? mechPickOf(selGroup.mechs[0])
-    : destMech != null
-      && selGroup.mechs.some(m => mechIdOf(mechPickOf(m)) === mechIdOf(destMech))
-      ? destMech
-      // D2's sub-picker DEFAULTS to the direct pool (UX §6 red line 9): the direct pair is
-      // the standing surface for the same reason it is the first row — a hub mechanism is
-      // an explicit switch away, never an upgrade the screen chose for the user. Only a
-      // group with NO direct mechanism (multi-hub) waits for an explicit pick.
-      : selGroup.mechs.some(m => m.kind === 'direct') ? {kind: 'direct'}
-      : null;
-  const mechUnpicked = selGroup != null && selGroup.mechs.length > 1 && selMechPick == null;
-  const activeMech = selMechPick;
-  const hubRoute: HubRoute | null = activeMech?.kind === 'hub'
-    ? hubRoutesAll.find(r => r.routeId === activeMech.routeId) ?? null
-    : null;
-  const hubMode = hubRoute != null;
-  const activeRoute: MultihopRoute | null = activeMech?.kind === 'route'
-    ? routes.find(r => r.routeId === activeMech.routeId) ?? null
-    : null;
-  const routeMode = activeRoute != null;
-  const activeCefiVenue: VenueEntry | null = activeMech?.kind === 'cefi'
-    ? cefiVenues.find(v => v.venue_id === activeMech.venueId) ?? null
-    : null;
-  const cefiMode = activeCefiVenue != null;
-  // The output leg a DIRECT mechanism converts into: the standing pair's other leg for the
-  // default row, the picked catalog row for an in-wallet direct pick, null otherwise (hub/
-  // route/cefi picks carry their own output facts). Everything downstream that named
-  // `legs.outDesc` names `effOut` — the pair surface is now one destination among many.
-  const effOut: CurrencyDescriptor | null =
-    legs == null ? null
-    : activeMech?.kind === 'direct' && selGroup != null && selGroup.key !== 'direct' && selGroup.destLedger != null
-      ? catalog.find(c => c.ledger === selGroup.destLedger) ?? null
-      : legs.outDesc;
-  const cefiOutMint = activeCefiVenue != null && legs != null
-    ? cefiOtherSide(activeCefiVenue, legs.inDesc.ledger)
-    : null;
-  const cefiOut = cefiOutMint != null ? solAssetOfMint(cefiOutMint) : null;
-  // The settle address is the user's OWN derived Solana address — never typed free-hand,
-  // never a third party's (this wallet owns the key; the venue pays out to it). Memoized:
-  // the derivation is real crypto, not per-keystroke work.
-  const cefiSettleAddress = useMemo(
-    () => (cefiMode ? deriveSolanaAddress(identity.secretHex) : null),
-    [cefiMode, identity.secretHex],
-  );
-  // The CeFi REFUND address — the user's OWN address ON THE DEPOSIT RAIL, where the venue
-  // returns the funds if the deposit fails or the order expires (an order without one
-  // leaves the funds with the venue: the fund-loss class). IC-side the deposit rail is the
-  // IC: the wallet's own IC ACCOUNT IDENTIFIER (the 64-hex account hash of the wallet's
-  // principal, default subaccount — the form the venue's payout layer can actually deliver
-  // to; see the SOL surface's icSettleAddress — a refund is an ICP payout too), derived
-  // from the same key that derives the Solana settle address (async native derivation →
-  // state; the confirm gate withholds the order until it is in). The relay independently
-  // refuses an order without a well-formed one.
-  const [cefiRefundAddress, setCefiRefundAddress] = useState<string | null>(null);
-  useEffect(() => {
-    if (!cefiMode) {
-      setCefiRefundAddress(null);
-      return;
-    }
-    let alive = true;
-    DpayCore.icpPrincipalFromPubkey(identity.publicHex)
-      .then(p => DpayCore.icpAccountIdFromPrincipal(p, ''))
-      .then(id => {
-        if (alive) setCefiRefundAddress(id);
-      })
-      .catch(() => {
-        if (alive) setCefiRefundAddress(null);
-      });
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cefiMode, identity.publicHex]);
-  // The chooser's candidate rows — only under a DIRECT mechanism pick with 2+ registered
-  // venues on that pair (registry order, unordered-set match). 2+ rows switch the screen to
-  // the chooser layout; ONE row = the plain single-venue surface. A hub/route/cefi pick
-  // suppresses the chooser just as a route pick always did: the destination mechanism owns
-  // the venue choice.
-  const directMechOn = activeMech?.kind === 'direct';
-  const pairVenues = legs != null && directMechOn && effOut != null
-    ? venuesForPair(legs.inDesc.ledger, effOut.ledger)
-    : [];
-  const chooserVenues = directMechOn && pairVenues.length > 1 ? pairVenues : null;
-  const chooserMode = chooserVenues != null;
-  // The user's pick, re-resolved against the CURRENT rows every render — if the venue it named
-  // stops serving the pair, the selection silently becomes "none" (never re-picks for the user).
-  const selectedVenue = selectedVenueId != null
-    ? pairVenues.find(v => v.venue_id === selectedVenueId) ?? null
-    : null;
-  // The quote the checklist/headline derive from: the row's own quote in chooser mode (null
-  // until one is picked — that is the none-preselected red line), the single quote otherwise.
-  // A re-key race guard (2026-09-19 live VCHF→USDC finding): the quote effect re-keys on the
-  // picked destination, but until the new fetch lands the OLD quote object is still in state —
-  // the standing VCHF→ICP quote rendered under the USDC pick as "17.074223 USDC" (an 8-decimal
-  // ICP amount formatted with the 6-decimal USDC row) with the min-out floor derived from it.
-  // A quote is displayable only under a destination it actually quotes; anything else is the
-  // busy state the refetch already switched on. Scoped to the IN-WALLET DIRECT pick (effOut
-  // overridden away from the flow's own terminal): route/hub/cefi flows legitimately quote
-  // toward a hop ledger while effOut stays legs.outDesc — suppressing those would blank the
-  // whole multihop/crossrail surface.
-  const staleDestQuote = !chooserMode && quote != null && effOut != null
-    && quote.tokenOutLedger !== effOut.ledger
-    && effOut.ledger !== (legs?.outDesc?.ledger ?? '');
-  const activeQuote = chooserMode
-    ? selectedVenue != null ? venueQuotes[selectedVenue.venue_id] ?? null : null
-    : staleDestQuote ? null : quote;
-  // The counterparty disclosure is a standing fact about today's venue; once a quote arrives its
-  // OWN attribution (venue_id) takes over (V1). Under a chooser PICK with no live quote — fetch
-  // in flight, errored into venueQuoteErrs, or cleared by a re-key — the PICKED venue is the
-  // honest attribution: falling back to the registered default here used to name venue A (and
-  // its pool) under a venue B pick, misattributing the pre-sign disclosure.
-  const counterVenueId = activeQuote?.venueId ?? selectedVenue?.venue_id
-    ?? (cefiMode && activeCefiVenue != null ? activeCefiVenue.venue_id
-      : activeRoute != null ? activeRoute.swapVenueId : REGISTERED_VENUE_ID);
 
-  // --- the engine view (V6): pick the record to render, then follow it. The resume engine
-  //     (hooks/useConvertResumeEngine, mounted from Wallet) drives EVERY live record from wallet
-  //     load — this screen's old private executor + 2 s pending re-arm are gone; what remains is
-  //     a read model: the newest live/pending record on mount, then whatever updates arrive for
-  //     the record this screen adopted or confirmed. A terminal record the engine already parked
-  //     is not resurrected here — the form shows, the balance tells the outcome.
+  // The active row's quote bundle, resolved per render from the maps. A quote lives keyed under
+  // its own row id, so a re-key (amount/target/pick change) drops it by construction — the old
+  // stale-destination-quote race class cannot recur.
+  const activeIcQuote: ConvertQuote | null = activeRow != null && (activeRow.kind === 'direct' || activeRow.kind === 'crossrail')
+    ? rowQuotes[activeRow.rowId] ?? null
+    : null;
+  const activeJup: JupiterQuote | null = ammRow != null ? jupQuotes[ammRow.rowId] ?? null : null;
+  const activeCefiQuote: ConvertQuote | null = cefiRow != null ? rowQuotes[cefiRow.rowId] ?? null : null;
+  const activeHub: HubBundle | null = hubRow != null ? hubBundles[hubRow.rowId] ?? null : null;
+  const activeRowErr: string | null = activeRow != null ? rowQuoteErrs[activeRow.rowId] ?? null : null;
+
+  // ── The engine view (V6): pick the record to render, then follow it. The resume engine
+  //    (hooks/useConvertResumeEngine, mounted from Wallet) drives EVERY live record from wallet
+  //    load — this screen is a read model: the newest live/pending record on mount, then
+  //    whatever updates arrive for the record this screen adopted or confirmed.
   useEffect(() => {
     mountedRef.current = true;
     const pick = (records: Record<string, ConvertRecord>) => {
@@ -435,10 +331,8 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- venue registry: what THIS relay serves (multi-venue readiness V5). One load per relay
-  //     per session (loadVenueRegistry caches); the served list becomes the runtime overlay the
-  //     `venuesForPair` rows above read. Until it lands (or if the relay is unreachable) the
-  //     bundled registry IS the list — venue identity fails closed to drift-alarmed truth.
+  // ── Venue registry: what THIS relay serves (multi-venue readiness V5). One load per relay
+  //    per session (loadVenueRegistry caches); until it lands the bundled registry IS the list.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -450,234 +344,166 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
     };
   }, [relayUrl]);
 
-  // --- quote fetch: only for a valid positive amount while the form (not a record) is showing.
+  // ── Quote fetch: only for a valid positive amount while the form (not a record) is showing.
+  //    The plan: every LIVE row (direct pools + Solana venues — public quote surfaces) quotes
+  //    whenever rendered; a hub/crossrail/cefi row quotes only once PICKED (the D5 rule one
+  //    level up: an unpicked row carries its label, never another mechanism's live number — and
+  //    a CeFi row is never quoted for demand the user did not initiate).
   useEffect(() => {
-    if (legs == null || isLiveRecord(record)) return;
-    const parsed = parseUserAmount(amountText, legs.inDecimals);
+    if (target == null || isLiveRecord(record)) return;
+    const parsed = parseUserAmount(amountText, inDecimals);
     if (!parsed.ok || parsed.raw === '0') {
-      setQuote(null);
-      setMath(null);
+      setRowQuotes({});
+      setRowQuoteErrs({});
+      rowQuoteAmts.current = {};
+      setJupQuotes({});
+      jupQuoteAmts.current = {};
+      setHubBundles({});
+      hubBundleAmts.current = {};
+      setNoQuoteRow(null);
       setQuoteErr(null);
-      setNoQuoteVenue(null);
-      setQuoteChanged(null);
-      setVenueQuotes({});
-      setVenueQuoteErrs({});
+      setQuoteBusy(false);
       return;
     }
-    if (mechUnpicked || hubMode) {
-      // D5 (2026-09-18 hub UX): a multi-mechanism destination fetches NOTHING until a
-      // mechanism sub-row is picked — the venue-chooser precedent one level up; an unpicked
-      // sub-row carries its label only, never another mechanism's live number. A picked HUB
-      // mechanism is quoted by its own two-quote flow (the hub branch, this effect's successor).
-      setQuote(null);
-      setMath(null);
-      setQuoteErr(null);
-      setNoQuoteVenue(null);
-      setQuoteChanged(null);
-      setVenueQuotes({});
-      setVenueQuoteErrs({});
-      return;
-    }
-    if (cefiMode && legs != null) {
-      // CeFI MODE: one quote through the relay's partner-key proxy — the venue's own
-      // settleAmount verbatim, attributed + timestamped. An unresolvable out rail id is a
-      // registry-shape failure: refused honestly, nothing fetched.
-      if (activeCefiVenue == null || cefiOutMint == null || cefiOut == null) {
-        setQuote(null);
-        setMath(null);
-        setQuoteErr(M.convert.errors.quoteUnavailable(venueDisplayName(activeCefiVenue?.venue_id ?? 'venue')));
-        setNoQuoteVenue(null);
-        return;
-      }
-      let cancelled = false;
-      setQuoteBusy(true);
-      setQuoteErr(null);
-      setNoQuoteVenue(null);
-      void (async () => {
-        try {
-          const q = await fetchCeFiConvertQuote(
-            relayUrl, activeCefiVenue, legs.inDesc.ledger, cefiOutMint, parsed.raw,
-            {inDecimals: legs.inDecimals, outDecimals: cefiOut.decimals},
-          );
-          if (!cancelled && mountedRef.current) setQuote(q);
-        } catch (e) {
-          if (!cancelled && mountedRef.current) {
-            setQuote(null);
-            // The venue's OWN listed-but-unquoted verdict is a state, not a failure: it
-            // renders as the attributed no-market line, never the red quote error.
-            if (e instanceof CeFiNoQuoteError) {
-              setQuoteErr(null);
-              setNoQuoteVenue(e.venueName);
-            } else {
-              setNoQuoteVenue(null);
-              setQuoteErr(e instanceof Error ? e.message : String(e));
-            }
-          }
-        } finally {
-          if (!cancelled && mountedRef.current) setQuoteBusy(false);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }
-    if (activeRoute != null) {
-      // ROUTE MODE: one quote for the SWAP HOP, through the route's OWN registered venue —
-      // the composed destination is not a quoteable pair and never pretends to be one; the
-      // destination's own figure is the min-you'll-receive line derived from this hop quote.
-      let cancelled = false;
-      setQuoteBusy(true);
-      setQuoteErr(null);
-      setNoQuoteVenue(null);
-      void (async () => {
-        try {
-          const q = await fetchConvertQuote(
-            relayUrl, legs.inDesc.ledger, activeRoute.hop.ledger, parsed.raw,
-            {venue: venueOfId(activeRoute.swapVenueId) ?? undefined},
-          );
-          if (!cancelled && mountedRef.current) setQuote(q);
-        } catch (e) {
-          if (!cancelled && mountedRef.current) {
-            setQuote(null);
-            setNoQuoteVenue(null);
-            setQuoteErr(e instanceof Error ? e.message : String(e));
-          }
-        } finally {
-          if (!cancelled && mountedRef.current) setQuoteBusy(false);
-        }
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }
-    const rows = venuesForPair(legs.inDesc.ledger, effOut!.ledger);
-    if (rows.length > 1) {
-      // CHOOSER MODE: one quote PER venue, fetched in parallel — each row owns its venue's own
-      // number (attributed + timestamped in the row). Row order is `rows` order, untouched by
-      // anything the fetches return (the never-rank red line). The user's selection is NOT
-      // re-derived here — picking a row is a user decision, not a fetch side effect.
-      let cancelled = false;
-      setQuoteBusy(true);
-      setQuoteErr(null);
-      setNoQuoteVenue(null);
-      setVenueQuotes({});
-      setVenueQuoteErrs({});
-      void (async () => {
-        const settled = await Promise.allSettled(
-          rows.map(v => fetchConvertQuote(relayUrl, legs.inDesc.ledger, effOut!.ledger, parsed.raw, {venue: v})),
-        );
-        if (cancelled || !mountedRef.current) return;
-        const qs: Record<string, ConvertQuote> = {};
-        const es: Record<string, string> = {};
-        settled.forEach((r, i) => {
-          if (r.status === 'fulfilled') qs[rows[i].venue_id] = r.value;
-          else es[rows[i].venue_id] = r.reason instanceof Error ? r.reason.message : String(r.reason);
-        });
-        setVenueQuotes(qs);
-        setVenueQuoteErrs(es);
-        setQuoteBusy(false);
-      })();
-      return () => {
-        cancelled = true;
-      };
-    }
+    // The fetch plan: every LIVE row (direct pools + Solana venues — public quote surfaces)
+    // whose cached quote is missing or predates the current amount, plus the PICKED row of a
+    // wait-for-pick kind (hub / crossrail hop / cefi). Cefi rows are NEVER quoted for an
+    // unpicked row — no machine-generated partner demand (2026-09-22 agreement).
+    const live = rows.filter(r => r.kind === 'direct' || r.kind === 'solamm');
+    const pickedWait = activeRow != null && !live.some(r => r.rowId === activeRow.rowId) ? [activeRow] : [];
+    const needs = (r: typeof rows[number]): boolean => {
+      if (r.kind === 'direct' || r.kind === 'crossrail') return rowQuoteAmts.current[r.rowId] !== parsed.raw;
+      if (r.kind === 'solamm') return jupQuoteAmts.current[r.rowId] !== parsed.raw;
+      if (r.kind === 'hub') return hubBundleAmts.current[r.rowId] !== parsed.raw;
+      return rowQuoteAmts.current[r.rowId] !== parsed.raw; // cefi (picked only)
+    };
+    const plan = [...live, ...pickedWait].filter(needs);
+    if (plan.length === 0) return;
     let cancelled = false;
     setQuoteBusy(true);
     setQuoteErr(null);
-    setNoQuoteVenue(null);
     void (async () => {
-      try {
-        const q = await fetchConvertQuote(relayUrl, legs.inDesc.ledger, effOut!.ledger, parsed.raw);
-        if (!cancelled && mountedRef.current) setQuote(q);
-      } catch (e) {
-        if (!cancelled && mountedRef.current) {
-          setQuote(null);
-          setNoQuoteVenue(null);
-          setQuoteErr(e instanceof Error ? e.message : String(e));
-        }
-      } finally {
-        if (!cancelled && mountedRef.current) setQuoteBusy(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // slippageBps deliberately NOT a dependency: it changes the minimum, not the quote.
-    // `venueList` IS one: when the relay's served registry lands (e.g. the offline two-venue
-    // world) the rows re-fetch per venue. The route's own hop ledger likewise re-keys the
-    // fetch when a destination row is picked — and so does the CeFi venue pick. `destMech`
-    // re-keys on a mechanism sub-pick; `mechUnpicked` gates the fetch off entirely (D5).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amountText, legs?.inDesc.ledger, effOut?.ledger, relayUrl, record != null && isLiveRecord(record), venueList, activeRoute?.routeId, activeRoute?.hop.ledger, destMech, mechUnpicked, selGroup?.key, hubMode]);
-
-  // --- HUB two-quote fetch (D5/D9): runs only under a picked hub mechanism, for the SELECTED
-  //     destination — never per-row, never per-keystroke beyond the amount itself. quote2 is
-  //     fetched on math1.minOut, so the pair is sequential by construction. slippageBps IS a
-  //     dependency here (it sizes both floors, hence quote2's amount).
-  useEffect(() => {
-    if (!hubMode || hubRoute == null || legs == null || isLiveRecord(record)) return;
-    const parsed = parseUserAmount(amountText, legs.inDecimals);
-    if (!parsed.ok || parsed.raw === '0') {
-      setHubQuote1(null);
-      setHubMath1(null);
-      setHubQuote2(null);
-      setHubMath2(null);
-      setHubErr(null);
-      return;
-    }
-    let cancelled = false;
-    setHubBusy(true);
-    setHubErr(null);
-    void (async () => {
-      try {
-        const got = await fetchHubQuotes(relayUrl, hubRoute, parsed.raw, legs.inFee, slippageBps);
-        if (cancelled || !mountedRef.current) return;
-        setHubQuote1(got.q1);
-        setHubMath1(got.m1);
-        setHubQuote2(got.q2);
-        setHubMath2(got.m2);
-      } catch (e) {
-        if (!cancelled && mountedRef.current) {
-          setHubQuote1(null);
-          setHubMath1(null);
-          setHubQuote2(null);
-          setHubMath2(null);
-          setHubErr(e instanceof Error ? e.message : String(e));
-        }
-      } finally {
-        if (!cancelled && mountedRef.current) setHubBusy(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amountText, slippageBps, legs?.inDesc.ledger, relayUrl, record != null && isLiveRecord(record), venueList, hubRoute?.routeId]);
-
-  // --- HUB stale refresh (D13): same 30 s staleness rule, BOTH hops re-quoted fresh and in
-  //     order (quote2 on the fresh floor — a stale second quote sized on a dead floor is
-  //     worse than none). A moved composed number surfaces through the SAME quoteChanged
-  //     review interrupt as every other mode; no new copy.
-  useEffect(() => {
-    if (!hubMode || hubRoute == null || legs == null || isLiveRecord(record)) return;
-    if (hubQuote1 == null || hubQuote2 == null) return;
-    const id = setInterval(() => {
-      if (!mountedRef.current || staleRefreshing || hubBusy) return;
-      if (!isQuoteStale(hubQuote1) && !isQuoteStale(hubQuote2)) return;
-      void (async () => {
-        setStaleRefreshing(true);
+      const quotes: Record<string, ConvertQuote> = {};
+      const errs: Record<string, string> = {};
+      const amts: Record<string, string> = {};
+      const jups: Record<string, JupiterQuote> = {};
+      const jupAmts: Record<string, string> = {};
+      const hubs: Record<string, HubBundle> = {};
+      const hubAmts: Record<string, string> = {};
+      const noQuoteRef: {v: {rowId: string; venueName: string} | null} = {v: null};
+      await Promise.allSettled(plan.map(async (r) => {
         try {
-          const got = await fetchHubQuotes(relayUrl, hubRoute, hubQuote1.amountIn, legs.inFee, slippageBps);
-          if (!mountedRef.current) return;
-          if (got.q1.amountOutGross !== hubQuote1.amountOutGross || got.q2.amountOutGross !== hubQuote2.amountOutGross) {
-            setQuoteChanged({oldAmt: hubMath2?.netOut ?? '0', newAmt: got.m2.netOut});
+          if (r.kind === 'direct') {
+            quotes[r.rowId] = await fetchConvertQuote(relayUrl, r.inLedger, r.outLedger, parsed.raw, {venue: r.venue});
+            amts[r.rowId] = parsed.raw;
+          } else if (r.kind === 'solamm') {
+            const name = venueDisplayName(r.venue.venue_id);
+            const res = await fetchJupiterQuote(relayUrl, r.venue, r.inMint, r.outMint, parsed.raw, slippageBps);
+            if (res.ok) {
+              jups[r.rowId] = res.quote;
+              jupAmts[r.rowId] = parsed.raw;
+            } else {
+              errs[r.rowId] = res.code === 'refused' ? M.convert.errors.quoteRefused(name) : M.convert.errors.quoteUnreachable(name);
+            }
+          } else if (r.kind === 'crossrail') {
+            quotes[r.rowId] = await fetchConvertQuote(relayUrl, r.route.from.ledger, r.route.hop.ledger, parsed.raw, {venue: venueOfId(r.route.swapVenueId) ?? undefined});
+            amts[r.rowId] = parsed.raw;
+          } else if (r.kind === 'hub') {
+            hubs[r.rowId] = await fetchHubQuotes(relayUrl, r.route, parsed.raw, inFee, slippageBps);
+            hubAmts[r.rowId] = parsed.raw;
+          } else {
+            quotes[r.rowId] = await fetchCeFiConvertQuote(relayUrl, r.venue, r.inLedgerOrMint, r.outLedger ?? r.outMint ?? '', parsed.raw, {inDecimals, outDecimals: r.outDecimals});
+            amts[r.rowId] = parsed.raw;
           }
-          setHubQuote1(got.q1);
-          setHubMath1(got.m1);
-          setHubQuote2(got.q2);
-          setHubMath2(got.m2);
+        } catch (e) {
+          // The venue's OWN listed-but-unquoted verdict is a state, not a failure.
+          if (e instanceof CeFiNoQuoteError) noQuoteRef.v = {rowId: r.rowId, venueName: e.venueName};
+          else errs[r.rowId] = e instanceof Error ? e.message : String(e);
+        }
+      }));
+      if (cancelled || !mountedRef.current) return;
+      setRowQuotes(prev => ({...prev, ...quotes}));
+      setRowQuoteErrs(errs);
+      rowQuoteAmts.current = {...rowQuoteAmts.current, ...amts};
+      setJupQuotes(prev => ({...prev, ...jups}));
+      jupQuoteAmts.current = {...jupQuoteAmts.current, ...jupAmts};
+      setHubBundles(prev => ({...prev, ...hubs}));
+      hubBundleAmts.current = {...hubBundleAmts.current, ...hubAmts};
+      setNoQuoteRow(noQuoteRef.v);
+      setQuoteBusy(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // slippageBps IS a dep: it re-keys the Solana venue's route + threshold (and both hub
+    // floors). `venueList` re-keys when the relay's served registry lands. `targets`/`rows`
+    // re-key on the resolved pair; `activeRow` re-keys on the pick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amountText, target, targets, venueList, record != null && isLiveRecord(record), slippageBps, activeRow?.rowId, inDecimals, inFee, relayUrl]);
+
+  // ── Stale refresh (the 30 s clock, single-flight): every RENDERED live quote refreshes its
+  //    own number in place; a moved ACTIVE quote is surfaced as the review line, never a silent
+  //    swap. CeFi rows are EXEMPT (the partner agreement: no timed partner demand) — their
+  //    confirm-time re-quote is the execution protection.
+  useEffect(() => {
+    if (target == null || isLiveRecord(record)) return;
+    const id = setInterval(() => {
+      if (!mountedRef.current || staleRefreshing) return;
+      const candidates = rows.filter(r => r.kind === 'direct' || r.kind === 'solamm' || r.rowId === selRowId)
+        .filter(r => r.kind !== 'cefi');
+      const staleIc = candidates.filter((r): r is Extract<SwapRow, {kind: 'direct'} | {kind: 'crossrail'}> => {
+        const q = rowQuotes[r.rowId];
+        return (r.kind === 'direct' || r.kind === 'crossrail') && q != null && isQuoteStale(q);
+      });
+      const staleJup = candidates.filter((r): r is Extract<SwapRow, {kind: 'solamm'}> => {
+        const q = jupQuotes[r.rowId];
+        return r.kind === 'solamm' && q != null && isQuoteStale(q);
+      });
+      const staleHub = candidates.filter((r): r is Extract<SwapRow, {kind: 'hub'}> => {
+        const b = hubBundles[r.rowId];
+        return r.kind === 'hub' && b != null && (isQuoteStale(b.q1) || isQuoteStale(b.q2));
+      });
+      if (staleIc.length === 0 && staleJup.length === 0 && staleHub.length === 0) return;
+      setStaleRefreshing(true);
+      void (async () => {
+        try {
+          for (const r of staleIc) {
+            const q = rowQuotes[r.rowId];
+            if (q == null) continue;
+            const fresh = r.kind === 'crossrail'
+              ? await fetchConvertQuote(relayUrl, r.route.from.ledger, r.route.hop.ledger, q.amountIn, {venue: venueOfId(r.route.swapVenueId) ?? undefined})
+              : await fetchConvertQuote(relayUrl, r.inLedger, r.outLedger, q.amountIn);
+            if (!mountedRef.current) return;
+            setRowQuotes(prev => ({...prev, [r.rowId]: fresh}));
+            if (activeRow != null && r.rowId === activeRow.rowId && fresh.amountOutGross !== q.amountOutGross) {
+              setQuoteChanged({oldAmt: q.amountOutGross, newAmt: fresh.amountOutGross});
+            }
+          }
+          for (const r of staleJup) {
+            const q = jupQuotes[r.rowId];
+            if (q == null) continue;
+            const res = await fetchJupiterQuote(relayUrl, r.venue, r.inMint, r.outMint, q.inAmount, slippageBps);
+            if (!mountedRef.current) return;
+            if (res.ok) {
+              setJupQuotes(prev => ({...prev, [r.rowId]: res.quote}));
+              if (activeRow != null && r.rowId === activeRow.rowId && res.quote.outAmount !== q.outAmount) {
+                setQuoteChanged({oldAmt: q.outAmount, newAmt: res.quote.outAmount});
+              }
+            }
+          }
+          for (const r of staleHub) {
+            const b = hubBundles[r.rowId];
+            if (b == null) continue;
+            const got = await fetchHubQuotes(relayUrl, r.route, b.q1.amountIn, inFee, slippageBps);
+            if (!mountedRef.current) return;
+            setHubBundles(prev => ({...prev, [r.rowId]: got}));
+            if (activeRow != null && r.rowId === activeRow.rowId
+              && (got.q1.amountOutGross !== b.q1.amountOutGross || got.q2.amountOutGross !== b.q2.amountOutGross)) {
+              setQuoteChanged({oldAmt: b.m2.netOut, newAmt: got.m2.netOut});
+            }
+          }
         } catch {
-          // The stale pair stays on screen; the next tick tries again. Errors while merely
+          // Stale quotes stay on screen; the next tick tries again. Errors while merely
           // refreshing are not confirm errors — the confirm re-quotes and would refuse.
         } finally {
           if (mountedRef.current) setStaleRefreshing(false);
@@ -686,121 +512,31 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hubMode, hubRoute?.routeId, legs?.inDesc.ledger, relayUrl, record != null && isLiveRecord(record), hubQuote1, hubQuote2, hubBusy, staleRefreshing, slippageBps, amountText]);
+  }, [target, rows, rowQuotes, jupQuotes, hubBundles, selRowId, activeRow?.rowId, staleRefreshing, slippageBps, record != null && isLiveRecord(record), inFee, relayUrl]);
 
-  // --- stale refresh: >30 s old (test-seam overridable via __DPAY_TEST_CONVERT_STALE_MS) → fetch
-  //     a fresh quote in place; a moved amount is surfaced as a review line, never silently kept.
-  //     Single-venue mode only — the chooser refreshes each row itself (below).
-  //     CEFI MODE IS EXEMPT (2026-09-22 partner agreement, organic-demand discipline): the
-  //     venue's rate is fetched when the screen opens and re-fetched when the amount changes
-  //     (and again at the confirm gesture, which mints the order's own locked quote) — NEVER
-  //     on a timer. An interval re-quote is machine-generated demand against the partner-key
-  //     proxy, exactly the traffic class the agreement forbids; the confirm-time re-quote
-  //     remains the user's execution protection (a moved market is reviewed THERE).
+  // ── Min-out derivation (the compiled core's arithmetic — never TS): from the ACTIVE IC quote
+  //    (a direct pool's own quote, or a cross-rail route's swap-hop quote).
+  const [math, setMath] = useState<ConvertMath | null>(null);
   useEffect(() => {
-    if (quote == null || legs == null || isLiveRecord(record) || chooserMode || cefiMode) return;
-    const id = setInterval(() => {
-      if (!mountedRef.current || staleRefreshing || !isQuoteStale(quote)) return;
-      setStaleRefreshing(true);
-      void (async () => {
-        try {
-          // IC-AMM pairs only now — the cefi surface never reaches this effect (the gate
-          // above); the refresh rides the plain swap_quote path with the route's own venue.
-          const fresh = await fetchConvertQuote(
-            relayUrl, legs.inDesc.ledger,
-            activeRoute != null ? activeRoute.hop.ledger : effOut!.ledger,
-            quote.amountIn,
-            activeRoute != null ? {venue: venueOfId(activeRoute.swapVenueId) ?? undefined} : {},
-          );
-          if (mountedRef.current && fresh.amountOutGross !== quote.amountOutGross) {
-            setQuoteChanged({oldAmt: quote.amountOutGross, newAmt: fresh.amountOutGross});
-          }
-          if (mountedRef.current) setQuote(fresh);
-        } catch (e) {
-          // unreachable relay: leave the old quote + its timestamp visible; confirm re-quotes anyway.
-          console.warn('convert stale re-quote failed:', e instanceof Error ? e.message : String(e));
-        } finally {
-          if (mountedRef.current) setStaleRefreshing(false);
-        }
-      })();
-    }, 1000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quote?.fetchedAtMs, quote?.amountIn, staleRefreshing, legs?.inDesc.ledger, effOut?.ledger, relayUrl, record != null && isLiveRecord(record), chooserMode, cefiMode, activeRoute?.routeId, activeRoute?.hop.ledger, destMech, mechUnpicked, selGroup?.key, hubMode]);
-
-  // --- stale refresh, CHOOSER MODE: every stale row refreshes its OWN quote (row order and the
-  //     user's selection are inputs here, never outputs). A moved SELECTED quote is surfaced as
-  //     the same review line as single-venue mode — never a silent swap under a confirmed pick.
-  useEffect(() => {
-    if (legs == null || isLiveRecord(record) || !chooserMode) return;
-    const id = setInterval(() => {
-      if (!mountedRef.current || staleRefreshing) return;
-      const staleRows = (chooserVenues ?? []).filter(v => {
-        const q = venueQuotes[v.venue_id];
-        return q != null && isQuoteStale(q);
-      });
-      if (staleRows.length === 0) return;
-      setStaleRefreshing(true);
-      void (async () => {
-        try {
-          const settled = await Promise.allSettled(
-            staleRows.map(v =>
-              fetchConvertQuote(relayUrl, legs.inDesc.ledger, effOut!.ledger, venueQuotes[v.venue_id].amountIn, {venue: v}),
-            ),
-          );
-          if (!mountedRef.current) return;
-          const next: Record<string, ConvertQuote> = {...venueQuotes};
-          settled.forEach((r, i) => {
-            if (r.status === 'fulfilled') next[staleRows[i].venue_id] = r.value;
-          });
-          setVenueQuotes(next);
-          const selIdx = staleRows.findIndex(v => v.venue_id === selectedVenueId);
-          if (selIdx >= 0 && settled[selIdx].status === 'fulfilled') {
-            const fresh = settled[selIdx].value;
-            const oldQ = venueQuotes[staleRows[selIdx].venue_id];
-            if (oldQ != null && fresh.amountOutGross !== oldQ.amountOutGross) {
-              setQuoteChanged({oldAmt: oldQ.amountOutGross, newAmt: fresh.amountOutGross});
-            }
-          }
-        } finally {
-          if (mountedRef.current) setStaleRefreshing(false);
-        }
-      })();
-    }, 1000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chooserMode, venueQuotes, selectedVenueId, staleRefreshing, legs?.inDesc.ledger, effOut?.ledger, relayUrl, record != null && isLiveRecord(record), destMech]);
-
-  // --- derivations (min-out is computed by the tested core — DpayCore.icpSwapMinOut — never in TS).
-  //     Derived from the ACTIVE quote — in chooser mode that is the picked row's own quote.
-  useEffect(() => {
-    if (activeQuote == null || legs == null) {
+    if (activeIcQuote == null) {
       setMath(null);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
-        // In route mode the "output fee" of the hop math is the HOP ledger's own fee (the
-        // ckUSDC the burn side pays its approve with) — the direct pair's output fee never
-        // enters a composed quote's arithmetic. In CeFi mode there IS no output ledger fee:
-        // the venue's commission lives inside its own quoted rate (commissionRate "0"
-        // relay-side), so the honest figure is zero, not the direct pair's VCHF fee.
-        const m = await deriveConvertMath(
-          activeQuote, legs.inFee,
-          activeRoute != null ? activeRoute.hop.fee : cefiMode ? '0' : effOut?.fee ?? legs.outFee,
-          slippageBps,
-        );
+        // A route's "output fee" is the HOP ledger's own fee (the ckUSDC the burn side pays its
+        // approve with) — the direct pair's output fee never enters a composed quote's math.
+        const outFee = directRow != null ? directRow.outDesc.fee ?? '0' : crossRow != null ? crossRow.route.hop.fee : '0';
+        const m = await deriveConvertMath(activeIcQuote, inFee, outFee, slippageBps);
         if (!cancelled && mountedRef.current) setMath(m);
       } catch (e) {
-        // The min-out is the compiled core's arithmetic: if it cannot run, the screen has no
-        // honest number to show and MUST say so — never a silently blank checklist.
+        // No honest number → the screen says so, never a silently blank checklist.
         const msg = e instanceof Error ? e.message : String(e);
         console.warn('convert math derivation failed:', msg);
         if (!cancelled && mountedRef.current) {
           setMath(null);
           setQuoteErr(msg);
-          setNoQuoteVenue(null);
         }
       }
     })();
@@ -808,14 +544,16 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeQuote?.venueId, activeQuote?.fetchedAtMs, activeQuote?.amountOutGross, slippageBps, legs?.inDesc.ledger, effOut?.fee, activeRoute?.routeId]);
+  }, [activeIcQuote?.venueId, activeIcQuote?.fetchedAtMs, activeIcQuote?.amountOutGross, slippageBps, directRow?.rowId, crossRow?.rowId, inFee]);
 
-  // --- the route's live gas quote (2026-09-14 spec §5/§6): the minter's OWN eip-1559 figure,
-  //     fetched through the same service the standalone Withdraw flow uses — shown as its own
-  //     census line and preflighted against the wallet's ckETH balance BEFORE anything is
-  //     signed. prepare re-queries at confirm; this copy is for review, never for signing.
+  // ── The cross-rail route's live gas quote (2026-09-14 spec §5/§6): the minter's OWN eip-1559
+  //    figure, shown as its own census line and preflighted BEFORE anything is signed. prepare
+  //    re-queries at confirm; this copy is for review, never for signing.
+  const [routeGas, setRouteGas] = useState<{feeWei: string; gasLedgerFee: string} | null>(null);
+  const [routeGasErr, setRouteGasErr] = useState<string | null>(null);
+  const [gasNonce, setGasNonce] = useState(0);
   useEffect(() => {
-    if (activeRoute == null || isLiveRecord(record)) {
+    if (crossRow == null || isLiveRecord(record)) {
       setRouteGas(null);
       setRouteGasErr(null);
       return;
@@ -823,9 +561,9 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
     let cancelled = false;
     void (async () => {
       try {
-        const feeWei = await fetchGasFeeWei(identity.secretHex, activeRoute.burn.minter, activeRoute.hop.ledger);
+        const feeWei = await fetchGasFeeWei(identity.secretHex, crossRow.route.burn.minter, crossRow.route.hop.ledger);
         if (feeWei == null) throw new Error(M.convert.errors.gasUnavailable);
-        const gasLedgerFee = await fetchLedgerFee(identity.secretHex, activeRoute.burn.gasLedger);
+        const gasLedgerFee = await fetchLedgerFee(identity.secretHex, crossRow.route.burn.gasLedger);
         if (!cancelled && mountedRef.current) {
           setRouteGas({feeWei, gasLedgerFee});
           setRouteGasErr(null);
@@ -841,14 +579,14 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoute?.routeId, relayUrl, record != null && isLiveRecord(record), gasNonce]);
+  }, [crossRow?.rowId, relayUrl, record != null && isLiveRecord(record), gasNonce]);
 
-  // --- the CROSS-RAIL fee census (Routes B/C): Circle's own published number for the burn
-  //     (fast finality, med forward fee, 20% buffer) + the honest external-gas line naming
-  //     WHO pays the Ethereum side. prepare re-fetches and freezes maxFee on the record;
-  //     this copy is for review. Fail-closed: no fee → no confirm (same rule as route gas).
+  // ── Circle's OWN published fee for the crossing — shown in the census as the venue's own
+  //    number; prepare re-fetches live at confirm. Fail-closed: no fee → no confirm.
+  const [crossFee, setCrossFee] = useState<{maxFee: string; floor: string} | null>(null);
+  const [crossFeeErr, setCrossFeeErr] = useState<string | null>(null);
   useEffect(() => {
-    if (activeRoute == null || activeRoute.crossRail == null || math == null || isLiveRecord(record)) {
+    if (crossRow == null || math == null || isLiveRecord(record)) {
       setCrossFee(null);
       setCrossFeeErr(null);
       return;
@@ -864,7 +602,6 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
           setCrossFeeErr(null);
         }
       } catch {
-        // Collapsed to the localized fee-unavailable line — never a partial census.
         if (!cancelled && mountedRef.current) {
           setCrossFee(null);
           setCrossFeeErr(M.convert.errors.cctpFeeUnavailable);
@@ -875,20 +612,14 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoute?.routeId, math?.minOut, record != null && isLiveRecord(record)]);
+  }, [crossRow?.rowId, math?.minOut, record != null && isLiveRecord(record)]);
 
-  // --- Route C's review-time destination estimate (founder clarity fix, 2026-09-22): the
-  //     review numbers name the HOP asset (USDC), so the destination's own figure is a
-  //     Jupiter quote for the mint FLOOR (crossFee.floor USDC → the route's out mint) — the
-  //     same machinery the sol_ready final leg quotes with, sized on the floor not the
-  //     verified credit (there is no credit yet; this is an estimate, labeled as one).
-  //     EVENT-DRIVEN ONLY: it re-keys on the floor (which re-keys on the quote/amount via
-  //     the crossFee effect) and the route — NO interval, NO polling. Fail-soft by
-  //     construction: fetch error, refusal, or timeout → the line is simply absent; it can
-  //     never block review or raise an error UI. Single-flight via the cancelled-flag
-  //     cleanup: a superseded fetch is dropped, never a late overwrite.
+  // ── Route C's review-time destination estimate (founder clarity fix, 2026-09-22): what the
+  //    USDC mint floor would land as at the destination, from the SAME quote machinery the
+  //    final leg runs. EVENT-DRIVEN, fail-soft: absent until it fetches, never an error.
+  const [destEstimate, setDestEstimate] = useState<string | null>(null);
   useEffect(() => {
-    const sol = activeRoute?.crossRail?.sol;
+    const sol = crossRow?.route.crossRail?.sol;
     if (sol == null || crossFee == null || isLiveRecord(record)) {
       setDestEstimate(null);
       return;
@@ -901,8 +632,6 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
     let cancelled = false;
     void (async () => {
       try {
-        // fetchJupiterQuote resolves to the honest-failure union (never throws), but the
-        // catch keeps the fail-soft promise airtight even against a transport surprise.
         const q = await fetchJupiterQuote(relayUrl, venue, USDC_MINT_ADDRESS, sol.outMint, crossFee.floor, slippageBps);
         if (!cancelled && mountedRef.current) setDestEstimate(q.ok ? q.quote.outAmount : null);
       } catch {
@@ -912,286 +641,93 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
     return () => {
       cancelled = true;
     };
-    // slippageBps deliberately NOT a dependency: the floor re-key already bakes it in
-    // (crossFee re-derives from math.minOut, which is slippage-sized).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeRoute?.routeId, crossFee?.floor, relayUrl, record != null && isLiveRecord(record)]);
+  }, [crossRow?.rowId, crossFee?.floor, relayUrl, record != null && isLiveRecord(record)]);
 
-  // HUB confirm (D7–D13): the destination is the user's OWN account on the destination
-  // ledger — no address input, no gas preflight, no cross-fee. Both hops re-quoted fresh at
-  // confirm (UX §6 red line 7): quote2 is sized on the FRESH floor; a moved number is
-  // reviewed, never silently signed. The frozen four-leg args are prepared only after the
-  // review passes. Kept as its own closure so onConfirm's single-quote guard keeps its
-  // narrowing for the direct/route/CeFi branches.
-  const onConfirmHub = async () => {
-    if (legs == null || confirmBusy) return;
-    if (mechUnpicked) return;
-    if (hubRoute == null || hubQuote1 == null || hubQuote2 == null || hubMath1 == null || hubMath2 == null) return;
-    setConfirmBusy(true);
-    setConfirmErr(null);
-    setQuoteChanged(null);
-    try {
-      const fresh = await fetchHubQuotes(relayUrl, hubRoute, hubQuote1.amountIn, legs.inFee, slippageBps);
-      if (fresh.q1.amountOutGross !== hubQuote1.amountOutGross || fresh.q2.amountOutGross !== hubQuote2.amountOutGross) {
-        if (mountedRef.current) {
-          setHubQuote1(fresh.q1);
-          setHubMath1(fresh.m1);
-          setHubQuote2(fresh.q2);
-          setHubMath2(fresh.m2);
-          setQuoteChanged({oldAmt: hubMath2.netOut, newAmt: fresh.m2.netOut});
-        }
-        return;
-      }
-      const rec = await prepareHubConvertRecord({
-        secretHex: identity.secretHex,
-        quote1: fresh.q1,
-        quote2: fresh.q2,
-        math1: fresh.m1,
-        math2: fresh.m2,
-        route: hubRoute,
+  // ── The CeFi handoff addresses: BOTH rails' derivations, one copy. The payout target
+  //    (settle) is the user's OWN address ON THE DESTINATION RAIL; the refund address is the
+  //    user's own address ON THE DEPOSIT RAIL (where the venue returns funds on a failed
+  //    deposit or expiry — never a dpay-controlled address, and the relay refuses an order
+  //    without one). The IC-side identifier is the wallet's 64-hex ACCOUNT IDENTIFIER — the
+  //    form the venue's ICP payout layer can actually deliver to (SideShift engineering,
+  //    confirmed in writing 2026-09-21) — derived async from the device key.
+  const [cefiIcAccountId, setCefiIcAccountId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!cefiMode) {
+      setCefiIcAccountId(null);
+      return;
+    }
+    let alive = true;
+    DpayCore.icpPrincipalFromPubkey(identity.publicHex)
+      .then(p => DpayCore.icpAccountIdFromPrincipal(p, ''))
+      .then(id => {
+        if (alive) setCefiIcAccountId(id);
+      })
+      .catch(() => {
+        if (alive) setCefiIcAccountId(null);
       });
-      if (!mountedRef.current) return;
-      // Same engine handoff as every other confirm: the ENGINE owns the four signed legs,
-      // the hop watch, and every state transition from here.
-      recordIdRef.current = rec.id;
-      setRecord(rec);
-      await adoptConvertRecord(rec);
-    } catch (e) {
-      if (mountedRef.current) setConfirmErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (mountedRef.current) setConfirmBusy(false);
-    }
-  };
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cefiMode, cefiRow?.rowId, identity.publicHex]);
+  // Memoized: the derivation is real crypto, not per-keystroke work.
+  const cefiSolAddress = useMemo(
+    () => (cefiMode ? deriveSolanaAddress(identity.secretHex) : null),
+    [cefiMode, identity.secretHex],
+  );
+  // The payout target (settle) lives on the DESTINATION rail; the refund address on the
+  // DEPOSIT rail (where the venue returns funds on a failed deposit or expiry).
+  const cefiSettleAddress = cefiRow != null
+    ? (cefiRow.outLedger != null ? cefiIcAccountId : cefiSolAddress)
+    : null;
+  const cefiRefundAddress = cefiRow != null
+    ? (cefiRow.outLedger != null ? cefiSolAddress : cefiIcAccountId)
+    : null;
 
-  // The funded variant passes the wallet's balances so the engine resolves + prepends the
-  // gas-funding pre-legs; the plain confirm never does (byte-identical unfunded records).
-  const onConfirm = async (gasFundArg?: {relayUrl: string; balances: Record<number, string>} | null) => {
-    if (legs == null || confirmBusy) return;
-    // A multi-mechanism destination signs NOTHING until a mechanism sub-row is picked (D2/D5) —
-    // same rule as the venue chooser's never-preselected confirm gate, one level down.
-    if (mechUnpicked) return;
-    if (hubMode) {
-      await onConfirmHub();
-      return;
-    }
-    if (activeQuote == null || math == null) return;
-    // Chooser mode: the confirm executes through the PICKED row's venue — the fresh quote, the
-    // record's venueId and the signed legs all follow that one pick (Wave-1 pool-keyed legs).
-    const venueOpt = chooserMode ? {venue: selectedVenue ?? undefined} : {};
-    const reviewed = activeQuote;
-    // Route mode: the destination address is part of the intent — never signed unvalidated,
-    // and a mixed-case EVM address must verify its own EIP-55 checksum (one flipped case
-    // verifies as a DIFFERENT address; this guard closes that exposure on EVERY route).
-    if (activeRoute != null && (!isValidDestinationAddress('CkEthErc20', destAddress) || eip55ChecksumBad(destAddress))) return;
-    if (activeRoute != null) {
-      setConfirmBusy(true);
-      setConfirmErr(null);
-      setQuoteChanged(null);
-      try {
-        // Same re-quote-at-confirm discipline, on the SWAP HOP: a moved market is reviewed,
-        // never silently submitted. prepare re-queries the minter's gas FRESH — the number
-        // signed is never the review copy fetched above.
-        const fresh = await fetchConvertQuote(
-          relayUrl, legs.inDesc.ledger, activeRoute.hop.ledger, reviewed.amountIn,
-          {venue: venueOfId(activeRoute.swapVenueId) ?? undefined},
-        );
-        if (fresh.amountOutGross !== reviewed.amountOutGross) {
-          setQuote(fresh);
-          setQuoteChanged({oldAmt: reviewed.amountOutGross, newAmt: fresh.amountOutGross});
-          return;
-        }
-        // The gas-fund widening (2026-09-20): a funded offer passes the wallet's balances so
-        // prepare resolves + prepends the funding pre-legs (the DOUBLE-GAS guard inside keeps
-        // this honest against the fresh quote). Absent → byte-identical unfunded record.
-        const rec = await prepareMultihopConvertRecord({
-          secretHex: identity.secretHex,
-          quote: fresh,
-          math,
-          route: activeRoute,
-          destAddress,
-          ...(gasFundArg != null ? {gasFund: gasFundArg} : {}),
-        });
-        if (!mountedRef.current) return;
-        recordIdRef.current = rec.id;
-        setRecord(rec);
-        await adoptConvertRecord(rec);
-      } catch (e) {
-        if (mountedRef.current) setConfirmErr(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (mountedRef.current) setConfirmBusy(false);
-      }
-      return;
-    }
-    if (cefiMode && activeCefiVenue != null && cefiOutMint != null && cefiOut != null
-      && cefiSettleAddress != null && cefiRefundAddress != null) {
-      setConfirmBusy(true);
-      setConfirmErr(null);
-      setQuoteChanged(null);
-      try {
-        // The record id is minted BEFORE the order (the trade's clientOrderId — see below).
-        const cefiRecordId = randNonceHex();
-        // Re-quote at the confirm gesture — but ONLY to mint a FRESH QUOTE ID: the fixed
-        // order must be created from a live quote (SideShift pins quoteId ↔ affiliateId ↔
-        // rate together). There is deliberately NO exact-match gate against the reviewed
-        // quote: a fixed shift LOCKS its rate at order creation, not at the earlier review
-        // quote, and a venue rate that ticks between the two fetches can never be matched
-        // exactly — the old equality gate livelocked the confirm live (review → moved →
-        // review → moved …). The user fixes the DEPOSIT (identical in both quotes); the
-        // settle figure is the venue's own number locked on the ORDER, and the
-        // awaiting-deposit panel renders the order's own depositAmount/settle verbatim —
-        // the order is both the lock and the consent point: the user sends exactly its
-        // deposit figure, or nothing (prepare still refuses an order whose depositAmount
-        // is not the quoted deposit).
-        let freshRes: CeFiQuoteResult;
-        try {
-          // The 20s confirm budget (CONVERT_CEFI_CONFIRM_TIMEOUT_MS), not the 8s review
-          // default: the client must never abort below the relay's own 15s upstream bound —
-          // an abort there orphans a venue-side order (the live attempt-#3 signature).
-          freshRes = await fetchCeFiQuoteResult(
-            relayUrl, activeCefiVenue, legs.inDesc.ledger, cefiOutMint,
-            rawToDecimal(reviewed.amountIn, legs.inDecimals), CONVERT_CEFI_CONFIRM_TIMEOUT_MS,
-          );
-        } catch (e) {
-          throw ceFiServiceError(e, activeCefiVenue.display_name);
-        }
-        const fresh = ceFiQuoteFromResult(
-          activeCefiVenue, legs.inDesc.ledger, cefiOutMint, reviewed.amountIn, freshRes, cefiOut.decimals,
-        );
-        // Order creation is CeFi: the DEVICE posts the order body to the relay proxy (the
-        // relay attaches the partner credential server-side); the venue answers with its
-        // OWN deposit address. The user sends the deposit to the VENUE, never to dpay —
-        // the record's providerDeposit block carries exactly that handoff. The refund
-        // address is the user's OWN IC principal: if the deposit fails or the order
-        // expires, the venue returns the funds THERE — never to a dpay-controlled
-        // address, and the relay refuses an order that omits it.
-        let order;
-        try {
-          order = await createCeFiOrder(relayUrl, activeCefiVenue, freshRes, {
-            settleAddress: cefiSettleAddress,
-            refundAddress: cefiRefundAddress,
-            depositLedger: legs.inDesc.ledger,
-            settleLedger: cefiOutMint,
-            depositAmountDecimal: rawToDecimal(reviewed.amountIn, legs.inDecimals),
-            // The partner agreement's correlation field (Trocador family, 2026-09-22): the
-            // record id is minted NOW, before the order exists, so the locally persisted
-            // record and the relay's logged clientOrderId are the SAME id. The sideshift
-            // family's order body has no such field and ignores it.
-            clientOrderId: cefiRecordId,
-          }, CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
-        } catch (e) {
-          throw ceFiServiceError(e, activeCefiVenue.display_name);
-        }
-        const rec = prepareCeFiConvertRecord({
-          id: cefiRecordId,
-          quote: fresh,
-          order,
-          relayUrl,
-          settleAddress: cefiSettleAddress,
-          inCurrency: legs.inDesc.currency,
-          inSymbol: legs.inSym,
-          outSymbol: cefiOut.symbol,
-          inDecimals: legs.inDecimals,
-          outDecimals: cefiOut.decimals,
-        });
-        if (!mountedRef.current) return;
-        // Same engine handoff as every other confirm: the ENGINE owns polling the venue's
-        // keyless status endpoint and every state transition from here.
-        recordIdRef.current = rec.id;
-        setRecord(rec);
-        await adoptConvertRecord(rec);
-      } catch (e) {
-        if (mountedRef.current) setConfirmErr(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (mountedRef.current) setConfirmBusy(false);
-      }
-      return;
-    }
-    setConfirmBusy(true);
-    setConfirmErr(null);
-    setQuoteChanged(null);
-    const outDesc = effOut ?? legs.outDesc;
-    // Unreachable for a direct pick (a direct row is always a priced catalog row) — kept
-    // fail-closed so the prepare call can never see a leg-less record.
-    if (outDesc == null) {
-      setConfirmBusy(false);
-      return;
-    }
-    try {
-      // Re-quote at confirm (spec §5): a moved market must be reviewed, never silently submitted.
-      const fresh = await fetchConvertQuote(relayUrl, legs.inDesc.ledger, outDesc.ledger, reviewed.amountIn, venueOpt);
-      if (fresh.amountOutGross !== reviewed.amountOutGross) {
-        if (chooserMode && selectedVenue != null) {
-          setVenueQuotes(prev => ({...prev, [selectedVenue.venue_id]: fresh}));
-        } else {
-          setQuote(fresh);
-        }
-        setQuoteChanged({oldAmt: reviewed.amountOutGross, newAmt: fresh.amountOutGross});
-        return;
-      }
-      const rec = await prepareConvertRecord({
-        secretHex: identity.secretHex,
-        relayUrl,
-        quote: fresh,
-        math,
-        inDesc: legs.inDesc,
-        outDesc,
-      });
-      if (!mountedRef.current) return;
-      // Hand the record to the ENGINE (V6): it persists, surfaces, and drives it — this screen
-      // keeps rendering FROM the engine's notifications, exactly as it does a resumed record.
-      recordIdRef.current = rec.id;
-      setRecord(rec);
-      await adoptConvertRecord(rec);
-    } catch (e) {
-      if (mountedRef.current) setConfirmErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (mountedRef.current) setConfirmBusy(false);
-    }
-  };
+  // ── The route's destination address (the CCTP crossing's signer side) — a required input,
+  //    validated live, re-typed once before the gas-fund offer can ever render. The checksum
+  //    and re-entry gates are verbatim from the multihop surface.
+  const [destAddress, setDestAddress] = useState('');
+  const [destRetype, setDestRetype] = useState('');
+  const [destReentered, setDestReentered] = useState<string | null>(null);
+  const [destEthWei, setDestEthWei] = useState<string | null | undefined>(undefined);
+  const [ethRecheckNonce, setEthRecheckNonce] = useState(0);
+  const [selfFundOpen, setSelfFundOpen] = useState(false);
 
-  // --- the destination/gas offer derivations + effects (2026-09-20) ---------------------------
-  // PLACEMENT RULE (the 196 lesson): every hook in ConvertMode must sit ABOVE the early
-  // returns below (the fund gate, the terminal-record panel) — a render that takes one of
-  // those doors skips any hook declared after it and React kills the tree with "Rendered
-  // fewer hooks than expected". These consts are the hooks' dependency closure.
+  // ── Gas-fund derivations (2026-09-20) — every hook above sits before the early returns (the
+  //    196 hooks rule); these consts are the hooks' dependency closure.
   const destShapeValid = isValidDestinationAddress('CkEthErc20', destAddress);
-  // EIP-55 at entry (2026-09-20): a MIXED-CASE EVM address must verify against its own
-  // checksum — one flipped case in a hand-copied address verifies as a DIFFERENT address.
-  // No-case-information forms (all-lower / all-upper) stay valid: they carry no checksum.
   const destChecksumBad = eip55ChecksumBad(destAddress);
   const destValid = destShapeValid && !destChecksumBad;
-  // The gas-fund gate: the offer renders only after the address was re-typed once.
   const destConfirmed = destReentered != null && destReentered === destAddress.toLowerCase();
-  const gasBalRaw = activeRoute != null ? assetBalances[activeRoute.burn.gasCurrency] : undefined;
   const gasNeededN = routeGas != null ? BigInt(routeGas.feeWei) + BigInt(routeGas.gasLedgerFee) : null;
-  const gasShort = activeRoute != null && gasNeededN != null && gasBalRaw != null && gasBalRaw.length > 0 && BigInt(gasBalRaw) < gasNeededN;
-  const gasNeededStr = gasNeededN != null && activeRoute != null
-    ? fmtAssetCompact(gasNeededN.toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
+  const gasBalRaw = crossRow != null ? assetBalances[crossRow.route.burn.gasCurrency] : undefined;
+  const gasShort = crossRow != null && gasNeededN != null && gasBalRaw != null && gasBalRaw.length > 0 && BigInt(gasBalRaw) < gasNeededN;
+  const gasNeededStr = gasNeededN != null && crossRow != null
+    ? fmtAssetCompact(gasNeededN.toString(), crossRow.route.burn.gasDecimals, crossRow.route.burn.gasSymbol)
     : null;
-  // --- the cross-rail gas-fund offer (2026-09-20): the gasShort warn upgraded from a dead end
-  //     into the two honest paths out. NEED is the minter's live feeWei plus the engine's own
-  //     20% forward-fee headroom convention; HAVE is the destination wallet's measured ETH
-  //     (eth_getBalance, publicnode). No measured have → no card: a need-vs-have offer without
-  //     a measured have is not honest, and today's fail-open warn stands instead.
-  const gasFundCardWanted = routeMode && gasShort && destConfirmed && activeRoute?.crossRail != null;
-  // NEED per the engine's own derivation (feeWei + its 20% headroom convention) — the card's
-  // number is the same arithmetic prepare freezes, never a UI-local re-derivation.
-  const gasFundNeedStr = routeGas != null && activeRoute != null
-    ? fmtAssetCompact(gasFundNeededWei(routeGas.feeWei).toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
+  // The measured HAVE for the gas-fund offer: the DESTINATION wallet's ETH (eth_getBalance,
+  // publicnode). Unknown → the card hides (a need-vs-have offer without a have is not honest).
+  const gasFundCardWanted = routeMode && gasShort && destConfirmed;
+  const gasFundNeedStr = routeGas != null && crossRow != null
+    ? fmtAssetCompact(gasFundNeededWei(routeGas.feeWei).toString(), crossRow.route.burn.gasDecimals, crossRow.route.burn.gasSymbol)
     : null;
-  const gasFundHaveStr = destEthWei != null && activeRoute != null
-    ? fmtAssetCompact(destEthWei, activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
+  const gasFundHaveStr = destEthWei != null && crossRow != null
+    ? fmtAssetCompact(destEthWei, crossRow.route.burn.gasDecimals, crossRow.route.burn.gasSymbol)
     : null;
-  const gasFundShortStr = gasFundNeedStr != null && destEthWei != null && routeGas != null && activeRoute != null
+  const gasFundShortStr = gasFundNeedStr != null && destEthWei != null && routeGas != null && crossRow != null
     ? (() => {
         const need = gasFundNeededWei(routeGas.feeWei);
         const have = BigInt(destEthWei);
-        return have >= need ? null : fmtAssetCompact((need - have).toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol);
+        return have >= need ? null : fmtAssetCompact((need - have).toString(), crossRow.route.burn.gasDecimals, crossRow.route.burn.gasSymbol);
       })()
     : null;
   const gasFundCardShown = gasFundCardWanted && destEthWei != null && gasFundNeedStr != null && gasFundHaveStr != null;
-  // Fresh NEED the moment the offer is first wanted (the effect order makes this a no-op
-  // until the card's conditions hold; leaving the offer re-arms it for the next entry).
+  // [Fund from this wallet] is enabled iff a funding path exists — the engine's enumeration
+  // over the registry (direct venue first, else hub) from the conversion's input ledger.
+  const gasFundRouteOk = crossRow != null
+    && gasFundRoutes(catalog, crossRow.route.from.ledger, crossRow.route.burn.gasLedger).length > 0;
   const gasFundFreshRef = useRef(false);
   useEffect(() => {
     if (gasFundCardWanted && !gasFundFreshRef.current) {
@@ -1201,8 +737,6 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
       gasFundFreshRef.current = false;
     }
   }, [gasFundCardWanted]);
-  // The measured HAVE: eth_getBalance on the destination wallet, only while the offer is
-  // wanted. Unknown (null) keeps the card hidden — the passive warn stands, fail-open.
   useEffect(() => {
     if (!gasFundCardWanted) {
       setDestEthWei(ethWei => (ethWei === undefined ? ethWei : undefined));
@@ -1220,76 +754,268 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gasFundCardWanted, destAddress, ethRecheckNonce]);
-  // A recheck that finds the wallet funded closes the self-fund instruction — the offer card
-  // returns with the fresh numbers (the shortfall line is its own unblock signal).
   useEffect(() => {
     if (selfFundOpen && ethRecheckNonce > 0 && destEthWei != null && gasFundShortStr == null) setSelfFundOpen(false);
   }, [selfFundOpen, ethRecheckNonce, destEthWei, gasFundShortStr]);
 
-  if (legs == null) return <UnavailablePanel selectedAsset={selectedAsset} onBack={onBack} />;
+  // ── The gates (fail closed BEFORE the confirm, never after it). A null balance (not yet
+  //    read) fails OPEN — a balance nobody has measured is not a zero (the Pay tab's rule).
+  const parsed = parseUserAmount(amountText, inDecimals);
+  const amountRaw = parsed.ok ? parsed.raw : null;
+  const amountN = amountRaw != null && /^\d+$/.test(amountRaw) ? BigInt(amountRaw) : 0n;
+  const hubFeeN = hubRow != null ? BigInt(hubRow.route.hub.fee) : 0n;
+  const neededN = parsed.ok && amountRaw !== '0' && !ammMode
+    ? BigInt(parsed.raw) + (cefiMode ? 1n : 2n) * BigInt(inFee) + hubFeeN
+    : null;
+  // The Solana venue tx's network fee is paid in SOL on top of the swapped amount — when SOL is
+  // the INPUT the honest available figure is the balance itself (a dust edge fails on-chain and
+  // lands in the honest failure state, never a false pass).
+  const insufficient = ammMode
+    ? amountN > 0n && balanceN != null && amountN > balanceN
+    : balanceN != null && neededN != null && neededN > balanceN;
+  const feeOverheadN = !ammMode && parsed.ok ? (cefiMode ? 1n : 2n) * BigInt(inFee) + hubFeeN : null;
+  const maxRaw = ammMode
+    ? (balanceN != null && balanceN > 0n ? balanceN.toString() : null)
+    : (balanceN != null && feeOverheadN != null && balanceN > feeOverheadN ? (balanceN - feeOverheadN).toString() : null);
+
+  // The decision bundle each kind must have on the table before confirm arms.
+  const hubReady = activeHub != null;
+  const crossReady = math != null && destValid && routeGas != null && routeGasErr == null && !gasShort && crossFee != null;
+  const cefiReady = activeCefiQuote != null && cefiSettleAddress != null && cefiRefundAddress != null;
+  const ammReady = activeJup != null;
+  const directReady = directRow != null && activeIcQuote != null && math != null;
+  const pickedReady = directReady || hubReady || crossReady || cefiReady || ammReady;
+  const canConfirm = activeRow != null && pickedReady && !quoteBusy && !confirmBusy && !insufficient && amountN > 0n;
+
+  // ── THE CONFIRM — one gesture, dispatched on the picked row's kind. Every branch re-quotes
+  //    fresh at the gesture (a moved market is reviewed, never silently submitted), then hands
+  //    the prepared record to the ENGINE (adoptConvertRecord) — this screen keeps rendering
+  //    FROM the engine's notifications.
+  const onConfirm = async (gasFundArg?: {relayUrl: string; balances: Record<number, string>} | null) => {
+    if (confirmBusyRef.current || activeRow == null || amountRaw == null || confirmBusy) return;
+    confirmBusyRef.current = true;
+    setConfirmBusy(true);
+    setConfirmErr(null);
+    setQuoteChanged(null);
+    try {
+      if (activeRow.kind === 'direct') {
+        const q = rowQuotes[activeRow.rowId];
+        if (q == null || math == null) return;
+        // Re-quote at confirm (spec §5): a moved market must be reviewed, never silently submitted.
+        const fresh = await fetchConvertQuote(relayUrl, activeRow.inLedger, activeRow.outLedger, q.amountIn, {venue: activeRow.venue});
+        if (fresh.amountOutGross !== q.amountOutGross) {
+          setRowQuotes(prev => ({...prev, [activeRow.rowId]: fresh}));
+          setQuoteChanged({oldAmt: q.amountOutGross, newAmt: fresh.amountOutGross});
+          return;
+        }
+        const rec = await prepareConvertRecord({
+          secretHex: identity.secretHex,
+          relayUrl,
+          quote: fresh,
+          math,
+          inDesc: sourceDesc!,
+          outDesc: activeRow.outDesc,
+        });
+        if (!mountedRef.current) return;
+        recordIdRef.current = rec.id;
+        setRecord(rec);
+        await adoptConvertRecord(rec);
+        return;
+      }
+      if (activeRow.kind === 'hub') {
+        const b = hubBundles[activeRow.rowId];
+        if (b == null) return;
+        // Both hops re-quoted fresh at confirm (UX §6 red line 7): quote2 is sized on the FRESH
+        // floor; a moved number is reviewed, never silently signed.
+        const fresh = await fetchHubQuotes(relayUrl, activeRow.route, b.q1.amountIn, inFee, slippageBps);
+        if (fresh.q1.amountOutGross !== b.q1.amountOutGross || fresh.q2.amountOutGross !== b.q2.amountOutGross) {
+          if (mountedRef.current) {
+            setHubBundles(prev => ({...prev, [activeRow.rowId]: fresh}));
+            setQuoteChanged({oldAmt: b.m2.netOut, newAmt: fresh.m2.netOut});
+          }
+          return;
+        }
+        const rec = await prepareHubConvertRecord({
+          secretHex: identity.secretHex,
+          quote1: fresh.q1,
+          quote2: fresh.q2,
+          math1: fresh.m1,
+          math2: fresh.m2,
+          route: activeRow.route,
+        });
+        if (!mountedRef.current) return;
+        recordIdRef.current = rec.id;
+        setRecord(rec);
+        await adoptConvertRecord(rec);
+        return;
+      }
+      if (activeRow.kind === 'crossrail') {
+        const q = rowQuotes[activeRow.rowId];
+        if (q == null || math == null) return;
+        if (!destValid) return;
+        // Re-quote at confirm on the SWAP HOP (the reviewed number is the hop payout).
+        const fresh = await fetchConvertQuote(relayUrl, activeRow.route.from.ledger, activeRow.route.hop.ledger, q.amountIn, {venue: venueOfId(activeRow.route.swapVenueId) ?? undefined});
+        if (fresh.amountOutGross !== q.amountOutGross) {
+          setRowQuotes(prev => ({...prev, [activeRow.rowId]: fresh}));
+          setQuoteChanged({oldAmt: q.amountOutGross, newAmt: fresh.amountOutGross});
+          return;
+        }
+        const rec = await prepareMultihopConvertRecord({
+          secretHex: identity.secretHex,
+          quote: fresh,
+          math,
+          route: activeRow.route,
+          destAddress,
+          ...(gasFundArg != null ? {gasFund: gasFundArg} : {}),
+        });
+        if (!mountedRef.current) return;
+        recordIdRef.current = rec.id;
+        setRecord(rec);
+        await adoptConvertRecord(rec);
+        return;
+      }
+      if (activeRow.kind === 'cefi') {
+        if (activeCefiQuote == null || cefiSettleAddress == null || cefiRefundAddress == null) return;
+        // The re-quote exists ONLY to mint a FRESH QUOTE ID (SideShift pins quoteId↔rate);
+        // there is deliberately NO exact-match gate against the reviewed quote — a ticking
+        // venue rate can never be matched exactly and the gate would livelock. The ORDER is
+        // the lock and the consent point: its depositAmount is the reviewed deposit, its
+        // settle figure is the venue's own locked number.
+        const cefiRecordId = randNonceHex();
+        let freshRes: CeFiQuoteResult;
+        try {
+          // The 20s confirm budget, NOT the 8s review default: an abort below the relay's own
+          // 15s upstream bound means the phone gives up while the venue is still answering —
+          // the order 201s venue-side and the handoff never begins (the live attempt-#3
+          // signature, 2026-09-21).
+          freshRes = await fetchCeFiQuoteResult(
+            relayUrl, activeRow.venue, activeRow.inLedgerOrMint, activeRow.outLedger ?? activeRow.outMint ?? '',
+            rawToDecimal(amountRaw, inDecimals), CONVERT_CEFI_CONFIRM_TIMEOUT_MS,
+          );
+        } catch (e) {
+          throw ceFiServiceError(e, venueDisplayName(activeRow.venue.venue_id));
+        }
+        const fresh = ceFiQuoteFromResult(
+          activeRow.venue, activeRow.inLedgerOrMint, activeRow.outLedger ?? activeRow.outMint ?? '',
+          amountRaw, freshRes, activeRow.outDecimals,
+        );
+        let order;
+        try {
+          order = await createCeFiOrder(relayUrl, activeRow.venue, freshRes, {
+            settleAddress: cefiSettleAddress,
+            refundAddress: cefiRefundAddress,
+            depositLedger: activeRow.inLedgerOrMint,
+            settleLedger: activeRow.outLedger ?? activeRow.outMint ?? '',
+            depositAmountDecimal: rawToDecimal(amountRaw, inDecimals),
+            // The partner agreement's correlation field: the record id is minted NOW, before
+            // the order exists, so the local record and the relay's logged clientOrderId are
+            // the SAME id.
+            clientOrderId: cefiRecordId,
+          }, CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
+        } catch (e) {
+          throw ceFiServiceError(e, venueDisplayName(activeRow.venue.venue_id));
+        }
+        const rec = prepareCeFiConvertRecord({
+          id: cefiRecordId,
+          quote: fresh,
+          order,
+          relayUrl,
+          settleAddress: cefiSettleAddress,
+          inCurrency: sourceDesc != null ? sourceDesc.currency : null,
+          inSymbol: inSym,
+          outSymbol: activeRow.outSym,
+          inDecimals,
+          outDecimals: activeRow.outDecimals,
+        });
+        if (!mountedRef.current) return;
+        recordIdRef.current = rec.id;
+        setRecord(rec);
+        await adoptConvertRecord(rec);
+        return;
+      }
+      // activeRow.kind === 'solamm' — the Solana venue (Jupiter): re-quote, review a moved
+      // output, then the venue-built transaction is beneficiary-checked and device-signed by
+      // the engine's prepare.
+      if (ammRow == null) return;
+      const q = jupQuotes[ammRow.rowId];
+      if (q == null) return;
+      const fresh = await fetchJupiterQuote(relayUrl, ammRow.venue, ammRow.inMint, ammRow.outMint, amountRaw, slippageBps);
+      if (!fresh.ok) {
+        setConfirmErr(M.convert.errors.quoteUnreachable(venueDisplayName(ammRow.venue.venue_id)));
+        return;
+      }
+      if (fresh.quote.outAmount !== q.outAmount) {
+        setJupQuotes(prev => ({...prev, [ammRow.rowId]: fresh.quote}));
+        setQuoteChanged({oldAmt: q.outAmount, newAmt: fresh.quote.outAmount});
+        return;
+      }
+      const rec = await prepareSolanaConvertRecord({
+        secretHex: identity.secretHex,
+        relayUrl,
+        quote: fresh.quote,
+        inAsset: {symbol: inSym, mint: ammRow.inMint, decimals: inDecimals},
+        outAsset: {symbol: ammRow.outSym, mint: ammRow.outMint, decimals: ammRow.outDecimals},
+      });
+      if (!mountedRef.current) return;
+      recordIdRef.current = rec.id;
+      setRecord(rec);
+      await adoptConvertRecord(rec);
+    } catch (e) {
+      if (mountedRef.current) setConfirmErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      confirmBusyRef.current = false;
+      if (mountedRef.current) setConfirmBusy(false);
+    }
+  };
+
+  // ── Early returns (AFTER every hook — the 196 rule). ─────────────────────────────────────────
+  if (selectedAsset == null || targets.length === 0) {
+    return <UnavailablePanel selectedAsset={selectedAsset} onBack={onBack} />;
+  }
   if (record != null && (isLiveRecord(record) || TERMINAL_CONVERT_STEPS.has(record.step))) {
-    // A CROSS-RAIL record has its own surface — the IC leg list PLUS the handoff / crossing /
-    // final-Solana phases. Checked before the plain planned panel: a cross-rail record always
-    // carries a legPlan too, so the order matters.
+    // A provider-shaped record (the CeFi family) renders through the GENERIC StatePanel — its
+    // awaiting_deposit handoff, provider_processing and refunded states are rail-agnostic. A
+    // CROSS-RAIL record carries the IC leg list PLUS the crossing phases; a plain Solana record
+    // renders its own machine; a leg-planned record renders the per-leg tracker.
+    if (record.providerRef != null) return <StatePanel record={record} onBack={onBack} />;
     if (record.crossRail != null) {
       return <CrossRailStatePanel record={record} secretHex={identity.secretHex} relayUrl={relayUrl} solLamports={solana?.sol ?? null} onBack={onBack} />;
     }
-    // A PLANNED record renders its own per-leg surface — the route's leg list IS the progress UI.
+    if (record.solanaLeg != null) return <SolStatePanel record={record} onBack={onBack} />;
     return record.legPlan != null
       ? <RouteStatePanel record={record} onBack={onBack} />
       : <StatePanel record={record} onBack={onBack} />;
   }
 
-  const {inSym, inDecimals} = legs;
-  // The OUTPUT leg the form names/quotes: under a non-standing in-wallet direct pick it is
-  // THAT row (effOut); otherwise the standing pair's other leg — byte-identical to the
-  // pre-groups surface for every pinned direct flow. Null for a hub-only asset, whose out*
-  // fallbacks (input row's own facts) never reach a rendered money line.
-  const effOutDesc = effOut ?? legs.outDesc;
-  // The standing leg's own validated fields; an eff row was fail-closed priced by the
-  // destination engine (fee/decimals/symbol), and falls back to the standing values —
-  // never a literal — so the form's money lines stay ledger-denominated either way.
-  const outSym = effOutDesc?.backing_symbol ?? effOutDesc?.symbol ?? legs.outSym;
-  const outDecimals = effOutDesc?.decimals ?? legs.outDecimals;
-  const balanceRaw = selectedAsset != null && selectedAsset.protocol === 'ic' ? assetBalances[selectedAsset.currency] : undefined;
-  const balanceN = balanceRaw != null ? BigInt(balanceRaw) : null;
-  const balanceStr = balanceRaw != null ? fmtAssetCompact(balanceRaw, inDecimals, inSym) : null;
-
-  // Fail closed BEFORE the confirm, never after it (2026-09-08: the button was live on a wallet
-  // holding nothing — a confirm that can only be refused by the ledger). A pool conversion costs
-  // the amount PLUS TWO input-ledger fees: the icrc2_approve, and the pool's own pull — which is
-  // exactly why `prepareConvertRecord` approves `amountIn + inFee`. A CeFi order costs ONE: the
-  // user's own deposit transfer (the phone approves nothing — nothing is signed). A null balance
-  // (not yet read) fails OPEN, matching the Pay tab's fund-gate: a balance nobody has measured
-  // is not a zero. D21: a HUB conversion costs THREE — the two input fees PLUS the hub-ledger
-  // approve fee; without it the gate green-lights a conversion that refuses at leg 3, after the
-  // input is already converted.
-  const parsedIn = parseUserAmount(amountText, inDecimals);
-  const neededN = parsedIn.ok && parsedIn.raw !== '0'
-    ? BigInt(parsedIn.raw) + (cefiMode ? 1n : 2n) * BigInt(legs.inFee) + (hubRoute != null ? BigInt(hubRoute.hub.fee) : 0n)
-    : null;
-  const insufficient = balanceN != null && neededN != null && neededN > balanceN;
-  // F4: the Max affordance fills the largest amount that survives the SAME fee overhead the
-  // gate computes — absent (never zero) when nothing would be left to convert.
-  const feeOverheadN = (cefiMode ? 1n : 2n) * BigInt(legs.inFee) + (hubRoute != null ? BigInt(hubRoute.hub.fee) : 0n);
-  const maxRaw = balanceN != null && balanceN > feeOverheadN ? balanceN - feeOverheadN : null;
-
-  // Nothing to convert at all: the Pay tab's fund-gate shape, pointed at the ONE surface that can
-  // fund an IC asset (Receive ▸ My address — reachable from the bottom nav on this very screen).
+  // The zero-balance gate: the Pay tab's fund-gate shape, pointed at the ONE surface that can
+  // fund this asset (Receive ▸ My address — reachable from the bottom nav on this very screen).
   if (balanceN === 0n) {
-    // The pair's OTHER leg, formatted, iff it holds something. A balance that has not been read
-    // (undefined) is not a zero and is not offered — the same fail-open rule the gate above uses.
-    const otherRaw = legs.outDesc != null ? assetBalances[legs.outDesc.currency] : null;
-    const otherHeld = otherRaw != null && BigInt(otherRaw) > 0n
-      ? fmtAssetCompact(otherRaw, outDecimals, outSym)
-      : null;
+    // The funded-account pointer, generalized to the pair walk: the first TARGET rail (in
+    // resolution order) this wallet provably holds value on. A balance that has not been read
+    // (null) is not a zero and is not offered — the same fail-open rule the gate uses.
+    let otherHeld: {held: string; toSym: string; assetId: AssetId} | null = null;
+    for (const t of targets) {
+      for (const r of t.rows) {
+        if (r.kind !== 'direct' && r.kind !== 'solamm') continue;
+        const raw = r.kind === 'direct'
+          ? assetBalances[r.outDesc.currency]
+          : (r.outMint === WRAPPED_SOL_MINT_ADDRESS ? solana?.sol ?? null : solana?.tokens[r.outMint] ?? null);
+        if (raw != null && /^\d+$/.test(raw) && BigInt(raw) > 0n) {
+          otherHeld = {
+            held: r.kind === 'direct'
+              ? fmtAssetCompact(raw, r.outDesc.decimals ?? 8, r.outDesc.backing_symbol ?? r.outDesc.symbol ?? '')
+              : fmtAssetCompact(raw, r.outDecimals, r.outSym),
+            toSym: inSym,
+            assetId: r.kind === 'direct' ? `ic:${r.outDesc.currency}` as AssetId : `solana:${r.outSym}` as AssetId,
+          };
+          break;
+        }
+      }
+      if (otherHeld != null) break;
+    }
     return (
       <View testID="convert-screen" style={S.convertWrap}>
-        <ConvertHeader title={M.convert.heading(inSym, outSym)} onBack={onBack} />
-        {/* The route this copy names is also the button under it — the same panel, label and
-            callback the Pay tab's fund gate uses. Unconditional: every asset the PoC venue serves
-            (ICP, VCHF) is a direct ICRC row whose My-address surface funds it by plain transfer,
-            so there is no capability branch to make here. */}
+        <ConvertHeader title={M.convert.actionConvert} onBack={onBack} />
         <InstructionPanel
           testID="convert-fund"
           title={M.pay.fundTitle(inSym)}
@@ -1297,109 +1023,95 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
           primaryLabel={M.pay.showMyAddress(inSym)}
           onPrimary={onShowDepositAddress}
         />
-        {/* The funded-account pointer the Pay gate has had since 2026-09-08 — and the reason it can
-            be made honestly HERE, where a generic "switch to BTC" could not: today's venue table
-            trades exactly ONE unordered pair (../config/venues), so the only account that could
-            ever help is the pair's other leg, which this screen has already resolved as its OUTPUT
-            leg. It is offered only when that leg actually holds something; when it does not, there
-            is provably no account to point at and the deposit route above is the whole answer.
-            Switching swaps the direction (the venue serves both), so the user converts what they
-            have into what they were standing on. */}
-        {otherHeld != null && legs.outDesc != null ? (
+        {otherHeld != null ? (
           <View testID="convert-fund-other">
             <Text testID="convert-fund-other-holds" style={S.convertMetaLine}>
-              {M.convert.fundOtherHolds(otherHeld, inSym)}
+              {M.convert.fundOtherHolds(otherHeld.held, otherHeld.toSym)}
             </Text>
             {onSwitchAsset ? (
               <Pressable
                 testID="btn-convert-fund-other"
                 style={S.linkBtn}
-                onPress={() => onSwitchAsset(`ic:${legs.outDesc!.currency}`)}
+                onPress={() => onSwitchAsset(otherHeld!.assetId)}
                 accessibilityRole="button"
-                accessibilityLabel={M.convert.fundOtherSwitch(outSym)}
+                accessibilityLabel={M.convert.fundOtherSwitch(otherHeld.held)}
                 accessibilityState={{disabled: false}}
               >
-                <Text style={S.linkText}>{M.convert.fundOtherSwitch(outSym)}</Text>
+                <Text style={S.linkText}>{M.convert.fundOtherSwitch(otherHeld.held)}</Text>
               </Pressable>
             ) : null}
           </View>
         ) : null}
-        {/* The ⇄ footing affordance is deliberately NOT rendered here: with a zero balance there
-            is nothing to swap yet, and the icon floated alone in the dead space under the fund
-            gate. It stays on every FILLED state (the form's own footing below, the state panels),
-            which render through the main return, never this early return. */}
-    </View>
-  );
-}
+      </View>
+    );
+  }
 
-  // In chooser mode this also withholds the confirm until a row is picked (activeQuote is null
-  // without a selection — the none-preselected red line, expressed as data, not as a flag).
-  // In route mode the confirm additionally requires a validated destination address, the gas
-  // census to be complete, and — when the wallet's ckETH balance is KNOWN — to cover the gas
-  // (an unknown balance stays fail-open, per spec §6; prepare re-queries everything anyway).
-  // The dest/gas derivations themselves live ABOVE the early returns (the 196 hooks rule).
-  // Hub mode replaces the quote pair entirely: the confirm needs BOTH hops' quotes and math
-  // on the table (a half-quoted conversion is not confirmable), and hub mode adds no address,
-  // gas, or cross-fee requirements — the destination is the user's own account.
-  const hubReady = hubQuote1 != null && hubQuote2 != null && hubMath1 != null && hubMath2 != null;
-  const canConfirm = !quoteBusy && !hubBusy && !confirmBusy && !insufficient && !mechUnpicked
-    && (hubMode ? hubReady : activeQuote != null && math != null)
-    && (!routeMode || (destValid && routeGas != null && routeGasErr == null && !gasShort))
-    // Cross-rail routes also need Circle's fee on the table before confirm (fail-closed).
-    && (activeRoute == null || activeRoute.crossRail == null || crossFee != null);
-  // [Fund from this wallet] is enabled iff a funding path exists — the engine's own enumeration
-  // over the registry (direct venue first, else hub), from this conversion's input ledger.
-  const gasFundRouteOk = legs != null && activeRoute != null
-    && gasFundRoutes(catalog, legs.inDesc.ledger, activeRoute.burn.gasLedger).length > 0;
-  // Route-mode quote-derived figures describe the HOP asset (ckUSDC), not the direct pair's
-  // other side — the destination's own figure is the min-you'll-receive line in the checklist.
-  // CeFi mode likewise describes the VENUE's settle asset (SOL via the registry mint), not
-  // the direct pair's other side. Hub mode describes the DESTINATION asset — the composed
-  // estimate is what lands in this wallet.
-  const hubDest = hubRoute?.dest ?? null;
-  const dispOutSym = activeRoute != null ? activeRoute.hop.symbol
-    : hubDest != null ? hubDest.symbol
-    : cefiMode && cefiOut != null ? cefiOut.symbol : outSym;
-  const dispOutDecimals = activeRoute != null ? activeRoute.hop.decimals
-    : hubDest != null ? hubDest.decimals
-    : cefiMode && cefiOut != null ? cefiOut.decimals : outDecimals;
-  const netStr = hubDest != null && hubMath2 != null
-    ? fmtAssetCompact(hubMath2.netOut, hubDest.decimals, hubDest.symbol)
-    : math != null ? fmtAssetCompact(math.netOut, dispOutDecimals, dispOutSym) : null;
-  // D12: the form's heading names the SELECTED destination — the direct pair only while the
-  // direct row is the pick. A route/hub/CeFi pick leaving the heading stuck on the direct
-  // pair made the form disagree with every state panel below it.
-  const formHeading = hubDest != null ? M.convert.heading(inSym, hubDest.symbol)
-    : activeRoute != null ? M.convert.heading(inSym, activeRoute.dest.symbol)
-    : cefiOut != null ? M.convert.heading(inSym, cefiOut.symbol)
-    : M.convert.heading(inSym, outSym);
+  // ── The form's derived display figures ──────────────────────────────────────────────────────
+  // The narrowed cross-rail block (a crossrail row is created with crossRail non-null; the
+  // binding just carries that fact into JSX).
+  const crossInfo = crossRow != null ? crossRow.route.crossRail ?? null : null;
+  const dispInName = sourceCurrency != null ? currencyName(sourceCurrency) : inSym;
+  const sourceBalanceLine = sourceCurrency != null
+    ? currencyBalances[sourceCurrency]?.displayText ?? '—'
+    : (balanceRaw != null ? fmtAssetCompact(balanceRaw, inDecimals, inSym) : null);
+  const targetBalanceLine = targetCode != null ? currencyBalances[targetCode]?.displayText ?? '—' : null;
+  // "Amount get, calculated" — the ACTIVE row's own number, in the venue's own out unit:
+  const receiveStr: string | null =
+    directRow != null && math != null ? fmtAssetCompact(math.netOut, outDecimals, outSym)
+    : crossRow != null && math != null ? fmtAssetCompact(math.netOut, crossRow.route.hop.decimals, crossRow.route.hop.symbol)
+    : hubRow != null && activeHub != null ? fmtAssetCompact(activeHub.m2.netOut, outDecimals, outSym)
+    : cefiRow != null && activeCefiQuote != null ? fmtAssetCompact(activeCefiQuote.amountOutGross, outDecimals, outSym)
+    : ammRow != null && activeJup != null ? fmtAssetCompact(activeJup.outAmount, outDecimals, outSym)
+    : null;
+  // Attribution: the quote's own venue takes over once one arrives; before that the PICKED
+  // row's venue is the honest attribution (never a neighbouring row's identity).
+  const counterVenueId: string | null =
+    activeIcQuote?.venueId
+    ?? (directRow != null ? directRow.venue.venue_id : null)
+    ?? (crossRow != null ? crossRow.route.swapVenueId : null)
+    ?? (cefiRow != null ? cefiRow.venue.venue_id : null)
+    ?? (ammRow != null ? ammRow.venue.venue_id : null);
+  // The target choices actually offered: reachable currencies plus the source itself (rendered
+  // DISABLED — the same-currency target is the one pick the surface refuses).
+  const targetChoices = visibleCurrencies.filter(code => code === sourceCurrency || targets.some(t => t.currency === code));
+  // Every rendered live quote still loading (the venue area's per-row spinner).
+  const slippageHidden = cefiMode; // a fixed shift is a LOCKED rate — there is no floor to set
+
   return (
     <View testID="convert-screen" style={S.convertWrap}>
-      <ConvertHeader title={formHeading} onBack={onBack} />
+      <ConvertHeader
+        title={targetCode != null ? M.convert.heading(sourceCurrency ?? inSym, targetCode) : M.convert.actionConvert}
+        onBack={onBack}
+      />
 
-      <Text style={S.convertAmountLabel}>{M.convert.amountLabel(inSym)}</Text>
-      <View style={S.amountRow}>
-        <TextInput
-          testID="convert-amount"
-          style={S.amountInput}
-          value={amountText}
-          onChangeText={setAmountText}
-          keyboardType="decimal-pad"
-          autoCorrect={false}
-          autoCapitalize="none"
-          placeholderTextColor={C.sub}
-        />
-      </View>
-      {balanceStr != null ? (
+      {/* ── The SELL leg ──────────────────────────────────────────────────────────────────────── */}
+      <View testID="convert-source-leg">
+        <View style={S.swapLegRow}>
+          <Text style={S.swapLegName}>{dispInName}</Text>
+        </View>
+        <View style={S.amountRow}>
+          <TextInput
+            testID="convert-amount"
+            style={S.amountInput}
+            value={amountText}
+            onChangeText={setAmountText}
+            keyboardType="decimal-pad"
+            autoCorrect={false}
+            autoCapitalize="none"
+            placeholderTextColor={C.sub}
+          />
+        </View>
         <View style={S.convertBalanceRow}>
-          <Text testID="convert-balance" style={S.convertMetaLine}>
-            {M.convert.balanceLine(balanceStr)}
-          </Text>
+          {sourceBalanceLine != null ? (
+            <Text testID="convert-balance" style={S.convertMetaLine}>
+              {M.convert.balanceLine(sourceBalanceLine)}
+            </Text>
+          ) : <View />}
           {maxRaw != null ? (
             <Pressable
               testID="btn-convert-max"
               onPress={() => {
-                setAmountText(rawToDecimal(maxRaw.toString(), inDecimals));
+                setAmountText(rawToDecimal(maxRaw, inDecimals));
                 setQuoteChanged(null);
               }}
               hitSlop={8}
@@ -1409,270 +1121,180 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
             </Pressable>
           ) : null}
         </View>
-      ) : null}
-      {insufficient ? (
-        <Text testID="convert-insufficient" style={S.err}>
-          {cefiMode
-            ? M.convert.cefi.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)
-            : hubRoute != null
-              // D21: the copy names the honest overhead — three fees, not two.
-              ? M.convert.multihop.insufficientHubLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)
-              : M.convert.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)}
-        </Text>
-      ) : null}
+      </View>
 
-      {/* The destination picker (2026-09-18 hub UX guidance D1–D6): ONE row per destination
-          ASSET — the direct pair as the standing default row first, then every other in-wallet
-          asset, then every external destination (routes + CeFi venues merged by where they
-          LAND). A destination with more than one mechanism reveals an indented MECHANISM
-          sub-picker on selection: direct pool first, then via-hub / CCTP / venue rows in
-          registry order — never ranked, nothing preselected beyond that order, and no quote
-          until a mechanism is picked (the venue chooser's red lines, one level down).
-          Since 2026-09 the rows sit under CURRENCY section headers (`groupDestSections`,
-          presentation only): the home currencies first in their fixed order, then the tail of
-          destinations that settle no home currency. A header NAMES the destination currency —
-          it is a label, never a total; the row order inside a section is exactly
-          `buildDestGroups`' registry order, and no row is preselected by the grouping. */}
-      {destGroups.length > 0 ? (
-        <View testID="convert-dest">
-          <Text style={S.convertDestLabel}>{M.convert.multihop.destLabel}</Text>
-          {groupDestSections(destGroups, catalog, legs).map(sec => {
-            const slug = sec.currency === null ? 'other' : sec.currency.toLowerCase();
-            return (
-              <View key={`dest-section-${slug}`}>
-                <Text testID={`convert-dest-group-${slug}`} style={S.convertDestGroupLabel}>
-                  {sec.currency === null ? M.convert.multihop.destGroupOther : currencyName(sec.currency)}
-                </Text>
-                {sec.groups.map(g => {
-                  const groupOn = selGroup != null && selGroup.key === g.key;
-                  const single = g.mechs.length === 1;
-                  return (
-                    <View key={g.key}>
-                      <Pressable
-                        testID={g.testID}
-                        style={[S.convertVenueRow, groupOn && S.convertVenueRowOn]}
-                        onPress={() => {
-                          setDestSel(g.key);
-                          setDestMech(single ? mechPickOf(g.mechs[0]) : null);
-                          setQuoteChanged(null);
-                        }}
-                        accessibilityRole="radio"
-                        accessibilityState={{checked: groupOn}}
-                        accessibilityLabel={g.label}>
-                        <View style={[S.convertVenueRadio, groupOn && S.convertVenueRadioOn]}>
-                          {groupOn ? <View style={S.convertVenueRadioDot} /> : null}
-                        </View>
-                        <View style={S.convertVenueRowText}>
-                          <Text style={[S.convertVenueName, groupOn && S.convertVenueNameOn]}>{g.label}</Text>
-                        </View>
-                      </Pressable>
-                      {groupOn && !single ? (
-                        <View testID="convert-dest-mechs" style={S.convertMechGroup}>
-                          {g.mechs.map(m => {
-                            const pick = mechPickOf(m);
-                            const id = mechIdOf(pick);
-                            const on = activeMech != null && mechIdOf(activeMech) === id;
-                            const mechLabel =
-                              m.kind === 'direct' ? M.convert.multihop.mechDirect
-                              : m.kind === 'hub' ? M.convert.multihop.mechViaHub(m.route.hub.symbol)
-                              : m.kind === 'route' ? (
-                                m.route.crossRail != null ? M.convert.multihop.mechViaCctp : M.convert.multihop.mechDirect
-                              )
-                              : M.convert.multihop.mechViaVenue(m.venue.display_name);
-                            return (
-                              <Pressable
-                                key={id}
-                                testID={`convert-dest-mech-${id}`}
-                                style={[S.convertVenueRow, on && S.convertVenueRowOn]}
-                                onPress={() => {
-                                  setDestMech(pick);
-                                  setQuoteChanged(null);
-                                }}
-                                accessibilityRole="radio"
-                                accessibilityState={{checked: on}}
-                                accessibilityLabel={mechLabel}>
-                                <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
-                                  {on ? <View style={S.convertVenueRadioDot} /> : null}
-                                </View>
-                                <View style={S.convertVenueRowText}>
-                                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{mechLabel}</Text>
-                                  {/* Same settlement-SLA honesty as the venue chooser (2026-09-20). */}
-                                  {m.kind === 'cefi' && m.venue.health?.status === 'degraded' ? (
-                                    <Text testID={`convert-dest-mech-cefi-slow-${m.venue.venue_id}`} style={S.convertMetaLine}>
-                                      {M.convert.venueSlow}
-                                    </Text>
-                                  ) : null}
-                                  {/* D5: an UNPICKED mechanism carries its label + a static shape
-                                      line, never another mechanism's live number. */}
-                                  {!on && m.kind === 'hub' ? (
-                                    <Text style={S.convertMetaLine}>{M.convert.multihop.hubShape()}</Text>
-                                  ) : null}
-                                </View>
-                              </Pressable>
-                            );
-                          })}
-                          {mechUnpicked ? (
-                            <Text testID="convert-dest-mech-none" style={S.convertMetaLine}>
-                              {M.convert.multihop.mechNoneSelected}
-                            </Text>
-                          ) : null}
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })}
-              </View>
-            );
-          })}
+      <View style={S.swapDivider} testID="convert-divider" />
+
+      {/* ── The RECEIVE leg ───────────────────────────────────────────────────────────────────── */}
+      <View testID="convert-target-leg">
+        <View style={S.swapLegRow}>
+          {targetChoices.length > 1 ? (
+            <Pressable
+              testID="btn-convert-target"
+              style={{flexDirection: 'row', alignItems: 'center', gap: 4}}
+              onPress={() => { if (!confirmBusy) setTargetListOpen(true); }}
+              accessibilityRole="button"
+              accessibilityLabel={M.convert.swapTargetPick}
+              accessibilityState={{expanded: targetListOpen}}>
+              <Text style={S.swapLegName}>{targetCode != null ? currencyName(targetCode) : '—'}</Text>
+              <IconChevronDown size={16} color={C.sub} />
+            </Pressable>
+          ) : (
+            <Text style={S.swapLegName}>{targetCode != null ? currencyName(targetCode) : '—'}</Text>
+          )}
+          <Text testID="convert-receive" style={S.swapLegAmount} numberOfLines={1}>
+            {receiveStr ?? (quoteBusy ? '…' : '—')}
+          </Text>
         </View>
-      ) : null}
-
-      {/* The route's destination address — a required input, validated live (the Withdraw
-          destination's own rule: an address is never signed unvalidated). Since 2026-09-20 a
-          MIXED-CASE EVM address must additionally verify its own EIP-55 checksum, and the
-          gas-fund offer can never render before the address was re-typed once. */}
-      {routeMode ? (
-        <View>
-          <Text style={S.convertAmountLabel}>{M.convert.multihop.destAddressLabel}</Text>
-          <View style={S.amountRow}>
-            <TextInput
-              testID="convert-dest-address"
-              style={S.monoInput}
-              value={destAddress}
-              onChangeText={t => {
-                setDestAddress(t);
-                // Any edit to the address re-locks the re-entry gate and clears the copy.
-                setDestRetype('');
-                setDestReentered(null);
-              }}
-              autoCorrect={false}
-              autoCapitalize="none"
-              placeholderTextColor={C.sub}
-            />
-          </View>
-          {destAddress.length > 0 && !destShapeValid ? (
-            <Text testID="convert-dest-address-invalid" style={S.err}>{M.convert.multihop.destAddressInvalid}</Text>
-          ) : destChecksumBad ? (
-            <Text testID="convert-dest-checksum" style={S.err}>{M.convert.crossrail.checksumMismatch}</Text>
-          ) : null}
-          {/* One-time re-entry: the gate the gas-fund offer sits behind — the address moves
-              value, so it is confirmed as typed, not just pasted. */}
-          {destShapeValid && !destChecksumBad && !destConfirmed ? (
-            <View>
-              <Text style={S.convertAmountLabel}>{M.convert.crossrail.retypeAddress}</Text>
-              <View style={S.amountRow}>
-                <TextInput
-                  testID="convert-dest-reenter"
-                  style={S.monoInput}
-                  value={destRetype}
-                  onChangeText={t => {
-                    setDestRetype(t);
-                    if (t.toLowerCase() === destAddress.toLowerCase()) setDestReentered(t.toLowerCase());
+        {targetBalanceLine != null ? (
+          <Text testID="convert-target-balance" style={S.swapLegSub}>
+            {M.convert.balanceLine(targetBalanceLine)}
+          </Text>
+        ) : null}
+        {targetListOpen && targetChoices.length > 1 ? (
+          <View testID="convert-target-list">
+            <Text style={S.convertDestLabel}>{M.convert.swapTargetListLabel}</Text>
+            {targetChoices.map(code => {
+              const reachable = targets.some(t => t.currency === code);
+              const same = code === sourceCurrency;
+              const on = code === targetCode;
+              return (
+                <Pressable
+                  key={code}
+                  testID={`convert-target-${code}`}
+                  style={[S.convertVenueRow, on && S.convertVenueRowOn]}
+                  disabled={same || !reachable || confirmBusy}
+                  onPress={() => {
+                    if (confirmBusy) return;
+                    setTargetSel(code);
+                    setSelRowId(null);
+                    setTargetListOpen(false);
+                    setQuoteChanged(null);
+                    setConfirmErr(null);
                   }}
-                  autoCorrect={false}
-                  autoCapitalize="none"
-                  placeholderTextColor={C.sub}
-                />
-              </View>
-              {destRetype.length >= destAddress.length && destAddress.length > 0 && !destConfirmed ? (
-                <Text testID="convert-dest-reenter-mismatch" style={S.err}>{M.convert.crossrail.retypeMismatch}</Text>
-              ) : null}
-            </View>
-          ) : null}
-          {/* Cross-rail routes (B/C): the SAME address is also the signer of the crossing —
-              the user must paste one they control, not an exchange deposit address. */}
-          {activeRoute?.crossRail != null ? (
-            <Text testID="convert-dest-cross-note" style={S.convertMetaLine}>{M.convert.crossrail.destAddressCrossNote}</Text>
-          ) : null}
-        </View>
-      ) : null}
+                  accessibilityRole="radio"
+                  accessibilityState={{checked: on, disabled: same || !reachable}}
+                  accessibilityLabel={currencyName(code)}>
+                  <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
+                    {on ? <View style={S.convertVenueRadioDot} /> : null}
+                  </View>
+                  <View style={S.convertVenueRowText}>
+                    <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{currencyName(code)}</Text>
+                    {same ? (
+                      <Text style={S.convertMetaLine}>{M.convert.swapTargetSame}</Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+      </View>
 
-      {/* The CeFi settle address: not an input — the user's OWN derived Solana address,
-          shown read-only before the order is created so the payout destination is reviewed
-          exactly like a route's typed destination (the phone owns this key; the venue pays
-          out to it and nothing else). */}
-      {cefiMode && cefiSettleAddress != null ? (
-        <View>
-          <Text style={S.convertAmountLabel}>{M.convert.cefi.settleAddressLabel}</Text>
-          <Text testID="convert-settle-address" style={S.convertMetaLine} selectable>{cefiSettleAddress}</Text>
-        </View>
-      ) : null}
-
-      {/* The venue chooser (multi-venue readiness V5): N rows in REGISTRY order — the relay's
-          own row order, rendered verbatim and NEVER ranked or sorted by output. Each row shows
-          its OWN quote, attributed + timestamped; nothing is preselected and the checklist +
-          confirm below stay gated on an explicit pick. Renders only when the pair has 2+ venues
-          — with one venue this whole block is absent and the screen is exactly today's.
-          A route pick suppresses it entirely: the route's swap hop runs through its own single
-          registered venue, and a second venue list would read as a route choice we never make.
-          A CeFi venue pick suppresses it for the same reason — the venue IS the destination. */}
-      {!routeMode && !cefiMode && chooserVenues != null ? (
+      {/* ── The VENUE AREA (fork #3): rows in registry order — venue rows NONE-preselected when
+          several venues serve the pair; composed routes render as explicit opt-ins beneath the
+          standing pick (D2). Live rows (direct pools + Solana venues) carry their own quote,
+          attributed per row; a hub/crossrail/cefi row carries its label until picked (D5 — and
+          no partner demand before a pick). With one row on the pair this area is ABSENT — the
+          single-venue screen is an attributed line, and the headline card below is that line. */}
+      {(() => {
+        // A LONE row with a settlement-SLA demotion still renders the area: the honest slow
+        // line is row content, not chooser chrome (the attributed line stays the headline).
+        const singleHonesty = rows.length === 1 && rows[0].kind !== 'hub' && rows[0].kind !== 'crossrail'
+          && rows[0].venue.health?.status === 'degraded';
+        return rows.length > 1 || singleHonesty;
+      })() ? (
         <View testID="convert-venues">
           <Text style={S.convertSlippageLabel}>{M.convert.venueChooserLabel}</Text>
-          {chooserVenues.map((v) => {
-            const vq = venueQuotes[v.venue_id];
-            const verr = venueQuoteErrs[v.venue_id];
-            const on = selectedVenueId === v.venue_id;
+          {rows.map(r => {
+            const on = activeRow != null && activeRow.rowId === r.rowId;
+            const icq = r.kind === 'direct' || r.kind === 'crossrail' ? rowQuotes[r.rowId] ?? null : null;
+            const jq = r.kind === 'solamm' ? jupQuotes[r.rowId] ?? null : null;
+            const rq = r.kind === 'cefi' ? rowQuotes[r.rowId] ?? null : null;
+            const err = rowQuoteErrs[r.rowId] ?? null;
+            const rOutSym = r.kind === 'direct' ? r.outDesc.backing_symbol ?? r.outDesc.symbol ?? ''
+              : r.kind === 'hub' ? r.route.dest.symbol
+              : r.kind === 'crossrail' ? (r.route.crossRail?.sol != null ? r.route.crossRail.sol.outSymbol : r.route.dest.symbol)
+              : r.kind === 'cefi' ? r.outSym : r.outSym;
+            const rOutDec = r.kind === 'direct' ? r.outDesc.decimals ?? 8
+              : r.kind === 'hub' ? r.route.dest.decimals
+              : r.kind === 'crossrail' ? (r.route.crossRail?.sol != null ? r.route.crossRail.sol.outDecimals : r.route.hop.decimals)
+              : r.kind === 'cefi' ? r.outDecimals : r.outDecimals;
+            const label =
+              r.kind === 'direct' ? r.venue.display_name
+              : r.kind === 'hub' ? M.convert.multihop.mechViaHub(r.route.hub.symbol)
+              : r.kind === 'crossrail' ? M.convert.multihop.mechViaCctp
+              : M.convert.multihop.mechViaVenue(r.venue.display_name);
             return (
               <Pressable
-                key={v.venue_id}
-                testID={`convert-venue-${v.venue_id}`}
+                key={r.rowId}
+                testID={`convert-venue-${r.rowId}`}
                 style={[S.convertVenueRow, on && S.convertVenueRowOn]}
                 onPress={() => {
-                  setSelectedVenueId(v.venue_id);
+                  if (confirmBusy) return;
+                  setSelRowId(r.rowId);
                   setQuoteChanged(null);
+                  setConfirmErr(null);
                 }}
                 accessibilityRole="radio"
                 accessibilityState={{checked: on}}
-                accessibilityLabel={v.display_name}>
-                {/* The selection affordance: an unchecked/checked radio circle, so a row READS
-                    as tappable and as chosen (border colour alone did not — a11y + scan-ability,
-                    2026-09-11). Decorative: the Pressable above carries the role/state/label. */}
+                accessibilityLabel={label}>
                 <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
                   {on ? <View style={S.convertVenueRadioDot} /> : null}
                 </View>
                 <View style={S.convertVenueRowText}>
-                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{v.display_name}</Text>
-                  {/* Settlement-SLA demotion (2026-09-20): the relay put a recently-slow venue
-                      at the tail — this line is the honest WHY. Never a ranking, never hidden. */}
-                  {v.health?.status === 'degraded' ? (
-                    <Text testID={`convert-venue-${v.venue_id}-slow`} style={S.convertMetaLine}>
+                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{label}</Text>
+                  {(r.kind === 'cefi' || r.kind === 'direct' || r.kind === 'solamm') && r.venue.health?.status === 'degraded' ? (
+                    <Text testID={`convert-venue-${r.rowId}-slow`} style={S.convertMetaLine}>
                       {M.convert.venueSlow}
                     </Text>
                   ) : null}
-                  {vq != null ? (
-                    <Text testID={`convert-venue-${v.venue_id}-quote`} style={S.convertVenueAmount}>
-                      {fmtAssetCompact(vq.amountOutGross, outDecimals, outSym)}
+                  {icq != null ? (
+                    <Text testID={`convert-venue-${r.rowId}-quote`} style={S.convertVenueAmount}>
+                      {fmtAssetCompact(icq.amountOutGross, rOutDec, rOutSym)}
                     </Text>
-                  ) : verr != null ? (
-                    <Text testID={`convert-venue-${v.venue_id}-err`} style={S.err}>{verr}</Text>
+                  ) : jq != null ? (
+                    <Text testID={`convert-venue-${r.rowId}-quote`} style={S.convertVenueAmount}>
+                      {fmtAssetCompact(jq.outAmount, rOutDec, rOutSym)}
+                    </Text>
+                  ) : rq != null ? (
+                    <Text testID={`convert-venue-${r.rowId}-quote`} style={S.convertVenueAmount}>
+                      {fmtAssetCompact(rq.amountOutGross, rOutDec, rOutSym)}
+                    </Text>
+                  ) : err != null ? (
+                    <Text testID={`convert-venue-${r.rowId}-err`} style={S.err}>{err}</Text>
+                  ) : r.kind === 'hub' ? (
+                    <Text style={S.convertMetaLine}>{M.convert.multihop.hubShape()}</Text>
+                  ) : r.kind === 'crossrail' ? (
+                    <Text style={S.convertMetaLine}>{M.convert.multihop.mechViaCctp}</Text>
                   ) : (
                     <View style={S.convertBtnBusyRow}>
                       <ActivityIndicator color={C.sub} />
                     </View>
                   )}
-                  {/* The per-row attribution+timestamp folds behind the ONE Details control
-                      below (10x-verbosity pass 2026-09-16); the row shows just the digits. */}
-                  {detailsOpen && vq != null ? (
-                    <Text testID={`convert-venue-${v.venue_id}-source`} style={S.convertMetaLine}>
-                      {M.convert.quoteSource(nonBreakingClock(new Date(vq.fetchedAtMs)), venueDisplayName(v.venue_id))}
-                    </Text>
-                  ) : null}
                 </View>
               </Pressable>
             );
           })}
-          {/* The chooser's own Details control: opens the per-row fetch timestamps (the
-              attribution lines), default CLOSED (10x-verbosity pass 2026-09-16). Its testID is
-              DISTINCT from the checklist's `convert-details` so the checklist control stays
-              unique in the DOM — e2e locators resolve the first match. */}
+          {/* The chooser's own Details control + per-row fetch timestamps (attribution lines),
+              default CLOSED — distinct from the checklist's `convert-details`. */}
           <DetailsToggle
             testID="convert-venue-details"
             open={detailsOpen}
             onToggle={() => setDetailsOpen(o => !o)}
             label={M.convert.detailsLabel}
           />
-          {selectedVenue == null ? (
+          {detailsOpen ? rows.map(r => {
+            if (r.kind === 'hub' || r.kind === 'crossrail') return null;
+            const q = r.kind === 'solamm' ? jupQuotes[r.rowId] ?? null : rowQuotes[r.rowId] ?? null;
+            if (q == null) return null;
+            return (
+              <Text key={`src-${r.rowId}`} testID={`convert-venue-${r.rowId}-source`} style={S.convertMetaLine}>
+                {M.convert.quoteSource(nonBreakingClock(new Date(q.fetchedAtMs)), venueDisplayName(r.venue.venue_id))}
+              </Text>
+            );
+          }) : null}
+          {multiVenue && activeRow == null ? (
             <Text testID="convert-venue-none" style={S.convertMetaLine}>
               {M.convert.venueNoneSelected}
             </Text>
@@ -1680,42 +1302,52 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
         </View>
       ) : null}
 
-      {/* The decision, as one number: what actually lands in the wallet, and whose quote it
-          is. The rate folds behind the checklist's Details control (10x-verbosity pass
-          2026-09-16); the attribution line stays — it is WHOSE number this is. Hub mode's
-          number is the COMPOSED estimate (both pools), attributed to BOTH venues verbatim
-          (D11) with the route chip naming the hub (D8). */}
-      {netStr != null && (hubMode ? hubReady : activeQuote != null) ? (
+      {insufficient ? (
+        <Text testID="convert-insufficient" style={S.err}>
+          {ammMode
+            ? M.convert.insufficientLine(fmtAssetCompact(amountN.toString(), inDecimals, inSym), fmtAssetCompact(balanceRaw ?? '0', inDecimals, inSym))
+            : cefiMode
+              ? M.convert.cefi.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), fmtAssetCompact(balanceRaw ?? '0', inDecimals, inSym))
+              : hubRow != null
+                ? M.convert.multihop.insufficientHubLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), fmtAssetCompact(balanceRaw ?? '0', inDecimals, inSym))
+                : M.convert.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), fmtAssetCompact(balanceRaw ?? '0', inDecimals, inSym))}
+        </Text>
+      ) : null}
+
+      {/* ── The decision, as one number + whose it is (the single-venue ATTRIBUTED LINE; under a
+          multi-row pick it appears once the user has chosen). ────────────────────────────────── */}
+      {receiveStr != null ? (
         <View testID="convert-headline" style={S.convertHeadlineCard}>
-          {/* Route mode: the quoted number is the HOP payout landing in THIS wallet, not the
-              at-address amount (that promise is convert-route-min) — label it so (UX pass
-              2026-09-15). Direct and hub modes keep "You'll receive" — the destination IS
-              this wallet (D7: the label gates on where the money lands, not the route). */}
           <Text style={S.convertHeadlineLabel}>
             {routeMode ? M.convert.multihop.swapPaysLabel : M.convert.receiveHeadline}
           </Text>
-          <Text style={S.convertHeadlineAmount}>{netStr}</Text>
-          {hubMode && hubQuote1 != null && hubQuote2 != null ? (
+          <Text style={S.convertHeadlineAmount}>{receiveStr}</Text>
+          {hubMode && activeHub != null ? (
             <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
               {M.convert.multihop.hubQuoteSource(
-                venueDisplayName(hubQuote1.venueId),
-                venueDisplayName(hubQuote2.venueId),
-                nonBreakingClock(new Date(Math.max(hubQuote1.fetchedAtMs, hubQuote2.fetchedAtMs))),
+                venueDisplayName(activeHub.q1.venueId),
+                venueDisplayName(activeHub.q2.venueId),
+                nonBreakingClock(new Date(Math.max(activeHub.q1.fetchedAtMs, activeHub.q2.fetchedAtMs))),
               )}
             </Text>
-          ) : activeQuote != null ? (
+          ) : activeIcQuote != null && counterVenueId != null ? (
             <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
-              {M.convert.quoteSource(nonBreakingClock(new Date(activeQuote.fetchedAtMs)), venueDisplayName(activeQuote.venueId))}
+              {M.convert.quoteSource(nonBreakingClock(new Date(activeIcQuote.fetchedAtMs)), venueDisplayName(counterVenueId))}
+            </Text>
+          ) : activeCefiQuote != null && counterVenueId != null ? (
+            <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
+              {M.convert.quoteSource(nonBreakingClock(new Date(activeCefiQuote.fetchedAtMs)), venueDisplayName(counterVenueId))}
+            </Text>
+          ) : activeJup != null && counterVenueId != null ? (
+            <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
+              {M.convert.quoteSource(nonBreakingClock(new Date(activeJup.fetchedAtMs)), venueDisplayName(counterVenueId))}
             </Text>
           ) : null}
-          {hubRoute != null ? (
+          {hubRow != null ? (
             <Text testID="convert-route-via" style={S.convertMetaLine}>
-              {M.convert.multihop.viaHub(hubRoute.hub.symbol)}
+              {M.convert.multihop.viaHub(hubRow.route.hub.symbol)}
             </Text>
           ) : null}
-          {/* The staleness notice renders HERE, pinned to the quote-source row it is about — the
-              user sees "refreshing" where the number is shown, not at the checklist bottom where
-              an unscrolled viewport hides it. Same testID flows 143 pin; single instance. */}
           {staleRefreshing ? (
             <Text testID="convert-stale" style={S.convertHeadlineMeta}>
               {M.convert.staleRefreshing}
@@ -1724,280 +1356,324 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
         </View>
       ) : null}
 
-      {/* In chooser mode the checklist (like the headline) appears only under an explicit pick —
-          with one venue the card renders exactly as it always has. */}
-      {(!chooserMode || selectedVenue != null) ? (
-      <View style={S.convertChecklistCard}>
-      {/* The MAIN surface is the decision (10x-verbosity pass 2026-09-16): the slippage axis,
-            the minimum, and a quote-change warning. The venue/fee/signing census — rate,
-            counterparty + principals, disclosure sentence, per-side fee lines, refusal
-            consequence, route surplus/gas notes — collapses behind the ONE Details control at
-            the bottom of this card, default CLOSED. Full attribution (quoteSource) stays on
-            the headline card. There is deliberately NO price-impact line here (V8): the IC
-            venues publish no impact figure. CeFi mode hides the slippage axis entirely: a
-            fixed shift is a LOCKED rate — there is no floor to set. */}
-        {/* Hub mode sizes BOTH floors on the slippage axis — the chips stay (D13 keeps the
-            whole stale/re-quote loop slippage-aware). CeFi mode hides them entirely: a fixed
-            shift is a LOCKED rate — there is no floor to set. */}
-        {(math != null || (hubMode && hubMath2 != null)) && !cefiMode ? (
-          <View testID="convert-slippage">
-            <Text style={S.convertSlippageLabel}>{M.convert.slippageLabel}</Text>
-            <View
-              testID="convert-slippage-chips"
-              style={S.convertSlippageRow}
-              accessibilityRole="radiogroup"
-              accessibilityLabel={M.convert.slippageLabel}>
-              {CONVERT_SLIPPAGE_BPS_OPTIONS.map((bps) => (
-                <Pressable
-                  key={bps}
-                  testID={`convert-bps-${bps}`}
-                  style={[S.convertSlippageChip, slippageBps === bps && S.convertSlippageChipOn]}
-                  onPress={() => setSlippageBps(bps)}
-                  accessibilityRole="radio"
-                  accessibilityState={{selected: slippageBps === bps}}
-                  accessibilityLabel={formatBps(bps)}>
-                  <Text style={[S.convertSlippageChipText, slippageBps === bps && S.convertSlippageChipTextOn]}>{formatBps(bps)}</Text>
-                </Pressable>
-              ))}
+      {/* ── The pre-sign transparency checklist (what does NOT change): the decision card carries
+          the slippage axis + the minimum + the quote-change warning; the venue/fee/signing
+          census folds behind the ONE Details control, default CLOSED. ────────────────────────── */}
+      {activeRow != null ? (
+        <View style={S.convertChecklistCard}>
+          {!slippageHidden ? (
+            <View testID="convert-slippage">
+              <Text style={S.convertSlippageLabel}>{M.convert.slippageLabel}</Text>
+              <View
+                testID="convert-slippage-chips"
+                style={S.convertSlippageRow}
+                accessibilityRole="radiogroup"
+                accessibilityLabel={M.convert.slippageLabel}>
+                {CONVERT_SLIPPAGE_BPS_OPTIONS.map((bps) => (
+                  <Pressable
+                    key={bps}
+                    testID={`convert-bps-${bps}`}
+                    style={[S.convertSlippageChip, slippageBps === bps && S.convertSlippageChipOn]}
+                    onPress={() => setSlippageBps(bps)}
+                    accessibilityRole="radio"
+                    accessibilityState={{selected: slippageBps === bps}}
+                    accessibilityLabel={formatBps(bps)}>
+                    <Text style={[S.convertSlippageChipText, slippageBps === bps && S.convertSlippageChipTextOn]}>{formatBps(bps)}</Text>
+                  </Pressable>
+                ))}
+              </View>
             </View>
-          </View>
-        ) : null}
-        {/* The minimum line is where the modes part ways. Hub mode (D9): the floor is the
-            SECOND swap's floor, an in-wallet amount — routeMinWalletLine, never the
-            at-address phrasing. Route mode: a route's floor is the DESTINATION's floor (the
-            burn amount is the swap's min-you'll-receive — spec §5). The routes' surplus/gas
-            notes and the cross-rail fee census fold behind Details; the live ERROR branches
-            stay on the main surface — an instruction is never hidden (founder rule). */}
-        {hubDest != null && hubMath2 != null ? (
-          <View testID="convert-route-min">
-            <Text style={S.convertMinOutLine}>
-              {M.convert.multihop.routeMinWalletLine(
-                fmtAssetCompact(hubMath2.minOut, hubDest.decimals, hubDest.symbol),
-                formatBps(slippageBps),
-              )}
-            </Text>
-          </View>
-        ) : math != null && routeMode && activeRoute != null ? (
-          <View testID="convert-route-min">
-            <Text style={S.convertMinOutLine}>
-              {/* Cross-rail honesty: the burn amount is denominated in the HOP asset (USDC) —
-                  Route C's dest.symbol is SOL and must not label this number. */}
-              {M.convert.multihop.routeMinLine(
-                fmtAssetCompact(math.minOut, dispOutDecimals, activeRoute.crossRail != null ? dispOutSym : activeRoute.dest.symbol),
-                formatBps(slippageBps),
-              )}
-            </Text>
-            {routeGasErr != null ? (
-              <Text testID="convert-gas-note" style={S.err}>{routeGasErr}</Text>
-            ) : null}
-            {activeRoute.crossRail != null && crossFeeErr != null ? (
-              <View testID="convert-crossrail-fees">
-                <Text testID="crossrail-circle-fee" style={S.err}>{crossFeeErr}</Text>
-              </View>
-            ) : null}
-          </View>
-        ) : math != null && !cefiMode ? (
-          <Text testID="convert-min-out" style={S.convertMinOutLine}>
-            {M.convert.minReceiveLine(fmtAssetCompact(math.minOut, outDecimals, outSym), formatBps(slippageBps))}
-          </Text>
-        ) : null}
-        {quoteChanged != null ? (
-          <Text testID="convert-quote-changed" style={S.convertChecklistWarn}>
-            {M.convert.quoteChanged(
-              fmtAssetCompact(quoteChanged.oldAmt, dispOutDecimals, dispOutSym),
-              fmtAssetCompact(quoteChanged.newAmt, dispOutDecimals, dispOutSym),
-            )}
-          </Text>
-        ) : null}
-        {/* The one Details control, at the bottom of the decision card. Default CLOSED. */}
-        <DetailsToggle
-          open={detailsOpen}
-          onToggle={() => setDetailsOpen(o => !o)}
-          label={M.convert.detailsLabel}
-        />
-        {detailsOpen ? (
-          <View testID="convert-details-block">
-            {math != null && activeQuote != null ? (
-              <View testID="convert-rate" style={S.convertRateRow}>
-                <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, dispOutSym)}</Text>
-                <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn, legs.inDecimals), dispOutDecimals, dispOutSym)}</Text>
-              </View>
-            ) : null}
-            {/* Counterparty disclosure: the venue the QUOTE is attributed to names itself —
-                display name and pool principal are registry lookups on the quote's own venueId,
-                so a second venue cannot render under the first one's identity (V1). Before a
-                quote arrives the standing disclosure names the one registered venue; attribution
-                follows the quote — or, under a chooser pick, the PICKED venue. The sentence
-                itself is trimmed to bare venue attribution (the tail moved to the disclosure
-                copy + quoteSource). */}
-            {/* Hub mode folds the whole direct counterparty census out: the per-hop census
-                below names each venue itself, and a single counterparty sentence would
-                misattribute a two-venue intent (D10/D11). */}
-            {!hubMode ? (
-            <View testID="convert-counterparty">
-              {/* The ic_amm sentence is FALSE for a CeFi venue — an exchange service is a
-                  company, not a contract; the cefi block says what it is. */}
-              <Text style={S.convertChecklistLine}>
-                {cefiMode
-                  ? M.convert.cefi.counterparty(venueDisplayName(counterVenueId))
-                  : M.convert.counterparty(venueDisplayName(counterVenueId))}
+          ) : null}
+          {/* The minimum line, per kind. */}
+          {hubRow != null && activeHub != null ? (
+            <View testID="convert-route-min">
+              <Text style={S.convertMinOutLine}>
+                {M.convert.multihop.routeMinWalletLine(
+                  fmtAssetCompact(activeHub.m2.minOut, outDecimals, outSym),
+                  formatBps(slippageBps),
+                )}
               </Text>
-              {/* The pool principal renders only when THIS venue's own number stands behind it:
-                  the quote's pool echo once one arrives, or the standing single-venue
-                  disclosure. Under a chooser pick whose quote has not settled (or errored) NO
-                  principal renders — an execution fact is never asserted without its quote, and
-                  another venue's principal is never borrowed. A CeFi venue renders NO principal
-                  line: its https API base is where the relay carries the partner key — not a
-                  fact a depositor can check. */}
-              {!cefiMode && (activeQuote != null || !chooserMode) ? (
-                <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeQuote?.pool ?? venueEndpointOf(counterVenueId)}</Text>
+            </View>
+          ) : math != null && routeMode && crossRow != null ? (
+            <View testID="convert-route-min">
+              <Text style={S.convertMinOutLine}>
+                {M.convert.multihop.routeMinLine(
+                  fmtAssetCompact(math.minOut, crossRow.route.hop.decimals, crossRow.route.hop.symbol),
+                  formatBps(slippageBps),
+                )}
+              </Text>
+              {routeGasErr != null ? (
+                <Text testID="convert-gas-note" style={S.err}>{routeGasErr}</Text>
               ) : null}
-              {/* "Your phone signs" is likewise false for CeFi: the phone signs NOTHING — the
-                  user sends the deposit to the venue's own address. */}
-              <Text style={S.convertChecklistLine}>
-                {cefiMode ? M.convert.cefi.checklistSigns : M.convert.counterpartySigns}
-              </Text>
-              {/* A route names its SECOND counterparty too: the ckETH minter that executes the
-                  burn — its principal is an execution fact, shown as plainly as the pool's. */}
-              {routeMode && activeRoute != null ? (
-                <Text testID="convert-minter-principal" style={S.convertPrincipal}>{activeRoute.burn.minter}</Text>
+              {crossFeeErr != null ? (
+                <View testID="convert-crossrail-fees">
+                  <Text testID="crossrail-circle-fee" style={S.err}>{crossFeeErr}</Text>
+                </View>
               ) : null}
             </View>
-            ) : null}
-            {/* The per-venue disclosure sentence (the registry's own `disclosure_key` picks the
-                copy; an unknown key falls back to honest generic copy — fail closed). It
-                follows the PICKED venue (the counterVenueId the quote's own attribution
-                resolves to). */}
-            {!hubMode ? (
-              <Text testID="convert-venue-disclosure" style={S.convertChecklistLine}>
-                {venueDisclosure(counterVenueId)}
-              </Text>
-            ) : null}
-            {math != null && !cefiMode && activeQuote != null ? (
-              <Text testID="convert-pool-fee" style={S.convertChecklistLine}>
-                {M.convert.poolFeeTier(formatMillionthsPct(activeQuote.feeMillionths), venueDisplayName(activeQuote.venueId))}
-              </Text>
-            ) : null}
-            {math != null ? (
-              <Text testID="convert-in-fee" style={S.convertChecklistLine}>
-                {M.convert.inputFeeLine(fmtAssetCompact(math.inFee, inDecimals, inSym))}
-              </Text>
-            ) : null}
-            {math != null ? (
-              <Text testID="convert-out-fee" style={S.convertChecklistLine}>
-                {M.convert.outputFeeLine(fmtAssetCompact(math.outFee, dispOutDecimals, dispOutSym))}
-              </Text>
-            ) : null}
-            {/* Route census (route mode only): the surplus note, the minter's gas line, and the
-                cross-rail fee census. The happy gas/crossrail branches live here; their error
-                branches stay on the main surface above. */}
-            {math != null && routeMode && activeRoute != null ? (
-              <View testID="convert-route-census">
-                <Text style={S.convertChecklistLine}>{M.convert.multihop.routeSurplusNote(dispOutSym)}</Text>
-                {routeGas != null ? (
-                  <Text testID="convert-gas-note" style={S.convertChecklistLine}>
-                    {M.convert.multihop.gasFeeLine(fmtAssetCompact(routeGas.feeWei, activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol))}
+          ) : math != null && !cefiMode ? (
+            <Text testID="convert-min-out" style={S.convertMinOutLine}>
+              {M.convert.minReceiveLine(fmtAssetCompact(math.minOut, outDecimals, outSym), formatBps(slippageBps))}
+            </Text>
+          ) : ammMode && activeJup != null ? (
+            <Text testID="convert-min-out" style={S.convertMinOutLine}>
+              {M.convert.minReceiveLine(fmtAssetCompact(activeJup.otherAmountThreshold, outDecimals, outSym), formatBps(slippageBps))}
+            </Text>
+          ) : null}
+          {quoteChanged != null ? (
+            <Text testID="convert-quote-changed" style={S.convertChecklistWarn}>
+              {M.convert.quoteChanged(
+                fmtAssetCompact(quoteChanged.oldAmt, outDecimals, outSym),
+                fmtAssetCompact(quoteChanged.newAmt, outDecimals, outSym),
+              )}
+            </Text>
+          ) : null}
+          {/* The route's destination address — required by the CCTP crossing (the user's OWN EVM
+              wallet signs the burn from there; dpay never holds EVM keys), validated live,
+              re-typed once before the gas-fund offer can render. */}
+          {routeMode ? (
+            <View>
+              <Text style={S.convertAmountLabel}>{M.convert.multihop.destAddressLabel}</Text>
+              <View style={S.amountRow}>
+                <TextInput
+                  testID="convert-dest-address"
+                  style={S.monoInput}
+                  value={destAddress}
+                  onChangeText={t => {
+                    setDestAddress(t);
+                    setDestRetype('');
+                    setDestReentered(null);
+                  }}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  placeholderTextColor={C.sub}
+                />
+              </View>
+              {destAddress.length > 0 && !destShapeValid ? (
+                <Text testID="convert-dest-address-invalid" style={S.err}>{M.convert.multihop.destAddressInvalid}</Text>
+              ) : destChecksumBad ? (
+                <Text testID="convert-dest-checksum" style={S.err}>{M.convert.crossrail.checksumMismatch}</Text>
+              ) : null}
+              {destShapeValid && !destChecksumBad && !destConfirmed ? (
+                <View>
+                  <Text style={S.convertAmountLabel}>{M.convert.crossrail.retypeAddress}</Text>
+                  <View style={S.amountRow}>
+                    <TextInput
+                      testID="convert-dest-reenter"
+                      style={S.monoInput}
+                      value={destRetype}
+                      onChangeText={t => {
+                        setDestRetype(t);
+                        if (t.toLowerCase() === destAddress.toLowerCase()) setDestReentered(t.toLowerCase());
+                      }}
+                      autoCorrect={false}
+                      autoCapitalize="none"
+                      placeholderTextColor={C.sub}
+                    />
+                  </View>
+                  {destRetype.length >= destAddress.length && destAddress.length > 0 && !destConfirmed ? (
+                    <Text testID="convert-dest-reenter-mismatch" style={S.err}>{M.convert.crossrail.retypeMismatch}</Text>
+                  ) : null}
+                </View>
+              ) : null}
+              <Text testID="convert-dest-cross-note" style={S.convertMetaLine}>{M.convert.crossrail.destAddressCrossNote}</Text>
+            </View>
+          ) : null}
+          {/* The CeFi payout target: not an input — the user's OWN derived address, shown
+              read-only before the order is created. */}
+          {cefiMode && cefiSettleAddress != null ? (
+            <View>
+              <Text style={S.convertAmountLabel}>{M.convert.cefi.settleAddressLabel}</Text>
+              <Text testID="convert-settle-address" style={S.convertMetaLine} selectable>{cefiSettleAddress}</Text>
+            </View>
+          ) : null}
+          <DetailsToggle
+            open={detailsOpen}
+            onToggle={() => setDetailsOpen(o => !o)}
+            label={M.convert.detailsLabel}
+          />
+          {detailsOpen ? (
+            <View testID="convert-details-block">
+              {/* Rate — derived (amount_out ÷ amount_in), never presented as venue-published. */}
+              {math != null && activeIcQuote != null ? (
+                <View testID="convert-rate" style={S.convertRateRow}>
+                  <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, routeMode && crossRow != null ? crossRow.route.hop.symbol : outSym)}</Text>
+                  <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeIcQuote.amountOutGross, activeIcQuote.amountIn, inDecimals), routeMode && crossRow != null ? crossRow.route.hop.decimals : outDecimals, routeMode && crossRow != null ? crossRow.route.hop.symbol : outSym)}</Text>
+                </View>
+              ) : null}
+              {cefiMode && activeCefiQuote != null && cefiRow != null ? (
+                <View testID="convert-rate" style={S.convertRateRow}>
+                  <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, cefiRow.outSym)}</Text>
+                  <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeCefiQuote.amountOutGross, activeCefiQuote.amountIn, inDecimals), cefiRow.outDecimals, cefiRow.outSym)}</Text>
+                </View>
+              ) : null}
+              {ammMode && activeJup != null && ammRow != null ? (
+                <View testID="convert-rate" style={S.convertRateRow}>
+                  <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, ammRow.outSym)}</Text>
+                  <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeJup.outAmount, activeJup.inAmount, inDecimals), ammRow.outDecimals, ammRow.outSym)}</Text>
+                </View>
+              ) : null}
+              {/* Counterparty census — per kind, one copy each. */}
+              {!hubMode ? (
+                <View testID="convert-counterparty">
+                  <Text style={S.convertChecklistLine}>
+                    {cefiMode && cefiRow != null
+                      ? M.convert.cefi.counterparty(venueDisplayName(cefiRow.venue.venue_id))
+                      : ammMode && ammRow != null
+                        ? M.convert.sol.counterparty(venueDisplayName(ammRow.venue.venue_id))
+                        : counterVenueId != null ? M.convert.counterparty(venueDisplayName(counterVenueId))
+                        : ''}
                   </Text>
-                ) : null}
-                {activeRoute.crossRail != null ? (
+                  {/* The pool/endpoint principal renders only when THIS venue's own number stands
+                      behind it; a CeFi venue renders none (its https API base is where the relay
+                      carries the partner key — not a depositor-checkable fact). */}
+                  {/* The principal renders only when THIS venue's own number stands behind it:
+                      the quote's pool echo once one arrives, or the standing single-venue
+                      disclosure. Under a multi-venue pick whose quote has not settled NO
+                      principal renders — an execution fact is never asserted without its
+                      quote, and another venue's principal is never borrowed. */}
+                  {!cefiMode && (activeIcQuote?.pool != null || (counterVenueId != null && !multiVenue)) && (directRow != null || (activeIcQuote != null && routeMode)) ? (
+                    <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeIcQuote?.pool ?? (counterVenueId != null ? venueOfId(counterVenueId)?.endpoint ?? '' : '')}</Text>
+                  ) : null}
+                  {!cefiMode && ammRow != null ? (
+                    <Text testID="convert-pool-principal" style={S.convertPrincipal}>{ammRow.venue.endpoint}</Text>
+                  ) : null}
+                  <Text style={S.convertChecklistLine}>
+                    {cefiMode
+                      ? M.convert.cefi.checklistSigns
+                      : ammMode ? M.convert.sol.counterpartySigns
+                      : M.convert.counterpartySigns}
+                  </Text>
+                  {routeMode && crossRow != null ? (
+                    <Text testID="convert-minter-principal" style={S.convertPrincipal}>{crossRow.route.burn.minter}</Text>
+                  ) : null}
+                </View>
+              ) : null}
+              {!hubMode && counterVenueId != null ? (
+                <Text testID="convert-venue-disclosure" style={S.convertChecklistLine}>
+                  {venueDisclosure(counterVenueId)}
+                </Text>
+              ) : null}
+              {math != null && activeIcQuote != null ? (
+                <Text testID="convert-pool-fee" style={S.convertChecklistLine}>
+                  {M.convert.poolFeeTier(formatMillionthsPct(activeIcQuote.feeMillionths), venueDisplayName(activeIcQuote.venueId))}
+                </Text>
+              ) : null}
+              {math != null ? (
+                <Text testID="convert-in-fee" style={S.convertChecklistLine}>
+                  {M.convert.inputFeeLine(fmtAssetCompact(math.inFee, inDecimals, inSym))}
+                </Text>
+              ) : null}
+              {math != null ? (
+                <Text testID="convert-out-fee" style={S.convertChecklistLine}>
+                  {M.convert.outputFeeLine(fmtAssetCompact(math.outFee, routeMode && crossRow != null ? crossRow.route.hop.decimals : outDecimals, routeMode && crossRow != null ? crossRow.route.hop.symbol : outSym))}
+                </Text>
+              ) : null}
+              {/* Route census (cross-rail only): surplus, gas, Circle's fee, the destination
+                  estimate — verbatim from the multihop surface. */}
+              {math != null && routeMode && crossRow != null ? (
+                <View testID="convert-route-census">
+                  <Text style={S.convertChecklistLine}>{M.convert.multihop.routeSurplusNote(crossRow.route.hop.symbol)}</Text>
+                  {routeGas != null ? (
+                    <Text testID="convert-gas-note" style={S.convertChecklistLine}>
+                      {M.convert.multihop.gasFeeLine(fmtAssetCompact(routeGas.feeWei, crossRow.route.burn.gasDecimals, crossRow.route.burn.gasSymbol))}
+                    </Text>
+                  ) : null}
                   <View testID="convert-crossrail-fees">
-                    {/* The full venue chain, named in one line (founder clarity fix
-                        2026-09-22): registry display names on both ends, Circle's crossing
-                        in the middle — Route C only (Route B has no final venue). */}
-                    {activeRoute.crossRail.sol != null ? (
+                    {crossInfo != null && crossInfo.sol != null ? (
                       <Text testID="convert-route-venues" style={S.convertChecklistLine}>
                         {M.convert.multihop.routeVenues(
-                          venueDisplayName(activeRoute.swapVenueId),
-                          venueDisplayName(activeRoute.crossRail.sol.venueId),
+                          venueDisplayName(crossRow.route.swapVenueId),
+                          venueDisplayName(crossInfo.sol.venueId),
                         )}
                       </Text>
                     ) : null}
-                    {/* Fee census honesty for the crossing: the EVM gas is the USER's wallet's
-                        ETH (dpay can neither pay nor quote it); Circle's mint fee is Circle's
-                        own published number, deducted from the amount — never a dpay fee. */}
                     <Text testID="crossrail-external-gas" style={S.convertChecklistLine}>
                       {M.convert.crossrail.externalGasLine}
                     </Text>
                     {crossFee != null ? (
                       <>
                         <Text testID="crossrail-circle-fee" style={S.convertChecklistLine}>
-                          {M.convert.crossrail.circleFeeLine(fmtAssetCompact(crossFee.maxFee, dispOutDecimals, dispOutSym))}
+                          {M.convert.crossrail.circleFeeLine(fmtAssetCompact(crossFee.maxFee, crossRow.route.hop.decimals, crossRow.route.hop.symbol))}
                         </Text>
-                        {/* The floor line reads USDC as the MID-STOP on a Route C (a final
-                            Jupiter step swaps it onward); Route B's USDC IS the outcome at
-                            the address, so it keeps the arrives-here phrasing. The BARE
-                            number + symbol: the copy owns the unit (solMinLine's rule). */}
+                        {/* The floor reads the HOP asset (USDC) as the mid-stop on a Route C
+                            (the final Jupiter step swaps it onward); Route B's USDC IS the
+                            outcome, so it keeps the arrives-here phrasing. Bare number + the
+                            copy's own unit (solMinLine's rule). */}
                         <Text testID="crossrail-mint-floor" style={S.convertChecklistLine}>
-                          {activeRoute.crossRail.sol != null
-                            ? M.convert.crossrail.mintFloorLine(fmtAssetCompact(crossFee.floor, dispOutDecimals, '').trim(), dispOutSym)
-                            : M.convert.crossrail.mintFloorDestLine(fmtAssetCompact(crossFee.floor, dispOutDecimals, '').trim(), dispOutSym)}
+                          {crossInfo?.sol != null
+                            ? M.convert.crossrail.mintFloorLine(fmtAssetCompact(crossFee.floor, crossRow.route.hop.decimals, '').trim(), crossRow.route.hop.symbol)
+                            : M.convert.crossrail.mintFloorDestLine(fmtAssetCompact(crossFee.floor, crossRow.route.hop.decimals, '').trim(), crossRow.route.hop.symbol)}
                         </Text>
-                        {/* The destination's own estimate (founder clarity fix 2026-09-22):
-                            what the floor would land as after the final Jupiter leg, from
-                            the SAME quote machinery the final leg runs. Fail-soft — absent
-                            until it fetches, never an error, never a gate. */}
-                        {activeRoute.crossRail.sol != null && destEstimate != null ? (
+                        {crossInfo?.sol != null && destEstimate != null ? (
                           <Text testID="crossrail-dest-estimate" style={S.convertChecklistLine}>
                             {M.convert.multihop.routeDestEstimate(
-                              fmtAssetCompact(destEstimate, activeRoute.crossRail.sol.outDecimals, '').trim(),
-                              activeRoute.dest.symbol,
+                              fmtAssetCompact(destEstimate, crossInfo.sol.outDecimals, '').trim(),
+                              crossRow.route.dest.symbol,
                             )}
                           </Text>
                         ) : null}
                       </>
                     ) : null}
                   </View>
-                ) : null}
-              </View>
-            ) : null}
-            {/* HUB per-hop census (D10): one section inside the SAME Details fold — each hop
-                names its venue, its fee tier, its approve cost and its OWN verbatim
-                quoteSource+timestamp; the main attribution (D11) stays on the headline. No
-                total-fees line: the two fees are in different ledger units and would have to
-                be summed dishonestly. */}
-            {hubDest != null && hubRoute != null && hubQuote1 != null && hubQuote2 != null && hubMath1 != null && hubMath2 != null ? (
-              <View testID="convert-hub-census">
-                <Text style={S.convertChecklistLine}>{M.convert.multihop.hubCensusHeading}</Text>
-                <Text style={S.convertRateLabel}>{M.convert.multihop.hubRateLine(inSym, hubDest.symbol)}
-                  <Text style={S.convertRateValue}> {fmtAssetCompact(scaledRate(hubMath2.netOut, hubQuote1.amountIn, legs.inDecimals), hubDest.decimals, hubDest.symbol)}</Text>
+                </View>
+              ) : null}
+              {/* HUB per-hop census (D10): each hop names its venue, its fee tier, its approve
+                  cost and its OWN attributed+timestamped quote. */}
+              {hubRow != null && activeHub != null ? (
+                <View testID="convert-hub-census">
+                  <Text style={S.convertChecklistLine}>{M.convert.multihop.hubCensusHeading}</Text>
+                  <Text style={S.convertRateLabel}>{M.convert.multihop.hubRateLine(inSym, hubRow.route.dest.symbol)}
+                    <Text style={S.convertRateValue}> {fmtAssetCompact(scaledRate(activeHub.m2.netOut, activeHub.q1.amountIn, inDecimals), hubRow.route.dest.decimals, hubRow.route.dest.symbol)}</Text>
+                  </Text>
+                  <Text style={S.convertChecklistLine}>{M.convert.multihop.legSwap(venueDisplayName(hubRow.route.legs[0].venueId), inSym, hubRow.route.hub.symbol)}</Text>
+                  <Text style={S.convertPrincipal}>{M.convert.poolFeeTier(formatMillionthsPct(activeHub.q1.feeMillionths), venueDisplayName(activeHub.q1.venueId))}</Text>
+                  <Text style={S.convertPrincipal}>{M.convert.multihop.approveFeeLine(fmtAssetCompact(activeHub.m1.inFee, inDecimals, inSym))}</Text>
+                  <Text style={S.convertPrincipal}>{M.convert.quoteSource(nonBreakingClock(new Date(activeHub.q1.fetchedAtMs)), venueDisplayName(activeHub.q1.venueId))}</Text>
+                  <Text style={S.convertChecklistLine}>{M.convert.multihop.legSwap(venueDisplayName(hubRow.route.legs[1].venueId), hubRow.route.hub.symbol, hubRow.route.dest.symbol)}</Text>
+                  <Text style={S.convertPrincipal}>{M.convert.poolFeeTier(formatMillionthsPct(activeHub.q2.feeMillionths), venueDisplayName(activeHub.q2.venueId))}</Text>
+                  <Text style={S.convertPrincipal}>{M.convert.multihop.approveFeeLine(fmtAssetCompact(hubRow.route.hub.fee, hubRow.route.hub.decimals, hubRow.route.hub.symbol))}</Text>
+                  <Text style={S.convertPrincipal}>{M.convert.quoteSource(nonBreakingClock(new Date(activeHub.q2.fetchedAtMs)), venueDisplayName(activeHub.q2.venueId))}</Text>
+                  <Text style={S.convertChecklistLine}>{M.convert.multihop.hubSurplusNote(hubRow.route.hub.symbol, hubRow.route.dest.symbol)}</Text>
+                </View>
+              ) : null}
+              {/* Jupiter's own published price impact — the ONE impact figure any venue here
+                  publishes (V8: display what the venue publishes, derive nothing). */}
+              {ammMode && activeJup?.priceImpactPct != null && ammRow != null ? (
+                <Text testID="convert-sol-impact" style={S.convertChecklistLine}>
+                  {M.convert.sol.priceImpactLine(activeJup.priceImpactPct, venueDisplayName(ammRow.venue.venue_id))}
                 </Text>
-                <Text style={S.convertChecklistLine}>{M.convert.multihop.legSwap(venueDisplayName(hubRoute.legs[0].venueId), inSym, hubRoute.hub.symbol)}</Text>
-                <Text style={S.convertPrincipal}>{M.convert.poolFeeTier(formatMillionthsPct(hubQuote1.feeMillionths), venueDisplayName(hubQuote1.venueId))}</Text>
-                <Text style={S.convertPrincipal}>{M.convert.multihop.approveFeeLine(fmtAssetCompact(hubMath1.inFee, inDecimals, inSym))}</Text>
-                <Text style={S.convertPrincipal}>{M.convert.quoteSource(nonBreakingClock(new Date(hubQuote1.fetchedAtMs)), venueDisplayName(hubQuote1.venueId))}</Text>
-                <Text style={S.convertChecklistLine}>{M.convert.multihop.legSwap(venueDisplayName(hubRoute.legs[1].venueId), hubRoute.hub.symbol, hubDest.symbol)}</Text>
-                <Text style={S.convertPrincipal}>{M.convert.poolFeeTier(formatMillionthsPct(hubQuote2.feeMillionths), venueDisplayName(hubQuote2.venueId))}</Text>
-                <Text style={S.convertPrincipal}>{M.convert.multihop.approveFeeLine(fmtAssetCompact(hubRoute.hub.fee, hubRoute.hub.decimals, hubRoute.hub.symbol))}</Text>
-                <Text style={S.convertPrincipal}>{M.convert.quoteSource(nonBreakingClock(new Date(hubQuote2.fetchedAtMs)), venueDisplayName(hubQuote2.venueId))}</Text>
-                <Text style={S.convertChecklistLine}>{M.convert.multihop.hubSurplusNote(hubRoute.hub.symbol, hubDest.symbol)}</Text>
-              </View>
-            ) : null}
-            {/* The refusal line names THIS trade's failure mode. A pool trade fails on price
-                (the pool/approval language); a CeFi deposit-order fails by never being sent —
-                the order expires and nothing moved. Same slot, same rank: what happens if it
-                goes wrong. Lives behind Details: it is context, not an active error — the
-                active error branches (quote/confirm/gas/crossrail) never fold. */}
-            {math != null ? (
-              <Text testID="convert-refusal" style={S.convertChecklistLine}>
-                {cefiMode ? M.convert.cefi.refusalLine(inSym) : M.convert.refusalLine(inSym)}
-              </Text>
-            ) : null}
-          </View>
-        ) : null}
-      </View>
-      ) : null}
-
-      {/* The CeFi no-quote verdict (listed but unquoted): a STATE, not an error — the
-          attributed line names the venue, says nothing was sent, and names the way out. */}
-      {noQuoteVenue != null ? (
-        <View testID="convert-no-quote">
-          <Text style={S.convertChecklistWarn}>{M.convert.cefi.noQuoteTitle}</Text>
-          <Text style={S.convertChecklistLine}>{M.convert.cefi.noQuoteBody(noQuoteVenue)}</Text>
+              ) : null}
+              {/* The refusal line names THIS trade's failure mode. */}
+              {cefiMode ? (
+                <Text testID="convert-refusal" style={S.convertChecklistLine}>
+                  {M.convert.cefi.refusalLine(inSym)}
+                </Text>
+              ) : ammMode ? (
+                <Text testID="convert-refusal" style={S.convertChecklistLine}>
+                  {M.convert.sol.refusalLine(inSym)}
+                </Text>
+              ) : math != null ? (
+                <Text testID="convert-refusal" style={S.convertChecklistLine}>
+                  {M.convert.refusalLine(inSym)}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
         </View>
       ) : null}
-      {(quoteErr ?? hubErr) != null ? (
+
+      {/* The CeFi no-quote verdict (listed but unquoted) — the honest attributed no-market state
+          for the row whose venue answered it. */}
+      {noQuoteRow != null && noQuoteRow.rowId === activeRow?.rowId ? (
+        <View testID="convert-no-quote">
+          <Text style={S.convertChecklistWarn}>{M.convert.cefi.noQuoteTitle}</Text>
+          <Text style={S.convertChecklistLine}>{M.convert.cefi.noQuoteBody(noQuoteRow.venueName)}</Text>
+        </View>
+      ) : null}
+      {(activeRowErr ?? quoteErr) != null ? (
         <Text testID="convert-quote-err" style={S.err}>
-          {quoteErr ?? hubErr}
+          {activeRowErr ?? quoteErr}
         </Text>
       ) : null}
       {confirmErr != null ? (
@@ -2006,11 +1682,7 @@ function ConvertModeIc({identity, relayUrl, catalog, selectedAsset, assetBalance
         </Text>
       ) : null}
 
-      {/* ckETH-gas preflight (spec §6): with a KNOWN shortfall the intent form says so BEFORE
-          anything is signed. On a cross-rail route with a CONFIRMED destination and a measured
-          have, the passive warn upgrades to the gas-fund offer card (2026-09-20): need vs have,
-          one number per line, and the two honest paths out. Without a measured have the card
-          never renders — the passive warn stands (today's fail-open). */}
+      {/* ckETH-gas preflight + the gas-fund offer (cross-rail only) — verbatim machinery. */}
       {routeMode && gasShort && gasNeededStr != null && !gasFundCardShown ? (
         <View testID="convert-gas-preflight">
           <Text style={S.convertChecklistWarn}>{M.convert.multihop.gasPreflightTitle}</Text>

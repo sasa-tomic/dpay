@@ -20,7 +20,7 @@
 //   cd e2e && DPAY_E2E_REGEN_BASELINES=1 DPAY_E2E_FILTER=84 node run.mjs
 // (same seeding policy as flow 40: REGEN only overwrites baselines that drifted past tolerance,
 // so a seed commit shows only genuinely-moved surfaces).
-import { setup, onboardWallet, assert, openBalances, selectCurrency, accountOf, faucetAccount } from '../harness/lib.mjs';
+import { setup, onboardWallet, assert, openBalances, selectCurrency, accountOf, faucetAccount, openConvertFor } from '../harness/lib.mjs';
 import { startRelay } from '../harness/relay.mjs';
 import { comparePng } from '../harness/pixel.mjs';
 import { existsSync } from 'node:fs';
@@ -177,10 +177,7 @@ export async function run() {
     const fund = await faucetAccount(r2.baseURL, account.publicHex, SEED, {currency: 8});
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
 
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'icp');
     await driver.type('convert-amount', '1');
     await driver.findByTestID('convert-venue-icpswap-quote', {timeoutMs: 10_000});
     await driver.findByTestID(`convert-venue-${FIXTURE_VENUE}-quote`, {timeoutMs: 10_000});

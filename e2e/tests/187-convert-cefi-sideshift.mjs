@@ -24,7 +24,9 @@
 //   5. THE DISCLOSURE IS THE VENUE'S OWN. The checklist renders the byKey.sideshift copy
 //      naming SideShift as an automated exchange service (not a licensed provider, dpay
 //      paid nothing) with their own published terms link.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
+  pickSwapTarget,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
 import {installSideShiftStub, setSideShiftStatus, sideShiftStubState} from '../harness/sideshift.mjs';
@@ -43,8 +45,8 @@ const SETTLE_HASH = 'sol-settle-sig-187';
 // D2 (2026-09-18 hub redesign): no standalone cefi row — SideShift rides as a MECHANISM
 // inside the SOL-on-Solana destination group (the group row carries the first route's id;
 // selecting it reveals the sub-picker where the cefi venue sits beside the route).
-const CEFI_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter';
-const CEFI_MECH = 'convert-dest-mech-sideshift';
+const CEFI_ROW = 'convert-venue-sideshift';
+const CEFI_MECH = 'convert-venue-sideshift';
 
 export const meta = {
   id: '187',
@@ -65,25 +67,21 @@ async function relayHits(relayBaseURL) {
 
 /** Re-enter the convert surface from the accounts route (post-terminal-variant trips). */
 async function reopenConvert(driver) {
-  await openBalances(driver);
-  await selectCurrency(driver, 'icp');
-  await openBalances(driver); // back to the accounts route — the convert entry lives there
   let opened = false;
   for (let i = 0; i < 3 && !opened; i++) {
     try {
-      await driver.click('btn-accounts-convert', {timeoutMs: 8_000});
+      await openConvertFor(driver, 'icp', {timeoutMs: 8_000});
       opened = true;
     } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
   }
 }
 
-/** One full surface pass: pick the CeFi row, quote, confirm, land at awaiting_deposit with
- *  the venue's deposit handoff rendered verbatim. Returns once the panel is up. */
+/** One full surface pass: the SOL target + the SideShift venue row, quote, confirm, land at
+ *  awaiting_deposit. Returns once the panel is up. Two venues serve the SOL pair → the venue
+ *  pick is explicit (nothing auto-arms). */
 async function pickCefiAndConfirm(driver) {
+  await pickSwapTarget(driver, 'SOL');
   await driver.type('convert-amount', AMOUNT_TEXT);
-  await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-  await driver.click(CEFI_ROW, {timeoutMs: 5_000});
-  // D2 merge: the group row reveals the mechanism sub-picker; the cefi venue is a mech pick.
   await driver.click(CEFI_MECH, {timeoutMs: 5_000});
   await driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
   await driver.waitForText('SideShift', {timeoutMs: 8_000});
@@ -133,20 +131,16 @@ export async function run() {
     const passOrigins = [new URL(r2.baseURL).origin, new URL(webBaseURL).origin, new URL(env.relayBaseURL).origin];
     await installSideShiftStub(driver, {passOrigins, initialStatus: 'waiting'});
 
-    // --- §1 the venue row, the disclosure, and the verbatim quote
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    // --- §1 the venue row, the disclosure, and the verbatim quote. Two CeFi venues serve the
+    // SOL pair (SideShift + Trocador) beside the composed route — nothing preselected.
+    await openConvertFor(driver, 'icp');
+    await pickSwapTarget(driver, 'SOL');
+    assert(await driver.findByTestID('convert-venues', {timeoutMs: 8_000}) != null,
+      'the SOL pair\'s venue area renders (the composed route + both CeFi venues as rows)');
     await driver.type('convert-amount', AMOUNT_TEXT);
-    await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-
-    assert(await driver.findByTestID(CEFI_ROW, {timeoutMs: 3_000}) != null,
-      'the SOL destination group (route + SideShift merged) is offered beside the direct pair');
-    await driver.click(CEFI_ROW);
     assert(await driver.findByTestID(CEFI_MECH, {timeoutMs: 4_000}) != null,
-      'SideShift is a mechanism inside the merged SOL destination (D2 merge)');
-    assertIncludes(await driver.readText(CEFI_MECH), 'SideShift', 'the mech row names the venue');
+      'the SideShift venue row is offered (registry order beside the route)');
+    assertIncludes(await driver.readText(CEFI_MECH), 'SideShift', 'the venue row names the venue');
     await driver.click(CEFI_MECH);
     const settle = await driver.readText('convert-settle-address');
     assertIncludes(settle, kp.address, 'the payout address is the wallet\'s OWN derived Solana address');

@@ -1,13 +1,13 @@
 /**
  * The convert matrix drift pins (docs/CONVERT_MATRIX.md + the registry that generates it):
  *
- * 1. REGISTRY COVERAGE — every mainnet venue row is actually REACHABLE in the pickers the
+ * 1. REGISTRY COVERAGE — every mainnet venue row is actually REACHABLE on the surfaces the
  *    app renders: ic_amm rows through resolveConvertDestinations (both pair directions),
- *    solana_amm + cefi rows through the SOL surface's resolveSolDestinations (the SOL-side
- *    mint as deposit), and cefi rows additionally through cefiVenuesForLedger (the IC
- *    surface's own enumeration). A registry row no picker can reach (or a hand-added doc
- *    row the registry does not carry) fails here — the doc and the app derive from the
- *    SAME registry, and neither carries a hand list.
+ *    solana_amm + cefi rows through the currency-level swap walk (config/swap.ts
+ *    resolveSwapTargets, the SOL-side mint as the standing source), and cefi rows
+ *    additionally through cefiVenuesForLedger (the IC-side enumeration). A registry row no
+ *    surface can reach (or a hand-added doc row the registry does not carry) fails here —
+ *    the doc and the app derive from the SAME registry, and neither carries a hand list.
  * 2. DOC DRIFT — docs/CONVERT_MATRIX.md is byte-identical to what
  *    scripts/gen_convert_matrix.mjs generates RIGHT NOW (regenerate-and-diff inside jest,
  *    the flows-md pattern), and the doc's venue set equals the bundled registry's
@@ -26,8 +26,9 @@ import {
   setRuntimeVenues,
   type VenueEntry,
 } from '../config/venues';
-import type {SelectableAsset} from '../config/assets';
-import {resolveSolDestinations} from '../components/ConvertSolDest';
+import {buildSelectableAssets} from '../config/assets';
+import {resolveSwapTargets} from '../config/swap';
+import {currencyOfAsset, WALLET_CURRENCIES, type HomeCurrency} from '../config/currency';
 import {
   EURC_MINT_ADDRESS,
   SOLANA_TOKENS,
@@ -54,35 +55,22 @@ const solSideOf = (v: VenueEntry): string => {
   return mint as string;
 };
 
-/** A minimal SOL selectable asset for the resolver (only `mint` is read). */
-function solAsset(mint: string | null): Extract<SelectableAsset, {protocol: 'solana'}> {
-  return {
-    id: `solana:${mint ?? 'SOL'}`,
-    protocol: 'solana',
-    token: 'SOL',
-    symbol: 'SOL',
-    linkToken: null,
-    networkLabel: 'SOL · Solana',
-    network: 'Solana',
-    mint,
-    decimals: 9,
-    minFractionDigits: 0,
-    liquidity: null,
-    onramp: 'Unavailable',
-    offramp: 'Unavailable',
-    rampPartner: null,
-    visible: true,
-    testKey: 'sol',
-  };
-}
-
-/** The SOL surface offers this venue as a mechanism when the asset named `mint` is deposited. */
+/** The swap screen offers this venue as a row when the SOL-rail asset named `mint` is the
+ *  standing source: `amm` = a solamm row (a rail-local Solana venue), `cefi` = a cefi row. */
 function solSurfaceOffers(v: VenueEntry, kind: 'amm' | 'cefi', mint: string): boolean {
-  const res = resolveSolDestinations(solAsset(mint), CATALOG);
-  if (res == null) return false;
-  return res.groups.some(g =>
-    g.mechs.some(m => m.kind === kind && m.venue.venue_id === v.venue_id),
+  const assets = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
+  const source = assets.find(
+    a => a.protocol === 'solana' && (a.mint ?? WRAPPED_SOL_MINT_ADDRESS) === mint,
   );
+  if (source == null) return false;
+  const targets = resolveSwapTargets({
+    catalog: CATALOG,
+    source,
+    targetCurrencies: (WALLET_CURRENCIES as readonly HomeCurrency[]).filter(c => c !== currencyOfAsset(source)),
+  });
+  if (targets == null) return false;
+  const want = kind === 'amm' ? 'solamm' : 'cefi';
+  return targets.some(t => t.rows.some(r => r.kind === want && r.rowId === v.venue_id));
 }
 
 describe('convert matrix — every mainnet registry row is reachable in the pickers', () => {

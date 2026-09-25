@@ -18,7 +18,8 @@
 //     the pair (checklist on the angxa pool, attributed ICPSwap) and the ICP→ckETH quote
 //     renders an 18-decimal amount_out — no execution on this leg.
 // Private relay (startRelay, the flow-168 pattern): execution mutates pool state.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
@@ -80,16 +81,17 @@ export async function run() {
     assert(fund.ok, `faucet ckUSDC credit ok (status ${fund.status})`);
 
     // --- ckUSDC→ICP: discover the pair on the Convert surface -----------------------------------
-    await openBalances(driver);
-    await selectCurrency(driver, 'ckusdc');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'ckusdc');
     await driver.type('convert-amount', '100');
-    // ONE venue on this pair → NO chooser renders (venue rows exist only when a choice exists,
-    // ConvertMode chooserVenues); the checklist surfaces directly, quoting through the pool.
+    // ONE VENUE on this pair → no venue CHOICE: the direct pool is the standing pick (the
+    // single-venue rule), the checklist surfaces directly, quoting through the pool. The
+    // venue area still renders the composed via-VCHF hub as an explicit opt-in row (the D2
+    // standing-default rule: a hub is an explicit switch away, never chosen for the user).
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-    assert(await driver.findByTestID('convert-venues', {timeoutMs: 1_000}).catch(() => null) == null,
-      'single venue on the ckUSDC pair → no chooser (pair-scoped: the VCHF/ckETH venues are not on this pair)');
+    assert(await driver.findByTestID('convert-venue-icpswap-ckusdc', {timeoutMs: 4_000}) != null,
+      'the direct pool row renders (the standing pick — one venue, nothing to choose)');
+    assert(await driver.findByTestID('convert-venue-none', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the single venue IS the standing pick — nothing is withheld for a choice that does not exist');
     assert(await driver.findByTestID('convert-unavailable', {timeoutMs: 500}).catch(() => null) == null,
       'the ckUSDC pair is venue-PAIRED now (no fail-closed panel — it was venue-less before 2026-09-15)');
 
@@ -156,15 +158,12 @@ export async function run() {
     console.log('[183-convert-pairs] ckETH pair offered (quote-only)…');
     const fundEth = await faucetAccount(r2.baseURL, account.publicHex, SEED_ETH, {currency: 6});
     assert(fundEth.ok, `faucet ckETH credit ok (status ${fundEth.status})`);
-    await openBalances(driver);
-    await selectCurrency(driver, 'cketh');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'cketh');
     await driver.type('convert-amount', '0.002');
-    // Single venue on the ckETH pair too → the checklist surfaces directly, no chooser.
+    // Single venue on the ckETH pair too → the direct pool stands, checklist surfaces directly.
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-    assert(await driver.findByTestID('convert-venues', {timeoutMs: 1_000}).catch(() => null) == null,
-      'single venue on the ckETH pair → no chooser');
+    assert(await driver.findByTestID('convert-venue-none', {timeoutMs: 1_000}).catch(() => null) == null,
+      'single venue on the ckETH pair → the direct pool is the standing pick (nothing withheld)');
     await driver.click('convert-details', {timeoutMs: 5_000}); // the folded census (verbosity pass 2026-09-16)
     assertEq((await driver.readText('convert-pool-principal')).trim(), CKETH_POOL,
       'the ckETH counterparty principal is the ckETH pool\'s own canister');

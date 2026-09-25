@@ -36,7 +36,7 @@
 // hits endpoint itself); the cluster is the __DPAY_TEST_SOLANA_RPC_STUB
 // every SOL flow uses, with sendTransaction decoding the real bytes and returning the tx's own
 // signature so the driver's node-signature identity check passes exactly as against a real node.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor} from '../harness/lib.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
   configureJupiterStub, jupiterStubState, USDC_MINT, WRAPPED_SOL_MINT,
@@ -139,14 +139,11 @@ export async function run() {
     });
 
     // §1 — the surface is reachable for a SOLANA wallet at all (the V11 gate, now open).
-    await openBalances(driver);
-    await driver.click('asset-sol-select', {timeoutMs: 8_000});
-    await driver.waitForText('Convert', {timeoutMs: 6_000});
-    await driver.click('btn-accounts-convert', {timeoutMs: 5_000});
+    await openConvertFor(driver, 'sol');
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for SOL (the Jupiter venue row resolves)');
-    assertIncludes(await driver.readText('convert-screen'), 'Convert SOL to USDC', 'heading names the rail-local pair');
+    assertIncludes(await driver.readText('convert-screen'), 'Convert SOL → USD', 'heading names the currency pair (the standing target is the row-0 venue\'s other side)');
 
-    // Single venue on the pair → no chooser chrome, nothing to preselect (the IC one-venue rule).
+    // Single venue on the pair → no chooser chrome, nothing to preselect (the one-venue rule).
     assert(await driver.isPresent('convert-venue-jupiter') === false, 'no venue chooser for the single solana_amm venue');
 
     // §2 — Jupiter's own digits, verbatim through the relay proxy.

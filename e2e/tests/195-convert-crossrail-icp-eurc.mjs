@@ -32,7 +32,10 @@
 // USDC→EURC quote and a venue tx paying out at the user's EURC ATA), and the SOL RPC stub
 // (the 185 seam — getTransaction is KEYED: Circle's forward tx → the USDC mint credit at
 // the USDC ATA; the swap signature → the EURC token credit at the EURC ATA).
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
+  pickSwapTarget,
+  pickSwapVenue,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
@@ -44,9 +47,9 @@ import {installCctpStub, cctpStubState, setCctpMessageState, cctpFeeExpectations
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 const CKUSDC_LEDGER = 'xevnm-gaaaa-aaaar-qafnq-cai';
 const CKUSDC_POOL = 'mohjv-bqaaa-aaaag-qjyia-cai';
-const ROUTE_C_SOL_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter';
-const ROUTE_C_EURC_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc';
-const ROUTE_C_EURC_MECH = 'convert-dest-mech-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc';
+const ROUTE_C_SOL_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter';
+const ROUTE_C_EURC_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc';
+const ROUTE_C_EURC_MECH = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc';
 const DEST = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'.toLowerCase();
 const BURN_HASH = '0x' + '2c'.repeat(32);
 
@@ -202,18 +205,24 @@ export async function run() {
     await installCctpStub(driver, {passOrigins, forwardTxHash: FORWARD_TX_HASH});
 
     // --- §1 the composed destination is an explicit opt-in — BOTH Route C rows, registry order
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'icp');
+    // The EUR target needs the EURC(Solana) rail in the wallet's asset list — the RPC stub's
+    // first answers must land before the currency list offers EUR.
+    await new Promise((r) => setTimeout(r, 2_500));
+    await driver.screenshot('195-probe-entry');
+    const ids = await driver.eval(() => Array.from(document.querySelectorAll('[data-testid]')).map(n => n.getAttribute('data-testid')).filter(t => t.startsWith('convert-')));
+    console.log('PROBE-SURFACE ' + JSON.stringify([...new Set(ids)]));
+    await pickSwapTarget(driver, 'EUR');
     await driver.type('convert-amount', '5');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
 
+    // The original Route C SOL row lives on the SOL target; the EUR target carries the
+    // generalization beside its own CeFi venue (each mechanism IS a row now).
+    await pickSwapTarget(driver, 'SOL');
     assert(await driver.findByTestID(ROUTE_C_SOL_ROW, {timeoutMs: 3_000}) != null, 'the original Route C SOL row is still offered');
-    assert(await driver.findByTestID(ROUTE_C_EURC_ROW, {timeoutMs: 3_000}) != null, 'the Route C EURC row is offered beside it (the generalization)');
-    assert(await driver.isPresent('convert-route-note') === false, 'the one-route honesty line is HIDDEN (four routes exist)');
+    await pickSwapTarget(driver, 'EUR');
+    assert(await driver.findByTestID(ROUTE_C_EURC_ROW, {timeoutMs: 3_000}) != null, 'the Route C EURC row is offered beside the CeFi venue (the generalization)');
     await driver.click(ROUTE_C_EURC_ROW);
-    await driver.click(ROUTE_C_EURC_MECH, {timeoutMs: 4_000});
     await driver.type('convert-dest-address', DEST);
     await driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
     assertIncludes(await driver.readText('convert-dest-cross-note'), 'also the wallet that signs',
@@ -302,13 +311,9 @@ export async function run() {
     await openBalances(driver);
     await selectCurrency(driver, 'icp');
     await openBalances(driver); // back to the accounts route — the convert entry lives there
-    let opened = false;
-    for (let i = 0; i < 3 && !opened; i++) {
-      try {
-        await driver.click('btn-accounts-convert', {timeoutMs: 8_000});
-        opened = true;
-      } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
-    }
+    // §5's reload re-enters on the LIVE crossrail record — the record view IS the screen; no
+    // form walk (the pick gestures are form-only).
+    await openConvertFor(driver, 'icp', {timeoutMs: 8_000});
     await driver.findByTestID('crossrail-crossing', {timeoutMs: 15_000});
     // One CDP round trip for all six leg states; the reads land in-page, asserts stay in Node.
     const legsAfterReload = await driver.eval(() =>

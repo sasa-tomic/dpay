@@ -15,6 +15,9 @@
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount,
   getBalance, openBalances, selectCurrency,
+  openConvertFor,
+  pickSwapTarget,
+  pickSwapVenue,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {
@@ -28,9 +31,9 @@ import {installSideShiftStub, sideShiftStubState} from '../harness/sideshift.mjs
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 const CKUSDC_LEDGER = 'xevnm-gaaaa-aaaar-qafnq-cai';
 const CKUSDC_POOL = 'mohjv-bqaaa-aaaag-qjyia-cai';
-const ROUTE_C_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter';
-const ROUTE_C_MECH = 'convert-dest-mech-multihop:icpswap-ckusdc:2:cctp:jupiter';
-const CEFI_MECH = 'convert-dest-mech-sideshift';
+const ROUTE_C_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter';
+const ROUTE_C_MECH = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter';
+const CEFI_MECH = 'convert-venue-sideshift';
 const DEST = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'.toLowerCase();
 const BURN_HASH = '0x' + '3c'.repeat(32);
 const SHIFT_ID = 'e2e-shift-9c1d';
@@ -192,13 +195,12 @@ async function attachBurnAndGetCrossing(driver, amountText) {
 
 /** Re-enter the convert surface from the accounts route. */
 async function reopenConvert(driver) {
-  await openBalances(driver);
-  await selectCurrency(driver, 'icp');
-  await openBalances(driver);
   let opened = false;
   for (let i = 0; i < 3 && !opened; i++) {
     try {
-      await driver.click('btn-accounts-convert', {timeoutMs: 8_000});
+      await openConvertFor(driver, 'icp', {timeoutMs: 8_000});
+      await pickSwapTarget(driver, 'SOL');
+      await pickSwapVenue(driver, 'multihop:icpswap-ckusdc:2:cctp:jupiter');
       opened = true;
     } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
   }

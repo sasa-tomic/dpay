@@ -14,14 +14,17 @@
 //   4. THE HONEST WAIT LINE. provider_processing shows "Last checked HH:MM" — the engine's
 //      own last completed read, no SLA claimed.
 //   5. THE DEPOSIT HANDOFF NAMES THE ORDER'S WINDOW: the venue's shift id and its expiry.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor,
+  pickSwapTarget,
+  pickSwapVenue,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {installSideShiftStub, setSideShiftStatus, sideShiftStubState} from '../harness/sideshift.mjs';
 
 const AMOUNT_TEXT = '3';
 const SHIFT_ID = 'e2e-shift-9c1d';
-const CEFI_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter';
-const CEFI_MECH = 'convert-dest-mech-sideshift';
+const CEFI_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter';
+const CEFI_MECH = 'convert-venue-sideshift';
 
 export const meta = {
   id: '208',
@@ -41,13 +44,12 @@ async function relayHits(relayBaseURL) {
 
 /** Re-enter the convert surface from the accounts route. */
 async function reopenConvert(driver) {
-  await openBalances(driver);
-  await selectCurrency(driver, 'icp');
-  await openBalances(driver);
   let opened = false;
   for (let i = 0; i < 3 && !opened; i++) {
     try {
-      await driver.click('btn-accounts-convert', {timeoutMs: 8_000});
+      await openConvertFor(driver, 'icp', {timeoutMs: 8_000});
+      await pickSwapTarget(driver, 'SOL');
+      await pickSwapVenue(driver, 'sideshift');
       opened = true;
     } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
   }
@@ -56,8 +58,6 @@ async function reopenConvert(driver) {
 async function pickCefiAndConfirm(driver) {
   await driver.type('convert-amount', AMOUNT_TEXT);
   await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-  await driver.click(CEFI_ROW, {timeoutMs: 5_000});
-  await driver.click(CEFI_MECH, {timeoutMs: 5_000});
   await driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
   await driver.waitForText('SideShift', {timeoutMs: 8_000});
   await driver.click('btn-convert-confirm', {timeoutMs: 5_000});
@@ -86,10 +86,9 @@ export async function run() {
     await installSideShiftStub(driver, {passOrigins, initialStatus: 'waiting'});
 
     // --- §1 the order is born into waiting; the handoff names the shift id + expiry window
-    await openBalances(driver);
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await openConvertFor(driver, 'icp');
+    await pickSwapTarget(driver, 'SOL');
+    await pickSwapVenue(driver, 'sideshift');
     await pickCefiAndConfirm(driver);
     const handoff = await driver.readText('convert-awaiting-deposit');
     assertIncludes(handoff, SHIFT_ID, 'the venue\'s shift id renders (the status-page handle)');

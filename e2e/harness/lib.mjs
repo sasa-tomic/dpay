@@ -878,7 +878,13 @@ export async function selectCurrency(driver, key, opts = {}) {
   }
   const currency = ASSET_KEY_TO_CURRENCY[key] ?? (key.length <= 4 ? key.toUpperCase() : null);
   if (currency == null) throw new Error(`selectCurrency: no currency for asset key "${key}"`);
-  await driver.click(`btn-accounts-currency-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+  try {
+    await driver.click(`btn-accounts-currency-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+  } catch (e) {
+    const rows = await driver.eval(() => [...new Set(Array.from(document.querySelectorAll('[data-testid]')).map(n => n.getAttribute('data-testid')).filter(t => t.startsWith('btn-accounts-currency-') || t === 'accounts-list' || t.startsWith('asset-')))]);
+    console.log(`[selectCurrency] surface after miss: ${JSON.stringify(rows)}`);
+    throw e;
+  }
   // The tap sets MAIN and navigates Home (the row unmounts), so the confirmation is Home's own
   // headline: "Balance <CODE>" names the currency the wallet is now in.
   const deadline = Date.now() + (opts.timeoutMs ?? 5_000);
@@ -906,11 +912,93 @@ export async function selectCurrency(driver, key, opts = {}) {
  * `btn-accounts-convert`. Does the whole journey: opens the route, taps the row's Convert.
  * Wait budget: the convert surface's own fund-gate/quote state is the caller's business.
  */
+/**
+ * Pick a TARGET CURRENCY on the swap screen (the 2026-09-24 currency grammar): open the
+ * target list (btn-convert-target) and tap the row (convert-target-<CODE>). Assumes the swap
+ * surface is already open. The pick resets the venue selection and the quote — the caller
+ * re-types the amount or waits for the fresh quote itself.
+ */
+export async function pickSwapTarget(driver, code, opts = {}) {
+  // Idempotent on the list's open state: the row lookup first (the list may already be open
+  // from a caller's own chip press); up to three chip presses, each followed by a row probe —
+  // a press that lands between renders (the quote poll re-renders the header) must not strand
+  // the walk with the list closed.
+  const attempts = opts.attempts ?? 3;
+  for (let i = 0; i < attempts; i++) {
+    const row = await driver.findByTestID(`convert-target-${code}`, { timeoutMs: 1_500 }).catch(() => null);
+    if (row != null) break;
+    await driver.click('btn-convert-target', { timeoutMs: opts.timeoutMs ?? 5_000 });
+    const opened = await driver.findByTestID(`convert-target-${code}`, { timeoutMs: 2_500 }).catch(() => null);
+    if (opened != null) break;
+  }
+  try {
+    await driver.click(`convert-target-${code}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+  } catch (e) {
+    const surf = await driver.eval(() => ({
+      chip: document.querySelectorAll('[data-testid="btn-convert-target"]').length,
+      ids: [...new Set(Array.from(document.querySelectorAll('[data-testid]')).map(n => n.getAttribute('data-testid')).filter(t => t.startsWith('convert-') || t.startsWith('btn-convert-')))],
+    }));
+    console.log(`[pickSwapTarget] surface after miss: ${JSON.stringify(surf)}`);
+    throw e;
+  }
+}
+
+/**
+ * Pick a VENUE row on the swap screen's venue area (convert-venue-<rowId>). Only needed when
+ * SEVERAL venues serve the resolved pair (none preselected — the fork-3 red line); a single
+ * venue arms on its own.
+ */
+export async function pickSwapVenue(driver, rowId, opts = {}) {
+  await driver.click(`convert-venue-${rowId}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+}
+
 export async function openConvertFor(driver, key, opts = {}) {
   await openBalances(driver, { timeoutMs: opts.timeoutMs ?? 5_000 });
   const currency = ASSET_KEY_TO_CURRENCY[key] ?? (key.length <= 4 ? key.toUpperCase() : null);
   if (currency == null) throw new Error(`openConvertFor: no currency for asset key "${key}"`);
   await driver.click(`btn-accounts-convert-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+  // A LIVE conversion record renders the RECORD VIEW on entry (no `convert-screen` chrome —
+  // the per-record panels carry their own roots). Wait for the FORM screen or any record
+  // root, whichever this entry carries.
+  const entryDeadline = Date.now() + (opts.timeoutMs ?? 5_000) + 4_000;
+  for (;;) {
+    const found = await driver.eval(() => {
+      for (const t of ['convert-screen', 'convert-state', 'crossrail-crossing', 'convert-awaiting-deposit', 'convert-provider-processing', 'convert-done', 'convert-pending', 'convert-fund', 'convert-unavailable']) {
+        if (document.querySelector(`[data-testid="${t}"]`) != null) return t;
+      }
+      return null;
+    });
+    if (found != null) break;
+    if (Date.now() > entryDeadline) throw new Error(`openConvertFor: the ${currency} convert surface never rendered (no form, record, gate, or unavailable panel within ${Math.round((entryDeadline - Date.now() + (opts.timeoutMs ?? 5_000) + 4_000) / 1000)}s)`);
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  // The zero-balance FUND GATE can flash first when the entry races the wallet's first balance
+  // poll (a fast two-click entry lands before the poll answers — the gate reads the poll's
+  // '0' seed as a measured zero). The FORM is this helper's contract: wait for the amount
+  // field; the gate flips on the first poll answer. One re-entry covers a poll that lost the
+  // race entirely (the remount reads the funded map). Still gated after that = a genuine zero
+  // balance — hand the gate to the caller (its fund-gate assertions take over).
+  const gated = async () => (await driver.findByTestID('convert-amount', { timeoutMs: 1_000 }).catch(() => null)) == null
+    && (await driver.findByTestID('convert-fund', { timeoutMs: 500 }).catch(() => null)) != null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const deadline = Date.now() + (opts.formTimeoutMs ?? 6_000);
+    let sawGate = false;
+    for (;;) {
+      if (await driver.findByTestID('convert-amount', { timeoutMs: 1_000 }).catch(() => null) != null) return;
+      // A live-record panel is the other valid end state (no form walk happens on it).
+      for (const rec of ['convert-state', 'convert-awaiting-deposit', 'convert-provider-processing', 'convert-done', 'convert-pending', 'crossrail-crossing']) {
+        if (await driver.findByTestID(rec, { timeoutMs: 300 }).catch(() => null) != null) return;
+      }
+      sawGate = sawGate || (await driver.findByTestID('convert-fund', { timeoutMs: 500 }).catch(() => null)) != null;
+      if (Date.now() > deadline) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (!sawGate) return; // not the gate (a record view / unavailable) — the caller's business
+    // Re-enter once: the poll has had its window; the remount reads the funded map.
+    await driver.click('btn-convert-back', { timeoutMs: 5_000 });
+    await driver.click(`btn-accounts-convert-${currency}`, { timeoutMs: 5_000 });
+    await driver.findByTestID('convert-screen', { timeoutMs: 5_000 });
+  }
 }
 
 /**

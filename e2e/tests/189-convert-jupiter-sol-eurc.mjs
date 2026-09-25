@@ -24,7 +24,7 @@
 // __DPAY_TEST_SOLANA_RPC_STUB, with
 // the getTransaction detail carrying the EURC mint row (the realized-payout oracle matches the
 // record's own out mint).
-import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
   configureJupiterStub, jupiterStubState, EURC_MINT, WRAPPED_SOL_MINT,
@@ -120,21 +120,14 @@ export async function run() {
       lastValidBlockHeight: 300000000,
     });
 
-    // §1 — both destinations visible; the DEFAULT is exactly flow 185's pair (no surprise
-    // preselection, no behavior change until the user picks).
-    await openBalances(driver);
-    await driver.click('asset-sol-select', {timeoutMs: 8_000});
-    await driver.waitForText('Convert', {timeoutMs: 6_000});
-    await driver.click('btn-accounts-convert', {timeoutMs: 5_000});
+    // §1 — the target list carries every reachable CURRENCY; the standing target is the
+    // registry-row-0 venue's other side (USD — exactly flow 185's pair).
+    await openConvertFor(driver, 'sol');
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for SOL');
-    assert(await driver.findByTestID('convert-sol-dest', {timeoutMs: 5_000}) != null, 'the out-destination picker renders (two venues on SOL)');
-    assert(await driver.findByTestID('convert-sol-dest-sol-usdc', {timeoutMs: 3_000}) != null, 'the USDC row is present');
-    assert(await driver.findByTestID('convert-sol-dest-sol-eurc', {timeoutMs: 3_000}) != null, 'the EURC row is present');
-    assertIncludes(await driver.readText('convert-screen'), 'Convert SOL to USDC', 'the default pair is still SOL→USDC (first venue in registry order)');
+    await pickSwapTarget(driver, 'EUR');
+    assertIncludes(await driver.readText('convert-screen'), 'Convert SOL → EUR', 'the heading names the picked pair');
 
-    // §2 — the pick re-targets the pair.
-    await driver.click('convert-sol-dest-sol-eurc', {timeoutMs: 3_000});
-    assertIncludes(await driver.readText('convert-screen'), 'Convert SOL to EURC', 'the heading names the picked pair');
+    // §2 — Jupiter's own digits for the EUR pair, verbatim through the relay proxy.
 
     // §3 — Jupiter's own digits for the EURC pair, verbatim through the relay proxy.
     await driver.type('convert-amount', '1');

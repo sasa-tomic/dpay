@@ -85,6 +85,8 @@ describe('CeFi quotes never refresh on a timer (organic-demand, partner agreemen
           catalog={CATALOG}
           selectedAsset={EURC_ASSET}
           assetBalances={{}}
+          visibleCurrencies={['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'] as const}
+          currencyBalances={{}}
           solana={{sol: '5000000000', tokens: BALANCES}}
           onActivity={() => undefined}
           onBack={() => undefined}
@@ -94,7 +96,12 @@ describe('CeFi quotes never refresh on a timer (organic-demand, partner agreemen
     });
     await act(async () => {});
     await act(async () => {
-      tree.root.findAll(n => n.props != null && n.props.testID === 'convert-sol-dest-cefi-sideshift-eurc')[0].props.onPress();
+      tree.root.findAll(n => n.props != null && n.props.testID === 'btn-convert-target')[0].props.onPress();
+    });
+    await act(async () => {
+      tree.root.findAll(n => n.props != null && n.props.testID === 'convert-target-ICP')[0].props.onPress();
+    });
+    await act(async () => {
       tree.root.findAll(n => n.props != null && n.props.testID === 'convert-amount')[0].props.onChangeText('1');
     });
     // The review quote is in — exactly one fetch, from opening the screen + typing the amount.

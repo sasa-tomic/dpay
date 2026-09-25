@@ -318,6 +318,15 @@ function buildStyles(p: Palette) {
   // Left-aligned instruction copy (not centered): these are lines to read closely before money
   // moves, matching the deposit/rail disclosure grammar rather than the celebration grammar.
   convertWrap: {alignSelf: 'stretch', paddingTop: 6, paddingBottom: 20},
+  // The swap screen's two currency legs (2026-09-24 redesign): each leg is one row — currency
+  // name left, amount right — with its currency-unit balance line beneath, and a hairline
+  // divider between sell and receive. The amount input rides the SELL row; the receive figure
+  // is the venue's own calculated number, never editable.
+  swapLegRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, alignSelf: 'stretch', marginTop: 14},
+  swapLegName: {fontSize: 17, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1},
+  swapLegAmount: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.4, textAlign: 'right', flexShrink: 1},
+  swapLegSub: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 2},
+  swapDivider: {height: 1, backgroundColor: p.line2, alignSelf: 'stretch', marginTop: 14},
   routeHeaderRow: ROUTE_HEADER_ROW,
   routeHeaderTitle: ROUTE_HEADER_TITLE,
   routeHeaderSpacer: ROUTE_HEADER_SPACER,

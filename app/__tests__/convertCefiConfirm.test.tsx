@@ -82,7 +82,9 @@ import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {SideShiftQuoteResult, SideShiftFixedShift} from '../services/sideshift';
 
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
-const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: false, solanaTokens: false});
+// Both rails of every multi-rail currency — the swap pair walk resolves the CeFi row
+// through the USD currency's Solana-side rail.
+const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
 const ICP_ASSET = ASSETS.find(a => a.protocol === 'ic' && a.currency === 8)!;
 const IDENTITY: Identity = {secretHex: 'aa'.repeat(32), publicHex: 'bb'.repeat(32), username: 'tester'};
 
@@ -109,6 +111,8 @@ const mountProps = {
   catalog: CATALOG,
   selectedAsset: ICP_ASSET,
   assetBalances: {8: '200000000'} as Record<number, string>,
+  visibleCurrencies: ['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'] as const,
+  currencyBalances: {},
   onBack: () => undefined,
   onActivity: () => undefined,
   onShowDepositAddress: () => undefined,
@@ -130,14 +134,17 @@ async function mountWithSideshiftPicked(): Promise<renderer.ReactTestRenderer> {
   await act(async () => {
     tree = renderer.create(<ConvertMode {...mountProps} />);
   });
-  // Pick the SOL destination's group (the CCTP→jupiter route to Solana — the SAME landing
-  // spot the CeFi venue folds into, D4's merged group), then the venue's own mechanism row
-  // — the same two gestures the e2e drives.
+  // Pick the SOL target (the CeFi venue lands SOL on the Solana rail — the same landing the
+  // CCTP route composes to), then the venue's own row. Two venues serve the pair, so the
+  // pick is required before anything quotes.
   await act(async () => {
-    present(tree!, 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter')[0].props.onPress();
+    present(tree!, 'btn-convert-target')[0].props.onPress();
   });
   await act(async () => {
-    present(tree!, 'convert-dest-mech-sideshift')[0].props.onPress();
+    present(tree!, 'convert-target-SOL')[0].props.onPress();
+  });
+  await act(async () => {
+    present(tree!, 'convert-venue-sideshift')[0].props.onPress();
   });
   return tree!;
 }

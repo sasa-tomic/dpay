@@ -22,7 +22,7 @@
 //   4. THE FULL PROVIDER LIFECYCLE on the SOL surface: awaiting_deposit → (venue
 //      processing) → done with the realized settle + payout address — the generic
 //      provider panel, rail-agnostic, plus the SOL-rail deposit-fee note.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
 import {icpAccountIdentifierHex} from '../harness/wire.mjs';
@@ -37,8 +37,6 @@ const SETTLE_TEXT = '0.0495 ICP';
 const DEPOSIT_ADDRESS = 'e2e-deposit-address-01';
 const SHIFT_ID = 'e2e-shift-9c1d';
 const SETTLE_HASH = 'ic-settle-sig-197';
-const CEFI_ROW = 'convert-sol-dest-cefi-sideshift-eurc';
-const AMM_ROW = 'convert-sol-dest-sol-usdc';
 
 export const meta = {
   id: '197',
@@ -79,19 +77,12 @@ async function installSolRpcStub(driver) {
   });
 }
 
-/** Enter the EURC(Solana) convert surface from the accounts route. */
+/** Enter the EURC(Solana) convert surface from the accounts route (standing target). */
 async function openEurcConvert(driver) {
-  await openBalances(driver);
-  await driver.click('asset-sol-eurc-select', {timeoutMs: 8_000});
-  await driver.waitForText('Convert', {timeoutMs: 6_000});
-  let opened = false;
-  for (let i = 0; i < 3 && !opened; i++) {
-    try {
-      await driver.click('btn-accounts-convert', {timeoutMs: 8_000});
-      opened = true;
-    } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
-  }
+  await openConvertFor(driver, 'sol-eurc', {timeoutMs: 8_000});
 }
+// NOTE: on a LIVE record (the §6 reload resume) the record view replaces the form — the entry
+// helper returns with that panel up; the pick gestures below are form-only.
 
 export async function run() {
   const env = await setup({solStub: true});
@@ -117,19 +108,17 @@ export async function run() {
     const passOrigins = [new URL(r2.baseURL).origin, new URL(webBaseURL).origin, new URL(env.relayBaseURL).origin];
     await installSideShiftStub(driver, {passOrigins, initialStatus: 'waiting'});
 
-    // --- §1 the destination picker offers BOTH surfaces: in-wallet SPL + the cefi venue
+    // --- §1 the target list: the standing target is SOL (the row-0 venue's other side), and
+    // the ICP target carries the cefi venue — the SAME surfaces the IC source sees.
     await openEurcConvert(driver);
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for EURC(Solana)');
-    assert(await driver.findByTestID('convert-sol-dest', {timeoutMs: 5_000}) != null, 'the out-destination picker renders');
-    assert(await driver.findByTestID(AMM_ROW, {timeoutMs: 3_000}) != null, 'the in-wallet USDC row is present (amm surface unchanged)');
-    assert(await driver.findByTestID(CEFI_ROW, {timeoutMs: 3_000}) != null, 'the cefi ICP row is present (same surfaces as the IC side)');
-    assertIncludes(await driver.readText(CEFI_ROW), 'ICP', 'the cefi row names the settle asset');
-    assertIncludes(await driver.readText(CEFI_ROW), 'SideShift', 'the cefi row names the venue');
-    assertIncludes(await driver.readText('convert-screen'), 'Convert EURC to SOL', 'the default pair is still the first amm group (no surprise preselection)');
+    assert(await driver.findByTestID('convert-unavailable', {timeoutMs: 500}).catch(() => null) == null,
+      'the EURC source is paired (no fail-closed panel)');
+    assertIncludes(await driver.readText('convert-screen'), 'Convert EUR → SOL', 'the standing pair is EUR→SOL (registry order, no surprise preselection)');
 
-    // --- §2 the cefi pick: derived payout address FIRST, venue quote verbatim
-    await driver.click(CEFI_ROW, {timeoutMs: 3_000});
-    assertIncludes(await driver.readText('convert-screen'), 'Convert EURC → ICP', 'the heading names the picked pair');
+    // --- §2 the cefi target: derived payout address FIRST, venue quote verbatim
+    await pickSwapTarget(driver, 'ICP');
+    assertIncludes(await driver.readText('convert-screen'), 'Convert EUR → ICP', 'the heading names the picked pair');
     await driver.type('convert-amount', AMOUNT_TEXT);
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     assertIncludes(await driver.readText('convert-headline'), SETTLE_TEXT, 'receive estimate is the venue settle figure verbatim');

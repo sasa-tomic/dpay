@@ -20,7 +20,7 @@
 //   * the panel gives the way back to the accounts list (a real action, not a dead end);
 //   * no quote is fetched and no amount field is offered on the fail-closed surface.
 //   * Screenshots: the fail-closed panel.
-import {setup, assert, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor} from '../harness/lib.mjs';
 
 const ICP_SEED = 300000000; // 3 ICP (plain Number — the faucet body is JSON); a zero balance gates the form
 
@@ -29,7 +29,7 @@ export const meta = {
   name: 'convert-venue-less-fail-closed',
   journey: 'convert',
   covers: ['convert', 'uniform-ia', 'venue-less', 'fail-closed', 'honest-copy', 'demo', 'icp'],
-  verifies: 'Every asset gets the same Convert button and the outcome is data-driven INSIDE the surface: the accounts route renders no VEUR row at all (retired 2026-09-19); DEMO — the only venue-less mainnet row left — fails closed with the honest what-exists-today copy naming all six IC converted pairs (derived from the bundled registry) and offers no amount field or quote, while ICP (has a venue) opens the real form from the same button.',
+  verifies: 'The currency-first swap surface fails closed honestly: the accounts route renders no VEUR row at all (retired 2026-09-19); the practice/DEMO row carries NO Convert affordance at all — practice money is not a currency in the currency-first model, so its swap surface is gone by design, not a dead panel — while ICP (a currency with venues) opens the real swap form from its row Convert button.',
   timeoutMs: 90000,
 };
 
@@ -48,35 +48,20 @@ export async function run() {
     assert(!(await driver.findByTestID('asset-veur', { timeoutMs: 3_000 }).catch(() => null)),
       'VEUR (currency 9) is retired — the accounts route must render NO row for it');
 
-    // --- DEMO: fail closed with the exhaustive what-exists-today copy ----------------------------
-    console.log('[142-convert-venue-less] DEMO → fail-closed panel…');
-    // selectCurrency makes DEMO the active asset and leaves on Pay; re-open the accounts route so
-    // Convert (which renders on the SELECTED row only) is on screen.
+    // --- DEMO: the practice row offers NO convert affordance at all ------------------------------
+    console.log('[142-convert-venue-less] DEMO → no swap surface by design…');
+    // Practice money is NOT a currency in the currency-first model (it is never main, never a
+    // list row), so the practice row carries only its faucet action — no Convert. The old
+    // fail-closed panel is gone with the destination picker: absence is the honest verdict,
+    // not a dead end wearing a screen's clothes.
     await selectCurrency(driver, 'demo');
     await openBalances(driver);
-    await driver.waitForText('Convert', { timeoutMs: 6_000 });
-    await driver.click('btn-accounts-convert', { timeoutMs: 5_000 });
-    assert(await driver.findByTestID('convert-unavailable', { timeoutMs: 8_000 }) != null, 'DEMO lands on the fail-closed panel (not the form)');
-
-    assertIncludes(await driver.readText('convert-unavailable-title'), 'DEMO', 'fail-closed title names the selected asset (DEMO)');
-    const dmBody = await driver.readText('convert-unavailable-body');
-    assertIncludes(dmBody, 'VCHF ↔ ICP', 'fail-closed body names what exists today (VCHF ↔ ICP)');
-    assertIncludes(dmBody, 'ICP ↔ USDC', 'fail-closed body names what exists today (ICP ↔ USDC)');
-    assertIncludes(dmBody, 'ICP ↔ ETH', 'fail-closed body names what exists today (ICP ↔ ETH)');
-    assertIncludes(dmBody, 'BTC ↔ ICP', 'fail-closed body names what exists today (BTC ↔ ICP)');
-    assertIncludes(dmBody, 'BTC ↔ ETH', 'fail-closed body names what exists today (BTC ↔ ETH)');
-    assertIncludes(dmBody, 'VCHF ↔ USDC', 'fail-closed body names what exists today (VCHF ↔ USDC)');
-    assertIncludes(dmBody, 'ICPSwap', 'fail-closed body names the venue');
-    assertIncludes(dmBody, 'nothing else', 'fail-closed copy is exhaustive, never a teaser');
-
+    assert(await driver.findByTestID('asset-demo', { timeoutMs: 5_000 }) != null, 'the practice row renders under its divider');
+    assert(await driver.findByTestID('btn-accounts-convert-DEMO', { timeoutMs: 2_000 }).catch(() => null) == null,
+      'the practice row carries NO Convert button (practice money is not a currency)');
     const dmAll = await driver.bodyText();
-    assert(!dmAll.includes('Minimum you\'ll receive'), 'no quote surface (no minimum-receive line) on a venue-less asset');
-    assert(await driver.findByTestID('convert-amount', { timeoutMs: 1_000 }).catch(() => null) == null, 'no amount field on the fail-closed surface');
+    assert(!dmAll.includes('Minimum you\'ll receive'), 'no quote surface (no minimum-receive line) anywhere on the practice row');
     await driver.screenshot('142-convert-venueless-demo');
-
-    // Back to the accounts list is a real action, then the contrast leg.
-    await driver.click('btn-convert-back', { timeoutMs: 5_000 });
-    assert(await driver.findByTestID('accounts-list', { timeoutMs: 6_000 }) != null, 'back returns to the accounts list (no dead end)');
 
     // --- ICP: the SAME button, an asset that HAS a venue → the real form --------------------------
     console.log('[142-convert-venue-less] ICP → the convert form (uniform entry)…');
@@ -85,11 +70,7 @@ export async function run() {
     const account = await accountOf(driver);
     const fund = await faucetAccount(env.relayBaseURL, account.publicHex, ICP_SEED, { currency: 8 });
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
-    // selectCurrency leaves on Pay, so re-open the route for the Convert button on the newly
-    // selected row.
-    await selectCurrency(driver, 'icp');
-    await openBalances(driver);
-    await driver.click('btn-accounts-convert', { timeoutMs: 5_000 });
+    await openConvertFor(driver, 'icp');
     assert(await driver.findByTestID('convert-screen', { timeoutMs: 8_000 }) != null, 'an asset with a venue opens the real convert form');
     assert(await driver.findByTestID('convert-amount', { timeoutMs: 4_000 }) != null, 'the form offers the amount field DEMO was denied');
     assert(await driver.findByTestID('convert-unavailable', { timeoutMs: 1_000 }).catch(() => null) == null,
