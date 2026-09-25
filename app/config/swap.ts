@@ -24,7 +24,7 @@
 // PURE: no React, no network. Deterministic in (catalog, assets, source, target currencies).
 import type {CurrencyDescriptor} from './catalog';
 import type {SelectableAsset} from './assets';
-import {currencyOfLinkToken, type HomeCurrency} from './currency';
+import {currencyOfLinkToken, isStableCurrency, type HomeCurrency} from './currency';
 import {assetLinkToken} from './catalog';
 import {
   cefiOtherSide,
@@ -185,22 +185,29 @@ export function resolveSwapTargets(args: {
   return targets;
 }
 
-/** The STANDING target: the target the source's FIRST registered rail-local row reaches (an
- *  ic_amm pool or a Solana venue — registry order, the pair this source's convert surface has
- *  always opened on). Falls back to the first reachable target for a source with no direct row
- *  (a hub-only source). Null when the source reaches nothing. */
+/** The STANDING target: for a STABLE source, the stable pair (CHF→USD, not CHF→a volatile) —
+ *  the conversion a fiat holder is there to make, one fewer tap than the historical registry
+ *  pick. A categorical preference, not a ranking: the founder's no-ranking rule governs VENUES
+ *  (fork 3 — venues are the things a price could rank), and within each pass the winner is
+ *  still the FIRST registered rail-local row (an ic_amm pool or a Solana venue — registry
+ *  order). Falls back through non-stable direct targets, then the first reachable target for a
+ *  source with no direct row (a hub-only source). Null when the source reaches nothing. */
 export function standingTarget(targets: SwapTarget[]): SwapTarget | null {
-  let best: SwapTarget | null = null;
-  let bestIdx = Number.MAX_SAFE_INTEGER;
-  for (const t of targets) {
-    for (const r of t.rows) {
-      if (r.kind !== 'direct' && r.kind !== 'solamm') continue;
-      const idx = registeredVenues().findIndex(v => v.venue_id === r.rowId);
-      if (idx >= 0 && idx < bestIdx) {
-        bestIdx = idx;
-        best = t;
+  const walk = (stableOnly: boolean): SwapTarget | null => {
+    let best: SwapTarget | null = null;
+    let bestIdx = Number.MAX_SAFE_INTEGER;
+    for (const t of targets) {
+      if (stableOnly && !isStableCurrency(t.currency)) continue;
+      for (const r of t.rows) {
+        if (r.kind !== 'direct' && r.kind !== 'solamm') continue;
+        const idx = registeredVenues().findIndex(v => v.venue_id === r.rowId);
+        if (idx >= 0 && idx < bestIdx) {
+          bestIdx = idx;
+          best = t;
+        }
       }
     }
-  }
-  return best ?? targets[0] ?? null;
+    return best;
+  };
+  return walk(true) ?? walk(false) ?? targets[0] ?? null;
 }
