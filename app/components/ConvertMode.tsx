@@ -1088,16 +1088,15 @@ export function ConvertMode({
       <View testID="convert-source-leg">
         <View style={S.swapLegRow}>
           <Text style={S.swapLegName}>{dispInName}</Text>
-        </View>
-        <View style={S.amountRow}>
           <TextInput
             testID="convert-amount"
-            style={S.amountInput}
+            style={S.swapLegInput}
             value={amountText}
             onChangeText={setAmountText}
             keyboardType="decimal-pad"
             autoCorrect={false}
             autoCapitalize="none"
+            placeholder="0"
             placeholderTextColor={C.sub}
           />
         </View>

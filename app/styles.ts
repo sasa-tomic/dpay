@@ -269,7 +269,7 @@ function buildStyles(p: Palette) {
   homeAmountRow: {flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%'},
   homeAmount: {fontSize: 40, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -1, flexShrink: 1},
   homeActionRow: {flexDirection: 'row', gap: 10, marginTop: 14},
-  homeActionBtn: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14, borderRadius: 16, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card, minHeight: 72},
+  homeActionBtn: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14, paddingHorizontal: 6, borderRadius: 16, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card, minHeight: 72},
   homeActionLabel: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
   homeActivity: {alignSelf: 'stretch', marginTop: 24},
   homeSeeAll: {minHeight: 44, justifyContent: 'center', alignItems: 'center'},
@@ -326,6 +326,9 @@ function buildStyles(p: Palette) {
   swapLegName: {fontSize: 17, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1},
   swapLegAmount: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.4, textAlign: 'right', flexShrink: 1},
   swapLegSub: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 2},
+  // The sell leg's inline amount field — the receive leg's amount, typeable: same size and
+  // alignment so the two legs read as one shape (founder sketch), no box around it.
+  swapLegInput: {flex: 1, minWidth: 0, fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, textAlign: 'right', letterSpacing: -0.4, padding: 0, outlineWidth: 0},
   swapDivider: {height: 1, backgroundColor: p.line2, alignSelf: 'stretch', marginTop: 14},
   routeHeaderRow: ROUTE_HEADER_ROW,
   routeHeaderTitle: ROUTE_HEADER_TITLE,

@@ -15,7 +15,7 @@ import {M} from '../i18n';
 import {fmtAssetCompact} from '../lib/format';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {IconChevronDown, IconSwap} from './icons';
+import {IconChevronDown, IconChevronLeft, IconSwap} from './icons';
 
 /** The name of the one registered REAL conversion venue — for the fail-closed panel's honest
  *  "what exists today" copy (a registry lookup, not a literal; the venue area itself renders
@@ -93,7 +93,7 @@ export function ConvertHeader({title, onBack}: {title: string; onBack: () => voi
   return (
     <View style={S.routeHeaderRow}>
       <Pressable testID="btn-convert-back" onPress={onBack} accessibilityRole="button" accessibilityLabel={M.convert.backToWallet}>
-        <IconChevronDown size={26} color={C.ink} />
+        <IconChevronLeft size={26} color={C.ink} />
       </Pressable>
       <Text style={S.routeHeaderTitle}>{title}</Text>
       <View style={S.routeHeaderSpacer} />
