@@ -165,6 +165,7 @@ export async function run() {
     await driver.click('btn-new', {timeoutMs: 4_000});
     await openBalances(driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     assert(await driver.waitForText('∂50.00', {timeoutMs: 10_000}), 'A is back online (live balance ∂50.00)');
+    await driver.click('tab-pay', {timeoutMs: 4_000}); // the balance read left the app on the accounts ROUTE — the scan arm needs the Pay tab back
     nonce = randNonceHex();
     expiry = Math.floor(Date.now() / 1000) + 600;
     requestQR = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, 'bob');

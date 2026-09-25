@@ -117,6 +117,7 @@ async function selectAndScan(driver, assetKey) {
   let entered = false;
   for (let i = 0; i < 3 && !entered; i++) {
     try {
+      await openBalances(driver);
       await selectCurrency(driver, assetKey, {timeoutMs: 8_000});
       entered = true;
     } catch (e) {
