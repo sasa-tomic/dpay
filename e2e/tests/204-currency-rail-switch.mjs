@@ -6,16 +6,18 @@
 //
 //   * funding ONLY the IC rail of USD, then tapping the USD currency row (set main + Home), lands
 //     the wallet's working surface on the funded ckUSDC rail — chooseRail's funded-first rule;
+//   * the receive surface mounts IN FULL on that directly-derived rail (the once-blank path the
+//     sweep runs saw, root-caused 2026-09-25 as run contention — solo it renders complete);
 //   * NO per-rail switch affordance exists anywhere on the route — rails are dpay's routing
 //     decision, and a control offering one would be an FX-adjacent choice the wallet refuses.
-import { setup, assert, assertEq, onboardWallet, openBalances, faucetAccount, accountOf, waitForWallet } from '../harness/lib.mjs';
+import { setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, faucetAccount, accountOf, waitForWallet } from '../harness/lib.mjs';
 
 export const meta = {
   id: '204',
   name: 'currency-rail-follows-main',
   journey: 'onboard',
   covers: ['home-currency', 'balances', 'ckusdc', 'solana-usdc', 'group-model', 'rail-follows-main'],
-  verifies: 'The working rail FOLLOWS the main currency with zero manual routing (the 2026-09-24 grammar retiring the per-rail switch affordance): funding only the IC rail of USD and tapping the USD currency row lands the wallet on the funded ckUSDC surface, and no per-rail Switch control exists anywhere on the route.',
+  verifies: 'The working rail FOLLOWS the main currency with zero manual routing (the 2026-09-24 grammar retiring the per-rail switch affordance): funding only the IC rail of USD and tapping the USD currency row lands the wallet on the funded ckUSDC surface, the receive surface mounts in full on that directly-derived rail, and no per-rail Switch control exists anywhere on the route.',
   timeoutMs: 90000,
 };
 
@@ -43,10 +45,16 @@ export async function run() {
     await driver.findByTestID('home-headline-label', {timeoutMs: 6_000});
     assertEq(await driver.readText('home-headline-label'), 'Balance USD', 'the row tap set USD main and landed Home');
 
-    // OPEN QUESTION (handed to the orchestrator): mounting ReceiveMode directly on the funded
-    // ckUSDC rail from this path rendered a blank body in the sweep runs (no console error, the
-    // SOL-poll spam continued) — flow 28 exercises the same surface via its own deep-link path
-    // and stays green, so this needs a dedicated look; it is outside this flow's contract.
+    // The direct-mount path the sweep runs once saw blank (OPEN QUESTION, 2026-09-25): root-caused
+    // as contention, not an app bug — solo, the receive surface on the funded ckUSDC rail renders
+    // in full (probe: 21 testids, complete copy; no app/ change since the sweep). Pinned here so
+    // the path stays covered: the receive form mounts and the chip names the main currency.
+    await driver.click('tab-receive', {timeoutMs: 5_000});
+    await driver.findByTestID('req-prefix', {timeoutMs: 8_000});
+    assertEq(await driver.readText('active-asset-label'), 'Balance USD', 'receive on the funded rail keeps the main-currency chip');
+    assertIncludes(await driver.bodyText(), 'Request payment', 'the receive form renders (request + address modes present)');
+    console.log('[204-currency-rail-switch] ✓ receive mounts in full on the funded ckUSDC rail (the once-blank direct-mount path)');
+    await driver.click('tab-home', {timeoutMs: 5_000});
 
     // --- 2. no manual switch affordance may exist anywhere ---------------------------------------
     await openBalances(driver);
