@@ -885,6 +885,9 @@ export async function selectCurrency(driver, key, opts = {}) {
   try {
     await driver.click(`btn-accounts-currency-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
   } catch (e) {
+    // A re-render between find and click detaches the row — one retry on a fresh node.
+    await driver.findByTestID(`btn-accounts-currency-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+    await driver.click(`btn-accounts-currency-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
     const rows = await driver.eval(() => ({
       url: location.href.slice(-40),
       testids: document.querySelectorAll('[data-testid]').length,
