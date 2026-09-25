@@ -93,6 +93,9 @@ export async function run() {
     console.log(`[26-names-memo] ✓ A reached "Paid ✓" to ${PAYEE_NAME}`);
 
     // --- A's balance decreased by the amount. ------------------------------------------------
+    // The Paid card locks the pay surface (the header chip is disabled while it is up), so the
+    // balance read goes through the explicit "New payment" release — the flow-07/176 unlock.
+    await driver.click('btn-new', { timeoutMs: 8_000 });
     await openBalances(driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });
     assert(aliceDown, `payer A balance should be ∂75.00 (∂100 − ∂25) after the settle`);

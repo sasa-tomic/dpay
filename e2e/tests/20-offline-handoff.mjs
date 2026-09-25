@@ -104,6 +104,9 @@ export async function run() {
     // --- A's balance reflects the debit (100 − 25). --------------------------------------------
     const aliceBal = await getBalance(env.relayBaseURL, alice.publicHex, 0);
     assert(aliceBal === '7500', `A ledger balance must be 7500 after the offline pay, got ${aliceBal}`);
+    // The Paid card locks the pay surface (the header chip is disabled while it is up), so the
+    // balance read goes through the explicit "New payment" release — the flow-07/176 unlock.
+    await env.driver.click('btn-new', {timeoutMs: 8_000});
     await openBalances(env.driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const shown = await env.driver.waitForText('∂75.00', {timeoutMs: 10_000});
     assert(shown, 'A on-screen balance should show ∂75.00');

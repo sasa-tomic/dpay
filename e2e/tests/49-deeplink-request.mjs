@@ -109,6 +109,9 @@ export async function run() {
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payer should reach the Paid screen after the ledger settles the linked payment');
+    // The Paid card locks the pay surface (the header chip is disabled while it is up), so the
+    // balance read goes through the explicit "New payment" release — the flow-07/176 unlock.
+    await driver.click('btn-new', { timeoutMs: 8_000 });
     await openBalances(driver); // the practice balance reads on the accounts route (currency-first chip headlines MAIN)
     const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });
     assert(aliceDown, 'payer A balance should be ∂75.00 (∂100 − ∂25) after the settle');
