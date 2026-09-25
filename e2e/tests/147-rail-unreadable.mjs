@@ -95,7 +95,7 @@ export async function run() {
     console.log('[147-rail-unreadable] a rail that answers renders its balance and nothing else…');
     await openBalances(driver);
     await driver.waitForFunction(
-      () => (document.querySelector('[data-testid="asset-sol"]')?.textContent ?? '').includes('2 SOL'),
+      () => (document.querySelector('[data-testid="accounts-currency-SOL"]')?.textContent ?? '').includes('2 SOL'),
       {timeoutMs: 12_000},
     );
     assert((await outageBanners(driver)) === 0, 'a rail that answers carries no outage banner');
@@ -120,15 +120,18 @@ export async function run() {
     assertIncludes(line, 'keeps retrying', 'the line states the recovery is automatic (there is no button to press)');
     // X9 — three Solana accounts are unreadable at once (one endpoint, one refusal). The banner is
     // stated ONCE for the network; before this it was repeated verbatim on each of them.
-    const solRows = await driver.eval(() => document.querySelectorAll('[data-testid^="asset-sol"][data-testid$="-select"]').length);
-    assert(solRows >= 3, `the screen must carry >=3 Solana accounts for the count to mean anything, saw ${solRows}`);
+    // Currency grammar: the Solana rails live inside their currency rows (USD carries Solana
+    // USDC; SOL is its own row) — the count probe becomes the USD row's presence, and the
+    // ONCE-per-network assertion below carries the meaning.
+    const usdRow = await driver.isPresent('accounts-currency-USD');
+    assert(usdRow, 'the USD currency row (Solana USDC rail) must be on screen for the count to mean anything');
     assert((await outageBanners(driver)) === 1, 'one network outage renders exactly ONE banner');
 
     // The failure is scoped to the rail that failed — the IC rows claim nothing about it.
     const vchfRow = await driver.readText('accounts-currency-CHF');
     assert(!vchfRow.includes('unreadable'), 'an IC row on the same screen is untouched by a Solana endpoint failure');
     // Bring the row itself into frame so the artifact shows the state it documents.
-    await driver.eval(() => document.querySelector('[data-testid="asset-sol"]')?.scrollIntoView({block: 'center'}));
+    await driver.eval(() => document.querySelector('[data-testid="rail-unreadable-solana"]')?.scrollIntoView({block: 'center'}));
     await driver.screenshot('147-rail-unreadable');
 
     // --- nothing answers on the rail's path while the phone IS online (UNREACHABLE) ------------

@@ -9,7 +9,7 @@
 //   1. Home = US dollars ⇒ preferred ckUSDC selected, IC balance ZERO ⇒ the pay-fund gate.
 //   2. A funded USDC@Solana sibling (stub) makes the pointer appear with the exact amount + rail.
 //   3. ONE tap on "Switch to Solana" flips the wallet to the funded rail — the SOL scan screen is
-//      armed, header reads "USDC·Sol balance". No manual Balances trip.
+//      armed, the working rail IS the funded sibling (the Solana scan gate up). No manual Balances trip.
 //
 // Selector contract: `pay-fund`, `fund-sibling-rail`, `fund-sibling-holds`,
 // `btn-fund-sibling-switch`, `active-asset-label`, `btn-sol-start-scan`.
@@ -84,8 +84,8 @@ export async function run() {
     //    the funded rail's own scan screen — no Balances detour, no sub-mode surprise.
     await driver.click('btn-fund-sibling-switch', {timeoutMs: 5_000});
     await driver.findByTestID('btn-sol-start-scan', {timeoutMs: 10_000});
-    assertEq(await driver.readText('active-asset-label'), 'USDC·Sol balance',
-      'the switch must select the funded sibling rail');
+    assertEq(await driver.readText('active-asset-label'), 'Balance USD',
+      'the switch selected the funded sibling rail — the chip keeps headline duty for the MAIN currency (USD)');
 
     await driver.screenshot('124-fund-gate-sibling-rail');
 

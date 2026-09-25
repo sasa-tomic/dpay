@@ -63,13 +63,14 @@ export async function run() {
     const stripGlyph = (t) => t.replace(/^[^\w]+/, '');
     const ckusdcTxt = await ckusdcRow.evaluate((n) => (n.textContent ?? '').trim());
     assertIncludes(ckusdcTxt, 'USDC', 'USDC row must be labeled "USDC" (not "Ethereum")');
-    assert(stripGlyph(ckusdcTxt).startsWith('USDC'), `USDC row primary heading should be "USDC", got "${ckusdcTxt}"`);
+    // Currency grammar: rows name the CURRENCY first ("US dollars"); the ckUSDC token lives in
+    // the row's rail subtitle. The old per-rail row testIDs are gone entirely.
+    assertIncludes(ckusdcTxt, 'US dollars', `the USD currency row names the CURRENCY, got "${ckusdcTxt}"`);
+    assertIncludes(ckusdcTxt, 'ckUSDC · Internet Computer', 'the USD row names its ckUSDC rail in the subtitle');
     const ckbtcRow = await driver.findByTestID('accounts-currency-BTC', { timeoutMs: 3_000 });
     const ckbtcTxt = await ckbtcRow.evaluate((n) => (n.textContent ?? '').trim());
-    assertIncludes(ckbtcTxt, 'BTC', 'BTC row must be labeled "BTC"');
-    console.log(`[24-wallet-cleanup] ✓ Balances rows name-first (H1): USDC="${ckusdcTxt}" / BTC="${ckbtcTxt}"`);
-    await driver.click('tab-pay', { timeoutMs: 5_000 });
-    await driver.waitGone('asset-ckusdc', { timeoutMs: 3_000 });
+    assertIncludes(ckbtcTxt, 'Bitcoin', 'BTC row must be labeled with the currency name');
+    console.log(`[24-wallet-cleanup] ✓ Balances rows name-first: USD="${ckusdcTxt.slice(0, 40)}" / BTC="${ckbtcTxt.slice(0, 40)}"`);
 
     // --- H2 prep: fund A with ckBTC via the rail faucet (test-helper on the fake-IC ledger). -----
     const seed = await fetch(`${relayBaseURL}/api/v1/faucet`, {

@@ -63,17 +63,20 @@ const SURFACES = {
   // cards (Pay — honestly named, the screen behind it scans/taps/beams; Receive navigates; Add
   // money funds the HOME rail), the accounts affordance is the HEADLINE BLOCK ITSELF (the balance
   // is the button — founder 2026-09-14), and the activity feed's See-all link closes it out.
-  homeTab: ['btn-home-pay', 'btn-home-receive', 'btn-home-add-money', 'btn-home-accounts',
-            'btn-home-activity-all'],
+  homeTab: ['btn-home-add-funds', 'btn-home-convert', 'btn-home-withdraw', 'btn-home-more',
+            'btn-home-accounts', 'btn-home-activity-all'],
   // The ACCOUNTS route — the retired Balances sheet's body, its own surface since 2026-09-08.
   // btn-accounts-back leaves the route; btn-topup is the practice row's faucet; `asset-*-select`
   // is each row's whole-row select Pressable; btn-accounts-convert is the per-asset Convert action
   // on the SELECTED row; btn-toggle-testnet reveals the testnet rows. SOL is uniform with the IC
   // rows (whole-row select — on-chain deposit/send lives in the Pay/Receive tab sub-modes).
-  accounts: ['btn-accounts-back', 'btn-accounts-convert', 'btn-topup', 'btn-toggle-testnet',
-             'asset-demo-select', 'asset-ckbtc-select', 'asset-ckusdc-select',
-             'asset-cketh-select', 'asset-vchf-select', 'asset-icp-select',
-             'asset-sol-select'],
+  accounts: ['btn-accounts-back', 'btn-accounts-convert-CHF', 'btn-accounts-convert-USD',
+             'btn-accounts-convert-EUR', 'btn-accounts-convert-BTC', 'btn-accounts-convert-ETH',
+             'btn-accounts-convert-ICP', 'btn-accounts-convert-SOL', 'btn-topup',
+             'btn-toggle-testnet', 'asset-demo-select', 'btn-accounts-currency-CHF',
+             'btn-accounts-currency-USD', 'btn-accounts-currency-EUR', 'btn-accounts-currency-BTC',
+             'btn-accounts-currency-ETH', 'btn-accounts-currency-ICP', 'btn-accounts-currency-SOL',
+             'btn-accounts-add-currency'],
   // Receive tab + currency picker (open via req-prefix). The picker rows are req-pick-<assetTestKey>;
   // the wallet's IC-mainnet catalog ships DEMO/ckBTC/ckUSDC/ckETH/VCHF/ICP (the REAL prod rows —
   // six mainnet IC assets since the 2026-08-28 catalog transplant), so all six picker rows assert.
@@ -145,7 +148,8 @@ export const meta = {
 export async function run() {
   const start = Date.now();
   console.log('[41-a11y-census] setup (relay + web + browser)…');
-  const env = await setup();
+  // solStub: EUR is offerable only when its EURC(Solana) rail is in the wallet's asset list.
+  const env = await setup({solStub: true});
   try {
     const { driver, relayBaseURL } = env;
 

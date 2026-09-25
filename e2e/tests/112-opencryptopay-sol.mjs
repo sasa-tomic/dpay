@@ -112,7 +112,24 @@ const setSolStatus = (driver, mode) => driver.eval((m) => { globalThis.__E2E_SOL
 
 /** Select an asset in Balances and land on its Pay scan surface. */
 async function selectAndScan(driver, assetKey) {
-  await selectCurrency(driver, assetKey, {timeoutMs: 8_000});
+  // The accounts route can be up but mid-render when the checkout stub install re-renders the
+  // shell — retry the whole entry (openBalances owns idempotent navigation).
+  let entered = false;
+  for (let i = 0; i < 3 && !entered; i++) {
+    try {
+      await selectCurrency(driver, assetKey, {timeoutMs: 8_000});
+      entered = true;
+    } catch (e) {
+      if (i === 2) throw e;
+      const dump = await driver.eval(() => ({
+        url: location.href.slice(0, 80),
+        all: [...new Set(Array.from(document.querySelectorAll('[data-testid]')).map(n => n.getAttribute('data-testid')))].slice(0, 30),
+        body: document.body.textContent.slice(0, 200),
+      }));
+      console.log('[112] LIST DUMP: ' + JSON.stringify(dump).slice(0, 900));
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
   if (assetKey !== 'sol') {
     // Multi-rail currency: the currency row lands on chooseRail's preference rail (the IC one);
     // the SOL-rail USDC surface is reached through the receive asset switch (sub-mode preserving).

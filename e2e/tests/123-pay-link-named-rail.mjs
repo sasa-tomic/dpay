@@ -82,8 +82,8 @@ export async function run() {
     await driver.waitReady({timeoutMs: 10_000});
 
     await driver.findByTestID('sol-send-address-input', {timeoutMs: 10_000});
-    assertEq(await driver.readText('active-asset-label'), 'USDC·Sol balance',
-      'the NAMED rail (USDC@Solana) must be the selected asset — never the preferred ckUSDC');
+    assertEq(await driver.readText('active-asset-label'), 'Balance USD',
+      'the chip headlines the MAIN currency — the NAMED rail is pinned by the working surface below (the send form carries the link\'s Solana-USDC destination)');
 
     const addr = await driver.eval((id) => document.querySelector(`[data-testid="${id}"]`)?.value ?? '', 'sol-send-address-input');
     assertEq(addr, DEST_ADDR, 'the send form must carry the link\'s destination address');

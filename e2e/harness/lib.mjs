@@ -878,6 +878,10 @@ export async function selectCurrency(driver, key, opts = {}) {
   }
   const currency = ASSET_KEY_TO_CURRENCY[key] ?? (key.length <= 4 ? key.toUpperCase() : null);
   if (currency == null) throw new Error(`selectCurrency: no currency for asset key "${key}"`);
+  // The currency rows mount only after the wallet's catalog resolves (bundled → AsyncStorage →
+  // relay /currencies). On a cold context the list can briefly be currency-less (practice row
+  // only) — wait for the ROW to exist before the tap instead of clicking into the empty list.
+  await driver.findByTestID(`btn-accounts-currency-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
   try {
     await driver.click(`btn-accounts-currency-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
   } catch (e) {

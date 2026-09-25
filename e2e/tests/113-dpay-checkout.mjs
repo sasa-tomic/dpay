@@ -43,7 +43,9 @@ const FEE = 10_000;             // the VCHF catalog fee, charged to the sender (
 const PAY_RAW = 999_990_000;
 const SEED = 2_000_020_001;     // 20.00020001 VCHF: two payments + two fees, with an odd tail so the
                                 // header's balance can never match a prefix of another number
-const SEED_TEXT = '20.00020001 VCHF';
+// Fork #4: the CHF currency row shows the summed balance in the CURRENCY unit ('20.00 Fr' —
+// 2-decimal stables); the token-unit seed figure is retired for balance display.
+const SEED_TEXT = '20.00 Fr';
 const PAY_TEXT = '10.00 VCHF'; /* the review/paid rendering: the TOTAL DEBIT — the checkout prices the fee in, so the total IS the shelf price — compact (VCHF min 2 fraction digits). Wire amount is PAY_RAW; the diff is the ledger fee the checkout absorbs. */
 
 export const meta = {
