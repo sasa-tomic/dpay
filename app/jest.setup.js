@@ -21,3 +21,8 @@ globalThis.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
 // An empty SOLANA_RPC_URL makes useSolanaBalance no-op and the SOL card render with `—`. Mirrors
 // the WC seam above. (solana-rpc.test.ts mocks fetch itself and never reads this constant.)
 globalThis.__DPAY_TEST_SOLANA_RPC_URL = '';
+// EVM native device-key rail: DISABLE for the offline jest inner loop, exactly like the SOL seam
+// above. An empty EVM RPC URL makes the `app/evm.ts` seam no-op (no dynamic import of the network
+// module, no fetch) — the offline inner loop never touches a chain. (evm-seam.test.ts overrides
+// it inside isolateModules and mocks fetch where the network path is the subject.)
+globalThis.__DPAY_TEST_EVM_RPC_URL = '';
