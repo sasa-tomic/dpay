@@ -143,12 +143,12 @@ export {bytesOf};
 
 // --- ABI slices (the selectors this rail needs — app/evm/abi.ts is the app mirror) -----------
 export function selector(sig) { return '0x' + keccak(Buffer.from(sig, 'utf8')).toString('hex').slice(0, 8); }
-function word32BE(v) {
+export function word32BE(v) {
   const h = (typeof v === 'bigint' ? v : BigInt(v)).toString(16).padStart(64, '0');
   if (h.length > 64) throw new Error(`abi: value too big: ${v}`);
   return Buffer.from(h, 'hex');
 }
-function addressWord(a) { return word32BE(BigInt(a)); }
+export function addressWord(a) { return word32BE(BigInt(a)); }
 
 export function encodeErc20Transfer(to, amountRaw) {
   return selector('transfer(address,uint256)')
