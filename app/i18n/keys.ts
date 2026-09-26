@@ -28,6 +28,7 @@ import type {OnboardingMessages, SettingsMessages} from './domains/en/settings';
 import type {EducationMessages, WalletMessages} from './domains/en/wallet';
 import type {ConvertMessages} from './domains/en/convert';
 import type {ReceiptMessages} from './domains/en/receipt';
+import type {EvmMessages} from './domains/en/evm';
 
 /**
  * The per-domain contracts, re-exported from the ONE module every locale already imports for
@@ -48,6 +49,7 @@ export type {
 } from './domains/en/wallet';
 export type {ConvertMessages} from './domains/en/convert';
 export type {ReceiptMessages} from './domains/en/receipt';
+export type {EvmMessages} from './domains/en/evm';
 
 /** Title + sub-line for one NFC tap phase, as rendered by the shared tap status view. */
 export type NfcPhaseCopy = {title: string; sub: string};
@@ -96,6 +98,10 @@ export type Messages = {
 
   /** The transaction receipt — the merchant-reconciliation and dispute surface (X6). */
   receipt: ReceiptMessages;
+
+  /** The EVM rail's screens: receive address + request/settle, pay scan/sign, send with the gas
+   *  honesty gate. Chain names and ETH are proper nouns — never translated. */
+  evm: EvmMessages;
 
   nfc: {
     /** Why tap-to-pay is unavailable. Each ends with the honest fallback that QR always works. */

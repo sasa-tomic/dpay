@@ -51,6 +51,7 @@ import type {Messages} from './keys';
 import {depositDe, withdrawDe} from './domains/de/deposit.ts';
 import {convertDe} from './domains/de/convert.ts';
 import {receiptDe} from './domains/de/receipt.ts';
+import {evmDe} from './domains/de/evm.ts';
 import {errorsDe} from './domains/de/errors.ts';
 import {payDe, receiveDe} from './domains/de/pay.ts';
 import {onboardingDe, settingsDe} from './domains/de/settings.ts';
@@ -81,6 +82,8 @@ export const de: Messages = {
   convert: convertDe,
 
   receipt: receiptDe,
+
+  evm: evmDe,
 
   nfc: {
     reason: {
