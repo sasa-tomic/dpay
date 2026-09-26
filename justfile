@@ -33,10 +33,52 @@ build-canister:
 build-mock-minter:
     cargo build -p dpay-mock-minter --target wasm32-unknown-unknown --release
 
+# third_party/ is the gitignored local cache (see AGENTS.md). Exactly TWO entries are load-bearing —
+# recipes, tests, and deploys read them at run time; every other entry is a research clone nothing
+# ever reads:
+#   third_party/bin/pocket-ic                       the PocketIC server (POCKET_IC_BIN; must match the
+#                                                   `pocket-ic` crate pin in Cargo.toml)
+#   third_party/ic-icrc1-ledger/{ic-icrc1-ledger.wasm,ledger.did}
+#                                                   the REAL DFINITY ICRC-1 ledger installed by the
+#                                                   canister/icp/relay-live tests, dfx.json, deploy scripts
+# third_party/ is gitignored, so a fresh WORKTREE lacks both. The preflight below fails LOUD with the
+# one-liner fix instead of a `cannot read ledger wasm` panic or a mold linker error mid-`just verify`.
+third-party-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}"
+    for p in third_party/bin/pocket-ic third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm; do
+      [ -e "$p" ] || { echo "third_party/ is missing $p — run: just third-party"; exit 1; }
+    done
+
+# repair third_party/'s load-bearing artifacts from any sibling checkout (../dpay-*). The reference
+# caches (ic-js, oisy-wallet, wallet-core, ...) are NOT repaired — no recipe reads them.
+third-party:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}"
+    ok=1
+    for p in third_party/bin/pocket-ic third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm third_party/ic-icrc1-ledger/ledger.did; do
+      if [ -e "$p" ]; then continue; fi
+      src="$(ls -d ../*/"$p" 2>/dev/null | head -n1 || true)"
+      if [ -n "$src" ]; then
+        echo "repairing $p from $src"
+        mkdir -p "$(dirname "$p")"
+        cp -a --reflink=always "$src" "$p" 2>/dev/null || cp -a "$src" "$p"
+      else
+        echo "MISSING $p — no sibling checkout has it."
+        echo "Copy it from any existing dpay checkout: pocket-ic must match the"
+        echo "pocket-ic crate pin in Cargo.toml; the ledger is DFINITY's"
+        echo "ic-icrc1-ledger wasm plus ledger.did."
+        ok=0
+      fi
+    done
+    [ "$ok" = 1 ] && echo "third_party load-bearing artifacts present."
+
 # canister settlement tests on PocketIC (offline, deterministic). The facade settles on the REAL
 # DFINITY ic-icrc1-ledger (cached in third_party/ic-icrc1-ledger/); multi-ledger proof incl. the
 # double-spend concurrency regression. Fully offline.
-test-canister: build-canister build-mock-minter
+test-canister: third-party-check build-canister build-mock-minter
     python3 scripts/testruns.py run test-canister --sh 'cargo nextest run -p dpay-canister-tests --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
     @just pocketic-cleanup
 
@@ -48,7 +90,7 @@ test-canister: build-canister build-mock-minter
 # the app will use on mainnet, with envelope-only auth (funding is PocketIC-API scaffolding).
 # ALSO runs the dpay-icp wire-contract goldens (byte-parity vs the cached production crates —
 # seconds-fast, was previously on no recipe) and the dpay-wasm host tests (icp goldens).
-test-icp: build-mock-minter
+test-icp: third-party-check build-mock-minter
     python3 scripts/testruns.py run test-icp --sh 'cargo nextest run -p dpay-icp --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}" && cargo nextest run -p dpay-wasm --message-format libtest-json >> "${DPAY_TESTRUNS_TIMING:-/dev/null}" && cargo nextest run -p dpay-icp-tests --message-format libtest-json >> "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
     @just pocketic-cleanup
 
@@ -158,14 +200,14 @@ e2e-live-testnet:
     node ../e2e-live/run.mjs
 
 # narrated end-to-end demo: offline sign -> canister -> Paid (self-checking)
-sim: build-canister
+sim: third-party-check build-canister
     python3 scripts/testruns.py run sim -- cargo run -q -p dpay-sim
 
 # relay <-> real canister over ic-agent against a live local IC (offline); feature-gated.
 # Depends on `web`: builds dpay-relay, whose build.rs embeds e2e/dist-prod (fail-loud without it).
 # Also builds the mock-minter wasm — the WAVE-5 live test drives TWO mock minters to prove the
 # ckERC20 onramp's runtime `get_minter_info` helper read + its logged-constant fallback.
-test-live: web
+test-live: third-party-check web
     python3 scripts/testruns.py run test-live --sh 'CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-canister --target wasm32-unknown-unknown --release && CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-mock-minter --target wasm32-unknown-unknown --release && DPAY_CANISTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_canister.wasm" DPAY_MOCK_MINTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_mock_minter.wasm" CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo nextest run -p dpay-relay --features agent,test-helpers --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # UniFFI shared-core binding: build host lib, generate bindings, run the language roundtrip test
