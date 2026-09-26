@@ -129,8 +129,6 @@ type Props = {
   /** The per-currency SUMMED views — both balance lines render in currency unit (fork #4). */
   currencyBalances: Readonly<Partial<Record<HomeCurrency, BalanceView>>>;
   onBack: () => void;
-  /** Fires when a swap reaches a terminal state so Wallet refreshes balances + history rows. */
-  onActivity: () => void;
   /** The zero-balance gate's one action: land the selected asset's own deposit surface. */
   onShowDepositAddress: () => void;
   /** Switch the wallet's selection (the funded-account pointer on the fund gate). Absent while
@@ -1161,7 +1159,12 @@ export function ConvertMode({
                 <Pressable
                   key={code}
                   testID={`convert-target-${code}`}
-                  style={[S.convertVenueRow, on && S.convertVenueRowOn]}
+                  style={[
+                    S.convertVenueRow,
+                    on && S.convertVenueRowOn,
+                    (same || !reachable) && S.disabledFlat,
+                    confirmBusy && S.dim,
+                  ]}
                   disabled={same || !reachable || confirmBusy}
                   onPress={() => {
                     if (confirmBusy) return;
@@ -1178,7 +1181,14 @@ export function ConvertMode({
                     {on ? <View style={S.convertVenueRadioDot} /> : null}
                   </View>
                   <View style={S.convertVenueRowText}>
-                    <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{currencyName(code)}</Text>
+                    <Text
+                      style={[
+                        S.convertVenueName,
+                        on && S.convertVenueNameOn,
+                        (same || !reachable) && S.disabledText,
+                      ]}>
+                      {currencyName(code)}
+                    </Text>
                     {same ? (
                       <Text style={S.convertMetaLine}>{M.convert.swapTargetSame}</Text>
                     ) : null}

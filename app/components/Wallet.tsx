@@ -1705,7 +1705,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               // action onto the selected currency's row). Returning to Home would drop the user
               // somewhere they never were.
               onBack={openAccounts}
-              onActivity={onActivity}
               // The zero-balance gate's action — the SAME deposit trip the Pay tab's gate fires.
               onShowDepositAddress={() =>
                 goToDeposit(selectedAsset != null ? selectedAsset.id : `ic:${selectedCurrency}`)

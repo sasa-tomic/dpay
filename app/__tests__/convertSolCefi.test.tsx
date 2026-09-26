@@ -90,7 +90,6 @@ async function mount(): Promise<renderer.ReactTestRenderer> {
         visibleCurrencies={['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'] as const}
         currencyBalances={{}}
         solana={{sol: '5000000000', tokens: BALANCES}}
-        onActivity={() => undefined}
         onBack={() => undefined}
         onShowDepositAddress={() => undefined}
       />,

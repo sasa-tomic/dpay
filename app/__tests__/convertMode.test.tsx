@@ -184,7 +184,6 @@ async function mountConvert(
         selectedAsset={ICP_ASSET}
         assetBalances={{8: balanceRaw}}
         onBack={jest.fn()}
-        onActivity={jest.fn()}
         onShowDepositAddress={jest.fn()}
         {...over}
       />,

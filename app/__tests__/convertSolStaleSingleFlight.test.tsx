@@ -88,7 +88,6 @@ describe('CeFi quotes never refresh on a timer (organic-demand, partner agreemen
           visibleCurrencies={['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'] as const}
           currencyBalances={{}}
           solana={{sol: '5000000000', tokens: BALANCES}}
-          onActivity={() => undefined}
           onBack={() => undefined}
           onShowDepositAddress={() => undefined}
         />,

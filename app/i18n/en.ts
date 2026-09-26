@@ -23,6 +23,7 @@ export const en: Messages = {
   common: {
     done: 'Done',
     cancel: 'Cancel',
+    linkFallback: url => `Couldn't open the link. Open it manually: ${url}`,
   },
 
   time: {

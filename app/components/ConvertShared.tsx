@@ -3,6 +3,7 @@
 // more than one conversion surface (the IC form, the route/hub/cross-rail record views, the
 // Solana surface), so it lives exactly once. The venue fail-closed constants stay in
 // ConvertMode.tsx (the IC form owns them); this file reads REGISTERED_VENUE_NAME from there.
+import {useState} from 'react';
 import {Linking, Pressable, Text, View} from 'react-native';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
@@ -282,16 +283,21 @@ export function plannedLegFee(record: ConvertRecord, lp: LegPlan, legCanister: s
 
 
 /** A plain external link row (Etherscan / Circle status) — Linking.openURL is the same OS
- *  path Settings' privacy link and the Trust fund button already use; inert nowhere. */
+ *  path Settings' privacy link uses. If the OS has no handler for the URL, the address itself
+ *  renders beneath the row: a silent no-op tap is a dead end, and dead ends are bugs. */
 export function LinkRow({testID, label, href}: {testID: string; label: string; href: string}) {
+  const [failed, setFailed] = useState(false);
   return (
-    <Pressable
-      testID={testID}
-      style={S.linkBtn}
-      onPress={() => { Linking.openURL(href).catch(() => undefined); }}
-      accessibilityRole="link"
-      accessibilityLabel={label}>
-      <Text style={S.linkText}>{label}</Text>
-    </Pressable>
+    <View>
+      <Pressable
+        testID={testID}
+        style={S.linkBtn}
+        onPress={() => { Linking.openURL(href).catch(() => setFailed(true)); }}
+        accessibilityRole="link"
+        accessibilityLabel={label}>
+        <Text style={S.linkText}>{label}</Text>
+      </Pressable>
+      {failed ? <Text style={S.err}>{M.common.linkFallback(href)}</Text> : null}
+    </View>
   );
 }

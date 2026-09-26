@@ -60,6 +60,7 @@ export const fr: Messages = {
   common: {
     done: 'Terminé',
     cancel: 'Annuler',
+    linkFallback: url => `Impossible d'ouvrir le lien. Ouvrez-le manuellement : ${url}`,
   },
 
   time: {
