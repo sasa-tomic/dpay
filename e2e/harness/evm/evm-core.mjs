@@ -134,6 +134,7 @@ export function deriveEvmKeypair(secretHex) {
 
 function bytesOf(hexStr, expectLen) {
   const s = String(hexStr).toLowerCase().replace(/^0x/, '');
+  if (s === '') return Buffer.alloc(0);
   if (!/^[0-9a-f]+$/.test(s) || s.length % 2 !== 0) throw new Error(`evm-core: bad hex: ${String(hexStr).slice(0, 12)}…`);
   const b = Buffer.from(s, 'hex');
   if (expectLen != null && b.length !== expectLen) throw new Error(`evm-core: expected ${expectLen} bytes, got ${b.length}`);
@@ -225,19 +226,19 @@ export function signEip1559({privHex, chainId, nonce, maxFeePerGas, maxPriorityF
   const dataBytes = bytesOf(data.startsWith('0x') ? data : '0x' + data);
   const payload = rlpEncode([
     num(chainId), num(nonce), num(maxPriorityFeePerGas), num(maxFeePerGas),
-    num(gasLimit), toBytes, num(value), dataBytes, rlpEncode([]),
+    num(gasLimit), toBytes, num(value), dataBytes, [], // accessList: a NESTED LIST item — passing rlpEncode([]) would double-encode it as the byte string 0x81c0 (undecodable)
   ]);
   const digest = keccak(Buffer.concat([Buffer.from([0x02]), payload]));
   const sig = secp256k1.sign(digest, priv, {prehash: false});
   if (sig.recovery !== 0 && sig.recovery !== 1) throw new Error('evm-core: bad recovery');
   const signed = rlpEncode([
     num(chainId), num(nonce), num(maxPriorityFeePerGas), num(maxFeePerGas),
-    num(gasLimit), toBytes, num(value), dataBytes, rlpEncode([]),
+    num(gasLimit), toBytes, num(value), dataBytes, [], // accessList: a NESTED LIST item — passing rlpEncode([]) would double-encode it as the byte string 0x81c0 (undecodable)
     num(sig.recovery), Buffer.from(BigInt(sig.r).toString(16).padStart(64, '0'), 'hex'), Buffer.from(BigInt(sig.s).toString(16).padStart(64, '0'), 'hex'),
   ]);
   // Integrity: the recovered signer must be the key we were handed (a swap here would fund/
-  // transfer from an address nobody owns — fail before any broadcast).
-  const recovered = '0x' + sig.recoverPublicKey(digest).toRawBytes(false).slice(1).slice(-20).toString('hex');
+  // transfer from an address nobody owns — fail before any broadcast). Address = keccak(pub)[12:].
+  const recovered = '0x' + keccak(Buffer.from(sig.recoverPublicKey(digest).toRawBytes(false).slice(1))).slice(-20).toString('hex');
   const sender = eip55(evmAddressOf(priv.toString('hex')));
   if (recovered.toLowerCase() !== sender.toLowerCase()) throw new Error(`evm-core: signer recovery mismatch ${recovered} != ${sender}`);
   const rawTx = '0x02' + signed.toString('hex');
