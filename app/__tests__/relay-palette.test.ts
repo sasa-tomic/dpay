@@ -81,10 +81,18 @@ describe('every served page consumes it — and defines no palette of its own', 
     // lines are the documented exception (a meta attribute cannot hold a CSS var) and are checked
     // for equality below instead.
     const html = read(page).replace(/<meta name="theme-color"[^>]*>/g, '');
-    const RETIRED_V4 = ['#FF5A1F', '#D8450D', '#FF7A45', '#E0480F', '#676257', '#A6A093', '#0E9F6E', '#1E7F4F'];
+    const RETIRED = [
+      // v4 (the original tangerine family)
+      '#FF5A1F', '#D8450D', '#FF7A45', '#E0480F', '#676257', '#A6A093', '#0E9F6E', '#1E7F4F',
+      // v5 "Traveler Paper" (retired 2026-09-26 by Ballast)
+      '#F4F1E8', '#FDFCF9', '#F8F6F0', '#1B1A17', '#524D41', '#6D675B', '#D03F00', '#B93700',
+      '#912900', '#C32335', '#9B5400', '#1B7351', '#E5DFD1', '#EDE8DC', '#141210', '#1D1A16',
+      '#24211C', '#2A2620', '#F2EEE6', '#BEB6A9', '#9A9386', '#FF6F41', '#30B180', '#F77476',
+      '#E9A23B', '#3B362D', '#34302A',
+    ];
     const live = (Object.values(LIGHT) as unknown[]).concat(Object.values(DARK) as unknown[])
       .filter((v): v is string => typeof v === 'string' && v.startsWith('#'));
-    for (const hex of new Set([...live, ...RETIRED_V4])) {
+    for (const hex of new Set([...live, ...RETIRED])) {
       expect(html.toUpperCase()).not.toContain(hex.toUpperCase());
     }
   });

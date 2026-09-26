@@ -18,93 +18,93 @@
  * themes and the Android launcher mirrors it, so the website mark must too. The FIXED inks: the
  * near-black and the white that a small inverted element keeps whatever theme it sits in. */
 :root {
-  --markTop: #D03F00; --markBottom: #912900; --markInk: #FDFCF9;
-  --fixedInk: #1B1A17; --fixedPaper: #FFFFFF;
+  --markTop: #0E5F53; --markBottom: #093F37; --markInk: #FAFCFB;
+  --fixedInk: #17221F; --fixedPaper: #FFFFFF;
 }
 
 :root {
-  --bg: #F4F1E8; --bgRGB: 244, 241, 232;
-  --panel: #FDFCF9; --panelRGB: 253, 252, 249;
-  --panel2: #F8F6F0; --panel2RGB: 248, 246, 240;
+  --bg: #EBF0ED; --bgRGB: 235, 240, 237;
+  --panel: #FAFCFB; --panelRGB: 250, 252, 251;
+  --panel2: #F0F4F2; --panel2RGB: 240, 244, 242;
   --card: #FFFFFF; --cardRGB: 255, 255, 255;
-  --field: #FFFFFF; --fieldRGB: 255, 255, 255;
-  --ink: #1B1A17; --inkRGB: 27, 26, 23;
-  --sub: #524D41; --subRGB: 82, 77, 65;
-  --sub2: #6D675B; --sub2RGB: 109, 103, 91;
-  --brand: #D03F00; --brandRGB: 208, 63, 0;
-  --brandText: #B93700; --brandTextRGB: 185, 55, 0;
-  --brand2: #912900; --brand2RGB: 145, 41, 0;
+  --field: #F5F8F7; --fieldRGB: 245, 248, 247;
+  --ink: #17221F; --inkRGB: 23, 34, 31;
+  --sub: #3E4F49; --subRGB: 62, 79, 73;
+  --sub2: #5D6F69; --sub2RGB: 93, 111, 105;
+  --brand: #0E5F53; --brandRGB: 14, 95, 83;
+  --brandText: #0B5147; --brandTextRGB: 11, 81, 71;
+  --brand2: #093F37; --brand2RGB: 9, 63, 55;
   --brandInk: #FFFFFF; --brandInkRGB: 255, 255, 255;
-  --ok: #1B7351; --okRGB: 27, 115, 81;
-  --bad: #C32335; --badRGB: 195, 35, 53;
-  --warn: #9B5400; --warnRGB: 155, 84, 0;
-  --line: #E5DFD1; --lineRGB: 229, 223, 209;
-  --line2: #EDE8DC; --line2RGB: 237, 232, 220;
-  --shadow: #1B1A17; --shadowRGB: 27, 26, 23;
+  --ok: #1B7340; --okRGB: 27, 115, 64;
+  --bad: #C22A3F; --badRGB: 194, 42, 63;
+  --warn: #94560A; --warnRGB: 148, 86, 10;
+  --line: #D6DFDA; --lineRGB: 214, 223, 218;
+  --line2: #E3EAE6; --line2RGB: 227, 234, 230;
+  --shadow: #17221F; --shadowRGB: 23, 34, 31;
   --wash: 0.06;
 }
 @media (prefers-color-scheme: dark) {
   html.scheme-auto {
-    --bg: #141210; --bgRGB: 20, 18, 16;
-    --panel: #1D1A16; --panelRGB: 29, 26, 22;
-    --panel2: #24211C; --panel2RGB: 36, 33, 28;
-    --card: #2A2620; --cardRGB: 42, 38, 32;
-    --field: #2A2620; --fieldRGB: 42, 38, 32;
-    --ink: #F2EEE6; --inkRGB: 242, 238, 230;
-    --sub: #BEB6A9; --subRGB: 190, 182, 169;
-    --sub2: #9A9386; --sub2RGB: 154, 147, 134;
-    --brand: #FF5A1F; --brandRGB: 255, 90, 31;
-    --brandText: #FF6F41; --brandTextRGB: 255, 111, 65;
-    --brand2: #E0480F; --brand2RGB: 224, 72, 15;
-    --brandInk: #1B1A17; --brandInkRGB: 27, 26, 23;
-    --ok: #30B180; --okRGB: 48, 177, 128;
-    --bad: #F77476; --badRGB: 247, 116, 118;
-    --warn: #E9A23B; --warnRGB: 233, 162, 59;
-    --line: #3B362D; --lineRGB: 59, 54, 45;
-    --line2: #34302A; --line2RGB: 52, 48, 42;
-    --shadow: #0A0908; --shadowRGB: 10, 9, 8;
+    --bg: #0C1312; --bgRGB: 12, 19, 18;
+    --panel: #121B19; --panelRGB: 18, 27, 25;
+    --panel2: #19221F; --panel2RGB: 25, 34, 31;
+    --card: #1F2A26; --cardRGB: 31, 42, 38;
+    --field: #26332F; --fieldRGB: 38, 51, 47;
+    --ink: #ECF2EF; --inkRGB: 236, 242, 239;
+    --sub: #B0C2BB; --subRGB: 176, 194, 187;
+    --sub2: #8CA49A; --sub2RGB: 140, 164, 154;
+    --brand: #2FB497; --brandRGB: 47, 180, 151;
+    --brandText: #63DABB; --brandTextRGB: 99, 218, 187;
+    --brand2: #1E8A72; --brand2RGB: 30, 138, 114;
+    --brandInk: #0C1312; --brandInkRGB: 12, 19, 18;
+    --ok: #46CE95; --okRGB: 70, 206, 149;
+    --bad: #F79BA1; --badRGB: 247, 155, 161;
+    --warn: #E9BA66; --warnRGB: 233, 186, 102;
+    --line: #2E3A35; --lineRGB: 46, 58, 53;
+    --line2: #28332F; --line2RGB: 40, 51, 47;
+    --shadow: #060A09; --shadowRGB: 6, 10, 9;
     --wash: 0.1;
   }
 }
 html[data-theme-mode="light"] {
-  --bg: #F4F1E8; --bgRGB: 244, 241, 232;
-  --panel: #FDFCF9; --panelRGB: 253, 252, 249;
-  --panel2: #F8F6F0; --panel2RGB: 248, 246, 240;
+  --bg: #EBF0ED; --bgRGB: 235, 240, 237;
+  --panel: #FAFCFB; --panelRGB: 250, 252, 251;
+  --panel2: #F0F4F2; --panel2RGB: 240, 244, 242;
   --card: #FFFFFF; --cardRGB: 255, 255, 255;
-  --field: #FFFFFF; --fieldRGB: 255, 255, 255;
-  --ink: #1B1A17; --inkRGB: 27, 26, 23;
-  --sub: #524D41; --subRGB: 82, 77, 65;
-  --sub2: #6D675B; --sub2RGB: 109, 103, 91;
-  --brand: #D03F00; --brandRGB: 208, 63, 0;
-  --brandText: #B93700; --brandTextRGB: 185, 55, 0;
-  --brand2: #912900; --brand2RGB: 145, 41, 0;
+  --field: #F5F8F7; --fieldRGB: 245, 248, 247;
+  --ink: #17221F; --inkRGB: 23, 34, 31;
+  --sub: #3E4F49; --subRGB: 62, 79, 73;
+  --sub2: #5D6F69; --sub2RGB: 93, 111, 105;
+  --brand: #0E5F53; --brandRGB: 14, 95, 83;
+  --brandText: #0B5147; --brandTextRGB: 11, 81, 71;
+  --brand2: #093F37; --brand2RGB: 9, 63, 55;
   --brandInk: #FFFFFF; --brandInkRGB: 255, 255, 255;
-  --ok: #1B7351; --okRGB: 27, 115, 81;
-  --bad: #C32335; --badRGB: 195, 35, 53;
-  --warn: #9B5400; --warnRGB: 155, 84, 0;
-  --line: #E5DFD1; --lineRGB: 229, 223, 209;
-  --line2: #EDE8DC; --line2RGB: 237, 232, 220;
-  --shadow: #1B1A17; --shadowRGB: 27, 26, 23;
+  --ok: #1B7340; --okRGB: 27, 115, 64;
+  --bad: #C22A3F; --badRGB: 194, 42, 63;
+  --warn: #94560A; --warnRGB: 148, 86, 10;
+  --line: #D6DFDA; --lineRGB: 214, 223, 218;
+  --line2: #E3EAE6; --line2RGB: 227, 234, 230;
+  --shadow: #17221F; --shadowRGB: 23, 34, 31;
   --wash: 0.06;
 }
 html[data-theme-mode="dark"], html.dark {
-  --bg: #141210; --bgRGB: 20, 18, 16;
-  --panel: #1D1A16; --panelRGB: 29, 26, 22;
-  --panel2: #24211C; --panel2RGB: 36, 33, 28;
-  --card: #2A2620; --cardRGB: 42, 38, 32;
-  --field: #2A2620; --fieldRGB: 42, 38, 32;
-  --ink: #F2EEE6; --inkRGB: 242, 238, 230;
-  --sub: #BEB6A9; --subRGB: 190, 182, 169;
-  --sub2: #9A9386; --sub2RGB: 154, 147, 134;
-  --brand: #FF5A1F; --brandRGB: 255, 90, 31;
-  --brandText: #FF6F41; --brandTextRGB: 255, 111, 65;
-  --brand2: #E0480F; --brand2RGB: 224, 72, 15;
-  --brandInk: #1B1A17; --brandInkRGB: 27, 26, 23;
-  --ok: #30B180; --okRGB: 48, 177, 128;
-  --bad: #F77476; --badRGB: 247, 116, 118;
-  --warn: #E9A23B; --warnRGB: 233, 162, 59;
-  --line: #3B362D; --lineRGB: 59, 54, 45;
-  --line2: #34302A; --line2RGB: 52, 48, 42;
-  --shadow: #0A0908; --shadowRGB: 10, 9, 8;
+  --bg: #0C1312; --bgRGB: 12, 19, 18;
+  --panel: #121B19; --panelRGB: 18, 27, 25;
+  --panel2: #19221F; --panel2RGB: 25, 34, 31;
+  --card: #1F2A26; --cardRGB: 31, 42, 38;
+  --field: #26332F; --fieldRGB: 38, 51, 47;
+  --ink: #ECF2EF; --inkRGB: 236, 242, 239;
+  --sub: #B0C2BB; --subRGB: 176, 194, 187;
+  --sub2: #8CA49A; --sub2RGB: 140, 164, 154;
+  --brand: #2FB497; --brandRGB: 47, 180, 151;
+  --brandText: #63DABB; --brandTextRGB: 99, 218, 187;
+  --brand2: #1E8A72; --brand2RGB: 30, 138, 114;
+  --brandInk: #0C1312; --brandInkRGB: 12, 19, 18;
+  --ok: #46CE95; --okRGB: 70, 206, 149;
+  --bad: #F79BA1; --badRGB: 247, 155, 161;
+  --warn: #E9BA66; --warnRGB: 233, 186, 102;
+  --line: #2E3A35; --lineRGB: 46, 58, 53;
+  --line2: #28332F; --line2RGB: 40, 51, 47;
+  --shadow: #060A09; --shadowRGB: 6, 10, 9;
   --wash: 0.1;
 }

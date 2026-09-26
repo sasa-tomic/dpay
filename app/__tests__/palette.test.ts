@@ -28,7 +28,7 @@ describe('dual theme: applyPalette', () => {
   test('applyPalette(DARK) swaps S keys AND the palette C in place', () => {
     applyPalette(DARK);
     expect(isDark()).toBe(true);
-    expect(S.root.backgroundColor).toBe(DARK.bg); // #141210 warm near-black
+    expect(S.root.backgroundColor).toBe(DARK.bg); // #0C1312 deep petrol-black
     expect(S.sheet.backgroundColor).toBe(DARK.bg);
     expect(S.wordmark.color).toBe(DARK.ink);
     expect(C.ink).toBe(DARK.ink);

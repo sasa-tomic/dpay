@@ -6,8 +6,8 @@
 <title>∂pay · Instant payments, even offline.</title>
 <meta name="description" content="Payments, even offline. Tap to pay even when your phone is offline: one press on your phone, the shop's online terminal settles the payment. Non-custodial. Free to pay." />
 <meta name="color-scheme" content="light dark" />
-<meta name="theme-color" content="#F4F1E8" />
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
+<meta name="theme-color" content="#EBF0ED" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0C1312" />
 <script>
 /* Theme choice (Wave 7, two-state since 2026-08-21): a stored 'light'/'dark' pins the theme;
    anything else (absent, legacy 'auto', garbage) follows the OS scheme. Runs pre-paint
@@ -27,13 +27,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@500;600&amp;display=swap" rel="stylesheet" />
 <style>
-  /* ————————————————————————————————————————————————
+  /* ─────
      ∂ifferent Pay (dpay) · "Traveler Paper" (2026-08-17)
      The colour tokens (light + dark) are substituted here by the relay from
-     crates/dpay-relay/assets/palette.css — generated from app/config/palette.ts.
+     crates/dpay-relay/assets/palette.css - generated from app/config/palette.ts.
      Brand discipline: tangerine is spent ONLY on CTAs, active marks, and the
      logo. Body copy is always ink. Green is success-only, amber is caution.
-     ———————————————————————————————————————————————— */
+     ───── */
 {{PALETTE}}
   /* Not colour, so not in the generated block: the type stacks and the page's
      shadow ramp, tinted with the palette's own --shadowRGB. */
@@ -61,13 +61,13 @@
   ::selection{background:rgba(var(--brandRGB),.22)}
   :focus-visible{outline:2px solid var(--brand);outline-offset:3px;border-radius:6px}
 
-  /* paper grain — a whisper of tooth on the porcelain */
+  /* paper grain - a whisper of tooth on the porcelain */
   .grain{position:fixed;inset:0;width:100%;height:100%;opacity:.04;mix-blend-mode:multiply;pointer-events:none;z-index:0}
   nav,header,main,footer{position:relative;z-index:1}
   .wrap{max-width:1128px;margin:0 auto;padding:0 28px}
   section{padding:104px 0;scroll-margin-top:76px}
 
-  /* eyebrows — the receipt voice */
+  /* eyebrows - the receipt voice */
   .kicker{
     display:inline-flex;align-items:center;gap:10px;
     font-family:var(--mono);font-size:.72rem;font-weight:600;
@@ -83,7 +83,7 @@
   .sec-sub{color:var(--sub);margin:18px 0 0;font-size:1.08rem;line-height:1.68;max-width:58ch;font-weight:500}
   .sec-sub b{color:var(--ink);font-weight:600}
 
-  /* ————— top bar ————— */
+  /* ───── top bar ───── */
   nav{
     position:sticky;top:0;z-index:50;
     display:flex;align-items:center;justify-content:space-between;
@@ -114,7 +114,7 @@
   .navlink.ghost:hover{border-color:var(--sub2)}
   .navlink.ghost svg{width:14px;height:14px;color:var(--sub)}
 
-  /* ————— hero ————— */
+  /* ───── hero ───── */
   .hero{position:relative;padding:72px 0 96px;overflow:hidden}
   .hero::before{ /* morning-light wash */
     content:"";position:absolute;inset:-260px -8% auto -8%;height:880px;z-index:0;pointer-events:none;
@@ -175,7 +175,7 @@
   }
   .trust span::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--brand)}
 
-  /* ————— hero visual: two floating phones on a dashed route ————— */
+  /* ───── hero visual: two floating phones on a dashed route ───── */
   .stage{position:relative;justify-self:center;width:100%;max-width:440px;min-height:600px}
   .route{position:absolute;left:-10%;top:-2%;width:116%;height:108%;z-index:0;pointer-events:none}
   .route path{
@@ -199,12 +199,12 @@
   }
   .phone{
     position:relative;border-radius:44px;padding:10px;
-    background:linear-gradient(172deg,#282520,#141310 72%);
+    background:linear-gradient(172deg,#232E2A,#101715 72%);
     box-shadow:var(--sh-xl), inset 0 1px 0 rgba(255,255,255,.10);
   }
   .phone::before{ /* speaker pill */
     content:"";position:absolute;top:17px;left:50%;transform:translateX(-50%);
-    width:84px;height:5px;border-radius:99px;background:rgba(8,7,5,.9);z-index:2;
+    width:84px;height:5px;border-radius:99px;background:rgba(7,11,10,.9);z-index:2;
   }
   .phone img{display:block;width:100%;height:auto;border-radius:35px}
   .phone.back{
@@ -238,7 +238,7 @@
   .phone.back{animation-name:risetiltb}
   @keyframes risetiltb{from{opacity:0;transform:translateY(16px) rotate(-7deg)}to{opacity:1;transform:rotate(-7deg)}}
 
-  /* ————— how it works: one shared flow, two ways for the phones to meet ————— */
+  /* ───── how it works: one shared flow, two ways for the phones to meet ───── */
   .payways{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:22px;row-gap:0;margin-top:28px;align-items:stretch}
   .payway{
     display:flex;flex-direction:column;padding:30px;border-radius:26px;min-width:0;
@@ -277,11 +277,11 @@
   }
   .mini-phone{
     position:relative;display:block;width:48px;height:76px;border-radius:12px;padding:5px;
-    background:linear-gradient(172deg,#282520,#141310 72%);box-shadow:var(--sh-sm);
+    background:linear-gradient(172deg,#232E2A,#101715 72%);box-shadow:var(--sh-sm);
   }
   .mini-phone::before{
     content:"";position:absolute;z-index:2;top:8px;left:50%;transform:translateX(-50%);
-    width:15px;height:3px;border-radius:99px;background:#080705;
+    width:15px;height:3px;border-radius:99px;background:#070B0A;
   }
   .mini-phone::after{
     content:"";display:block;width:100%;height:100%;border-radius:8px;
@@ -326,7 +326,7 @@
   .pw-offline>summary::-webkit-details-marker{display:none}
   .pw-offline>summary:focus-visible{outline:2px solid var(--brand);outline-offset:7px}
   .of-txt{flex:1;min-width:0;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-  /* Subordinate to the card's own h3 (1.4rem) — it is a variant of this rail, not a rival to it. */
+  /* Subordinate to the card's own h3 (1.4rem) - it is a variant of this rail, not a rival to it. */
   .nfc-offline h4,.pw-offline h4{margin:0;font-size:1.12rem;font-weight:700;letter-spacing:-.025em;line-height:1.22}
 
   /* The closed summary names the extra offline step; opening it reveals the reverse scan. */
@@ -348,7 +348,7 @@
   .pw-offline[open] .of-cue{color:var(--sub2)}
   .pw-offline[open] .of-btn{background:var(--panel2);color:var(--ink);box-shadow:none;border:1px solid var(--line)}
   .pw-offline[open] .of-btn svg{transform:rotate(180deg)}
-  /* The fold IS the reveal, so the body does not carry .rv — a scroll-reveal inside a closed
+  /* The fold IS the reveal, so the body does not carry .rv - a scroll-reveal inside a closed
      <details> has never intersected and would open to invisible content. */
   .of-body{
     box-sizing:border-box;width:calc(200% + 22px);margin:22px 0 0 calc(-100% - 22px);padding:26px 30px;
@@ -374,12 +374,12 @@
   .step{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;gap:13px;z-index:1;min-width:0}
   .ph{
     position:relative;width:116px;flex:none;aspect-ratio:9/16;border-radius:20px;padding:5px;
-    background:linear-gradient(172deg,#282520,#141310 72%);
+    background:linear-gradient(172deg,#232E2A,#101715 72%);
     box-shadow:0 20px 36px -22px rgba(var(--inkRGB),.45), inset 0 1px 0 rgba(255,255,255,.08);
   }
   .ph::before{
     content:"";position:absolute;top:9px;left:50%;transform:translateX(-50%);
-    width:30px;height:4px;border-radius:99px;background:rgba(8,7,5,.9);z-index:2;
+    width:30px;height:4px;border-radius:99px;background:rgba(7,11,10,.9);z-index:2;
   }
   .ph img{display:block;width:100%;height:100%;border-radius:15px;object-fit:cover;object-position:top}
   .ph .idx{
@@ -400,20 +400,20 @@
   .arrow{flex:none;align-self:flex-start;margin-top:52px;color:var(--sub2);z-index:1}
   .arrow svg{width:22px;height:22px;display:block}
 
-  /* ————— the offline story: an ink band ————— */
+  /* ───── the offline story: an ink band ───── */
   .band{background:var(--ink);padding:104px 0;scroll-margin-top:76px}
   .band .kicker{color:var(--sub2)}
   .band h2{color:var(--bg)}
   .band .sec-sub{color:var(--sub2)}
   .band .rail-track{background:repeating-linear-gradient(90deg,rgba(var(--bgRGB),.2) 0 7px,transparent 7px 15px)}
   .band .rail-track i{background:var(--brand)}
-  .band .ph{background:linear-gradient(172deg,#33302a,#1d1c19 72%);box-shadow:0 24px 40px -22px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.09);border:1px solid rgba(var(--bgRGB),.13)}
+  .band .ph{background:linear-gradient(172deg,#31413A,#1B2420 72%);box-shadow:0 24px 40px -22px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.09);border:1px solid rgba(var(--bgRGB),.13)}
   .band .ph .idx{background:var(--brand);border-color:var(--ink)}
   .band .step.done .ph .idx{background:var(--ok)}
   .band .step .t{color:var(--bg)}
   .band .step .d{color:var(--sub2)}
   .band .arrow{color:rgba(var(--bgRGB),.4)}
-  /* One closing-note rule for the whole page — the proof section and the QR card's offline flow
+  /* One closing-note rule for the whole page - the proof section and the QR card's offline flow
      both end on one, and both sit on paper. (It replaced a duplicate .band-note/.proof-note pair
      that differed only in surface colour.) */
   .closing-note{
@@ -422,7 +422,7 @@
   }
   .closing-note b{color:var(--ink);font-weight:600}
 
-  /* ————— merchants ————— */
+  /* ───── merchants ───── */
   .m-grid{display:grid;grid-template-columns:1.04fr .96fr;gap:60px;align-items:center}
   .msteps{margin-top:42px;max-width:520px}
   .mstep{display:grid;grid-template-columns:56px 1fr;gap:16px;padding:20px 0;border-top:1px solid var(--line)}
@@ -458,7 +458,7 @@
   }
   .bview .shot{
     width:262px;border-radius:26px;padding:7px;
-    background:linear-gradient(172deg,#282520,#141310 72%);
+    background:linear-gradient(172deg,#232E2A,#101715 72%);
     box-shadow:var(--sh-lg), inset 0 1px 0 rgba(255,255,255,.09);
   }
   .bview .shot img{display:block;width:100%;height:auto;border-radius:20px}
@@ -468,7 +468,7 @@
   }
   .bcap::before,.bcap::after{content:"";width:18px;height:1px;background:var(--line)}
 
-  /* ————— why ∂pay: bento ————— */
+  /* ───── why ∂pay: bento ───── */
   .bento{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:56px}
   .tile{
     position:relative;overflow:hidden;
@@ -509,7 +509,7 @@
   .link .tap svg{width:19px;height:19px;color:var(--brandInk)}
   .zero{font-size:4.4rem;font-weight:700;letter-spacing:-.05em;color:var(--brand);line-height:1}
 
-  /* ————— get the app ————— */
+  /* ───── get the app ───── */
   .get{
     border-radius:30px;padding:64px 56px;position:relative;overflow:hidden;
     background:var(--card);border:1px solid var(--line);
@@ -523,7 +523,7 @@
   .get p{color:var(--sub);max-width:44ch;margin:16px 0 0;font-size:1.06rem;line-height:1.66}
   .stores{display:flex;flex-wrap:wrap;gap:14px;margin-top:30px}
 
-  /* the injected APK button (primary, filled) + its disabled variant —
+  /* the injected APK button (primary, filled) + its disabled variant -
      the relay swaps the download placeholder for one of these two */
   .btn,.play{
     min-height:64px;min-width:232px;
@@ -583,7 +583,7 @@
   details.custody li{color:var(--sub);font-size:.88rem;line-height:1.5;padding-left:15px;position:relative}
   details.custody li::before{content:"";position:absolute;left:0;top:.55em;width:5px;height:5px;border-radius:50%;background:var(--brand)}
 
-  /* ————— footer: an ink band ————— */
+  /* ───── footer: an ink band ───── */
   footer{background:var(--ink);margin-top:104px}
   .foot{display:flex;align-items:flex-start;justify-content:space-between;gap:32px;flex-wrap:wrap;padding:64px 28px 72px}
   .foot .brandmark svg{box-shadow:0 10px 24px -12px rgba(0,0,0,.6)}
@@ -599,7 +599,7 @@
     font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:rgba(var(--bgRGB),.55);
   }
 
-  /* ————— ticker: the movement strip ————— */
+  /* ───── ticker: the movement strip ───── */
   .ticker{background:var(--ink);padding:15px 0;overflow:hidden}
   .ticker-track{display:flex;width:max-content;animation:tick 32s linear infinite}
   .tgroup{display:flex;flex:none}
@@ -614,7 +614,7 @@
   }
   @keyframes tick{to{transform:translateX(-50%)}}
 
-  /* ————— the movement: big plain words on ink ————— */
+  /* ───── the movement: big plain words on ink ───── */
   .mlines{margin-top:46px;display:flex;flex-direction:column;gap:18px}
   .mline{
     display:flex;align-items:baseline;gap:26px;
@@ -633,10 +633,10 @@
   .band .ghost{background:transparent;box-shadow:none;color:var(--bg);border-color:rgba(var(--bgRGB),.4)}
   .band .ghost:hover{border-color:var(--bg)}
 
-  /* ————— the proof: one sealed slip, two couriers —————
+  /* ───── the proof: one sealed slip, two couriers ─────
      Two CSS state machines driven by a single attribute each (data-route on the
      courier card, data-tamper on the slip card), so the script at the end of <body>
-     only flips an attribute — every visual state lives here. The argument the
+     only flips an attribute - every visual state lives here. The argument the
      section makes is the invariance: the courier swaps, the sealed slip does not. */
   .proofwrap{margin-top:52px;display:flex;flex-direction:column;gap:20px}
   .pcard{
@@ -648,7 +648,7 @@
   .p-head{display:flex;align-items:flex-start;gap:22px;flex-wrap:wrap}
   .p2{display:grid;grid-template-columns:.92fr 1.08fr;gap:20px}
 
-  /* — the route switch: the one control on the page that changes a diagram — */
+  /* - the route switch: the one control on the page that changes a diagram - */
   .rswitch{margin-left:auto;display:inline-flex;align-items:center;gap:13px;flex:none}
   .rswitch .lab{
     display:inline-flex;align-items:center;gap:7px;
@@ -678,7 +678,7 @@
   [data-route="off"] .rswitch .lab.i-off{color:var(--warn)}
   [data-route="off"] .rswitch .lab.i-off::before{background:var(--warn)}
 
-  /* — the three-node route; only the middle node's copy swaps — */
+  /* - the three-node route; only the middle node's copy swaps - */
   .route3{display:flex;align-items:stretch;margin-top:30px}
   .rnode{
     flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
@@ -717,7 +717,7 @@
   .notpath svg{width:15px;height:15px;color:var(--sub2);flex:none}
   .notpath s{color:var(--sub2);text-decoration-color:var(--warn);text-decoration-thickness:2px}
 
-  /* — the tamper toy: edit the sealed slip, watch the seal stop matching — */
+  /* - the tamper toy: edit the sealed slip, watch the seal stop matching - */
   .slip{
     margin-top:24px;border-radius:16px;
     border:1px solid var(--line2);background:var(--panel2);
@@ -764,7 +764,7 @@
   .tbtn:hover:not(:disabled){border-color:var(--sub2);transform:translateY(-1px)}
   .tbtn:disabled{background:var(--panel2);color:var(--sub2);cursor:default}
 
-  /* — the foldables: a receipt strip of the questions people actually ask — */
+  /* - the foldables: a receipt strip of the questions people actually ask - */
   .folds{margin-top:22px}
   .fold{border-bottom:1px solid var(--line2)}
   .fold:first-child{border-top:1px solid var(--line2)}
@@ -803,18 +803,18 @@
     .fold p{padding-left:0}
   }
 
-  /* ————— how it works: storyboard + the two starting rails ————— */
+  /* ───── how it works: storyboard + the two starting rails ───── */
   .pw-group{
     display:flex;align-items:center;gap:16px;margin:64px 0 0;
     font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--sub);
   }
   .pw-group::after{content:"";flex:1;border-top:1px dashed var(--line)}
 
-  /* ————— scroll reveal ————— */
+  /* ───── scroll reveal ───── */
   .rv{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.2,1);transition-delay:var(--d,0s)}
   .rv.in{opacity:1;transform:none}
 
-  /* ————— responsive ————— */
+  /* ───── responsive ───── */
   @media (max-width:920px){
     section{padding:80px 0}
     .hero{padding:48px 0 88px}
@@ -880,7 +880,7 @@
      that are ALREADY dark on a porcelain page (.band/.ticker/footer), which need a lifted
      floor so they stay distinct once the page itself is near-black.
      Wave 7: keyed on `html.dark` (set by the pre-paint head script + the fixed toggle below)
-     instead of a bare @media — with no stored choice the OS scheme seeds it via matchMedia;
+     instead of a bare @media - with no stored choice the OS scheme seeds it via matchMedia;
      a stored 'light'/'dark' pins it. color-scheme follows the class so scrollbars/native
      controls match. */
   html{color-scheme:light}
@@ -894,31 +894,31 @@
     html.dark .grain{opacity:.06;mix-blend-mode:screen}
     html.dark .navlink:hover{background:rgba(var(--inkRGB),.06)}
     /* Wave 7 contrast fixes: the .band/.ticker showcase sections key their text off var(--bg) and
-       their strips off var(--ink) — both flip in dark, leaving near-black-on-near-black text and
+       their strips off var(--ink) - both flip in dark, leaving near-black-on-near-black text and
        a cream-on-cream ticker. The floor overrides below keep the showcase rhythm readable. */
     html.dark .band h2,
     html.dark .band .step .t,
     html.dark .band .sec-sub b,
     html.dark .mline{color:var(--ink)}
-    html.dark .ticker{background:#0E0D0B}
+    html.dark .ticker{background:#0E1513}
     html.dark .tgroup span{color:rgba(var(--inkRGB),.88)}
     html.dark .ph .idx{border-color:rgba(var(--inkRGB),.25)}
     /* .band + .foot key off --ink/--bg which now flip (near-black band bg becomes near-black on
-        near-black — indistinct): give them a slightly lifted floor + cream text so the showcase
+        near-black - indistinct): give them a slightly lifted floor + cream text so the showcase
         rhythm survives, and re-point the porcelain-tinted accents inside them. */
-    html.dark .band{background:#0E0D0B}
+    html.dark .band{background:#0E1513}
     html.dark .band .rail-track{background:repeating-linear-gradient(90deg,rgba(var(--inkRGB),.14) 0 7px,transparent 7px 15px)}
     html.dark .band .arrow{color:rgba(var(--inkRGB),.4)}
     html.dark .band .ph{border-color:rgba(var(--inkRGB),.13)}
     html.dark .band .ghost{color:var(--ink);border-color:rgba(var(--inkRGB),.4)}
-    html.dark footer{background:#0E0D0B}
+    html.dark footer{background:#0E1513}
     html.dark .foot .word,
     html.dark .foot p b,
     html.dark .foot a{color:var(--ink)}
     html.dark .foot a{border-bottom-color:rgba(var(--inkRGB),.3)}
     html.dark .foot-micro{color:rgba(var(--inkRGB),.55)}
 
-  /* Wave 7 — fixed theme toggle (Light ↔ Dark flip), bottom-right. A panel chip on a
+  /* Wave 7 - fixed theme toggle (Light ↔ Dark flip), bottom-right. A panel chip on a
      hairline border with the site's soft shadow; the icon follows html[data-theme-mode]. */
   .theme-toggle{
     position:fixed;right:18px;bottom:18px;z-index:80;width:44px;height:44px;border-radius:999px;
@@ -1017,7 +1017,7 @@
 </div>
 
 <main>
-  <!-- ————— how it works ————— -->
+  <!-- ───── how it works ───── -->
   <section id="how" class="wrap">
     <span class="kicker rv">How it works</span>
     <h2 class="rv">Three steps, start to settled<i class="dot">.</i></h2>
@@ -1122,7 +1122,7 @@
 
         <!-- Offline variant of QR only: the shop scans a second code off your screen.
              Folded by default: having a signal is the common case, so this is the "what if I
-             don't?" answer — one obvious click away rather than always open. -->
+             don't?" answer - one obvious click away rather than always open. -->
         <details class="pw-offline" aria-label="Paying offline">
           <summary>
             <span class="of-txt">
@@ -1182,14 +1182,14 @@
     </div>
   </section>
 
-  <!-- ————— the proof: one sealed slip, two couriers —————
+  <!-- ───── the proof: one sealed slip, two couriers ─────
        The #proof nav link's destination. Two toys carry the whole argument: the
        switch shows that the courier is interchangeable, the slip shows that editing
        it breaks it. Everything below the toys is plain-language detail, folded away. -->
   <section id="proof" class="wrap">
     <span class="kicker rv">The proof</span>
     <h2 class="rv">Your phone signs it. Everyone else just carries it<i class="dot">.</i></h2>
-    <p class="sec-sub rv">A payment is a slip your phone <b>seals with a key only it holds</b>. Whoever carries that slip — your connection or the shop's — can't open it, can't edit it, and can't write a new one. Flip the switch: the courier changes, the slip doesn't.</p>
+    <p class="sec-sub rv">A payment is a slip your phone <b>seals with a key only it holds</b>. Whoever carries that slip (your connection or the shop's) can't open it, can't edit it, and can't write a new one. Flip the switch: the courier changes, the slip doesn't.</p>
 
     <div class="proofwrap">
 
@@ -1275,15 +1275,15 @@
             </details>
             <details class="fold">
               <summary><span class="q">03</span>If the shop carries it, can the shop change it?</summary>
-              <p>No. The shop's phone is holding sealed bytes it cannot rewrite. It has exactly two options: pass the slip on, or don't. <b>If it doesn't, no money moves</b> — you simply haven't paid, and you'll see that. What it can't do is raise the amount, point the payment somewhere else, or charge you again later.</p>
+              <p>No. The shop's phone is holding sealed bytes it cannot rewrite. It has exactly two options: pass the slip on, or don't. <b>If it doesn't, no money moves</b>: you simply haven't paid, and you'll see that. What it can't do is raise the amount, point the payment somewhere else, or charge you again later.</p>
             </details>
             <details class="fold">
               <summary><span class="q">04</span>What can ∂pay's server actually do?</summary>
-              <p>Less than you'd expect. It hands you this website and the app, and it reads public information back to you — your balances, your history, which assets exist. <b>Payments don't go through it at all</b>; your phone, or the shop's, talks to the network directly. And if we ever did stand in the middle, it would change nothing: we'd be holding the same sealed bytes as everyone else.</p>
+              <p>Less than you'd expect. It hands you this website and the app, and it reads public information back to you: your balances, your history, which assets exist. <b>Payments don't go through it at all</b>; your phone, or the shop's, talks to the network directly. And if we ever did stand in the middle, it would change nothing: we'd be holding the same sealed bytes as everyone else.</p>
             </details>
             <details class="fold">
               <summary><span class="q">05</span>Can one payment be charged twice?</summary>
-              <p>No. Your phone signs a slip once, and it is those exact sealed bytes that travel. Hand that slip over once or a hundred times and <b>the network settles it exactly once</b>, ignoring the rest. Each slip also carries a deadline a few minutes out — after that it's dead paper, and nothing moves.</p>
+              <p>No. Your phone signs a slip once, and it is those exact sealed bytes that travel. Hand that slip over once or a hundred times and <b>the network settles it exactly once</b>, ignoring the rest. Each slip also carries a deadline a few minutes out; after that it's dead paper, and nothing moves.</p>
             </details>
           </div>
         </div>
@@ -1294,7 +1294,7 @@
     <p class="closing-note rv">Your key never leaves your phone. Every payment is settled by <b>hard cryptography</b>. Provably correct.</p>
   </section>
 
-  <!-- ————— merchants: the web wallet is the terminal ————— -->
+  <!-- ───── merchants: the web wallet is the terminal ───── -->
   <section id="merchants" class="wrap">
     <div class="m-grid">
       <div>
@@ -1348,7 +1348,7 @@
     </div>
   </section>
 
-  <!-- ————— why ∂pay: bento ————— -->
+  <!-- ───── why ∂pay: bento ───── -->
   <section id="why" class="wrap">
     <span class="kicker rv">Why ∂pay</span>
     <h2 class="rv">Fast. Offline. Yours<i class="dot">.</i></h2>
@@ -1397,7 +1397,7 @@
     </div>
   </section>
 
-  <!-- ————— the movement: big plain words on ink ————— -->
+  <!-- ───── the movement: big plain words on ink ───── -->
   <section class="band" aria-label="The movement">
     <div class="wrap">
       <h2 class="rv">Our manifesto<i class="dot">.</i></h2>
@@ -1414,7 +1414,7 @@
     </div>
   </section>
 
-  <!-- ————— get the app ————— -->
+  <!-- ───── get the app ───── -->
   <section id="get" class="wrap">
     <div class="get rv">
       <div class="get-grid">
@@ -1504,7 +1504,7 @@
   });
 
   // Tampering disables the other tamper button, so the card always returns through
-  // 'none' before it can be tampered again — which is also what re-arms the shake
+  // 'none' before it can be tampered again - which is also what re-arms the shake
   // and the stamp (a CSS animation only restarts when the rule starts applying).
   var card = document.getElementById('tampercard');
   var btns = card.querySelectorAll('.tbtn');
@@ -1518,7 +1518,7 @@
 })();
 </script>
 
-<!-- Wave 7 — theme toggle (two-state): one click flips Light ↔ Dark; persists 'dpay-theme' and
+<!-- Wave 7 - theme toggle (two-state): one click flips Light ↔ Dark; persists 'dpay-theme' and
      keys the html.dark class set by the pre-paint head script (no flash on reload). Before the
      first click the theme seeds from the OS scheme. -->
 <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Theme: Light. Switches between light and dark theme.">

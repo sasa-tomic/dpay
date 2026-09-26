@@ -1,18 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Night variant (uiMode=night) of the identity palette — Wave 4 dual theme. Android
-         switches automatically with the OS dark toggle; the RN app resolves the same scheme via
-         Appearance and applies the matching in-app palette (app/config/palette.ts DARK). Values
-         mirror palette.ts DARK: warm near-black family, NO pure #000. `white` stays #FFFFFF
-         (it is the tangerine-tile glyph ink in the launcher/splash, not a surface). `accent_ink`
-         is DARK's `brandInk`: in the dark theme the saturated fill keeps the vivid tangerine and
-         the ink ON it flips to the warm near-black, which is what makes white-on-brand's 3.12:1
-         become 5.58:1. -->
-    <color name="bg">#141210</color>
-    <color name="panel">#1D1A16</color>
-    <color name="ink">#F2EEE6</color>
-    <color name="accent">#FF5A1F</color>
-    <color name="accent_ink">#1B1A17</color>
+    <!-- Night variant (uiMode=night) of the identity palette. Android switches automatically
+         with the OS dark toggle; the RN app resolves the same scheme via Appearance and applies
+         the matching in-app palette (app/config/palette.ts DARK). Values mirror palette.ts
+         DARK: deep petrol-black family, NO pure #000. `white` stays #FFFFFF (it is the glyph
+         ink in the launcher/splash, not a surface). `accent_ink` is DARK's `brandInk`: in the
+         dark theme the lifted fill carries the deep petrol-black ink, ≈6.5:1 on brand. -->
+    <color name="bg">#0C1312</color>
+    <color name="panel">#121B19</color>
+    <color name="ink">#ECF2EF</color>
+    <color name="accent">#2FB497</color>
+    <color name="accent_ink">#0C1312</color>
     <color name="white">#FFFFFF</color>
-    <color name="black">#F2EEE6</color>
+    <color name="black">#ECF2EF</color>
 </resources>

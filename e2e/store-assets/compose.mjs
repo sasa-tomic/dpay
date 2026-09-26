@@ -21,7 +21,7 @@ const OUT = join(__dirname, '..', '..', '.dev', 'store-assets');
 mkdirSync(OUT, { recursive: true });
 
 // Brand palette (app/config/palette.ts)
-const BRAND = '#D03F00'; // app/config/palette.ts LIGHT.brand — the FILL step of the tangerine ramp
+const BRAND = '#0E5F53'; // app/config/palette.ts LIGHT.brand - the FILL step of the petrol ramp
 const BG_DARK = '#06070a';
 const INK = '#f1f4f7';
 const SUB = '#a6afba';
@@ -93,7 +93,7 @@ body {
 
 async function main() {
   const exe = resolveExecutablePath();
-  if (!exe) throw new Error('no chromium found — run `npm install` in e2e/');
+  if (!exe) throw new Error('no chromium found - run `npm install` in e2e/');
 
   const browser = await puppeteer.launch({
     executablePath: exe,

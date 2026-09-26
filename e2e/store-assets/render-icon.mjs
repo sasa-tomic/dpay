@@ -1,8 +1,8 @@
-// Renders the 512×512 Play Store icon — a ∂ (partial differential) in brand green
+// Renders the 512×512 Play Store icon - a ∂ (partial differential) in brand green
 // on a dark background with a subtle radial glow.
 //
 // Uses PIL (not headless chrome) because DejaVu Serif regular is the ONLY system
-// font that renders the ∂ glyph (U+2202) recognizably — verified via vision.
+// font that renders the ∂ glyph (U+2202) recognizably - verified via vision.
 // Browser CSS text-rendering produces an ambiguous "a" shape from the same font.
 //
 // Output → .dev/store-assets/icon-512.png
@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 W, H = 512, 512
 BG = (10, 12, 17)        # #0a0c11
-BRAND = (208, 63, 0)    # #D03F00 — app/config/palette.ts LIGHT.brand
+BRAND = (14, 95, 83)    # #0E5F53 - app/config/palette.ts LIGHT.brand
 
 # Background with subtle radial glow
 img = Image.new('RGBA', (W, H), (*BG, 255))

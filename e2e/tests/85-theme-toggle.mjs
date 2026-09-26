@@ -5,8 +5,8 @@
 //      browser the app boots Light and the header toggle names the TARGET ('Switch theme to Dark',
 //      the moon glyph — Wave-8 target-state semantics, not current-state).
 //   2. The wallet-header toggle (btn-theme, grouped beside the settings gear) flips Light ↔ Dark
-//      with a single click and the rendered root background flips between the light (#F4F1E8) and
-//      dark (#141210) palette values — the same computed-style probe flow 84 uses, so a broken
+//      with a single click and the rendered root background flips between the light (#EBF0ED) and
+//      dark (#0C1312) palette values — the same computed-style probe flow 84 uses, so a broken
 //      applyPalette shows up as a bg that never flips.
 //   3. The choice PERSISTS: after a reload (fresh JS context, localStorage-backed AsyncStorage
 //      rehydrating App.tsx's themeChoice) the dark palette is still applied pre-assertion.
@@ -28,8 +28,8 @@ export const meta = {
   timeoutMs: 90000,
 };
 
-const LIGHT_BG = 'rgb(244, 241, 232)'; // palette LIGHT bg #F4F1E8
-const DARK_BG = 'rgb(20, 18, 16)';     // palette DARK bg  #141210
+const LIGHT_BG = 'rgb(235, 240, 237)'; // palette LIGHT bg #EBF0ED
+const DARK_BG = 'rgb(12, 19, 18)';     // palette DARK bg  #0C1312
 
 export async function run() {
   const start = Date.now();
@@ -44,7 +44,7 @@ export async function run() {
       driver.eval(() => document.querySelector('[data-testid="btn-theme"]')?.getAttribute('aria-label') ?? '');
     // RNW (this version) does not project accessibilityState → aria-checked, so the active
     // segment is probed by its computed background: railPillActive paints the palette `card`
-    // (#FFFFFF light / #2A2620 dark) inside the panel2 well.
+    // (#FFFFFF light / #1F2A26 dark) inside the panel2 well.
     const segBg = (id) =>
       driver.eval((tid) => getComputedStyle(document.querySelector(`[data-testid="${tid}"]`)).backgroundColor, id);
     const ACTIVE_LIGHT_CARD = 'rgb(255, 255, 255)';

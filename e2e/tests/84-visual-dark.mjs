@@ -102,8 +102,8 @@ export async function run() {
     // + useColorScheme wiring saw the emulated media, not just the raw CSS media query.
     const bg = await driver.eval(() => getComputedStyle(document.querySelector('#root > div')).backgroundColor);
     assert(
-      bg === 'rgb(20, 18, 16)',
-      `app root renders DARK bg (expected rgb(20, 18, 16)=#141210, got ${bg})`,
+      bg === 'rgb(12, 19, 18)',
+      `app root renders DARK bg (expected rgb(12, 19, 18)=#0C1312, got ${bg})`,
     );
 
     const masks = {};

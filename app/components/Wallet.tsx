@@ -1420,8 +1420,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
 
   return (
     <SafeAreaView style={S.root}>
-      {/* Traveler Paper: porcelain bg ⇒ DARK status-bar icons (light-content was the dark-theme
-          remnant — white icons on #F4F1E8 were near-invisible). */}
+      {/* Ballast: mist bg ⇒ DARK status-bar icons (light-content; white icons on #EBF0ED
+          would be near-invisible). */}
       <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} translucent={false} />
       <View style={S.header}>
         {/* Row 1 — the utility cluster and who this wallet is. Row 2 is the account chip, which
