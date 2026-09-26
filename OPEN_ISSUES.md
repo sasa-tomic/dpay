@@ -693,6 +693,25 @@ transaction detail, or if a backgrounded app issues anything at all.
   `DPAY_SOLANA_RPC_URL` pattern — provider endpoint in deploy config, never the app bundle);
   balance/history indexed by `eth_getLogs` Transfer-topic polling on the relay. The standing
   invariant carries over unchanged: dpay holds no EVM key, never pays and never quotes gas.
+- **"App-only" means where value custody and settlement live. It does NOT contrast with a
+  facade-settled IC rail; no such rail exists at HEAD.** Per-rail truth (`docs/CANISTERS.md` is the
+  authority; since the 2026-08-19/20 user-principal cutover): on EVERY rail the device holds the
+  key, the app builds and signs the transaction, and the ledger of record is an external one. The
+  facade canister (`ssqti`) is on no value path; its only live roles are the demo faucet `mint`,
+  display reads via the relay, and the module-hash integrity pin.
+
+  | | IC rails (ICP/VCHF, ck twins) | SOL rail | EVM rail (this) |
+  |---|---|---|---|
+  | Key custody | device ed25519 | device ed25519 | device secp256k1 |
+  | Tx build + sign | app, direct to the ledger or minter | app, device-signed | app, device-signed |
+  | Settlement | app-signed `icrc1_transfer` (native) / `icrc2_approve` + minter calls (ck) | app broadcast via relay RPC proxy | app broadcast via relay RPC proxy (planned) |
+  | Ledger of record | the external ICRC ledger canisters | Solana itself | the EVM chain itself |
+  | Facade involvement | none (faucet, display reads, integrity pin only) | none | none |
+  | Offline pay | app-signed envelope, device-clock fallback; the MERCHANT submits (flow 19) | `solreq:v2`/`solpay:v2` recent-blockhash, merchant scans + broadcasts | not designed |
+
+  Any rail table with rows like "app, then facade settles", "ledger of record: facade canister", or
+  "offline claims: facade, settle-later" describes the pre-cutover custody model retired
+  2026-08-19/20 and is wrong at HEAD.
 - **Gas**: user-side. Every payer address needs dust native ETH (mainnet / Arbitrum) alongside the
   token — the in-intent gas-fund offer (CCTP wave precedent) is the onboarding pattern; ZCHF's
   permit makes any future approval signature-cheap, but plain transfers need no approval at all.
