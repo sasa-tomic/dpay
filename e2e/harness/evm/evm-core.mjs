@@ -195,6 +195,31 @@ export function domainSeparator({name, version, chainId, verifyingContract}) {
   ]));
 }
 
+// The MINIMAL EIP-712 domain: chainId + verifyingContract ONLY — no name, no version. This is
+// what the REAL ZCHF (Frankencoin's ERC20PermitLight) signs and therefore what the committed
+// MockZCHF blob implements (MockZCHF.sol's DOMAIN_TYPEHASH). NOTE for the app twin: spec D9
+// named a full {name, version} domain — the real ZCHF does NOT use one; stream S2 must pin the
+// minimal form for ZCHF or verify against DOMAIN_SEPARATOR() before any permit ships.
+const MINIMAL_DOMAIN_TYPEHASH = keccak(Buffer.from('EIP712Domain(uint256 chainId,address verifyingContract)', 'utf8'));
+
+export function domainSeparatorMinimal({chainId, verifyingContract}) {
+  return keccakHex(abiEncode32([
+    BigInt('0x' + MINIMAL_DOMAIN_TYPEHASH.toString('hex')),
+    chainId,
+    BigInt(verifyingContract),
+  ]));
+}
+
+/** The EIP-2612 digest a payer signs OFFLINE — MINIMAL domain (the ZCHF/MockZCHF form). */
+export function permitDigestMinimal({chainId, verifyingContract, owner, spender, value, deadline, nonce}) {
+  const ds = Buffer.from(domainSeparatorMinimal({chainId, verifyingContract}).slice(2), 'hex');
+  const structHash = keccak(abiEncode32([
+    BigInt('0x' + PERMIT_TYPEHASH.toString('hex')),
+    BigInt(owner), BigInt(spender), value, deadline, nonce,
+  ]));
+  return keccakHex(Buffer.concat([Buffer.from([0x19, 0x01]), ds, structHash]));
+}
+
 /** The EIP-2612 digest a payer signs OFFLINE (flow 215; app/evm/permit.ts is the app mirror). */
 export function permitDigest({name, version, chainId, verifyingContract, owner, spender, value, deadline, nonce}) {
   const ds = Buffer.from(domainSeparator({name, version, chainId, verifyingContract}).slice(2), 'hex');
@@ -266,13 +291,38 @@ export const ethCall = (url, to, data, opts) => rpc(url, 'eth_call', [{to, data}
  * receipt is RETURNED (status 0x0), never thrown — callers assert on status where it matters.
  */
 export async function sendRawAndWait(url, rawTx, {timeoutMs = 30_000, pollMs = 250} = {}) {
-  const hash = await rpc(url, 'eth_sendRawTransaction', [rawTx], {timeoutMs});
+  const hash = await sendRawRpc(url, rawTx, {timeoutMs});
   const t0 = Date.now();
   for (;;) {
     const r = await rpc(url, 'eth_getTransactionReceipt', [hash]);
     if (r != null) return {hash, receipt: r, reverted: BigInt(r.status) !== 1n};
     if (Date.now() - t0 > timeoutMs) throw new Error(`evm-core: receipt for ${hash} never landed within ${timeoutMs}ms`);
     await new Promise((res) => setTimeout(res, pollMs));
+  }
+}
+
+/**
+ * eth_sendRawTransaction with ONE defensive retry of the IDENTICAL bytes. Rationale: anvil was
+ * once observed answering a verbatim-forwarded raw tx with a spurious `Failed to decode
+ * transaction` (reads + estimate on the same pipe stayed green; never reproduced since), and the
+ * relay forwards the client's bytes verbatim (evm.rs fetch_once). Resending the SAME signature is
+ * safe — nodes dedup by hash ('already known' → the first send landed) and this is NOT the app's
+ * blind-re-sign rule (no new signing material, ever; the app seam keeps its own stricter rule).
+ */
+export async function sendRawRpc(url, rawTx, {timeoutMs = 10_000} = {}) {
+  try {
+    return await rpc(url, 'eth_sendRawTransaction', [rawTx], {timeoutMs});
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!msg.includes('Failed to decode transaction')) throw e;
+    await new Promise((res) => setTimeout(res, 1_200));
+    try {
+      return await rpc(url, 'eth_sendRawTransaction', [rawTx], {timeoutMs});
+    } catch (e2) {
+      const msg2 = e2 instanceof Error ? e2.message : String(e2);
+      if (msg2.includes('already known')) return keccakHex(Buffer.from(rawTx.slice(2), 'hex'));
+      throw e2;
+    }
   }
 }
 

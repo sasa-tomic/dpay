@@ -18,7 +18,7 @@ import {
   ANVIL_ACCOUNT_0_PRIV,
 } from './anvil.mjs';
 import {
-  eip55, evmAddressOf, rpc, signEip1559, encodeErc20Transfer, encodeErc20BalanceOf,
+  eip55, evmAddressOf, rpc, signEip1559, sendRawRpc, encodeErc20Transfer, encodeErc20BalanceOf,
   decodeUint256, TRANSFER_TOPIC, decodeTransferLog,
 } from './evm-core.mjs';
 
@@ -68,7 +68,7 @@ try {
   });
 
   // 4. broadcast THROUGH the pipe (uncached pass-through — the exact app send path).
-  const sentHash = await viaPipe('eth_sendRawTransaction', [rawTx]);
+  const sentHash = await sendRawRpc(pipe, rawTx);
   assert(sentHash.toLowerCase() === txHash.toLowerCase(), `node hash ${sentHash} != locally computed ${txHash}`);
 
   // 5. receipt through the pipe (1s blocks — poll briefly).
