@@ -914,3 +914,59 @@ Consequences (binding for S2/S4/S6):
   not assume `ZCHF: …` strings.
 - The dev mock mirrors all of this exactly (verified mock at `tmp/mock-zchf`, 3/3 forge tests:
   offline-permit pull-claim, expiry revert, nonce replay revert).
+
+---
+
+## Addendum 2 — app-side service layer LANDED (2026-09-26/27, stream S4+S3-app on `evm-rail`)
+
+Records exactly the D-items this stream completed; everything else in §1–§7 is unchanged. The
+Solana rail was mirrored everywhere (root seam, network modules, jest wiring, driver seam).
+
+- **D6/D7 app half — LANDED, relocated by scope decision:** the parse lives in
+  `app/lib/evmCatalog.ts` (NOT `app/config/catalog.ts` as first written) with `parseEvmRow`
+  (fail-closed, `eip55ChecksumBad` rejects the row), `evmSectionsOf`/`evmAssetsOf` over the RAW
+  wire envelope, the selectable-row shape (`evm:<chainId>:<TOKEN>`, linkToken=token, chain slugs
+  `arbitrum`/`ethereum`/`arbitrum-sepolia`/`anvil` owned here as `EVM_CHAIN_SLUGS`,
+  `evm-zchf-arbitrum`/`evm-zchf-ethereum` testKeys), `parseEvmAssetId`, exact-case-insensitive
+  `evmTokenEq` (no VCHF collision), the `ZCHF·Arb`/`ZCHF·Eth` collision chips, and
+  `visibleEvmKeys`. `AssetId` (lib/types.ts) gained the `evm:<chainId>:<TOKEN>` arm. REMAINING
+  (one-line integrations, UI wave): the `'evm'` arm in `parseNetworkCatalog` +
+  `opts.evmEnabled` appending `evmSelectableRow` outputs in `buildSelectableAssets` +
+  `SHORT_NETWORK_TAG`'s Arb entry if the config chip path is preferred over `evmChipLabel`.
+- **D10 — LANDED:** `app/evm.ts` is the isolation seam (SOL-mirror: pure static imports only;
+  `evm/service` + `evm/history` reached via lazy dynamic import gated on
+  `evmRpcUrl(chainId)`; the offline contract is pinned by a jest trip-wire that fails if the
+  network module so much as EVALUATES). Endpoint machinery in `app/evm/endpoints.ts` (pure):
+  operator override > `__DPAY_TEST_EVM_RPC_URL` (jest.setup.js sets `''`; the e2e driver option
+  `evmRpcUrl` mirrors `solRpcUrl`, 'derive' deletes) > relay-derived per-chain routes. The
+  wrong-chain gate is LIVE: `eth_chainId` must prove the endpoint serves the requested chain
+  before any spend-shaped request OR balance read (memoized per endpoint list per session,
+  never on failure; `EvmWrongChainError` names both chains). The Settings ▸ Advanced field
+  (D11 UI half) is NOT in this wave; the override machinery + storage key are.
+- **D12 app half — LANDED:** the client derives the bare route for chain 1 and `/{chainId}`
+  for every other chain; the relay markers (`evm-unconfigured`, `evm-upstream-unreachable`,
+  `evm-unknown-chain`) classify through `EvmRelayPathDown`/`EvmEndpointRefused` (brand-field
+  tests, never instanceof) into the SOL read taxonomy ('unreachable'/'refused'/offline-oracle).
+- **D15 app half — LANDED:** `quoteEvmFee` = the chain's own `eth_estimateGas` + `eth_gasPrice`
+  + `eth_maxPriorityFeePerGas` (null → 0 priority, nothing invented; maxFeePerGas =
+  2×baseFee+priority, gasLimit = estimate×1.2+1). `sendErc20` gates in money-safety order:
+  wrong-chain → fee probe → THE GAS GATE (`eth_getBalance` < maxFee ⇒ `EvmGasGateError`
+  carrying required/have/chain/payer-address for the D15.3 instructive copy, BEFORE any nonce
+  or broadcast) → `signEip1559Tx` → `eth_sendRawTransaction` (same bytes walk, never re-sign;
+  a node echoing an unexpected hash is not a verdict — the receipt decides by OUR keccak) →
+  receipt poll 1.5s/60s (failed = definitive, timeout = honest unknown). Broadcasts ride the
+  `abortable` seam guarantee; every step traced to the money log.
+- **D9 partial (history):** `app/evm/history.ts` — `eth_getLogs` Transfer-topic paging, two
+  filter legs (wallet as from / as to), dedupe, `dropped` count for foreign shapes,
+  best-effort block timestamps, newest-first. The per-chain `logPageSize` idea is a SINGLE
+  conservative constant (`EVM_LOG_PAGE_SIZE=2000` in `app/evm/constants.ts`) — a performance
+  knob, never a correctness one (R4); D29's measured values can replace it in one place.
+- **e2e seams (D26/D27 partial):** `driver.mjs` gains `__DPAY_TEST_EVM_RPC_URL=''` in the
+  test globals + an `evmRpcUrl` flow option ('derive' deletes; else the URL is the whole
+  list). `harness/evm/pipe.mjs` sets `DPAY_EVM_RPC_URL_31337` (so the app's per-chain route
+  rides the pipe) and `DPAY_EVM_ANVIL_TOKEN` (so the real harness relay's catalog carries the
+  Anvil ZCHF dev row — the fake relay IS the real binary; no separate fake catalog exists).
+- **Tests:** 70 jest tests across `evm-{endpoints,rpc,seam,service,history,catalog}.test.ts`
+  (walk precedence, gate ORDER, raw-tx RLP decode, gas gate, wrong-chain sends AND reads,
+  receipt states incl. honest-unknown, history decode/paging, catalog fail-closed rows).
+  Flows 213–217 remain optional+stubbed (UI legs) — the UI wave owns the app-surface legs.
