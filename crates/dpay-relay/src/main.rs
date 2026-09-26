@@ -73,7 +73,25 @@
 //!                           deploy config: never logged, never echoed in a response,
 //!                           never committed. Unset is legal — the route still registers
 //!                           and answers 503 naming this variable; only a SET-but-malformed
-//!                           URL refuses startup (EXIT_CONFIG).
+//!                           URL refuses startup (EXIT_CONFIG). This is the DEFAULT-CHAIN
+//!                           upstream: it serves the bare route == chain 1 (Ethereum); the
+//!                           per-chain suffix route maps DPAY_EVM_RPC_URL_<CHAINID> first
+//!                           and falls back to this only for chain 1.
+//!   DPAY_EVM_RPC_URL_<CHAINID>
+//!                           the per-chain upstream for POST /api/v1/evm/rpc/<chain_id>
+//!                           (spec 2026-09-26, D12) — e.g. DPAY_EVM_RPC_URL_42161 for
+//!                           Arbitrum One. Same URL + SECRET discipline as DPAY_EVM_RPC_URL.
+//!                           Unset for a non-1 chain → that chain answers 503 naming the
+//!                           exact variable; no fallback across chains (one upstream serves
+//!                           ONE chain — routing a 42161 envelope at a chain-1 node is a
+//!                           wrong-chain send).
+//!   DPAY_EVM_SEPOLIA_TOKEN  a mock ZCHF ERC-20 contract address (0x + 40 hex) on Arbitrum
+//!                           Sepolia — set ONLY by local dev / the e2e harness. Set, it adds
+//!                           the {evm, "Arbitrum Sepolia", testnet} catalog section; unset,
+//!                           the section is absent and the served catalog is the prod shape
+//!                           (fail-closed absence). Malformed values refuse startup.
+//!   DPAY_EVM_ANVIL_TOKEN    the same for the local anvil chain (31337) — the e2e harness's
+//!                           deployed MockZCHF address. Same set/unset/malformed semantics.
 //!   DPAY_EVM_TIMEOUT_MS     per-call upstream timeout for the evm proxy in milliseconds
 //!                           (default 10000). `0` or non-numeric → startup refuses (EXIT_CONFIG).
 //!   DPAY_SIDESHIFT_SECRET   the SideShift partner ACCOUNT SECRET for the partner-key proxy
@@ -773,6 +791,22 @@ impl Config {
             None => dpay_relay::evm::DEFAULT_TIMEOUT,
         };
 
+        // The dev EVM catalog rows' mock-token addresses (spec 2026-09-26, D3). EITHER may be
+        // unset — a legal state: the dev sections are simply absent and the served catalog is
+        // the prod shape. A SET value must be an EVM contract address (0x + 40 hex) — a typo
+        // would otherwise serve a dead token row the wallet would happily target. Not secret
+        // (a mock token's deployment address), so the error names the value like the demo
+        // override does.
+        for name in ["DPAY_EVM_SEPOLIA_TOKEN", "DPAY_EVM_ANVIL_TOKEN"] {
+            if let Some(v) = non_empty(name) {
+                if !is_evm_address(&v) {
+                    return Err(format!(
+                        "{name}={v:?} is not an EVM contract address (want 0x + 40 hex chars)"
+                    ));
+                }
+            }
+        }
+
         // The SideShift partner-key credentials (founder decision 3, 2026-09-14). EITHER may
         // be unset — that is a legal state: the routes still register and answer 503 naming
         // exactly the variable(s) missing (the venue is simply absent until the founder's
@@ -911,6 +945,13 @@ fn non_empty(key: &str) -> Option<String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// The EVM-address shape check for the dev catalog rows' mock-token envs (`0x` + 40 hex) —
+/// well-formedness only, exactly what the catalog row needs; existence is the chain's business.
+fn is_evm_address(v: &str) -> bool {
+    let body = v.strip_prefix("0x").unwrap_or(v);
+    body.len() == 40 && body.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn parse_bool(key: &str, raw: &str) -> Result<bool, String> {

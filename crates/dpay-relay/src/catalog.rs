@@ -1017,6 +1017,39 @@ pub(crate) const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111
 /// venue row's Solana-side rail id IS this mint.
 pub(crate) const SOLANA_EURC_MINT: &str = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
 
+// --- The EVM rail's chain + ZCHF token constants (spec 2026-09-26, D2) -------------------------
+// The device-key ERC-20 rail: one relay-level catalog section per settlement chain, carried in
+// [`NetworkAssets::Evm`] rows ([`EvmAsset`]) — never a `CurrencyDescriptor` (the rail never
+// touches the IC; the SolanaAsset precedent). All literals are cross-checked against
+// `dfx/catalog_truth.json` (`erc20_contracts.zchf_*`, `decimals.zchf`, `chains`) by the
+// `catalog_truth_tests` module below; the addresses' EIP-55 checksums are additionally
+// self-verified by the jest half of the drift alarm (app/__tests__/catalog.test.ts).
+
+/// ZCHF on Arbitrum One — the Frankencoin ERC-20 contract, EIP-55 checksummed. Arbitrum One is
+/// the RECOMMENDED event rail (sub-cent gas), which is why its section comes FIRST in the served
+/// catalog (section order = wallet row order).
+pub(crate) const ZCHF_ARBITRUM_ADDRESS: &str = "0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553";
+
+/// ZCHF on Ethereum mainnet — the same token's L1 deployment, EIP-55 checksummed.
+pub(crate) const ZCHF_ETHEREUM_ADDRESS: &str = "0xB58E61C3098d85632Df34EecfB899A1Ed80921cB";
+
+/// ZCHF decimals — 18 (the ERC-20 standard's own precision; NOT the IC VCHF row's 8).
+pub(crate) const ZCHF_DECIMALS: u8 = 18;
+
+/// EVM chain id — Ethereum mainnet. THE default chain of the JSON-RPC pipe (the bare
+/// `/api/v1/evm/rpc` route serves exactly this chain).
+pub(crate) const CHAIN_ID_ETHEREUM: u64 = 1;
+
+/// EVM chain id — Arbitrum One.
+pub(crate) const CHAIN_ID_ARBITRUM_ONE: u64 = 42161;
+
+/// EVM chain id — Arbitrum Sepolia (dev/e2e only; its section is env-gated, see
+/// [`dev_evm_sections`]).
+pub(crate) const CHAIN_ID_ARBITRUM_SEPOLIA: u64 = 421614;
+
+/// EVM chain id — the local anvil dev/e2e chain (section env-gated, see [`dev_evm_sections`]).
+pub(crate) const CHAIN_ID_ANVIL: u64 = 31337;
+
 /// The solana mainnet section — a relay-level constant provider (NOT a `Ledger` thing: the rail
 /// is device-key + direct RPC and never touches the IC, so it is absent from the trait and
 /// `fake.rs`). Values mirror app/solana.ts exactly: SOL 9 decimals (`SOL_DECIMALS`), USDC 6
@@ -1079,43 +1112,187 @@ fn solana_network_section() -> NetworkBody {
     }
 }
 
-/// The complete `GET /api/v1/currencies` response body: exactly three sections in order
-/// (icp mainnet, icp testnet, solana mainnet), partitioned server-side ([`is_testnet_row`]).
-/// The empty testnet section is still emitted — clients shouldn't infer from absence. IC rows
-/// serialize in the UNCHANGED `CurrencyDescriptor` shape (field set/casing frozen — the app +
-/// e2e depend on the byte-shape).
+/// One EVM network section — an env-provided mock-token address on a dev chain. There is no
+/// real ZCHF on Arbitrum Sepolia and nothing at all on a fresh anvil, so these rows exist ONLY
+/// when the operator hands the relay the deployed mock token's address (spec 2026-09-26, D3):
+///
+/// - `DPAY_EVM_SEPOLIA_TOKEN=<0x…>` → an `{evm, "Arbitrum Sepolia", testnet}` section (chain
+///   421614) carrying ZCHF at that address.
+/// - `DPAY_EVM_ANVIL_TOKEN=<0x…>` → an `{evm, "Anvil", testnet}` section (chain 31337), same.
+///
+/// Unset — every prod, lean and test build — the sections are ABSENT (fail-closed absence) and
+/// the served wire bytes are unchanged: the same trick [`demo_ledger_text`] plays for
+/// `DPAY_DEMO_LEDGER`. Read once via `OnceLock` (the catalog is rebuilt per request and must
+/// not re-parse the env each call); the address SHAPE (`0x` + 40 hex) is validated at relay
+/// startup in `main.rs` where a malformed value refuses to boot instead of serving a dead row.
+/// Testnet-ness is the SECTION's `environment` field — the app stamps `testnet` from it and the
+/// existing testnet toggle hides these rows by default. Never compiled mock addresses.
+fn dev_evm_sections(sepolia_token: Option<&str>, anvil_token: Option<&str>) -> Vec<NetworkBody> {
+    let mut sections = Vec::new();
+    if let Some(address) = sepolia_token {
+        sections.push(NetworkBody {
+            protocol: "evm",
+            name: "Arbitrum Sepolia",
+            environment: "testnet",
+            assets: NetworkAssets::Evm(vec![EvmAsset {
+                token: "ZCHF",
+                symbol: "ZCHF",
+                decimals: ZCHF_DECIMALS,
+                min_fraction_digits: Some(2),
+                chain_id: CHAIN_ID_ARBITRUM_SEPOLIA,
+                address: address.to_string(),
+                onramp: RampCapability::Unavailable,
+                offramp: RampCapability::Unavailable,
+                liquidity: None,
+            }]),
+        });
+    }
+    if let Some(address) = anvil_token {
+        sections.push(NetworkBody {
+            protocol: "evm",
+            name: "Anvil",
+            environment: "testnet",
+            assets: NetworkAssets::Evm(vec![EvmAsset {
+                token: "ZCHF",
+                symbol: "ZCHF",
+                decimals: ZCHF_DECIMALS,
+                min_fraction_digits: Some(2),
+                chain_id: CHAIN_ID_ANVIL,
+                address: address.to_string(),
+                onramp: RampCapability::Unavailable,
+                offramp: RampCapability::Unavailable,
+                liquidity: None,
+            }]),
+        });
+    }
+    sections
+}
+
+/// The two dev-token env values, read ONCE (the [`demo_ledger_text`] OnceLock discipline):
+/// `(DPAY_EVM_SEPOLIA_TOKEN, DPAY_EVM_ANVIL_TOKEN)`, trimmed, empty-means-unset. Exposed as a
+/// fn (not inlined into [`evm_network_sections`]) so the wire tests can pin that the SERVED body
+/// is exactly [`dev_evm_sections`] applied to THESE values — whatever they are — without
+/// process-env mutation.
+fn env_evm_dev_tokens() -> (Option<String>, Option<String>) {
+    use std::sync::OnceLock;
+
+    fn once(name: &'static str) -> Option<String> {
+        static SEPOLIA: OnceLock<Option<String>> = OnceLock::new();
+        static ANVIL: OnceLock<Option<String>> = OnceLock::new();
+        let lock = match name {
+            "DPAY_EVM_SEPOLIA_TOKEN" => &SEPOLIA,
+            _ => &ANVIL,
+        };
+        lock.get_or_init(|| {
+            std::env::var(name)
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
+        .clone()
+    }
+    (
+        once("DPAY_EVM_SEPOLIA_TOKEN"),
+        once("DPAY_EVM_ANVIL_TOKEN"),
+    )
+}
+
+/// The EVM sections for a given pair of dev-token addresses — THE env-dependent builder, kept
+/// env-free so the tests pin the full shape without process-env mutation (D3). Prod calls it
+/// through [`evm_network_sections`] with the OnceLock-resolved env. Arbitrum One FIRST (the
+/// recommended event rail: sub-cent gas), then Ethereum, then the dev sections. The section
+/// order IS the wallet row order (`buildSelectableAssets` preserves section order app-side).
+fn evm_sections_with(sepolia_token: Option<&str>, anvil_token: Option<&str>) -> Vec<NetworkBody> {
+    let mut sections = vec![
+        NetworkBody {
+            protocol: "evm",
+            name: "Arbitrum One",
+            environment: "mainnet",
+            assets: NetworkAssets::Evm(vec![EvmAsset {
+                token: "ZCHF",
+                symbol: "ZCHF",
+                decimals: ZCHF_DECIMALS,
+                min_fraction_digits: Some(2), // unit-denominated — the VCHF/USDC display policy
+                chain_id: CHAIN_ID_ARBITRUM_ONE,
+                address: ZCHF_ARBITRUM_ADDRESS.to_string(),
+                // No fiat ramp through dpay on this device-key rail — the honest
+                // Unavailable (the solana rows' corrected semantics). Transfer-in still
+                // works: send-to-address is the deposit mechanism.
+                onramp: RampCapability::Unavailable,
+                offramp: RampCapability::Unavailable,
+                // No measured venue tier for ZCHF on either chain — do not invent one.
+                liquidity: None,
+            }]),
+        },
+        NetworkBody {
+            protocol: "evm",
+            name: "Ethereum",
+            environment: "mainnet",
+            assets: NetworkAssets::Evm(vec![EvmAsset {
+                token: "ZCHF",
+                symbol: "ZCHF",
+                decimals: ZCHF_DECIMALS,
+                min_fraction_digits: Some(2),
+                chain_id: CHAIN_ID_ETHEREUM,
+                address: ZCHF_ETHEREUM_ADDRESS.to_string(),
+                onramp: RampCapability::Unavailable,
+                offramp: RampCapability::Unavailable,
+                liquidity: None,
+            }]),
+        },
+    ];
+    sections.extend(dev_evm_sections(sepolia_token, anvil_token));
+    sections
+}
+
+/// The EVM mainnet sections — Arbitrum One FIRST, then Ethereum, followed by any env-gated dev
+/// sections ([`dev_evm_sections`]). Relay-level constants like the solana section (the rail
+/// never touches the IC — no `CurrencyDescriptor`, no ledger principal, no minter).
+fn evm_network_sections() -> Vec<NetworkBody> {
+    let (sepolia, anvil) = env_evm_dev_tokens();
+    evm_sections_with(sepolia.as_deref(), anvil.as_deref())
+}
+
+/// The complete `GET /api/v1/currencies` response body: exactly five sections in order
+/// (icp mainnet, icp testnet, solana mainnet, evm "Arbitrum One" mainnet, evm "Ethereum"
+/// mainnet; plus the env-gated dev evm sections appended last, D3), partitioned server-side
+/// ([`is_testnet_row`]). The empty testnet section is still emitted — clients shouldn't infer
+/// from absence. IC rows serialize in the UNCHANGED `CurrencyDescriptor` shape (field
+/// set/casing frozen — the app + e2e depend on the byte-shape).
 pub(crate) fn currencies_body() -> CurrenciesBody {
     // Partition preserves each side's catalog order; mainnet keeps DEMO (network None).
     let (mainnet, testnet): (Vec<_>, Vec<_>) =
         ic_rows().into_iter().partition(|d| !is_testnet_row(d));
-    CurrenciesBody {
-        networks: vec![
-            NetworkBody {
-                protocol: "icp",
-                name: "Internet Computer",
-                environment: "mainnet",
-                assets: NetworkAssets::Ic(mainnet),
-            },
-            NetworkBody {
-                protocol: "icp",
-                name: "Internet Computer",
-                environment: "testnet",
-                assets: NetworkAssets::Ic(testnet),
-            },
-            solana_network_section(),
-        ],
-    }
+    let mut networks = vec![
+        NetworkBody {
+            protocol: "icp",
+            name: "Internet Computer",
+            environment: "mainnet",
+            assets: NetworkAssets::Ic(mainnet),
+        },
+        NetworkBody {
+            protocol: "icp",
+            name: "Internet Computer",
+            environment: "testnet",
+            assets: NetworkAssets::Ic(testnet),
+        },
+        solana_network_section(),
+    ];
+    networks.extend(evm_network_sections());
+    CurrenciesBody { networks }
 }
 
-/// `GET /api/v1/currencies` response body — the network-first asset catalog (v2). Exactly three
-/// sections in order: icp mainnet, icp testnet (possibly empty), solana mainnet.
+/// `GET /api/v1/currencies` response body — the network-first asset catalog (v2). Exactly five
+/// sections in order: icp mainnet, icp testnet (possibly empty), solana mainnet, evm Arbitrum
+/// One mainnet, evm Ethereum mainnet (plus the env-gated dev evm sections, D3).
 #[derive(Serialize)]
 pub(crate) struct CurrenciesBody {
     networks: Vec<NetworkBody>,
 }
 
-/// One `networks[]` section. `assets` is untagged so IC sections carry `CurrencyDescriptor` rows
-/// and the solana section carries [`SolanaAsset`] rows — both serialize as plain JSON arrays.
+/// One `networks[]` section. `assets` is untagged so IC sections carry `CurrencyDescriptor` rows,
+/// the solana section carries [`SolanaAsset`] rows and the evm sections carry [`EvmAsset`]
+/// rows — all serialize as plain JSON arrays.
 #[derive(Serialize)]
 pub(crate) struct NetworkBody {
     protocol: &'static str,
@@ -1125,12 +1302,14 @@ pub(crate) struct NetworkBody {
 }
 
 /// The `assets` array of a network section — IC rows (`CurrencyDescriptor`, field set/casing
-/// UNCHANGED from the pre-v2 flat catalog) or the relay-constant Solana rows.
+/// UNCHANGED from the pre-v2 flat catalog), the relay-constant Solana rows, or the
+/// relay-constant EVM rows.
 #[derive(Serialize)]
 #[serde(untagged)]
 pub(crate) enum NetworkAssets {
     Ic(Vec<CurrencyDescriptor>),
     Solana(Vec<SolanaAsset>),
+    Evm(Vec<EvmAsset>),
 }
 
 /// One Solana asset row — a relay-level constant (the device-key rail never touches the IC,
@@ -1148,6 +1327,30 @@ pub(crate) struct SolanaAsset {
     /// (see `CurrencyDescriptor::min_fraction_digits`), so USDC reads `1.50` on BOTH rails.
     min_fraction_digits: Option<u8>,
     mint: Option<&'static str>,
+    onramp: RampCapability,
+    offramp: RampCapability,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    liquidity: Option<LiquidityTier>,
+}
+
+/// One EVM asset row — a relay-level constant (the device-key rail never touches the IC, so
+/// deliberately NOT a `CurrencyDescriptor` — the [`SolanaAsset`] precedent, same module).
+/// `token` is the link/registry literal ('ZCHF'; exact-case matching app-side keeps it distinct
+/// from the IC VCHF row), `symbol` the display form (the split exists for a native-ETH row
+/// later). `chain_id` names THE chain the money settles on — NEW semantics vs the IC rows'
+/// chain_id (which names the BACKING chain, e.g. ckUSDC's 1 = Ethereum); written down in
+/// `dfx/catalog_truth.json` `chains._doc`. `address` is the EIP-55 checksummed ERC-20 contract
+/// (`String` only because the dev rows' addresses arrive via env, D3 — prod rows are the
+/// `ZCHF_*_ADDRESS` consts). Ramps are the honest fiat Unavailable; `liquidity` stays unset
+/// until a venue tier is measured.
+#[derive(Serialize)]
+pub(crate) struct EvmAsset {
+    token: &'static str,
+    symbol: &'static str,
+    decimals: u8,
+    min_fraction_digits: Option<u8>,
+    chain_id: u64,
+    address: String,
     onramp: RampCapability,
     offramp: RampCapability,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1335,6 +1538,32 @@ mod catalog_truth_tests {
             CKUSDC_ERC20_ADDRESS,
             t["erc20_contracts"]["ckusdc"].as_str().unwrap()
         );
+        // The EVM rail's ZCHF consts ARE the truth file's values (spec 2026-09-26, D5): the two
+        // ERC-20 contracts, the 18-dec decimals, and every chain id. A const edit without a JSON
+        // update (or vice versa) goes RED here.
+        assert_eq!(
+            ZCHF_ARBITRUM_ADDRESS,
+            t["erc20_contracts"]["zchf_arbitrum"].as_str().unwrap()
+        );
+        assert_eq!(
+            ZCHF_ETHEREUM_ADDRESS,
+            t["erc20_contracts"]["zchf_ethereum"].as_str().unwrap()
+        );
+        assert_eq!(
+            u64::from(ZCHF_DECIMALS),
+            t["decimals"]["zchf"].as_u64().unwrap()
+        );
+        let chains = &t["chains"];
+        assert_eq!(CHAIN_ID_ETHEREUM, chains["ethereum"].as_u64().unwrap());
+        assert_eq!(
+            CHAIN_ID_ARBITRUM_ONE,
+            chains["arbitrum_one"].as_u64().unwrap()
+        );
+        assert_eq!(
+            CHAIN_ID_ARBITRUM_SEPOLIA,
+            chains["arbitrum_sepolia"].as_u64().unwrap()
+        );
+        assert_eq!(CHAIN_ID_ANVIL, chains["anvil"].as_u64().unwrap());
         // The official ICP index is NOT a catalog field (no index_canister abstraction until a
         // second ledger needs one) — the CODE pin lives in agent_ledger.rs's history adapter.
         // This literal check keeps the JSON's icp_index entry honest against the spec-locked
@@ -1403,7 +1632,9 @@ mod catalog_truth_tests {
         let section_ids = |sec: usize| -> Vec<Currency> {
             match &body.networks[sec].assets {
                 NetworkAssets::Ic(rows) => rows.iter().map(|d| d.currency).collect(),
-                NetworkAssets::Solana(_) => panic!("section {sec} must be an IC section"),
+                NetworkAssets::Solana(_) | NetworkAssets::Evm(_) => {
+                    panic!("section {sec} must be an IC section")
+                }
             }
         };
         assert_eq!(
@@ -1837,6 +2068,172 @@ mod catalog_truth_tests {
             );
         }
     }
+
+    /// The EVM sections' truth-file pins + locked shape (spec 2026-09-26, D5). Built from the
+    /// env-free prod inputs (`None, None`) so the test is hermetic — the env-gated dev rows are
+    /// covered by `evm_dev_sections_are_env_gated` below. Pins: exactly two prod sections in
+    /// order (Arbitrum One, Ethereum), one ZCHF row each, every field matched against
+    /// `dfx/catalog_truth.json`, and the served body carries them right after the solana
+    /// section.
+    #[test]
+    fn evm_rows_match_truth_and_locked_shape() {
+        let t = truth();
+        let sections = evm_sections_with(None, None);
+        assert_eq!(sections.len(), 2, "prod shape: Arbitrum One + Ethereum only");
+        assert_eq!(
+            sections
+                .iter()
+                .map(|s| (s.protocol, s.name, s.environment))
+                .collect::<Vec<_>>(),
+            vec![
+                ("evm", "Arbitrum One", "mainnet"),
+                ("evm", "Ethereum", "mainnet"),
+            ],
+            "section order IS the wallet row order: Arbitrum One first"
+        );
+
+        let NetworkAssets::Evm(arb_rows) = &sections[0].assets else {
+            panic!("an evm section must carry EvmAsset rows");
+        };
+        let NetworkAssets::Evm(eth_rows) = &sections[1].assets else {
+            panic!("an evm section must carry EvmAsset rows");
+        };
+        assert_eq!(arb_rows.len(), 1, "one ZCHF row per evm section");
+        assert_eq!(eth_rows.len(), 1, "one ZCHF row per evm section");
+        let arb = &arb_rows[0];
+        let eth = &eth_rows[0];        for (row, address_key, chain_key, chain_id) in [
+            (arb, "zchf_arbitrum", "arbitrum_one", CHAIN_ID_ARBITRUM_ONE),
+            (eth, "zchf_ethereum", "ethereum", CHAIN_ID_ETHEREUM),
+        ] {
+            assert_eq!(row.token, "ZCHF");
+            assert_eq!(row.symbol, "ZCHF");
+            assert_eq!(
+                row.address,
+                t["erc20_contracts"][address_key].as_str().unwrap(),
+                "row address == catalog_truth erc20_contracts.{address_key}"
+            );
+            assert_eq!(
+                u64::from(row.decimals),
+                t["decimals"]["zchf"].as_u64().unwrap(),
+                "row decimals == catalog_truth decimals.zchf"
+            );
+            assert_eq!(row.chain_id, chain_id);
+            assert_eq!(
+                u64::from(chain_id),
+                t["chains"][chain_key].as_u64().unwrap()
+            );
+            assert_eq!(
+                row.min_fraction_digits,
+                Some(2),
+                "unit-denominated — the VCHF/USDC display policy"
+            );
+            assert_eq!(row.onramp, RampCapability::Unavailable, "no fiat onramp");
+            assert_eq!(row.offramp, RampCapability::Unavailable, "no fiat offramp");
+            assert_eq!(row.liquidity, None, "no measured venue tier — do not invent one");
+        }
+        // The token literal must stay distinct from the IC VCHF row (exact-case tokenEq
+        // app-side; no case-folding trick may merge the two).
+        assert_ne!("ZCHF".to_lowercase(), "VCHF".to_lowercase());
+
+        // The SERVED body carries exactly these sections, immediately after the solana one
+        // (in the env-unset shape this test process runs in).
+        if dev_len() == 0 {
+            let body = currencies_body();
+            assert!(matches!(body.networks[2].assets, NetworkAssets::Solana(_)));
+            let expected = serde_json::to_string(&sections).unwrap();
+            assert_eq!(
+                serde_json::to_string(&body.networks[3..5]).unwrap(),
+                expected,
+                "the served evm sections are the prod sections, in order"
+            );
+            assert_eq!(body.networks.len(), 5, "prod wire shape: five sections");
+        }
+    }
+
+    /// How many dev evm sections THIS test process's env implies (the same OnceLock-resolved
+    /// values [`evm_network_sections`] reads). Zero in every prod/lean/test run — asserted
+    /// where it matters.
+    fn dev_len() -> usize {
+        let (sep, anv) = env_evm_dev_tokens();
+        usize::from(sep.is_some()) + usize::from(anv.is_some())
+    }
+
+    /// D3's env gating: dev tokens set → the dev sections appear (Arbitrum Sepolia then Anvil,
+    /// both `testnet`, carrying the env-provided address); unset → absent. Built from the
+    /// env-free builder — no process-env mutation anywhere.
+    #[test]
+    fn evm_dev_sections_are_env_gated() {
+        assert_eq!(
+            evm_sections_with(None, None).len(),
+            2,
+            "env unset: the dev sections are ABSENT (fail-closed absence)"
+        );
+        let sep = "0x1111111111111111111111111111111111111111";
+        let anv = "0x2222222222222222222222222222222222222222";
+        let both = evm_sections_with(Some(sep), Some(anv));
+        assert_eq!(both.len(), 4, "prod two + dev two");
+        assert_eq!(
+            both.iter()
+                .map(|s| (s.protocol, s.name, s.environment))
+                .collect::<Vec<_>>(),
+            vec![
+                ("evm", "Arbitrum One", "mainnet"),
+                ("evm", "Ethereum", "mainnet"),
+                ("evm", "Arbitrum Sepolia", "testnet"),
+                ("evm", "Anvil", "testnet"),
+            ],
+            "dev sections append LAST, Sepolia then Anvil"
+        );
+        let NetworkAssets::Evm(sep_rows) = &both[2].assets else {
+            panic!("a dev evm section must carry EvmAsset rows");
+        };
+        assert_eq!(sep_rows[0].chain_id, CHAIN_ID_ARBITRUM_SEPOLIA);
+        assert_eq!(sep_rows[0].address, sep, "the env-provided mock token address");
+        let NetworkAssets::Evm(anv_rows) = &both[3].assets else {
+            panic!("a dev evm section must carry EvmAsset rows");
+        };
+        assert_eq!(anv_rows[0].chain_id, CHAIN_ID_ANVIL);
+        assert_eq!(anv_rows[0].address, anv);
+
+        // Each dev env gates ITS OWN section: one set → exactly one dev section.
+        let only_sep = evm_sections_with(Some(sep), None);
+        assert_eq!(
+            only_sep.iter().map(|s| s.name).collect::<Vec<_>>(),
+            vec!["Arbitrum One", "Ethereum", "Arbitrum Sepolia"]
+        );
+        let only_anv = evm_sections_with(None, Some(anv));
+        assert_eq!(
+            only_anv.iter().map(|s| s.name).collect::<Vec<_>>(),
+            vec!["Arbitrum One", "Ethereum", "Anvil"]
+        );
+    }
+
+    /// The SERVED body is exactly [`dev_evm_sections`] applied to the OnceLock-resolved env
+    /// values — whatever they are — so the env→wire wiring is pinned without process-env
+    /// mutation (the DPAY_DEMO_LEDGER pattern's testability clause).
+    #[test]
+    fn served_body_dev_sections_match_the_resolved_env() {
+        let (sep, anv) = env_evm_dev_tokens();
+        let expected = evm_sections_with(sep.as_deref(), anv.as_deref());
+        let body = currencies_body();
+        assert_eq!(
+            body.networks.len(),
+            3 + expected.len(),
+            "3 non-evm sections + the evm sections for THIS process's env"
+        );
+        assert_eq!(
+            serde_json::to_string(&body.networks[3..]).unwrap(),
+            serde_json::to_string(&expected).unwrap(),
+        );
+        if sep.is_none() && anv.is_none() {
+            assert_eq!(
+                body.networks.len(),
+                5,
+                "the DEFAULT (env-unset) build serves exactly five sections — prod wire bytes \
+                 unchanged by the dev-row machinery"
+            );
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1908,6 +2305,66 @@ mod wire_byte_shape_tests {
             eurc,
             "{\"token\":\"EURC\",\"symbol\":\"EURC\",\"decimals\":6,\"min_fraction_digits\":2,\"mint\":\"HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr\",\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\",\"liquidity\":\"deep\"}"
         );
+    }
+
+    /// The EVM ZCHF rows' exact wire bytes (spec 2026-09-26, D5): key order, casing, the
+    /// checksummed addresses, `min_fraction_digits` as a plain number, NO `liquidity` key.
+    /// Any serializer regression (key order, an accidental liquidity key, a re-cased address)
+    /// goes RED here before it reaches a route test.
+    #[test]
+    fn zchf_rows_wire_byte_shape() {
+        let NetworkAssets::Evm(rows) = evm_sections_with(None, None).remove(0).assets else {
+            panic!("the Arbitrum One section must carry EvmAsset rows");
+        };
+        assert_eq!(
+            serde_json::to_string(&rows[0]).unwrap(),
+            "{\"token\":\"ZCHF\",\"symbol\":\"ZCHF\",\"decimals\":18,\"min_fraction_digits\":2,\"chain_id\":42161,\"address\":\"0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553\",\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\"}"
+        );
+        let NetworkAssets::Evm(rows) = evm_sections_with(None, None).remove(1).assets else {
+            panic!("the Ethereum section must carry EvmAsset rows");
+        };
+        assert_eq!(
+            serde_json::to_string(&rows[0]).unwrap(),
+            "{\"token\":\"ZCHF\",\"symbol\":\"ZCHF\",\"decimals\":18,\"min_fraction_digits\":2,\"chain_id\":1,\"address\":\"0xB58E61C3098d85632Df34EecfB899A1Ed80921cB\",\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\"}"
+        );
+    }
+
+    /// A DEV row's wire bytes: the env-provided mock address lands in the `address` slot with
+    /// every other field identical to the prod rows, and the section rides `environment:
+    /// "testnet"` (the app's testnet toggle reads the SECTION, D3).
+    #[test]
+    fn dev_evm_rows_wire_byte_shape() {
+        let token = "0x9999999999999999999999999999999999999999";
+        let sections = evm_sections_with(Some(token), Some(token));
+        assert_eq!(
+            serde_json::to_string(&sections[2]).unwrap(),
+            "{\"protocol\":\"evm\",\"name\":\"Arbitrum Sepolia\",\"environment\":\"testnet\",\"assets\":[{\"token\":\"ZCHF\",\"symbol\":\"ZCHF\",\"decimals\":18,\"min_fraction_digits\":2,\"chain_id\":421614,\"address\":\"0x9999999999999999999999999999999999999999\",\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\"}]}"
+        );
+        assert_eq!(
+            serde_json::to_string(&sections[3]).unwrap(),
+            "{\"protocol\":\"evm\",\"name\":\"Anvil\",\"environment\":\"testnet\",\"assets\":[{\"token\":\"ZCHF\",\"symbol\":\"ZCHF\",\"decimals\":18,\"min_fraction_digits\":2,\"chain_id\":31337,\"address\":\"0x9999999999999999999999999999999999999999\",\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\"}]}"
+        );
+    }
+
+    /// D3's prod-bytes pin: with BOTH dev envs unset the served body is EXACTLY the five
+    /// prod sections — the dev-row machinery is invisible on the wire. (The OnceLock-resolved
+    /// values are read the same way the route reads them, so the test stays honest about what
+    /// environment it is actually running in; the env-unset branch is the one every prod, lean
+    /// and test run takes.)
+    #[test]
+    fn served_wire_unchanged_when_dev_env_unset() {
+        let (sep, anv) = env_evm_dev_tokens();
+        if sep.is_some() || anv.is_some() {
+            return; // a dev-env process: the exact-shape pin above already covers prod shape
+        }
+        let body = serde_json::to_string(&currencies_body()).unwrap();
+        assert_eq!(body.matches("\"protocol\":\"evm\"").count(), 2);
+        assert!(body.contains("\"name\":\"Arbitrum One\""));
+        assert!(body.contains("\"name\":\"Ethereum\""));
+        assert!(!body.contains("\"name\":\"Arbitrum Sepolia\""));
+        assert!(!body.contains("\"name\":\"Anvil\""));
+        assert_eq!(body.matches("\"protocol\":\"icp\"").count(), 2);
+        assert_eq!(body.matches("\"protocol\":\"solana\"").count(), 1);
     }
 }
 

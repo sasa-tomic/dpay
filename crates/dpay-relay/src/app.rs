@@ -2359,10 +2359,11 @@ async fn deposit_info(State(state): State<AppState>, Query(qs): Query<BalanceQue
 }
 
 /// `GET /api/v1/currencies` → `200 {"networks":[...]}` — the network-first asset catalog (v2):
-/// exactly three sections in order (icp mainnet, icp testnet, solana mainnet). INFALLIBLE: the
-/// catalog is compiled into [`crate::catalog`] (the sole authority — founder decision 2026-08-28;
-/// the facade registry was removed), so this handler has no ledger call and no failure mode.
-/// No query params; unauthenticated (catalog only — no balances).
+/// exactly five sections in order (icp mainnet, icp testnet, solana mainnet, evm Arbitrum One
+/// mainnet, evm Ethereum mainnet; plus the env-gated dev evm sections last). INFALLIBLE: the
+/// catalog is compiled into [`crate::catalog`] (the sole authority — founder decision
+/// 2026-08-28; the facade registry was removed), so this handler has no ledger call and no
+/// failure mode. No query params; unauthenticated (catalog only — no balances).
 async fn currencies() -> Response {
     (StatusCode::OK, Json(currencies_body())).into_response()
 }

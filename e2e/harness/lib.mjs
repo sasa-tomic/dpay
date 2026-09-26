@@ -1311,7 +1311,8 @@ export async function getBalance(relayBaseURL, accountHex, currency = 0, timeout
 
 /**
  * GET /api/v1/currencies → the v2 network-first catalog (`200 {"networks":[{protocol,name,
- * environment,assets}]}` — three sections in order: icp mainnet, icp testnet, solana mainnet).
+ * environment,assets}]}` — five sections in order: icp mainnet, icp testnet, solana mainnet,
+ * evm Arbitrum One mainnet, evm Ethereum mainnet, plus env-gated dev evm sections).
  * Returns the IC assets as ONE flat list (icp mainnet ++ icp testnet), each section selected by
  * `protocol === 'icp'` + `environment` — never by display name — mirroring the app's own parse
  * seam (`icpCatalogOf` in app/config/catalog.ts). IC rows keep the exact `CurrencyDescriptor`
