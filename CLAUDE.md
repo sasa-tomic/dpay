@@ -232,6 +232,16 @@ happens in the final report after a documented skip, never as a mid-session stal
   silent is forbidden: the final report MUST state that the live round-trip validation was NOT
   done during development, name the exact blocker, the concrete unblocking step and its cost, and
   what WAS verified offline instead, then ask the user for further guidance.
+- **Knowledge base: `docs/live-testing/` is the single home for testnet-vs-mainnet knowledge.** Its
+  AGENTS.md carries the working rules; compact, date-stamped notes record per rail/venue whether a
+  free test path exists, the cheapest live probe, funding pointers, and dead ends. An agent that
+  learns anything new about testing a venue or network updates the notes (and any scripts) in the
+  SAME session as the finding; stale claims get corrected, not accumulated.
+- **The free-testnet search is time-boxed: max 10 minutes, per venue, at most once per day.** If a
+  venue has no documented free test path, search for one for at most 10 minutes, and skip
+  entirely when the note's last-checked date is less than 24h old. A found path gets documented
+  and used; no path means mainnet at the smallest allowed amount, and the dead end gets recorded
+  with the date so future agents do not repeat the search before its time.
 
 ## Projects
 
