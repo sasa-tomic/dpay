@@ -2,6 +2,10 @@
 node_modules/
 dist/
 .browser/
+# `just evm-anvil` runtime state — the chain is staged fresh every run; nothing here is a contract
+harness/evm/anvil.json
+harness/evm/anvil.pid
+harness/evm/anvil.log
 # Per-run captures are regenerable → ignored. The visual-regression BASELINES are the contract
 # (committed PNGs the suite diffs against), so un-ignore the baselines/ subdir + its contents.
 shots/*

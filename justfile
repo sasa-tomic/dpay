@@ -123,6 +123,22 @@ relay-default-check: web
 test-relay: web
     python3 scripts/testruns.py run test-relay --sh 'cargo nextest run -p dpay-relay --features test-helpers --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
+# stage the local EVM rail (D26): a SCRATCH anvil (chain 31337, offline, 1s blocks), the COMMITTED
+# MockZCHF blob (e2e/harness/evm/MockZCHF.hex) deployed with a raw signed type-2 tx — no forge/solc
+# at runtime — and the DEVICE-derived EVM key funded (gas via anvil_setBalance + ZCHF from the
+# deployer). Prints the config JSON and writes e2e/harness/evm/anvil.json for the flows; the chain
+# stays RUNNING (detached; logs → anvil.log). Idempotent: a re-run replaces the previous instance
+# on a fresh chain. Port collision (8545 held by something else): fail loud — pass another port:
+#   just evm-anvil 8645     (or DPAY_EVM_ANVIL_PORT=8645)
+evm-anvil port='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}"
+    [ -d e2e/node_modules ] || npm --prefix e2e install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    p="{{port}}"
+    [ -n "$p" ] || p="${DPAY_EVM_ANVIL_PORT:-8545}"
+    exec env DPAY_EVM_ANVIL_PORT="$p" node e2e/harness/evm/anvil.mjs
+
 # emit the committed core goldens from the real Rust core: the wire layout (single source of truth
 # for the JS ed25519 signing shim) and the checkout-open signing document (the merchant's charge-open proof,
 # read by scripts/check-wasm-core.mjs). `just test-core` fails when the checkout-open file is stale.
@@ -621,6 +637,13 @@ stop:
 
     # relay (LAN settle service) — `just demo` or a manual `cargo run -p dpay-relay`. Frees port 8787.
     if pkill -f 'dpay-relay' 2>/dev/null; then echo "  ✓ relay stopped"; else echo "  · relay: none"; fi
+
+    # scratch EVM chain from `just evm-anvil` — frees port 8545 (or wherever it was staged).
+    if [ -f e2e/harness/evm/anvil.pid ] && kill -0 "$(cat e2e/harness/evm/anvil.pid 2>/dev/null)" 2>/dev/null; then
+      kill "$(cat e2e/harness/evm/anvil.pid)" && echo "  ✓ anvil stopped"
+    else
+      echo "  · anvil: none"
+    fi
 
     # dfx local replica and everything it manages (replica, canister_sandbox, icx-proxy, pocket-ic).
     if command -v dfx >/dev/null 2>&1; then
