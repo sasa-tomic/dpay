@@ -9,6 +9,8 @@
 
 export type EvmMessages = {
   // --- Receive ▸ My address (D14) -------------------------------------------------------------
+  /** The explorer link label ('View on Arbitrum One' — the chain is a proper noun). */
+  viewOnExplorer: (chain: string) => string;
   /** One EVM key serves every chain — the note says so where IC/SOL sections name one chain. */
   sameAddressNote: (chains: string) => string;
   /** The native-gas visibility line (D19): "Gas: 0.00013 ETH". */
@@ -99,6 +101,7 @@ export type EvmMessages = {
 export const evmEn: EvmMessages = {
   sameAddressNote: chains => `Same address on ${chains} — one key, every chain`,
   gasLine: amount => `Gas: ${amount}`,
+  viewOnExplorer: chain => `View on ${chain}`,
   fundBody: (symbol, chains) => `Get ${symbol} from any wallet or exchange that supports it, then send it to your address below on ${chains}. No memo needed. Keep a little ETH at the same address for the network fee when you want to pay onward.`,
 
   requestOffline: 'Requests work offline. The payer signs from your code and you settle when you are back online.',

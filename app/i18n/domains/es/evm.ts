@@ -7,6 +7,7 @@ import type {EvmMessages} from '../../keys';
 export const evmEs: EvmMessages = {
   sameAddressNote: chains => `La misma dirección en ${chains} — una clave, todas las cadenas`,
   gasLine: amount => `Gas: ${amount}`,
+  viewOnExplorer: chain => `Ver en ${chain}`,
   fundBody: (symbol, chains) => `Consigue ${symbol} desde cualquier billetera o exchange que lo admita y envíalo a tu dirección de abajo en ${chains}. No hace falta memo. Deja un poco de ETH en la misma dirección para la comisión de red cuando quieras pagar.`,
 
   requestOffline: 'Las solicitudes funcionan sin conexión. El pagador firma desde tu código y tú liquidas cuando vuelvas a estar en línea.',
