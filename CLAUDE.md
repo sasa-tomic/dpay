@@ -192,10 +192,11 @@ mechanism is proven and a larger size is itself the thing under test.
 
 Founder rule, verbatim: when relevant parts of currency conversion or payments are implemented or
 modified, "the affected currencies and the UI and UX get manually and adversarially verified by the
-agent — the agent should make a round trip of the currency conversion and/or payments, with as much
+agent - the agent should make a round trip of the currency conversion and/or payments, with as much
 of the real stack as possible, ideally fully on the real networks, with testnets if possible,
 otherwise with mainnet (e.g. ETH, SOL, ...)". And: "if something is blocking these tests, it should
-be MANDATORY to inform the user and ask for further instructions."
+be MANDATORY to inform the user and ask for further instructions." (2026-09-26 refinement: the ask
+happens in the final report after a documented skip, never as a mid-session stall.)
 
 - **When:** any change that implements or modifies a conversion or payment path. **Order:** the
   final acceptance step, AFTER the full test suites (the suites stay the last automated gate; the
@@ -219,12 +220,18 @@ be MANDATORY to inform the user and ask for further instructions."
   windows, refused/too-small amounts, wrong-namespace addresses, interrupted-and-resumed flows —
   proven live only where the venue or chain itself produces the refusal; never by spamming orders
   or retrying failures.
-- **Blocked = mandatory ask, never a silent skip.** If anything blocks the live round trip (no
-  float in the affected asset, venue minimum above the ask-free cap, venue/rpc/region down, a
-  provisioning or seed gap), the session may NOT claim completion: report (a) exactly what is
-  blocked, (b) the concrete unblocking step and its cost, (c) what WAS verified offline instead —
-  and wait for instructions. This is a legitimate terminal state of a session, not a failure to
-  iterate.
+- **The attempt is delegated, with a mandate to unblock.** The main loop spawns a dedicated
+  subagent for the live round trip and hands it the mission of making the validation with real
+  funds happen: exhaust the float policy's legitimate moves (swap held float assets into the
+  affected asset on the real networks, provision missing state, drive the real UI) before
+  concluding that anything is impossible.
+- **Blocked = skip, continue, disclose at the end.** If the subagent still concludes the round
+  trip is blocked (no float in the affected asset, venue minimum above the ask-free cap,
+  venue/rpc/region down, a provisioning or seed gap), the session SKIPS the live step and carries
+  on with the regular autonomous loop; a blocked round trip never blocks the session. Staying
+  silent is forbidden: the final report MUST state that the live round-trip validation was NOT
+  done during development, name the exact blocker, the concrete unblocking step and its cost, and
+  what WAS verified offline instead, then ask the user for further guidance.
 
 ## Projects
 
