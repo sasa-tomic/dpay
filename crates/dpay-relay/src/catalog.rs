@@ -2119,8 +2119,9 @@ mod catalog_truth_tests {
             );
             assert_eq!(row.chain_id, chain_id);
             assert_eq!(
-                u64::from(chain_id),
-                t["chains"][chain_key].as_u64().unwrap()
+                chain_id,
+                t["chains"][chain_key].as_u64().unwrap(),
+                "row chain_id == catalog_truth chains.{chain_key}"
             );
             assert_eq!(
                 row.min_fraction_digits,

@@ -13,10 +13,13 @@
 //! `eth_sendRawTransaction` or unknown methods, no caching of any failure), the allowlist
 //! boundary (cached reads vs pass-through methods, `eth_estimateGas` deliberately uncached),
 //! the cache (hit, TTL expiry, id-substitution on hit, single-flight, canonical key ordering
-//! incl. nested objects, cap eviction expired-first-then-arbitrary), and the failure
+//! incl. nested objects, cap eviction expired-first-then-arbitrary), the failure
 //! semantics (upstream status relayed verbatim, hang → 504, connection refused → 504,
 //! unconfigured → 503 — the relay-ORIGINATED ones carrying the `dpayRelayError` body marker
-//! the client walks on).
+//! the client walks on), and the chain multiplexing (spec 2026-09-26, D12: the suffix route
+//! maps {chain_id} → its own upstream, the bare route stays chain 1, the per-chain cache
+//! never cross-answers, an unconfigured served chain is a 503 naming its exact env var, an
+//! unknown chain is a 404 `evm-unknown-chain` answered before the body is even read).
 //!
 //! Route contract pin: a JSON-RPC BATCH (top-level JSON array) is a 400 — the client never
 //! batches, and the envelope parse finds no string `method` on an array (see the module
@@ -140,9 +143,15 @@ fn state_with(proxy: EvmProxy) -> AppState {
 
 /// POST one JSON-RPC envelope to /api/v1/evm/rpc through the real router.
 async fn rpc(state: &AppState, body: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
+    rpc_path(state, "/api/v1/evm/rpc", body).await
+}
+
+/// POST to an arbitrary path under /api/v1 — the chain-multiplexing tests (D12) drive the
+/// suffix route `/api/v1/evm/rpc/{chain_id}` through the same real router.
+async fn rpc_path(state: &AppState, path: &str, body: &str) -> (StatusCode, HeaderMap, Vec<u8>) {
     let req = axum::http::Request::builder()
         .method("POST")
-        .uri("/api/v1/evm/rpc")
+        .uri(path)
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body.to_string()))
         .expect("build the rpc request");
@@ -769,4 +778,164 @@ async fn jsonrpc_batch_array_is_a_400_by_contract() {
         "the 400 says what was missing"
     );
     assert_eq!(stub.hits(), 0, "a batch never reaches the provider");
+}
+
+// ---- chain multiplexing (spec 2026-09-26, D12) ----
+
+/// The suffix route maps chain id → per-chain upstream: chain 42161's envelope goes to ITS
+/// stub, the bare route (chain 1) stays on the default stub — and each chain's reads cache
+/// independently (same (method, params) on two chains is two upstream calls, not one).
+#[tokio::test]
+async fn suffix_route_serves_the_per_chain_upstream_and_caches_per_chain() {
+    let (stub1, url1) = spawn_stub(Script::Ok {
+        body: r#"{"jsonrpc":"2.0","id":1,"result":"0x1"}"#.to_string(),
+        delay_ms: 0,
+    })
+    .await;
+    let (stub_arb, url_arb) = spawn_stub(Script::Ok {
+        body: r#"{"jsonrpc":"2.0","id":1,"result":"0xa4b1"}"#.to_string(),
+        delay_ms: 0,
+    })
+    .await;
+    let state = state_with(
+        EvmProxy::new(Some(url1), DEFAULT_TIMEOUT).with_chain(42161, Some(url_arb)),
+    );
+    let req = get_balance(1, "0xmulti");
+
+    // Chain 42161 via the suffix → the Arbitrum stub.
+    let (status, _, body) = rpc_path(&state, "/api/v1/evm/rpc/42161", &req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stub_arb.hits(), 1);
+    assert_eq!(stub1.hits(), 0, "no cross-chain bleed");
+    assert_eq!(body, r#"{"jsonrpc":"2.0","id":1,"result":"0xa4b1"}"#.as_bytes());
+
+    // The BARE route stays chain 1 → the default stub.
+    let (status, _, _) = rpc_path(&state, "/api/v1/evm/rpc", &req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stub1.hits(), 1);
+    assert_eq!(stub_arb.hits(), 1);
+
+    // Per-chain cache: the same params asked again on 42161 is a HIT (no new upstream call),
+    // and on chain 1 likewise — but they were never each other's answers.
+    rpc_path(&state, "/api/v1/evm/rpc/42161", &req).await;
+    assert_eq!(stub_arb.hits(), 1, "42161's second identical read is a hit");
+    rpc_path(&state, "/api/v1/evm/rpc", &req).await;
+    assert_eq!(stub1.hits(), 1, "chain 1's second identical read is a hit");
+}
+
+/// The bare route IS chain 1 — including the DPAY_EVM_RPC_URL_1 override: a per-chain var for
+/// chain 1 wins over the default, exactly as it does for every other chain (D12).
+#[tokio::test]
+async fn chain_1_per_chain_override_wins_over_the_default() {
+    let (stub_default, url_default) = spawn_stub(Script::Ok {
+        body: r#"{"jsonrpc":"2.0","id":1,"result":"0xdefault"}"#.to_string(),
+        delay_ms: 0,
+    })
+    .await;
+    let (stub_override, url_override) = spawn_stub(Script::Ok {
+        body: r#"{"jsonrpc":"2.0","id":1,"result":"0xoverride"}"#.to_string(),
+        delay_ms: 0,
+    })
+    .await;
+    let state = state_with(
+        EvmProxy::new(Some(url_default), DEFAULT_TIMEOUT)
+            .with_chain(1, Some(url_override)),
+    );
+    let (status, _, body) = rpc(&state, &get_balance(1, "0xdef1")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        r#"{"jsonrpc":"2.0","id":1,"result":"0xoverride"}"#.as_bytes(),
+        "the per-chain override served chain 1"
+    );
+    assert_eq!(stub_override.hits(), 1);
+    assert_eq!(stub_default.hits(), 0);
+}
+
+/// NO cross-chain fallback, ever: a served chain without its own upstream answers the honest
+/// 503 `evm-unconfigured` marker naming the EXACT variable — even when ANOTHER chain (here the
+/// default, chain 1) is fully configured. Pointing 42161's traffic at a chain-1 node would be
+/// a wrong-chain answer, not a degraded mode.
+#[tokio::test]
+async fn unconfigured_chain_answers_503_naming_its_own_env_var_without_fallback() {
+    let (stub1, url1) = spawn_stub(Script::Ok {
+        body: r#"{"jsonrpc":"2.0","id":1,"result":"0x1"}"#.to_string(),
+        delay_ms: 0,
+    })
+    .await;
+    let state = state_with(EvmProxy::new(Some(url1), DEFAULT_TIMEOUT));
+
+    let (status, _, body) = rpc_path(&state, "/api/v1/evm/rpc/42161", &get_balance(1, "0xnofb")).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        relay_error_code(&body),
+        "evm-unconfigured",
+        "the 503 carries the relay-error marker"
+    );
+    let text = String::from_utf8_lossy(&body).into_owned();
+    assert!(
+        text.contains("DPAY_EVM_RPC_URL_42161"),
+        "the detail names the EXACT missing knob: {text}"
+    );
+    assert_eq!(stub1.hits(), 0, "chain 1's upstream was never borrowed");
+}
+
+/// A chain id outside the served set (or a non-numeric path segment) is a 404 carrying the
+/// `evm-unknown-chain` marker: the relay will never serve that chain, so a walking client
+/// stops instead of trying the next candidate. Routing happens BEFORE the body is read — a
+/// garbage body on an unknown chain is still the 404.
+#[tokio::test]
+async fn unknown_chain_answers_404_with_the_marker_before_any_body_parse() {
+    let (stub, url) = spawn_stub(Script::Ok {
+        body: r#"{"jsonrpc":"2.0","id":1,"result":"0x1"}"#.to_string(),
+        delay_ms: 0,
+    })
+    .await;
+    let state = state_with(EvmProxy::new(Some(url.clone()), DEFAULT_TIMEOUT));
+
+    for path in [
+        "/api/v1/evm/rpc/999",   // numeric, not in SERVED_CHAINS
+        "/api/v1/evm/rpc/abc",   // not a number at all
+        "/api/v1/evm/rpc/0x1",   // hex-looking — the suffix is decimal
+    ] {
+        let (status, _, body) = rpc_path(&state, path, &get_balance(1, "0xunkno")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
+        assert_eq!(relay_error_code(&body), "evm-unknown-chain", "{path}");
+        // …and routing precedes parsing: even a garbage body gets the same 404.
+        let (status, _, _) = rpc_path(&state, path, "this is not json{").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path} (garbage body)");
+    }
+    assert_eq!(stub.hits(), 0, "an unknown chain never reaches any upstream");
+
+    // Sanity: the marker's detail names the served set (fixed strings only — no URL, no key).
+    let (_, _, body) = rpc_path(&state, "/api/v1/evm/rpc/999", &get_balance(1, "0xunkno")).await;
+    let text = String::from_utf8_lossy(&body).into_owned();
+    assert!(text.contains("42161"), "detail names the served set: {text}");
+    assert!(
+        !text.contains("stub-secret"),
+        "no secret echoes through the detail: {text}"
+    );
+}
+
+/// The suffix route keeps EVERY pure-pipe guarantee: `eth_sendRawTransaction` over
+/// /api/v1/evm/rpc/31337 goes out byte-faithfully and is never cached — multiplexing changes
+/// WHERE the pipe points, never HOW it behaves.
+#[tokio::test]
+async fn suffix_route_send_is_byte_faithful_and_uncached() {
+    let (stub, url) = spawn_stub(Script::Ok {
+        body: r#"{"jsonrpc":"2.0","id":9,"result":"0xtxhash"}"#.to_string(),
+        delay_ms: 0,
+    })
+    .await;
+    let state = state_with(EvmProxy::new(None, DEFAULT_TIMEOUT).with_chain(31337, Some(url)));
+    // Deliberately unusual spacing/ordering: whatever the client serialized is what must land.
+    let req = r#"{"params":["0xdeadbeef"],"method":"eth_sendRawTransaction","id":9,"jsonrpc":"2.0"}"#;
+
+    let (status, _, body) = rpc_path(&state, "/api/v1/evm/rpc/31337", req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stub.last_body(), req, "the stub received the exact bytes");
+    assert_eq!(body, r#"{"jsonrpc":"2.0","id":9,"result":"0xtxhash"}"#.as_bytes());
+
+    rpc_path(&state, "/api/v1/evm/rpc/31337", req).await;
+    assert_eq!(stub.hits(), 2, "sends are NEVER cached on any chain");
 }

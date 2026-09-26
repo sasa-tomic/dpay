@@ -281,13 +281,15 @@ async fn main() {
         cfg.solana_timeout,
     ));
     // The EVM RPC proxy (`crate::evm`): the Solana pipe's EVM twin, same always-registered
-    // contract — an unconfigured proxy answers 503 naming DPAY_EVM_RPC_URL rather than
-    // 404ing — and gets its upstream + per-call timeout here. The URL is SECRET (it embeds
-    // the provider api key): never logged, never echoed in a response.
-    let state = state.with_evm(dpay_relay::evm::EvmProxy::new(
-        cfg.evm_rpc_url.clone(),
-        cfg.evm_timeout,
-    ));
+    // contract — an unconfigured proxy answers 503 naming the exact DPAY_EVM_RPC_URL[_<CHAINID>]
+    // variable rather than 404ing — and gets its default + per-chain upstreams + per-call
+    // timeout here. The URLs are SECRET (they embed the provider api key): never logged, never
+    // echoed in a response.
+    let mut evm_proxy = dpay_relay::evm::EvmProxy::new(cfg.evm_rpc_url.clone(), cfg.evm_timeout);
+    for (chain_id, url) in &cfg.evm_chain_urls {
+        evm_proxy = evm_proxy.with_chain(*chain_id, Some(url.clone()));
+    }
+    let state = state.with_evm(evm_proxy);
     // The SideShift partner-key proxy (founder decision 3, 2026-09-14): same
     // always-registered contract — unconfigured it answers 503 naming the missing
     // variable(s). BOTH credential halves are SECRET deploy config (the partner account
@@ -417,14 +419,15 @@ async fn main() {
         );
     }
     // Same one-line WHETHER for the EVM twin (never the values — the upstream URL embeds the
-    // provider api key, and even the docker log must not carry it).
+    // provider api key, and even the docker log must not carry it). Per-chain lines name which
+    // chains have their own upstream (D12) and which fall back to the default (chain 1 only).
     if cfg.evm_rpc_url.is_some() {
         println!(
             "POST /api/v1/evm/rpc: ENABLED — pure pipe + read cache against the configured \
-             upstream (DPAY_EVM_RPC_URL). eth_sendRawTransaction and every unallowlisted \
-             method are passed through byte-faithfully, uncached; allowlisted reads share a \
-             per-method TTL cache; upstream failures come back with their own status, never a \
-             stale cache hit."
+             default-chain (1) upstream (DPAY_EVM_RPC_URL). eth_sendRawTransaction and every \
+             unallowlisted method are passed through byte-faithfully, uncached; allowlisted \
+             reads share a per-method TTL cache; upstream failures come back with their own \
+             status, never a stale cache hit."
         );
     } else {
         println!(
@@ -432,6 +435,30 @@ async fn main() {
              DPAY_EVM_RPC_URL (the provider endpoint, full URL incl. api key) is set in the \
              deploy environment."
         );
+    }
+    for chain_id in dpay_relay::evm::SERVED_CHAINS {
+        let configured = cfg.evm_chain_urls.iter().any(|(c, _)| c == chain_id);
+        let fallback = *chain_id == dpay_relay::evm::DEFAULT_CHAIN_ID
+            && cfg.evm_rpc_url.is_some()
+            && !configured;
+        if configured || fallback {
+            println!(
+                "POST /api/v1/evm/rpc/{chain_id}: ENABLED{}",
+                if configured {
+                    format!(
+                        " — per-chain upstream ({}).",
+                        dpay_relay::evm::chain_upstream_env_name(*chain_id)
+                    )
+                } else {
+                    " — via the DPAY_EVM_RPC_URL default (chain 1's fallback).".to_string()
+                }
+            );
+        } else {
+            println!(
+                "POST /api/v1/evm/rpc/{chain_id}: unconfigured — answers 503 until {} is set.",
+                dpay_relay::evm::chain_upstream_env_name(*chain_id)
+            );
+        }
     }
     // Same one-line WHETHER (never the values — they are the partner account's
     // credentials), naming the exact variable(s) an operator must set.
@@ -608,8 +635,13 @@ struct Config {
     /// Per-call upstream timeout for the solana proxy (`DPAY_SOLANA_TIMEOUT_MS`).
     solana_timeout: std::time::Duration,
     /// The evm proxy's upstream, when configured (`DPAY_EVM_RPC_URL`). Carries the
-    /// provider api key — treat as secret end to end.
+    /// provider api key — treat as secret end to end. The DEFAULT-CHAIN (1) upstream: the
+    /// per-chain map overrides it for chain 1 when `DPAY_EVM_RPC_URL_1` is set.
     evm_rpc_url: Option<String>,
+    /// The evm proxy's per-chain upstreams (`DPAY_EVM_RPC_URL_<CHAINID>`, spec 2026-09-26
+    /// D12) — ONLY the chains whose env is explicitly set, (chain id, provider URL). SECRET
+    /// values (api key in the query) — never logged, never echoed.
+    evm_chain_urls: Vec<(u64, String)>,
     /// Per-call upstream timeout for the evm proxy (`DPAY_EVM_TIMEOUT_MS`).
     evm_timeout: std::time::Duration,
     /// The SideShift partner account secret (`DPAY_SIDESHIFT_SECRET`) — one half of the
@@ -774,6 +806,21 @@ impl Config {
             }
             None => None,
         };
+        // The per-chain upstreams (spec 2026-09-26, D12): DPAY_EVM_RPC_URL_<CHAINID> per
+        // SERVED chain (the env-name builder in crate::evm is the ONE spelling — the 503
+        // detail names the same builder's output, so error and knob can never drift). Each
+        // URL gets the same validation as the default. NO cross-chain fallback here or in
+        // the proxy: a chain without its own upstream answers 503 naming its variable, and
+        // only chain 1 falls back to DPAY_EVM_RPC_URL (the default-chain contract).
+        let mut evm_chain_urls = Vec::new();
+        for chain_id in dpay_relay::evm::SERVED_CHAINS {
+            let name = dpay_relay::evm::chain_upstream_env_name(*chain_id);
+            if let Some(url) = non_empty(&name) {
+                reqwest::Url::parse(&url)
+                    .map_err(|e| format!("{name} is not a valid URL: {e}"))?;
+                evm_chain_urls.push((*chain_id, url));
+            }
+        }
         let evm_timeout = match non_empty("DPAY_EVM_TIMEOUT_MS") {
             Some(raw) => {
                 let ms: u64 = raw
@@ -921,6 +968,7 @@ impl Config {
             solana_rpc_url,
             solana_timeout,
             evm_rpc_url,
+            evm_chain_urls,
             evm_timeout,
             sideshift_secret,
             sideshift_affiliate_id,

@@ -1660,22 +1660,26 @@ async fn apk_download_revalidates_with_304_on_if_none_match() {
 // --- currency catalog (M0 + v2 network-first envelope) ------------------------
 //
 // Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7), served
-// network-first (v2): {networks:[{protocol,name,environment,assets}]} with exactly 3 sections in
-// order — icp mainnet, icp testnet, solana mainnet. The relay serves its compiled-in catalog
-// (crate::catalog — sole authority since 2026-08-28, founder decision; the facade registry is
-// gone, the route is infallible). Since the 2026-08-28 REAL-rows transplant the IC rows are the
-// VERBATIM live-prod rows: mainnet DEMO_USD (0, $, mintable, faucet) + ckBTC (1, ₿, CkBtcUtxo
-// ramp) + ckUSDC (2, CkEthErc20 onramp) + native ckETH (6, token_contract null) + VCHF (7) +
-// ICP (8) — the two complete no-minter direct-ICRC assets, network "Internet Computer";
-// testnet ckTESTBTC (3, "Bitcoin Testnet") + ckSepoliaUSDC (4) + ckSepoliaETH (5, "Sepolia").
-// The wallet reads this once on load instead of hardcoding DEPOSIT_CURRENCY.
+// network-first (v2): {networks:[{protocol,name,environment,assets}]} with exactly 5 sections in
+// order — icp mainnet, icp testnet, solana mainnet, evm "Arbitrum One" mainnet, evm "Ethereum"
+// mainnet (plus env-gated dev evm sections last, D3 — absent here). The relay serves its
+// compiled-in catalog (crate::catalog — sole authority since 2026-08-28, founder decision; the
+// facade registry is gone, the route is infallible). Since the 2026-08-28 REAL-rows transplant
+// the IC rows are the VERBATIM live-prod rows: mainnet DEMO_USD (0, $, mintable, faucet) +
+// ckBTC (1, ₿, CkBtcUtxo ramp) + ckUSDC (2, CkEthErc20 onramp) + native ckETH (6,
+// token_contract null) + VCHF (7) + ICP (8) — the two complete no-minter direct-ICRC assets,
+// network "Internet Computer"; testnet ckTESTBTC (3, "Bitcoin Testnet") + ckSepoliaUSDC (4) +
+// ckSepoliaETH (5, "Sepolia"). The evm sections (2026-09-26, D1/D2) carry EvmAsset rows — ZCHF
+// on Arbitrum One (FIRST: section order = wallet row order) then Ethereum. The wallet reads
+// this once on load instead of hardcoding DEPOSIT_CURRENCY.
 
 /// `GET /api/v1/currencies` returns `200 {"networks":[...]}` — the v2 network-first envelope with
-/// exactly 3 sections in order (icp mainnet, icp testnet, solana mainnet) and NO legacy top-level
-/// `currencies`/`testnet` arrays. IC mainnet rows carry every registered mainnet currency's
-/// ledger/minter/display metadata in the UNCHANGED row shape; the testnet section holds exactly
-/// the rows the relay's server-authoritative partition classifies as testnet; the solana section
-/// mirrors app/solana.ts constants verbatim.
+/// exactly 5 sections in order (icp mainnet, icp testnet, solana mainnet, evm Arbitrum One,
+/// evm Ethereum) and NO legacy top-level `currencies`/`testnet` arrays. IC mainnet rows carry
+/// every registered mainnet currency's ledger/minter/display metadata in the UNCHANGED row
+/// shape; the testnet section holds exactly the rows the relay's server-authoritative partition
+/// classifies as testnet; the solana section mirrors app/solana.ts constants verbatim; the evm
+/// sections carry the ZCHF rows with chain_id + EIP-55 address.
 #[tokio::test]
 async fn currencies_route_returns_demo_catalog() {
     let (state, _led) = state_from(ledger());
@@ -1692,8 +1696,9 @@ async fn currencies_route_returns_demo_catalog() {
     );
     assert_eq!(
         networks.len(),
-        3,
-        "exactly icp mainnet + icp testnet + solana mainnet: {body}"
+        5,
+        "exactly icp mainnet + icp testnet + solana mainnet + evm Arbitrum One + evm \
+         Ethereum (dev evm sections are env-gated and absent here): {body}"
     );
 
     let mainnet = &networks[0];
@@ -1708,6 +1713,39 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(solana["protocol"], "solana");
     assert_eq!(solana["name"], "Solana");
     assert_eq!(solana["environment"], "mainnet");
+    // The evm sections (D2): Arbitrum One FIRST (the recommended rail), then Ethereum — the
+    // section order IS the wallet row order. One ZCHF row each: 18 decimals, 2 display
+    // digits, honest Unavailable ramps, and the chain's OWN settlement chain_id.
+    let arbitrum = &networks[3];
+    assert_eq!(arbitrum["protocol"], "evm");
+    assert_eq!(arbitrum["name"], "Arbitrum One");
+    assert_eq!(arbitrum["environment"], "mainnet");
+    let arb_rows = arbitrum["assets"].as_array().expect("evm assets array");
+    assert_eq!(arb_rows.len(), 1);
+    assert_eq!(arb_rows[0]["token"], "ZCHF");
+    assert_eq!(arb_rows[0]["symbol"], "ZCHF");
+    assert_eq!(arb_rows[0]["decimals"], 18);
+    assert_eq!(arb_rows[0]["min_fraction_digits"], 2);
+    assert_eq!(arb_rows[0]["chain_id"], 42161);
+    assert_eq!(
+        arb_rows[0]["address"],
+        "0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553"
+    );
+    assert_eq!(arb_rows[0]["onramp"], "Unavailable");
+    assert_eq!(arb_rows[0]["offramp"], "Unavailable");
+    assert!(arb_rows[0].get("liquidity").is_none(), "no invented tier");
+    let ethereum = &networks[4];
+    assert_eq!(ethereum["protocol"], "evm");
+    assert_eq!(ethereum["name"], "Ethereum");
+    assert_eq!(ethereum["environment"], "mainnet");
+    let eth_rows = ethereum["assets"].as_array().expect("evm assets array");
+    assert_eq!(eth_rows.len(), 1);
+    assert_eq!(eth_rows[0]["token"], "ZCHF");
+    assert_eq!(eth_rows[0]["chain_id"], 1);
+    assert_eq!(
+        eth_rows[0]["address"],
+        "0xB58E61C3098d85632Df34EecfB899A1Ed80921cB"
+    );
 
     // IC mainnet section: the REAL prod rows (DEMO's network None is mainnet-side). VCHF
     // (currency 7) and ICP (currency 8) carry network "Internet Computer"

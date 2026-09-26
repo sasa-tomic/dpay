@@ -185,10 +185,12 @@ pub struct AppState {
     /// answers, honestly, 503 naming `DPAY_SOLANA_RPC_URL`. The default state here carries that
     /// unconfigured proxy; `main` replaces it via [`AppState::with_solana`] from the env.
     pub solana: Arc<crate::solana::SolanaProxy>,
-    /// The EVM JSON-RPC proxy (`crate::evm`) — `POST /api/v1/evm/rpc`. The Solana pipe's EVM
+    /// The EVM JSON-RPC proxy (`crate::evm`) — `POST /api/v1/evm/rpc` (chain 1) plus the
+    /// per-chain suffix `POST /api/v1/evm/rpc/{chain_id}` (D12). The Solana pipe's EVM
     /// twin, with the SAME always-registered contract: an unconfigured proxy still answers,
-    /// honestly, 503 naming `DPAY_EVM_RPC_URL`. The default state here carries that
-    /// unconfigured proxy; `main` replaces it via [`AppState::with_evm`] from the env.
+    /// honestly, 503 naming the exact `DPAY_EVM_RPC_URL[_<CHAINID>]` variable. The default
+    /// state here carries that unconfigured proxy; `main` replaces it via
+    /// [`AppState::with_evm`] from the env.
     pub evm: Arc<crate::evm::EvmProxy>,
     /// The SideShift partner-key proxy (`crate::sideshift`) — `POST /api/v1/sideshift/quotes`
     /// and `POST /api/v1/sideshift/shifts/fixed`. Same always-registered contract as the
@@ -415,8 +417,15 @@ pub fn app(state: AppState) -> Router {
         // The EVM JSON-RPC proxy (`crate::evm`) — the Solana pipe's EVM twin, registered
         // ALWAYS for the same reason: an unconfigured proxy still answers (503 naming
         // DPAY_EVM_RPC_URL). Pure pipe + read cache; `eth_sendRawTransaction` and every
-        // unallowlisted method pass through byte-faithfully, uncached.
+        // unallowlisted method pass through byte-faithfully, uncached. The BARE route IS
+        // chain 1; the per-chain suffix (spec 2026-09-26, D12) maps {chain_id} →
+        // DPAY_EVM_RPC_URL_<CHAINID> and answers 404 `evm-unknown-chain` for chains outside
+        // the served set.
         .route("/evm/rpc", axum::routing::post(crate::evm::rpc_proxy))
+        .route(
+            "/evm/rpc/{chain_id}",
+            axum::routing::post(crate::evm::rpc_proxy_chain),
+        )
         // The SideShift partner-key proxy (founder decision 3, 2026-09-14) — registered
         // ALWAYS for the same reason: unset credentials still answer 503 naming
         // DPAY_SIDESHIFT_SECRET / DPAY_SIDESHIFT_AFFILIATE_ID. The relay attaches the

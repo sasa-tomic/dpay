@@ -49,6 +49,28 @@
 //!
 //! The reqwest error text is NEVER included in a 504: it embeds the request URL, and the URL
 //! carries the provider api key.
+//!
+//! # Chain multiplexing (spec 2026-09-26, D12)
+//!
+//! ONE upstream serves ONE chain — routing a 42161 envelope at a chain-1 node is a wrong-chain
+//! send — so the route is multiplexed by chain id while staying a pure pipe:
+//!
+//! - `POST /api/v1/evm/rpc/{chain_id}` maps the path suffix → upstream env
+//!   `DPAY_EVM_RPC_URL_<CHAINID>` (e.g. `DPAY_EVM_RPC_URL_42161`). NOTHING is read from the
+//!   body for routing.
+//! - `DPAY_EVM_RPC_URL_1` overrides the default for chain 1 too; absent it, chain 1 (and the
+//!   BARE `POST /api/v1/evm/rpc` route, which IS chain 1) falls back to `DPAY_EVM_RPC_URL`.
+//! - A chain id OUTSIDE the served set ([`SERVED_CHAINS`] — exactly the catalog's evm sections,
+//!   `dfx/catalog_truth.json` `chains`) is a 404 carrying the `evm-unknown-chain` marker: the
+//!   relay will never serve that chain, so a walking client must STOP, not try the next
+//!   candidate. Non-numeric path segments land in the same 404.
+//! - A SERVED chain with no configured upstream is the honest 503 `evm-unconfigured` marker,
+//!   naming the EXACT missing env var. No cross-chain fallback, ever: pointing chain A's
+//!   traffic at chain B's node is not a degraded mode, it is a different answer.
+//!
+//! The read cache is keyed PER CHAIN (chain id prefixes the key): `eth_getBalance` for the same
+//! address on two chains is two questions, never one.
+//!
 //! - `DPAY_EVM_RPC_URL` unset → the route is still REGISTERED (always, on every build —
 //!   unlike the checkout there is no registration gate) and answers the 503 marker above: an
 //!   honest refusal, never a fake success.
@@ -133,12 +155,42 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 /// that something is wrong upstream of this cache, and evicting beats growing.
 const MAX_CACHE_ENTRIES: usize = 4096;
 
-/// The proxy's state: the upstream URL (secret — see the module header), the shared HTTP
-/// client, and the two maps that make the free tier survive (TTL cache + single-flight).
-/// Cloned into an `Arc` on [`AppState`]; the interior Mutexes are the repo's poison-tolerant
-/// kind and are never held across an await.
+/// The chain ids this relay multiplexes — exactly the EVM catalog's settlement chains
+/// (`dfx/catalog_truth.json` `chains`; the consts live in [`crate::catalog`], the same place
+/// the rows do, so a new chain joins by adding a catalog row + this entry + the env). A chain
+/// id outside this set is a 404 `evm-unknown-chain`, never a guess.
+pub const SERVED_CHAINS: &[u64] = &[
+    crate::catalog::CHAIN_ID_ETHEREUM,
+    crate::catalog::CHAIN_ID_ARBITRUM_ONE,
+    crate::catalog::CHAIN_ID_ARBITRUM_SEPOLIA,
+    crate::catalog::CHAIN_ID_ANVIL,
+];
+
+/// The per-chain upstream env name for a chain id: `DPAY_EVM_RPC_URL_<CHAINID>` (D12). Shared
+/// by `main.rs` (which reads the env) and the 503 detail (which names the missing knob), so
+/// the error can never drift from the variable that would fix it.
+pub fn chain_upstream_env_name(chain_id: u64) -> String {
+    format!("DPAY_EVM_RPC_URL_{chain_id}")
+}
+
+/// The DEFAULT chain — what the BARE `/api/v1/evm/rpc` route serves, and the only chain that
+/// falls back to `DPAY_EVM_RPC_URL` (D12). Pub for `main.rs`'s startup lines; the value IS
+/// the catalog const.
+pub const DEFAULT_CHAIN_ID: u64 = crate::catalog::CHAIN_ID_ETHEREUM;
+
+/// The proxy's state: the default-chain (1) upstream (`DPAY_EVM_RPC_URL`), the per-chain
+/// upstreams (`DPAY_EVM_RPC_URL_<CHAINID>`, D12), the shared HTTP client, and the two maps
+/// that make the free tier survive (TTL cache + single-flight). Cloned into an `Arc` on
+/// [`AppState`]; the interior Mutexes are the repo's poison-tolerant kind and are never held
+/// across an await.
 pub struct EvmProxy {
+    /// The DEFAULT-CHAIN upstream (`DPAY_EVM_RPC_URL`) — chain 1's upstream unless
+    /// `DPAY_EVM_RPC_URL_1` overrides it. Secret — see the module header.
     upstream: Option<String>,
+    /// Per-chain upstreams keyed by chain id, present for EVERY served chain (`None` =
+    /// configured-absent — a real answer, the 503 — vs an unknown chain, the 404). Secret
+    /// values — see the module header.
+    chains: HashMap<u64, Option<String>>,
     timeout: Duration,
     client: reqwest::Client,
     /// `(method, canonical params)` → cached upstream SUCCESS body + expiry (ms since epoch).
@@ -170,17 +222,42 @@ struct Outcome {
 }
 
 impl EvmProxy {
-    /// Build the proxy. `upstream` is the full provider URL including its api key
-    /// (`DPAY_EVM_RPC_URL`); `None` leaves the route registered but answering 503.
+    /// Build the proxy. `upstream` is the DEFAULT-CHAIN (1) provider URL including its api key
+    /// (`DPAY_EVM_RPC_URL`); `None` leaves chain 1 (and the bare route) answering 503. Per-chain
+    /// upstreams start configured-absent for every served chain — [`with_chain`] fills them.
     pub fn new(upstream: Option<String>, timeout: Duration) -> Self {
         EvmProxy {
             upstream,
+            chains: SERVED_CHAINS.iter().map(|c| (*c, None)).collect(),
             timeout,
             client: shared_client(),
             cache: Mutex::new(HashMap::new()),
             inflight: Mutex::new(HashMap::new()),
             ttl_overrides: Mutex::new(HashMap::new()),
             cache_cap_override: Mutex::new(None),
+        }
+    }
+
+    /// Set one chain's upstream (`DPAY_EVM_RPC_URL_<CHAINID>`; `main.rs` folds the env in here).
+    /// `None` re-marks the chain configured-absent (the 503). For chain 1 this OVERRIDES the
+    /// `new` default — the per-chain var wins, per D12.
+    pub fn with_chain(mut self, chain_id: u64, upstream: Option<String>) -> Self {
+        self.chains.insert(chain_id, upstream);
+        self
+    }
+
+    /// The upstream for a chain id, resolved ONCE per request: the per-chain var first, then —
+    /// for chain 1 ONLY — the `new` default (`DPAY_EVM_RPC_URL`). `None` = configured-absent;
+    /// an unknown chain never reaches here (the route 404s it first).
+    fn upstream_for(&self, chain_id: u64) -> Option<&str> {
+        match self.chains.get(&chain_id) {
+            Some(Some(url)) => Some(url.as_str()),
+            // The bare-route contract: DPAY_EVM_RPC_URL is the DEFAULT-CHAIN (1) upstream, so
+            // it is chain 1's fallback and nobody else's — no cross-chain fallback, ever.
+            Some(None) if chain_id == crate::catalog::CHAIN_ID_ETHEREUM => {
+                self.upstream.as_deref()
+            }
+            _ => None,
         }
     }
 
@@ -376,23 +453,71 @@ fn relay_error_body(code: &str, detail: &str) -> Bytes {
     )
 }
 
-/// `POST /api/v1/evm/rpc` — the route. Request: the client's JSON-RPC envelope, verbatim.
-/// Response: the upstream's status + body verbatim on a miss (or a pure pass-through), a
-/// TTL-fresh cached body with the caller's id on a hit, or an honest 4xx/5xx naming what is
-/// wrong. Content-Type is `application/json` both ways, always.
+/// `POST /api/v1/evm/rpc` — the BARE route == chain 1 (D12: the default chain, so the
+/// original single-route contract keeps working unchanged). Request: the client's JSON-RPC
+/// envelope, verbatim. See [`proxy_body`] for the response contract.
 pub async fn rpc_proxy(State(state): State<AppState>, body: Bytes) -> Response {
-    let proxy = state.evm.clone();
-    let Some(upstream) = proxy.upstream.clone() else {
-        return json_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            &relay_error_body(
-                "evm-unconfigured",
-                "evm rpc proxy is not configured: set DPAY_EVM_RPC_URL in the relay's \
-                 environment (the full provider endpoint, including its api key) — see \
-                 docs/OPS.md §3",
+    rpc_for_chain(&state.evm, crate::catalog::CHAIN_ID_ETHEREUM, body).await
+}
+
+/// `POST /api/v1/evm/rpc/{chain_id}` — the per-chain suffix route (D12). The path suffix is
+/// the ONLY routing input; the body is forwarded untouched. Chain resolution order: the
+/// envelope parse happens AFTER chain routing, so a bad chain is answered before the body is
+/// even inspected.
+pub async fn rpc_proxy_chain(
+    State(state): State<AppState>,
+    axum::extract::Path(chain): axum::extract::Path<String>,
+    body: Bytes,
+) -> Response {
+    let Ok(chain_id) = chain.parse::<u64>() else {
+        return marker_response(
+            StatusCode::NOT_FOUND,
+            "evm-unknown-chain",
+            &format!(
+                "no such chain: `{chain}` is not a chain id — POST \
+                 /api/v1/evm/rpc/{{chain_id}} takes a numeric EVM chain id (served: \
+                 {SERVED_CHAINS:?})"
             ),
         );
     };
+    if !SERVED_CHAINS.contains(&chain_id) {
+        return marker_response(
+            StatusCode::NOT_FOUND,
+            "evm-unknown-chain",
+            &format!(
+                "chain {chain_id} is not served by this relay — served chains: \
+                 {SERVED_CHAINS:?} (the catalog, GET /api/v1/currencies, is the served-set \
+                 authority)"
+            ),
+        );
+    }
+    rpc_for_chain(&state.evm, chain_id, body).await
+}
+
+/// Chain-routed core shared by both routes: resolve the upstream, then pipe. An unknown chain
+/// never gets here (404 above); a served chain with no upstream gets the honest 503 naming the
+/// EXACT env var that would configure it.
+async fn rpc_for_chain(proxy: &EvmProxy, chain_id: u64, body: Bytes) -> Response {
+    let Some(upstream) = proxy.upstream_for(chain_id) else {
+        return marker_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "evm-unconfigured",
+            &format!(
+                "evm rpc proxy is not configured for chain {chain_id}: set {} in the relay's \
+                 environment (the full provider endpoint, including its api key) — see \
+                 docs/OPS.md §3",
+                chain_upstream_env_name(chain_id)
+            ),
+        );
+    };
+    proxy_body(proxy, chain_id, upstream, body).await
+}
+
+/// The pipe itself — one JSON-RPC envelope in, the upstream's answer out. On the read
+/// allowlist: TTL cache + single-flight keyed per (chain, method, canonical params). Off it
+/// (`eth_sendRawTransaction`, unknown methods): the original bytes go out, the upstream's
+/// status + body come back, nothing is cached, shared, inspected or rewritten.
+async fn proxy_body(proxy: &EvmProxy, chain_id: u64, upstream: &str, body: Bytes) -> Response {
     let envelope: Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -421,11 +546,16 @@ pub async fn rpc_proxy(State(state): State<AppState>, body: Bytes) -> Response {
             // PURE PIPE: not on the read allowlist (eth_sendRawTransaction, unknown methods,
             // …). The original bytes go out, the upstream's status + body come back, and
             // nothing is cached, shared, inspected or rewritten on the way.
-            let outcome = fetch_once(proxy.client.clone(), upstream, body, proxy.timeout).await;
+            let outcome =
+                fetch_once(proxy.client.clone(), upstream.to_string(), body, proxy.timeout).await;
             json_response(outcome.status, &outcome.body)
         }
         Some(ttl) => {
-            let mut key = String::with_capacity(method.len() + 32);
+            // PER-CHAIN key (D12): the same (method, params) on two chains is two questions —
+            // a chain-1 balance must never answer a 42161 caller.
+            let mut key = String::with_capacity(method.len() + 40);
+            key.push_str(&chain_id.to_string());
+            key.push('\u{1}');
             key.push_str(method);
             key.push('\u{1}');
             canonical_json(envelope.get("params").unwrap_or(&Value::Null), &mut key);
@@ -435,7 +565,9 @@ pub async fn rpc_proxy(State(state): State<AppState>, body: Bytes) -> Response {
                 return json_response(StatusCode::OK, &with_caller_id(&cached, caller_id.as_ref()));
             }
             // MISS (or expired): one shared upstream call for everyone asking this right now.
-            let (outcome, leader) = proxy.shared_fetch(&key, &upstream, body).await;
+            let (outcome, leader) = proxy
+                .shared_fetch(&key, upstream, body)
+                .await;
             // Cache ONLY a 200 that parses as a JSON-RPC result envelope. A failure is never
             // cached — not an HTTP error status, not a JSON-RPC error body — and never
             // answered from cache: the caller hears what the upstream said.
@@ -450,6 +582,13 @@ pub async fn rpc_proxy(State(state): State<AppState>, body: Bytes) -> Response {
             json_response(outcome.status, &body_out)
         }
     }
+}
+
+/// A relay-originated marker answer: fixed status + the `dpayRelayError` body marker (module
+/// header, "Failure semantics"). Built from FIXED inputs only — env var NAMES and the served
+/// chain list, never an upstream URL or key.
+fn marker_response(status: StatusCode, code: &str, detail: &str) -> Response {
+    json_response(status, &relay_error_body(code, detail))
 }
 
 /// The shared HTTP client. One per process: per-request timeout rides the request builder,
