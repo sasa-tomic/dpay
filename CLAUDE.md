@@ -188,6 +188,44 @@ mechanism is proven and a larger size is itself the thing under test.
   derived keys are documented in docs/AGENT-FUNDS.md so a fresh session can always re-derive. A
   key that is not persisted is forbidden from holding value (the destroyed-principal precedent).
 
+## Non-negotiable: live round-trip verification of money paths (set 2026-09-26)
+
+Founder rule, verbatim: when relevant parts of currency conversion or payments are implemented or
+modified, "the affected currencies and the UI and UX get manually and adversarially verified by the
+agent — the agent should make a round trip of the currency conversion and/or payments, with as much
+of the real stack as possible, ideally fully on the real networks, with testnets if possible,
+otherwise with mainnet (e.g. ETH, SOL, ...)". And: "if something is blocking these tests, it should
+be MANDATORY to inform the user and ask for further instructions."
+
+- **When:** any change that implements or modifies a conversion or payment path. **Order:** the
+  final acceptance step, AFTER the full test suites (the suites stay the last automated gate; the
+  live round trip is what comes after them).
+- **What:** the agent personally drives every affected currency through the REAL UI/UX — not the
+  e2e harness: at minimum one real round trip per affected path (convert there and back, or pay and
+  be paid back), exercising the screens a user would touch, including the failure screens the
+  adversarial cases below produce.
+- **Where:** as much of the real stack as possible. A testnet counts only if the affected venues
+  and liquidity actually exist on it — most do not (ICPSwap, Trocador/SideShift, EURC are
+  mainnet-only), so small mainnet amounts are the NORM, not the fallback of last resort. Smallest
+  amount the platform allows, per the float rule above.
+- **Automated tests never move real money by default.** Real movement happens only two ways:
+  (a) the agent manually drives the real UI/code with the float, or (b) an explicit opt-in live
+  mode — a dedicated recipe gated behind env vars (e.g. `DPAY_LIVE_SMOKE=1` + a per-run amount cap
+  `DPAY_LIVE_CAP_CHF`) that uses the agent float, refuses to run without a cap set, and ledgers
+  every movement through the funds tooling. The opt-in mode is never part of `just verify` /
+  `just check` (`test-live` remains read-only API testing; it moves nothing).
+- **All float rules apply unchanged**: CHF 25 ceiling, ≤CHF 2 auto-spend, no retries of failed or
+  abnormally-slow transfers, ledger every movement. Adversarial = stale quotes, expired venue
+  windows, refused/too-small amounts, wrong-namespace addresses, interrupted-and-resumed flows —
+  proven live only where the venue or chain itself produces the refusal; never by spamming orders
+  or retrying failures.
+- **Blocked = mandatory ask, never a silent skip.** If anything blocks the live round trip (no
+  float in the affected asset, venue minimum above the ask-free cap, venue/rpc/region down, a
+  provisioning or seed gap), the session may NOT claim completion: report (a) exactly what is
+  blocked, (b) the concrete unblocking step and its cost, (c) what WAS verified offline instead —
+  and wait for instructions. This is a legitimate terminal state of a session, not a failure to
+  iterate.
+
 ## Projects
 
 | Name | What |
