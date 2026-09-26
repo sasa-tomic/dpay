@@ -30,10 +30,15 @@ export class EvmEndpointRefused extends Error {
   /** The BRAND — see `isEvmEndpointRefusal`; a field cannot be duplicated apart across the two
    *  module instances the way a class object can. */
   readonly dpayEndpointRefused = true;
-  constructor(message: string, status: number | null) {
+  /** The JSON-RPC error's own `data` payload when the node sent one — the revert blob the
+   *  claim-settle preflights classify (`evm/claims.ts` reads `err.data`, the ethers/viem
+   *  convention). Absent on every HTTP-level refusal. */
+  readonly data?: unknown;
+  constructor(message: string, status: number | null, data?: unknown) {
     super(message);
     this.name = 'EvmEndpointRefused';
     this.status = status;
+    if (data !== undefined) this.data = data;
   }
 }
 

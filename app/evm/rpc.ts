@@ -197,7 +197,7 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
         }
         throw new EvmEndpointRefused(`evm rpc ${method} → ${hostOf(candidate)}: HTTP ${r.status}: ${body.slice(0, 200)}`, r.status);
       }
-      const j: {dpayRelayError?: unknown; detail?: unknown; error?: {message?: string}; result?: unknown} = await r.json();
+      const j: {dpayRelayError?: unknown; detail?: unknown; error?: {message?: string; data?: unknown}; result?: unknown} = await r.json();
       // The endpoint answered: whatever it said, it is talking to us again, so the gate is done.
       cooldowns.delete(candidate);
       if (typeof j?.dpayRelayError === 'string' && j.dpayRelayError.length > 0) {
@@ -208,9 +208,11 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
       }
       if (j.error) {
         // A JSON-RPC-level error is a verdict on THIS request (an estimate refusal, a rejected
-        // raw tx, an unknown method) — refused in place, never walked.
+        // raw tx, an unknown method, a contract REVERT) — refused in place, never walked. The
+        // node's `error.data` (a 0x-hex revert payload when present) rides along on the thrown
+        // error: the settle preflights classify a revert FROM it (evm/claims.ts reads err.data).
         const rawMsg = typeof j.error.message === 'string' ? j.error.message : String(j.error.message ?? 'error');
-        throw new EvmEndpointRefused(`evm rpc: ${rawMsg}`, null);
+        throw new EvmEndpointRefused(`evm rpc: ${rawMsg}`, null, j.error.data);
       }
       return j.result;
     } finally {
@@ -270,9 +272,13 @@ export async function ethGetBalance(url: string | readonly string[], address: st
 
 /** `eth_call` with `{to, data}` at 'latest' — the balanceOf / nonces / DOMAIN_SEPARATOR read
  *  path. Returns the raw string the node answered (the CALLER decodes — evm/abi.ts — so bytes
- *  that cannot be decoded classify as 'unreadable', never as a refusal). */
-export async function ethCall(url: string | readonly string[], to: string, data: string, opts?: EvmRpcOpts): Promise<string> {
-  const result = await rpcFetch(url, 'eth_call', [{to, data}, 'latest'], opts);
+ *  that cannot be decoded classify as 'unreadable', never as a refusal).
+ *
+ *  `from` sets the call's `msg.sender` when given (the settle preflights need it: the token's
+ *  `transferFrom` checks `allowance[owner][msg.sender]`, so the preflight must call AS the
+ *  merchant, while `permit` is ecrecover-based and msg.sender-blind). */
+export async function ethCall(url: string | readonly string[], to: string, data: string, opts?: EvmRpcOpts, from?: string): Promise<string> {
+  const result = await rpcFetch(url, 'eth_call', [{...(from !== undefined ? {from} : {}), to, data}, 'latest'], opts);
   if (typeof result !== 'string') {
     throw new EvmEndpointRefused(`evm rpc: eth_call returned ${typeof result} where a hex string was expected`, null);
   }
