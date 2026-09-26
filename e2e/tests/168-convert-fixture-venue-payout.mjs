@@ -9,7 +9,7 @@
 // 'icpswap-fixture-b', zero_for_one TRUE (pool B's token0 is ICP — the reversed-order pool),
 // fee tier 1000, and the on-ledger payout is B's quoted output verbatim. Private relay
 // (startRelay, the flow-164 pattern): the venue knob cannot reach any sibling flow.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor, openOtherVenues, typeConvertAmount, fmtHero,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
@@ -71,8 +71,12 @@ export async function run() {
     assert(arm.ok, `venue knob armed (status ${arm.status})`);
 
     await openConvertFor(driver, 'icp');
-    await driver.type('convert-amount', '1');
-    await driver.findByTestID(`convert-venue-${FIXTURE_VENUE}-quote`, {timeoutMs: 10_000});
+    await typeConvertAmount(driver, '1');
+    // The sheet auto-picks the highest net quoted output — the REAL pool quotes higher at this
+    // size — so the fixture venue waits behind the ONE Other-venues expander. Open it and
+    // override in one tap (brief 5.2/5.3: the pick is disclosed, the override is one tap).
+    await driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+    await openOtherVenues(driver);
 
     // The oracle BEFORE the pick: pool B's own facts (reversed token order → ICP is its token0).
     const oracle = await relayQuote(r2.baseURL, FIXTURE_POOL, ICP_LEDGER, VCHF_LEDGER, AMOUNT_IN);
@@ -96,14 +100,16 @@ export async function run() {
       'the counterparty principal is pool B\'s own canister');
     const counterparty = await driver.readText('convert-counterparty');
     assertIncludes(counterparty, 'ICPSwap (offline fixture)', 'the counterparty is attributed to venue B');
-    assertIncludes(await driver.readText('convert-headline'), `${fmt8(net)} VCHF`, 'the headline states B\'s net output');
+    assertIncludes(await driver.readText('convert-headline'), `≈ ${fmtHero(net, 8, 'VCHF', { stable: true })}`, 'the headline states B\'s net output at standard display precision');
+    // The rounding is presentation only — B's verbatim figure sits in the opened Details.
+    assertIncludes(await driver.readText('convert-quote-verbatim'), `${fmt8(gross)} VCHF`, 'Details carries B\'s verbatim quoted figure');
     assertIncludes(await driver.readText('convert-min-out'), `${fmt8(minOut)} VCHF`, 'the minimum follows B\'s quote');
     assertIncludes(await driver.readText('convert-pool-fee'), '0.10%', 'the fee line states B\'s own 0.10% tier');
 
     // Confirm (a quote-changed interrupt would demand a re-confirm — retry a few rounds).
     for (let round = 0; round < 5; round++) {
       await driver.click('btn-convert-confirm');
-      const changed = await driver.findByTestID('convert-quote-changed', {timeoutMs: 2_000}).catch(() => null);
+      const changed = await driver.findByTestID('convert-moved-note', {timeoutMs: 2_000}).catch(() => null);
       if (changed == null) break;
       console.log(`[168-convert-fixture] quote moved (round ${round + 1}) — re-reviewing and confirming again`);
     }

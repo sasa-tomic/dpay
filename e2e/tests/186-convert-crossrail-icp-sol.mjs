@@ -33,7 +33,7 @@
 // (harness/jupiter.mjs configures it — the dials go through dpay's relay proxy) and the SOL
 // RPC stub (the 185 seam, extended with a getTransaction keyed by which credit is being read:
 // Circle's forward tx → USDC token credit at the ATA; the swap signature → native SOL credit).
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor, pickSwapTarget, openOtherVenues, typeConvertAmount} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
@@ -203,15 +203,17 @@ export async function run() {
     });
     await installCctpStub(driver, {passOrigins, forwardTxHash: FORWARD_TX_HASH});
 
-    // --- §1 the composed route is an explicit venue-row pick on the SOL target -----------------
+    // --- §1 the composed route is an explicit opt-in row behind the Other-venues expander ------
     await openConvertFor(driver, 'icp');
     await pickSwapTarget(driver, 'SOL');
-    // Two CeFi venues serve the SOL pair (SideShift + Trocador) beside the composed route →
-    // NOTHING is preselected: the venue rows render, confirm withheld until a pick.
-    await driver.findByTestID('convert-venues', {timeoutMs: 8_000});
+    // The sheet auto-picks the first device-signable venue (the Jupiter AMM row); the CeFi
+    // venues and the composed Route C wait behind the ONE Other-venues expander — opt-in rows,
+    // never the auto pick while a device-signable path exists (brief 5.4.1).
+    await driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+    await openOtherVenues(driver);
     assert(await driver.findByTestID(ROUTE_C_ROW, {timeoutMs: 3_000}) != null, 'the Route C row is offered beside the CeFi venue rows');
     await driver.click(ROUTE_C_ROW);
-    await driver.type('convert-amount', '5');
+    await typeConvertAmount(driver, '5');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     await driver.type('convert-dest-address', DEST);
     await driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
@@ -231,7 +233,7 @@ export async function run() {
     // Confirm (quote-changed interrupt → re-review, same as 184).
     for (let round = 0; round < 5; round++) {
       await driver.click('btn-convert-confirm');
-      const changed = await driver.findByTestID('convert-quote-changed', {timeoutMs: 2_000}).catch(() => null);
+      const changed = await driver.findByTestID('convert-moved-note', {timeoutMs: 2_000}).catch(() => null);
       if (changed == null) break;
       console.log(`[186-crossrail] quote moved (round ${round + 1}) — re-reviewing`);
       const re = await relayQuote(r2.baseURL, CKUSDC_POOL, ICP_LEDGER, CKUSDC_LEDGER, AMOUNT_IN_ICP);
@@ -378,7 +380,9 @@ export async function run() {
     assertEq(jup.swapCalls.length, 1, `exactly one swap POST (saw: ${JSON.stringify(jup.swapCalls)})`);
     const finalLegQuotes = jup.quoteCalls.filter((q) => q.inputMint === USDC_MINT && q.outputMint === WRAPPED_SOL_MINT);
     assert(finalLegQuotes.length >= 1, 'the final leg quoted USDC→wrapped-SOL (fresh, on the verified credit)');
-    assertEq(finalLegQuotes[0].amount, mintCredit.toString(), 'the final quote was for the VERIFIED mint amount');
+    // finalLegQuotes[0] may be the review card's own destination ESTIMATE, sized on the sheet's
+    // Max prefill before the flow typed its amount (brief 5.2); the LAST one is the crossing's.
+    assertEq(finalLegQuotes[finalLegQuotes.length - 1].amount, mintCredit.toString(), 'the final quote was for the VERIFIED mint amount');
     const cctp = await cctpStubState(driver);
     assertEq(cctp.unexpected.length, 0, `cctp stub saw no unexpected origins (${cctp.unexpected.join(', ')})`);
     assert(cctpBeforeReload.feesCalls + cctp.feesCalls >= 2, 'the fee census was fetched (form + prepare/handoff — pre- and post-reload epochs summed)');

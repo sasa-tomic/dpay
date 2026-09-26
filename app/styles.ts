@@ -579,6 +579,9 @@ function buildStyles(p: Palette) {
   receiptField: {alignSelf: 'stretch', marginTop: 12},
   receiptLabel: {fontSize: 13, fontWeight: '600', color: p.sub2, fontFamily: FONT.sans, marginBottom: 4},
   receiptValue: {fontSize: 13, color: p.ink, lineHeight: 18, fontFamily: FONT.mono},
+  // The non-opaque value voice: same scale, sans — the receipt's mono is for strings a payee
+  // checks character by character (principals, hashes), never for times, fees or amounts.
+  receiptValueSans: {fontSize: 13, color: p.ink, lineHeight: 18, fontFamily: FONT.sans, fontVariant: ['tabular-nums']},
   // An honest ABSENCE (or a failed-transaction status) reads as prose, never as a value: the
   // receipt must not let "the ledger recorded no account" look like something copied off a chain.
   receiptNote: {fontSize: 13, color: p.sub, lineHeight: 18, fontFamily: FONT.sans},
@@ -840,6 +843,8 @@ function buildStyles(p: Palette) {
   // Withdraw sheet form fields.
   inputLabel: {fontSize: 13, fontWeight: '600', color: p.sub, alignSelf: 'flex-start', marginTop: 18, marginBottom: 6, fontFamily: FONT.sansMedium},
   withdrawAddrInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 16, height: 58, paddingHorizontal: 16, fontSize: 15, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
+  // The destination NICKNAME field: same box, sans — a person's label is prose, not an opaque string.
+  withdrawNameInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 16, height: 58, paddingHorizontal: 16, fontSize: 15, color: p.ink, fontFamily: FONT.sans, borderWidth: 1, borderColor: p.line2},
   savedAddrChip: {alignSelf: 'flex-start', backgroundColor: p.panel2, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, minHeight: 44, justifyContent: 'center'},
   savedAddrText: {fontSize: 13, color: p.brandText, fontFamily: FONT.mono},
   // `minWidth: 0` is load-bearing at the ONE call site that puts this field in a row - SendSheet's
@@ -982,6 +987,54 @@ function buildStyles(p: Palette) {
   fieldBody: {fontSize: 15, color: p.brandInk, fontFamily: FONT.sans, textAlign: 'center', lineHeight: 22, marginTop: 8},
   fieldRule: {alignSelf: 'stretch', height: 1, backgroundColor: p.brand2, marginVertical: 18},
   fieldAction: {alignSelf: 'stretch', minHeight: 52, borderRadius: 18, borderWidth: 1, borderColor: withAlpha(p.brandInk, 0.45), alignItems: 'center', justifyContent: 'center', marginTop: 16},
+  fieldActionText: {color: p.brandInk, fontSize: 17, fontWeight: '700', fontFamily: FONT.sansBold},
+
+  // ── The convert intent sheet (brief Part V) ─────────────────────────────────────────────
+  // The sheet surface the two-tap convert renders in: the route's content column wears the
+  // sheet chrome (28-radius top corners, card surface, LIFT_SM), everything inside stays
+  // mist-quiet. Chips are the 999/h44 pill; the CTA is S.primary (18/h58) bottom-anchored.
+  sheetRoot: {flex: 1, alignSelf: 'stretch', backgroundColor: p.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 10, ...LIFT_SM},
+  sheetGrabber: {alignSelf: 'center', width: 44, height: 4, borderRadius: 2, backgroundColor: p.line, marginBottom: 12},
+  sheetSectionLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 16, marginBottom: 6},
+  // The target line: ONE tappable row naming the currency the conversion lands in (the
+  // optional decision). A 44-tall pill row so the touch floor holds without extra chrome.
+  targetLine: {flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, alignSelf: 'flex-start'},
+  targetLineName: {fontSize: 17, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1},
+  // Sibling currency chips: small pills in one wrap row (999/h44), 6px gaps, the active
+  // currency absent (it IS the line).
+  chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8},
+  chip: {paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, minHeight: 44, alignItems: 'center', justifyContent: 'center'},
+  chipOn: {borderColor: p.brand, backgroundColor: p.brand},
+  chipText: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
+  chipTextOn: {color: p.brandInk, fontFamily: FONT.sansBold},
+  // The preset row (25% / 50% / Max) rides under the amount field: same pill grammar, 8px top.
+  presetRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8},
+  // The review card is the sheet's whole body: what moves, what lands, whose numbers they are.
+  intentCard: {backgroundColor: p.panel2, borderRadius: 20, padding: 16, alignSelf: 'stretch', marginTop: 16},
+  reviewPairRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, alignSelf: 'stretch'},
+  reviewConvertLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
+  reviewConvertAmount: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.4, textAlign: 'right', flexShrink: 1, fontVariant: ['tabular-nums']},
+  reviewArrow: {fontSize: 20, color: p.sub2, textAlign: 'center', marginTop: 2, fontFamily: FONT.sans},
+  reviewReceiveRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, alignSelf: 'stretch', marginTop: 10},
+  reviewReceiveAmount: {fontSize: 34, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.6, textAlign: 'right', flexShrink: 1, fontVariant: ['tabular-nums']},
+  // The mechanical venue-pick disclosure + attribution: quiet meta lines under the figure.
+  reviewMeta: {fontSize: 12, color: p.sub2, fontFamily: FONT.sans, marginTop: 8},
+  // The quote-moved note at re-arm: warn is the traffic-light for "look again", on its own line.
+  movedNote: {fontSize: 13, color: p.warn, lineHeight: 19, marginTop: 10, fontFamily: FONT.sansMedium},
+  // The Other-venues expander row: a quiet full-width disclosure control (the Details grammar).
+  venuesToggle: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'stretch', minHeight: 44, marginTop: 12},
+  venuesToggleText: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, flexShrink: 1},
+  venuesList: {alignSelf: 'stretch', marginTop: 4},
+  // Settlement Field in-flight tracker rows: brandInk text, brand2 separators, no shadows.
+  fieldLegRow: {alignSelf: 'stretch', paddingVertical: 10, borderTopWidth: 1, borderTopColor: p.brand2},
+  fieldLegLabel: {fontSize: 15, color: p.brandInk, fontFamily: FONT.sans, lineHeight: 21},
+  fieldLegState: {fontSize: 13, color: p.brandInk, fontFamily: FONT.sans, opacity: 0.85, marginTop: 2},
+  fieldTx: {fontSize: 12, color: p.brandInk, fontFamily: FONT.mono, textAlign: 'center', lineHeight: 18, marginTop: 8},
+  fieldHeaderTitle: {flex: 1, fontSize: 22, fontWeight: '700', color: p.brandInk, fontFamily: FONT.sansBold, letterSpacing: -0.3},
+  fieldLegs: {alignSelf: 'stretch', marginTop: 18},
+  fieldLegStateBad: {fontSize: 13, color: p.brandInk, fontFamily: FONT.sansBold, opacity: 1, marginTop: 2, fontWeight: '700'},
+  // The composed tracker's verbatim venue deposit address (mono, brandInk, wraps left-aligned).
+  fieldPrincipal: {fontSize: 12, color: p.brandInk, fontFamily: FONT.mono, lineHeight: 18, marginTop: 2, marginBottom: 6},
   });
 }
 

@@ -489,7 +489,7 @@ export function SendSheet({
         <TextInput
           testID="send-save-name"
           accessibilityLabel={M.withdraw.send.saveNamePlaceholder}
-          style={S.withdrawAddrInput}
+          style={S.withdrawNameInput}
           value={saveName}
           onChangeText={setSaveName}
           placeholder={M.withdraw.send.saveNamePlaceholder}

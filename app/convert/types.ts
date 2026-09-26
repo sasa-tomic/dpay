@@ -169,6 +169,50 @@ export type ResolvedGasFundPlan = GasFundPlan & {
   legs: Array<GasFundPreLeg & {zeroForOne: boolean; fromFee: string; toFee: string}>;
 };
 
+/** The composed IC→CeFi widening (2026-09-26, design brief §5.4 item 2): the CeFi DEPOSIT
+ *  facts of a composed route's final leg, frozen at order creation and re-verified before
+ *  the transfer may ever sign. The venue's order is created FIRST (its own deposit address
+ *  + locked figure are known before anything signs), the IC legs + the deposit transfer are
+ *  then signed in one pass (the user consents once on the review), and the engine submits
+ *  the deposit transfer as the LAST leg: to the VENUE's own address, for the EXACT order
+ *  amount. Every string the venue issued is carried verbatim. dpay is never a party: the
+ *  order is the user's, the deposit is the user's signed transfer, the payout lands at the
+ *  user's own settle address. */
+export type ComposedDepositInfo = {
+  /** The cefi venue that holds the order (registry id — looked up, never assumed). */
+  venueId: string;
+  /** The venue's order id — providerRef.orderId's twin (one order, one id). */
+  orderId: string;
+  /** The VENUE's own deposit account, VERBATIM (ICRC-1 account text or the ICP ledger's
+   *  64-hex account identifier — whichever the venue issued). The transfer signs to it. */
+  depositAddress: string;
+  /** The parsed owner of that account (the ledger-row match key for the sent evidence). */
+  depositOwner: string;
+  /** The venue's decimal figure for the exact deposit (verbatim, never reformatted). */
+  amountDecimal: string;
+  /** The SAME amount in raw hub-ledger units — what the signed transfer moves. */
+  amountRaw: string;
+  /** The hub ledger's own transfer fee the leg signed (paid on top, never out of the order). */
+  fee: string;
+  /** When the venue's deposit window dies (its own order expiry, parsed) — past it the
+   *  transfer must never be submitted: the venue would not credit the order. */
+  expiresAtMs?: number;
+  /** The venue's memo/tag when its wire requires one on the deposit (rides the transfer). */
+  depositMemo?: string;
+  /** The settle side's display facts (from the composed route's registry resolution). */
+  settleSymbol: string;
+  settleDecimals: number;
+  /** The venue's own locked settle figure, decimal (verbatim) — the honest order-side
+   *  number beside the rate attribution. */
+  settleAmountDecimal?: string;
+  /** The same settle figure in raw settle units — the done-state fallback when the venue's
+   *  completed status carries no amount. */
+  settleAmountRaw?: string;
+  /** Durable identity of the deposit leg's ledger row once the transfer is known-sent
+   *  (the settled block index, else the history row's identity). */
+  sentTx?: string;
+};
+
 export type ConvertRecord = {
   id: string;
   createdAtMs: number;
@@ -279,6 +323,11 @@ export type ConvertRecord = {
    *  whole shape (legs.length === pre-legs×2 + 5, the approve/swap rhythm, the ledger
    *  chain). Absent on every record this build wrote before it — byte-identical history. */
   gasPre?: GasFundPlan;
+  /** The composed IC→CeFi widening (2026-09-26, brief §5.4 item 2): present iff the record
+   *  was prepared on a COMPOSED route — three legs (approve, swap, deposit_transfer) plus
+   *  a providerRef the final phase polls. Mutually exclusive with crossRail, solanaLeg and
+   *  gasPre (hydration pins all three). */
+  composedDeposit?: ComposedDepositInfo;
   failureCode?: 'approve_refused' | 'swap_refused' | 'refunded' | 'withdraw_refused' | 'unknown'
     // The cross-rail additions: the user declined/abandoned the external signing step
     // (funds sit as USDC at their OWN EVM address — the copy names it).
@@ -286,7 +335,11 @@ export type ConvertRecord = {
     // The gas-fund addition: the funding did not deliver (a pre-leg refused, or the
     // post-pre-leg balance re-check came up short) — the MAIN conversion has not started
     // and every source value sits in-wallet. The failed card names the shortfall.
-    | 'gas_short';
+    | 'gas_short'
+    // The composed-deposit addition (2026-09-26): the deposit transfer was refused at a
+    // gate or by the ledger, ONCE, and was never retried — the swap payout (the hub
+    // asset) is still in the wallet and the failure names that exit.
+    | 'deposit_refused';
   failureDetail?: string;
 };
 
@@ -298,7 +351,12 @@ export type ConvertRecord = {
  *  its hash, and Circle's mint status; `canister` is '' because no IC canister is called)
  *  and `sol_swap` is the final device-signed Jupiter leg (same shape the standalone Solana
  *  convert signs — `canister` '' likewise). */
-export type LegKind = 'approve' | 'swap' | 'approve_gas' | 'withdraw_erc20' | 'cctp_burn' | 'sol_swap';
+export type LegKind = 'approve' | 'swap' | 'approve_gas' | 'withdraw_erc20' | 'cctp_burn' | 'sol_swap'
+  // The composed IC→CeFi widening (2026-09-26): the final device-signed transfer that funds
+  // the venue order — an icrc1_transfer (or the ICP ledger's legacy transfer, when the
+  // venue's deposit address is a 64-hex account identifier) to the VENUE's own address for
+  // the EXACT order amount. Submitted last; never retried after a definitive refusal.
+  | 'deposit_transfer';
 
 /** One leg's completion state. `sent` ≠ `pending` only in what the USER sees — both resume
  *  by re-submitting the identical envelope bytes (request_id dedup makes that safe); the
@@ -352,13 +410,25 @@ export const PROVIDER_ONLY_STEPS: ReadonlySet<ConvertStep> = new Set([
   'quote_expired', 'provider_refunded',
 ]);
 
-/** The steps a Solana-shaped record (`solanaLeg`) may sit at: the Solana driver's own
+/** The steps a SOLANA-shaped record (`solanaLeg`) may sit at: the Solana driver's own
  *  vocabulary, start to terminal. There is no approve state (nothing to approve — the venue's
  *  tx is the whole route) and no provider states. Prepare lands at `swapping` with the leg
  *  already signed; anything else driverless fails hydration, same rule as the other two
  *  vocabularies. */
 export const SOLANA_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
   'swapping', 'settling', 'done', 'pending_withdrawal', 'failed_refunded', 'stuck',
+  'aborted',
+]);
+
+/** The steps a COMPOSED record (`composedDeposit`) may sit at: the planned executor's own
+ *  flight states while the IC legs + the deposit leg run, the provider vocabulary once the
+ *  deposit transfer is sent (the venue poll owns the final phase), and the shared
+ *  terminals. Hydration pins a composedDeposit-bearing record to this vocabulary, exactly
+ *  like every other widening. */
+export const COMPOSED_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
+  'approving', 'pending_withdrawal', 'stuck', 'failed_refunded', 'failed_leg',
+  'awaiting_deposit', 'provider_processing',
+  'done', 'quote_expired', 'provider_refunded',
   'aborted',
 ]);
 

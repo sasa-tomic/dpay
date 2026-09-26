@@ -22,7 +22,9 @@
 // (harness/jupiter.mjs configures it — the dials go through dpay's relay proxy) and the
 // __DPAY_TEST_SOLANA_RPC_STUB, with the getTransaction detail carrying the EURC mint row
 // (the realized-payout oracle matches the record's own out mint).
-import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor,
+  typeConvertAmount,
+} from '../harness/lib.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
   configureJupiterStub, jupiterStubState, EURC_MINT, USDC_MINT,
@@ -124,7 +126,7 @@ export async function run() {
     assertIncludes(await driver.readText('convert-screen'), 'Convert USD → EUR', 'the standing pair is USD→EUR (stable-first)');
 
     // §2 — Jupiter's own digits for the standing FX pair, verbatim through the relay proxy.
-    await driver.type('convert-amount', '1');
+    await typeConvertAmount(driver, '1');
     assert(await driver.findByTestID('convert-quote-source', {timeoutMs: 10_000}) != null, 'a quote arrived (through the relay proxy)');
     assertIncludes(await driver.readText('convert-quote-source'), 'Jupiter', 'attribution names the venue');
     assertIncludes(await driver.readText('convert-quote-source'), 'fetched', 'attribution carries the read instant');
@@ -180,12 +182,17 @@ export async function run() {
     assertEq(jup.lastQuoteResponse.outAmount, OUT_EURC, 'POST body carried the VERBATIM quote (outAmount)');
     assertEq(jup.lastQuoteResponse.platformFee, null, 'POST body carried the VERBATIM quote (platformFee null)');
     assert(jup.quoteCalls.length >= 1, 'at least one quote GET (per-keystroke)');
-    for (const q of jup.quoteCalls) {
+    // The sheet's Max prefill legitimately quotes the full balance first (brief 5.2).
+    const prefillMicro = '2500000';
+    const postPrefill = [...jup.quoteCalls];
+    while (postPrefill.length > 0 && postPrefill[0].amount === prefillMicro) postPrefill.shift();
+    for (const q of postPrefill) {
       assertEq(q.inputMint, USDC_MINT, 'quote GET asked for the USDC mint (the FX venue\'s own in-side)');
       assertEq(q.outputMint, EURC_MINT, 'quote GET asked for the PICKED pair\'s EURC mint');
       assertEq(q.amount, IN_MICRO, 'quote GET carried the raw 6-decimal amount');
       assertEq(q.slippageBps, '100', 'quote GET carried the chosen slippage');
     }
+    assertEq(postPrefill[postPrefill.length - 1].amount, IN_MICRO, 'the LAST quote GET is the typed amount');
 
     console.log(`GREEN 193 — USDC→EURC(Solana) via jupiter-usdc-eurc through the out-destination picker: default unchanged, pick re-targets the FX pair, quote verbatim, device-signed venue tx, one broadcast, realized credit 0.87 EURC (sig ${sent[0].signature.slice(0, 12)}…)`);
   } finally {

@@ -4,12 +4,15 @@ import {submitTransfer as railSubmitTransfer, railBalanceOf} from '../services/r
 import {CONVERT_PROBE_WINDOW_ROWS, CONVERT_ENGINE_TEST_OPTS} from '../config/convert';
 import {venueDisplayName, venueEndpointOf} from '../config/venues';
 import {saveTxNote} from '../services/txNotes';
+import {rawToDecimal} from '../lib/format';
 import {type ConvertRecord, type LegState, isTerminalConvertStep} from './types';
 import {
   convertAborted,
   convertLegsExpired,
   convertRecordMinOut,
+  isComposedConvertRecord,
   isHubConvertRecord,
+  sameDecimalAmount,
   saveConvertRecord,
 } from './records';
 // --- execute: submit the persisted bytes, watch the output ledger (never trust #ok alone) ---------
@@ -187,7 +190,7 @@ export async function probeHopPayout(args: {
 }): Promise<{amount: string; tx: string} | null> {
   const {relayUrl, publicHex, myPrincipalLower, record} = args;
   const leg = args.swapLeg ?? 1;
-  const outCurrency = leg === 2 ? record.destCurrency : record.outCurrency;
+  const outCurrency = leg === 2 ? record.destCurrency : (record.hopCurrency ?? record.outCurrency);
   const venueId = leg === 2 ? record.venue2Id : record.venueId;
   const maxGross = leg === 2 ? record.expectedGross2 : record.expectedGross;
   // Same fail-closed guard as probeConvertSettlement: no numeric currency, no IC ledger window.
@@ -224,6 +227,55 @@ export async function probeHopPayout(args: {
     }
   } catch (e) {
     console.warn('hop payout probe failed:', e instanceof Error ? e.message : String(e));
+  }
+  return null;
+}
+
+/**
+ * The COMPOSED deposit-leg probe (2026-09-26, brief §5.4 item 2): did the venue's deposit
+ * transfer execute? Reads the hub ledger's history at the user's principal and looks for
+ * the OUTGOING row the transfer would have created — from the user, to the venue's own
+ * deposit account (owner principal or the raw address text, whichever the relay renders),
+ * for the EXACT order amount, newer than the record itself (the same -120s clock-skew
+ * floor every probe applies). This is the resume evidence for a kill between submit and
+ * persist, and the expiry arm's truth-source: the ledger row, never a hope. Returns the
+ * row's durable identity, or null (nothing proven either way).
+ */
+export async function probeDepositRow(args: {
+  relayUrl: string;
+  publicHex: string;
+  myPrincipalLower: string;
+  record: ConvertRecord;
+}): Promise<string | null> {
+  const {relayUrl, publicHex, myPrincipalLower, record} = args;
+  const cd = record.composedDeposit;
+  const hubCurrency = record.destCurrency ?? record.hopCurrency;
+  if (cd == null || hubCurrency == null) return null; // not a composed record / unwatchable — prove nothing
+  try {
+    const r = await relayFetch(
+      relayUrl,
+      `/api/v1/transactions/${publicHex}?currency=${hubCurrency}&limit=${CONVERT_PROBE_WINDOW_ROWS}`,
+      undefined,
+      6000,
+    );
+    if (!r.ok) return null;
+    const body = await r.json().catch(() => null) as {transactions?: TransactionsRowLike[]} | null;
+    const owner = cd.depositOwner.toLowerCase();
+    const address = cd.depositAddress.toLowerCase();
+    const floorSec = Math.floor(record.createdAtMs / 1000) - 120;
+    for (const row of body?.transactions ?? []) {
+      const tx = rowIdentity(row);
+      const to = row.to?.toLowerCase();
+      if (row.currency === hubCurrency
+        && row.from?.toLowerCase() === myPrincipalLower
+        && (to === owner || to === address)
+        && row.amount === cd.amountRaw
+        && row.timestamp != null && Number(row.timestamp) > floorSec) {
+        return tx;
+      }
+    }
+  } catch (e) {
+    console.warn('deposit row probe failed:', e instanceof Error ? e.message : String(e));
   }
   return null;
 }
@@ -279,6 +331,11 @@ async function executePlannedConvert(
   const probeHop = (r: ConvertRecord, swapLeg: 1 | 2 = 1) => probeHopPayout({
     relayUrl: deps.relayUrl, publicHex: deps.publicHex, myPrincipalLower, record: r, excludeOutTx: deps.claimedOutTx, swapLeg,
   });
+  // The COMPOSED widening (2026-09-26, brief §5.4 item 2): a deposit_transfer leg FOLLOWS
+  // the IC swaps — a second swap's payout row is then NOT the terminal evidence (the hub
+  // record's done-rule); it only opens the gate for the deposit leg, which the venue poll
+  // after it resolves to a terminal state.
+  const composedTail = isComposedConvertRecord(rec);
   // The resume cursor counts IC legs ONLY — the cctp_burn/sol_swap tail entries are driven
   // by the cross-rail drivers, never by this loop, so a cross-rail record whose IC legs are
   // all confirmed reads as complete here (the loop body never indexes past `legs`).
@@ -313,12 +370,14 @@ async function executePlannedConvert(
       }
       return tools.advance({...rec, step: 'pending_withdrawal'}); // still watching — re-arm and come back
     }
-    if (leg === 2) {
+    if (leg === 2 && !composedTail) {
       rec = await tools.advance(withLegState(rec, swapIdx, 'confirmed', {
         step: 'done', outAmountNet: seen.amount, outTx: seen.tx, destTx: seen.tx,
       }));
     } else {
-      rec = await tools.advance(withLegState(rec, swapIdx, 'confirmed', {hopTx: seen.tx}));
+      // leg 1 confirms the hop; a COMPOSED second swap only opens the deposit leg's gate
+      // (its row is evidence, not completion — the deposit leg + venue poll finish the route).
+      rec = await tools.advance(withLegState(rec, swapIdx, 'confirmed', leg === 2 ? {destTx: seen.tx} : {hopTx: seen.tx}));
     }
   }
 
@@ -330,7 +389,36 @@ async function executePlannedConvert(
   // seen dest row means the dest asset IS in the wallet (done, the SEEN amount). Only then
   // the hub payout: swap1 ran, swap2's bytes are dead — the user holds the hub asset
   // (failed_leg), never done on a mid-route row.
+  // The COMPOSED trichotomy (2026-09-26) probes the DEPOSIT row first — a dead envelope can
+  // still have executed before it died, and a seen deposit row means the venue owes the
+  // trade (the venue poll resolves it: awaiting_deposit). Then the IC rows: the LAST swap's
+  // payout → failed_leg (the hub asset is in-wallet, the deposit never went), else stuck.
   if (firstIncomplete() >= 0 && convertLegsExpired(rec, opts.nowMs)) {
+    if (composedTail) {
+      const sentTx = await probeDepositRow({
+        relayUrl: deps.relayUrl, publicHex: deps.publicHex, myPrincipalLower, record: rec,
+      });
+      if (sentTx != null) {
+        const cd = rec.composedDeposit;
+        return tools.advance(withLegState(rec, rec.legs.length - 1, 'confirmed', {
+          step: 'awaiting_deposit',
+          ...(cd != null ? {composedDeposit: {...cd, sentTx}} : {}),
+        }));
+      }
+      const lastSwap = (rec.legPlan ?? []).reduce((acc, l, i) => (l.kind === 'swap' ? i : acc), -1);
+      if (lastSwap >= 0 && swapOrdinalOf(lastSwap) >= 1) {
+        const dest = await probeHop(rec, 2);
+        if (dest != null) {
+          return tools.advance(withLegState(rec, lastSwap, 'confirmed', {
+            step: 'failed_leg', failureCode: 'unknown', destTx: dest.tx,
+          }));
+        }
+      }
+      const hub = await probeHop(rec, 1);
+      return tools.advance(hub != null
+        ? {...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: hub.tx}
+        : {...rec, step: 'stuck', failureCode: 'unknown'});
+    }
     if (isHubConvertRecord(rec)) {
       const dest = await probeHop(rec, 2);
       if (dest != null) {
@@ -372,16 +460,72 @@ async function executePlannedConvert(
           failureDetail: `gas-fund short: have ${balRaw} need ${rec.gasPre.neededWei}`});
       }
     }
+    // THE DEPOSIT GATE (composed, 2026-09-26): re-verified from the record's OWN frozen
+    // bytes at EVERY entry — never from memory, so a resume can never sign from stale
+    // state. Order matters: (1) the exact-amount invariant (the frozen transfer must BE
+    // the frozen order amount — a mismatch means the record is corrupt and must never
+    // sign); (2) the LEDGER ROW — a kill between submit and persist leaves the leg `sent`
+    // with the transfer possibly already on-chain, and the row is the truth (never a
+    // re-sign, never a double-send: identical bytes are deduped anyway); (3) the windows —
+    // the envelope's own ingress death and the venue's deposit window, past either of
+    // which the venue cannot credit the order so the transfer must never leave; (4) the
+    // ACTUAL hub-ledger balance (the swap's payout is in it) must cover transfer + fee —
+    // an unreadable balance is NOT a pass: hold, the re-arm re-runs the gate.
+    if (plan.kind === 'deposit_transfer') {
+      const cd = rec.composedDeposit;
+      if (cd == null) {
+        return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'deposit_refused',
+          failureDetail: 'composed record carries no deposit block'}));
+      }
+      const depositDecimals = rec.destDecimals ?? rec.hopDecimals ?? 8;
+      if (!sameDecimalAmount(cd.amountDecimal, rawToDecimal(cd.amountRaw, depositDecimals))) {
+        return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'deposit_refused',
+          failureDetail: `order amount ${cd.amountDecimal} != signed transfer amount`}));
+      }
+      const sentTx = await probeDepositRow({
+        relayUrl: deps.relayUrl, publicHex: deps.publicHex, myPrincipalLower, record: rec,
+      });
+      if (sentTx != null) {
+        // The transfer already executed (an earlier life of this record): the venue owes
+        // the trade — straight to the provider poll, never a second signature.
+        return tools.advance(withLegState(rec, i, 'confirmed', {
+          step: 'awaiting_deposit',
+          composedDeposit: {...cd, sentTx},
+        }));
+      }
+      if (leg.expiresAtMs <= opts.nowMs) {
+        return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'deposit_refused',
+          failureDetail: 'the signed deposit transfer expired before it could be submitted'}));
+      }
+      if (cd.expiresAtMs != null && opts.nowMs >= cd.expiresAtMs) {
+        return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'deposit_refused',
+          failureDetail: 'the venue order expired before the deposit could be sent'}));
+      }
+      const balRaw = await railBalanceOf(deps.secretHex, leg.canister);
+      if (balRaw == null || !/^\d+$/.test(balRaw)) {
+        console.warn('deposit gate: hub-ledger balance unreadable — holding the deposit leg');
+        return rec;
+      }
+      const needed = BigInt(cd.amountRaw) + BigInt(cd.fee);
+      if (BigInt(balRaw) < needed) {
+        return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'deposit_refused',
+          failureDetail: `hub balance ${balRaw} short of ${cd.amountRaw}+${cd.fee}`}));
+      }
+      // gate passed — fall through to the generic submit below
+    }
     rec = await tools.advance(withLegState(rec, i, 'sent'));
     // Device-saved annotation for the swap-side legs only — the burn-side legs are the
     // Withdraw flow's own calls and carry no venue row to name (parity with WithdrawSheet).
     // On a hub record legs 3–4 are venue2's business (their ordinal ≥ 1); a Route A record
     // has no venue2Id, so the ?? falls back to the same venue it always named. A gas-fund
-    // pre-leg names its OWN venue (pair k = floor(i/2) in the pre-leg list).
-    if (plan.kind === 'approve' || plan.kind === 'swap') {
-      const venue = isPreLeg(i)
-        ? rec.gasPre!.legs[Math.floor(i / 2)]!.venueId
-        : swapOrdinalOf(i) >= 1 ? (rec.venue2Id ?? rec.venueId) : rec.venueId;
+    // pre-leg names its OWN venue (pair k = floor(i/2) in the pre-leg list). The composed
+    // deposit transfer names the CEFI venue (it funds that venue's order).
+    if (plan.kind === 'approve' || plan.kind === 'swap' || plan.kind === 'deposit_transfer') {
+      const venue = plan.kind === 'deposit_transfer'
+        ? (rec.composedDeposit?.venueId ?? rec.venueId)
+        : isPreLeg(i)
+          ? rec.gasPre!.legs[Math.floor(i / 2)]!.venueId
+          : swapOrdinalOf(i) >= 1 ? (rec.venue2Id ?? rec.venueId) : rec.venueId;
       void saveTxNote(deps.publicHex, {k: leg.requestIdHex, who: venueDisplayName(venue)}, opts.nowMs);
     }
     let legBlockIndex: string | null = null;
@@ -399,11 +543,29 @@ async function executePlannedConvert(
                 if (out.ok && out.blockIndex != null) legBlockIndex = out.blockIndex;
                 return out;
               }
-            : undefined;
+            // The composed deposit transfer: the ledger's own reply, decoded by the method
+            // the leg signed (ICRC-1 transfer, or the ICP ledger's legacy transfer when the
+            // venue's deposit address is an account identifier). The settled block index is
+            // the durable sent-evidence.
+            : plan.kind === 'deposit_transfer'
+              ? async (h: string) => {
+                  const out = leg.method === 'icrc1_transfer'
+                    ? await DpayCore.icpDecodeTransferResult(h)
+                    : await DpayCore.icpDecodeLegacyTransferResult(h);
+                  if (out.ok && out.blockIndex != null) legBlockIndex = out.blockIndex;
+                  return out;
+                }
+              : undefined;
     const outcome = await tools.submitEnvelope(leg.canister, leg.envelopeHex, leg.requestIdHex, decodeReply);
     if (outcome === 'unknown') {
       // Bytes submitted, outcome unknowable: park stuck. The plan keeps the leg at `sent`
       // (it WAS sent); the engine's slow watch can still resolve the hop row later.
+      // THE COMPOSED EXCEPTION: the venue is now the source of truth — if the transfer
+      // executed, the order completes; if not, the venue expires it honestly (nothing left
+      // the wallet). Either way the provider poll resolves it; never a second signature.
+      if (plan.kind === 'deposit_transfer') {
+        return tools.advance(withLegState(rec, i, 'sent', {step: 'awaiting_deposit'}));
+      }
       return tools.advance({...rec, step: 'stuck', failureCode: 'unknown'});
     }
     if (outcome !== 'settled') {
@@ -430,6 +592,13 @@ async function executePlannedConvert(
         }
         // The pool's atomic refusal: input stays in the wallet, allowance dies at expiry.
         return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_refunded', failureCode: 'swap_refused', failureDetail: detail}));
+      }
+      if (plan.kind === 'deposit_transfer') {
+        // The ledger refused the deposit transfer DEFINITIVELY: single attempt — a failed
+        // deposit is NEVER retried and NEVER re-signed (the agent-float red line). The IC
+        // phase's payout (the hub asset) is still in the wallet; the venue order dies
+        // unfunded at its expiry, which the failure copy names.
+        return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'deposit_refused', failureDetail: detail}));
       }
       // A burn-side leg refused (spec §4 taxonomy): the swap already confirmed, so the user
       // holds the HOP asset in-wallet — failed_leg, and the standalone Withdraw flow is the
@@ -461,13 +630,24 @@ async function executePlannedConvert(
         }
       }
       if (seen == null) return tools.advance({...rec, step: 'pending_withdrawal'});
-      if (leg === 2) {
+      if (leg === 2 && !composedTail) {
         return tools.advance(withLegState(rec, i, 'confirmed', {
           step: 'done', outAmountNet: seen.amount, outTx: seen.tx, destTx: seen.tx,
         }));
       }
-      rec = await tools.advance(withLegState(rec, i, 'confirmed', {hopTx: seen.tx}));
+      rec = await tools.advance(withLegState(rec, i, 'confirmed', leg === 2 ? {destTx: seen.tx} : {hopTx: seen.tx}));
       continue;
+    }
+    if (plan.kind === 'deposit_transfer') {
+      // The venue's order is funded: the record hands off to the provider poll (the
+      // engine's driver dispatch keys on the composed shape + this step). The settled
+      // block index is the durable sent-evidence frozen on the deposit block.
+      const cd = rec.composedDeposit;
+      const sentTx = legBlockIndex ?? cd?.sentTx ?? null;
+      return tools.advance(withLegState(rec, i, 'confirmed', {
+        step: 'awaiting_deposit',
+        ...(cd != null && sentTx != null ? {composedDeposit: {...cd, sentTx}} : {}),
+      }));
     }
     if (plan.kind === 'withdraw_erc20') {
       if (rec.crossRail != null) {

@@ -46,6 +46,10 @@ export type ReceiptMessages = {
 
   /** Honest absences — each says what the ledger did NOT record, and what stands in its place. */
   noAccount: string;
+  /** A pool counterparty the execution knew but no registry row names anymore (round-1 item 9):
+   *  the neutral party wording — never a principal styled as a counterparty. The raw principal
+   *  rides in its own mono line beneath. */
+  partyPool: string;
   noReferenceIc: string;
   noReferenceSolana: string;
   /** A PENDING payment's one honest sentence: this receipt was written by the device's outbox, no
@@ -83,7 +87,8 @@ export const receiptEn: ReceiptMessages = {
   signatureLabel: 'Transaction signature',
 
   noAccount: 'The ledger recorded no account on that side.',
-  noReferenceIc: 'No reference — this transfer carried no memo.',
+  partyPool: 'A liquidity pool',
+  noReferenceIc: 'This transfer carried no memo.',
   noReferenceSolana: 'A Solana transfer carries no dpay reference — the signature below identifies it.',
   pendingProof: 'Not confirmed yet — this payment settles on the ledger later.',
 

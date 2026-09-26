@@ -75,6 +75,14 @@ jest.mock('../services/rail', () => ({
   fetchGasFeeWei: jest.fn(),
   fetchLedgerFee: jest.fn(),
 }));
+jest.mock('../services/native', () => ({
+  DpayCore: {
+    icpPrincipalFromPubkey: jest.fn(async () => 'my-ic-principal'),
+    icpAccountIdFromPrincipal: jest.fn(async () => 'cd'.repeat(32)),
+  },
+  DpayNfc: {},
+  DpaySolNfc: {},
+}));
 
 // The engine (V6): the screen is a VIEW onto app/convertResume.ts — it reads the snapshot on
 // mount, subscribes for updates, and hands freshly-prepared records to the engine. It no longer
@@ -216,8 +224,17 @@ beforeEach(() => {
   jest.mocked(fetchLedgerFee).mockResolvedValue('2000000000000'); // ckETH ledger fee
 });
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The suites below drive the TWO-TAP INTENT SHEET (design brief Part V, 2026-09-26): the
+// screen pre-computes the target, the amount and the venue pick; tap 2 is the CTA. The
+// superseded 2026-09-11 no-preselection chooser suites were rewritten for the auto pick with
+// its compensating controls (mechanical pick, verbatim attribution, one-tap override, order
+// stability in the Other-venues expander) — the founder directive and its flag recorded in
+// docs/specs. The record-view suites (engine view, CeFi panel, decimals threading) carry over
+// against the Settlement Field tracker and the untouched StatePanel.
+
 describe('C1 — the unit is printed exactly once on every money line', () => {
-  test('balance and minimum carry ONE unit on the main surface; the fee census folds behind Details', async () => {
+  test('balance and minimum carry ONE unit on the sheet; the fee census folds behind Details', async () => {
     const tree = await mountConvert('250000000', '1');
     // The input leg's unit (ICP) and the output leg's (VCHF) each appear once per money line.
     expect(occurrences(textOf(tree, 'convert-balance'), 'ICP')).toBe(1);
@@ -225,9 +242,9 @@ describe('C1 — the unit is printed exactly once on every money line', () => {
     // …and the amounts themselves are the compact formatter's strings (trailing zeros trimmed).
     expect(textOf(tree, 'convert-balance')).toContain('2.5 ICP');
     expect(textOf(tree, 'convert-min-out')).toContain('0.40782196 VCHF');
-    // The fee census folds behind the ONE Details control (10x-verbosity pass 2026-09-16);
-    // open it and the per-side fee lines still carry exactly one unit each. The old net
-    // end-state line is GONE — the headline number IS the end state.
+    // The fee census folds behind the ONE Details control; open it and the per-side fee
+    // lines still carry exactly one unit each. The old net end-state line is GONE — the
+    // receive figure IS the end state.
     expect(present(tree, 'convert-details')).toBe(true);
     expect(present(tree, 'convert-net')).toBe(false);
     expect(present(tree, 'convert-dpay-fee')).toBe(false);
@@ -250,7 +267,8 @@ describe('C1 — the unit is printed exactly once on every money line', () => {
         d.inputFeeLine('9.99 ICP'),
         d.approvingBody('9.99 ICP', '14:42'),
         d.outputFeeLine('9.99 VCHF'),
-        d.minReceiveLine('9.99 VCHF', '1%'),
+        d.composedOrderLine('ICPSwap', '9.99 VCHF'),
+        d.atLeast('9.99 VCHF', '1%'),
         d.doneBody('9.99 VCHF'),
       ];
       for (const line of lines) {
@@ -259,9 +277,9 @@ describe('C1 — the unit is printed exactly once on every money line', () => {
         // the amount is stated once and no bare unit trails it
         expect(`${locale}: ${line}`).not.toMatch(/9\.99 (ICP|VCHF) \1/);
       }
-      // 'ICP' alone is not countable here — the venue's registry display name may CONTAIN a unit
-      // token, and naming the counterparty is a §5 requirement. Count the FORMATTED amounts
-      // instead: each must appear exactly once, with no bare unit trailing it.
+      // 'ICP' alone is not countable here — the venue's registry display name may CONTAIN a
+      // unit token, and naming the counterparty is a §5 requirement. Count the FORMATTED
+      // amounts instead: each must appear exactly once, with no bare unit trailing it.
       const signed = d.stuckSigned('9.99 ICP', '4.44 VCHF', 'ICPSwap');
       expect(occurrences(signed, '9.99 ICP')).toBe(1);
       expect(occurrences(signed, '4.44 VCHF')).toBe(1);
@@ -272,14 +290,8 @@ describe('C1 — the unit is printed exactly once on every money line', () => {
 
 describe('C2 — the venue publishes no price impact, and none is invented', () => {
   test('NO impact line renders: not a number, not a placeholder, nothing', async () => {
-    // 2026-09-11 (spec V8: display what the venue publishes): the impact line was REMOVED —
-    // it was dpay's own curve-slope estimate from a second reference quote, presented beside
-    // venue facts. The execution protection (minimum received + slippage) stays; impact does
-    // not. A re-introduced line — placeholder, number, or "unmeasurable" sentence — is RED.
     const tree = await mountConvert('250000000', '1');
     expect(present(tree, 'convert-impact')).toBe(false);
-    expect(present(tree, 'convert-impact-warn')).toBe(false);
-    // …and no Text anywhere on the screen claims an impact at all.
     const flat = (c: unknown): string =>
       Array.isArray(c) ? c.map(flat).join('') : typeof c === 'string' || typeof c === 'number' ? String(c) : '';
     const allText = tree.root.findAllByType(Text).map(n => flat(n.props.children)).join(' ');
@@ -289,66 +301,49 @@ describe('C2 — the venue publishes no price impact, and none is invented', () 
 });
 
 describe('C3 — a confirm that can only fail is refused before it is offered', () => {
-  test('zero balance: no form, no confirm, and the next action is named', async () => {
+  test('zero balance: no sheet, no confirm, and the next action is named', async () => {
     const tree = await mountConvert('0', null);
     expect(present(tree, 'convert-fund')).toBe(true);
     expect(present(tree, 'btn-convert-confirm')).toBe(false);
     expect(present(tree, 'convert-amount')).toBe(false);
     const gate = textOf(tree, 'convert-fund');
-    expect(gate).toContain('ICP'); // names the asset the user lacks
-    expect(gate.toLowerCase()).toContain('receive'); // names what to do instead
+    expect(gate).toContain('ICP');
+    expect(gate.toLowerCase()).toContain('receive');
   });
 
   test('the fund gate OFFERS the route it names, exactly as the Pay tab\'s gate does', async () => {
-    // Naming "Receive ▸ My address" and then making the user walk there by hand is half a gate.
-    // The Pay tab's fund gate has always carried the button (PayMode → InstructionPanel
-    // `onPrimary`); Convert now passes the same callback, so the dead end is one tap from its own
-    // remedy (founder rule 2026-08-29: useful practical instructions on every step).
     const onShowDepositAddress = jest.fn();
     const tree = await mountConvert('0', null, {onShowDepositAddress});
-    // Same panel, same derived testID shape the Pay tab's gate uses (`pay-fund-go`).
     const btn = node(tree, 'convert-fund-go');
     expect(btn).not.toBeUndefined();
     expect(btn!.props.accessibilityRole).toBe('button');
-    expect(textOf(tree, 'convert-fund')).toContain('ICP'); // the button names the asset it funds
     await act(async () => { btn!.props.onPress(); });
     expect(onShowDepositAddress).toHaveBeenCalledTimes(1);
   });
 
-  // The funded-account pointer the Pay gate has and this gate did not. It is offerable HONESTLY
-  // only here: the PoC venue trades exactly ONE unordered pair, so the only account that could
-  // ever help is the pair's other leg — already resolved as this screen's output leg. A generic
-  // "switch to BTC" would be a dead offer, which is why the pointer is not generic.
   test('the OTHER leg of the pair is named and offered when it holds something', async () => {
     const onSwitchAsset = jest.fn();
-    // No ICP (currency 8) and 1.2 VCHF (currency 7) — the pair's other side.
     const tree = await mountConvert('0', null, {assetBalances: {8: '0', 7: '120000000'}, onSwitchAsset});
     expect(present(tree, 'convert-fund-other')).toBe(true);
     const line = textOf(tree, 'convert-fund-other-holds');
-    expect(line).toContain('1.2 VCHF'); // what is actually held, in its own ledger unit
-    expect(line).toContain('ICP');            // and what it would become
-    const btn = node(tree, 'btn-convert-fund-other');
-    expect(btn!.props.accessibilityRole).toBe('button');
-    await act(async () => { btn!.props.onPress(); });
-    // Switching selects the OTHER leg's asset id, which re-enters Convert with the legs swapped.
+    expect(line).toContain('1.2 VCHF');
+    expect(line).toContain('ICP');
+    await act(async () => { node(tree, 'btn-convert-fund-other')!.props.onPress(); });
     expect(onSwitchAsset).toHaveBeenCalledWith('ic:7');
   });
 
   test('a pair whose other leg is empty offers nothing — there is no account to point at', async () => {
     const tree = await mountConvert('0', null, {assetBalances: {8: '0', 7: '0'}, onSwitchAsset: jest.fn()});
-    expect(present(tree, 'convert-fund')).toBe(true);       // the deposit route is still the answer
-    expect(present(tree, 'convert-fund-other')).toBe(false); // …and it is the WHOLE answer
+    expect(present(tree, 'convert-fund')).toBe(true);
+    expect(present(tree, 'convert-fund-other')).toBe(false);
   });
 
   test('a balance nobody has read is not a zero — nothing is offered on an unknown', async () => {
-    // The same fail-open rule the gate itself uses: `assetBalances` simply has no entry yet.
     const tree = await mountConvert('0', null, {assetBalances: {8: '0'}, onSwitchAsset: jest.fn()});
     expect(present(tree, 'convert-fund-other')).toBe(false);
   });
 
   test('while the selection is LOCKED the account is still named, only the button is withheld', async () => {
-    // The Pay pointer's rule: knowledge is not gated on the lock (Wallet passes no callback while
-    // an engine holds it, because a mid-flight switch would destroy a captured request).
     const tree = await mountConvert('0', null, {assetBalances: {8: '0', 7: '120000000'}});
     expect(present(tree, 'convert-fund-other')).toBe(true);
     expect(present(tree, 'btn-convert-fund-other')).toBe(false);
@@ -363,11 +358,10 @@ describe('C3 — a confirm that can only fail is refused before it is offered', 
     expect(line).toContain('ICP');
     expect(line).toContain('2.0002 ICP'); // 2 ICP + the two ledger fees it also costs
     expect(line).toContain('1 ICP'); // the balance it is measured against
+    expect(line).toContain(convertEn.smallerAmount); // the named way out (the presets do it)
   });
 
   test('the fee overhead is part of the check: exactly-the-balance is still refused', async () => {
-    // A conversion costs amountIn PLUS two input-ledger fees (the approve and the pool's pull),
-    // so spending the whole balance can never settle.
     const tree = await mountConvert('100000000', '1');
     expect(present(tree, 'convert-insufficient')).toBe(true);
     expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
@@ -378,54 +372,74 @@ describe('C3 — a confirm that can only fail is refused before it is offered', 
     expect(present(tree, 'convert-insufficient')).toBe(false);
     expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(false);
   });
+
+  test('the sheet PRE-FILLS the amount: the full spendable balance net of the route fees', async () => {
+    // 2.5 ICP minus the two ledger fees = 2.4998 ICP — the "convert what I have" default,
+    // on screen before the user touches a thing (brief 5.2).
+    const tree = await mountConvert('250000000', null);
+    expect(node(tree, 'convert-amount')!.props.value).toBe('2.4998');
+    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(false);
+    // The 25% preset is exactly a quarter of that figure.
+    await act(async () => { node(tree, 'convert-preset-25')!.props.onPress(); });
+    expect(node(tree, 'convert-amount')!.props.value).toBe('0.62495');
+  });
+
+  test('a typed amount wins over the prefill; the presets recompute from the balance', async () => {
+    const tree = await mountConvert('250000000', null);
+    await act(async () => { node(tree, 'convert-amount')!.props.onChangeText('1'); });
+    expect(node(tree, 'convert-amount')!.props.value).toBe('1');
+    await act(async () => { node(tree, 'convert-preset-max')!.props.onPress(); });
+    expect(node(tree, 'convert-amount')!.props.value).toBe('2.4998');
+  });
 });
 
-describe('C4 — the slippage chips are labelled', () => {
-  test('the label renders and the chip group carries an accessible name', async () => {
+describe('C4 — slippage is a disclosed default inside Details, not a visible decision', () => {
+  test('the 1% default renders in Details; the chip axis is gone', async () => {
     const tree = await mountConvert('250000000', '1');
+    expect(present(tree, 'convert-slippage-chips')).toBe(false);
+    for (const bps of [50, 100, 300]) {
+      expect(present(tree, `convert-bps-${bps}`)).toBe(false);
+    }
+    expect(textOf(tree, 'convert-min-out')).toContain('1% slippage'); // the floor carries it too
+    await openDetails(tree);
     expect(textOf(tree, 'convert-slippage')).toContain(convertEn.slippageLabel);
-    const row = node(tree, 'convert-slippage-chips')!;
-    expect(row.props.accessibilityLabel).toBe(convertEn.slippageLabel);
-    expect(row.props.accessibilityRole).toBe('radiogroup');
-    // each chip states whether it is the chosen one, not just its number
-    const chosen = node(tree, 'convert-bps-100')!;
-    expect(chosen.props.accessibilityState).toEqual({selected: true});
-    expect(node(tree, 'convert-bps-300')!.props.accessibilityState).toEqual({selected: false});
+    expect(textOf(tree, 'convert-slippage')).toContain('1%');
   });
 });
 
 describe('C5 — hierarchy, with every §5 disclosure kept', () => {
-  test('the headline states what the user receives', async () => {
+  test('the receive hero reads at standard display precision; the venue verbatim stays in Details', async () => {
     const tree = await mountConvert('250000000', '1');
     const headline = textOf(tree, 'convert-headline');
-    expect(headline).toContain('0.41184138 VCHF'); // the net end-state amount, as the headline
-    expect(headline).toContain(convertEn.receiveHeadline);
+    // VCHF is currency-class: the hero reads like money (2 decimals), the one ≈ in the copy.
+    expect(headline).toContain(convertEn.youReceive('0.41 VCHF'));
+    expect(headline).toContain(convertEn.youConvert('1 ICP'));
+    // The venue's verbatim figure is NOT lost — Details carries the quote's own GROSS
+    // figure, unchanged, attributed (the net hero subtracts only the disclosed ledger fee).
+    await openDetails(tree);
+    expect(textOf(tree, 'convert-quote-verbatim')).toContain(convertEn.quoteVerbatim('ICPSwap', '0.41194138 VCHF'));
   });
 
-  test('not one §5 census fact was dropped by the verbosity pass — they fold behind Details', async () => {
+  test('not one §5 census fact was dropped — the sheet carries them; the census folds behind Details', async () => {
     const tree = await mountConvert('250000000', '1');
-    // Main surface: the decision facts. The net end-state line is GONE (the headline IS the
-    // end state) and dpay's paid-nothing line is GONE from every locale and render site.
-    expect(present(tree, 'convert-details')).toBe(true);
-    for (const id of ['convert-min-out', 'convert-slippage', 'convert-quote-source']) {
+    // On the open sheet: the decision facts — receive figure, attribution, floor, the
+    // ONE venue pick line, the CTA. The net/dpay lines are GONE (asserted below).
+    for (const id of ['convert-min-out', 'convert-quote-source', 'convert-venue-auto', 'convert-receive']) {
       expect(`${id}: ${present(tree, id)}`).toBe(`${id}: true`);
     }
     expect(present(tree, 'convert-net')).toBe(false);
     expect(present(tree, 'convert-dpay-fee')).toBe(false);
-    // impact is the ONE §5-era line that is deliberately gone (V8, 2026-09-11): the venue
-    // publishes no such figure, so the checklist must not render one.
     expect(present(tree, 'convert-impact')).toBe(false);
     // One tap opens the census: every folded §5 fact is still rendered.
     await openDetails(tree);
     for (const id of [
+      'convert-slippage',
       'convert-counterparty', 'convert-rate', 'convert-pool-fee',
       'convert-in-fee', 'convert-out-fee', 'convert-venue-disclosure',
       'convert-refusal',
     ]) {
       expect(`${id}: ${present(tree, id)}`).toBe(`${id}: true`);
     }
-    // the counterparty disclosure names the venue, its pool, and who signs — trimmed to bare
-    // attribution (the licensing tail is gone; quoteSource carries whose quote this is)
     const cp = textOf(tree, 'convert-counterparty');
     expect(cp).toContain('ICPSwap');
     expect(cp).toContain('65mrh-fqaaa-aaaar-qapoa-cai');
@@ -433,24 +447,28 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
     expect(cp).not.toContain('not a licensed provider and not dpay');
   });
 
+  test('the pick line is a MECHANICAL disclosure — it states the pick, never a "best" claim', async () => {
+    const tree = await mountConvert('250000000', '1');
+    const pickLine = textOf(tree, 'convert-venue-auto');
+    expect(pickLine).toContain('Executed via ICPSwap'); // the executor, named
+    expect(pickLine.toLowerCase()).not.toContain('best'); // the designed-out word, absent
+    // The attribution + timestamp ride their own line, exactly as before.
+    expect(textOf(tree, 'convert-quote-source')).toContain('Quote from ICPSwap, fetched');
+  });
+
   test('the displayed rate is EXACTLY the derivation of the venue\'s own reply digits', async () => {
-    // scaledRate (ConvertMode) = out×1e8÷in, floored — recomputed here independently so the
-    // rendered string is pinned to the pure derivation, never to a hand-copied literal.
     const tree = await mountConvert('250000000', '1');
     const scaled = (BigInt(QUOTE.amountOutGross) * 10n ** 8n) / BigInt(QUOTE.amountIn);
     const expected = fmtAssetCompact(scaled.toString(), 8, 'VCHF');
-    expect(expected).toBe('0.41194138 VCHF'); // 41194138e8 / 100000000 — the derivation itself
-    await openDetails(tree); // the rate folds behind Details (10x-verbosity pass 2026-09-16)
+    expect(expected).toBe('0.41194138 VCHF');
+    await openDetails(tree);
     expect(textOf(tree, 'convert-rate')).toContain(expected);
     expect(textOf(tree, 'convert-rate')).toContain(convertEn.rateLabel('ICP', 'VCHF'));
   });
 
   test('the single-venue disclosure renders from the registry key, exactly once', async () => {
     const tree = await mountConvert('250000000', '1');
-    // The bundled venue's disclosure_key is 'icpswap' (dfx/catalog_truth.json venues[]) — the
-    // known sentence, not the generic fallback, and only ONE Text carries it (counted by type:
-    // RN mirrors testID onto the host layer under a Text, so raw findAll double-counts).
-    await openDetails(tree); // the disclosure folds behind Details (verbosity pass 2026-09-16)
+    await openDetails(tree);
     const expected = convertEn.disclosures.byKey.icpswap('ICPSwap');
     expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(expected);
     expect(tree.root.findAllByType(Text).filter(n => n.props.testID === 'convert-venue-disclosure')).toHaveLength(1);
@@ -458,26 +476,28 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
 
   test('the pool principal is its own line, so it can never wrap mid-token', async () => {
     const tree = await mountConvert('250000000', '1');
-    // Exactly ONE Text element carries it, and it carries nothing else — so the 27-character
-    // hyphenated principal is a line, not a run inside a wrapping paragraph. It lives behind
-    // the Details control (verbosity pass 2026-09-16); open it first.
     await openDetails(tree);
     const principals = tree.root.findAllByType(Text).filter(n => n.props.testID === 'convert-pool-principal');
     expect(principals).toHaveLength(1);
     expect(textOf(tree, 'convert-pool-principal').trim()).toBe('65mrh-fqaaa-aaaar-qapoa-cai');
   });
+
+  test('the CTA names the amount ("Convert 1 ICP") and carries both testIDs of the migration', async () => {
+    const tree = await mountConvert('250000000', '1');
+    expect(textOf(tree, 'convert-cta')).toBe(convertEn.ctaConvert('1 ICP'));
+    // The legacy confirm testID lives on the Pressable itself (the alias the flows drive).
+    expect(node(tree, 'btn-convert-confirm')!.props.accessibilityRole).toBe('button');
+  });
 });
 
-// --- V5 — the venue chooser, when the relay serves TWO venues on the pair -------------------------
-// The three red lines (spec 2026-09-08), pinned as STRUCTURAL facts of the rendered screen:
-//   (1) rows keep REGISTRY order no matter what they quote (never sorted by output);
-//   (2) nothing is preselected — no row is picked, no "obviously better" venue is highlighted;
-//   (3) no last-used memory — the amount can change, the quotes can swap places, and the
-//       selection stays exactly what the user tapped (here: still nothing, mid-test).
-// The two-venue world is simulated by arming the runtime overlay (setRuntimeVenues) with the
-// real bundled icpswap entry plus the offline fixture venue `icpswap-fixture-b` — the same
-// second venue the test-helpers relay serves behind POST /api/v1/test/venue.
-describe('V5 — the venue chooser (two venues on one pair)', () => {
+// --- AUTO — the mechanical venue pick (supersedes the V5 no-preselection chooser) -------------
+// The founder's 2026-09-26 directive: dpay picks the venue, mechanically, and discloses the
+// pick as a fact ("Executed via X, highest quoted rate of N venues"). The compensating
+// controls, pinned here: the pick FOLLOWS the highest net quoted output (and follows it again
+// if the market moves before the user confirms); the quote is the venue's own attributed +
+// timestamped number; the word "best" never appears; every other row sits behind the ONE
+// Other-venues expander in REGISTRY order, each still one tap away.
+describe('AUTO — the disclosed mechanical venue pick', () => {
   const VENUE_A = BUNDLED_VENUES.find(v => v.venue_id === 'icpswap')!;
   const FIXTURE_POOL = '6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7';
   const VENUE_B: VenueEntry = {
@@ -494,7 +514,7 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     ...QUOTE,
     venueId: VENUE_B.venue_id,
     pool: FIXTURE_POOL,
-    amountOutGross: '90000000', // B quotes BETTER than A's 41194138 — and must still render SECOND
+    amountOutGross: '90000000', // B quotes BETTER than A — so the mechanical pick takes B
     feeMillionths: 1000,
   };
   const MATH_B: ConvertMath = {
@@ -503,29 +523,7 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     minOut: '89100000',
     netOut: '89990000',
   };
-  const REC_B: ConvertRecord = {
-    id: 'rec-b',
-    createdAtMs: 0,
-    step: 'approving',
-    venueId: VENUE_B.venue_id,
-    inCurrency: 8,
-    outCurrency: 7,
-    inLedger: QUOTE.tokenInLedger,
-    outLedger: QUOTE.tokenOutLedger,
-    inSymbol: 'ICP',
-    outSymbol: 'VCHF',
-    amountIn: '100000000',
-    expectedGross: '90000000',
-    expectedNet: '89990000',
-    inFee: '10000',
-    outFee: '10000',
-    slippageBps: 100,
-    legs: [],
-  };
-
-  /** The row testIDs in RENDER order — the never-rank red line, read straight off the tree.
-   *  RN's Pressable mirrors testID onto its internal wrapper layers, so duplicates appear in
-   *  `findAll`; what matters (and what is asserted) is the ORDER OF FIRST APPEARANCE. */
+  /** The row testIDs in first-appearance order (RN mirrors testID onto wrapper layers). */
   const rowOrder = (tree: renderer.ReactTestRenderer): string[] => {
     const seen: string[] = [];
     for (const n of tree.root.findAll(
@@ -537,361 +535,123 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     }
     return seen;
   };
-
-  let quoteForB = '90000000';
-  let quoteForA = QUOTE_A.amountOutGross;
+  const openVenues = async (tree: renderer.ReactTestRenderer): Promise<void> => {
+    await act(async () => {
+      node(tree, 'btn-convert-venues-other')!.props.onPress();
+    });
+  };
 
   beforeEach(() => {
     setRuntimeVenues([VENUE_A, VENUE_B]);
-    quoteForB = '90000000';
-    quoteForA = QUOTE_A.amountOutGross;
     jest.mocked(fetchConvertQuote).mockImplementation((async (_r: string, _in: string, _out: string, _amt: string, opts?: {venue?: VenueEntry}) =>
-      Promise.resolve(opts?.venue?.venue_id === VENUE_B.venue_id
-        ? {...QUOTE_B, amountOutGross: quoteForB}
-        : {...QUOTE_A, amountOutGross: quoteForA}) as never));
+      Promise.resolve(opts?.venue?.venue_id === VENUE_B.venue_id ? QUOTE_B : QUOTE_A) as never));
     jest.mocked(deriveConvertMath).mockImplementation((async (q: ConvertQuote) =>
-      (q.venueId === VENUE_B.venue_id ? {...MATH_B, grossOut: q.amountOutGross} : MATH) as never));
-    jest.mocked(prepareConvertRecord).mockResolvedValue(REC_B as never);
+      (q.venueId === VENUE_B.venue_id ? MATH_B : MATH) as never));
     jest.mocked(adoptConvertRecord).mockResolvedValue(undefined as never);
   });
   afterEach(() => {
-    setRuntimeVenues(null); // never leak the two-venue overlay into the C1–C5 suites
+    setRuntimeVenues(null); // never leak the two-venue overlay into the other suites
     jest.mocked(convertResumeSnapshot).mockReturnValue({});
   });
 
-  test('a relay-demoted (settlement-degraded) row renders the honest slow line — the app keeps the served order verbatim', async () => {
-    // The relay serves a flagged venue demoted to the tail; the app NEVER re-sorts (V5) —
-    // it renders the order exactly as served and marks the degraded row with the slow line.
-    setRuntimeVenues([
-      {...VENUE_B, health: {status: 'degraded', settle_seconds: 7200, measured_at: 1758000000}},
-      VENUE_A,
-    ]);
+  test('the pick FOLLOWS the highest net quoted output and says so — with the count', async () => {
     const tree = await mountConvert('250000000', '1');
-    expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_B.venue_id}`, `convert-venue-${VENUE_A.venue_id}`]);
-    expect(textOf(tree, `convert-venue-${VENUE_B.venue_id}-slow`)).toContain('Recently slow to settle.');
-    expect(present(tree, `convert-venue-${VENUE_A.venue_id}-slow`)).toBe(false);
+    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueLine(VENUE_B.display_name, 2));
+    // The hero figure is B's own number at the hero's standard display precision — the pick
+    // never blends or recomputes; the venue's VERBATIM figure sits in Details, attributed.
+    expect(textOf(tree, 'convert-receive')).toContain(convertEn.youReceive('0.89 VCHF'));
+    await openDetails(tree);
+    expect(textOf(tree, 'convert-quote-verbatim')).toContain(convertEn.quoteVerbatim(VENUE_B.display_name, fmtAssetCompact(QUOTE_B.amountOutGross, 8, 'VCHF')));
+    expect(textOf(tree, 'convert-quote-source')).toContain(VENUE_B.display_name);
+    // Armed at the pick: tap 2 exists without any further decision.
+    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(false);
   });
 
-  test('two rows render, in registry order, NONE preselected; confirm + headline stay withheld', async () => {
+  test('every other row sits behind the ONE expander, verbatim in REGISTRY order', async () => {
     const tree = await mountConvert('250000000', '1');
-    expect(present(tree, 'convert-venues')).toBe(true);
-    expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_A.venue_id}`, `convert-venue-${VENUE_B.venue_id}`]);
-    // B quotes better (0.90000000 vs 0.41194138) yet stays row 2 — the never-rank red line.
-    expect(textOf(tree, `convert-venue-${VENUE_B.venue_id}-quote`)).toContain('0.9 VCHF');
-    // NOTHING is selected: both rows radio-off, the none-selected line shows, and the decision
-    // surfaces (headline, checklist, confirm) that follow a pick are all absent/disabled.
-    for (const id of [VENUE_A.venue_id, VENUE_B.venue_id]) {
-      expect(node(tree, `convert-venue-${id}`)!.props.accessibilityState).toEqual({checked: false});
-    }
-    expect(present(tree, 'convert-venue-none')).toBe(true);
-    expect(textOf(tree, 'convert-venue-none')).toContain(convertEn.venueNoneSelected);
-    expect(present(tree, 'convert-headline')).toBe(false);
-    // The checklist card carries no testID of its own — its absence is proven by its lines.
-    expect(present(tree, 'convert-counterparty')).toBe(false);
-    expect(present(tree, 'convert-venue-disclosure')).toBe(false); // no pick → no disclosure
-    expect(present(tree, 'convert-min-out')).toBe(false);
-    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
+    // Collapsed by default.
+    expect(present(tree, 'convert-venues-expanded')).toBe(false);
+    await openVenues(tree);
+    expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_A.venue_id}`]);
+    expect(textOf(tree, `convert-venue-${VENUE_A.venue_id}-quote`)).toContain('0.41194138 VCHF');
   });
 
-  test('row order + no-selection survive the quotes SWAPPING places (never ranked, never remembered)', async () => {
+  test('row order in the expander survives the quotes SWAPPING places (registry order is the identity)', async () => {
+    jest.mocked(fetchConvertQuote).mockImplementation((async (_r: string, _in: string, _out: string, _amt: string, opts?: {venue?: VenueEntry}) =>
+      Promise.resolve(opts?.venue?.venue_id === VENUE_B.venue_id
+        ? {...QUOTE_B, amountOutGross: '20000000'}
+        : {...QUOTE_A, amountOutGross: '90000000'}) as never));
     const tree = await mountConvert('250000000', '1');
-    expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_A.venue_id}`, `convert-venue-${VENUE_B.venue_id}`]);
-    // Flip which venue quotes better — A now far above B — and re-key the amount to refetch.
-    quoteForA = '90000000';
-    quoteForB = '20000000';
-    await act(async () => {
-      node(tree, 'convert-amount')!.props.onChangeText('12');
-    });
-    expect(textOf(tree, `convert-venue-${VENUE_A.venue_id}-quote`)).toContain('0.9 VCHF');
+    // Now A quotes strictly better — the PICK flips to A, mechanically…
+    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueLine(VENUE_A.display_name, 2));
+    // …and the expander STILL lists the other row first-served, registry order, unchanged.
+    await openVenues(tree);
+    expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_B.venue_id}`]);
     expect(textOf(tree, `convert-venue-${VENUE_B.venue_id}-quote`)).toContain('0.2 VCHF');
-    // The refetch really happened (values above prove it) and the order did NOT move.
-    expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_A.venue_id}`, `convert-venue-${VENUE_B.venue_id}`]);
-    // Still nothing selected: no last-used default appears just because rates diverged.
-    for (const id of [VENUE_A.venue_id, VENUE_B.venue_id]) {
-      expect(node(tree, `convert-venue-${id}`)!.props.accessibilityState).toEqual({checked: false});
-    }
-    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
   });
 
-  test('picking fixture B executes through pool B: headline + counterparty follow the pick, record carries venueId', async () => {
+  test('an override is ONE tap: the attribution switches, the mechanical-pick line stands down', async () => {
     const tree = await mountConvert('250000000', '1');
+    await openVenues(tree);
     await act(async () => {
-      node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.onPress();
+      node(tree, `convert-venue-${VENUE_A.venue_id}`)!.props.onPress();
     });
-    // The decision surfaces appear under the pick and quote venue B's OWN numbers.
-    expect(present(tree, 'convert-venue-none')).toBe(false);
-    expect(node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.accessibilityState).toEqual({checked: true});
-    expect(node(tree, `convert-venue-${VENUE_A.venue_id}`)!.props.accessibilityState).toEqual({checked: false});
-    expect(textOf(tree, 'convert-headline')).toContain('0.8999 VCHF');
-    await openDetails(tree); // the pool principal folds behind Details (verbosity pass)
-    expect(textOf(tree, 'convert-pool-principal').trim()).toBe(FIXTURE_POOL); // B's pool, not A's
-    // Confirm re-quotes the PICKED venue only and executes through it.
+    // The user's pick governs: A's own quote + floor + attribution on the card, no pick
+    // criterion line (the mechanical disclosure describes the AUTO pick, not a user choice).
+    expect(present(tree, 'convert-venue-auto')).toBe(false);
+    expect(textOf(tree, 'convert-quote-source')).toBe(convertEn.quoteSource(nonBreakingClock(new Date(QUOTE_A.fetchedAtMs)), VENUE_A.display_name));
+    expect(textOf(tree, 'convert-min-out')).toContain(fmtAssetCompact(MATH.minOut, 8, 'VCHF'));
+    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(false);
+  });
+
+  test('a relay-demoted (settlement-degraded) row keeps the honest slow line — on the card when picked, in the expander when not', async () => {
+    setRuntimeVenues([VENUE_A, {...VENUE_B, health: {status: 'degraded', settle_seconds: 7200, measured_at: 1758000000}}]);
+    const tree = await mountConvert('250000000', '1');
+    // B still quotes better and the mechanical pick takes it — the slow line renders beside
+    // the attribution, honestly naming what the relay measured (2026-09-20 SLA gate).
+    expect(textOf(tree, `convert-venue-${VENUE_B.venue_id}-slow`)).toContain(convertEn.venueSlow);
+    // Overriding to A moves the slow line into the expander's B row (verbatim registry row).
+    await openVenues(tree);
+    await act(async () => {
+      node(tree, `convert-venue-${VENUE_A.venue_id}`)!.props.onPress();
+    });
+    // The expander is still open and now holds B — its row carries the same honesty line.
+    expect(textOf(tree, `convert-venue-${VENUE_B.venue_id}-slow`)).toContain(convertEn.venueSlow);
+  });
+
+  test('a pair with ONE quotable venue discloses the single form — no comparison that never happened', async () => {
+    setRuntimeVenues(null); // the bundled registry alone: exactly one quotable venue on the pair
+    const tree = await mountConvert('250000000', '1');
+    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueSingle(VENUE_A.display_name));
+    // The pick is already armed: the common case is literally two taps.
+    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(false);
+  });
+
+  test('confirming at the pick signs THE PICK\'S venue (the record carries its venueId)', async () => {
+    const rec: ConvertRecord = {
+      id: 'rec-auto', createdAtMs: 0, step: 'approving', venueId: VENUE_B.venue_id,
+      inCurrency: 8, outCurrency: 7,
+      inLedger: QUOTE.tokenInLedger, outLedger: QUOTE.tokenOutLedger,
+      inSymbol: 'ICP', outSymbol: 'VCHF',
+      amountIn: '100000000', expectedGross: '90000000', expectedNet: '89990000',
+      inFee: '10000', outFee: '10000', slippageBps: 100, legs: [],
+    };
+    jest.mocked(prepareConvertRecord).mockResolvedValue(rec as never);
+    const tree = await mountConvert('250000000', '1');
     await act(async () => {
       node(tree, 'btn-convert-confirm')!.props.onPress();
     });
-    expect(jest.mocked(prepareConvertRecord).mock.calls.length).toBe(1);
-    const arg = jest.mocked(prepareConvertRecord).mock.calls[0][0] as {quote: ConvertQuote};
-    expect(arg.quote.venueId).toBe(VENUE_B.venue_id);
-    expect(arg.quote.pool).toBe(FIXTURE_POOL);
-    expect(jest.mocked(adoptConvertRecord).mock.calls.length).toBe(1); // handed to the ENGINE
-    expect(jest.mocked(adoptConvertRecord).mock.calls[0][0]).toBe(REC_B); // the record it prepared
-    // The screen moved to the state panel for a record whose venue is B (looked-up facts follow it).
-    expect(present(tree, 'convert-approving')).toBe(true);
-  });
-
-  test('the PICKED venue\'s disclosure renders once, from its own registry disclosure_key', async () => {
-    const tree = await mountConvert('250000000', '1');
-    // Before a pick the checklist is withheld, so the disclosure is too (pinned above); under
-    // the pick it is B's OWN key ('icpswap' — the fixture carries the same key as the real
-    // venue, so the sentence must name B, proving it followed the pick and not a default).
-    await act(async () => {
-      node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.onPress();
-    });
-    await openDetails(tree); // the disclosure folds behind Details (verbosity pass)
-    const expected = convertEn.disclosures.byKey.icpswap(VENUE_B.display_name);
-    expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(expected);
-    expect(tree.root.findAllByType(Text).filter(n => n.props.testID === 'convert-venue-disclosure')).toHaveLength(1);
-    // The disclosure is CHECKLIST-ONLY (V8): the chooser rows never repeat it — two rows would
-    // otherwise render the same sentence twice on one screen.
-    expect(textOf(tree, 'convert-venues')).not.toContain(expected);
-  });
-
-  test('the two-venue rate follows the PICKED venue\'s own reply digits', async () => {
-    const tree = await mountConvert('250000000', '1');
-    await act(async () => {
-      node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.onPress();
-    });
-    // B's own quote: 90000000 out for 100000000 in ⇒ scaled 90000000 ⇒ exactly this string.
-    const scaled = (BigInt(QUOTE_B.amountOutGross) * 10n ** 8n) / BigInt(QUOTE_B.amountIn);
-    await openDetails(tree); // the rate folds behind Details (verbosity pass)
-    expect(textOf(tree, 'convert-rate')).toContain(fmtAssetCompact(scaled.toString(), 8, 'VCHF'));
-    expect(textOf(tree, 'convert-rate')).toContain('0.9 VCHF');
-  });
-
-  test('a picked-but-unquoted venue is attributed HONESTLY — never another venue\'s name or pool', async () => {
-    // The gap this pins (audit 2026-09-11): venue B's quote ERRORED while the user has B picked
-    // (the same shape as a quote still in flight or cleared by a re-key). Nothing can sign
-    // (canConfirm needs a live quote) — but the PRE-SIGN disclosure used to fall back to the
-    // registered default, naming venue A + A's pool under a B pick. The honest shape: B's own
-    // name on the counterparty and disclosure lines, and NO pool principal at all until B's own
-    // number stands behind it — never another venue's principal.
-    jest.mocked(fetchConvertQuote).mockImplementation((async (_r: string, _in: string, _out: string, _amt: string, opts?: {venue?: VenueEntry}) =>
-      opts?.venue?.venue_id === VENUE_B.venue_id
-        ? Promise.reject(new Error('venue B unreachable'))
-        : Promise.resolve({...QUOTE_A, amountOutGross: quoteForA}) as never));
-    const tree = await mountConvert('250000000', '1');
-    // B's row carries its OWN error line; the pick still lands (a pick is a user decision).
-    expect(present(tree, `convert-venue-${VENUE_B.venue_id}-err`)).toBe(true);
-    await act(async () => {
-      node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.onPress();
-    });
-    expect(node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.accessibilityState).toEqual({checked: true});
-    // The counterparty + disclosure name the PICKED venue — B, not the registered default A.
-    await openDetails(tree); // they fold behind Details (verbosity pass 2026-09-16)
-    expect(textOf(tree, 'convert-counterparty')).toContain(VENUE_B.display_name);
-    expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(convertEn.disclosures.byKey.icpswap(VENUE_B.display_name));
-    // No pool principal renders, and venue A's pool appears NOWHERE on the screen — the old
-    // fallback printed it inside the counterparty card. Full-text dump proves the absence.
-    expect(present(tree, 'convert-pool-principal')).toBe(false);
-    const flat = (c: unknown): string =>
-      Array.isArray(c) ? c.map(flat).join('') : typeof c === 'string' || typeof c === 'number' ? String(c) : '';
-    const allText = tree.root.findAllByType(Text).map(n => flat(n.props.children)).join('\n');
-    expect(allText).not.toContain(QUOTE_A.pool);
-    // And nothing can sign on another venue's behalf: the confirm stays disabled.
-    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
+    expect(jest.mocked(prepareConvertRecord)).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(adoptConvertRecord)).toHaveBeenCalledTimes(1);
+    const adopted = jest.mocked(adoptConvertRecord).mock.calls[0][0] as ConvertRecord;
+    expect(adopted.venueId).toBe(VENUE_B.venue_id);
+    // The screen floods to the Settlement Field: the in-flight tracker with the signing copy.
+    expect(present(tree, 'convert-state')).toBe(true);
+    expect(present(tree, 'convert-inflight')).toBe(true);
+    expect(textOf(tree, 'convert-inflight')).toContain(convertEn.signing);
   });
 });
 
-// --- V9 — venue-agnostic chooser invariants: arbitrary venue sets through the overlay seam ----------
-// Waves 1–3 pinned the chooser against exactly two known venues; V9's ask is that NOTHING here
-// knows the venue count or names. Every set below is injected through setRuntimeVenues (the same
-// seam loadVenueRegistry arms in production), incl. a rank-bait-hostile display name — so a
-// crossing by ANY future venue (a third, a fourth, a nastily-named one) fails these, not just
-// icpswap. INV-4's relay half is in tests/relay.rs, its quote-mapping half in venueInvariants.
-describe('V9 — chooser invariants parametric over arbitrary venue sets', () => {
-  // Self-contained fixture set (the V5 describe above keeps its own): bundled A + fixture B +
-  // an invented hostile C. Nothing outside this block knows these venues — that is the point.
-  const VENUE_A = BUNDLED_VENUES.find(v => v.venue_id === 'icpswap')!;
-  const POOL_B = '6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7';
-  const VENUE_B: VenueEntry = {
-    venue_id: 'icpswap-fixture-b',
-    display_name: 'ICPSwap (offline fixture)',
-    kind: 'ic_amm',
-    endpoint: POOL_B,
-    pair_ledgers: [QUOTE.tokenInLedger, QUOTE.tokenOutLedger],
-    testnet: true,
-    disclosure_key: 'icpswap',
-  };
-  const POOL_C = '2xh5b-7xkab-aaaaa-qbkcq-cai'; // invented — a hostile third venue's "pool"
-  const VENUE_C: VenueEntry = {
-    venue_id: 'hostile-rankbait',
-    display_name: 'Best Rate Swap ⚡ Zero Fees', // rank-bait: nothing may sort/rank/label by it
-    kind: 'ic_amm',
-    endpoint: POOL_C,
-    pair_ledgers: [QUOTE.tokenInLedger, QUOTE.tokenOutLedger],
-    testnet: false,
-    disclosure_key: 'icpswap',
-  };
-  const QUOTE_A = QUOTE;
-  const QUOTE_B: ConvertQuote = {...QUOTE, venueId: VENUE_B.venue_id, pool: POOL_B, amountOutGross: '90000000', feeMillionths: 1000};
-  const QUOTE_C: ConvertQuote = {...QUOTE, venueId: VENUE_C.venue_id, pool: POOL_C, amountOutGross: '70000000', feeMillionths: 4321};
-  const MATH_A = MATH;
-  const MATH_B: ConvertMath = {...MATH, grossOut: '90000000', minOut: '89100000', netOut: '89990000'};
-  const MATH_C: ConvertMath = {...MATH, grossOut: '70000000', minOut: '69300000', netOut: '69990000'};
-  const REC_ANY: ConvertRecord = {
-    id: 'rec-v9',
-    createdAtMs: 0,
-    step: 'approving',
-    venueId: VENUE_B.venue_id,
-    inCurrency: 8,
-    outCurrency: 7,
-    inLedger: QUOTE.tokenInLedger,
-    outLedger: QUOTE.tokenOutLedger,
-    inSymbol: 'ICP',
-    outSymbol: 'VCHF',
-    amountIn: '100000000',
-    expectedGross: '90000000',
-    expectedNet: '89990000',
-    inFee: '10000',
-    outFee: '10000',
-    slippageBps: 100,
-    legs: [],
-  };
-
-  // Distinct outputs per venue: A 0.41194138 < C 0.70000000 < B 0.90000000 — the ordering the
-  // rows must NOT follow (registry order wins over every rank-bait temptation).
-  const QUOTES: Record<string, ConvertQuote> = {
-    [VENUE_A.venue_id]: QUOTE_A,
-    [VENUE_B.venue_id]: QUOTE_B,
-    [VENUE_C.venue_id]: QUOTE_C,
-  };
-  const MATHS: Record<string, ConvertMath> = {
-    [VENUE_A.venue_id]: MATH_A,
-    [VENUE_B.venue_id]: MATH_B,
-    [VENUE_C.venue_id]: MATH_C,
-  };
-  const SETS: ReadonlyArray<readonly VenueEntry[]> = [
-    [VENUE_A, VENUE_B],
-    [VENUE_A, VENUE_B, VENUE_C],
-  ];
-
-  /** Row testIDs in render order for an ARBITRARY venue set (first appearance dedup — RN's
-   *  Pressable mirrors testID onto wrapper layers). */
-  const rowOrderOf = (tree: renderer.ReactTestRenderer, venues: readonly VenueEntry[]): string[] => {
-    const wanted = venues.map(v => `convert-venue-${v.venue_id}`);
-    const seen: string[] = [];
-    for (const n of tree.root.findAll(
-      (x: {props?: {testID?: unknown}}) => x.props != null && wanted.includes(String(x.props.testID)),
-    )) {
-      const id = String(n.props.testID);
-      if (!seen.includes(id)) seen.push(id);
-    }
-    return seen;
-  };
-
-  beforeEach(() => {
-    jest.mocked(fetchConvertQuote).mockImplementation((async (_r: string, _in: string, _out: string, _amt: string, opts?: {venue?: VenueEntry}) =>
-      Promise.resolve(QUOTES[opts?.venue?.venue_id ?? ''] ?? QUOTE_A) as never));
-    jest.mocked(deriveConvertMath).mockImplementation((async (q: ConvertQuote) =>
-      (MATHS[q.venueId] ?? MATH_A) as never));
-    jest.mocked(prepareConvertRecord).mockResolvedValue(REC_ANY as never);
-    jest.mocked(adoptConvertRecord).mockResolvedValue(undefined as never);
-  });
-  afterEach(() => {
-    setRuntimeVenues(null);
-  });
-
-  describe.each(SETS.map(venues => [String(venues.length), venues] as const))
-  ('%s-venue registry (INV-5: registry order, no preselection, hostile names included)', (_n, venues) => {
-    beforeEach(() => {
-      setRuntimeVenues(venues);
-    });
-
-    test('rows render in REGISTRY order — never by quote, name, or kind', async () => {
-      const tree = await mountConvert('250000000', '1');
-      expect(rowOrderOf(tree, venues)).toEqual(venues.map(v => `convert-venue-${v.venue_id}`));
-      // The hostile display name renders as the row's own label — registry-driven, not whitelisted.
-      if (venues.some(v => v.venue_id === VENUE_C.venue_id)) {
-        expect(textOf(tree, `convert-venue-${VENUE_C.venue_id}`)).toContain(VENUE_C.display_name);
-      }
-    });
-
-    test('nothing is preselected for ANY set: every radio off, confirm withheld, no headline', async () => {
-      const tree = await mountConvert('250000000', '1');
-      for (const v of venues) {
-        expect(node(tree, `convert-venue-${v.venue_id}`)!.props.accessibilityState).toEqual({checked: false});
-      }
-      expect(present(tree, 'convert-venue-none')).toBe(true);
-      expect(present(tree, 'convert-headline')).toBe(false);
-      expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
-    });
-
-    test('INV-4 render half: each row shows ITS OWN venue reply, byte-identical to the echo', async () => {
-      const tree = await mountConvert('250000000', '1');
-      for (const v of venues) {
-        // The "Quote: " prefix is GONE (verbosity pass 2026-09-16): the row is the venue's
-        // name and the compact amount, nothing else.
-        const expected = fmtAssetCompact(QUOTES[v.venue_id]!.amountOutGross, 8, 'VCHF');
-        expect(textOf(tree, `convert-venue-${v.venue_id}-quote`).trim()).toBe(expected);
-        expect(textOf(tree, `convert-venue-${v.venue_id}-quote`)).not.toContain('Quote:');
-      }
-    });
-
-    test('INV-6 (verbosity pass): the dpay-paid-nothing line is GONE under every pick; the census is one tap away', async () => {
-      const tree = await mountConvert('250000000', '1');
-      for (const v of venues) {
-        await act(async () => {
-          node(tree, `convert-venue-${v.venue_id}`)!.props.onPress();
-        });
-        // The line was deleted from every locale and every render site (10x-verbosity pass
-        // 2026-09-16); attribution lives with quoteSource on the headline.
-        expect(present(tree, 'convert-dpay-fee')).toBe(false);
-        expect(present(tree, 'convert-net')).toBe(false);
-        // the Details control is present under every pick; opening it reveals the census
-        expect(present(tree, 'convert-details')).toBe(true);
-        await openDetails(tree);
-        expect(present(tree, 'convert-counterparty')).toBe(true);
-        await act(async () => {
-          node(tree, 'convert-details')!.props.onPress(); // re-close for the next pick
-        });
-      }
-    });
-  });
-
-  // The registry's disclosure_key is DATA: a venue this catalog has no sentence for (a newer
-  // relay serving a key this build never shipped) must still get an HONEST generic disclosure —
-  // fail closed, never blank, never a guess at the unknown venue's nature.
-  test('unknown disclosure_key falls back to the generic sentence, naming the venue', async () => {
-    const POOL_D = 'b7d2z-qzdqb-aaaaa-qbzkq-cai'; // invented — carries a key no locale knows
-    const VENUE_D: VenueEntry = {
-      venue_id: 'venue-unknown-key',
-      display_name: 'Mystery Venue',
-      kind: 'ic_amm',
-      endpoint: POOL_D,
-      pair_ledgers: [QUOTE.tokenInLedger, QUOTE.tokenOutLedger],
-      testnet: false,
-      disclosure_key: 'no-such-key',
-    };
-    setRuntimeVenues([VENUE_A, VENUE_D]); // overrides the describe.each overlay for this test
-    jest.mocked(fetchConvertQuote).mockImplementation((async (_r: string, _in: string, _out: string, _amt: string, opts?: {venue?: VenueEntry}) =>
-      Promise.resolve(opts?.venue?.venue_id === VENUE_D.venue_id
-        ? {...QUOTE, venueId: VENUE_D.venue_id, pool: POOL_D}
-        : QUOTE) as never));
-    jest.mocked(deriveConvertMath).mockImplementation((async () => MATH as never));
-    const tree = await mountConvert('250000000', '1');
-    await act(async () => {
-      node(tree, `convert-venue-${VENUE_D.venue_id}`)!.props.onPress();
-    });
-    await openDetails(tree); // the disclosure folds behind Details (verbosity pass)
-    expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(convertEn.disclosures.generic(VENUE_D.display_name));
-    expect(textOf(tree, 'convert-venue-disclosure')).not.toContain(convertEn.disclosures.byKey.icpswap(VENUE_D.display_name));
-  });
-});
-
-// --- V6 — the screen is a VIEW onto the engine, never a private executor --------------------------
-// The resume engine (app/convertResume.ts, mounted from Wallet) owns all driving. What the screen
-// owes the user: the newest live record renders ON OPEN (no private store read, no adoption),
-// the stuck unknown stays honestly watchable, and the acknowledge gesture reaches the engine.
 describe('V6 — engine view', () => {
   const FIXTURE_POOL = '6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7';
   const LEGS = [
@@ -942,10 +702,11 @@ describe('V6 — engine view', () => {
     jest.mocked(convertResumeSnapshot).mockReturnValue({});
   });
 
-  test('a live record in the engine snapshot renders its state panel on open — no private resume', async () => {
+  test('a live record in the engine snapshot renders the Settlement Field tracker on open', async () => {
     jest.mocked(convertResumeSnapshot).mockReturnValue({[liveRecord.id]: liveRecord});
     const tree = await mountConvert('250000000', null);
-    expect(present(tree, 'convert-approving')).toBe(true);
+    expect(present(tree, 'convert-state')).toBe(true);
+    expect(present(tree, 'convert-inflight')).toBe(true);
     // The screen did NOT try to drive anything itself — the engine already is.
     expect(jest.mocked(adoptConvertRecord)).not.toHaveBeenCalled();
   });
@@ -967,7 +728,6 @@ describe('V6 — engine view', () => {
     jest.mocked(convertResumeSnapshot).mockReturnValue({[stuckRecord.id]: stuckRecord});
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-stuck')).toBe(true); // unacknowledged: still surfaced on open
-    // The user acknowledges; the engine persists + notifies, and the panel answers:
     await act(async () => {
       mockEngineSub.cb?.({[stuckRecord.id]: {...stuckRecord, acknowledgedStuckAtMs: 123}});
     });
@@ -976,17 +736,13 @@ describe('V6 — engine view', () => {
   });
 });
 
-// --- the pre-broadcast invariant + the CeFi panel lines (2026-09-24) -------------------------------
-// C1: no record exists before the confirm tap — every prepare*Record runs AT the confirm
-// gesture and only then adopts; backing out at review discards in-memory state, and nothing
-// was persisted (nothing to clean up). The CeFi panel lines: the honest no-expiry fact and
-// the provider_processing "last checked" timestamp (a timestamp, never an SLA).
+// --- the pre-broadcast invariant + the CeFi panel lines (carried over; StatePanel untouched) ------
 describe('C1 — no record exists before the confirm (pre-broadcast invariant)', () => {
   afterEach(() => {
     jest.mocked(convertResumeSnapshot).mockReturnValue({});
   });
-  test('mount → type → unmount WITHOUT confirm: nothing prepared, nothing adopted', async () => {
-    const tree = await mountConvert('250000000', '1');
+  test('mount → prefill → unmount WITHOUT confirm: nothing prepared, nothing adopted', async () => {
+    const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-screen')).toBe(true);
     expect(jest.mocked(prepareConvertRecord)).not.toHaveBeenCalled();
     expect(jest.mocked(adoptConvertRecord)).not.toHaveBeenCalled();
@@ -994,8 +750,6 @@ describe('C1 — no record exists before the confirm (pre-broadcast invariant)',
       tree.unmount();
     });
     mounted = null;
-    // Going back at review discards everything: no record was minted, none was persisted
-    // through the engine — there is nothing to clean up because nothing was created.
     expect(jest.mocked(prepareConvertRecord)).not.toHaveBeenCalled();
     expect(jest.mocked(adoptConvertRecord)).not.toHaveBeenCalled();
   });
@@ -1033,7 +787,6 @@ describe('the CeFi panel lines — no-expiry honesty + the last-checked timestam
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-awaiting-deposit')).toBe(true);
     expect(textOf(tree, 'convert-deposit-no-expiry')).toContain(convertEn.cefi.noExpiryLine);
-    // The shift id line still names the handle the user needs for the venue's status page.
     expect(textOf(tree, 'convert-shift-id')).toContain('shift-x1');
   });
 
@@ -1043,7 +796,6 @@ describe('the CeFi panel lines — no-expiry honesty + the last-checked timestam
     });
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-deposit-no-expiry')).toBe(false);
-    // The panel renders the expiry through nonBreakingClock (the line must not wrap mid-time).
     expect(textOf(tree, 'convert-awaiting-deposit'))
       .toContain(convertEn.cefi.depositExpiryLine(nonBreakingClock(new Date(1_700_000_000_000))));
   });
@@ -1069,8 +821,6 @@ describe('the CeFi panel lines — no-expiry honesty + the last-checked timestam
   });
 
   test('awaiting_deposit offers the Stop; tapping it calls abortConvertRecord through the engine', async () => {
-    // C2 (2026-09-24): the Stop is offered on the provider-held states — the exit that keeps
-    // an unfunded Trocador order from polling forever.
     jest.mocked(convertResumeSnapshot).mockReturnValue({[cefiBase.id]: cefiBase});
     jest.mocked(convertAbortFlavor).mockReturnValue('provider');
     const tree = await mountConvert('250000000', null);
@@ -1083,8 +833,7 @@ describe('the CeFi panel lines — no-expiry honesty + the last-checked timestam
   });
 
   test('the aborted provider card carries the two-sided truth AND the venue handle it points at', async () => {
-    // The copy says the shift id is "right below" — the card renders it there, so the instruction is TRUE.
-    jest.mocked(convertResumeSnapshot).mockReturnValue({[cefiBase.id]: cefiBase}); // live → adopted
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[cefiBase.id]: cefiBase});
     const tree = await mountConvert('250000000', null);
     jest.mocked(convertAbortFlavor).mockReturnValue('provider');
     await act(async () => {
@@ -1096,15 +845,8 @@ describe('the CeFi panel lines — no-expiry honesty + the last-checked timestam
   });
 });
 
-// --- decimals threading (audit 2026-09-11) ---------------------------------------------------------
-// The record freezes each leg's ledger decimals at prepare; the state screens and the rate line
-// read THEM, falling back to 8 only for records that predate the field (the e8s world every IC
-// ledger lives in today). These pins hold the threading: a 6-decimal output ledger renders
-// 6-decimal money and a 6-decimal-scaled rate, a legacy record still renders 8 — and no literal
-// 8 survives anywhere a ledger fact is available.
+// --- decimals threading (audit 2026-09-11) — carried over against the Settlement Field tracker ----
 describe('decimals threading — money lines read the ledger, never a literal 8', () => {
-  // A 6-decimal output ledger (the shape of a future non-e8s pair): the same flat descriptor
-  // list with the VCHF row's decimals overridden — legs, fmtAsset and scaledRate must follow.
   const CATALOG6 = CATALOG.map(c => (c.ledger === QUOTE.tokenOutLedger ? {...c, decimals: 6} : c));
 
   const stateRecord: ConvertRecord = {
@@ -1134,13 +876,8 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
 
   test('the rate line scales to the OUTPUT ledger\'s own decimals — 6 here, not a hardcoded 8', async () => {
     const tree = await mountConvert('250000000', '1', {catalog: CATALOG6});
-    // 41194138 gross for 100000000 in (= 1.0 ICP at 8 decimals): the rate is out-per-display-in,
-    // so the IN scale normalizes the raw ratio — (41194138 × 10^8) / 10^8 = 41194138 raw ⇒
-    // "41.194138 VCHF" rendered at the output ledger's SIX decimals. A literal-8 RENDERING
-    // instead yields "0.41194138 VCHF", and an OUT-scale normalization (the pre-2026-09-15
-    // latent form, exposed by the first cross-decimal pair SOL 9 → USDC 6) reads 1000× off.
     const scaled = (BigInt(QUOTE.amountOutGross) * 10n ** 8n) / BigInt(QUOTE.amountIn);
-    await openDetails(tree); // the rate folds behind Details (verbosity pass 2026-09-16)
+    await openDetails(tree);
     expect(textOf(tree, 'convert-rate')).toContain(fmtAssetCompact(scaled.toString(), 6, 'VCHF'));
     expect(textOf(tree, 'convert-rate')).toContain('41.194138 VCHF');
   });
@@ -1149,17 +886,16 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
     jest.mocked(convertResumeSnapshot).mockReturnValue({dec6: {...stateRecord, inDecimals: 6, outDecimals: 6}});
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-approving')).toBe(true);
-    // amountIn 100000000 raw at SIX decimals = 100.000000 ICP; a literal-8 regression prints
-    // 1.00000000 ICP — a 100× lie about what was approved.
+    // amountIn 100000000 raw at SIX decimals = 100 ICP; a literal-8 regression prints
+    // 1.00000000 ICP — a 100x lie about what was approved.
     expect(textOf(tree, 'convert-approving')).toContain('100 ICP');
   });
 
-  test('the stuck panel carries BOTH legs\' frozen decimals (signed amount in, minimum out)', async () => {
+  test('the stuck tracker carries BOTH legs\' frozen decimals (signed amount in, minimum out)', async () => {
     jest.mocked(convertRecordMinOut).mockResolvedValue('40782196' as never);
     jest.mocked(convertResumeSnapshot).mockReturnValue({stuck6: {...stateRecord, step: 'stuck', failureCode: 'unknown', inDecimals: 6, outDecimals: 6}});
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-stuck')).toBe(true);
-    // minOut 40782196 raw at SIX decimals = 40.782196 VCHF (literal-8 regression: 0.40782196).
     expect(textOf(tree, 'convert-stuck')).toContain('100 ICP');
     expect(textOf(tree, 'convert-stuck')).toContain('40.782196 VCHF');
   });
@@ -1169,92 +905,89 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
     jest.mocked(convertResumeSnapshot).mockReturnValue({legacy: {...stateRecord, step: 'stuck', failureCode: 'unknown'}});
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-stuck')).toBe(true);
-    // No decimals on the record ⇒ 8 (today's IC reality), never a crash or a blank line.
     expect(textOf(tree, 'convert-stuck')).toContain('1 ICP');
     expect(textOf(tree, 'convert-stuck')).toContain('0.40782196 VCHF');
   });
 });
 
-/**
- * Multi-hop Route A (2026-09-14 spec): the composed destination is an explicit, gated opt-in.
- * These pin the three gates the founder rule demands BEFORE anything is signed — the
- * destination picker (nothing preselected, route is an explicit pick), the address input
- * (never signed unvalidated), and the ckETH-gas preflight (a KNOWN shortfall names the
- * requirement in copy; an unknown balance stays fail-open, per spec §6).
- */
-describe('multihop — the composed route is an explicit venue-area row (2026-09-24 swap screen)', () => {
-  // The external-address cash-out route (the old Route A row) left the swap screen with the
-  // destination picker: the swap converts BETWEEN the user's own balances, and cashing out to
-  // an external address is the withdraw surface's job. The IN-WALLET composites stay: Route B
-  // (+CCTP) and Route C (+CCTP+Jupiter) render as venue-area rows on the USD target, beside
-  // the direct pool and the CeFi venue — registry/kind order, nothing preselected (two venues
-  // serve this pair), every one an explicit pick.
+// --- the composed routes: expander rows, the Route-B gates, the hub two-quote surface -------------
+describe('multihop — the composed routes are Other-venues rows under the auto-picked direct pool', () => {
   const ROUTE_B_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp';
+  const HUB_ROW = 'convert-venue-hub:icpswap:7:icpswap-vchf-ckusdc';
   const DEST = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'.toLowerCase();
 
-  /** Open the USD target (the target chip, then the row) and pick a venue-area row. */
+  /** Clear the prefill, open the USD pair, expand the other rows, pick one, re-type 1. */
   const pickRow = async (tree: renderer.ReactTestRenderer, rowId: string): Promise<void> => {
     await act(async () => {
-      node(tree, 'btn-convert-target')!.props.onPress();
+      node(tree, 'convert-amount')!.props.onChangeText('');
     });
     await act(async () => {
-      node(tree, 'convert-target-USD')!.props.onPress();
+      node(tree, 'convert-target-chip-USD')!.props.onPress();
+    });
+    await act(async () => {
+      node(tree, 'btn-convert-venues-other')!.props.onPress();
     });
     await act(async () => {
       node(tree, rowId)!.props.onPress();
     });
+    await act(async () => {
+      node(tree, 'convert-amount')!.props.onChangeText('1');
+    });
+    await act(async () => {});
   };
 
-  test('the venue area lists the pair rows in kind order — direct pool, hub, Route B, Route C, CeFi — and the external-address route is gone', async () => {
+  test('the direct pool auto-picks; hub, Route B and the CeFi venue wait in the expander, kind order', async () => {
     const tree = await mountConvert('250000000', '1');
     await act(async () => {
-      node(tree, 'btn-convert-target')!.props.onPress();
+      node(tree, 'convert-amount')!.props.onChangeText('');
     });
     await act(async () => {
-      node(tree, 'convert-target-USD')!.props.onPress();
+      node(tree, 'convert-target-chip-USD')!.props.onPress();
+    });
+    await act(async () => {});
+    // Without an amount nothing is quoted yet; the direct pool stands as the provisional row
+    // and the expander carries the composed rows beside it.
+    // Open the expander: the OTHER rows, verbatim in kind/registry order, NO quote of their
+    // own until picked (an unpicked composed row carries its label, never another quote).
+    await act(async () => {
+      node(tree, 'btn-convert-venues-other')!.props.onPress();
     });
     const ids = (t: renderer.ReactTestRenderer): string[] => {
       const seen: string[] = [];
-      for (const n of t.root.findAll(x => x.props != null && typeof x.props.testID === 'string' && String(x.props.testID).startsWith('convert-venue-') && !/-quote$|-err$|-slow$|-source$/.test(String(x.props.testID)) && String(x.props.testID) !== 'convert-venue-none' && String(x.props.testID) !== 'convert-venue-details')) {
+      for (const n of t.root.findAll(x => x.props != null && typeof x.props.testID === 'string' && String(x.props.testID).startsWith('convert-venue-') && !/-quote$|-err$|-slow$|-source$/.test(String(x.props.testID)))) {
         const id = String(n.props.testID);
         if (!seen.includes(id)) seen.push(id);
       }
       return seen;
     };
     expect(ids(tree)).toEqual([
-      'convert-venue-icpswap-ckusdc',                       // direct pool
-      'convert-venue-hub:icpswap:7:icpswap-vchf-ckusdc',    // via the VCHF hub
-      'convert-venue-multihop:icpswap-ckusdc:2:cctp',       // Route B (in-wallet landing)
-      'convert-venue-sideshift-usdc',                       // the CeFi venue
+      HUB_ROW,                                // via the VCHF hub
+      ROUTE_B_ROW,                            // Route B (in-wallet CCTP landing)
+      'convert-venue-sideshift-usdc',         // the CeFi venue
     ]);
     // Route C (the +Jupiter composite) lands SOL — it is a row on the SOL target, not here.
     await act(async () => {
-      node(tree, 'btn-convert-target')!.props.onPress();
+      node(tree, 'convert-amount')!.props.onChangeText('');
     });
     await act(async () => {
-      node(tree, 'convert-target-SOL')!.props.onPress();
+      node(tree, 'convert-target-chip-SOL')!.props.onPress();
     });
+    await act(async () => {});
     expect(present(tree, 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter')).toBe(true);
     // The cash-out row does not exist anywhere on the surface.
     expect(present(tree, 'convert-venue-multihop:icpswap-ckusdc:2')).toBe(false);
-    // Two venues serve the pair → NOTHING is preselected: no quote, no checklist, no confirm.
-    expect(present(tree, 'convert-headline')).toBe(false);
-    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
-    expect(present(tree, 'convert-venue-none')).toBe(true);
-    // No address input before a route row is picked.
-    expect(present(tree, 'convert-dest-address')).toBe(false);
   });
 
-  test('opting into Route B swaps the surface: route census, minter principal, gas line, address input', async () => {
+  test('opting into Route B swaps the surface: the external-sign note, the floor, the address input', async () => {
     const tree = await mountConvert('250000000', '1');
     await pickRow(tree, ROUTE_B_ROW);
+    // The external-signature exception, disclosed at tap 1 (brief 5.4.1).
+    expect(textOf(tree, 'convert-external-sign-note')).toContain(convertEn.externalSignTitle);
     expect(present(tree, 'convert-dest-address')).toBe(true);
     expect(present(tree, 'convert-route-min')).toBe(true);
     expect(present(tree, 'convert-min-out')).toBe(false);
-    // The minter principal + gas census fold behind Details (verbosity pass 2026-09-16).
     await openDetails(tree);
     expect(present(tree, 'convert-minter-principal')).toBe(true);
-    // the gas leg carries the minter's OWN live figure as its census line
     expect(present(tree, 'convert-gas-note')).toBe(true);
     // a malformed address is flagged in copy, never silently signed
     await act(async () => {
@@ -1275,7 +1008,6 @@ describe('multihop — the composed route is an explicit venue-area row (2026-09
   });
 
   test('an unknown ckETH balance stays fail-open; a funded one offers the confirm, and confirming prepares the ROUTE record', async () => {
-    // unknown: the wallet simply has no ckETH row yet — the requirement is shown, nothing is blocked
     const unknown = await mountConvert('250000000', '1');
     await pickRow(unknown, ROUTE_B_ROW);
     await act(async () => {
@@ -1283,8 +1015,10 @@ describe('multihop — the composed route is an explicit venue-area row (2026-09
     });
     expect(present(unknown, 'convert-gas-preflight')).toBe(false);
     expect(node(unknown, 'btn-convert-confirm')!.props.disabled).toBe(false);
+    // Tear the probe tree down HERE: `mounted` holds only the LAST tree, so an un-unmounted
+    // first mount would keep its stale-quote interval armed and hang the whole file at exit.
+    await act(async () => { unknown.unmount(); });
 
-    // funded: enough ckETH for gas + its approve fee → confirm proceeds to the multihop prepare
     jest.mocked(prepareMultihopConvertRecord).mockResolvedValue({
       id: 'route1', createdAtMs: 1, step: 'approving', venueId: 'icpswap-ckusdc',
       inCurrency: 8, outCurrency: 2, inLedger: 'ryjl3-tyaaa-aaaaa-aaaba-cai', outLedger: 'xevnm-gaaaa-aaaar-qafnq-cai',
@@ -1306,16 +1040,12 @@ describe('multihop — the composed route is an explicit venue-area row (2026-09
   });
 });
 
-describe('hub destination — the two-quote composed surface (2026-09-18 hub UX D5–D13)', () => {
+describe('hub destination — the two-quote composed surface under the sheet (2026-09-18 hub UX)', () => {
   const VCHF_ASSET = ASSETS.find(a => a.protocol === 'ic' && a.currency === 7)!;
   const rowOf = (currency: number) => CATALOG.find(c => c.currency === currency)!;
   const VCHF_LEDGER = rowOf(7).ledger!;
   const ICP_LEDGER = rowOf(8).ledger!;
   const CKETH_LEDGER = rowOf(6).ledger!;
-  // The ETH target row (currency-level grammar): the chip opens the list, the row picks the
-  // target. ETH carries ONE hub route from VCHF and no direct venue — a single row, so the
-  // surface arms on it without a venue pick (the single-row attributed line).
-  const ETH_TARGET_ROW = 'convert-target-ETH';
   /** quote1: VCHF → ICP through icpswap; its 1% floor is what quote2 is SIZED on. */
   const HUB_Q1: ConvertQuote = {
     venueId: 'icpswap', pool: '65mrh-fqaaa-aaaar-qapoa-cai',
@@ -1327,7 +1057,6 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     amountIn: '100000000', grossOut: '120000000', minOut: '118800000', netOut: '119990000',
     inFee: '10000', outFee: '10000', slippageBps: 100,
   };
-  /** quote2: ICP → ckETH, amountIn EXACTLY math1.minOut — the composition the engine signs. */
   const HUB_Q2: ConvertQuote = {
     venueId: 'icpswap-cketh', pool: 'angxa-baaaa-aaaag-qcvnq-cai',
     tokenInLedger: ICP_LEDGER, tokenOutLedger: CKETH_LEDGER,
@@ -1338,7 +1067,6 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     amountIn: '118800000', grossOut: '3000000000000', minOut: '2970000000000', netOut: '1000000000000',
     inFee: '10000', outFee: '2000000000000', slippageBps: 100,
   };
-  /** The screen renders clocks with non-breaking spaces (nonBreakingClock) — match that. */
   const nbclock = (ms: number): string => formatClock(new Date(ms)).replace(/ /g, '\u00A0');
   const armHubMocks = (): void => {
     jest.mocked(fetchConvertQuote).mockReset();
@@ -1347,48 +1075,41 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
       if (tin === ICP_LEDGER && tout === CKETH_LEDGER) return HUB_Q2;
       throw new Error('unexpected pair ' + tin + ' -> ' + tout);
     });
-    // Implementation, not a Once-chain: the effect legitimately re-runs (venue list landing),
-    // and every run must derive the same pair — quote1 derives by input ledger (VCHF vs ICP).
     jest.mocked(deriveConvertMath).mockReset();
     jest.mocked(deriveConvertMath).mockImplementation(async (q: ConvertQuote) =>
       q.tokenInLedger === VCHF_LEDGER ? HUB_M1 : HUB_M2);
   };
   const mountHub = async (balanceRaw = '250000000'): Promise<renderer.ReactTestRenderer> => {
     armHubMocks();
-    const tree = await mountConvert(balanceRaw, '1', {
+    const tree = await mountConvert(balanceRaw, null, {
       selectedAsset: VCHF_ASSET,
       assetBalances: {7: balanceRaw},
     });
     armHubMocks(); // drop the standing-surface direct fetch from the call history
+    await act(async () => {});
     await act(async () => {
-      node(tree, 'btn-convert-target')!.props.onPress();
+      node(tree, 'convert-target-chip-ETH')!.props.onPress();
     });
-    await act(async () => {
-      node(tree, ETH_TARGET_ROW)!.props.onPress();
-    });
+    await act(async () => {});
     return tree;
   };
 
-  test('the hub-only row auto-picks its single mechanism and shows the composed two-quote surface', async () => {
+  test('the hub-only target auto-picks its single mechanism and shows the composed two-quote surface', async () => {
     const tree = await mountHub();
-    // D7: no address input, no gas preflight — the destination is this wallet.
     expect(present(tree, 'convert-dest-address')).toBe(false);
     expect(present(tree, 'convert-gas-preflight')).toBe(false);
-    // D9: the promise is the in-wallet floor of the SECOND swap, never "at your address".
     expect(textOf(tree, 'convert-route-min')).toBe(
       convertEn.multihop.routeMinWalletLine(fmtAssetCompact('2970000000000', 18, 'ETH'), '1%'));
     expect(present(tree, 'convert-min-out')).toBe(false);
     // The heading names the CURRENCY pair (currency-first grammar): CHF → ETH.
     const headingTexts = tree.root.findAllByType(Text).filter(n => n.props.children === convertEn.heading('CHF', 'ETH'));
     expect(headingTexts.length).toBeGreaterThanOrEqual(1);
-    // D7/D8/D11: "You'll receive" (in-wallet), the composed net estimate, BOTH venues verbatim.
-    expect(textOf(tree, 'convert-headline')).toContain(convertEn.receiveHeadline);
-    expect(textOf(tree, 'convert-headline')).toContain(fmtAssetCompact('1000000000000', 18, 'ETH'));
+    // The receive figure is the composed net estimate; BOTH venues verbatim on the line.
+    expect(textOf(tree, 'convert-headline')).toContain(convertEn.youReceive(fmtAssetCompact('1000000000000', 18, 'ETH')));
+    expect(textOf(tree, 'convert-headline')).toContain(convertEn.youConvert('2.4997 VCHF'));
     expect(textOf(tree, 'convert-quote-source')).toBe(
       convertEn.multihop.hubQuoteSource('ICPSwap', 'ICPSwap', nbclock(1_700_000_005_000)));
     expect(textOf(tree, 'convert-route-via')).toBe(convertEn.multihop.viaHub('ICP'));
-    // D10: the per-hop census folds in the SAME Details — both hops, each with its own
-    // approve fee line and its own quoteSource timestamp.
     await openDetails(tree);
     const census = textOf(tree, 'convert-hub-census');
     expect(census).toContain(convertEn.multihop.hubCensusHeading);
@@ -1411,8 +1132,6 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
       amountIn: '100000000', expectedGross: '120000000', expectedNet: '119990000',
       inFee: '10000', outFee: '10000', slippageBps: 100, legs: [], legPlan: [],
     } as never);
-    // The confirm re-quote runs BOTH hops again (fetch 1+1) before anything is signed.
-    // Measured as a delta: the live-fetch effect legitimately re-runs on its own triggers.
     jest.mocked(fetchConvertQuote).mockClear();
     await act(async () => {
       node(tree, 'btn-convert-confirm')!.props.onPress();
@@ -1426,6 +1145,9 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(args.math1).toMatchObject({minOut: '118800000'});
     expect(args.math2).toMatchObject({minOut: '2970000000000'});
     expect(adoptConvertRecord).toHaveBeenCalledTimes(1);
+    // The hub record floods to the Settlement Field tracker, legs fully expanded.
+    expect(present(tree, 'convert-state')).toBe(true);
+    expect(present(tree, 'convert-route-legs')).toBe(true);
   });
 
   /** A hub record as prepare leaves it (the widening fields frozen), parameterised per test. */
@@ -1442,7 +1164,7 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
   const POOL1 = '65mrh-fqaaa-aaaar-qapoa-cai';
   const POOL2 = 'angxa-baaaa-aaaag-qcvnq-cai';
 
-  test('in-flight: four legs fully expanded, per-hop labels, top block tracks the current leg (D14/D15)', async () => {
+  test('in-flight: four legs fully expanded, per-hop labels, top line tracks the current leg (D14/D15)', async () => {
     const live = hubScreenRecord({
       id: 'hub-live',
       legPlan: [
@@ -1460,7 +1182,7 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(textOf(tree, 'convert-leg-2')).toContain(convertEn.multihop.legApprovePull('ICP'));
     expect(textOf(tree, 'convert-leg-3')).toContain(convertEn.multihop.legSwap(venueDisplayName('icpswap-cketh'), 'ICP', 'ETH'));
     expect(textOf(tree, 'convert-step')).toBe(
-      convertEn.multihop.legProgress(2, 4) + ' — ' + convertEn.multihop.legSwap(venueDisplayName('icpswap'), 'VCHF', 'ICP'));
+      convertEn.multihop.legProgress(2, 4) + ' \u2014 ' + convertEn.multihop.legSwap(venueDisplayName('icpswap'), 'VCHF', 'ICP'));
   });
 
   test('done: the hub receipt is the IN-WALLET copy — never the cash-out "on its way" family (D17)', async () => {
@@ -1476,8 +1198,6 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     jest.mocked(convertResumeSnapshot).mockReturnValue({[live.id]: live});
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-route-legs')).toBe(true);
-    // The engine watches the DEST-ledger payout row and flips the record to done itself;
-    // the screen just renders the receipt.
     await act(async () => {
       mockEngineSub.cb?.({
         [live.id]: {...live, step: 'done', outAmountNet: '1000000000000', outTx: 'dest-tx-9'},
@@ -1505,11 +1225,8 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-failed-leg')).toBe(true);
     const dead = textOf(tree, 'convert-failed-leg');
-    expect(dead).toContain(convertEn.multihop.failedHop2Title);
     expect(dead).toContain(convertEn.multihop.failedHop2Body('ICP', 'ETH', 'allowance expired'));
     expect(dead).toContain(convertEn.multihop.failedHop2Exit('ICP'));
-    // The cash-out exit names Pay ▸ Send-to-address — the WRONG door for an in-wallet hub
-    // asset; it must never render on a hub record.
     expect(dead).not.toContain(convertEn.multihop.failedLegExit);
   });
 
@@ -1529,15 +1246,18 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(textOf(tree, 'convert-stuck')).toContain(convertEn.multihop.stuckHoldsLine('ICP'));
   });
 
-  test('the fee gate counts the hub approve fee: exactly-two-fee balance is REFUSED (D21)', async () => {
-    jest.mocked(convertResumeSnapshot).mockReturnValue({}); // fresh form, no engine record
-    // 1 VCHF + two input fees = 100020000 — a DIRECT conversion would pass on this balance;
-    // the hub approve fee on the hub ledger (+10000) must still block it.
+  test('the fee gate counts the hub approve fee: the prefill dodges it, the raw amount hits it (D21)', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({});
+    // 1 VCHF + three fees = 100030000 — a DIRECT conversion would pass on this balance; the
+    // hub approve fee on the hub ledger (+10000) must still be counted. The sheet's prefill
+    // therefore lands UNDER the amount and tap 2 arms; typing the raw 1 VCHF is refused.
     const tree = await mountHub('100020000');
-    const btn = node(tree, 'btn-convert-confirm');
-    expect(btn!.props.disabled).toBe(true);
+    expect(node(tree, 'convert-amount')!.props.value).toBe('0.9999');
+    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(false);
+    await act(async () => { node(tree, 'convert-amount')!.props.onChangeText('1'); });
+    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
     expect(present(tree, 'convert-insufficient')).toBe(true);
-    expect(textOf(tree, 'convert-insufficient')).toBe(
+    expect(textOf(tree, 'convert-insufficient')).toContain(
       convertEn.multihop.insufficientHubLine(fmtAssetCompact('100030000', 8, 'VCHF'), fmtAssetCompact('100020000', 8, 'VCHF')));
   });
 
@@ -1565,45 +1285,37 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(texts).not.toContain(convertEn.multihop.routeHeading('VCHF', 'USDC', 'USDC', 'Ethereum'));
   });
 
-  test('Max fills the amount that survives the fee overhead (F4)', async () => {
-    jest.mocked(convertResumeSnapshot).mockReturnValue({}); // fresh form, no engine record
-    // 1 VCHF above the hub three-fee overhead → Max present; tapping fills exactly 1 VCHF.
+  test('Max fills the amount that survives the fee overhead (F4) — and the sheet prefilled it already', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({});
+    // 1 VCHF above the hub three-fee overhead: the prefill lands on exactly 1 VCHF…
     const tree = await mountHub('100030000');
-    expect(present(tree, 'btn-convert-max')).toBe(true);
-    await act(async () => { node(tree, 'btn-convert-max')!.props.onPress(); });
+    expect(node(tree, 'convert-amount')!.props.value).toBe('1'); // the prefill IS the max
+    expect(present(tree, 'btn-convert-max')).toBe(true); // the Max chip's inner alias
+    await act(async () => { node(tree, 'convert-preset-max')!.props.onPress(); });
     expect(node(tree, 'convert-amount')!.props.value).toBe('1');
     expect(present(tree, 'convert-insufficient')).toBe(false);
   });
 
-  test('hub-reachable input: ckETH converts — the direct ICP pair stands, hub-only targets are target rows', async () => {
+  test('hub-reachable input: ckETH converts — the direct ICP pair stands, hub-only targets are chips', async () => {
     const CKETH_ASSET = ASSETS.find(a => a.protocol === 'ic' && a.currency === 6)!;
     jest.mocked(convertResumeSnapshot).mockReturnValue({});
     const tree = await mountConvert('1000000000000000000', null,
       {selectedAsset: CKETH_ASSET, assetBalances: {6: '1000000000000000000'}});
-    // The target list: the source's own row renders DISABLED (same-currency target), the
-    // hub-only targets (CHF, USD, BTC — reachable only through the ICP hub, no direct venue
-    // pairs them with ckETH) render as plain target rows.
-    const targets = (t: renderer.ReactTestRenderer): string[] => {
+    // The chips carry every OTHER reachable currency; the source currency is never one.
+    const chips = (t: renderer.ReactTestRenderer): string[] => {
       const seen: string[] = [];
-      for (const n of t.root.findAll(x => x.props != null && typeof x.props.testID === 'string' && String(x.props.testID).startsWith('convert-target-'))) {
-        const id = String(n.props.testID).replace('convert-target-', '');
+      for (const n of t.root.findAll(x => x.props != null && typeof x.props.testID === 'string' && String(x.props.testID).startsWith('convert-target-chip-'))) {
+        const id = String(n.props.testID).replace('convert-target-chip-', '');
         if (!seen.includes(id)) seen.push(id);
       }
       return seen;
     };
-    await act(async () => {
-      node(tree, 'btn-convert-target')!.props.onPress();
-    });
-    expect(present(tree, 'convert-target-list')).toBe(true);
-    // The source currency itself is in the list but DISABLED (same-currency target).
-    const same = node(tree, 'convert-target-ETH')!;
-    expect((same.props.accessibilityState as {disabled?: boolean}).disabled).toBe(true);
-    // The reachable set is exactly {USD, CHF, BTC, ICP}: ICP direct, the rest hub-only.
-    for (const code of ['USD', 'CHF', 'BTC', 'ICP']) {
-      expect(targets(tree).includes(code)).toBe(true);
-    }
-    for (const code of ['EUR', 'SOL']) {
-      expect(targets(tree).includes(code)).toBe(false);
-    }
+    // The reachable set grew with the composed walk (2026-09-26): beside ICP (direct) and
+    // the hub-only {BTC, CHF, USD}, the IC+CeFi chains through ICP reach the SOL-rail mints
+    // the registered cefi venues pay — EUR (sideshift-eurc) and SOL (sideshift) — so their
+    // chips are TRUE reachability now, not lies.
+    expect(chips(tree).sort()).toEqual(['BTC', 'CHF', 'EUR', 'SOL', 'USD']);
+    expect(present(tree, 'convert-target-list')).toBe(false); // the old open/close list is gone
   });
 });
+

@@ -389,7 +389,7 @@ export const onboardingEn: OnboardingMessages = {
     ...copyWordsEn,
     title: 'Back up your wallet',
     warning:
-      "Write down these 24 words and store them safely. They are the ONLY way to recover your wallet if you lose this device — there is no dpay account, and not even dpay can recover them.",
+      "Write down these 24 words and store them safely. They are the only way to recover your wallet if you lose this device — there is no dpay account, and not even dpay can recover them.",
     copyWordsHint: 'Copies all 24 words without the position numbers',
     ack: "I've written down all 24 words",
   },

@@ -15,7 +15,9 @@
 //      never talks to any venue origin — there is no page fetch stub at all.
 //   3. THE KEY-GATED STATUS POLL DRIVES THE LIFECYCLE through the SAME relay route the
 //      record's statusUrl names — including across a page reload.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances, openConvertFor, pickSwapTarget,
+  typeConvertAmount, openOtherVenues,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
 import {icpAccountIdentifierHex} from '../harness/wire.mjs';
@@ -113,11 +115,14 @@ export async function run() {
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for SOL');
     assertIncludes(await driver.readText('convert-screen'), 'Convert SOL → USD', 'the standing pair is SOL→USD (registry order)');
     await pickSwapTarget(driver, 'ICP');
-    assert(await driver.findByTestID('convert-venues', {timeoutMs: 8_000}) != null, 'the venue area renders (two CeFi venues serve the ICP pair)');
-    assert(await driver.findByTestID('convert-venue-sideshift', {timeoutMs: 3_000}) != null, 'the registry-first venue (SideShift) is offered');
-    await driver.click(CEFI_ROW, {timeoutMs: 3_000});
+    // Two CeFi venues serve the ICP pair: the registry-first SideShift is the sheet's auto
+    // pick (disclosed on the card); Trocador waits behind the ONE Other-venues expander.
+    await driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000}) != null;
+    await openOtherVenues(driver);
+    assert(await driver.findByTestID(TROCADOR_MECH, {timeoutMs: 3_000}) != null, 'the Trocador aggregator waits behind the expander');
+    await driver.click(TROCADOR_MECH, {timeoutMs: 3_000});
     assertIncludes(await driver.readText('convert-screen'), 'Convert SOL → ICP', 'the heading names the picked pair');
-    await driver.type('convert-amount', AMOUNT_TEXT);
+    await typeConvertAmount(driver, AMOUNT_TEXT);
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     assertIncludes(await driver.readText('convert-headline'), SETTLE_TEXT, 'receive estimate is the venue settle figure verbatim');
     assertIncludes(await driver.readText('convert-quote-source'), 'Trocador', 'attribution names the venue');

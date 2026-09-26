@@ -23,6 +23,7 @@
 // relay's fake-IC, the in-page Circle stub, the relay's Jupiter test-stub, the SOL RPC stub.
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
   pickSwapTarget,
+  typeConvertAmount, openOtherVenues, pickSwapVenue,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {
@@ -178,11 +179,15 @@ export async function run() {
     });
     await installCctpStub(driver, {passOrigins, forwardTxHash: FORWARD_TX_HASH});
 
-    // --- §1 the composed route: VCHF→SOL is single-mechanism (no CeFi venue pairs it) — the
-    // route IS the one row, self-armed; its census names the final leg's venue before any quote.
+    // --- §1 the composed route: VCHF→SOL now carries DEVICE-SIGNABLE composed rows beside the
+    // CCTP route (the engine's composed kind: ICP→SOL through SideShift/Trocador), so the
+    // external-signature crossrail is an EXPLICIT opt-in (brief 5.4.1: it never auto-picks
+    // while a device-signable path exists). Pick it from the ONE Other-venues expander; the
+    // destination address input then renders (the cross-rail consent surface).
     await openConvertFor(driver, 'vchf');
     await pickSwapTarget(driver, 'SOL');
-    await driver.type('convert-amount', '10');
+    await typeConvertAmount(driver, '10');
+    await pickSwapVenue(driver, 'multihop:icpswap-vchf-ckusdc:2:cctp:jupiter', {timeoutMs: 10_000});
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     // The destination address input appears directly (the route self-resolves); the census
     // below names the final leg's venue before any confirm.
@@ -210,7 +215,7 @@ export async function run() {
     // Confirm (quote-changed interrupt → re-review, same as 186).
     for (let round = 0; round < 5; round++) {
       await driver.click('btn-convert-confirm');
-      const changed = await driver.findByTestID('convert-quote-changed', {timeoutMs: 2_000}).catch(() => null);
+      const changed = await driver.findByTestID('convert-moved-note', {timeoutMs: 2_000}).catch(() => null);
       if (changed == null) break;
       console.log(`[200-crossrail-vchf-sol] quote moved (round ${round + 1}) — re-reviewing`);
       const re = await relayQuote(r2.baseURL, VCHF_USDC_POOL, VCHF_LEDGER, CKUSDC_LEDGER, AMOUNT_IN_VCHF);

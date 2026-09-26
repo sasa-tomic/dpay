@@ -15,7 +15,8 @@
 //      the no-quote verdict is about ONE venue's live market, never the destination.
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor,
   pickSwapTarget,
-  pickSwapVenue,
+  pickSwapVenue, openOtherVenues,
+  typeConvertAmount,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {installSideShiftStub} from '../harness/sideshift.mjs';
@@ -83,9 +84,10 @@ export async function run() {
     await openConvertFor(driver, 'icp');
     await pickSwapTarget(driver, 'SOL');
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'the IC convert surface opens for ICP');
-    await driver.type('convert-amount', AMOUNT_TEXT);
+    await typeConvertAmount(driver, AMOUNT_TEXT);
     assert(await driver.findByTestID('convert-venues', {timeoutMs: 8_000}) != null, 'the venue area renders for the SOL pair');
-    assert(await driver.findByTestID(SIDESHIFT_MECH, {timeoutMs: 3_000}) != null, 'the registry-first venue is offered');
+    assertIncludes(await driver.readText('convert-venue-auto'), 'SideShift', 'the registry-first venue is the auto pick (disclosed)');
+    await openOtherVenues(driver);
     assert(await driver.findByTestID(TROCADOR_MECH, {timeoutMs: 3_000}) != null, 'the trocador aggregator is offered beside it');
 
     // --- §2 the armed no-quote venue answers; the surface names it honestly
@@ -100,8 +102,10 @@ export async function run() {
     assertIncludes(noQuoteText, 'Pick another venue or try again later', 'the line names the way out');
     assert(await driver.findByTestID('convert-quote-err', {timeoutMs: 1_000}).catch(() => null) == null,
       'NOT a generic red quote error — the state carries its own attributed line');
-    assert(await driver.findByTestID('convert-headline', {timeoutMs: 1_000}).catch(() => null) == null,
-      'no receive headline — there is no quote to show');
+    // The sheet's card never disappears (it holds the previous state), but the receive figure
+    // carries NO made-up number: it reads the dash while the overridden venue has no market.
+    const receiveText = await driver.readText('convert-receive');
+    assert(!/\d/.test(receiveText.replace('1%','')), `no receive figure without a quote (got: "${receiveText}")`);
     const confirmDisabled = await driver.eval((t) => {
       const el = document.querySelector(`[data-testid="${t}"]`);
       return el ? el.getAttribute('aria-disabled') : null;

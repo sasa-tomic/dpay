@@ -142,6 +142,8 @@ export const walletDe: WalletMessages = {
     filter: label => `${label} filtern`,
     to: who => `an ${who}`,
     from: who => `von ${who}`,
+    fromPool: 'von einem Liquiditätspool',
+    toPool: 'an einen Liquiditätspool',
     fees: fee => `− ${fee} Gebühren`,
     mintCounterparty: 'Demo-Guthaben',
     failed: 'Fehlgeschlagen — nur die Netzwerkgebühr wurde abgebucht',
@@ -165,7 +167,7 @@ export const walletDe: WalletMessages = {
 };
 
 /** Month abbreviations for the passport stamp date — German caps, as inked on a document page. */
-const DE_MONTHS = ['JAN', 'FEB', 'MÄR', 'APR', 'MAI', 'JUN', 'JUL', 'AUG', 'SEP', 'OKT', 'NOV', 'DEZ'];
+const DE_MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 
 export const educationDe: EducationMessages = {
   campaignLine: 'Signal? Nicht nötig.',
@@ -174,22 +176,22 @@ export const educationDe: EducationMessages = {
   walkthrough: {
     scenes: {
       offline: {
-        eyebrow: 'ZUERST: SO LÄUFT EINE ZAHLUNG',
+        eyebrow: 'Zuerst: so läuft eine Zahlung',
         title: 'Ein Handy fordert an, das andere bezahlt',
         body: 'Das andere Handy zeigt eine Anfrage. Du scannst sie, prüfst den Betrag und gibst frei. Seine Verbindung sendet die Zahlung, wenn deins offline ist.',
       },
       key: {
-        eyebrow: 'DEIN GELD',
+        eyebrow: 'Dein Geld',
         title: 'Dein Schlüssel bleibt auf diesem Gerät',
         body: 'dpay hält kein Geld und kann keine Zahlungen für dich freigeben. Es gibt kein dpay-Konto — nur deinen Schlüssel.',
       },
       exact: {
-        eyebrow: 'KEINE ÜBERRASCHUNG',
+        eyebrow: 'Keine Überraschung',
         title: 'Genau das angeforderte Asset',
         body: 'Der Laden fordert genau ein Asset an. Du prüfst den Betrag und gibst frei. dpay tauscht nie um.',
       },
     },
-    stageTags: ['01 — SIGNAL', '02 — SCHLÜSSEL', '03 — ASSET'],
+    stageTags: ['Signal', 'Schlüssel', 'Asset'],
     close: 'So funktioniert dpay schließen',
     skip: 'Überspringen',
     back: 'Zurück',
@@ -200,7 +202,7 @@ export const educationDe: EducationMessages = {
 
   practice: {
     sheetTitle: 'Übungszahlung',
-    eyebrow: 'ÜBUNG',
+    eyebrow: 'Übung',
     payeeName: 'Übungsladen',
     title: 'Mach eine Zahlung, ganz echt',
     cardLine: 'Der Code, den dir ein Laden zeigt.',
@@ -253,14 +255,14 @@ export const educationDe: EducationMessages = {
   passport: {
     title: 'Reisebereitschaft',
     stamps: {
-      recoverySaved: {label: 'BACKUP\nGESICHERT', hint: 'Kopiere deine Backup-Wörter in den Einstellungen', short: 'noch das Backup'},
-      flowUnderstood: {label: 'ABLAUF\nGESEHEN', hint: 'Mach die Übungszahlung — oder mach eine beliebige Zahlung', short: 'noch den Ablauf ansehen'},
-      fundsReady: {label: 'GUTHABEN\nGELADEN', hint: 'Lade echtes Guthaben auf — Übungsguthaben zählt nicht', short: 'noch Guthaben aufladen'},
-      paymentTested: {label: 'ERSTE\nZAHLUNG', hint: 'Schließe eine Zahlung ab — bezahlen oder empfangen', short: 'noch eine Zahlung'},
+      recoverySaved: {label: 'Backup\ngesichert', hint: 'Kopiere deine Backup-Wörter in den Einstellungen', short: 'noch das Backup'},
+      flowUnderstood: {label: 'Ablauf\ngesehen', hint: 'Mach die Übungszahlung — oder mach eine beliebige Zahlung', short: 'noch den Ablauf ansehen'},
+      fundsReady: {label: 'Guthaben\ngeladen', hint: 'Lade echtes Guthaben auf — Übungsguthaben zählt nicht', short: 'noch Guthaben aufladen'},
+      paymentTested: {label: 'Erste\nZahlung', hint: 'Schließe eine Zahlung ab — bezahlen oder empfangen', short: 'noch eine Zahlung'},
     },
     close: title => `${title} schließen`,
     stripLabel: filled => `Reisebereitschaft ${filled} von 4`,
-    count: filled => `${filled} VON 4`,
+    count: filled => `${filled} von 4`,
     goToStep: hint => `Los: ${hint}`,
     nextTag: 'Weiter',
     nextLabel: hint => `Weiter: ${hint}`,

@@ -99,10 +99,12 @@ export function clearAllProviderRateLimits(): void {
 
 /** Is this a TROCADOR-family provider record? The partner agreement's poll floor keys on
  *  the FAMILY, not the whole provider vocabulary — the sideshift family's status read is
- *  the venue's own keyless host and is not party to the agreement. */
+ *  the venue's own keyless host and is not party to the agreement. The COMPOSED widening
+ *  (2026-09-26): a composed record's legs no longer exclude it — the cefi venue lives on
+ *  the deposit block for that shape (the record's own venueId is the IC pool). */
 export function isTrocadorProviderRecord(record: ConvertRecord): boolean {
-  if (record.legs.length > 0 || record.solanaLeg != null) return false;
-  const v = venueOfId(record.venueId);
+  if (record.providerRef == null && record.composedDeposit == null) return false;
+  const v = venueOfId(record.composedDeposit?.venueId ?? record.venueId);
   return v != null && cefiFamilyOf(v) === 'trocador';
 }
 
@@ -236,15 +238,21 @@ export async function advanceProviderRecord(
         // The cefi widening (2026-09-15): SideShift speaks DECIMAL strings in the out
         // asset's own units ("settleAmount": "0.0495…"), while outAmountNet is raw units
         // like every other record money field. Normalize exactly at this boundary and
-        // ONLY for the cefi handoff shape (providerDeposit present) — the legacy provider
-        // records (OCP) never carried a provider amount, so nothing else moves.
-        const rawAmount = reading.amount != null && record.providerDeposit != null
+        // ONLY for the cefi handoff shapes (a providerDeposit or a composed deposit
+        // block) — the legacy provider records (OCP) never carried a provider amount, so
+        // nothing else moves. The COMPOSED record's outDecimals is already the settle
+        // asset's (frozen at prepare), so the same conversion serves both.
+        const usesDecimal = record.providerDeposit != null || record.composedDeposit != null;
+        const rawAmount = reading.amount != null && usesDecimal
           ? toUnits(reading.amount, record.outDecimals ?? 8)
           : reading.amount;
         return apply({
           ...record,
           step: 'done',
-          outAmountNet: rawAmount ?? record.expectedNet,
+          // The composed record falls back to its own frozen order figure (the venue's
+          // locked settle, already raw) — never the IC hub's figure, which is a different
+          // asset in different units.
+          outAmountNet: rawAmount ?? record.composedDeposit?.settleAmountRaw ?? record.expectedNet,
           outTx: reading.tx,
         });
       }

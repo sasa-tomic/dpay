@@ -19,7 +19,7 @@
 // withdraw-refusal knob and none was added for it.
 // Private relay (startRelay, the flow-183 pattern): execution mutates pool + ledger state.
 import {
-  setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
+  setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor, pickSwapTarget, openOtherVenues, typeConvertAmount, fmtHero} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
@@ -84,20 +84,22 @@ export async function run() {
     // --- the venue area: the USD pair's executable rows, in kind order, Route A GONE -----------
     await openConvertFor(driver, 'icp');
     await pickSwapTarget(driver, 'USD');
-    await driver.type('convert-amount', '5');
-    // Two venues serve the pair (the direct pool + the CeFi service) → NOTHING is preselected:
-    // no headline, no checklist, confirm withheld until the user picks a row.
-    await driver.findByTestID('convert-venues', {timeoutMs: 8_000});
-    for (const rowId of ['icpswap-ckusdc', 'hub:icpswap:7:icpswap-vchf-ckusdc', 'multihop:icpswap-ckusdc:2:cctp', 'sideshift-usdc']) {
+    await typeConvertAmount(driver, '5');
+    // Two venues serve the pair? No — four mechanisms: the direct pool + the CeFi service +
+    // the hub + Route B. The sheet AUTO-PICKS the direct pool (highest net quoted output among
+    // the live-quoted venue rows) and the other three wait behind the ONE Other-venues
+    // expander, verbatim in kind/registry order.
+    await driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+    await openOtherVenues(driver);
+    for (const rowId of ['hub:icpswap:7:icpswap-vchf-ckusdc', 'multihop:icpswap-ckusdc:2:cctp', 'sideshift-usdc']) {
       assert(await driver.findByTestID(`convert-venue-${rowId}`, {timeoutMs: 4_000}) != null,
-        `the USD pair offers its ${rowId} row`);
+        `the USD pair offers its ${rowId} row behind the expander`);
     }
     assert(await driver.findByTestID('convert-venue-multihop:icpswap-ckusdc:2', {timeoutMs: 1_000}).catch(() => null) == null,
       'the external-address cash-out route is NOT offered — the swap screen converts between the user\'s own balances (the withdraw surface owns cash-out)');
-    assert(await driver.findByTestID('convert-venue-none', {timeoutMs: 1_000}) != null,
-      'two venues serve the pair → nothing is preselected (the none-selected line shows)');
-    assert(await driver.findByTestID('convert-headline', {timeoutMs: 1_000}).catch(() => null) == null,
-      'no decision headline before a venue pick');
+    assertIncludes(await driver.readText('convert-venue-auto'), 'Executed via', 'the direct pool is the auto pick (disclosed mechanically)');
+    assert(await driver.findByTestID('convert-headline', {timeoutMs: 4_000}) != null,
+      'the review card stands at the pick (nothing is withheld — the pick is dpay\'s job now)');
     assert(await driver.findByTestID('convert-dest-address', {timeoutMs: 1_000}).catch(() => null) == null,
       'no destination address input before a route row is picked');
 
@@ -120,9 +122,10 @@ export async function run() {
     // The route census: hop quote verbatim (headline net) + the crossing's 1% floor (route-min)
     // stay MAIN; the minter's live gas fee and the burn counterparty fold behind the ONE Details
     // control (10x-verbosity pass 2026-09-16) — open it before pinning them.
-    assertIncludes(await driver.readText('convert-headline'), `${fmt(net, 6)} USDC`, 'the headline states the hop\'s net ckUSDC output');
+    assertIncludes(await driver.readText('convert-headline'), `≈ ${fmtHero(net, 6, 'USDC', { stable: true })}`, 'the headline states the hop\'s net ckUSDC output at standard display precision');
     assertIncludes(await driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the crossing minimum is the hop quote\'s 1% floor');
     await driver.click('convert-details', {timeoutMs: 5_000});
+    assertIncludes(await driver.readText('convert-quote-verbatim'), `${fmt(gross, 6)} USDC`, 'Details carries the hop venue\'s verbatim quoted figure');
     assertIncludes(await driver.readText('convert-gas-note'), `${fmt(GAS_WEI, 18)} ETH`, 'the gas census line states the minter\'s live figure');
     assertEq((await driver.readText('convert-minter-principal')).trim(), MINTER,
       'the burn counterparty principal is the ckETH minter');

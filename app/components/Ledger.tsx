@@ -20,7 +20,7 @@ function filterTestKey(asset: SelectableAsset, catalog: CurrencyDescriptor[]): s
 }
 
 // The transaction list, promoted from an inline card under Pay/Receive into its own tab. Renders the
-// SAME row structure the old histCard used (so the e2e `RECENT`/`hist-memo` anchors carry over), but
+// SAME row structure the old histCard used (so the e2e `Recent`/`hist-memo` anchors carry over), but
 // formats each amount in its OWN asset's units and exposes a per-asset filter chip row when >1 asset
 // is present.
 //

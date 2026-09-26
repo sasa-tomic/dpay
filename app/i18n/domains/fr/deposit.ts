@@ -265,7 +265,7 @@ export const withdrawFr: WithdrawMessages = {
     noRail: 'Le retrait n’est pas configuré pour cet actif',
     gasFeeErr: 'Impossible de récupérer les frais de réseau actuels — vérifiez votre connexion',
     withdrawn: 'Retiré ✓',
-    sentTo: 'envoyé à',
+    sentTo: 'Envoyé à',
     copyDestinationLabel: 'Copier l’adresse de destination',
     withdrawing: amount => `Retrait de ${amount}…`,
     sendToNative: (networkLabel, nativeAsset) => `Envoyez vos ${networkLabel} vers une adresse ${nativeAsset} native`,

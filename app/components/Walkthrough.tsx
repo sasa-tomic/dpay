@@ -3,10 +3,10 @@
  * ("How dpay works"). THE education surface: it renders `walkthroughScenes()` verbatim from
  * config/education.ts (the comprehension contract — never paraphrase here).
  *
- * Design voice — "Traveler Paper" travel document:
- *   - a left-aligned editorial header (mono eyebrow → Space Grotesk title → measured body),
- *   - an illustration STAGE: one raised paper plate the three scenes share (same size, same
- *     corner marker "01 — SIGNAL"), so the pager reads as one document with three stamps,
+ * Design voice — "Ballast" instrument-quiet:
+ *   - a left-aligned editorial header (sentence-case eyebrow → Space Grotesk title → measured body),
+ *   - an illustration STAGE: one raised panel the three scenes share (same size, same
+ *     corner tag naming the scene), so the pager reads as one continuous explanation,
  *   - a footer of progress dots + the primary Next (final label "Get started").
  *
  * The illustrations are hand-built from Views + react-native-svg strokes — no stock art, no
@@ -565,7 +565,7 @@ function CampaignStrip({reduced}: {reduced: boolean}) {
   return (
     <View style={S.walkCampaign}>
       <Animated.View style={[S.walkCampaignRule, {transform: [{scaleX: sx}]}]} />
-      <Animated.Text style={[S.walkCampaignText, {opacity: op}]}>{M.education.campaignLine.toUpperCase()}</Animated.Text>
+      <Animated.Text style={[S.walkCampaignText, {opacity: op}]}>{M.education.campaignLine}</Animated.Text>
       <Animated.View style={[S.walkCampaignRule, {transform: [{scaleX: sx}]}]} />
     </View>
   );

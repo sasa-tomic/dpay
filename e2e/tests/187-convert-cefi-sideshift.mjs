@@ -25,7 +25,7 @@
 //      naming SideShift as an automated exchange service (not a licensed provider, dpay
 //      paid nothing) with their own published terms link.
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
-  pickSwapTarget,
+  pickSwapTarget, openOtherVenues, typeConvertAmount,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
@@ -35,11 +35,11 @@ const SEED_ICP = 2000000000; // 20 ICP
 const AMOUNT_TEXT = '3';
 // The relay stub's deterministic venue figures (src/app.rs sideshift_stub_*): the quote is
 // a FIXED 0.0495 SOL settle for any deposit, rate 0.02475; the order carries deposit
-// address e2e-deposit-address-01 and id e2e-shift-9c1d. The flow types 3 ICP so the order's
+// deposit address (the stub’s valid ICRC-1 account text) and id e2e-shift-9c1d. The flow types 3 ICP so the order's
 // echoed depositAmount ("3") is QUOTE-DERIVED, never a default — the app's prepare red line
 // refuses an order whose amount is not the reviewed quote's.
 const SETTLE_TEXT = '0.0495 SOL';
-const DEPOSIT_ADDRESS = 'e2e-deposit-address-01';
+const DEPOSIT_ADDRESS = 'ryjl3-tyaaa-aaaaa-aaaba-cai'; // the stub's valid ICRC-1 account text
 const SHIFT_ID = 'e2e-shift-9c1d';
 const SETTLE_HASH = 'sol-settle-sig-187';
 // D2 (2026-09-18 hub redesign): no standalone cefi row — SideShift rides as a MECHANISM
@@ -81,8 +81,10 @@ async function reopenConvert(driver) {
  *  pick is explicit (nothing auto-arms). */
 async function pickCefiAndConfirm(driver) {
   await pickSwapTarget(driver, 'SOL');
-  await driver.type('convert-amount', AMOUNT_TEXT);
-  await driver.click(CEFI_MECH, {timeoutMs: 5_000});
+  await typeConvertAmount(driver, AMOUNT_TEXT);
+  // The CeFi venue is this pair's ONLY device-signable row → the sheet AUTO-PICKS it (a
+  // single-venue pair has no chooser at all): typing the amount quotes it, the settle
+  // address renders, tap 2 confirms. No override step exists anymore (brief 5.2/5.3).
   await driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
   await driver.waitForText('SideShift', {timeoutMs: 8_000});
   await driver.click('btn-convert-confirm', {timeoutMs: 5_000});
@@ -95,7 +97,7 @@ async function pickCefiAndConfirm(driver) {
       const out = {};
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && k.startsWith('dpay.convert.v2')) out[k] = localStorage.getItem(k);
+        if (k && k.startsWith('dpay.convert.v')) out[k] = localStorage.getItem(k);
       }
       return out;
     });
@@ -131,17 +133,18 @@ export async function run() {
     const passOrigins = [new URL(r2.baseURL).origin, new URL(webBaseURL).origin, new URL(env.relayBaseURL).origin];
     await installSideShiftStub(driver, {passOrigins, initialStatus: 'waiting'});
 
-    // --- §1 the venue row, the disclosure, and the verbatim quote. Two CeFi venues serve the
-    // SOL pair (SideShift + Trocador) beside the composed route — nothing preselected.
+    // --- §1 the disclosed pick, the disclosure, and the verbatim quote. The CeFi service is
+    // the SOL pair's only device-signable row → the sheet AUTO-PICKS it and discloses the
+    // pick mechanically; the composed CCTP route waits behind the ONE Other-venues expander.
     await openConvertFor(driver, 'icp');
     await pickSwapTarget(driver, 'SOL');
-    assert(await driver.findByTestID('convert-venues', {timeoutMs: 8_000}) != null,
-      'the SOL pair\'s venue area renders (the composed route + both CeFi venues as rows)');
-    await driver.type('convert-amount', AMOUNT_TEXT);
-    assert(await driver.findByTestID(CEFI_MECH, {timeoutMs: 4_000}) != null,
-      'the SideShift venue row is offered (registry order beside the route)');
-    assertIncludes(await driver.readText(CEFI_MECH), 'SideShift', 'the venue row names the venue');
-    await driver.click(CEFI_MECH);
+    assert(await driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000}) != null,
+      'the sheet discloses its pick (the single device-signable CeFi row)');
+    assertIncludes(await driver.readText('convert-venue-auto'), 'SideShift', 'the pick line names the venue');
+    await openOtherVenues(driver);
+    assert(await driver.findByTestID('convert-venues-expanded', {timeoutMs: 4_000}) != null,
+      'the composed route waits behind the expander as an explicit opt-in row');
+    await typeConvertAmount(driver, AMOUNT_TEXT);
     const settle = await driver.readText('convert-settle-address');
     assertIncludes(settle, kp.address, 'the payout address is the wallet\'s OWN derived Solana address');
     await driver.waitForText(SETTLE_TEXT, {timeoutMs: 15_000});

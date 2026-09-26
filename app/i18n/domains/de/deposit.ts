@@ -264,7 +264,7 @@ export const withdrawDe: WithdrawMessages = {
     noRail: 'Für dieses Asset ist kein Auszahlungsweg konfiguriert',
     gasFeeErr: 'Die aktuelle Gas-Gebühr konnte nicht geladen werden — prüfe deine Verbindung',
     withdrawn: 'Ausgezahlt ✓',
-    sentTo: 'gesendet an',
+    sentTo: 'Gesendet an',
     copyDestinationLabel: 'Zieladresse kopieren',
     withdrawing: amount => `${amount} werden ausgezahlt…`,
     sendToNative: (networkLabel, nativeAsset) => `Sende dein ${networkLabel} an eine native ${nativeAsset}-Adresse`,

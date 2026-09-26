@@ -18,6 +18,7 @@ import {
   openConvertFor,
   pickSwapTarget,
   pickSwapVenue,
+  typeConvertAmount,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {
@@ -159,14 +160,14 @@ async function installEvmSignSeam(driver, cfg) {
 /** Confirm a Route C intent through the quote-changed interrupt (the 184/186 pattern). */
 async function confirmRouteC(driver, amountText) {
   for (let attempt = 0; attempt < 3; attempt++) {
-    await driver.type('convert-amount', amountText).catch(() => undefined);
+    // Route C is already the sheet's pick (reopenConvert established it); typing re-keys the
+    // quote — no row click exists anymore (brief 5.2/5.3).
+    await typeConvertAmount(driver, amountText).catch(() => undefined);
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-    await driver.click(ROUTE_C_ROW, {timeoutMs: 5_000});
-    await driver.click(ROUTE_C_MECH, {timeoutMs: 5_000});
     await driver.type('convert-dest-address', DEST);
     await driver.findByTestID('convert-route-min', {timeoutMs: 20_000});
     await driver.click('btn-convert-confirm');
-    const changed = await driver.findByTestID('convert-quote-changed', {timeoutMs: 2_000}).catch(() => null);
+    const changed = await driver.findByTestID('convert-moved-note', {timeoutMs: 2_000}).catch(() => null);
     if (changed == null) return;
     console.log(`[209-abort-cefi] quote moved (round ${attempt + 1}) — re-reviewing`);
     await driver.click('btn-convert-back', {timeoutMs: 5_000}).catch(() => undefined);
@@ -193,14 +194,15 @@ async function attachBurnAndGetCrossing(driver, amountText) {
   await driver.findByTestID('crossrail-crossing', {timeoutMs: 20_000});
 }
 
-/** Re-enter the convert surface from the accounts route. */
-async function reopenConvert(driver) {
+/** Re-enter the convert surface from the accounts route. `overrideRow` opts the SOL pair's
+ *  sheet INTO a non-standing row (the CCTP route); without it the auto pick (SideShift) stands. */
+async function reopenConvert(driver, overrideRow) {
   let opened = false;
   for (let i = 0; i < 3 && !opened; i++) {
     try {
       await openConvertFor(driver, 'icp', {timeoutMs: 8_000});
       await pickSwapTarget(driver, 'SOL');
-      await pickSwapVenue(driver, 'multihop:icpswap-ckusdc:2:cctp:jupiter');
+      if (overrideRow != null) await pickSwapVenue(driver, overrideRow);
       opened = true;
     } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
   }
@@ -247,7 +249,7 @@ export async function run() {
     // --- §B the CROSSING STOP: the burn is out — watching, never "nothing moved"
     console.log('[209-abort-cefi] §B crossing stop…');
     await installEvmSignSeam(driver, {burnHash: BURN_HASH});
-    await reopenConvert(driver);
+    await reopenConvert(driver, 'multihop:icpswap-ckusdc:2:cctp:jupiter');
     await attachBurnAndGetCrossing(driver, '5');
     // The Circle watch is live before the stop: wait for one mint-watch poll.
     await driver.waitForFunction(
@@ -275,7 +277,7 @@ export async function run() {
     // --- §C the SOL_READY STOP: the final leg was never signed — clean
     console.log('[209-abort-cefi] §C sol_ready stop…');
     await driver.click('btn-convert-back', {timeoutMs: 8_000});
-    await reopenConvert(driver);
+    await reopenConvert(driver, 'multihop:icpswap-ckusdc:2:cctp:jupiter');
     await attachBurnAndGetCrossing(driver, '5');
     await setCctpMessageState(driver, 'complete');
     await driver.findByTestID('crossrail-sol-ready', {timeoutMs: 40_000});
@@ -297,10 +299,10 @@ export async function run() {
     await installSideShiftStub(driver, {passOrigins, initialStatus: 'waiting'});
     await reopenConvert(driver);
     const icpBeforeCefi = BigInt(await getBalance(r2.baseURL, account.publicHex, 8));
-    await driver.type('convert-amount', '3');
+    await typeConvertAmount(driver, '3');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-    await driver.click(ROUTE_C_ROW, {timeoutMs: 5_000});
-    await driver.click(CEFI_MECH, {timeoutMs: 5_000});
+    // SideShift is the sheet's auto pick for this pair (the CCTP route never auto-picks while
+    // a device-signable row exists) — no override click exists (brief 5.2/5.3).
     await driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
     await driver.click('btn-convert-confirm', {timeoutMs: 5_000});
     await driver.findByTestID('convert-awaiting-deposit', {timeoutMs: 30_000});
@@ -336,7 +338,7 @@ export async function run() {
       const out = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k && k.startsWith('dpay.convert.v2')) out.push(localStorage.getItem(k) ?? '');
+        if (k && k.startsWith('dpay.convert.v')) out.push(localStorage.getItem(k) ?? '');
       }
       return out.join('|');
     });

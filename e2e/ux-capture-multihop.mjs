@@ -104,7 +104,7 @@ async function seedPendingWithdrawal(driver, publicHex, payoutAmount, {id, failu
     store[seedId] = rec;
     window.localStorage.setItem(key, JSON.stringify(store));
     return Object.keys(store);
-  }, `dpay.convert.v2.${publicHex}`, id, String(payoutAmount), failureDetail ?? null, Date.now());
+  }, `dpay.convert.v3.${publicHex}`, id, String(payoutAmount), failureDetail ?? null, Date.now());
 }
 
 /** Seed a `stuck` (unacknowledged, planned) record — ConvertMode still shows it (needs the eye). */
@@ -126,7 +126,7 @@ async function seedStuck(driver, publicHex, payoutAmount, {id}) {
     store[seedId] = rec;
     window.localStorage.setItem(key, JSON.stringify(store));
     return Object.keys(store);
-  }, `dpay.convert.v2.${publicHex}`, id, String(payoutAmount), Date.now());
+  }, `dpay.convert.v3.${publicHex}`, id, String(payoutAmount), Date.now());
 }
 
 /**

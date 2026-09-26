@@ -821,17 +821,28 @@ export async function openBalances(driver, opts = {}) {
   // rendering both put two different accounts in one viewport (founder, 2026-09-09). Every other
   // screen has the chip and not the tappable balance.
   //
-  // This is a lookup, not a fallback: neither present is a hard failure with both names, because
-  // the accounts route being unreachable from the current screen is exactly the regression the
-  // "one gesture from every screen" rule (flow 150) exists to catch.
+  // The convert ROUTE is the exception (2026-09-26 validation round: it dropped the global
+  // header — the intent sheet's CTA needs the vertical room and the Settlement Field floods from
+  // the top). Its way back IS its own back chevron: Back goes to the accounts route that launched
+  // the convert (Wallet's `onBack={openAccounts}`), so a user on convert reaches accounts with
+  // the same one gesture. Take it when neither chip nor headline exists.
+  //
+  // This is a lookup, not a fallback: none of the three present is a hard failure with all
+  // names, because the accounts route being unreachable from the current screen is exactly the
+  // regression the "one gesture from every screen" rule (flow 150) exists to catch.
   const timeoutMs = opts.timeoutMs ?? 5_000;
   const affordance = (await driver.isPresent('balance'))
     ? 'balance'
     : (await driver.isPresent('btn-home-accounts')) ? 'btn-home-accounts' : null;
   if (affordance === null) {
-    throw new Error('openBalances: this screen offers neither the header chip (`balance`) nor Home\'s tappable headline (`btn-home-accounts`) — the accounts route is unreachable from here');
+    if (await driver.isPresent('btn-convert-back')) {
+      await driver.click('btn-convert-back', { timeoutMs });
+    } else {
+      throw new Error('openBalances: this screen offers neither the header chip (`balance`), Home\'s tappable headline (`btn-home-accounts`), nor the convert route\'s back chevron (`btn-convert-back`) — the accounts route is unreachable from here');
+    }
+  } else {
+    await driver.click(affordance, { timeoutMs });
   }
-  await driver.click(affordance, { timeoutMs });
   await driver.findByTestID('asset-demo-select', { timeoutMs });
 }
 
@@ -930,37 +941,67 @@ export async function selectCurrency(driver, key, opts = {}) {
  * re-types the amount or waits for the fresh quote itself.
  */
 export async function pickSwapTarget(driver, code, opts = {}) {
-  // Idempotent on the list's open state: the row lookup first (the list may already be open
-  // from a caller's own chip press); up to three chip presses, each followed by a row probe —
-  // a press that lands between renders (the quote poll re-renders the header) must not strand
-  // the walk with the list closed.
-  const attempts = opts.attempts ?? 3;
-  for (let i = 0; i < attempts; i++) {
-    const row = await driver.findByTestID(`convert-target-${code}`, { timeoutMs: 1_500 }).catch(() => null);
-    if (row != null) break;
-    await driver.click('btn-convert-target', { timeoutMs: opts.timeoutMs ?? 5_000 });
-    const opened = await driver.findByTestID(`convert-target-${code}`, { timeoutMs: 2_500 }).catch(() => null);
-    if (opened != null) break;
+  // The INTENT SHEET (2026-09-26): the standing target IS the single line; every other
+  // reachable currency rides as a sibling chip (`convert-target-chip-<CODE>`), one tap each.
+  // The chip tap is verified against the LINE'S TEXT (the sheet re-renders constantly while
+  // quotes land, and a tap swallowed by a replaced node must fail loud, not strand the walk).
+  const name = { CHF: 'Swiss francs', USD: 'US dollars', EUR: 'Euros', BTC: 'Bitcoin', ETH: 'Ether', ICP: 'Internet Computer', SOL: 'Solana' }[code] ?? code;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const line = await driver.readText('convert-target-line', { timeoutMs: 2_000 }).catch(() => null);
+    if (line != null && line.includes(name)) return; // already the standing target
+    const chip = await driver.findByTestID(`convert-target-chip-${code}`, { timeoutMs: opts.timeoutMs ?? 5_000 }).catch(() => null);
+    if (chip == null) {
+      throw new Error(`pickSwapTarget: no chip for ${code} and the line does not name "${name}" (got: ${line})`);
+    }
+    await driver.click(`convert-target-chip-${code}`, opts);
+    const landed = await driver.waitForFunction(
+      (n) => (document.querySelector('[data-testid="convert-target-line"]')?.textContent ?? '').includes(n),
+      { timeoutMs: opts.timeoutMs ?? 5_000, label: `target line flips to ${code}`, args: [name] },
+    ).catch(() => null);
+    if (landed != null) return;
   }
-  try {
-    await driver.click(`convert-target-${code}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
-  } catch (e) {
-    const surf = await driver.eval(() => ({
-      chip: document.querySelectorAll('[data-testid="btn-convert-target"]').length,
-      ids: [...new Set(Array.from(document.querySelectorAll('[data-testid]')).map(n => n.getAttribute('data-testid')).filter(t => t.startsWith('convert-') || t.startsWith('btn-convert-')))],
-    }));
-    console.log(`[pickSwapTarget] surface after miss: ${JSON.stringify(surf)}`);
-    throw e;
+  throw new Error(`pickSwapTarget: the target line never flipped to "${name}" after 3 tries`);
+}
+
+/** Open the sheet's ONE "Other venues" expander (the registry-order row list). Idempotent:
+ *  a second call closes it, so callers open it exactly once before row taps. */
+export async function openOtherVenues(driver, opts = {}) {
+  // The toggle click can be swallowed by a re-render (quotes landing replace nodes), so
+  // VERIFY the expander is open and re-press if not. Idempotent: already-open returns.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const open = await driver.findByTestID('convert-venues-expanded', { timeoutMs: 1_000 }).catch(() => null);
+    if (open != null) return;
+    await driver.click('btn-convert-venues-other', opts);
   }
+  await driver.findByTestID('convert-venues-expanded', { timeoutMs: opts.timeoutMs ?? 2_500 });
 }
 
 /**
- * Pick a VENUE row on the swap screen's venue area (convert-venue-<rowId>). Only needed when
- * SEVERAL venues serve the resolved pair (none preselected — the fork-3 red line); a single
- * venue arms on its own.
+ * Type into the sheet's amount field and VERIFY the controlled input holds the text: the sheet
+ * re-renders when the auto pick / Max prefill / quote lands (all right after mount), and a
+ * keystroke that lands in a replaced input node would silently vanish. Retries, then fails loud.
+ */
+export async function typeConvertAmount(driver, text, opts = {}) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await driver.type('convert-amount', text, opts);
+    const v = await driver.readInputValue('convert-amount');
+    if (v === text) return;
+  }
+  throw new Error(`typeConvertAmount: the controlled amount input never held "${text}" after 3 tries`);
+}
+
+/**
+ * Pick a VENUE row on the convert sheet (convert-venue-<rowId>). Needed only when the row is
+ * NOT the sheet's auto pick (the pick is the card's disclosed line, no row): unpicked rows sit
+ * behind the ONE Other-venues expander, so open it when the row is not already on screen
+ * (brief 5.2/5.3 — the 2026-09-26 intent sheet).
  */
 export async function pickSwapVenue(driver, rowId, opts = {}) {
-  await driver.click(`convert-venue-${rowId}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+  const onScreen = await driver.findByTestID(`convert-venue-${rowId}`, { timeoutMs: 1_000 }).catch(() => null);
+  if (onScreen == null) {
+    await openOtherVenues(driver, opts);
+  }
+  await driver.click(`convert-venue-${rowId}`, opts);
 }
 
 
@@ -1410,4 +1451,17 @@ export async function faucetAccount(relayBaseURL, accountHex, amount, opts = {})
   } catch (e) {
     throw new Error(`POST ${url} failed (transport): ${e instanceof Error ? e.message : e}`);
   } finally { clearTimeout(t); }
+}
+
+/** The receive HERO's display figure — the app's round-1 item 8 rule (ConvertIntentSheet's
+ * `heroFigure`): currency-class outs (`stable`) read like money at 2 decimals; token-class
+ * outs keep the registry display precision (`displayDecimals`, else `decimals` full).
+ * Truncates toward zero like the app (never rounds up), trims trailing zeros — the ≈ itself
+ * is the app copy's, so this returns the bare number + unit. */
+export function fmtHero(raw, decimals, unit, { stable = false, displayDecimals = null } = {}) {
+  const dd = stable ? 2 : (displayDecimals ?? decimals);
+  const scale = 10n ** BigInt(decimals);
+  const whole = (BigInt(raw) / scale).toString();
+  let frac = (BigInt(raw) % scale).toString().padStart(decimals, '0').slice(0, dd).replace(/0+$/, '');
+  return frac ? `${whole}.${frac} ${unit}` : `${whole} ${unit}`;
 }

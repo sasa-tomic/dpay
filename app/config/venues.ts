@@ -289,6 +289,51 @@ export function venueOfId(venueId: string): VenueEntry | null {
   return registeredVenues().find(v => v.venue_id === venueId) ?? null;
 }
 
+// --- the counterparty's display identity (round-1 validation item 9) --------------------------------
+//
+// A conversion's payout row lands FROM a pool principal — a contract, not a counterparty — and
+// a composed deposit row is paid TO the venue's per-order address. Both identities ARE known at
+// execution time: the record's venueId/legs name them. The display layer resolves what the
+// registries still answer directly (`venueOfEndpoint`), and Wallet overlays the execution-known
+// identities from the record store below (a pool whose venue row has since left the registry
+// stays a pool, never a name, and never a principal styled as a counterparty).
+
+/** The execution-known overlay: counterparty principal (lowercased) → the venue's registry
+ *  display name, or '' when the shape proves a pool but no registry row names it anymore.
+ *  Production writes via `setRuntimePoolNames` (Wallet, from the record store); jest pins it
+ *  directly — the same seam pattern as `setRuntimeVenues`. */
+let RUNTIME_POOL_NAMES: ReadonlyMap<string, string> = new Map();
+
+export function setRuntimePoolNames(map: ReadonlyMap<string, string>): void {
+  RUNTIME_POOL_NAMES = map;
+}
+
+/** Reverse registry lookup: which registered venue owns this endpoint/pool principal?
+ *  Case-insensitive (principals arrive in mixed case across rails). Null when nobody in the
+ *  registry claims it. */
+export function venueOfEndpoint(endpoint: string): VenueEntry | null {
+  const e = endpoint.trim().toLowerCase();
+  if (e === '') return null;
+  return registeredVenues().find(v => v.endpoint.trim().toLowerCase() === e) ?? null;
+}
+
+/** What may the row/receipt call this counterparty? The tri-state the display layer renders:
+ *  - `{kind: 'venue', name}` — a registered venue endpoint (or an execution-known principal
+ *    the record store still names): the PARTY is the venue.
+ *  - `{kind: 'pool'}` — execution proved a pool (a `depositFromAndSwap` target) whose venue
+ *    row is gone: the honest neutral wording, never a principal styled as a counterparty.
+ *  - null — nothing known: the caller renders the ledger's own truth (a person's principal,
+ *    an address), exactly as before. */
+export function venuePartyOf(counterparty: string): {kind: 'venue'; name: string} | {kind: 'pool'} | null {
+  const c = counterparty.trim().toLowerCase();
+  if (c === '') return null;
+  const v = venueOfEndpoint(counterparty);
+  if (v != null) return {kind: 'venue', name: v.display_name};
+  const known = RUNTIME_POOL_NAMES.get(c);
+  if (known != null) return known !== '' ? {kind: 'venue', name: known} : {kind: 'pool'};
+  return null;
+}
+
 // Every ic_amm venue serving this pair, as an UNORDERED ledger set, in REGISTRY ORDER
 // (multi-venue readiness V5). This is the chooser's candidate list — what COULD execute the
 // pair — so it does NOT apply the enabled-gate's testnet filter: the offline two-venue test

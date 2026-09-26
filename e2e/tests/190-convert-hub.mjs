@@ -36,6 +36,7 @@ import {
   openBalances, selectCurrency,
   openConvertFor,
   pickSwapTarget,
+  typeConvertAmount, openOtherVenues, fmtHero,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
@@ -136,18 +137,19 @@ export async function run() {
     // --- the target list (the currency grammar): ONE row per reachable CURRENCY ------------------
     console.log('[190-convert-hub] target list: currency rows from VCHF…');
     await openVchfConvert(driver);
-    await driver.click('btn-convert-target', {timeoutMs: 5_000});
-    for (const code of ['ICP', 'USD', 'ETH', 'BTC', 'SOL']) {
-      assert(await driver.findByTestID(`convert-target-${code}`, {timeoutMs: 5_000}) != null,
-        `the ${code} target row is offered`);
+    // The sheet grammar: the standing target IS the line (stable twin USD, the 2026-09-25
+    // founder rule) and every other reachable currency rides as a sibling chip.
+    for (const code of ['ICP', 'ETH', 'BTC', 'SOL']) {
+      assert(await driver.findByTestID(`convert-target-chip-${code}`, {timeoutMs: 5_000}) != null,
+        `the ${code} target chip is offered`);
     }
-    // The standing pair is stable-first USD (the 2026-09-25 founder rule); the ICP pair is
-    // picked explicitly. It carries BOTH mechanisms that reach it: the direct pool and the
-    // via-ckUSDC hub route — kind order puts the direct pool first, and one venue = the
-    // standing pick.
+    // The ICP pair is picked explicitly (one chip tap). It carries BOTH mechanisms that reach
+    // it: the direct pool (auto-picked, disclosed on the card) and the via-ckUSDC hub route —
+    // an explicit opt-in row behind the ONE Other-venues expander.
     await pickSwapTarget(driver, 'ICP');
+    await driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+    await openOtherVenues(driver);
     await driver.findByTestID(STANDING_HUB_ROW, {timeoutMs: 8_000});
-    await driver.findByTestID('convert-venue-icpswap', {timeoutMs: 5_000});
 
     // --- the hub-only target: ETH (no direct pool anywhere in the registry) ----------------------
     console.log('[190-convert-hub] hub-only target ETH: the composed quote branch…');
@@ -156,21 +158,24 @@ export async function run() {
     // address input (the dest IS this wallet).
     assert(await driver.findByTestID('convert-dest-address', {timeoutMs: 1_000}).catch(() => null) == null,
       'a hub target adds NO address input (the dest IS this wallet)');
-    await driver.type('convert-amount', '2');
+    await typeConvertAmount(driver, '2');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
 
     // The oracle BEFORE confirming: the exact two quotes the composed surface shows.
     let {gross1, minOut1, gross2, minOut2, net2} = await hubOracle(r2.baseURL, AMOUNT_IN);
     const headline = await driver.readText('convert-headline');
-    assertIncludes(headline, `${fmt(net2, 18)} ETH`, 'the headline states the COMPOSED net estimate (both hops, dest fee netted)');
+    assertIncludes(headline, `≈ ${fmtHero(net2, 18, 'ETH', { displayDecimals: 6 })}`, 'the headline states the COMPOSED net estimate (both hops, dest fee netted) at the standard ETH display precision');
+    // The hub pair's second swap quote — the hero's own figure — keeps its verbatim in Details
+    // (opened right below for the per-hop census).
+    await driver.click('convert-details', {timeoutMs: 5_000});
+    assertIncludes(await driver.readText('convert-quote-verbatim'), `${fmt(gross2, 18)} ETH`, 'Details carries swap2\'s verbatim quoted figure');
     assertIncludes(await driver.readText('convert-quote-source'), 'Quotes from ICPSwap and ICPSwap, fetched ',
       'the attribution names BOTH venues verbatim (D11)');
     assertIncludes(await driver.readText('convert-route-via'), 'via ICP · 2 swaps', 'the route chip names the hub and the swap count (D8)');
     assertIncludes(await driver.readText('convert-route-min'),
       `At least ${fmt(minOut2, 18)} ETH stays in this wallet (slippage floor 1%)`,
       'the floor promise is the SECOND swap\'s floor as an in-wallet amount (D9)');
-    // The two-hop census folds behind the ONE Details control (D10).
-    await driver.click('convert-details', {timeoutMs: 5_000});
+    // The two-hop census folds behind the ONE Details control (D10) — already open above.
     const census = await driver.readText('convert-hub-census');
     assertIncludes(census, 'Two swaps, itemized', 'the census heading names the fold');
     assertIncludes(census, 'Combined rate, VCHF → ETH:', 'the composed rate names both ends');
@@ -187,7 +192,7 @@ export async function run() {
     let confirmed = false;
     for (let round = 0; round < 5 && !confirmed; round++) {
       await driver.click('btn-convert-confirm');
-      const changed = await driver.findByTestID('convert-quote-changed', {timeoutMs: 2_000}).catch(() => null);
+      const changed = await driver.findByTestID('convert-moved-note', {timeoutMs: 2_000}).catch(() => null);
       if (changed == null) {
         confirmed = true;
         break;
@@ -255,17 +260,15 @@ export async function run() {
     console.log('[190-convert-hub] USD pair rows (no execution)…');
     await openVchfConvert(driver);
     await pickSwapTarget(driver, 'USD');
-    assert(await driver.findByTestID('convert-venue-icpswap-vchf-ckusdc', {timeoutMs: 8_000}) != null,
-      'the direct pool row is offered for the USD pair');
+    assertIncludes(await driver.readText('convert-venue-auto'), 'Executed via', 'the direct pool is the auto pick for the USD pair (disclosed)');
+    await openOtherVenues(driver);
     const hubRow = await driver.readText(CKUSDC_HUB_ROW);
     assertIncludes(hubRow, 'Via ICP', 'the opt-in hub row names its mechanism');
     assertIncludes(hubRow, '2 swaps', 'the opt-in hub row carries its static shape line (D5)');
-    assert(await driver.findByTestID('convert-route-via', {timeoutMs: 1_000}).catch(() => null) == null,
-      'no hub surface is armed while the direct pool is the standing pick');
     // Pick `Via ICP` → the SAME composed surface arms for USD. Selection-surface assertions
     // only — this second conversion is deliberately NOT executed.
     await driver.click(CKUSDC_HUB_ROW);
-    await driver.type('convert-amount', '1');
+    await typeConvertAmount(driver, '1');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     assertIncludes(await driver.readText('convert-route-via'), 'via ICP · 2 swaps', 'picking Via ICP arms the composed surface for USD');
     assert(await driver.findByTestID('convert-dest-address', {timeoutMs: 1_000}).catch(() => null) == null,
@@ -280,7 +283,7 @@ export async function run() {
     console.log('[190-convert-hub] swap2 refusal: park on pending_withdrawal, degrade the hop pool, settle…');
     await openVchfConvert(driver);
     await pickSwapTarget(driver, 'ETH');
-    await driver.type('convert-amount', '2');
+    await typeConvertAmount(driver, '2');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     let run2 = await hubOracle(r2.baseURL, AMOUNT_IN); // fresh: run 1 moved both pools
     // fail_withdrawal does NOT touch the quote curve — the confirm-time re-quote still matches.
@@ -288,7 +291,7 @@ export async function run() {
     let run2Confirmed = false;
     for (let round = 0; round < 5 && !run2Confirmed; round++) {
       await driver.click('btn-convert-confirm');
-      const changed = await driver.findByTestID('convert-quote-changed', {timeoutMs: 2_000}).catch(() => null);
+      const changed = await driver.findByTestID('convert-moved-note', {timeoutMs: 2_000}).catch(() => null);
       if (changed == null) {
         run2Confirmed = true;
         break;

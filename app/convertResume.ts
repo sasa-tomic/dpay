@@ -46,6 +46,7 @@ import {
   executeCrossRailConvert,
   executeCrossRailSolSwap,
   executeSolanaConvert,
+  isComposedConvertRecord,
   isTerminalConvertStep,
   loadConvertRecords,
   prepareCrossRailSolLeg,
@@ -265,7 +266,7 @@ function fireOnTerminalIfEnteredListed(before: ConvertStep | undefined, after: C
  *  to identity B mid-drive, the stale drive still finishes its work, but every write, persist,
  *  and re-arm below is gated on `state.ctx === capturedCtx` — A's record never lands in B's
  *  in-memory records map, B's timers are never armed for it, and B's engine never drives (and
- *  thereby never persists) A's record into `dpay.convert.v2.<B>`. Stale drives finish silently. */
+ *  thereby never persists) A's record into `dpay.convert.v3.<B>`. Stale drives finish silently. */
 async function driveOne(id: string): Promise<void> {
   const ctx = state.ctx;
   if (ctx == null || state.stopped || state.inflight.has(id)) return;
@@ -352,6 +353,43 @@ async function driveOne(id: string): Promise<void> {
           fireOnTerminalIfEnteredListed(before, next);
           notify();
         }
+      } else if (isComposedConvertRecord(rec)) {
+        // The COMPOSED IC→CeFi driver (2026-09-26, brief §5.4 item 2). Two phases, ONE
+        // record: the IC legs + the deposit transfer are a planned record the IC executor
+        // drives (the deposit leg's gate lives there); once the deposit transfer is sent
+        // the record parks at a provider step and THIS driver polls the venue's order
+        // status to a terminal state — the same provider driver every legless CeFi record
+        // uses, keyed on the composed record's own providerRef.
+        if (rec.step === 'awaiting_deposit' || rec.step === 'provider_processing') {
+          next = await advanceProviderRecord(rec, mine, ctx.relayUrl);
+          if (!mine()) return; // stale drive — no post-run write, no re-arm
+          PROVIDER_LAST_CHECKED_MS.set(id, Date.now()); // one read completed — the panel's "last checked"
+          if (next !== rec) {
+            const before = state.records.get(id)?.step;
+            state.records.set(id, next);
+            fireOnTerminalIfEnteredListed(before, next);
+            notify();
+          }
+        } else {
+          next = await executeConvert(rec, {
+            secretHex: ctx.secretHex,
+            publicHex: ctx.publicHex,
+            relayUrl: ctx.relayUrl,
+            onUpdate: (r) => {
+              if (!mine()) return;
+              fireOnTerminalIfEnteredListed(state.records.get(r.id)?.step, r);
+              state.records.set(r.id, r);
+              notify();
+            },
+            claimedOutTx: claimedOutTxFor(id),
+            claimedRefundTx: claimedRefundTxFor(id),
+          }, state.opts.executorOpts);
+          if (!mine()) return;
+          const before = state.records.get(id)?.step;
+          state.records.set(id, next);
+          fireOnTerminalIfEnteredListed(before, next);
+          notify();
+        }
       } else if (rec.legs.length > 0) {
         // IC-legs driver (convert.ts): the V6 trichotomy lives inside — resubmit only unexpired
         // signed bytes, watch everything else, never sign anything new.
@@ -409,8 +447,7 @@ async function driveOne(id: string): Promise<void> {
     } else if (
       rec.step === 'quote_expired'
       && rec.providerRef != null
-      && rec.legs.length === 0
-      && rec.solanaLeg == null
+      && ((rec.legs.length === 0 && rec.solanaLeg == null) || isComposedConvertRecord(rec))
     ) {
       // The LATE-DEPOSIT watch (2026-09-24): `expired` from awaiting_deposit is the VENUE
       // giving up on its quote window, but a deposit that lands late is still refunded (or
@@ -418,7 +455,9 @@ async function driveOne(id: string): Promise<void> {
       // happens. One SLOW poll per stuck-watch window (a record that cannot be advanced any
       // faster must not be polled any faster) until the venue answers refunded/processing/
       // completed — or the user's abort flag retires the watch (the flag, not a step rewrite:
-      // quote_expired is terminal, and abort must not un-terminal a record).
+      // quote_expired is terminal, and abort must not un-terminal a record). The COMPOSED
+      // widening (2026-09-26): a composed record reaches the same terminal the same way
+      // (its deposit leg sent, the venue expired the window) — the same slow watch applies.
       if (convertAborted(id)) return; // the watch was retired — never re-armed below
       next = await advanceProviderRecord(rec, mine, ctx.relayUrl);
       if (!mine()) return; // stale drive — no post-run write, no re-arm
@@ -482,7 +521,13 @@ function scheduleNext(id: string, rec: ConvertRecord): void {
   if (state.ctx == null || state.stopped) return;
   let delay: number | null = null;
   if (!isTerminalConvertStep(rec.step)) {
-    if (rec.legs.length === 0 && rec.solanaLeg == null) {
+    // A provider-phase record re-arms on the provider cadence: a legless CeFi record, or a
+    // COMPOSED record once its deposit transfer is sent (its own legs are confirmed — the
+    // venue poll is the only thing left to drive).
+    const providerPhase = rec.legs.length === 0 && rec.solanaLeg == null
+      || (isComposedConvertRecord(rec)
+        && (rec.step === 'awaiting_deposit' || rec.step === 'provider_processing'));
+    if (providerPhase) {
       // CeFi provider record. Two bounds stack on the engine cadence (partner agreement,
       // 2026-09-22 spec term 4): the TROCADOR family's 60 s FLOOR (one status request per
       // trade id per minute, never faster — the sideshift family polls its own keyless
@@ -509,8 +554,7 @@ function scheduleNext(id: string, rec: ConvertRecord): void {
   } else if (
     rec.step === 'quote_expired'
     && rec.providerRef != null
-    && rec.legs.length === 0
-    && rec.solanaLeg == null
+    && ((rec.legs.length === 0 && rec.solanaLeg == null) || isComposedConvertRecord(rec))
     && !convertAborted(id)
   ) {
     // The late-deposit watch (2026-09-24): the quote_expired step keeps ONE SLOW poll per

@@ -118,7 +118,7 @@ export async function run() {
       `a mint has no sending account — the receipt must say so, got ${JSON.stringify(mintAccount)}`);
     assertIncludes(mintAccount, 'no account', 'the empty-counterparty slot names what is missing');
     const mintRef = await driver.readText('txn-receipt-ref');
-    assertIncludes(mintRef, 'No reference', 'the empty-memo slot names what is missing');
+    assertIncludes(mintRef, 'carried no memo', 'the empty-memo slot names what is missing');
     const mintBlock = await driver.readText('txn-receipt-proof');
     assert(/^\d+$/.test(mintBlock), `the mint still has a ledger block, got ${JSON.stringify(mintBlock)}`);
     await driver.screenshot('157-transaction-receipt-absent-fields');

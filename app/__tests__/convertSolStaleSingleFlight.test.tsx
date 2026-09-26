@@ -95,15 +95,11 @@ describe('CeFi quotes never refresh on a timer (organic-demand, partner agreemen
     });
     await act(async () => {});
     await act(async () => {
-      tree.root.findAll(n => n.props != null && n.props.testID === 'btn-convert-target')[0].props.onPress();
+      tree.root.findAll(n => n.props != null && n.props.testID === 'convert-target-chip-ICP')[0].props.onPress();
     });
-    await act(async () => {
-      tree.root.findAll(n => n.props != null && n.props.testID === 'convert-target-ICP')[0].props.onPress();
-    });
-    await act(async () => {
-      tree.root.findAll(n => n.props != null && n.props.testID === 'convert-amount')[0].props.onChangeText('1');
-    });
-    // The review quote is in — exactly one fetch, from opening the screen + typing the amount.
+    await act(async () => {});
+    // The review quote is in — exactly ONE fetch: the sheet's pre-filled amount against the
+    // picked pair. The entry gesture is the user's own demand; nothing else has asked.
     expect(jest.mocked(fetchSideShiftQuote).mock.calls.length).toBe(1);
 
     // The quote is pinned stale (see the header): the old build re-fetched here on a 1s

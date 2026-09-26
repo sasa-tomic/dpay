@@ -23,7 +23,8 @@ export const receiptEs: ReceiptMessages = {
   signatureLabel: 'Firma de la transacción',
 
   noAccount: 'La red no registró ninguna cuenta en ese lado.',
-  noReferenceIc: 'Sin referencia: esta transferencia no llevaba memo.',
+  partyPool: 'Un pool de liquidez',
+  noReferenceIc: 'Esta transferencia no llevaba memo.',
   noReferenceSolana: 'Una transferencia de Solana no lleva referencia de dpay: la firma de abajo la identifica.',
   pendingProof: 'Aún sin confirmar — este pago se liquidará en la red más tarde.',
 

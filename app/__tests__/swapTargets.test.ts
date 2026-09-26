@@ -48,15 +48,18 @@ describe('resolveSwapTargets — the currency-level pair walk', () => {
     expect(ts.some(t => t.currency === 'CHF')).toBe(false);
   });
 
-  test('row kind order is fixed per target: direct, hub, crossrail, cefi, solamm', () => {
+  test('row kind order is fixed per target: direct, hub, composed, crossrail, cefi, solamm', () => {
     const ts = targetsFor(VCHF);
     const usd = ts.find(t => t.currency === 'USD')!;
     // The standing direct pool first, then the via-ICP hub composition, then the composed
-    // CCTP route (Route B lands USDC on the Solana rail — the USD currency's second rail).
-    expect(rowKinds(usd)).toEqual(['direct', 'hub', 'crossrail']);
+    // IC+CeFi chains into sideshift-usdc (direct legs, then hub legs, keyed on the settle
+    // mint), then the composed CCTP route (Route B lands USDC on the Solana rail).
+    expect(rowKinds(usd)).toEqual(['direct', 'hub', 'composed', 'composed', 'crossrail']);
     expect(rowIds(usd)[0]).toBe('icpswap-vchf-ckusdc');
     const sol = ts.find(t => t.currency === 'SOL')!;
-    expect(rowKinds(sol)).toEqual(['crossrail']);
+    // SOL is the CeFi venues' own settle side: two IC→CeFi chains per venue (direct and hub
+    // IC legs), with the external-signature CCTP route last.
+    expect(rowKinds(sol)).toEqual(['composed', 'composed', 'composed', 'composed', 'crossrail']);
     const eth = ts.find(t => t.currency === 'ETH')!;
     // One hub composition reaches ckETH (via ICP — the only pool chain the registry serves).
     expect(rowKinds(eth)).toEqual(['hub']);
@@ -84,10 +87,13 @@ describe('resolveSwapTargets — the currency-level pair walk', () => {
     expect(icpTargets?.currency).toBe('CHF');
   });
 
-  test('EUR reaches VCHF through the composed CCTP+Jupiter route (Route C generalization)', () => {
+  test('EUR reaches VCHF through the IC+CeFi chains AND the composed CCTP+Jupiter route (Route C generalization)', () => {
     const eur = targetsFor(VCHF).find(t => t.currency === 'EUR');
-    expect(eur?.rows.map(r => r.kind)).toEqual(['crossrail']);
-    expect(eur?.rows[0]?.rowId).toContain('cctp:jupiter-usdc-eurc');
+    // The device-signable IC→CeFi chains (via sideshift-eurc) rank first; the CCTP route —
+    // one leg signed in the user's own Ethereum wallet — stays the explicit opt-in behind
+    // them (brief 5.4.1: it never wins while a device-signable path exists).
+    expect(eur?.rows.map(r => r.kind)).toEqual(['composed', 'composed', 'crossrail']);
+    expect(eur?.rows.at(-1)?.rowId).toContain('cctp:jupiter-usdc-eurc');
   });
 
   test('SOL source: rail-local venues as solamm rows, the cross-rail CeFi rows as cefi rows', () => {

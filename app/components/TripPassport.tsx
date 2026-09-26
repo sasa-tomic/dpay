@@ -3,9 +3,9 @@
  *
  * A PRIVATE capability credential rendered as a travel document page: four finite stamp
  * positions (backed up / saw the flow / funds loaded / first payment) on a porcelain
- * card with a fine rule and a mono count ("n OF 4"). Empty positions
+ * card with a fine rule and a count ("n of 4"). Empty positions
  * are debossed dashes — a place not yet stamped; filled positions are inked rings with
- * the two-line caps label + the award date ('AUG 23'), each at its own slight rotation
+ * the two-line label + the award date ('Aug 23'), each at its own slight rotation
  * so the set reads hand-stamped. There is NO checklist ✓, no counters beyond n/4, no
  * amounts, no streaks, nothing public.
  *

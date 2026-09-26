@@ -1,45 +1,47 @@
-// Flow 206 — the Convert DESTINATION PICKER is grouped by currency (multi-currency build-out,
-// 2026-09). Presentation only: `groupDestSections` (components/ConvertShared.tsx) partitions the
-// buildDestGroups rows by the currency each DESTINATION settles, home currencies first in their
-// fixed order, then the tail of destinations that settle no home currency — other in-wallet assets,
-// the standing direct pair when it lands on one (VCHF's direct pair is ICP), and the
-// external-address payouts. What is pinned, on the real VCHF convert form:
+// Flow 206 — the intent sheet's TARGET grammar: the standing line + the sibling chips.
 //
-//   * the section headers exist and name their currency — "US dollars" then "Other destinations";
-//   * the sections lead: the USD destination (ckUSDC) sits under its header, BEFORE the tail;
-//   * registry order inside a section is preserved — the tail keeps the direct pair first, then
-//     ckETH, ckBTC, then the route rows (the same order flow 190 pins, now under a header);
-//   * the rows themselves are untouched — every pinned row testID of flows 188/190 still resolves,
-//     and nothing is preselected by the grouping (headers carry no radio state of their own).
-import { setup, assert, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor, pickSwapTarget } from '../harness/lib.mjs';
+// The 2026-09-26 intent sheet replaces the grouped destination-picker list: the conversion's
+// target is ONE pre-computed default on its own line, and every OTHER reachable currency rides
+// as a small sibling chip — changing it is optional, never required. What is pinned, on the
+// real VCHF sheet:
+//
+//   * the standing target for a stable source is its value twin (CHF → USD, the 2026-09-25
+//     founder rule) — the line names it, and USD carries NO chip (it IS the line);
+//   * the chips carry exactly the reachable set in list order — the pair walk is
+//     registry-derived (EUR reachable since the CeFi EURC generalization; the source CHF absent by
+//     construction), and no chip ever shows a number (chips are currencies, not quotes);
+//   * one chip tap re-resolves the pair: the target line flips, the sheet re-quotes;
+//   * the USD pair's OTHER rows sit behind the Other-venues expander in kind order (direct
+//     pool standing, via-ICP hub, Route B) with the direct pool auto-picked and disclosed.
+import { setup, assert, assertIncludes, onboardWallet, accountOf, faucetAccount, openConvertFor, pickSwapTarget, openOtherVenues } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
-const SEED_VCHF = 50000000000; // 500 VCHF — enough to open the convert form's funded gates
+const SEED_VCHF = 50000000000; // 500 VCHF — enough to open the sheet's funded gates
 
 export const meta = {
   id: '206',
   name: 'convert-target-currencies',
   journey: 'convert',
-  covers: ['convert', 'target-currencies', 'currency-groups', 'group-model', 'registry-order', 'no-fx-sum'],
-  verifies: 'The swap screen\'s target list is grouped by CURRENCY (the 2026-09-24 currency grammar, successor of the destination picker): on VCHF the list carries every other wallet currency in list order (stables first, then Other), the SOURCE currency renders disabled rather than absent, the reachable set exactly mirrors the pair walk (registry-derived, EUR absent — no VCHF→EUR row exists), headers carry no numbers, and the USD pair\'s venue rows keep kind order (direct pool, via-ICP hub, Route B) with the single venue auto-armed — nothing preselected where two venues serve a pair.',
+  covers: ['convert', 'target-currencies', 'intent-sheet', 'target-line', 'target-chips', 'group-model', 'registry-order', 'auto-venue-pick'],
+  verifies: 'The intent sheet\'s target grammar: on VCHF the standing target is the value twin USD (the line names it; USD carries no chip), the sibling chips carry exactly the reachable set in list order (EUR, BTC, ETH, ICP, SOL in list order — EUR reachable since the CeFi EURC generalization; CHF absent as the source), no chip shows a number, one chip tap re-resolves the pair and flips the line, and the USD pair\'s other rows (via-ICP hub, Route B) wait in the Other-venues expander in kind order beneath the auto-picked, mechanically disclosed direct pool.',
   timeoutMs: 120_000,
 };
 
-/** The target list's rows in true DOM order. */
+/** The sheet's target testIDs in true DOM order (line + chips). */
 async function targetLayout(driver) {
   return driver.eval(() => [...document.querySelectorAll('[data-testid]')]
     .map(el => el.getAttribute('data-testid'))
-    .filter(t => t === 'btn-convert-target'
-      || /^convert-target-[A-Z]+$/.test(t)
+    .filter(t => t === 'convert-target-line'
+      || /^convert-target-chip-[A-Z]+$/.test(t)
       || /^convert-venue-/.test(t)));
 }
 
 export async function run() {
   const start = Date.now();
   console.log('[206-convert-dest-groups] setup (own relay + shared web + browser)…');
-  // solStub: the EUR currency is offerable only when its EURC(Solana) rail exists in the
-  // wallet's asset list — the RPC stub answers the balance probe honestly offline, so the
-  // target list pins the FULL six-currency set.
+  // solStub: the SOL currency is offerable only when its native rail exists in the wallet's
+  // asset list — the RPC stub answers the balance probe honestly offline, so the chips pin
+  // the FULL reachable set.
   const env = await setup({solStub: true});
   const r2 = await startRelay();
   try {
@@ -53,66 +55,53 @@ export async function run() {
     const fund = await faucetAccount(r2.baseURL, account.publicHex, SEED_VCHF, {currency: 7});
     assert(fund.ok, `faucet VCHF credit ok (status ${fund.status})`);
 
-    // Open the convert form on the VCHF account (the currency row's Convert button).
+    // Tap 1 — the convert sheet on the VCHF account (the currency row's Convert button).
     await openConvertFor(driver, 'vchf');
     await driver.findByTestID('convert-target-leg', {timeoutMs: 15_000});
 
-    // --- 1. the target list: every OTHER wallet currency, in list order -------------------------
-    await driver.click('btn-convert-target', {timeoutMs: 5_000});
-    const seq = await targetLayout(driver);
-    const codes = ['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'];
-    const found = codes.filter(c => seq.includes(`convert-target-${c}`));
-    console.log('[206] target rows found: ' + JSON.stringify(found));
-    // The full set INCLUDING the source's own row — the source renders DISABLED (the
-    // same-currency target is refused honestly, not hidden).
-    assertEqJson(found, ['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'],
-      'the target list carries every wallet currency in list order (stables first, then Other), the source included');
-    const srcState = await driver.eval(() => document.querySelector('[data-testid="convert-target-CHF"]')?.getAttribute('aria-state')
-      ?? document.querySelector('[data-testid="convert-target-CHF"]')?.getAttribute('aria-disabled') ?? null);
-    const srcNode = await driver.eval(() => {
-      const el = document.querySelector('[data-testid="convert-target-CHF"]');
-      if (el == null) return null;
-      const inner = el.hasAttribute('aria-disabled') ? el : el.querySelector('[aria-disabled="true"]');
-      return inner == null ? null : inner.getAttribute('aria-disabled');
-    });
-    assert(srcNode === 'true', `the source currency's own row is DISABLED (aria-disabled, got ${JSON.stringify(srcNode)})`);
-    void srcState;
-    for (const c of found) {
-      const text = await driver.readText(`convert-target-${c}`);
-      assert(!/\d/.test(text.replace(/^\s+/, '').split('\n')[0]), `the target row ${c} carries no number in its name line — got "${text.slice(0, 60)}"`);
-    }
-    console.log('[206-convert-target-currencies] ✓ target rows: list order, source excluded');
+    // --- 1. the standing target is the value twin; the chips carry exactly the reachable set ---
+    const layout = await targetLayout(driver);
+    const chips = layout.filter(t => t.startsWith('convert-target-chip-'));
+    assertEqJson(chips, [
+      'convert-target-chip-USD',
+      'convert-target-chip-BTC',
+      'convert-target-chip-ETH',
+      'convert-target-chip-ICP',
+      'convert-target-chip-SOL',
+    ], 'the chips carry exactly the reachable currencies in list order (EUR standing as the twin, so it vacates the chips; CHF absent: it is the source)');
+    assert(layout.includes('convert-target-line'), 'the standing target renders as the ONE line');
+    const lineText = await driver.readText('convert-target-line');
+    assertIncludes(lineText, 'Euros', 'a stable source stands on its value twin (CHF → EUR, the brief 5.3 rule)');
+    // The pair walk arms the sheet: the standing pair is already quoted on open.
+    await driver.findByTestID('convert-quote-source', {timeoutMs: 15_000});
+    console.log('[206-convert-dest-groups] ✓ standing line (stable twin USD) + reachable chips');
 
-    // --- 2. the SOURCE currency renders DISABLED (same-currency target refused honestly) --------
-    // (The source's row only renders when the source itself is a wallet currency — VCHF is CHF,
-    // which the filter already excluded; the disabled-state contract is pinned by the
-    // swapTargets jest suite and flow 190's ckETH leg.)
+    // --- 2. one chip tap re-resolves the pair (the optional decision, one tap) ------------------
+    await pickSwapTarget(driver, 'ICP');
+    const afterPick = await driver.readText('convert-target-line');
+    assertIncludes(afterPick, 'Internet Computer', 'the line flipped to the picked currency');
+    assert(await driver.findByTestID('convert-target-chip-USD', {timeoutMs: 4_000}) != null,
+      'the previous standing target returns to the chips');
+    assert(await driver.findByTestID('convert-target-chip-ICP', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the picked currency vacates the chips (it IS the line)');
+    console.log('[206-convert-dest-groups] ✓ one-tap target switch');
 
-    // --- 3. the standing pair arms on its own: stable-first USD (the 2026-09-25 founder
-    // rule), single venue → attributed line --------------------------------------------------
-    await driver.click('btn-convert-target', {timeoutMs: 3_000}); // close the list
-    await driver.type('convert-amount', '1');
-    await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-    assert(await driver.findByTestID('convert-venue-icpswap-vchf-ckusdc', {timeoutMs: 4_000}) != null,
-      'the standing USD pair\'s direct pool is the standing pick (one venue, nothing withheld)');
-    assert(await driver.findByTestID('convert-venue-none', {timeoutMs: 1_000}).catch(() => null) == null,
-      'no none-selected line — the single venue leaves nothing to choose');
-    console.log('[206-convert-target-currencies] ✓ standing pair (stable-first USD): direct pool armed, attributed headline');
-
-    // --- 4. the USD pair: kind order (direct pool, hub, Route B) and NO cash-out row -------------
+    // --- 3. the USD pair (a chip pick): its OTHER rows in the expander, kind order ----
     await pickSwapTarget(driver, 'USD');
-    await driver.findByTestID('convert-venues', {timeoutMs: 8_000});
-    const usdRows = (await targetLayout(driver)).filter(t => t.startsWith('convert-venue-') && !/-quote$|-err$|-slow$/.test(t) && t !== 'convert-venue-none' && t !== 'convert-venue-details');
-    assertEqJson(usdRows, [
-      'convert-venue-icpswap-vchf-ckusdc',                 // direct pool
+    await driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+    const autoLine = await driver.readText('convert-venue-auto');
+    assertIncludes(autoLine, 'Executed via', 'the direct pool is auto-picked and mechanically disclosed');
+    await openOtherVenues(driver);
+    const venueRows = (await targetLayout(driver))
+      .filter(t => t.startsWith('convert-venue-') && t !== 'convert-venue-auto' && !/-quote$|-err$|-slow$/.test(t));
+    assertEqJson(venueRows, [
       'convert-venue-hub:icpswap:8:icpswap-ckusdc',        // via the ICP hub
+      // The composed IC+CeFi chains (2026-09-26): direct-then-hub IC legs into the
+      // sideshift-usdc order, keyed on the settle mint, in registry order.
+      'convert-venue-composed:icpswap:sideshift-usdc',
+      'convert-venue-composed:hub:icpswap-vchf-ckusdc:2:icpswap-ckusdc:sideshift-usdc',
       'convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp', // Route B (in-wallet landing)
-    ], 'the USD pair\'s venue rows in kind order (registry order inside each kind, never ranked)');
-    // Two venues? The direct pool + ... the hub and route are composites, not venues — ONE
-    // venue serves the pair → the direct pool is the standing pick (nothing withheld).
-    assert(await driver.findByTestID('convert-venue-none', {timeoutMs: 1_000}).catch(() => null) == null,
-      'the USD pair\'s single venue is the standing pick (nothing withheld)');
-    console.log('[206-convert-target-currencies] ✓ USD pair rows: kind order, single venue standing');
+    ], 'the USD pair\'s other rows in kind order (registry order inside each kind, never ranked) — the direct pool is the standing pick, not a row');
 
     await driver.screenshot('206-convert-target-currencies');
 

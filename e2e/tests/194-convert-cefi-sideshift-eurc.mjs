@@ -20,6 +20,7 @@
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
   pickSwapTarget,
   pickSwapVenue,
+  typeConvertAmount, openOtherVenues, fmtHero,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
@@ -29,11 +30,11 @@ const SEED_ICP = 2000000000; // 20 ICP
 const AMOUNT_TEXT = '3';
 // The relay stub's deterministic venue figures (src/app.rs sideshift_stub_*): the quote is
 // a FIXED 0.0495 settle for any pair — here rendered in the venue's EURC unit — with rate
-// 0.02475; the order carries deposit address e2e-deposit-address-01 and id e2e-shift-9c1d.
+// 0.02475; the order carries the stub’s deposit address and id e2e-shift-9c1d.
 // The flow types 3 ICP so the order's echoed depositAmount ("3") is QUOTE-DERIVED, never
 // a default (the app's prepare red line refuses a mismatched order amount).
 const SETTLE_TEXT = '0.0495 EURC';
-const DEPOSIT_ADDRESS = 'e2e-deposit-address-01';
+const DEPOSIT_ADDRESS = 'ryjl3-tyaaa-aaaaa-aaaba-cai'; // the stub's valid ICRC-1 account text
 const SHIFT_ID = 'e2e-shift-9c1d';
 const SETTLE_HASH = 'sol-settle-sig-194';
 // The EURC destination is a MERGED multi-mechanism group (D2/D4): a composed route
@@ -91,25 +92,30 @@ export async function run() {
     // --- §1 the venue row, the disclosure, and the verbatim quote
     await openConvertFor(driver, 'icp');
     await pickSwapTarget(driver, 'EUR');
-    await driver.type('convert-amount', AMOUNT_TEXT);
+    await typeConvertAmount(driver, AMOUNT_TEXT);
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
 
-    // The EUR pair's venue area: the composed CCTP+jupiter route AND the SideShift venue are
-    // SEPARATE rows now (the sub-picker is gone — each mechanism IS a row), registry/kind
-    // order, nothing preselected (two venues serve the pair).
+    // The EUR pair: the SideShift venue is the only device-signable row → the sheet
+    // AUTO-PICKS it; the composed CCTP+jupiter route is the explicit opt-in row behind the
+    // ONE Other-venues expander (brief 5.4.1: external-sign paths never auto-pick while a
+    // device-signable path exists).
+    assert(await driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000}) != null,
+      'the sheet discloses its pick');
+    assertIncludes(await driver.readText('convert-venue-auto'), 'SideShift', 'the pick line names the CeFi venue');
+    await openOtherVenues(driver);
     assert(await driver.findByTestID('convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc', {timeoutMs: 3_000}) != null,
-      'the composed CCTP+jupiter route row is offered for the EUR pair');
-    assert(await driver.findByTestID(EURC_MECH, {timeoutMs: 4_000}) != null,
-      'the SideShift venue row is offered beside the route');
-    assertIncludes(await driver.readText(EURC_MECH), 'SideShift', 'the venue row names the venue');
-    await driver.click(EURC_MECH);
+      'the composed CCTP+jupiter route row is offered for the EUR pair (behind the expander)');
     const settle = await driver.readText('convert-settle-address');
     assertIncludes(settle, kp.address, 'the payout address is the wallet\'s OWN derived Solana address');
-    await driver.waitForText(SETTLE_TEXT, {timeoutMs: 15_000});
+    // The hero reads EURC at standard display precision (2 decimals); the venue's verbatim
+    // settle figure stays in Details (pinned right after it opens below).
+    await driver.waitForText(`≈ ${fmtHero('49500', 6, 'EURC', { stable: true })}`, {timeoutMs: 15_000});
     assertIncludes(await driver.readText('convert-quote-source'), 'SideShift', 'the quote is attributed to SideShift');
     // The counterparty + disclosure census folds behind the ONE Details control (as on the
     // sibling rows): open it before pinning them.
     await driver.click('convert-details', {timeoutMs: 5_000});
+    assertIncludes(await driver.readText('convert-quote-verbatim'), SETTLE_TEXT,
+      'Details carries SideShift\'s verbatim quoted settle figure');
     const counterparty = await driver.readText('convert-counterparty');
     assertIncludes(counterparty, 'SideShift', 'the counterparty line names the venue');
     assertIncludes(counterparty, 'automated exchange service',

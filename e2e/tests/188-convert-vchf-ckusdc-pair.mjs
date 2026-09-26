@@ -26,6 +26,7 @@
 // Private relay (startRelay, the flow-183 pattern): deterministic catalog, isolated pools.
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
   pickSwapTarget,
+  typeConvertAmount, openOtherVenues,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
@@ -114,7 +115,7 @@ export async function run() {
     assert(fund.ok, `faucet VCHF credit ok (status ${fund.status})`);
 
     await openConvertFor(driver, 'vchf');
-    await driver.type('convert-amount', '10');
+    await typeConvertAmount(driver, '10');
     // Stable-first standing (the 2026-09-25 founder rule): the VCHF surface opens on the USD
     // pair, and its direct pool — THIS flow's new venue — is the standing pick, quoted through
     // the pool principal the checklist renders. The row-0 VCHF ↔ ICP pool still wins WITHIN
@@ -130,7 +131,10 @@ export async function run() {
     // external-address Route A is not offered (the swap converts between the user's own
     // balances). Route B's hop quotes through the SAME new pool.
     await pickSwapTarget(driver, 'USD');
-    await driver.findByTestID('convert-venue-icpswap-vchf-ckusdc', {timeoutMs: 5_000});
+    // The direct pool auto-picks (disclosed on the card); Route B (the CCTP crossing) is the
+    // explicit opt-in row behind the ONE Other-venues expander (brief 5.4.1).
+    await driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+    await openOtherVenues(driver);
     await driver.findByTestID('convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp', {timeoutMs: 3_000});
     await driver.click('convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp', {timeoutMs: 4_000});
     await driver.type('convert-dest-address', DEST);

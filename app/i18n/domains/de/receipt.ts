@@ -23,7 +23,8 @@ export const receiptDe: ReceiptMessages = {
   signatureLabel: 'Transaktionssignatur',
 
   noAccount: 'Das Ledger hat für diese Seite kein Konto festgehalten.',
-  noReferenceIc: 'Keine Referenz — diese Überweisung trug kein Memo.',
+  partyPool: 'Ein Liquiditätspool',
+  noReferenceIc: 'Diese Überweisung trug kein Memo.',
   noReferenceSolana: 'Eine Solana-Überweisung trägt keine dpay-Referenz — die Signatur unten identifiziert sie.',
   pendingProof: 'Noch nicht bestätigt — diese Zahlung wird später im Ledger verbucht.',
 

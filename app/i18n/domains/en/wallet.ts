@@ -264,6 +264,12 @@ export type WalletMessages = {
     filter: (label: string) => string;
     to: (who: string) => string;
     from: (who: string) => string;
+    /** A pool counterparty the registries can no longer name (round-1 item 9): the neutral
+     *  wording, never a principal styled as a counterparty. Lowercase like from()/to(). */
+    fromPool: string;
+    /** The same neutral wording for the outgoing leg (a deposit into a pool contract the
+     *  registries can no longer name). Lowercase like from()/to(). */
+    toPool: string;
     /**
      * The fee annotation on a log row whose payment netted a fee in (founder rule 2026-09-14):
      * fees ride the row ONLY as this line beside the GROSS headline — hidden when unknown/zero.
@@ -456,6 +462,8 @@ export const walletEn: WalletMessages = {
     filter: label => `Filter ${label}`,
     to: who => `to ${who}`,
     from: who => `from ${who}`,
+    fromPool: 'from a liquidity pool',
+    toPool: 'to a liquidity pool',
     fees: fee => `− ${fee} fees`,
     mintCounterparty: 'Demo funds',
     failed: 'Failed — only the network fee was charged',
@@ -589,8 +597,8 @@ export type EducationMessages = {
   peak: {micro: string; settled: string};
 };
 
-/** Month abbreviations for the passport stamp date — English caps, as inked on a document page. */
-const EN_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+/** Month abbreviations for the passport stamp date. */
+const EN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export const educationEn: EducationMessages = {
   campaignLine: "Signal? Don't need it.",
@@ -599,22 +607,22 @@ export const educationEn: EducationMessages = {
   walkthrough: {
     scenes: {
       offline: {
-        eyebrow: 'FIRST, HOW A PAYMENT WORKS',
+        eyebrow: 'First, how a payment works',
         title: 'One phone requests, the other pays',
         body: 'The other phone shows a request. You scan it, check the amount, then approve. Their connection sends the payment if yours is offline.',
       },
       key: {
-        eyebrow: 'YOUR MONEY',
+        eyebrow: 'Your money',
         title: 'Your key stays on this device',
         body: 'dpay holds no money and cannot approve payments for you. There is no dpay account — only your key.',
       },
       exact: {
-        eyebrow: 'NO SURPRISES',
+        eyebrow: 'No surprises',
         title: 'Pay the exact requested asset',
         body: 'The shop asks for one exact asset. You check the amount and approve. dpay never swaps.',
       },
     },
-    stageTags: ['01 — SIGNAL', '02 — KEY', '03 — ASSET'],
+    stageTags: ['Signal', 'Key', 'Asset'],
     close: 'Close how dpay works',
     skip: 'Skip walkthrough',
     back: 'Back',
@@ -625,7 +633,7 @@ export const educationEn: EducationMessages = {
 
   practice: {
     sheetTitle: 'Practice payment',
-    eyebrow: 'PRACTICE',
+    eyebrow: 'Practice',
     payeeName: 'Practice shop',
     title: 'Make one payment, for real',
     cardLine: 'The code a shop would show you.',
@@ -678,14 +686,14 @@ export const educationEn: EducationMessages = {
   passport: {
     title: 'Trip readiness',
     stamps: {
-      recoverySaved: {label: 'BACKED\nUP', hint: 'Copy your backup words in Settings', short: 'back up to go'},
-      flowUnderstood: {label: 'SAW THE\nFLOW', hint: 'Make the practice payment — or any payment', short: 'see how it works to go'},
-      fundsReady: {label: 'FUNDS\nLOADED', hint: 'Add money you can spend — practice funds do not count', short: 'add funds to go'},
-      paymentTested: {label: 'FIRST\nPAYMENT', hint: 'Complete a payment — pay or receive', short: 'one payment to go'},
+      recoverySaved: {label: 'Backed\nup', hint: 'Copy your backup words in Settings', short: 'back up to go'},
+      flowUnderstood: {label: 'Saw the\nflow', hint: 'Make the practice payment — or any payment', short: 'see how it works to go'},
+      fundsReady: {label: 'Funds\nloaded', hint: 'Add money you can spend — practice funds do not count', short: 'add funds to go'},
+      paymentTested: {label: 'First\npayment', hint: 'Complete a payment — pay or receive', short: 'one payment to go'},
     },
     close: title => `Close ${title}`,
     stripLabel: filled => `Trip readiness ${filled} of 4`,
-    count: filled => `${filled} OF 4`,
+    count: filled => `${filled} of 4`,
     goToStep: hint => `Go: ${hint}`,
     nextTag: 'Next',
     nextLabel: hint => `Next: ${hint}`,

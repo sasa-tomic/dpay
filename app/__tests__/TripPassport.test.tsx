@@ -73,7 +73,7 @@ describe('PassportArchive (the one full-page surface)', () => {
     await seedJourney(['walkthroughDone', 'recoverySaved', 'fundsReady']);
     const tree = await render();
     expect(hasTestID(tree, 'passport-archive')).toBe(true);
-    expect(findByTestID(tree, 'passport-count').props.children).toBe('2 OF 4');
+    expect(findByTestID(tree, 'passport-count').props.children).toBe('2 of 4');
     expect(hasTestID(tree, 'passport-slot-recoverySaved-filled')).toBe(true);
     expect(hasTestID(tree, 'passport-slot-fundsReady-filled')).toBe(true);
     expect(hasTestID(tree, 'passport-slot-flowUnderstood')).toBe(true);
@@ -87,7 +87,7 @@ describe('PassportArchive (the one full-page surface)', () => {
   test('empty journey: 0 OF 4, hint = first stamp', async () => {
     await seedJourney([]);
     const tree = await render();
-    expect(findByTestID(tree, 'passport-count').props.children).toBe('0 OF 4');
+    expect(findByTestID(tree, 'passport-count').props.children).toBe('0 of 4');
     expect(findByTestID(tree, 'passport-hint').props.children).toBe('Copy your backup words in Settings');
   });
 

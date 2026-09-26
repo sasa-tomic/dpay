@@ -11,14 +11,18 @@
 //   direct     a registered ic_amm pool trading (source ledger, target IC rail)
 //   solamm     a registered solana_amm venue (Jupiter) trading the SOL-rail pair
 //   hub        a 2-leg IC composition over two pools (app/routes.ts hubRoutes)
+//   composed   an IC→CeFi chain (design brief 2026-09-26 §5.4 item 2): the IC legs land the
+//              hub asset in this wallet, then a registered cefi venue's order carries it to a
+//              SOL-rail mint — the walk comes from resolveConvertDestinations (./convert), the
+//              same source every other convert surface reads
 //   crossrail  a composed CCTP route (Routes B/C — in-wallet landings only; the external-address
 //              cash-out routes are NOT offered here: the swap screen converts BETWEEN the user's
 //              own balances, and cashing out to an external address is the withdraw surface's job)
 //   cefi       a registered CeFi venue (SideShift/Trocador) whose pair carries the two rails
 //
 // Registry order is the ONLY order: targets follow the caller's currency list (stables, then
-// Other), rows follow kind order (direct, hub, crossrail, cefi, solamm) with each kind in its
-// own registry walk order. Nothing here sees a quote, so nothing here can rank by price —
+// Other), rows follow kind order (direct, hub, composed, crossrail, cefi, solamm) with each kind
+// in its own registry walk order. Nothing here sees a quote, so nothing here can rank by price —
 // the no-ranking red line holds by construction.
 //
 // PURE: no React, no network. Deterministic in (catalog, assets, source, target currencies).
@@ -35,6 +39,7 @@ import {
   type VenueEntry,
 } from './venues';
 import {hubRoutes, multihopRoutesFrom, type HubRoute, type MultihopRoute} from '../routes';
+import {resolveConvertDestinations, type ComposedConvertRoute} from './convert';
 import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 
 /** Mint → {symbol, decimals} for venue-pair mints: the wrapped-SOL identifier resolves to SOL
@@ -55,6 +60,7 @@ export function solAssetOfMint(mint: string): {symbol: string; decimals: number}
 export type SwapRow =
   | {kind: 'direct'; rowId: string; venue: VenueEntry; inLedger: string; outLedger: string; outDesc: CurrencyDescriptor}
   | {kind: 'hub'; rowId: string; route: HubRoute}
+  | {kind: 'composed'; rowId: string; route: ComposedConvertRoute}
   | {kind: 'crossrail'; rowId: string; route: MultihopRoute}
   | {kind: 'cefi'; rowId: string; venue: VenueEntry; inLedgerOrMint: string; outLedger: string | null; outMint: string | null; outSym: string; outDecimals: number}
   | {kind: 'solamm'; rowId: string; venue: VenueEntry; inMint: string; outMint: string; outSym: string; outDecimals: number};
@@ -114,11 +120,27 @@ export function resolveSwapTargets(args: {
   const crossrailRoutes = inLedger != null && inRow != null && !inRow.testnet
     ? multihopRoutesFrom(catalog, inRow.currency).filter(r => r.crossRail != null)
     : [];
+  // The composed IC→CeFi routes (2026-09-26), keyed by their SETTLE MINT so they join the
+  // target rail loop below exactly like the crossrail rows do. resolveConvertDestinations
+  // is the one walk (the IC-ledger destinations it also returns are this module's own
+  // direct/hub rows and are ignored here).
+  const composedByMint = new Map<string, ComposedConvertRoute[]>();
+  if (inLedger != null && inRow != null && !inRow.testnet) {
+    for (const dest of resolveConvertDestinations(inLedger, inRow.testnet, catalog)) {
+      for (const route of dest.routes) {
+        if (route.kind !== 'composed') continue;
+        const list = composedByMint.get(route.settleMint);
+        if (list != null) list.push(route);
+        else composedByMint.set(route.settleMint, [route]);
+      }
+    }
+  }
 
   const targets: SwapTarget[] = [];
   for (const currency of targetCurrencies) {
     const direct: SwapRow[] = [];
     const hub: SwapRow[] = [];
+    const composed: SwapRow[] = [];
     const cross: SwapRow[] = [];
     const cefi: SwapRow[] = [];
     const amm: SwapRow[] = [];
@@ -135,6 +157,12 @@ export function resolveSwapTargets(args: {
         // HUB — a 2-leg composition onto this IC rail.
         for (const hr of hubRoutes(catalog, inLedger, ledger)) {
           hub.push({kind: 'hub', rowId: hr.routeId, route: hr});
+        }
+      }
+      // COMPOSED — an IC→CeFi chain whose settle side lands this rail's mint.
+      if (mint != null) {
+        for (const route of composedByMint.get(mint) ?? []) {
+          composed.push({kind: 'composed', rowId: route.routeId, route});
         }
       }
       // CROSSRAIL — a composed CCTP route whose FINAL landing is this rail's mint.
@@ -176,10 +204,11 @@ export function resolveSwapTargets(args: {
         }
       }
     }
-    // Kind order is fixed (direct, hub, crossrail, cefi, solamm); inside a kind, registry walk
-    // order. A duplicate rowId cannot exist within one kind (venue/route ids are unique per
-    // walk), and one row lands in exactly one kind — the list is dedupe-free by construction.
-    const all = [...direct, ...hub, ...cross, ...cefi, ...amm];
+    // Kind order is fixed (direct, hub, composed, crossrail, cefi, solamm); inside a kind,
+    // registry walk order. A duplicate rowId cannot exist within one kind (venue/route ids
+    // are unique per walk), and one row lands in exactly one kind — the list is dedupe-free
+    // by construction.
+    const all = [...direct, ...hub, ...composed, ...cross, ...cefi, ...amm];
     if (all.length > 0) targets.push({currency, rows: all});
   }
   return targets;

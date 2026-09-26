@@ -29,18 +29,13 @@ export type ConvertMessages = {
   backToWallet: string;
 
   // --- fail-closed entry (venue-less assets — uniform entry point, honest copy) ------------------
-  unavailableTitle: (sym: string) => string;
-  /** What exists today, named honestly. Params are the locale-invariant pair string and the
-   *  venue's registry display name. */
-  unavailableBody: (pair: string, venue: string) => string;
+  // noPathTitle/noPathBody/noPathAction (below, brief 5.7) are THE no-route render.
 
   // --- the quote surface (every §5 checklist line) ----------------------------------------------
   amountLabel: (sym: string) => string;
   /** F4: the Max affordance beside the balance line — fills the largest convertible amount. */
   maxAmount: string;
   balanceLine: (balance: string) => string;
-  /** The one number the decision turns on, as the screen's headline: what lands in the wallet. */
-  receiveHeadline: string;
   /** Counterparty disclosure, part 1: WHO executes and what it is NOT. `venue` is the registry
    *  display name (venue facts are looked up, never hardcoded — V1). The pool's principal is NOT
    *  spelled here — the screen renders it on its own line (a 27-character hyphenated principal
@@ -51,6 +46,10 @@ export type ConvertMessages = {
   /** "Quote from ICPSwap, fetched 14:32:05" — the venue's own number, attributed + timestamped.
    *  `at` is the VENUE-READ instant (the quote's relay `fetched_at`), never the device clock. */
   quoteSource: (at: string, venue: string) => string;
+  /** The venue's verbatim figure behind the receive hero, in Details (round-1 item 8): the
+   *  hero renders at standard display precision; THIS line carries the venue's published
+   *  figure unchanged. `amt` is the caller's fmtAsset string, `venue` the registry name. */
+  quoteVerbatim: (venue: string, amt: string) => string;
   /** The displayed rate is DERIVED — amount_out ÷ amount_in of this quote; the venue publishes
    *  amounts, not a rate (V8). The copy must never present it as a venue-published figure. */
   rateLabel: (inSym: string, outSym: string) => string;
@@ -68,35 +67,70 @@ export type ConvertMessages = {
     generic: (venue: string) => string;
   };
   slippageLabel: string;
-  /** "Minimum you'll receive: 1.91 CHF (1% slippage)" + the refusal outcome on the next line. */
-  minReceiveLine: (amount: string, pct: string) => string;
   refusalLine: (sym: string) => string;
   /** The one disclosure control on the quote-ready card: the venue/fee/signing census
    *  collapses behind it, default CLOSED (the 2026-09-16 10x-verbosity pass). */
   detailsLabel: string;
-  confirmButton: string;
   staleRefreshing: string;
-  /** Re-quote at confirm found a different price: name both, ask for a fresh confirm. */
-  quoteChanged: (oldAmt: string, newAmt: string) => string;
-
-  // --- the venue chooser (multi-venue readiness V5 — N venues on one pair, the USER picks) -------
-  /** Section label above the venue rows. */
-  venueChooserLabel: string;
-  /** Shown while NO venue is selected — the only initial state: nothing is preselected, and
-   *  the checklist + confirm stay withheld until the user picks a row (V5 red line). */
-  venueNoneSelected: string;
   /** Shown on a venue row whose last measured settlement blew the SLA (2026-09-20 gate):
    *  the relay demoted the row to the tail — this line is the honest why, nothing more. */
   venueSlow: string;
 
-  // --- the swap screen's TARGET leg (2026-09-24 currency-first redesign) -----------------------
-  /** The target currency's tap affordance, shown when more than one target currency exists —
-   *  the currency the conversion lands in is a choice, and the choice is named. */
-  swapTargetPick: string;
-  /** The expanded target-currency list's label. */
-  swapTargetListLabel: string;
-  /** The SOURCE currency's own row in that list: rendered but disabled, with the honest why. */
-  swapTargetSame: string;
+  // --- the intent sheet (brief Part V, 2026-09-26): dpay pre-computes everything ------------------
+  // Tap 1 opens this sheet fully computed; tap 2 (the CTA) confirms. One default target, one
+  // amount, one venue pick: each disclosed mechanically, each still overridable in one tap.
+  /** The sheet's title: the action plus the currency the user came from. */
+  sheetTitle: (inSym: string) => string;
+  /** The review card's two halves: what leaves, what lands. The receive figure is the
+   *  venue's own estimate — the ≈ is part of the copy, the amount is the caller's string. */
+  youConvert: (amt: string) => string;
+  youReceive: (amt: string) => string;
+  /** The quoting state's line: whose rate is being fetched right now. */
+  quoteFetching: (venue: string) => string;
+  /** The venue auto-pick's disclosure — a mechanical fact, never an endorsement: which venue
+   *  executes, and how many live quotes the pick compared. The word "best" is a designed-out
+   *  failure mode; the line states what happened instead. `n >= 2` by the caller's contract
+   *  (a one-venue pair uses autoVenueSingle). */
+  autoVenueLine: (venue: string, n: number) => string;
+  /** The one-venue pair's pick line: attribution without a comparison that never happened. */
+  autoVenueSingle: (venue: string) => string;
+  /** The Other-venues expander: every other row, registry order, one tap each. */
+  otherVenues: (n: number) => string;
+  /** The floor line on the review card: the minimum the signed instructions accept. */
+  atLeast: (amt: string, pct: string) => string;
+  /** The one bottom CTA. The action names the amount ("Convert 4.54 CHF"). */
+  ctaConvert: (amt: string) => string;
+  /** Confirm re-quoted and the market had moved: both figures inline, the same button re-arms. */
+  rateMoved: (oldAmt: string, newAmt: string) => string;
+  /** The amount is above what the wallet can spend on this route: need vs have, and the
+   *  preset chips are the named way out. */
+  neededVsHave: (need: string, have: string) => string;
+  smallerAmount: string;
+  /** No executable route from this currency: what exists today, plus the one way forward. */
+  noPathTitle: (inSym: string) => string;
+  noPathBody: (pairs: string) => string;
+  /** The no-path panel's one action: the deposit surface for the currency the user holds. */
+  noPathAction: string;
+  /** The CCTP exception, disclosed at tap 1: one step is signed in the user's OWN wallet. */
+  externalSignTitle: string;
+  externalSignBody: string;
+  /** Settlement Field states (brief 5.5): the device signing, the swap in flight, the pool
+   *  payout watch, the resolved receipt, and the composed route's automatic deposit leg. */
+  signing: string;
+  swapVia: (venue: string) => string;
+  awaitingPool: string;
+  receivedDone: (amt: string) => string;
+  viaChain: (venue: string) => string;
+  /** The composed IC+CeFi route's deposit leg: dpay creates the venue order first, then the
+   *  device signs the deposit transfer as a leg of the SAME intent (no second handoff). */
+  depositLegSent: (venue: string, amt: string) => string;
+  depositLegPending: (venue: string, amt: string) => string;
+  /** The composed tracker's order-creation line (the ONE consent's live narration): the
+   *  venue and the payout figure its order locked, verbatim. */
+  composedOrderLine: (venue: string, amt: string) => string;
+  /** The composed deposit transfer was refused at a gate or by the ledger (terminal, never
+   *  retried): the swap went through, the hub asset is still in the wallet, the exit is named. */
+  depositRefusedBody: (hopSym: string, venue: string) => string;
 
   // --- fail closed BEFORE the confirm (a swap that can only fail is never offered) ---------------
   /** Zero balance: the Pay tab's fund-gate shape, routed at the surface that can actually fund an
@@ -180,8 +214,6 @@ export type ConvertMessages = {
    *  refusal outcome). */
   sol: {
     heading: (inSym: string, outSym: string) => string;
-    unavailableTitle: (sym: string) => string;
-    unavailableBody: (sym: string, venue: string) => string;
     /** Solana shape of the counterparty sentence: bare venue attribution (there is no pool
      *  here); what the venue IS lives in its own disclosure, not in this line. */
     counterparty: (venue: string) => string;
@@ -227,7 +259,7 @@ export type ConvertMessages = {
     mechViaHub: (hubSym: string) => string;
     mechViaCctp: string;
     mechViaVenue: (venue: string) => string;
-    /** Same slot as venueNoneSelected, one level down: confirm waits for an explicit pick. */
+    /** Confirm waits for an explicit pick (one level below the venue auto line). */
     mechNoneSelected: string;
     /** The route chip under the headline (D8): which hub, how many swaps. */
     viaHub: (hubSym: string) => string;
@@ -471,16 +503,13 @@ export const convertEn: ConvertMessages = {
   heading: (inSym, outSym) => `Convert ${inSym} → ${outSym}`,
   backToWallet: 'Back to wallet',
 
-  unavailableTitle: sym => `Convert is not available for ${sym} yet`,
-  unavailableBody: (pair, venue) => `Today dpay converts ${pair} through ${venue} — and nothing else.`,
-
   amountLabel: sym => `Amount (${sym})`,
   maxAmount: 'Max',
   balanceLine: balance => `Balance: ${balance}`,
-  receiveHeadline: "You'll receive",
   counterparty: venue => `Executed by the ${venue} pool.`,
   counterpartySigns: 'Your phone signs; the pool pulls exactly the approved amount.',
   quoteSource: (at, venue) => `Quote from ${venue}, fetched ${at}`,
+  quoteVerbatim: (venue, amt) => `${venue} quoted exactly ${amt}`,
   rateLabel: (inSym, outSym) => `Rate for this quote (${inSym} → ${outSym})`,
   poolFeeTier: (tier, venue) => `Pool fee: ${tier} (${venue} fee tier)`,
   inputFeeLine: fee => `Input fee: ${fee}`,
@@ -516,25 +545,43 @@ export const convertEn: ConvertMessages = {
     generic: venue => `This conversion is executed by ${venue}.`,
   },
   slippageLabel: 'Slippage',
-  minReceiveLine: (amount, pct) => `Minimum you'll receive: ${amount} (${pct} slippage)`,
   refusalLine: sym =>
     `If the pool's price moves past your minimum, the swap fails, your ${sym} stays in your wallet, and the approval expires unused.`,
   detailsLabel: 'Details',
-  confirmButton: 'Re-quote and confirm',
   staleRefreshing: 'Quote stale — refreshing…',
-  quoteChanged: (oldAmt, newAmt) => `Quote changed: ${oldAmt} → ${newAmt}. Review and confirm again.`,
-  venueChooserLabel: 'Venue',
-  venueNoneSelected: 'Select a venue to see its full quote and continue.',
   venueSlow: 'Recently slow to settle.',
-  swapTargetPick: 'Change target currency',
-  swapTargetListLabel: 'Convert into',
-  swapTargetSame: 'This is the currency you are converting from.',
+
+  // The intent sheet (brief Part V): the copy the two-tap flow renders.
+  sheetTitle: inSym => `Convert ${inSym}`,
+  youConvert: amt => `You convert ${amt}`,
+  youReceive: amt => `You receive ≈ ${amt}`,
+  quoteFetching: venue => `Getting the rate from ${venue}`,
+  autoVenueLine: (venue, n) => `Executed via ${venue}, highest quoted rate of ${n} venues`,
+  autoVenueSingle: venue => `Executed via ${venue}`,
+  otherVenues: n => `Other venues (${n})`,
+  atLeast: (amt, pct) => `At least ${amt} (${pct} slippage)`,
+  ctaConvert: amt => `Convert ${amt}`,
+  rateMoved: (oldAmt, newAmt) => `The rate moved: ${oldAmt} → ${newAmt}. Confirm again.`,
+  neededVsHave: (need, have) => `${need} needed, you have ${have}`,
+  smallerAmount: 'Convert a smaller amount',
+  noPathTitle: inSym => `No conversion route from ${inSym} right now`,
+  noPathBody: pairs => `Pairs with routes today: ${pairs}`,
+  noPathAction: 'Add money instead',
+  externalSignTitle: 'One step needs your own Ethereum wallet',
+  externalSignBody: 'You sign the crossing in your own wallet; dpay never holds its keys. Everything before and after stays in this sheet.',
+  signing: 'Signing…',
+  swapVia: venue => `Swapping via ${venue}`,
+  awaitingPool: 'Waiting for the pool to pay out',
+  receivedDone: amt => `You received ${amt}`,
+  viaChain: venue => `via ${venue}`,
+  depositLegSent: (venue, amt) => `${amt} deposit sent to ${venue}`,
+  depositLegPending: (venue, amt) => `Sending ${amt} to ${venue}`,
+  composedOrderLine: (venue, amt) => `Order created at ${venue}, locked payout ${amt}`,
+  depositRefusedBody: (hopSym, venue) =>
+    `The deposit to ${venue} was refused — the swap itself went through and your ${hopSym} is still in this wallet. Nothing more will be signed; convert or send the ${hopSym} from its own account.`,
 
   sol: {
     heading: (inSym, outSym) => `Convert ${inSym} to ${outSym} (Solana)`,
-    unavailableTitle: sym => `${sym} cannot be converted yet`,
-    unavailableBody: (sym, venue) =>
-      `Conversions for Solana assets run through a registered Solana venue (${venue} today). No venue serves ${sym} right now — nothing was offered, nothing moved.`,
     counterparty: venue => `Executed by ${venue}.`,
     counterpartySigns: 'Your phone signs the transaction the venue built — nobody else signs anything.',
     priceImpactLine: (pct, venue) => `Price impact: ${pct} (${venue}'s own figure)`,

@@ -264,7 +264,7 @@ export const withdrawEs: WithdrawMessages = {
     noRail: 'Este activo no tiene configurada ninguna vía de retiro',
     gasFeeErr: 'No se pudo obtener la comisión de gas actual: revisa tu conexión',
     withdrawn: 'Retirado ✓',
-    sentTo: 'enviado a',
+    sentTo: 'Enviado a',
     copyDestinationLabel: 'Copiar dirección de destino',
     withdrawing: amount => `Retirando ${amount}…`,
     sendToNative: (networkLabel, nativeAsset) => `Envía tu ${networkLabel} a una dirección nativa de ${nativeAsset}`,

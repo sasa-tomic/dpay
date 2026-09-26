@@ -23,7 +23,8 @@ export const receiptFr: ReceiptMessages = {
   signatureLabel: 'Signature de la transaction',
 
   noAccount: 'Le registre n’a enregistré aucun compte de ce côté.',
-  noReferenceIc: 'Aucune référence — ce transfert ne portait pas de mémo.',
+  partyPool: 'Un pool de liquidité',
+  noReferenceIc: 'Ce transfert ne portait pas de mémo.',
   noReferenceSolana: 'Un transfert Solana ne porte aucune référence dpay — la signature ci-dessous l’identifie.',
   pendingProof: 'Pas encore confirmé — ce paiement sera réglé dans le registre plus tard.',
 

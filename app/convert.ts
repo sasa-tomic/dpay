@@ -13,7 +13,7 @@
  * (display name, endpoint) are looked up from it, never imported as constants.
  *
  * The §4 state machine (persisted in AsyncStorage under the identity-scoped key
- * `convertStoreKey(publicHex)` — `dpay.convert.v2.<pub>`, V6; one record per conversion id;
+ * `convertStoreKey(publicHex)` — `dpay.convert.v3.<pub>`, V6; one record per conversion id;
  * v1 and pre-scoping v2 records are MIGRATED on load — per-record salvage: a corrupt record
  * is dropped, never the whole store, and a legacy key is retired only after a fully
  * successful adoption):
@@ -51,6 +51,7 @@
  */
 
 export type {
+  ComposedDepositInfo,
   ConvertRecord,
   ConvertStep,
   CrossRailInfo,
@@ -88,6 +89,7 @@ export {
   convertLegsExpired,
   convertRecordMinOut,
   hydrateConvertStore,
+  isComposedConvertRecord,
   isHubConvertRecord,
   loadConvertRecords,
   requestConvertAbort,
@@ -95,7 +97,7 @@ export {
   saveConvertRecord,
 } from './convert/records';
 
-export {prepareConvertRecord, prepareCeFiConvertRecord} from './convert/prepare';
+export {prepareConvertRecord, prepareCeFiConvertRecord, prepareComposedConvertRecord, ComposedQuoteChangedError} from './convert/prepare';
 
 export {
   gasFundNeededWei,
@@ -114,7 +116,7 @@ export {
 } from './convert/cctp';
 
 export type {ConvertExecutorDeps, SettleWatch} from './convert/execute';
-export {executeConvert, probeConvertSettlement, probeHopPayout} from './convert/execute';
+export {executeConvert, probeConvertSettlement, probeDepositRow, probeHopPayout} from './convert/execute';
 
 export type {SolanaConvertPrepareArgs, SolanaExecutorDeps, SolanaExecutorOpts} from './convert/executeSolana';
 export {executeSolanaConvert, prepareSolanaConvertRecord} from './convert/executeSolana';

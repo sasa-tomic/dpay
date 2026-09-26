@@ -143,7 +143,9 @@ export const walletEs: WalletMessages = {
     filter: label => `Filtrar ${label}`,
     to: who => `a ${who}`,
     from: who => `de ${who}`,
-    fees: fee => `− ${fee} de comisionas`,
+    fromPool: 'de un pool de liquidez',
+    toPool: 'a un pool de liquidez',
+    fees: fee => `− ${fee} de comisiones`,
     mintCounterparty: 'Fondos de prueba',
     failed: 'Falló — solo se cobró la comisión de red',
     dropped: count => count === 1
@@ -166,7 +168,7 @@ export const walletEs: WalletMessages = {
 };
 
 /** Month abbreviations for the passport stamp date, in Spanish. */
-const ES_MONTHS = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+const ES_MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 export const educationEs: EducationMessages = {
   campaignLine: '¿Señal? No hace falta.',
@@ -175,22 +177,22 @@ export const educationEs: EducationMessages = {
   walkthrough: {
     scenes: {
       offline: {
-        eyebrow: 'PRIMERO, CÓMO FUNCIONA UN PAGO',
+        eyebrow: 'Primero, cómo funciona un pago',
         title: 'Un teléfono solicita y el otro paga',
         body: 'El otro teléfono muestra una solicitud. La escaneas, compruebas el importe y apruebas. Su conexión envía el pago si el tuyo está sin conexión.',
       },
       key: {
-        eyebrow: 'TU DINERO',
+        eyebrow: 'Tu dinero',
         title: 'Tu clave se queda en este dispositivo',
         body: 'dpay no guarda dinero ni puede aprobar pagos por ti. No hay ninguna cuenta de dpay: solo tu clave.',
       },
       exact: {
-        eyebrow: 'SIN SORPRESAS',
+        eyebrow: 'Sin sorpresas',
         title: 'Paga el activo exacto que te piden',
         body: 'La tienda pide un activo exacto. Tú revisas el importe y lo apruebas. dpay nunca convierte.',
       },
     },
-    stageTags: ['01 — SEÑAL', '02 — CLAVE', '03 — ACTIVO'],
+    stageTags: ['Señal', 'Clave', 'Activo'],
     close: 'Cerrar Cómo funciona dpay',
     skip: 'Saltar la introducción',
     back: 'Atrás',
@@ -201,7 +203,7 @@ export const educationEs: EducationMessages = {
 
   practice: {
     sheetTitle: 'Pago de práctica',
-    eyebrow: 'PRÁCTICA',
+    eyebrow: 'Práctica',
     payeeName: 'Tienda de práctica',
     title: 'Haz un pago de verdad',
     cardLine: 'El código que te mostraría una tienda.',
@@ -254,14 +256,14 @@ export const educationEs: EducationMessages = {
   passport: {
     title: 'Preparación del viaje',
     stamps: {
-      recoverySaved: {label: 'COPIA\nHECHA', hint: 'Copia tus palabras de recuperación en Ajustes', short: 'falta la copia de seguridad'},
-      flowUnderstood: {label: 'FLUJO\nVISTO', hint: 'Haz el pago de práctica, o haz cualquier pago', short: 'falta ver cómo funciona'},
-      fundsReady: {label: 'FONDOS\nCARGADOS', hint: 'Añade dinero que puedas gastar; los fondos de práctica no cuentan', short: 'falta añadir fondos'},
-      paymentTested: {label: 'PRIMER\nPAGO', hint: 'Completa un pago: paga o recibe', short: 'falta un pago'},
+      recoverySaved: {label: 'Copia\nhecha', hint: 'Copia tus palabras de recuperación en Ajustes', short: 'falta la copia de seguridad'},
+      flowUnderstood: {label: 'Flujo\nvisto', hint: 'Haz el pago de práctica, o haz cualquier pago', short: 'falta ver cómo funciona'},
+      fundsReady: {label: 'Fondos\ncargados', hint: 'Añade dinero que puedas gastar; los fondos de práctica no cuentan', short: 'falta añadir fondos'},
+      paymentTested: {label: 'Primer\npago', hint: 'Completa un pago: paga o recibe', short: 'falta un pago'},
     },
     close: title => `Cerrar ${title}`,
     stripLabel: filled => `Preparación del viaje: ${filled} de 4`,
-    count: filled => `${filled} DE 4`,
+    count: filled => `${filled} de 4`,
     goToStep: hint => `Ir: ${hint}`,
     nextTag: 'Siguiente',
     nextLabel: hint => `Siguiente: ${hint}`,

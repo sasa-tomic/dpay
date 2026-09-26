@@ -135,7 +135,7 @@ async function main() {
         rec.legPlan = rec.legPlan.map((lp, i) => ({...lp, state: i === 0 ? 'confirmed' : 'pending'}));
         store[seedId] = rec;
         window.localStorage.setItem(key, JSON.stringify(store));
-      }, `dpay.convert.v2.${account.publicHex}`, `${pass.tag}-dead-1`, String(BigInt(row.amount)), Date.now());
+      }, `dpay.convert.v3.${account.publicHex}`, `${pass.tag}-dead-1`, String(BigInt(row.amount)), Date.now());
       // keep the engine's ledger probe parked so the record is still LIVE (pending_withdrawal)
       // when the screen mounts — released once convert-pending is on screen (capture-script trick).
       // Listener BEFORE enabling interception: a paused request with no listener hangs forever.

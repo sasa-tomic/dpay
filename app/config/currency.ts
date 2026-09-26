@@ -62,6 +62,13 @@ export function isStableCurrency(c: HomeCurrency): boolean {
   return (STABLE_CURRENCIES as readonly string[]).includes(c);
 }
 
+/** The VALUE TWIN of each stable (design brief 2026-09-26 §5.3, the standing-target rule):
+ *  the stable currency a fiat holder is actually there for — CHF→EUR, EUR→USD, USD→CHF.
+ *  The convert sheet stands on the twin whenever it is reachable at all, over ANY mechanism
+ *  (which rail or composed route carries the pair is dpay's pick per the currency-first rule —
+ *  this is what makes the founder's 2-press CHF→EURC example hold). */
+export const STABLE_TWIN: Partial<Record<HomeCurrency, HomeCurrency>> = {CHF: 'EUR', EUR: 'USD', USD: 'CHF'};
+
 /**
  * Fork #4 — the currency-unit format for a balance: prefix ("$4.54", "€4.54"), suffix
  * ("4.54 Fr"), or null for a pure-token currency, whose unit IS the token and rides as the

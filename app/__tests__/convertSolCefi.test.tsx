@@ -7,7 +7,7 @@
 // bug; per-rail EXECUTION shapes are not (the CeFi row's engine is unchanged).
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
-import {beforeEach, describe, expect, jest, test} from '@jest/globals';
+import {afterEach, beforeEach, describe, expect, jest, test} from '@jest/globals';
 
 // The settle address the venue pays out to: the wallet's IC ACCOUNT IDENTIFIER as 64-hex —
 // the 32-byte account hash (SHA-224 of the principal blob with the empty subaccount), the
@@ -77,6 +77,18 @@ const ORDER = {
   expiresAt: '2026-09-21T12:00:00.000Z',
 };
 
+
+// Every mounted tree is unmounted in afterEach: the sheet arms its 1 s stale-quote clock on
+// mount, so a tree left alive after its test would keep the interval armed and hang the whole
+// file at exit (jest waits on the timer before the worker can die).
+const mountedTrees: renderer.ReactTestRenderer[] = [];
+afterEach(async () => {
+  const trees = mountedTrees.splice(0);
+  for (const t of trees) {
+    await act(async () => { t.unmount(); });
+  }
+});
+
 async function mount(): Promise<renderer.ReactTestRenderer> {
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {
@@ -95,6 +107,7 @@ async function mount(): Promise<renderer.ReactTestRenderer> {
       />,
     );
   });
+  mountedTrees.push(tree);
   return tree;
 }
 
@@ -112,13 +125,15 @@ const textOf = (node: {props: {children?: unknown}}): string => {
 
 async function mountWithCefiPicked(tree: renderer.ReactTestRenderer): Promise<void> {
   // Pick the ICP target (the cefi venue's landing currency), then type the amount. ICP is
-  // reached by ONE cefi row here — a single row arms without a venue pick. Awaited acts: the
-  // pick re-keys the quote effect, and the cefi fetch must land before the assertions read.
+  // reached by ONE cefi row here — the sheet auto-picks it and pre-fills the amount, so the
+  // walk CLEARS the prefill first and then types '1': exactly ONE review fetch, at the typed
+  // amount, then the confirm's own re-quote. Awaited acts throughout: the pick re-keys the
+  // quote effect and the cefi fetch must land before the assertions read.
   await act(async () => {
-    present(tree, 'btn-convert-target')[0].props.onPress();
+    present(tree, 'convert-amount')[0].props.onChangeText('');
   });
   await act(async () => {
-    present(tree, 'convert-target-ICP')[0].props.onPress();
+    present(tree, 'convert-target-chip-ICP')[0].props.onPress();
   });
   await act(async () => {
     present(tree, 'convert-amount')[0].props.onChangeText('1');
@@ -134,19 +149,19 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
   test('EURC screen offers ICP as a target whose venue row is the cefi service', async () => {
     jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
     const tree = await mount();
-    // The currency grammar: the target list carries USD, SOL and ICP; the ICP target's row
-    // names the service that executes it (the venue id is the row identity).
-    // Open the target list: the currency grammar's two gestures (chip, then row).
-    await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
-    });
-    for (const code of ['USD', 'SOL', 'ICP']) {
-      expect(present(tree, `convert-target-${code}`).length).toBeGreaterThan(0);
+    await act(async () => {});
+    // The currency grammar: USD is the STANDING target (the sheet's own line), SOL and ICP
+    // ride as sibling chips; the ICP target's single cefi row is auto-picked and its
+    // attribution renders on the review card once quoted.
+    expect(textOf(present(tree, 'convert-target-line')[0])).toContain('US dollars');
+    for (const code of ['SOL', 'ICP']) {
+      expect(present(tree, `convert-target-chip-${code}`).length).toBeGreaterThan(0);
     }
-    // The venue-area row is a multi-row affordance; a single cefi row renders as the
-    // attributed line once quoted — its SideShift attribution is pinned here.
     await act(async () => {
-      present(tree, 'convert-target-ICP')[0].props.onPress();
+      present(tree, 'convert-amount')[0].props.onChangeText('');
+    });
+    await act(async () => {
+      present(tree, 'convert-target-chip-ICP')[0].props.onPress();
     });
     await act(async () => {
       present(tree, 'convert-amount')[0].props.onChangeText('1');
@@ -164,14 +179,13 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
       ? {...v, health: {status: 'degraded', settle_seconds: 7200, measured_at: 1758000000}}
       : v));
     const tree = await mount();
-    // Walk to the ICP target: its single cefi row carries the honesty line on the screen
-    // itself (the single-honesty area render) — no pick needed once the target is chosen.
+    await act(async () => {});
+    // Walk to the ICP target: its single cefi row IS the standing pick, so the honesty line
+    // renders on the review card itself — no second gesture needed.
     await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
+      present(tree, 'convert-target-chip-ICP')[0].props.onPress();
     });
-    await act(async () => {
-      present(tree, 'convert-target-ICP')[0].props.onPress();
-    });
+    await act(async () => {});
     const slow = present(tree, 'convert-venue-sideshift-eurc-slow');
     expect(slow.length).toBeGreaterThan(0);
     expect(textOf(slow[0])).toContain('Recently slow to settle.');
@@ -182,12 +196,11 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     jest.mocked(fetchSideShiftQuote).mockResolvedValue({venueId: 'sideshift-eurc', quoteId: 'q1', settleAmount: '0.0495', rate: '0.0495', fetchedAtMs: Date.now()});
     setRuntimeVenues(BUNDLED_VENUES);
     const tree = await mount();
+    await act(async () => {});
     await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
+      present(tree, 'convert-target-chip-ICP')[0].props.onPress();
     });
-    await act(async () => {
-      present(tree, 'convert-target-ICP')[0].props.onPress();
-    });
+    await act(async () => {});
     expect(present(tree, 'convert-venue-sideshift-eurc-slow').length).toBe(0);
     setRuntimeVenues(null);
   });

@@ -9,13 +9,14 @@
  * The `testPrefix` seam is the one new fact: the Home feed renders the identical row under its
  * own home-hist-* testIDs so the two surfaces never share an e2e anchor.
  */
-import {describe, test, expect} from '@jest/globals';
+import {describe, test, expect, afterEach} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
 import {HistoryRow, TxnReceipt, receiptText} from '../components/HistoryRow';
 import {buildSelectableAssets} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {BUNDLED_VENUES, setRuntimePoolNames} from '../config/venues';
 import {M} from '../i18n';
 import type {AssetId, Txn} from '../lib/types';
 
@@ -195,6 +196,88 @@ describe('TxnReceipt — the merchant-reconciliation surface', () => {
     // No label may be emitted with nothing after it — that is the "blank labelled row" this
     // surface exists to avoid, in the text a merchant pastes into a dispute.
     for (const line of ic.split('\n')) expect(line).not.toMatch(/:\s*$/);
+  });
+});
+
+// ── The counterparty's display identity (round-1 item 9) ───────────────────────────────────────
+// A conversion payout lands FROM a pool principal — a contract, not a counterparty. A registered
+// venue resolves to its NAME (row + receipt party) with the principal kept as the checkable mono
+// line; a pool the record store proves but no registry row names anymore gets the neutral
+// wording; a principal nothing knows about renders exactly as before (it may be a person).
+describe('HistoryRow — a pool principal never renders styled as a counterparty', () => {
+  const POOL = BUNDLED_VENUES.find(v => v.venue_id === 'icpswap')!.endpoint;
+
+  afterEach(() => {
+    setRuntimePoolNames(new Map()); // never leak the execution overlay into other suites
+  });
+
+  test('a registered venue\'s pool principal names the venue on the row and the receipt', () => {
+    const t = txn('ic:7', '41194138', TS_NEW, {dir: 'in', who: POOL.slice(0, 8), counterparty: POOL, memo: NONCE_HEX});
+    const row = mount(t);
+    expect(texts(row)).toContain(M.wallet.ledger.from('ICPSwap'));
+    act(() => { row.unmount(); });
+    const tree = mountReceipt(t);
+    const all = texts(tree);
+    expect(all).toContain('ICPSwap');            // the party is the venue
+    expect(all).toContain(POOL);                 // the checkable principal stays, in mono
+    act(() => { tree.unmount(); });
+    const text = receiptText(t, CATALOG, ASSETS);
+    expect(text).toContain(`${M.receipt.fromLabel}: ICPSwap`);
+    expect(text).toContain(POOL);
+  });
+
+  test('a pool the record store proves but no registry row names gets the neutral wording', () => {
+    const deadPool = 'zzzz9-dead-aaaaa-aaaar-qacoq-cai'; // a venue row that left the registry
+    setRuntimePoolNames(new Map([[deadPool, '']]));
+    const t = txn('ic:7', '41194138', TS_NEW, {dir: 'in', who: deadPool.slice(0, 8), counterparty: deadPool, memo: NONCE_HEX});
+    const row = mount(t);
+    expect(texts(row)).toContain(M.wallet.ledger.fromPool);
+    expect(texts(row)).not.toContain(deadPool);
+    act(() => { row.unmount(); });
+    const tree = mountReceipt(t);
+    const all = texts(tree);
+    expect(all).toContain(M.receipt.partyPool);
+    expect(all).toContain(deadPool);             // the ledger truth survives beneath the wording
+    act(() => { tree.unmount(); });
+  });
+
+  test('the OUTGOING leg into a proven-but-unnamed pool gets the neutral wording too', () => {
+    // The swap's deposit half transfers INTO the pool contract (the pull the approve enabled).
+    // The same never-a-principal-counterparty rule covers the direction the first fix missed.
+    const deadPool = 'zzzz9-dead-aaaaa-aaaar-qacoq-cai';
+    setRuntimePoolNames(new Map([[deadPool, '']]));
+    const t = txn('ic:8', '100000000', TS_NEW, {dir: 'out', who: deadPool.slice(0, 8), counterparty: deadPool, memo: NONCE_HEX});
+    const row = mount(t);
+    expect(texts(row)).toContain(M.wallet.ledger.toPool);
+    expect(texts(row)).not.toContain(deadPool);
+    act(() => { row.unmount(); });
+  });
+
+  test('an execution-known venue name (registry row gone) still names the venue', () => {
+    const deadPool = 'zzzz9-dead-aaaaa-aaaar-qacoq-cai';
+    setRuntimePoolNames(new Map([[deadPool, 'ICPSwap (delisted)']]));
+    const t = txn('ic:7', '41194138', TS_NEW, {dir: 'in', who: deadPool.slice(0, 8), counterparty: deadPool, memo: NONCE_HEX});
+    const row = mount(t);
+    expect(texts(row)).toContain(M.wallet.ledger.from('ICPSwap (delisted)'));
+    act(() => { row.unmount(); });
+  });
+
+  test('a principal nothing knows about renders exactly its ledger truth (unchanged)', () => {
+    const t = txn('ic:0', '2500', TS_NEW, {dir: 'in', who: PRINCIPAL_PREFIX, counterparty: FULL_PRINCIPAL});
+    const row = mount(t);
+    expect(texts(row)).toContain(M.wallet.ledger.from(PRINCIPAL_PREFIX));
+    act(() => { row.unmount(); });
+    const tree = mountReceipt(t);
+    expect(texts(tree)).toContain(FULL_PRINCIPAL);
+    expect(tree.root.findAllByProps({testID: 'txn-receipt-account-principal'})).toHaveLength(0);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a payment-time note still outranks the venue name (the user saw the peer)', () => {
+    const t = txn('ic:7', '41194138', TS_NEW, {dir: 'in', who: POOL.slice(0, 8), counterparty: POOL, memo: NONCE_HEX});
+    const tree = mountNoted(t, {who: 'The swap'});
+    expect(texts(tree)).toContain(M.wallet.ledger.from('The swap'));
+    act(() => { tree.unmount(); });
   });
 });
 

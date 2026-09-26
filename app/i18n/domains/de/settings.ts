@@ -145,7 +145,7 @@ export const onboardingDe: OnboardingMessages = {
     ...copyWordsDe,
     title: 'Sichere deine Wallet',
     warning:
-      'Schreib diese 24 Wörter auf und bewahre sie sicher auf. Sie sind der EINZIGE Weg, deine Wallet wiederherzustellen, wenn du dieses Gerät verlierst — es gibt kein dpay-Konto, und nicht einmal dpay kann sie wiederherstellen.',
+      'Schreib diese 24 Wörter auf und bewahre sie sicher auf. Sie sind der einzige Weg, deine Wallet wiederherzustellen, wenn du dieses Gerät verlierst — es gibt kein dpay-Konto, und nicht einmal dpay kann sie wiederherstellen.',
     copyWordsHint: 'Kopiert alle 24 Wörter ohne die Positionsnummern',
     ack: 'Ich habe alle 24 Wörter aufgeschrieben',
   },

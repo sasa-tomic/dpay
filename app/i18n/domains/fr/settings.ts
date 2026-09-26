@@ -148,7 +148,7 @@ export const onboardingFr: OnboardingMessages = {
     ...copyWordsFr,
     title: 'Sauvegardez votre portefeuille',
     warning:
-      'Notez ces 24 mots et conservez-les en lieu sûr. C’est le SEUL moyen de récupérer votre portefeuille si vous perdez cet appareil — il n’y a aucun compte dpay, et même dpay ne peut pas les récupérer.',
+      'Notez ces 24 mots et conservez-les en lieu sûr. C’est le seul moyen de récupérer votre portefeuille si vous perdez cet appareil — il n’y a aucun compte dpay, et même dpay ne peut pas les récupérer.',
     copyWordsHint: 'Copie les 24 mots sans les numéros',
     ack: 'J’ai noté les 24 mots',
   },
