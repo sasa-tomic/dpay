@@ -1,37 +1,34 @@
-// Flow 213 — the device-derived EVM address (D28 / D14): the same Identity.secretHex that
-// derives the Solana key derives the EVM key at m/44'/60'/0'/0/0, and the wallet renders that
-// EIP-55-checksummed address everywhere (Balances + Receive ▸ My address, bare-address QR,
-// no explorer link on Anvil).
+// Flow 213 — the device-derived EVM address (D28 / D14), through the REAL app: the same
+// Identity.secretHex that derives the Solana key derives the EVM key at m/44'/60'/0'/0/0, and
+// the wallet renders that EIP-55-checksummed address everywhere (Balances row + Receive ▸ My
+// address, bare-address QR, copy, NO explorer link on Anvil).
 //
-// LIVE (this skeleton): the full derivation+staging contract, UI-independent —
+// LIVE:
 //   1. the SLIP-10 secp256k1 implementation against the OFFICIAL test vectors (TV1+TV2: chain
 //      codes, child keys, pubkeys, hardened AND normal chains);
 //   2. deriveEvmKeypair determinism + EIP-55 self-consistency;
-//   3. staging integration: a chain funded through the device-seed ladder lands on EXACTLY the
-//      derived address (the same address `just evm-anvil` funds — anvil.mjs and this flow share
-//      evm-core.mjs, the vector-proven implementation).
-// TODO(app-ui) — the legs that need the app surface + the app/evm seam (owned by other streams):
-//   - onboard seeded, read `dpay.identity.v1`.secretHex, expect deriveEvmAddress(secretHex);
-//   - open Receive ▸ My address: rendered 0x == expected (EIP-55 spelled), QR payload == the bare
-//     checksummed address, copy works, NO explorer link on Anvil (explorer: null);
-//   - zero RPC at render (the seam pinned to '' during the phase — the flow-46 offline discipline).
+//   3. the ONBOARD IDENTITY's secretHex (read from the app's own storage) derives exactly the
+//      address the UI renders — Balances row and Receive ▸ My address agree, the QR payload is
+//      the bare checksummed address, copy exists, and Anvil (explorer: null) renders NO
+//      explorer link. The address surface renders with the connectivity oracle pinned OFFLINE —
+//      it is pure derivation and needs no RPC (D14's zero-RPC-at-render discipline).
+//   4. staging integration: the funded address is funded THROUGH the harness relay's evm pipe,
+//      and the balance poll (the app's own) shows the credited amount on the row.
 import {
-  deriveSlip10Secp256k1Node, deriveEvmKeypair, eip55, evmAddressOf, rpc, ethCall,
-  encodeErc20BalanceOf, decodeUint256,
+  deriveSlip10Secp256k1Node, deriveEvmKeypair, eip55, evmAddressOf,
 } from '../harness/evm/evm-core.mjs';
-import {stageAnvil, DEV_DEFAULT_ZCHF_RAW} from '../harness/evm/anvil.mjs';
-import {devSeed} from '../harness/evm/pipe.mjs';
+import {stagePipe, devSeed} from '../harness/evm/pipe.mjs';
+import {ANVIL_ACCOUNT_0_PRIV, DEV_DEFAULT_ZCHF_RAW, fundEth, transferToken} from '../harness/evm/anvil.mjs';
 import {secp256k1} from '@noble/curves/secp256k1';
-import {sha256} from '@noble/hashes/sha2';
+import {setup, onboardWallet, waitForWallet, accountOf, selectEvmAsset} from '../harness/lib.mjs';
 
 export const meta = {
   id: '213',
   name: 'evm-receive',
   journey: 'deposit',
   covers: ['evm-identity', 'slip10-secp256k1', 'eip55', 'evm-device-address'],
-  verifies: 'EVM receive address: the SLIP-10 secp256k1 derivation is pinned to the official test vectors and the device EVM address (m/44\'/60\'/0\'/0/0 over Identity.secretHex) is EIP-55-checksummed, deterministic, and exactly what the harness stages funds to; the app renders it (Balances + Receive ▸ My address QR, no explorer on Anvil) — those UI legs are stubbed in this skeleton.',
-  timeoutMs: 90_000,
-  optional: true, // excluded from the default suite until the UI legs land (needs the app/evm seam)
+  verifies: 'EVM receive address: the SLIP-10 secp256k1 derivation is pinned to the official test vectors, the onboard identity\'s own seed derives the EIP-55-checksummed EVM address the app renders (Balances row + Receive ▸ My address: bare-address QR, copy, no explorer on Anvil), and the address surface renders with connectivity pinned offline (pure derivation, zero RPC needed).',
+  timeoutMs: 300_000, // pays a cold harness-relay build on a fresh worktree (warm: ~8s)
 };
 
 const assert = (ok, msg) => { if (!ok) throw new Error(`[213] ${msg}`); };
@@ -81,22 +78,55 @@ export async function run() {
   assert(other.address !== a.address, 'different seeds must give different addresses');
   console.log(`[213-evm-receive]  ✓ deterministic EIP-55 address ${a.address}`);
 
-  console.log('[213-evm-receive] staging integration: fund the derived device address on a scratch anvil…');
-  const staged = await stageAnvil({recipients: [{seed: deviceSeed, zchfRaw: DEV_DEFAULT_ZCHF_RAW, ethWei: 10_000_000_000_000n}]});
+  // ── The app legs: stage the pipe, boot the app on it, drive the REAL surfaces ────────────────
+  console.log('[213-evm-receive] staging the relay pipe + anvil, booting the app…');
+  const env = await stagePipe({recipients: []});
+  const app = await setup({relay: env.relay.baseURL, evmRpcUrl: 'derive'});
+  const {driver} = app;
   try {
-    const device = staged.accounts[0];
-    assert(device.address === a.address, `staged device ${device.address} != derived ${a.address} — the harness ladder and the rail derivation disagree`);
-    const onChain = decodeUint256(await rpc(staged.rpcUrl, 'eth_call', [{to: staged.tokenAddress, data: encodeErc20BalanceOf(a.address)}, 'latest'], {timeoutMs: 5_000}));
-    assert(onChain === DEV_DEFAULT_ZCHF_RAW, `on-chain device balance ${onChain} != staged ${DEV_DEFAULT_ZCHF_RAW}`);
-    console.log(`[213-evm-receive]  ✓ staged + funded: ${a.address} holds ${onChain} raw ZCHF on chain ${staged.chainId}`);
+    await onboardWallet(driver, 'evm-213');
+    const id = await accountOf(driver);
+    assert(id && typeof id.secretHex === 'string' && id.secretHex.length === 64, 'the app identity must carry a 64-hex seed');
+    const device = deriveEvmKeypair(id.secretHex);
+    assert(device.address === eip55(device.address.toLowerCase()), 'the identity-derived address must be EIP-55-checksummed');
+    console.log(`[213-evm-receive]  ✓ onboard identity derives ${device.address}`);
 
-    // TODO(app-ui): onboard seeded (dpay.identity.v1 = {secretHex: <deviceSeed>}), open
-    // Receive ▸ My address, and assert the rendered address == a.address (EIP-55 spelled),
-    // the QR payload == the bare checksummed address, copy works, and NO explorer link renders
-    // on Anvil (EVM_CHAINS[31337].explorer === null). Pin zero RPC at render with the seam ''.
-    console.log('[213-evm-receive]  · TODO(app-ui): rendered-address / QR / copy / no-explorer legs are stubbed');
+    // Fund the DERIVED address through anvil (the harness ladder), then watch the app's own
+    // balance poll show it on the row.
+    await fundEth(env.anvil.rpcUrl, device.address, 10_000_000_000_000n);
+    await transferToken(env.anvil.rpcUrl, env.anvil.tokenAddress, ANVIL_ACCOUNT_0_PRIV, device.address, DEV_DEFAULT_ZCHF_RAW);
+
+    await waitForWallet(driver);
+    await selectEvmAsset(driver, 'evm-zchf-anvil');
+    console.log('[213-evm-receive]  ✓ EVM asset selected (Balances row → Pay engine)');
+
+    // Receive ▸ My address: the rendered address IS the derivation, EIP-55 spelled.
+    await driver.click('tab-receive');
+    await driver.click('btn-receive-address', {timeoutMs: 5_000});
+    const addrNode = await driver.findByTestID('evm-recv-address', {timeoutMs: 5_000});
+    const rendered = (await addrNode.evaluate((n) => (n.textContent ?? '').trim())).trim();
+    assert(rendered === device.address, `rendered address ${rendered} != derived ${device.address}`);
+    // The QR payload is the BARE checksummed address (D14 — no URI scheme, no EIP-681).
+    const qrValue = await driver.eval(() => window.__DPAY_QR_LAST);
+    assert(qrValue === device.address, `QR payload ${JSON.stringify(qrValue)} must be the bare checksummed address`);
+    // Copy affordance exists; Anvil (explorer: null) renders NO explorer link.
+    await driver.findByTestID('btn-evm-recv-copy', {timeoutMs: 3_000});
+    assert(!(await driver.isPresent('evm-recv-explorer')), 'no explorer link may render on Anvil (explorer: null)');
+    console.log('[213-evm-receive]  ✓ Receive ▸ My address: rendered == derived, bare-address QR, copy, no explorer');
+
+    // Zero-RPC-at-render: pin the connectivity oracle OFFLINE, flip the sub-mode away and back —
+    // the address surface re-renders identically (pure derivation; the balance rows degrade to
+    // their last-known/'—' honestly instead of the address ever disappearing).
+    await driver.eval(() => { globalThis.__DPAY_TEST_EVM_CONNECTIVITY = 'offline'; });
+    await driver.click('btn-receive-request', {timeoutMs: 5_000});
+    await driver.click('btn-receive-address', {timeoutMs: 5_000});
+    const again = await driver.findByTestID('evm-recv-address', {timeoutMs: 5_000});
+    assert((await again.evaluate((n) => (n.textContent ?? '').trim())) === device.address, 'the address must render with connectivity offline (no RPC in the render path)');
+    await driver.eval(() => { delete globalThis.__DPAY_TEST_EVM_CONNECTIVITY; });
+    console.log('[213-evm-receive]  ✓ address renders offline-pinned (zero RPC in the render path)');
   } finally {
-    await staged.stop();
+    await app.stop();
+    await env.stop();
   }
   console.log(`[213-evm-receive] PASS (${Date.now() - start}ms)`);
 }

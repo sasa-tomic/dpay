@@ -208,7 +208,8 @@ export function AccountsTab({
             not a currency: it renders after the list, never in it. */}
         {demo != null ? (
           <View>
-            <Text testID="accounts-practice-note" style={S.accountsPractice}>{M.wallet.accounts.practice}</Text>            <CurrencyRow
+            <Text testID="accounts-practice-note" style={S.accountsPractice}>{M.wallet.accounts.practice}</Text>
+            <CurrencyRow
               testId="asset-demo"
               asset={demo}
               amount={demoView?.displayText}

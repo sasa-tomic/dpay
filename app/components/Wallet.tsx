@@ -593,8 +593,13 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     [catalog, showTestnet, solAddress, evmRailOn, networks],
   );
   // Whether the FULL catalog carries any testnet currency (the assets list is already filtered, so
-  // it cannot answer this — the Balances sheet's reveal-toggle needs the unfiltered truth).
-  const hasTestnet = useMemo(() => catalog.some(isTestnetCurrency), [catalog]);
+  // it cannot answer this — the Balances sheet's reveal-toggle needs the unfiltered truth). The
+  // EVM rail's env-gated dev sections (Anvil / Arbitrum Sepolia) count: a dev row hidden behind
+  // the toggle needs the toggle to exist.
+  const hasTestnet = useMemo(
+    () => catalog.some(isTestnetCurrency) || evmSections.some(s => s.environment === 'testnet' && s.assets.length > 0),
+    [catalog, evmSections],
+  );
   // The reconciled selection: preserve the selected id while it remains visible; fall back to ic:0
   // (then first visible, else null) when it disappears. Computed every render so the header + chip
   // + engine dispatch read a VALID id immediately (no flash on the first paint, no stale testnet

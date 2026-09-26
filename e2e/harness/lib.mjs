@@ -327,11 +327,17 @@ export async function setup(opts = {}) {
 
   try {
     if (!opts.noWeb) {
-      const navPath = `/?relay=${encodeURIComponent(relayBaseURL)}`;
+      // `opts.relay` — a flow-owned relay override (the EVM anvil flows, spec D26/D28): the app
+      // boots against THIS relay's `?relay=` instead of the shared session relay, so a relay
+      // spawned with flow-specific env (DPAY_EVM_RPC_URL_31337 + DPAY_EVM_ANVIL_TOKEN —
+      // harness/evm/pipe.mjs stagePipe) serves the flow its own catalog + evm pipe. The shared
+      // session's web + browser are still used; only the app's relay target moves.
+      const effectiveRelay = opts.relay ?? relayBaseURL;
+      const navPath = `/?relay=${encodeURIComponent(effectiveRelay)}`;
       driver.appBoot = {
         base: webBaseURL,
         path: navPath,
-        relay: relayBaseURL,
+        relay: effectiveRelay,
         navTimeoutMs: mode === 'live' ? 20_000 : 8_000,
         readyTimeoutMs: mode === 'live' ? 20_000 : 10_000,
       };
@@ -1079,7 +1085,7 @@ async function scanCount(driver) {
  *  (button gone between probe and click) just returns false for the next poll to retry. */
 async function pressScanGate(driver) {
   const gate = await driver.eval(() => {
-    for (const t of ['btn-start-scan', 'btn-sol-start-scan']) {
+    for (const t of ['btn-start-scan', 'btn-sol-start-scan', 'btn-evm-start-scan']) {
       if (document.querySelector(`[data-testid="${t}"]`)) return t;
     }
     return null;
@@ -1091,6 +1097,24 @@ async function pressScanGate(driver) {
   } catch {
     return false; // unmounted mid-click (tab switch / re-render) — the caller's poll retries
   }
+}
+
+/**
+ * Select an EVM asset row in the ACCOUNTS route (the per-rail `asset-<testKey>-select` press —
+ * the same gesture the practice row carries). The EVM dev rows (Anvil / Arbitrum Sepolia) are
+ * testnet-gated, so this reveals them first when the row is not yet visible. Lands on Pay with
+ * the EVM engine mounted (the caller's assumption after every selectCurrency).
+ */
+export async function selectEvmAsset(driver, testKey, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  await openBalances(driver, { timeoutMs });
+  if (!(await driver.isPresent(`asset-${testKey}`))) {
+    await driver.click('btn-toggle-testnet', { timeoutMs });
+    await driver.findByTestID(`asset-${testKey}`, { timeoutMs });
+  }
+  await driver.click(`asset-${testKey}-select`, { timeoutMs });
+  await driver.click('tab-pay', { timeoutMs });
+  await driver.findByTestID('evm-pay-scan', { timeoutMs });
 }
 
 /**
