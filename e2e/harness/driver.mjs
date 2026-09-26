@@ -264,6 +264,18 @@ export class Driver {
         else globalThis.__DPAY_TEST_SOLANA_RPC_URL = u;
       }, o.solRpcUrl);
     }
+    // EVM seam (spec 2026-09-26 D27) — the solRpcUrl mirror, EVM-seam lines only: 'derive'
+    // DELETES the override (the relay-derived per-chain route stands — the production path);
+    // any other string is the whole candidate list (e.g. the harness relay's /api/v1/evm/rpc
+    // pipe URL, so anvil flows ride the REAL proxy). Runs after injectTestGlobals (which sets
+    // ''), and the app captures the value at module load, so it lands before the bundle
+    // evaluates on every navigation.
+    if (o.evmRpcUrl) {
+      await page.evaluateOnNewDocument((u) => {
+        if (u === 'derive') delete globalThis.__DPAY_TEST_EVM_RPC_URL;
+        else globalThis.__DPAY_TEST_EVM_RPC_URL = u;
+      }, o.evmRpcUrl);
+    }
     const driver = new Driver(browser, context, page, ownsBrowser);
     // The create-time CDP session (locale override lives HERE — a second session stacking another
     // locale override is a protocol error, so flows that switch locale mid-run must reuse this one).
@@ -879,6 +891,12 @@ function injectTestGlobals() {
   // SOL rail: DISABLE so the offline e2e suite never hits real Solana devnet. An empty URL makes
   // useSolanaBalance no-op and the SOL card render with `—` (tested offline-rendered, see flow SOL).
   globalThis.__DPAY_TEST_SOLANA_RPC_URL = '';
+  // EVM rail: DISABLE identically (the SOL seam's mirror, spec 2026-09-26 D27). An empty URL
+  // makes the app/evm.ts seam no-op. A flow that wants the EVM rail re-points it per-page with
+  // the `evmRpcUrl` Driver option below (the `solRpcUrl` mirror) — usually the harness relay's
+  // /api/v1/evm/rpc URL so the app exercises the REAL pipe, or 'derive' to drop the override
+  // and let the relay-derived per-chain route stand.
+  globalThis.__DPAY_TEST_EVM_RPC_URL = '';
   // Convert engine cadences (the config/convert.ts seam): the suite proves the honest-pending /
   // resume-engine invariants at ~100 ms probe cadence instead of prod's seconds. The invariants
   // are cadence-independent — the settle watch still has to EXHAUST before a record parks on

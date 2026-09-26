@@ -23,7 +23,19 @@ export async function stagePipe({recipients = [], blockTime} = {}) {
   const anvil = await stageAnvil({port: anvilPort, recipients, blockTime});
   let relay = null;
   try {
-    relay = await startRelay({env: {DPAY_EVM_RPC_URL: anvil.rpcUrl}});
+    relay = await startRelay({env: {
+      // The bare /api/v1/evm/rpc route (== chain 1 per D12) fronts the anvil too — the flows
+      // dial the bare pipe directly (their own evm-core, no suffix).
+      DPAY_EVM_RPC_URL: anvil.rpcUrl,
+      // D12: the PER-CHAIN route the app's seam derives (`<relay>/api/v1/evm/rpc/31337`) —
+      // without it every suffixed call answers 503 evm-unconfigured and the app-side flows
+      // cannot ride the pipe.
+      DPAY_EVM_RPC_URL_31337: anvil.rpcUrl,
+      // D3: the env-gated dev catalog row — the relay serves an `{evm, "Anvil", testnet}`
+      // section with the mock ZCHF at this address, so the app's catalog carries the Anvil
+      // ZCHF row the flows assert on.
+      DPAY_EVM_ANVIL_TOKEN: anvil.tokenAddress,
+    }});
   } catch (e) {
     await anvil.stop();
     throw e;
