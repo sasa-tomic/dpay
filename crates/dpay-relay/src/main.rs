@@ -67,6 +67,15 @@
 //!                           refuses startup (EXIT_CONFIG).
 //!   DPAY_SOLANA_TIMEOUT_MS  per-call upstream timeout for the solana proxy in milliseconds
 //!                           (default 10000). `0` or non-numeric → startup refuses (EXIT_CONFIG).
+//!   DPAY_EVM_RPC_URL        the EVM JSON-RPC provider endpoint proxied at POST
+//!                           /api/v1/evm/rpc (the Solana pipe's EVM twin) — the FULL URL
+//!                           including its api key (e.g. `https://…/v3/<key>`). SECRET
+//!                           deploy config: never logged, never echoed in a response,
+//!                           never committed. Unset is legal — the route still registers
+//!                           and answers 503 naming this variable; only a SET-but-malformed
+//!                           URL refuses startup (EXIT_CONFIG).
+//!   DPAY_EVM_TIMEOUT_MS     per-call upstream timeout for the evm proxy in milliseconds
+//!                           (default 10000). `0` or non-numeric → startup refuses (EXIT_CONFIG).
 //!   DPAY_SIDESHIFT_SECRET   the SideShift partner ACCOUNT SECRET for the partner-key proxy
 //!                           (founder decision 3, 2026-09-14 — POST /api/v1/sideshift/*; see
 //!                           src/sideshift.rs and the feasibility spec's Partner-key
@@ -253,6 +262,14 @@ async fn main() {
         cfg.solana_rpc_url.clone(),
         cfg.solana_timeout,
     ));
+    // The EVM RPC proxy (`crate::evm`): the Solana pipe's EVM twin, same always-registered
+    // contract — an unconfigured proxy answers 503 naming DPAY_EVM_RPC_URL rather than
+    // 404ing — and gets its upstream + per-call timeout here. The URL is SECRET (it embeds
+    // the provider api key): never logged, never echoed in a response.
+    let state = state.with_evm(dpay_relay::evm::EvmProxy::new(
+        cfg.evm_rpc_url.clone(),
+        cfg.evm_timeout,
+    ));
     // The SideShift partner-key proxy (founder decision 3, 2026-09-14): same
     // always-registered contract — unconfigured it answers 503 naming the missing
     // variable(s). BOTH credential halves are SECRET deploy config (the partner account
@@ -378,6 +395,23 @@ async fn main() {
         println!(
             "POST /api/v1/solana/rpc: unconfigured — the route answers 503 until \
              DPAY_SOLANA_RPC_URL (the provider endpoint, full URL incl. api key) is set in the \
+             deploy environment."
+        );
+    }
+    // Same one-line WHETHER for the EVM twin (never the values — the upstream URL embeds the
+    // provider api key, and even the docker log must not carry it).
+    if cfg.evm_rpc_url.is_some() {
+        println!(
+            "POST /api/v1/evm/rpc: ENABLED — pure pipe + read cache against the configured \
+             upstream (DPAY_EVM_RPC_URL). eth_sendRawTransaction and every unallowlisted \
+             method are passed through byte-faithfully, uncached; allowlisted reads share a \
+             per-method TTL cache; upstream failures come back with their own status, never a \
+             stale cache hit."
+        );
+    } else {
+        println!(
+            "POST /api/v1/evm/rpc: unconfigured — the route answers 503 until \
+             DPAY_EVM_RPC_URL (the provider endpoint, full URL incl. api key) is set in the \
              deploy environment."
         );
     }
@@ -555,6 +589,11 @@ struct Config {
     solana_rpc_url: Option<String>,
     /// Per-call upstream timeout for the solana proxy (`DPAY_SOLANA_TIMEOUT_MS`).
     solana_timeout: std::time::Duration,
+    /// The evm proxy's upstream, when configured (`DPAY_EVM_RPC_URL`). Carries the
+    /// provider api key — treat as secret end to end.
+    evm_rpc_url: Option<String>,
+    /// Per-call upstream timeout for the evm proxy (`DPAY_EVM_TIMEOUT_MS`).
+    evm_timeout: std::time::Duration,
     /// The SideShift partner account secret (`DPAY_SIDESHIFT_SECRET`) — one half of the
     /// FIRST relay-held partner credential (founder decision 3). SECRET: never logged,
     /// never echoed, never committed. Unset is legal (503 naming the variable).
@@ -703,6 +742,37 @@ impl Config {
             None => dpay_relay::solana::DEFAULT_TIMEOUT,
         };
 
+        // The EVM RPC proxy's upstream (`crate::evm`). Same discipline as the solana URL:
+        // UNSET is a legal state — the route still registers and answers 503 naming the
+        // variable — but a set value that isn't a URL is refused here rather than surfacing
+        // as a 504 per request with no hint why. The value embeds the provider api key, so
+        // it never appears in an error message, a log line, or a response (url::ParseError's
+        // text names the defect, not the URL — deliberately not interpolated here).
+        let evm_rpc_url = match non_empty("DPAY_EVM_RPC_URL") {
+            Some(url) => {
+                reqwest::Url::parse(&url)
+                    .map_err(|e| format!("DPAY_EVM_RPC_URL is not a valid URL: {e}"))?;
+                Some(url)
+            }
+            None => None,
+        };
+        let evm_timeout = match non_empty("DPAY_EVM_TIMEOUT_MS") {
+            Some(raw) => {
+                let ms: u64 = raw
+                    .parse()
+                    .map_err(|e| format!("DPAY_EVM_TIMEOUT_MS={raw:?} is not a number: {e}"))?;
+                if ms == 0 {
+                    return Err(
+                        "DPAY_EVM_TIMEOUT_MS=0 — a zero timeout refuses every upstream call \
+                         before it is made"
+                            .into(),
+                    );
+                }
+                std::time::Duration::from_millis(ms)
+            }
+            None => dpay_relay::evm::DEFAULT_TIMEOUT,
+        };
+
         // The SideShift partner-key credentials (founder decision 3, 2026-09-14). EITHER may
         // be unset — that is a legal state: the routes still register and answer 503 naming
         // exactly the variable(s) missing (the venue is simply absent until the founder's
@@ -816,6 +886,8 @@ impl Config {
             checkout,
             solana_rpc_url,
             solana_timeout,
+            evm_rpc_url,
+            evm_timeout,
             sideshift_secret,
             sideshift_affiliate_id,
             sideshift_api_base,

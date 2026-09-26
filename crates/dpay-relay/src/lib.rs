@@ -26,6 +26,7 @@ pub mod jupiter;
 pub mod ledger;
 pub mod sideshift;
 pub mod solana;
+pub mod evm;
 pub mod checkout;
 pub mod trocador;
 /// The Trocador partner-agreement layer (2026-09-21): the compliance access log, the per-trade
