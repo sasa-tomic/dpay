@@ -677,6 +677,46 @@ mint account together; it replaced the five-requests-every-2.5-seconds fan-out
 assertion: it fails if the poll issues the old per-rail fan-out, if a history tick re-reads a
 transaction detail, or if a backgrounded app issues anything at all.
 
+## EVM rail — generic ERC-20 custody (filed 2026-09-26, UNSTARTED)
+
+- **Why**: founder directive 2026-09-26 — "we should add ERC-20 support anyway", driven by ZCHF /
+  Frankencoin (the OISY-parity ask: OISY holds ZCHF, dpay cannot). dpay settles ck twins and
+  bridges via the minters but holds NO raw ERC-20, and there is no ckZCHF twin to bridge into (the
+  ckERC20 family is ckUSDC-only). ZCHF is a plain OZ ERC-20 (18 decimals, EIP-2612 permit, verified
+  source); the vendored `third_party/oisy-wallet` env files pin its deployed addresses: Ethereum
+  mainnet `0xB58E61C3098d85632Df34EecfB899A1Ed80921cB`, Arbitrum
+  `0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553`, plus Base and Polygon copies.
+- **Shape — a SOL-rail sibling, app-only; the facade, wire, and core are untouched** (same rule as
+  SOL): device-held EVM key (secp256k1, non-custodial, one address across all EVM chains);
+  `catalog.rs` rows keyed per (chain_id, token) — first rows Ethereum mainnet + Arbitrum ZCHF;
+  ERC-20 `transfer` signed on device; broadcast through a relay RPC proxy per chain (the R2
+  `DPAY_SOLANA_RPC_URL` pattern — provider endpoint in deploy config, never the app bundle);
+  balance/history indexed by `eth_getLogs` Transfer-topic polling on the relay. The standing
+  invariant carries over unchanged: dpay holds no EVM key, never pays and never quotes gas.
+- **Gas**: user-side. Every payer address needs dust native ETH (mainnet / Arbitrum) alongside the
+  token — the in-intent gas-fund offer (CCTP wave precedent) is the onboarding pattern; ZCHF's
+  permit makes any future approval signature-cheap, but plain transfers need no approval at all.
+- **Custody semantics: verify from the verified source at build time, keep the receipt.** Etherscan
+  surfaces a "UI multiplier" note on the ZCHF token page (displayed amounts scaled by a
+  `UIMultiplierUpdated` value) while the pinned contract's ABI is vanilla ERC-20 + permit —
+  reconcile that contradiction BEFORE any balance display ships; a real multiplier means the
+  indexer must apply it, a stale Etherscan widget means drop it with the evidence.
+- **Event capacity, measured 2026-09-26 (the triathlon question, ~5k attendees)**: Ethereum: 12s
+  blocks, accept-at-1-block ~12–25s at the day's 0.09 Gwei (transfer ≈ 65k gas ≈ $0.02; absolute
+  finality ~13 min, never needed for acceptance); ~65k gas per transfer ⇒ ~500 ERC-20
+  transfers/block (~40 TPS chain-wide headroom). Arbitrum (the recommended event rail): 250ms
+  blocks, ~1–3s soft-confirmed accept, sub-cent fees, orders of magnitude more headroom. Realistic
+  load: 5,000 payments over 30 min = 2.8 TPS; a 15-min concession crush = 5.5 TPS; even an absurd
+  5-min all-at-once spike = 17 TPS — all trivial for either chain and for the relay proxy (the SOL
+  rail already lives at this shape; per-address nonces never contend at one-tx-per-address). The
+  engineering risk is NOT throughput — it is (a) gas pre-funding UX before race day, (b) the
+  confirm-UX policy (show "seen/included" at soft confirmation, never promise finality), (c)
+  nonce/retry hygiene in the broadcast queue.
+- **Gates**: receive address + send sheet + request auto-confirm via inclusion poll (the
+  `POLL.request` precedent) as new e2e flows; `just verify` + jest + relay catalog tests with the
+  `dfx/catalog_truth.json` drift alarms; mainnet + Arbitrum rows live and ONE real on-chain ZCHF
+  round trip recorded before any pilot claim.
+
 ## UX swarm 2026-09-08 — three independent reviewers, live build
 
 Three reviewers drove the deployed wallet in separate browsers with no sight of each other: a
