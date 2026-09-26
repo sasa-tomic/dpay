@@ -771,8 +771,9 @@ const TRUTH = JSON.parse(
   readFileSync(join(__dirname, '..', '..', 'dfx', 'catalog_truth.json'), 'utf8'),
 ) as {
   principals: {ckbtc_minter: string; cketh_minter: string; ckusdc_ledger: string; cketh_gas_ledger: string; cketh_ledger: string; vchf_ledger: string; icp_ledger: string; eurc_mint: string};
-  erc20_contracts: {ckusdc: string};
-  decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number; vchf: number; icp: number; eurc: number};
+  erc20_contracts: {ckusdc: string; zchf_arbitrum: string; zchf_ethereum: string};
+  decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number; vchf: number; icp: number; eurc: number; zchf: number};
+  chains: {ethereum: number; arbitrum_one: number; arbitrum_sepolia: number; anvil: number};
   wire_consts: {retrieve_btc_min_amount: number; mint_account: string};
   venues: VenueTruth[];
 };
