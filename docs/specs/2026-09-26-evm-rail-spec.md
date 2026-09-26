@@ -856,9 +856,8 @@ Then, in dependency order (each item cites its decision):
 - **R2 — the ZCHF address literals' EIP-55 checksums are unverified in this spec.** D5's jest
   alarm self-verifies them (`eip55ChecksumBad`); a red alarm means the verified-source spelling
   wins and the truth file is corrected in the same commit.
-- **R3 — UIMultiplier.** Balance display on the ZCHF rows is BLOCKED on D30.2's evidence; if a
-  real multiplier exists, the scaling must be applied where balances are read (app-side over the
-  chain's own numbers), never in copy.
+- **R3 — UIMultiplier.** RESOLVED same-day — see Addendum 1 (A1.1): no multiplier exists on
+  either pinned ZCHF contract; chain == indexer; display = raw/10^18.
 - **R4 — provider `eth_getLogs` range limits** on free tiers (commonly 1k-10k blocks). The
   per-chain `logPageSize` starts conservative (D9) and is replaced by D29's measured values;
   the history cursor makes page size a performance knob, never a correctness one.
@@ -871,3 +870,47 @@ Then, in dependency order (each item cites its decision):
 - **R7 — foundry/anvil availability**: vendoring is a fetch-once with a pinned checksum (D26.1);
   until it lands, flows 213-217 stay RED-by-absence and `just verify` must not regress
   (the recipes fail loud, they do not skip).
+
+---
+
+## Addendum 1 — same-day probe receipts (2026-09-26, keyless, read-only)
+
+### A1.1 — D30.2 CLOSED: no UIMultiplier exists; balance display UNBLOCKED
+
+Verified-source pulls (blockscout v2 api, receipts saved in `tmp/frankencoin-src.json`,
+`tmp/frankencoin-arb.json`):
+
+- Ethereum `0xB58E…21cB` "Frankencoin": plain verified solidity, not a proxy, ABI events exactly
+  `{Approval, Loss, MinterApplied, MinterDenied, Profit, Transfer}` — zero `UIMultiplier`
+  occurrences.
+- Arbitrum `0xD4dD…5553` "BridgedFrankencoin": CCIP `CrossChainERC20`, zero `UIMultiplier`
+  occurrences.
+- On-chain cross-check (`ethereum-rpc.publicnode.com`): `decimals()` = 18;
+  `balanceOf(0x27d9AD987BdE08a0d083ef7e0e4043C857A17B38)` = 11671150848527532348117692, which
+  EXACTLY equals the indexer's raw holder value — chain == indexer, no scaling anywhere.
+
+**Verdict: display = `balanceOf` / 10^18. The Etherscan "UI multiplier" note is an explorer-side
+token-tracker display config, not chain state. R3 is resolved; D16's display gate is lifted.**
+
+### A1.2 — D30.1 AMENDED: real ZCHF permit uses the MINIMAL EIP-712 domain
+
+Both pinned ZCHF contracts use `ERC20PermitLight`, whose domain has NO name and NO version:
+
+```
+DOMAIN_SEPARATOR() = keccak256(abi.encode(
+    0x47e79534a245952e8b16893a336b85a3d9ea9fa8c573f3d803afb92a79469218, // EIP712Domain(uint256 chainId,address verifyingContract)
+    block.chainid,
+    address(this)))
+permit typehash = 0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9 // canonical, (owner,spender,value,nonce,deadline)
+```
+
+Consequences (binding for S2/S4/S6):
+
+- The registry's `permitName`/`permitVersion` idea is DROPPED for ZCHF; replace with a per-token
+  **domain-kind flag** (`minimal | full`). ZCHF on both chains = `minimal`.
+- Signing a full-domain permit against real ZCHF fails `INVALID_SIGNER` — D30.1's probe MUST
+  compute the minimal domain (this addendum, not the D30.1 text above, is authoritative).
+- Error strings on real ZCHF: `PERMIT_DEADLINE_EXPIRED`, `INVALID_SIGNER`; UI/error mapping must
+  not assume `ZCHF: …` strings.
+- The dev mock mirrors all of this exactly (verified mock at `tmp/mock-zchf`, 3/3 forge tests:
+  offline-permit pull-claim, expiry revert, nonce replay revert).
