@@ -394,9 +394,13 @@ Precedence (the `solanaRpcUrls` lines 178-244 pattern, verbatim structure):
    mirroring `e2e/harness/driver.mjs` lines 247-264). Single candidate; the offline loop's
    isolation contract.
 3. Relay-derived — each active relay base + `/api/v1/evm/rpc/{chainId}` (the per-chain suffix,
-   D12). Chain 1 may use the bare route (`/api/v1/evm/rpc`) as its candidate head for
-   compatibility with the S1 contract as specified; the suffixed form is the primary candidate
-   list for every chain, including 1, once S1 confirms the suffix parse.
+   D12). LANDED FACT (2026-09-26, commit `9cecd64`): S1 shipped the bare single-route form
+   (`POST /api/v1/evm/rpc`, one `DPAY_EVM_RPC_URL`), which serves chain 1 exactly. The per-chain
+   suffix parse + `DPAY_EVM_RPC_URL_<CHAINID>` lookup is now a REQUIRED follow-up on that module
+   (small: one `Path<String>` extractor and an env-name builder); until it lands, the app's
+   candidate list for every non-1 chain resolves to the bare route and MUST be treated as
+   unavailable (a 31337/42161 envelope sent to a chain-1 node is a wrong-chain send — the seam
+   gates on `eth_chainId` matching the requested chainId before any send, D15).
 
 `isEvmRpcAvailable(chainId)` = head of the list non-empty (line 965's mirror). The send-path
 deadline table (module header lines 35-60) is restated for EVM: import load 10s; per-call rpcFetch
@@ -844,10 +848,11 @@ Then, in dependency order (each item cites its decision):
 
 ## Risks and open items
 
-- **R1 — S1 contract drift (the only blocking unknown).** If `evm.rs` lands with a single
-  non-suffixed route and no per-chain env, multi-chain is impossible without a follow-up change.
-  D12 is written so the bare route stays chain 1; the suffix + env naming must be agreed with that
-  implementer BEFORE S4 wires candidates. Everything else in this spec is independent of it.
+- **R1 — S1 landed single-chain (RESOLVED into a required follow-up).** `evm.rs` shipped
+  2026-09-26 (`9cecd64`) as the bare `POST /api/v1/evm/rpc` + one `DPAY_EVM_RPC_URL` — correct
+  for chain 1, not yet multi-chain. The suffix + per-chain env (D12) is the follow-up; until it
+  lands the seam refuses to send on any non-1 chain (`eth_chainId` gate, D12/D15). Everything
+  else in this spec was and is independent of it.
 - **R2 — the ZCHF address literals' EIP-55 checksums are unverified in this spec.** D5's jest
   alarm self-verifies them (`eip55ChecksumBad`); a red alarm means the verified-source spelling
   wins and the truth file is corrected in the same commit.
