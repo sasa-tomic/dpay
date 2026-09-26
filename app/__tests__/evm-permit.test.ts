@@ -1,6 +1,14 @@
 import {describe, expect, test} from '@jest/globals';
 import {secp256k1} from '@noble/curves/secp256k1';
-import {buildDomainSeparator, PERMIT_TYPEHASH, permitDigest, permitStructHash, signPermit} from '../evm/permit';
+import {
+  buildDomainSeparator,
+  MINIMAL_DOMAIN_TYPEHASH,
+  PERMIT_TYPEHASH,
+  permitDigest,
+  permitStructHash,
+  signPermit,
+  type PermitDomain,
+} from '../evm/permit';
 import {keccak256} from '../evm/keccak';
 import {utf8ToBytes} from '../lib/base64url';
 import {hexToBytes} from '../lib/format';
@@ -10,9 +18,10 @@ const hex = (b: Uint8Array): string =>
     .map((x) => x.toString(16).padStart(2, '0'))
     .join('');
 
-// The domain and message of the locally-generated golden (see below): the real ZCHF deployment
+// The domain and message of the locally-generated golden (see below): the REAL ZCHF deployment
 // on Arbitrum One, the payer is anvil's well-known account #0, the spender account #1.
-const DOMAIN = {
+const DOMAIN: PermitDomain = {
+  kind: 'full',
   name: 'ZCHF',
   version: '1',
   chainId: 42161,
@@ -110,5 +119,48 @@ describe('evm/permit — locally-generated golden (Foundry 1.8.3)', () => {
     const a = signPermit(hexToBytes(PRIVATE_KEY), DOMAIN, MESSAGE);
     const b = signPermit(hexToBytes(PRIVATE_KEY), DOMAIN, MESSAGE);
     expect(hex(a.serialized)).toBe(hex(b.serialized));
+  });
+});
+
+// The REAL ZCHF domains — both deployments use ERC20PermitLight's MINIMAL EIP-712 domain (no
+// name, no version): DOMAIN_SEPARATOR() = keccak256(abi.encode(MINIMAL_DOMAIN_TYPEHASH, chainId,
+// address)). Golden separators below verified against live DOMAIN_SEPARATOR() via eth_call,
+// 2026-09-26 (publicnode RPCs; identical to the spec addendum-1 receipts).
+const ZCHF_ETH: PermitDomain = {
+  kind: 'minimal',
+  chainId: 1,
+  verifyingContract: '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB',
+};
+const ZCHF_ARB: PermitDomain = {
+  kind: 'minimal',
+  chainId: 42161,
+  verifyingContract: '0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553',
+};
+
+describe('evm/permit — minimal domain (ERC20PermitLight, the kind real ZCHF uses)', () => {
+  test('the minimal typehash constant is the ERC20PermitLight one', () => {
+    expect(hex(MINIMAL_DOMAIN_TYPEHASH)).toBe(
+      '47e79534a245952e8b16893a336b85a3d9ea9fa8c573f3d803afb92a79469218',
+    );
+  });
+
+  test('Ethereum ZCHF separator matches the on-chain DOMAIN_SEPARATOR() (eth_call, 2026-09-26)', () => {
+    expect(hex(buildDomainSeparator(ZCHF_ETH))).toBe(
+      '0030eba518c077921487bde9523478fa8ba39b881d0372fd1cb104a3080bfcb0',
+    );
+  });
+
+  test('Arbitrum One ZCHF separator matches the on-chain DOMAIN_SEPARATOR() (eth_call, 2026-09-26)', () => {
+    expect(hex(buildDomainSeparator(ZCHF_ARB))).toBe(
+      '617234e4a9e50a533c5d115e211786310f382c0b63c6140c6ee12bf3b8c1cff9',
+    );
+  });
+
+  test('signing with the WRONG kind for ZCHF yields a different digest (silent-regression guard)', () => {
+    const wrongKind: PermitDomain = {...DOMAIN}; // full-domain ZCHF on Arbitrum, same token/chain
+    expect(hex(permitDigest(wrongKind, MESSAGE))).not.toBe(hex(permitDigest(ZCHF_ARB, MESSAGE)));
+    // …and the regression would already show at the separator, the root of the digest:
+    expect(hex(buildDomainSeparator(wrongKind))).not.toBe(hex(buildDomainSeparator(ZCHF_ARB)));
+    expect(hex(permitDigest(wrongKind, MESSAGE))).not.toBe(hex(permitDigest(ZCHF_ETH, MESSAGE)));
   });
 });

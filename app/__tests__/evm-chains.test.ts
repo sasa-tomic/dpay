@@ -3,6 +3,7 @@ import {
   clearEvmDevToken,
   EVM_CHAINS,
   evmDevToken,
+  evmZchfDeployment,
   evmZchfToken,
   fromBaseUnits,
   setEvmDevToken,
@@ -34,24 +35,33 @@ describe('evm/chains — registry', () => {
     }
   });
 
-  test('ZCHF mainnet deployments are pinned', () => {
-    expect(ZCHF_TOKEN[42161]).toBe('0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553');
-    expect(ZCHF_TOKEN[1]).toBe('0xB58E61C3098d85632Df34EecfB899A1Ed80921cB');
+  test('ZCHF mainnet deployments are pinned, both on the MINIMAL permit domain', () => {
+    expect(ZCHF_TOKEN[42161]).toEqual({
+      address: '0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553',
+      domainKind: 'minimal',
+    });
+    expect(ZCHF_TOKEN[1]).toEqual({
+      address: '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB',
+      domainKind: 'minimal',
+    });
     expect(ZCHF_TOKEN[421614]).toBeUndefined(); // testnet mocks are injected at runtime
     expect(ZCHF_DECIMALS).toBe(18);
   });
 });
 
 describe('evm/chains — dev-token override (the e2e driver seam)', () => {
-  test('the override wins over the registry and clears back to it', () => {
+  test('the override wins over the registry and clears back to it (with its domain kind)', () => {
     const mock = '0x00000000000000000000000000000000deadbeef';
-    setEvmDevToken({chainId: 31337, address: mock});
+    setEvmDevToken({chainId: 31337, address: mock, domainKind: 'minimal'});
     expect(evmZchfToken(31337)).toBe(mock);
+    expect(evmZchfDeployment(31337)).toEqual({address: mock, domainKind: 'minimal'});
     expect(evmDevToken(42161)).toBeNull(); // scoped to the injected chain
-    expect(evmZchfToken(42161)).toBe(ZCHF_TOKEN[42161] ?? null);
+    expect(evmZchfToken(42161)).toBe(ZCHF_TOKEN[42161]?.address ?? null);
+    expect(evmZchfDeployment(42161)?.domainKind).toBe('minimal');
     clearEvmDevToken();
     expect(evmZchfToken(31337)).toBeNull();
     expect(evmDevToken(31337)).toBeNull();
+    expect(evmZchfDeployment(31337)).toBeNull();
   });
 
   test('clear is idempotent', () => {

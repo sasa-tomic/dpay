@@ -2,11 +2,20 @@
 // here (plus a catalog row, owned by the catalog module). PURE module — records and a mutable
 // dev-token hook, no fetch.
 //
-// MAINNET token addresses are pinned here because they are public, permanent facts. TESTNET /
-// anvil mock token addresses are NOT baked into source: they are injected at runtime by the e2e
-// driver via `setEvmDevToken()` (the EVM twin of the `__DPAY_TEST_SOLANA_RPC_URL` seam in
-// config/constants.ts — a test/dev-only override read at the last responsible moment, empty in
-// prod builds where nothing sets it).
+// MAINNET token addresses are pinned here because they are public, permanent facts — together
+// with the permit-domain kind each deployment verifies (ZCHF's contracts are ERC20PermitLight:
+// MINIMAL domain, addendum 1 of the EVM-rail spec). TESTNET / anvil mock token addresses are NOT
+// baked into source: they are injected at runtime by the e2e driver via `setEvmDevToken()` (the
+// EVM twin of the `__DPAY_TEST_SOLANA_RPC_URL` seam in config/constants.ts — a test/dev-only
+// override read at the last responsible moment, empty in prod builds where nothing sets it).
+// The committed MockZCHF mirrors real ZCHF exactly, so the driver injects domainKind 'minimal'.
+
+import type {PermitDomain} from './permit';
+
+/** The EIP-712 domain kind the token's permit verifies against (see evm/permit.ts). Registry
+ *  entries and dev overrides MUST state it — signing with the wrong kind yields a signature the
+ *  token will always reject. */
+export type PermitDomainKind = PermitDomain['kind'];
 
 export type EvmChainId = 42161 | 1 | 421614 | 31337;
 
@@ -53,19 +62,32 @@ export const EVM_CHAINS: Record<EvmChainId, EvmChain> = {
   },
 };
 
-/** ZCHF (Frankencoin) deployments per chain. Absent key = no mainnet deployment there. */
-export const ZCHF_TOKEN: Partial<Record<EvmChainId, string>> = {
-  42161: '0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553',
-  1: '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB',
+/** A ZCHF deployment: the token address and the permit-domain kind its contract verifies. */
+export interface ZchfDeployment {
+  readonly address: string;
+  readonly domainKind: PermitDomainKind;
+}
+
+/**
+ * ZCHF (Frankencoin) deployments per chain. Absent key = no mainnet deployment there. BOTH real
+ * deployments use ERC20PermitLight's MINIMAL EIP-712 domain (no name/version — addendum 1 of the
+ * EVM-rail spec; separators on-chain-verified 2026-09-26, see __tests__/evm-permit.test.ts).
+ */
+export const ZCHF_TOKEN: Partial<Record<EvmChainId, ZchfDeployment>> = {
+  42161: {address: '0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553', domainKind: 'minimal'},
+  1: {address: '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB', domainKind: 'minimal'},
 };
 
 /** ZCHF (like every ERC-20 here) carries 18 decimals. Centralised so callers never hard-code it. */
 export const ZCHF_DECIMALS = 18;
 
-/** A dev/testnet token override: the chain whose mock token address to swap, and that address. */
+/** A dev/testnet token override: the chain whose mock token address to swap, that address, and
+ *  the permit-domain kind the mock verifies (the committed MockZCHF mirrors real ZCHF exactly, so
+ *  the e2e driver passes 'minimal' — stated, never defaulted). */
 export interface EvmTokenOverride {
   readonly chainId: EvmChainId;
   readonly address: string;
+  readonly domainKind: PermitDomainKind;
 }
 
 // Mutable ONLY through setEvmDevToken/clearEvmDevToken below. Module-level (not a globalThis
@@ -73,7 +95,8 @@ export interface EvmTokenOverride {
 let devTokenOverride: EvmTokenOverride | null = null;
 
 /** Inject the dev/testnet mock token for `chainId` (e2e driver / dev builds only). Pure state —
- *  takes effect on the next `evmZchfToken()` read, no network, no notifications. */
+ *  takes effect on the next `evmZchfToken()`/`evmZchfDeployment()` read, no network, no
+ *  notifications. */
 export function setEvmDevToken(override: EvmTokenOverride): void {
   devTokenOverride = override;
 }
@@ -88,10 +111,18 @@ export function evmDevToken(chainId: EvmChainId): string | null {
   return devTokenOverride?.chainId === chainId ? devTokenOverride.address : null;
 }
 
-/** The ZCHF token address on `chainId`: the dev override wins, else the pinned mainnet address,
+/** The ZCHF deployment on `chainId`: the dev override wins, else the pinned mainnet registry,
  *  else null (the caller hides the asset — a chain without ZCHF has nothing to list). */
+export function evmZchfDeployment(chainId: EvmChainId): ZchfDeployment | null {
+  if (devTokenOverride?.chainId === chainId) {
+    return {address: devTokenOverride.address, domainKind: devTokenOverride.domainKind};
+  }
+  return ZCHF_TOKEN[chainId] ?? null;
+}
+
+/** The ZCHF token address on `chainId`, or null when the chain has no deployment. */
 export function evmZchfToken(chainId: EvmChainId): string | null {
-  return evmDevToken(chainId) ?? ZCHF_TOKEN[chainId] ?? null;
+  return evmZchfDeployment(chainId)?.address ?? null;
 }
 
 // ---------------------------------------------------------------------------
