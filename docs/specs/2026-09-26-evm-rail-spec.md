@@ -837,6 +837,16 @@ Then, in dependency order (each item cites its decision):
 4. **S6 — offline claim (needs S2 permit/abi, S4):** `app/evm/qr.ts` codec + golden tests (D21) →
    `app/services/evmClaimQueue.ts` (D23) → nonce cache + stale-nonce path (D22) →
    `settleEvmClaim` + `decideEvmPayerReceipt` (D24/D25) → request screen flip (D18).
+   STATUS (2026-09-27, the pure core): `app/evm/qr.ts` (D21 codec, byte-interop-proven against
+   `e2e/harness/evm/qr.mjs`) and `app/evm/claims.ts` (D22 nonce cache, D23 queue, D24 settle over
+   an injected `EvmRpcLike`, D25 receipt decision) are LANDED with 37 jest tests
+   (`app/__tests__/evm-claims.test.ts`, fully offline). Deliberate deviations: the queue lives in
+   `app/evm/claims.ts`, not `app/services/evmClaimQueue.ts`, until the seam lands (same key scheme,
+   50-row cap, corrupt-tolerant load); queue rows carry the FULL `req` (settle needs
+   chainId/token/to/amt — the claim wire deliberately does not); the status union gains
+   `needsResign` (D22.3's state, not an error); settle reaches the chain ONLY through the injected
+   `EvmRpcLike` (`app/evm.ts` adapts its rpc client and wraps `settleEvmClaim`). Still open: the
+   seam wrapper, the nonce-cache seeding in the balance poll (D16), and the request-screen flip (D18).
 5. **S7 — anvil + e2e (needs S1, S5, S6):** MockZCHF blob + `evm-core.mjs` extraction (D26) →
    `just evm-anvil` + harness relay/driver injection (D26/D27) → flows 213-217 (D28).
 6. **S8 — probes + live docs (needs S4; S6 for the permit half):** Sepolia round trip (D29) →
