@@ -21,6 +21,7 @@ import {usd, fmtAssetCompact, fmtMoneyCompact} from './format';
 import {cmpRaw} from './amount';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import type {SolanaReadFailure} from '../solana';
+import type {EvmReadFailure} from '../evm/errors';
 import type {AssetId} from './types';
 
 // The unified per-asset balance status. Every value is meaningful for styling/gating:
@@ -61,6 +62,11 @@ export type SolStateInput = {balance: string | null; status: 'loading' | 'ok' | 
 // `failure` mirrors the hook's per-mint field.
 export type TokenStateInput = {amount: string | null; decimals: number | null; status: 'loading' | 'absent' | 'balance' | 'unavailable' | 'error'; failure?: SolanaReadFailure | null};
 
+// The EVM per-asset state (the useEvmBalances hook's per-row shape): NO 'absent' arm — an EVM
+// balanceOf answers 0 for any address, so a known zero is a 'balance' zero (the D10 note). The
+// failure type is the EVM seam's own taxonomy (structurally the same four words).
+export type EvmStateInput = {amount: string | null; status: 'loading' | 'balance' | 'unavailable' | 'error'; failure?: EvmReadFailure | null};
+
 /** Back-compat alias — the per-mint token input carries the exact former USDC-only shape. */
 export type UsdcStateInput = TokenStateInput;
 
@@ -85,14 +91,19 @@ export function buildAssetBalances(args: {
   approx?: Readonly<Partial<Record<AssetId, boolean>>>;  // per-asset stale marker (all four rails)
   solState: SolStateInput;
   tokenStates: Record<string, TokenStateInput>;  // keyed by SPL mint pubkey
+  evmStates?: Record<string, EvmStateInput>;     // keyed by EVM asset id (`evm:<chainId>:<TOKEN>`)
 }): Record<AssetId, BalanceView> {
-  const {catalog, assets, icBalances, primaryBalance, approx, solState, tokenStates} = args;
+  const {catalog, assets, icBalances, primaryBalance, approx, solState, tokenStates, evmStates} = args;
   const out: Partial<Record<AssetId, BalanceView>> = {};
   for (const a of assets) {
     if (a.protocol === 'ic') {
       out[a.id] = a.currency === 0
         ? demoView(primaryBalance, approx?.[a.id] === true)
         : icAssetView(catalog, a.currency, icBalances[a.currency] ?? '0', approx?.[a.id] === true);
+    } else if (a.protocol === 'evm') {
+      // Its OWN row's state — one entry per (chain, token) id, never a cross-chain fallback
+      // (the same financial isolation every other rail's rows keep).
+      out[a.id] = evmView(evmStates?.[a.id] ?? {amount: null, status: 'loading'}, a.symbol, a.decimals, a.minFractionDigits, approx?.[a.id] === true);
     } else if (a.token === 'SOL') {
       out[a.id] = solView(solState, a.minFractionDigits, approx?.[a.id] === true);
     } else {
@@ -218,6 +229,35 @@ function tokenView(state: TokenStateInput, symbol: string, decimals: number, min
   }
 }
 
+// One EVM token row (ZCHF·Arb, ZCHF·Eth, …). Same grading as the SOL token view minus the
+// 'absent' arm (an EVM balanceOf answers 0 for any address — the D10 note): 'balance' ⇒ a real
+// amount (zero ⇒ 'zero', dims); 'unavailable' ⇒ rail off/offline ('—' only when nothing was
+// ever read); 'error' ⇒ preserves the prior amount (never zeroes); 'loading' ⇒ first poll
+// pending. Addendum 1: display = raw / 10^decimals — no multiplier anywhere.
+function evmView(state: EvmStateInput, symbol: string, decimals: number, minFractionDigits: number, approx: boolean): BalanceView {
+  const mark = (raw: string) => (approx ? M.wallet.balance.approxAmount(raw) : raw);
+  const fmt = (raw: string) => fmtAssetCompact(raw, decimals, symbol, undefined, minFractionDigits);
+  switch (state.status) {
+    case 'balance':
+      if (state.amount == null) return {displayText: '—', status: 'zero', failure: null};
+      if (cmpRaw(state.amount, '0') === 0) return {displayText: mark(fmt(state.amount)), status: 'zero', failure: null};
+      return {displayText: mark(fmt(state.amount)), status: 'ok', failure: null};
+    case 'unavailable':
+      return state.amount == null
+        ? {displayText: '—', status: 'unavailable', failure: null}
+        : {displayText: mark(fmt(state.amount)), status: 'unavailable', failure: null};
+    case 'error':
+      return {
+        displayText: state.amount == null ? '—' : mark(fmt(state.amount)),
+        status: 'error',
+        failure: state.failure ?? null,
+      };
+    case 'loading':
+    default:
+      return {displayText: '—', status: 'loading', failure: null};
+  }
+}
+
 // ── Per-currency SUMMED balances (the currency-first redesign, founder forks #2 + #4) ───────────
 //
 // Fork #2: a multi-rail currency shows ONE summed currency balance across its rails — Revolut-style
@@ -271,10 +311,12 @@ export function buildCurrencyBalances(args: {
   solBalance: string | null;
   /** SPL raw amounts keyed by SPL mint, null when unknown/absent ('absent' status supplies '0'). */
   tokenAmounts: Record<string, string | null>;
+  /** EVM raw amounts keyed by asset id (`evm:<chainId>:<TOKEN>`), null when never read. */
+  evmAmounts?: Record<string, string | null>;
   /** The per-asset staleness flags — ANY contributing rail's flag marks the whole sum '~'. */
   approx: Readonly<Partial<Record<AssetId, boolean>>>;
 }): Partial<Record<HomeCurrency, BalanceView>> {
-  const {currencies, assets, catalog, views, icBalances, solBalance, tokenAmounts, approx} = args;
+  const {currencies, assets, catalog, views, icBalances, solBalance, tokenAmounts, evmAmounts, approx} = args;
   const out: Partial<Record<HomeCurrency, BalanceView>> = {};
   for (const currency of currencies) {
     const rails = currencyRails(currency, assets);
@@ -286,11 +328,11 @@ export function buildCurrencyBalances(args: {
     const rawOf = (rail: SelectableAsset): string | null => {
       const status = views[rail.id]?.status;
       if (status === 'ok' || status === 'zero') {
-        return rail.protocol === 'ic'
-          ? (icBalances[rail.currency] ?? '0')
-          : rail.token === 'SOL'
-            ? solBalance
-            : (tokenAmounts[rail.mint ?? ''] ?? null);
+        if (rail.protocol === 'ic') return icBalances[rail.currency] ?? '0';
+        if (rail.protocol === 'evm') return evmAmounts?.[rail.id] ?? null;
+        return rail.token === 'SOL'
+          ? solBalance
+          : (tokenAmounts[rail.mint ?? ''] ?? null);
       }
       if (status === 'absent') return '0';
       return null;

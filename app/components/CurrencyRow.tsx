@@ -25,6 +25,9 @@ import type {SelectableAsset} from '../config/assets';
 export type CurrencyRowProps = {
   testId: string;                  // base testID — 'asset-ckbtc' (card) | 'req-pick-ckbtc' (plain)
   asset: SelectableAsset;          // the row's asset — drives the glyph chip + name/subtitle
+  /** Title override — the collision-qualified chip (`ZCHF·Arb`) when the caller computes one;
+   *  defaults to the asset's own symbol. */
+  label?: string;
   amount?: string;                 // '0.00050000 BTC' (card); omit in plain (the picker is a selector)
   active: boolean;                 // selects the trailing check + (card) left-edge
   onPress: () => void;
@@ -37,7 +40,8 @@ export type CurrencyRowProps = {
   children?: React.ReactNode;      // extra nodes below the subtitle (topUpErr line; card variant only)
 };
 
-export function CurrencyRow({testId, asset, amount, active, onPress, accessibilityLabel, accessibilityHint, variant, showCheck = true, zero, actions, children}: CurrencyRowProps) {
+export function CurrencyRow({testId, asset, label, amount, active, onPress, accessibilityLabel, accessibilityHint, variant, showCheck = true, zero, actions, children}: CurrencyRowProps) {
+  const title = label ?? asset.symbol;
   const check = active && showCheck ? (
     <View style={S.pickCheck}><IconCheck size={18} color={C.brandText} /></View>
   ) : null;
@@ -95,7 +99,7 @@ export function CurrencyRow({testId, asset, amount, active, onPress, accessibili
             <AssetGlyph asset={asset} />
             <View style={S.pickTextCol}>
               <View style={S.assetTitleRow}>
-                <Text style={S.assetLabel}>{asset.symbol}</Text>
+                <Text style={S.assetLabel}>{title}</Text>
                 {amount != null ? <Text style={[S.assetAmt, zero && S.assetCardZero]}>{amount}</Text> : null}
                 {check}
               </View>

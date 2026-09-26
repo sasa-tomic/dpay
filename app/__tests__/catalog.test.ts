@@ -1008,6 +1008,31 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     }
   });
 
+  it('the BUNDLED evm rows are exactly these literals (D6 bundled rows, registry-imported)', () => {
+    // D6's app half, landed: BUNDLED_NETWORKS carries the two mainnet ZCHF rows (Arbitrum One
+    // first — section order IS the wallet row order) + the EMPTY Arbitrum Sepolia testnet
+    // section. Addresses come from the registry (evm/chains.ts), never re-typed, so this pins
+    // registry ↔ truth ↔ bundled in one triangle.
+    const evmSections = BUNDLED_NETWORKS.filter(s => s.protocol === 'evm');
+    expect(evmSections.map(s => `${s.name}:${s.environment}`)).toEqual(['Arbitrum One:mainnet', 'Ethereum:mainnet', 'Arbitrum Sepolia:testnet']);
+    expect(evmSections[2].assets).toEqual([]);
+    const rows = evmSections.flatMap(s => s.assets);
+    expect(rows.map(r => [r.chainId, r.address])).toEqual([
+      [ZCHF_ARBITRUM_ROW.chainId, ZCHF_ARBITRUM_ROW.address],
+      [ZCHF_ETHEREUM_ROW.chainId, ZCHF_ETHEREUM_ROW.address],
+    ]);
+    for (const r of rows) {
+      expect(r.token).toBe('ZCHF');
+      expect(r.decimals).toBe(TRUTH.decimals.zchf);
+      expect(r.minFractionDigits).toBe(2);
+      expect(r.liquidity).toBeNull();
+      expect(r.onramp).toBe('Unavailable');
+      expect(r.offramp).toBe('Unavailable');
+      expect(r.testnet).toBe(false);
+      expect(eip55ChecksumBad(r.address)).toBe(false);
+    }
+  });
+
   it('ZCHF never collides with the IC VCHF row (exact-case tokenEq discipline)', () => {
     // The evm token literal and the IC VCHF symbol must stay distinct under exact-case token
     // matching (asset id `evm:42161:ZCHF` vs icp currency 7). If anyone ever case-folds token
@@ -1408,8 +1433,8 @@ describe('fetchCurrencies — wire fetch + cache persist (catalog v2)', () => {
 });
 
 describe('BUNDLED_NETWORKS — one shape with the wire (catalog v2)', () => {
-  it('carries the icp mainnet + icp testnet + solana mainnet sections in order', () => {
-    expect(BUNDLED_NETWORKS.map(s => `${s.protocol}:${s.environment}`)).toEqual(['icp:mainnet', 'icp:testnet', 'solana:mainnet']);
+  it('carries the icp mainnet + icp testnet + solana mainnet + evm sections in order', () => {
+    expect(BUNDLED_NETWORKS.map(s => `${s.protocol}:${s.environment}`)).toEqual(['icp:mainnet', 'icp:testnet', 'solana:mainnet', 'evm:mainnet', 'evm:mainnet', 'evm:testnet']);
   });
 
   it('derives the flat IC catalog [0,1,2,6,7,8] with every row stamped testnet=false', () => {

@@ -172,7 +172,9 @@ export function ConvertMode({
     ? null
     : isSolSource
       ? (inMint === WRAPPED_SOL_MINT_ADDRESS ? solana?.sol ?? null : solana?.tokens[inMint ?? ''] ?? null)
-      : assetBalances[selectedAsset.currency];
+      : selectedAsset.protocol === 'ic'
+        ? assetBalances[selectedAsset.currency]
+        : null;
   const balanceN = balanceRaw != null && /^\d+$/.test(balanceRaw) ? BigInt(balanceRaw) : null;
 
   // ── The resolved pair ────────────────────────────────────────────────────────────────────────
