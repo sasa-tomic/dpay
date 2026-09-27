@@ -592,7 +592,8 @@ async function openLease({ key, executablePath, extraArgs }) {
   }
   // Registry backstop (236d9a6c semantics, self-launched shells only): an abnormal exit
   // SIGKILLs the shell from the sync exit handler, so a launched shell can never outlive us.
-  trackChild(pid);
+  // The exe fragment makes that fallback pid-recycling-safe on this shared box (see procs.mjs).
+  trackChild(pid, 'chrome-headless-shell');
   writeDiscoveryAtomic(discoveryPath, { pid, port, started: Date.now() });
   _launchedDiscovery.set(key, discoveryPath);
   console.log(`[chrome-gate] launched chrome-headless-shell pid=${pid} port=${port} (machine-global singleton; lock held for the run's browser lifetime)`);
