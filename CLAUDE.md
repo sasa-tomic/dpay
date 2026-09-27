@@ -480,3 +480,7 @@ The IC rail is proven on two physical phones (2026-08-26): the **NFC radio hop**
 - Be concise and direct; minimal formatting, no filler.
 - Money is shown using the asset's **backing native currency symbol** when known (`$`, `€`, `CHF`, BTC, ETH, SOL); fall back to the wrapper symbol (`ck*`) only when the backing is unknown. Never surface raw internal ledger/token identifiers.
 - Demo-critical: the relay must be rock solid (idempotency, retries, health check, safe-mode fallback).
+
+## Never kill by name pattern (set 2026-09-27)
+
+Shared-host rule: multiple agent sessions run test suites on this box concurrently. NEVER `pkill`/`killall` by name or pattern (`pkill -f "run.mjs"`, `pkill chrome`, …): it mass-kills OTHER sessions' runners and browsers and costs them hours. Track the PIDs you spawned (or read them from a pidfile) and kill exactly those. `pgrep` to OBSERVE is fine; name-based KILL is not. If a stale process must die and you cannot attribute it, leave it and coordinate with the user.
