@@ -205,12 +205,7 @@ export async function findEvmSettledTransfer(
   }
   return null;
 }
-
-/** The chain's display facts for a settle/payer surface ('ETH', 'Arbitrum One'). Null when the
- *  chain is unknown to the registry (the callers refuse such a chain before rendering). The
- *  native gas coin's decimals are 18 on every chain this registry ships (the wei arithmetic
- *  the fee copy needs is fixed-width). */
-export function evmChainFacts(chainId: number): {name: string; nativeSymbol: string} | null {
+| null {
   const c = EVM_CHAINS[chainId as EvmChainId];
   return c ? {name: c.name, nativeSymbol: c.nativeSymbol} : null;
 }
