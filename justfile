@@ -146,14 +146,23 @@ wire-layout:
     cargo run -p dpay-fixture --release -- wire-layout dfx/wire_layout.json
     cargo run -p dpay-fixture --release -- checkout-open dfx/checkout_open_signing.json
 
+# reap the machine-global e2e chrome gate: remove dead discovery files, kill idle clientless
+# gate shells (>10min old, scoped to this gate's /tmp/opencode/dpay-chrome-* marker — never
+# foreign browsers, never shells with live targets), drop a stale lock. Safe anytime; runs as
+# the pre-step of `just e2e`.
+e2e-sweep:
+    node e2e/harness/sweep.mjs
+
 # radical e2e: drive the REAL app (App.tsx via react-native-web) + REAL relay (FakeLedger) + REAL
 # browser (chrome-headless-shell), offline + seconds-fast. The inner-loop UI/flow gate — it BOTH
 # drives every flow through the real app AND screenshots each state (shots land in e2e/shots/),
 # superseding the old parallel-component ui/ harness (removed). Add a flow = add `e2e/tests/NN-name.mjs`.
 # Runs the DEFAULT enumeration: every flow except `meta.optional` render-only capture harnesses
 # (flow 39 runs via `just e2e-store`; the flow catalog lives in FLOWS.md — never hardcode a count here).
+# The sweep pre-step clears dead discovery files / idle orphaned gate shells before the run
+# (machine-global gate: e2e/harness/browser.mjs; parallel runs QUEUE on the browser lock).
 e2e:
-    python3 scripts/testruns.py run e2e --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && node run.mjs'
+    python3 scripts/testruns.py run e2e --sh 'node e2e/harness/sweep.mjs && cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && node run.mjs'
 
 # visual-regression gate (fast iteration on flow 40 alone): re-capture the 5 primary surfaces and
 # pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift >0.5%. Catches the
