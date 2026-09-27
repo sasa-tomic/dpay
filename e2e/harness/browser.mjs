@@ -658,19 +658,19 @@ export async function sweepChromeGate({ minIdleMs = SWEEP_MIN_IDLE_MS } = {}) {
     referencedPids.add(d.pid);
     const answered = await probeDevTools(d.port, 1000);
     if (!answered) {
-      if (pidIsOurShell(d.pid, profileDir)) {
-        if (pidAlive(d.pid)) {
-          await gracefulKill(d.pid);
-          actions.push(`killed wedged gate shell pid=${d.pid} (devtools not answering; named by ${name})`);
-        }
-        try { unlinkSync(path); } catch {}
-        actions.push(`removed dead discovery file ${name} (pid ${d.pid})`);
-      } else if (pidAlive(d.pid)) {
-        try { unlinkSync(path); } catch {}
-        actions.push(`removed stale discovery file ${name} (pid ${d.pid} is alive but is NOT our shell — recycled pid; process untouched)`);
-      } else {
+      if (!pidAlive(d.pid)) {
         try { unlinkSync(path); } catch {}
         actions.push(`removed dead discovery file ${name} (pid ${d.pid} gone)`);
+      } else if (pidIsOurShell(d.pid, profileDir)) {
+        // Alive and ours but devtools-silent: under load this is a healthy shell that missed a
+        // 1s probe just as often as it is a wedged one, and this sweep runs OUTSIDE the gate
+        // lock, so killing here can murder the shell another run is actively using. Leave both
+        // the shell and the file; the gate's tryAdopt (under the lock) re-judges with fresh
+        // evidence, and the unreferenced pass below reaps a truly dead shell later.
+        actions.push(`left ${name}: pid ${d.pid} alive but devtools did not answer within 1s (killing on a timeout is not safe outside the lock)`);
+      } else {
+        try { unlinkSync(path); } catch {}
+        actions.push(`removed stale discovery file ${name} (pid ${d.pid} is alive but is NOT our shell — recycled pid; process untouched)`);
       }
       continue;
     }
@@ -712,12 +712,16 @@ export async function sweepChromeGate({ minIdleMs = SWEEP_MIN_IDLE_MS } = {}) {
     const port = readDevToolsActivePort(udd);
     const targets = port ? await listClientTargets(port) : null;
     const clients = targets === null ? -1 : targets.length;
-    if (ageMs > minIdleMs && clients === 0) {
+    // An UNREFERENCED marker shell cannot belong to a live run (every run's shell has its
+    // discovery file until teardown), so once it is ancient, silence from devtools is evidence
+    // enough: reap it. The referenced path above stays stricter (kill only on zero targets).
+    if (ageMs > minIdleMs && (clients === 0 || clients === -1)) {
       await gracefulKill(pid);
-      actions.push(`killed unreferenced idle gate shell pid=${pid} (age ${Math.round(ageMs / 60000)}min, zero client targets)`);
+      const verdict = clients === 0 ? 'zero client targets' : 'devtools unreachable';
+      actions.push(`killed unreferenced idle gate shell pid=${pid} (age ${Math.round(ageMs / 60000)}min, ${verdict})`);
     } else {
-      const why = clients !== 0 ? `${clients} live client target(s)` : clients < 0
-        ? 'devtools endpoint unreadable (not killing without proof)'
+      const why = clients > 0 ? `${clients} live client target(s)` : clients < 0
+        ? 'devtools endpoint unreadable, age below idle threshold'
         : `age ${Math.round(ageMs / 1000)}s < idle threshold`;
       actions.push(`kept unreferenced gate shell pid=${pid}: ${why}`);
     }
