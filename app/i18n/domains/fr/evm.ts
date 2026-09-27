@@ -27,7 +27,7 @@ export const evmFr: EvmMessages = {
   failNonce: 'La signature du payeur était périmée — montre ton code à nouveau pour une signature fraîche.',
   failExpired: 'La demande a expiré sur la chaîne — crée-en une nouvelle.',
   failRejected: detail => `La chaîne a rejeté la demande${detail ? ` (${detail})` : ''}.`,
-  failGas: (native, chain, address) => `Ton ${native} sur ${chain} est épuisé — reçois des ${native} à ${address} puis réessaie.`,
+  failGas: (native, chain, address) => `Ton ${native} sur ${chain} est épuisé — reçois-en à ${address} puis réessaie.`,
 
   scanHint: "Scanne le code du marchand pour payer",
   signingOffline: 'Signature hors ligne — aucune connexion requise',
