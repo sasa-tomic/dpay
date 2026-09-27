@@ -183,22 +183,19 @@ const LOCK_WAIT_CAP_MS = envMs('DPAY_E2E_LOCK_WAIT_MS', 30 * 60_000);
 const SWEEP_MIN_IDLE_MS = envMs('DPAY_E2E_SWEEP_MIN_IDLE_MS', 10 * 60_000);
 const DEVTOOLS_PORT_WAIT_MS = 10_000;
 
-// One shell per RUN is the machine-global policy (spec acceptance: two concurrent `just e2e`
-// runs must show exactly ONE chrome-headless-shell). run.mjs defaults its browser-shard count
-// to the pool concurrency (one PROCESS per lane, the 2026-09-16 throughput optimization), so
-// publish the collapse to it: it reads this env when sizing shards and the self-contention
-// timeout scale, and both stay honest only if it knows the run owns a single shell. An
-// explicit DPAY_E2E_BROWSERS value still wins for the runner's math; the gate itself always
-// connects every lane of the process to the one admitted shell regardless.
-//
-// The collapse also caps the pool's auto lanes: the load-based auto concurrency (up to 12)
-// predates the collapse, and >3 contexts sharing ONE browser process measured 2-5x flow
-// inflation (run.mjs 2026-09-16 note) — full-suite runs went RED on app-boot waits at 7-12
-// ctx/shell. 4 lanes (~3 ctx/browser, the 2026-09-17 A/B sweet spot) is the collapsed default;
-// an explicit DPAY_E2E_CONCURRENCY always wins.
+// One shell per RUN was the 2026-09-27 machine-global policy (spec acceptance: two concurrent
+// `just e2e` runs must show exactly ONE chrome-headless-shell). Refined 2026-09-28: the
+// machine-global INVARIANT is preserved at RUN granularity — the admission lock still serializes
+// runs, so two concurrent `just e2e` invocations never interleave shells — but one run may now
+// drive several shells (per-shard gate slots, browser.mjs gateKey), because the post-jest per-flow
+// profile showed the suite starved on the single shell's serialized main/IO thread. Defaults:
+// 8 lanes across 4 shells (2 ctx/shell) — measured on the 7-flow profile set: 51.6s @ 4 lanes /
+// 1 shell → 47.0s @ 8/2 → 35.6s @ 8/4, with the straggler (101) capping further lane gains.
+// An explicit DPAY_E2E_CONCURRENCY / DPAY_E2E_BROWSERS still wins. Per-test isolation is
+// unchanged: fresh incognito context per test on whatever shell owns the lane.
 if (process.env.DPAY_E2E_BROWSERS === undefined) {
-  process.env.DPAY_E2E_BROWSERS = '1';
-  if (process.env.DPAY_E2E_CONCURRENCY === undefined) process.env.DPAY_E2E_CONCURRENCY = '4';
+  process.env.DPAY_E2E_BROWSERS = '4';
+  if (process.env.DPAY_E2E_CONCURRENCY === undefined) process.env.DPAY_E2E_CONCURRENCY = '8';
 }
 
 // The launch flags are the shell's identity and live HERE (the gate owns launch + adopt).
