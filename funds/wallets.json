@@ -33,11 +33,23 @@
       "purpose": "Independent raw-seed SOL key created before the app's derived rail (sol-rail) was known — unused, no app code can sign from it; kept measured so it can never silently hold value"
     },
     {
+      "id": "evm-rail",
+      "chain": "evm",
+      "address": "0x18884BC8e867eEf401703b702097220bdAe27668",
+      "status": "live-unfunded",
+      "census": "rail",
+      "custody": "scripts/agent-key.mjs (the IC float seed) + e2e/harness/evm/evm-core.mjs deriveEvmKeypair (no key of its own)",
+      "secret": "secrets/agent-icp.sops.json + SLIP-10 m/44'/60'/0'/0/0",
+      "derived_from": {"wallet": "icp-float", "path": "m/44'/60'/0'/0/0", "code": "e2e/harness/evm/evm-core.mjs deriveEvmKeypair (mirror of app/evm/identity.ts)"},
+      "created": "2026-09-27",
+      "purpose": "The app's OWN EVM rail — the address every in-app ZCHF action signs from on every EVM chain (derived from the IC float seed, so ONE backup recovers all three rails); balances measured BOTH chains (ETH gas + ZCHF, chain-qualified ledger labels ETH·Eth/ZCHF·Eth/ETH·Arb/ZCHF·Arb); all EVM-rail movements record under THIS id, never evm-float"
+    },
+    {
       "id": "evm-float",
       "chain": "evm",
       "address": "0x6B1C4D33832ba8B21Fa454C1F16E332D4c1183b9",
       "status": "live",
-      "custody": "sops key only (secrets/agent-evm.sops.json; no signing script yet — gas funder sends IN, spends need the key imported into standard tooling)",
+      "custody": "e2e/harness/evm-sign.mjs (sops key decrypted in-process; status/approve/cctp-burn today — spend surface grows with the EVM rail staging)",
       "secret": "secrets/agent-evm.sops.json",
       "rpc": "https://ethereum-rpc.publicnode.com",
       "created": "2026-09-20",
