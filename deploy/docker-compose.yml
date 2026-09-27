@@ -109,6 +109,10 @@ services:
       DPAY_TROCADOR_RATE_PER_MIN: ${DPAY_TROCADOR_RATE_PER_MIN:-}
       DPAY_TROCADOR_TRADE_PER_MIN: ${DPAY_TROCADOR_TRADE_PER_MIN:-}
 
+      # The landing page's APK override (default /srv/dpay.apk, baked by deploy/build.sh —
+      # see .env.example). Unset/missing → the download link shows "coming soon".
+      DPAY_APK_PATH: ${DPAY_APK_PATH:-}
+
       # The Trocador partner-agreement compliance records (access log + order store). SET the
       # DSN in prod — it is REQUIRED for durable records: this stack mounts NO volume, so the
       # JSONL fallback (unset) writes into the ephemeral container cwd and dies on every
