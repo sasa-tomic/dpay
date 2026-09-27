@@ -9,7 +9,7 @@ search; otherwise at most 10 minutes, then record the outcome here.
 | VCHF (ICRC) | none | swap ICP to VCHF on ICPSwap, smallest amount | 2026-09-27 | Mainnet-only token, no faucet. LIVE-PROVEN 2026-09-27: 0.01 ICP -> 0.02562143 VCHF via the app (see dead-end log for the trip record). |
 | ckUSDC / ckBTC / ckETH | none | smallest ICPSwap swap | 2026-09-26 | No free path in the dpay catalog. Design-time knowledge. |
 | ICPSwap (IC DEX) | none | smallest pool swap (icrc2 approve + swap) | 2026-09-27 | Mainnet-only DEX. LIVE-PROVEN 2026-09-27: pool 65mrh-…-cai executed icrc2_approve + depositFromAndSwap from the app; quoted 2.57 VCHF/ICP verbatim; settled in seconds; fees exactly the two 0.0001 ICP census lines. |
-| Jupiter (Solana) | none | smallest quote (free, read-only) through the relay proxy | 2026-09-27 | Quotes LIVE and healthy through /api/v1/jupiter/quote (EURC->USDC 0.5 -> 0.5692, verbatim). Swap BUILD BROKEN 2026-09-27: lite-api now 400s the app's `asLegacyTransaction: true` ("asLegacyTransaction cannot be used with quoteResponse.transactionVersion", NOT_SUPPORTED) — see dead-end log; execution blocked until app fix. |
+| Jupiter (Solana) | none | smallest quote (free, read-only) through the relay proxy; smallest swap (Solana tx fee 0.000005 SOL) | 2026-09-27 | Quotes live + verbatim through /api/v1/jupiter/quote. Execution was BLOCKED by venue drift (asLegacyTransaction 400, see dead-end log) — RESOLVED by uix 145ec40; LIVE-PROVEN 2026-09-27: 0.5 EURC -> 0.569229 USDC through jupiter-usdc-eurc, one broadcast, fee exactly 0.000005 SOL, no priority fee. |
 | Solana devnet | partial | SOL faucet; devnet USDC via Circle faucet | 2026-09-26 | EURC is not issued on devnet; Jupiter devnet is limited; dpay venues do not run devnet. Design-time knowledge. |
 | EURC (Solana) | none | receive-side exercises are free with an existing EURC balance (float holds some) | 2026-09-27 | Circle issues EURC mainnet-only. Float rail measured 9.198416 EURC 2026-09-27; app derivation re-proven (in-app derived rail shows the exact float balances). |
 | Trocador (CeFi) | none | smallest supported order (venue minimum, roughly $5-20) | 2026-09-26 | Mainnet-only; partner API terms (poll floor) apply; relay holds no DPAY_TROCADOR_API_KEY yet (routes 503). Design-time knowledge. |
@@ -19,27 +19,25 @@ search; otherwise at most 10 minutes, then record the outcome here.
 
 - IC side (after the 2026-09-27 trip): ICP 0.005 + VCHF 0.0257 + ckETH dust. Tiny IC probes
   still possible; anything CeFi- or Ethereum-sized needs a top-up (above the <=CHF 2 line).
-- Solana app rail: EURC 9.198 + USDC 0.259 + SOL 0.0017. EURC->USDC quotes exercise free;
-  EXECUTION is blocked by the Jupiter build defect below until the app fix lands.
+- Solana app rail (after the 2026-09-27 trip 2): EURC 8.698 + USDC 0.829 + SOL 0.0017. Both
+  directions of EURC<->USDC are now live-proven through Jupiter at the smallest sensible size;
+  SOL-gas headroom is ~0.0017 (roughly 300 more swaps at 5000 lamports each).
 - Composed VCHF->EURC (flagship deposit-leg route): blocked on prod twice over — VCHF float is
   dust (CeFi minimums ~CHF 10-15) and the CeFi legs have no partner credential on prod (503
   tripwire). Route resolution + honest fail-closed states verified offline-only 2026-09-27.
 
 ## Dead-end log (do not re-search before last-checked + 24h)
 
-- **2026-09-27 — Jupiter lite-api swap build (Solana execution leg): BROKEN by venue drift.**
-  What happened: two in-app confirm attempts (0.5 EURC -> USDC via jupiter-usdc-eurc) never
-  broadcast; the app failed closed with "Jupiter declined to quote this pair right now." after
-  `POST /api/v1/jupiter/swap` returned 400. No funds ever moved (balances verified unchanged
-  on-chain after every attempt; no retry of any transfer — fresh attempts only after on-chain
-  all-clear). Root cause reproduced keylessly: lite-api quotes now carry
-  `"transactionVersion": 0`, and any /swap build posting the app's exact body
-  (`services/jupiter.ts fetchJupiterSwapTx`: `asLegacyTransaction: true`) answers
-  `400 {"error":"asLegacyTransaction cannot be used with quoteResponse.transactionVersion",
-  "errorCode":"NOT_SUPPORTED"}`. Dropping the param on the SAME quote returns 200 and the
-  venue still builds a LEGACY tx (first byte 0x01) the app's decoder accepts. Unblocking step:
-  stop sending `asLegacyTransaction` (and/or honor `transactionVersion` + accept v0 messages in
-  the verifier) in `app/services/jupiter.ts` — one-line-class change plus executor tests; cost
-  ~0 (no funds needed). Search/triage duration ~35 min. Venue rows in this file updated.
+- **2026-09-27 — Jupiter lite-api swap build (Solana execution leg): RESOLVED same day.**
+  Found: lite-api quotes now carry `"transactionVersion": 0`, and the app's build body
+  (`asLegacyTransaction: true`) got a deterministic `400 NOT_SUPPORTED` — every Jupiter
+  execution blocked; no funds ever moved (verified on-chain per attempt). Resolution: uix
+  commit **145ec40** omits the param when the quote self-describes its version (build-refusal
+  copy also made honest, 4 locales); the fail-closed shape check stays in
+  `verifyVenueSwapTxBeneficiaries`. Re-verified live the same session: the fixed build ran the
+  real two-tap convert **0.5 EURC -> 0.569229 USDC** via jupiter-usdc-eurc (Whirlpool
+  `ArisQNcb…`), one broadcast, tx `sol:394mcX6X…MvGwwDv`, fee exactly 0.000005 SOL, chain
+  deltas == done panel == ledger. Entry kept as the resolved-dead-end record; no re-search
+  needed.
 - (No free-testnet search was due: every row's last-checked was same-day/next-day and the
   affected venues are mainnet-only per the table.)
