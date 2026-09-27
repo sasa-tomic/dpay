@@ -1,4 +1,4 @@
-// Flow 215 — the offline permit claim (D28 / D21-D25) through the REAL app, both roles:
+// Flow 220 — the offline permit claim (D28 / D21-D25) through the REAL app, both roles:
 //
 //   MERCHANT (boot A): the request QR is minted OFFLINE in the Receive tab (evmreq:v1 — no
 //     chain read), the payer's signed evmpay:v1 code is fed to the scan-back, and the claim
@@ -26,7 +26,7 @@ import {
 } from '../harness/lib.mjs';
 
 export const meta = {
-  id: '215',
+  id: '220',
   name: 'evm-offline-claim',
   journey: 'offline',
   covers: ['evm-offline-claim', 'evmreq-wire', 'evmpay-wire', 'eip2612-permit', 'settle-first-wins', 'relay-evm-pipe'],
@@ -34,16 +34,16 @@ export const meta = {
   timeoutMs: 300_000, // pays a cold harness-relay build on a fresh worktree (warm: ~8s)
 };
 
-const assert = (ok, msg) => { if (!ok) throw new Error(`[215] ${msg}`); };
+const assert = (ok, msg) => { if (!ok) throw new Error(`[220] ${msg}`); };
 const ZCHF = (n) => BigInt(n) * 10n ** 18n;
 const CLAIM_AMOUNT = ZCHF(7);
 const MERCHANT_ETH_WEI = 10_000_000_000_000_000n; // 0.01 ETH — covers permit + transferFrom settle gas
 
 export async function run() {
   const start = Date.now();
-  const payerSeed = devSeed('215-payer');
+  const payerSeed = devSeed('220-payer');
   const payer = deriveEvmKeypair(payerSeed);
-  console.log(`[215-evm-offline-claim] staging: payer ${payer.address} (ZCHF, no ETH) · merchant boots in-app…`);
+  console.log(`[220-evm-offline-claim] staging: payer ${payer.address} (ZCHF, no ETH) · merchant boots in-app…`);
   const env = await stagePipe({
     recipients: [
       {seed: payerSeed, zchfRaw: ZCHF(100), ethWei: 0n},
@@ -79,7 +79,7 @@ export async function run() {
           }
           await new Promise((res) => setTimeout(res, 250));
         }
-        throw new Error('[215] settle leg never confirmed within 15s');
+        throw new Error('[220] settle leg never confirmed within 15s');
       } catch (e) {
         lastErr = e;
         const msg = e instanceof Error ? e.message : String(e);
@@ -96,11 +96,11 @@ export async function run() {
     // ═══ BOOT A — the MERCHANT: request QR → scan-back → settle → "Received ✓" ════════════════
     const merchantApp = await setup({relay: env.relay.baseURL, evmRpcUrl: 'derive'});
     try {
-      await onboardWallet(merchantApp.driver, 'evm-215-merchant');
+      await onboardWallet(merchantApp.driver, 'evm-220-merchant');
       const merchantId = await accountOf(merchantApp.driver);
       const merchant = deriveEvmKeypair(merchantId.secretHex);
       await fundEth(env.anvil.rpcUrl, merchant.address, MERCHANT_ETH_WEI);
-      console.log(`[215-evm-offline-claim] merchant ${merchant.address} funded with settle gas`);
+      console.log(`[220-evm-offline-claim] merchant ${merchant.address} funded with settle gas`);
 
       await selectEvmAsset(merchantApp.driver, 'evm-zchf-anvil');
       await merchantApp.driver.click('tab-receive', {timeoutMs: 5_000});
@@ -114,7 +114,7 @@ export async function run() {
       assert(typeof reqUri === 'string' && reqUri.startsWith('evmreq:v1?'), `the request QR must be an evmreq:v1 URI, got ${String(reqUri).slice(0, 40)}`);
       const req = decodeEvmReq(reqUri);
       assert(req.to.toLowerCase() === merchant.address.toLowerCase() && req.amt === CLAIM_AMOUNT.toString(), 'the request must bind the merchant address and the typed amount');
-      console.log('[215-evm-offline-claim]  ✓ merchant request QR minted (evmreq:v1, rid ' + req.rid.slice(0, 8) + '…)');
+      console.log('[220-evm-offline-claim]  ✓ merchant request QR minted (evmreq:v1, rid ' + req.rid.slice(0, 8) + '…)');
 
       // Harness-side: sign the payer's permit claim over THIS request (the on-chain nonce —
       // what the payer's cached copy held at their last online moment).
@@ -144,7 +144,7 @@ export async function run() {
       }
       const statusTxt = (await (await merchantApp.driver.findByTestID('evm-req-status')).evaluate((n) => (n.textContent ?? '').trim()));
       assert(/Received ✓/.test(statusTxt), `the request screen should read "Received ✓ …", got "${statusTxt}"`);
-      console.log(`[215-evm-offline-claim]  ✓ scan-back settled: "${statusTxt}"`);
+      console.log(`[220-evm-offline-claim]  ✓ scan-back settled: "${statusTxt}"`);
 
       // The chain: ZCHF moved payer → merchant exactly once, the permit nonce consumed.
       const deadline = Date.now() + 10_000;
@@ -160,7 +160,7 @@ export async function run() {
         }
         await new Promise((r) => setTimeout(r, 500));
       }
-      console.log('[215-evm-offline-claim]  ✓ on-chain: payer -7.00 exact · merchant +7.00 · nonce consumed');
+      console.log('[220-evm-offline-claim]  ✓ on-chain: payer -7.00 exact · merchant +7.00 · nonce consumed');
     } finally {
       await merchantApp.stop();
     }
@@ -168,7 +168,7 @@ export async function run() {
     // ═══ BOOT B — the PAYER: offline sign → honest pending → Check-now finds the settle ═══════
     const payerApp = await setup({relay: env.relay.baseURL, evmRpcUrl: 'derive'});
     try {
-      await onboardWallet(payerApp.driver, 'evm-215-payer');
+      await onboardWallet(payerApp.driver, 'evm-220-payer');
       const payerId = await accountOf(payerApp.driver);
       const payerDevice = deriveEvmKeypair(payerId.secretHex);
       // Fund THIS boot's payer (the boot A payer was the staged seed; this one is the onboarded
@@ -196,13 +196,13 @@ export async function run() {
       assert(typeof payUri2 === 'string' && payUri2.startsWith('evmpay:v1?'), `the signed claim QR must be an evmpay:v1 URI, got ${String(payUri2).slice(0, 40)}`);
       const pay2 = JSON.parse(Buffer.from(payUri2.slice('evmpay:v1?'.length), 'base64url').toString('utf8'));
       assert(pay2.rid === rid && pay2.deadline === req2.exp, 'the claim must echo the request rid + deadline');
-      console.log('[215-evm-offline-claim]  ✓ payer signed OFFLINE (evmpay:v1 QR rendered with connectivity down)');
+      console.log('[220-evm-offline-claim]  ✓ payer signed OFFLINE (evmpay:v1 QR rendered with connectivity down)');
 
       // "Handed to merchant" → the honest pending (never "Paid").
       await payerApp.driver.click('btn-evm-pay-handed', {timeoutMs: 5_000});
       const paidTxt = (await (await payerApp.driver.findByTestID('evm-pay-status', {timeoutMs: 5_000})).evaluate((n) => (n.textContent ?? '').trim()));
       assert(/Sent/.test(paidTxt) && !/Paid ✓/.test(paidTxt), `the pending headline must be "Sent …" (never "Paid ✓"), got "${paidTxt}"`);
-      console.log(`[215-evm-offline-claim]  ✓ honest pending: "${paidTxt}"`);
+      console.log(`[220-evm-offline-claim]  ✓ honest pending: "${paidTxt}"`);
 
       // The merchant collects: settle THIS claim through the pipe (harness-side legs). The gas
       // payer is anvil's well-known account #0 (valueless).
@@ -216,7 +216,7 @@ export async function run() {
       const sig2 = signDigest(digest2, payerDevice.privateKeyHex);
       await settleRaw(anvilPayer, encodePermit(payerDevice.address, req2.to, BigInt(req2.amt), BigInt(req2.exp), sig2.v + 27, sig2.r, sig2.s));
       await settleRaw(anvilPayer, encodeTransferFrom(payerDevice.address, req2.to, BigInt(req2.amt)));
-      console.log('[215-evm-offline-claim]  ✓ the merchant collected the handed-off claim (through the pipe)');
+      console.log('[220-evm-offline-claim]  ✓ the merchant collected the handed-off claim (through the pipe)');
 
       // Back online, the payer's read-only "Check now" finds the settled Transfer and reports it.
       await payerApp.driver.eval(() => { delete globalThis.__DPAY_TEST_EVM_CONNECTIVITY; });
@@ -233,11 +233,11 @@ export async function run() {
         lastNote = await payerApp.driver.isPresent('evm-pay-check-note')
           ? (await (await payerApp.driver.findByTestID('evm-pay-check-note')).evaluate((n) => (n.textContent ?? '').trim()))
           : '';
-        if (/Settled/.test(lastNote)) { console.log(`[215-evm-offline-claim]  ✓ pending claim resolved: "${lastNote}"`); break; }
+        if (/Settled/.test(lastNote)) { console.log(`[220-evm-offline-claim]  ✓ pending claim resolved: "${lastNote}"`); break; }
         if (!(await payerApp.driver.isPresent('evm-pay-pending'))) {
           // Success by the badge's own rule: no queued/unknown claim remains, so the row flipped
           // to settled and the pending notice unmounted with it.
-          console.log('[215-evm-offline-claim]  ✓ pending claim resolved (badge cleared — nothing pending)');
+          console.log('[220-evm-offline-claim]  ✓ pending claim resolved (badge cleared — nothing pending)');
           break;
         }
         if (Date.now() > checkDeadline) {
@@ -258,17 +258,17 @@ export async function run() {
       const payerZchf = await balanceOf(payerDevice.address);
       const merchantZchf = decodeUint256(await viaPipe('eth_call', [{to: token, data: encodeErc20BalanceOf(req2.to)}, 'latest']));
       await settleRaw(anvilPayer, encodePermit(payerDevice.address, req2.to, BigInt(req2.amt), BigInt(req2.exp), sig2.v + 27, sig2.r, sig2.s)).then(
-        () => { throw new Error('[215] a replayed permit SUCCEEDED — replay protection broken'); },
+        () => { throw new Error('[220] a replayed permit SUCCEEDED — replay protection broken'); },
         () => { /* the expected shape: the permit re-run reverts on-chain */ },
       );
       assert((await balanceOf(payerDevice.address)) === payerZchf, 'the double hand-off must not move the payer twice');
       assert((await balanceOf(req2.to)) === merchantZchf, 'the double hand-off must not pay the merchant twice');
-      console.log('[215-evm-offline-claim]  ✓ double hand-off: the replay reverts — exactly one settlement');
+      console.log('[220-evm-offline-claim]  ✓ double hand-off: the replay reverts — exactly one settlement');
     } finally {
       await payerApp.stop();
     }
   } finally {
     await env.stop();
   }
-  console.log(`[215-evm-offline-claim] PASS (${Date.now() - start}ms)`);
+  console.log(`[220-evm-offline-claim] PASS (${Date.now() - start}ms)`);
 }

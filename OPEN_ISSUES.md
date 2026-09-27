@@ -744,14 +744,17 @@ transaction detail, or if a backgrounded app issues anything at all.
   `POLL.request` precedent) as new e2e flows; `just verify` + jest + relay catalog tests with the
   `dfx/catalog_truth.json` drift alarms; mainnet + Arbitrum rows live and ONE real on-chain ZCHF
   round trip recorded before any pilot claim.
-  **State 2026-09-27:** everything OFFLINE-buildable is DONE — e2e flows 213–217 drive the real
+  **State 2026-09-27:** everything OFFLINE-buildable is DONE — e2e flows 218-222 drive the real
   app against a local anvil through the real relay pipe; both drift alarms + wire pins are in;
   `just verify` GREEN at `d88a69b`. The live legs are NOT done and are the reason this entry
-  stays: (a) `scripts/evm-probe-arbitrum-sepolia.mjs` (spec D29) was never written and no
-  Sepolia round trip is recorded (`docs/live-testing/networks.md` has no EVM note);
+  stays: (a) the D29 Sepolia probe IS written and green (`just evm-probe-sepolia`, chainId
+  421614 verified; facts + the faucet dead-end log in `docs/live-testing/networks.md`) and
+  `scripts/evm-sepolia-roundtrip.mjs` is ready but UNEXECUTED — blocked on faucet gas (every
+  no-login faucet refuses a zero-mainnet-balance address; the agent EVM float is empty on-chain);
   (b) the funded mainnet round trip (D31) — the acceptance gate for any pilot claim — needs
   the agent EVM float registered in `funds/wallets.json` + a `docs/AGENT-FUNDS.md` derivation
-  note, dust ETH on Arbitrum One, and ZCHF on one chain. The D30 mainnet READ probe ran
+  note, dust ETH, and ZCHF on one chain (mainnet's Uniswap V3 ZCHF/WETH 0.3% pool is the one
+  liquid venue — see the networks.md EVM section). The D30 mainnet READ probe ran
   same-day (spec addendum 1: minimal permit domain, no UIMultiplier, addresses verified);
   `scripts/evm-probe-zchf-mainnet.mjs` pins it as a standing opt-in tripwire.
 

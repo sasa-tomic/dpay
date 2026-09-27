@@ -6,7 +6,7 @@
 // The mock chain here is a small FUNCTIONAL state machine (balances, allowances, permit nonces,
 // Transfer logs, receipts) that runs the token's own require/ecrecover logic via the module's
 // exported recovery helper. It proves the settle STATE MACHINE; the wire-bytes-vs-real-node proof
-// is e2e flow 215's job (live anvil through the relay pipe), not jest's.
+// is e2e flow 220's job (live anvil through the relay pipe), not jest's.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {afterEach, beforeEach, describe, expect, test} from '@jest/globals';

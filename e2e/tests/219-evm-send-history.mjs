@@ -1,4 +1,4 @@
-// Flow 214 — EVM send + history (D28 / D15/D16) through the REAL app: anvil-funded device sends
+// Flow 219 — EVM send + history (D28 / D15/D16) through the REAL app: anvil-funded device sends
 // ZCHF from the send sheet THROUGH the harness relay's evm proxy, the receipt confirms
 // inclusion ("Sent · seen on <chain>"), the balance drops by exactly the amount (+ gas on the
 // ETH leg), and the eth_getLogs poll renders the history row.
@@ -22,7 +22,7 @@ import {
 } from '../harness/lib.mjs';
 
 export const meta = {
-  id: '214',
+  id: '219',
   name: 'evm-send-history',
   journey: 'pay',
   covers: ['evm-send', 'evm-gas-quote', 'evm-receipt', 'evm-transfer-log', 'relay-evm-pipe'],
@@ -30,7 +30,7 @@ export const meta = {
   timeoutMs: 300_000, // pays a cold harness-relay build on a fresh worktree (warm: ~8s)
 };
 
-const assert = (ok, msg) => { if (!ok) throw new Error(`[214] ${msg}`); };
+const assert = (ok, msg) => { if (!ok) throw new Error(`[219] ${msg}`); };
 const ZCHF = (n) => BigInt(n) * 10n ** 18n;
 const DEVICE_ZCHF = ZCHF(500);
 const SEND_AMOUNT = ZCHF(42);
@@ -39,15 +39,15 @@ const RECIPIENT = eip55(evmAddressOf('59c6995e998f97a5a0044966f0945389dc9e86dae8
 
 export async function run() {
   const start = Date.now();
-  console.log('[214-evm-send-history] staging the relay pipe + anvil, booting the app…');
+  console.log('[219-evm-send-history] staging the relay pipe + anvil, booting the app…');
   const env = await stagePipe({recipients: []});
   const app = await setup({relay: env.relay.baseURL, evmRpcUrl: 'derive'});
   const {driver} = app;
   try {
-    await onboardWallet(driver, 'evm-214');
+    await onboardWallet(driver, 'evm-219');
     const id = await accountOf(driver);
     const device = deriveEvmKeypair(id.secretHex);
-    console.log(`[214-evm-send-history] device ${device.address} ← ${DEVICE_ZCHF} raw ZCHF + ${DEVICE_ETH_WEI} wei gas`);
+    console.log(`[219-evm-send-history] device ${device.address} ← ${DEVICE_ZCHF} raw ZCHF + ${DEVICE_ETH_WEI} wei gas`);
     await fundEth(env.anvil.rpcUrl, device.address, DEVICE_ETH_WEI);
     await transferToken(env.anvil.rpcUrl, env.anvil.tokenAddress, ANVIL_ACCOUNT_0_PRIV, device.address, DEVICE_ZCHF);
 
@@ -65,7 +65,7 @@ export async function run() {
       await new Promise((r) => setTimeout(r, 500));
     }
     const ethBefore = DEVICE_ETH_WEI;
-    console.log('[214-evm-send-history]  ✓ staged: device funded through the harness ladder');
+    console.log('[219-evm-send-history]  ✓ staged: device funded through the harness ladder');
 
     // 2. the SEND SHEET: destination + amount, fee quote rendered BEFORE the amount commits.
     await selectEvmAsset(driver, 'evm-zchf-anvil');
@@ -82,7 +82,7 @@ export async function run() {
         const el = document.querySelector('[data-testid="evm-send-review-fee"]');
         return el ? el.textContent.trim() : '';
       });
-      if (/≈ .+\(estimate\)/.test(fee)) { console.log(`[214-evm-send-history]  ✓ fee line: ${fee}`); break; }
+      if (/≈ .+\(estimate\)/.test(fee)) { console.log(`[219-evm-send-history]  ✓ fee line: ${fee}`); break; }
       if (Date.now() > feeDeadline) throw new Error(`fee line never rendered an estimate, got "${fee}"`);
       await new Promise((r) => setTimeout(r, 250));
     }
@@ -98,7 +98,7 @@ export async function run() {
     assert(/Sent · seen on /.test(body), `the terminal should read "Sent · seen on <chain>", got: "${body.slice(0, 160)}"`);
     const hash = await driver.eval(() => document.querySelector('[data-testid="evm-send-hash"]')?.textContent?.trim());
     assert(typeof hash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(hash), `the terminal must carry the tx hash, got ${hash}`);
-    console.log(`[214-evm-send-history]  ✓ sent through the pipe: ${hash} ("Sent · seen on")`);
+    console.log(`[219-evm-send-history]  ✓ sent through the pipe: ${hash} ("Sent · seen on")`);
 
     // 4. balances: ZCHF moves by exactly the amount; ETH drops (gas).
     const deadline = Date.now() + 15_000;
@@ -114,7 +114,7 @@ export async function run() {
     }
     const ethAfter = decodeUint256(await viaPipe('eth_getBalance', [device.address, 'latest']));
     assert(ethAfter < ethBefore, `device ETH must drop by gas (${ethBefore} → ${ethAfter})`);
-    console.log('[214-evm-send-history]  ✓ balances: ZCHF -42.00 exact, ETH dropped by gas');
+    console.log('[219-evm-send-history]  ✓ balances: ZCHF -42.00 exact, ETH dropped by gas');
 
     // 5. the history row (the eth_getLogs poll → the Transactions tab): the outgoing 42 ZCHF
     //    transfer with the recipient as counterparty.
@@ -123,7 +123,7 @@ export async function run() {
     for (;;) {
       const txt = await driver.bodyText();
       if (/42\.00\s*ZCHF/.test(txt) && txt.includes('0x709979')) {
-        console.log('[214-evm-send-history]  ✓ history row rendered from the Transfer log poll');
+        console.log('[219-evm-send-history]  ✓ history row rendered from the Transfer log poll');
         break;
       }
       if (Date.now() > histDeadline) throw new Error(`history row never rendered (looking for "42.00 ZCHF" + 0x709979), got: ${txt.slice(0, 200)}`);
@@ -133,5 +133,5 @@ export async function run() {
     await app.stop();
     await env.stop();
   }
-  console.log(`[214-evm-send-history] PASS (${Date.now() - start}ms)`);
+  console.log(`[219-evm-send-history] PASS (${Date.now() - start}ms)`);
 }

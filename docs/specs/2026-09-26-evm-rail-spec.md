@@ -742,7 +742,7 @@ discipline, `e2e/tests/46-sol-offline-handoff.mjs`).
 
 | id | file | proves |
 |----|------|--------|
-| 213 | `e2e/tests/213-evm-receive.mjs` | device-derived 0x address renders EIP-55-checksummed in Balances + Receive ▸ My address (QR + copy + explorer link, no explorer on Anvil); the address matches `deriveEvmAddress(seed)` asserted jest-side via golden vectors; zero RPC at render (seam `''`). |
+| 218 | `e2e/tests/218-evm-receive.mjs` | device-derived 0x address renders EIP-55-checksummed in Balances + Receive ▸ My address (QR + copy + explorer link, no explorer on Anvil); the address matches `deriveEvmAddress(seed)` asserted jest-side via golden vectors; zero RPC at render (seam `''`). |
 | 214 | `e2e/tests/214-evm-send-history.mjs` | anvil funded → send sheet quotes a fee, passes the gas gate, signs + broadcasts THROUGH the harness relay's evm proxy (stub→anvil upstream hit recorded), receipt confirms "seen on Anvil", history row appears via the `eth_getLogs` poll, balance drops by amount+fee. |
 | 215 | `e2e/tests/215-evm-offline-claim.mjs` | the offline permit loop: merchant request QR (`evmreq:v1`) → payer signs OFFLINE (dead-URL seam) → claim QR scanned back → merchant settle (permit + transferFrom through the pipe) → both screens flip; the double-hand-off second settle settles NOTHING and reports settled/failed without a second spend (D24.4). |
 | 216 | `e2e/tests/216-evm-paylink.mjs` | `…/wallet/pay/<0x…>?asset=ZCHF&network=arbitrum` prefills the send form on the evm asset (route disclosed, never auto-signed); `network=solana` + `asset=ZCHF` refuses `wrong_network` by name; camera-scanned request QR opens the link (the flow-176 loop, evm arm). |
@@ -859,7 +859,7 @@ Then, in dependency order (each item cites its decision):
    unpinned dev chains (Anvil) resolve their token through `syncEvmCatalogDeployments`
    (the served catalog row IS the deployment — D3), not the pinned registry alone.
 5. **S7 — anvil + e2e (needs S1, S5, S6):** MockZCHF blob + `evm-core.mjs` extraction (D26) →
-   `just evm-anvil` + harness relay/driver injection (D26/D27) → flows 213-217 (D28).
+   `just evm-anvil` + harness relay/driver injection (D26/D27) → flows 218-222 (D28).
 6. **S8 — probes + live docs (needs S4; S6 for the permit half):** Sepolia round trip (D29) →
    mainnet read-only probe + UIMultiplier verdict (D30) → float-key census + funded mainnet trip
    (D31). Final automated gate: `just verify` (which runs e2e + the suites), then the live trip
@@ -889,7 +889,7 @@ Then, in dependency order (each item cites its decision):
   for the user, never a fund loss; the `needsResign` path must ship with S6 or offline claims are
   not honest.
 - **R7 — foundry/anvil availability**: vendoring is a fetch-once with a pinned checksum (D26.1);
-  until it lands, flows 213-217 stay RED-by-absence and `just verify` must not regress
+  until it lands, flows 218-222 stay RED-by-absence and `just verify` must not regress
   (the recipes fail loud, they do not skip).
 
 ---
@@ -990,4 +990,4 @@ Solana rail was mirrored everywhere (root seam, network modules, jest wiring, dr
 - **Tests:** 70 jest tests across `evm-{endpoints,rpc,seam,service,history,catalog}.test.ts`
   (walk precedence, gate ORDER, raw-tx RLP decode, gas gate, wrong-chain sends AND reads,
   receipt states incl. honest-unknown, history decode/paging, catalog fail-closed rows).
-  Flows 213–217 remain optional+stubbed (UI legs) — the UI wave owns the app-surface legs.
+  Flows 218-222 remain optional+stubbed (UI legs) — the UI wave owns the app-surface legs.

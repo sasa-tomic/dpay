@@ -9,7 +9,7 @@ never deployed to any public chain.
 
 - `MockZCHF.sol` — the source (compiled artifact of record).
 - `MockZCHF.t.sol` — the foundry proof: offline-permit pull-claim, expired-permit revert,
-  permit-nonce single-use (the dpay offline-claim mechanics, flow 215's subject).
+  permit-nonce single-use (the dpay offline-claim mechanics, flow 220's subject).
 - `MockZCHF.hex` — the CREATION bytecode the harness deploys (`e2e/harness/evm/anvil.mjs`,
   `e2e/harness/evm/pipe-smoke.mjs`) with a raw signed type-2 tx. This is why runtime needs no
   forge/solc (the offline inner-loop rule).

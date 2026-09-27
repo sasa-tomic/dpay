@@ -12,7 +12,7 @@
 // SLIP-10 note: the secp256k1 HMAC-SHA512 here is the hand-rolled RFC 2104 form (sha512 only),
 // byte-for-byte the same construction as app/evm/identity.ts — same master seed ("Bitcoin
 // seed"), same path m/44'/60'/0'/0/0 — so a seed funded by anvil.mjs is the address the app
-// derives, and flow 213's cross-check holds over BOTH implementations.
+// derives, and flow 218's cross-check holds over BOTH implementations.
 import {keccak_256} from '@noble/hashes/sha3';
 import {sha512} from '@noble/hashes/sha512';
 import {secp256k1} from '@noble/curves/secp256k1';
@@ -84,7 +84,7 @@ function hmacSha512(key, data) {
 /**
  * SLIP-10 secp256k1 child derivation over hardened (>= 0x80000000) and normal indices. Exported so
  * the SLIP-10 official test vectors can assert master AND intermediate nodes directly against the
- * reference (flow 213 pins TV1 + TV2), not just the leaf of one fixed path. Throws on the SLIP-10
+ * reference (flow 218 pins TV1 + TV2), not just the leaf of one fixed path. Throws on the SLIP-10
  * invalid-key conditions (IL = 0, IL >= n, or the normal-derivation sum wrapping past n) — at a
  * fixed path that is a derivation-code bug, never a runtime condition to recover from.
  */
@@ -123,7 +123,7 @@ export function deriveSlip10Secp256k1Node(masterSeed, indices) {
 /**
  * Derive the device EVM keypair from the SAME 32-byte identity seed the Solana rail uses
  * (Identity.secretHex) at the standard Ethereum coin-type path. Mirrors app/evm/identity.ts
- * `deriveEvmKeypair` exactly (flow 213 cross-checks the two).
+ * `deriveEvmKeypair` exactly (flow 218 cross-checks the two).
  */
 export function deriveEvmKeypair(secretHex) {
   const seed = typeof secretHex === 'string' ? bytesOf(secretHex) : Buffer.from(secretHex);
@@ -220,7 +220,7 @@ export function permitDigestMinimal({chainId, verifyingContract, owner, spender,
   return keccakHex(Buffer.concat([Buffer.from([0x19, 0x01]), ds, structHash]));
 }
 
-/** The EIP-2612 digest a payer signs OFFLINE (flow 215; app/evm/permit.ts is the app mirror). */
+/** The EIP-2612 digest a payer signs OFFLINE (flow 220; app/evm/permit.ts is the app mirror). */
 export function permitDigest({name, version, chainId, verifyingContract, owner, spender, value, deadline, nonce}) {
   const ds = Buffer.from(domainSeparator({name, version, chainId, verifyingContract}).slice(2), 'hex');
   const structHash = keccak(abiEncode32([
@@ -326,7 +326,7 @@ export async function sendRawRpc(url, rawTx, {timeoutMs = 10_000} = {}) {
   }
 }
 
-// --- Transfer log decoding (history's raw material; flow 214 asserts the decode) --------------
+// --- Transfer log decoding (history's raw material; flow 219 asserts the decode) --------------
 export const TRANSFER_TOPIC = '0x' + keccak(Buffer.from('Transfer(address,address,uint256)', 'utf8')).toString('hex');
 
 /** Decode one ERC-20 Transfer event log → {from, to, value}. Null when it is not a Transfer. */

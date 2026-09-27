@@ -145,7 +145,7 @@ Recovery rule below covers all four wallets: one identity to back up, and losing
 - `evm-rail` — SLIP-10 **secp256k1 m/44'/60'/0'/0/0** of the same IC float seed (the standard
   Ethereum coin-type path, non-hardened levels per BIP-32 for secp256k1). Code:
   `e2e/harness/evm/evm-core.mjs deriveEvmKeypair`, the mirror of `app/evm/identity.ts` — ONE
-  derivation, the app's; flow 213 cross-checks both implementations. Re-derive + measure
+  derivation, the app's; flow 218 cross-checks both implementations. Re-derive + measure
   keylessly: `just funds balance evm-rail` (both mainnet chains, ETH gas + ZCHF).
 - `evm-float` — a fresh **secp256k1** key (node `crypto`), NOT derived from any seed; the private
   key lives whole in `secrets/agent-evm.sops.json` (`private_key_hex`), the EIP-55 address

@@ -2,7 +2,7 @@
 // e2e/harness/evm-sign.mjs — the agent test float's EVM tool (docs/AGENT-FUNDS.md). NO
 // ethers/web3/circle-sdk — the crypto core (keccak + secp256k1 + SLIP-10 + RLP + EIP-1559 +
 // ABI slices + JSON-RPC) is the ONE shared implementation in harness/evm/evm-core.mjs
-// (D26.2), the same module the local-Anvil harness and the 213-217 flow proofs import.
+// (D26.2), the same module the local-Anvil harness and the 218-222 flow proofs import.
 // This file is the thin float shell around it: the sops-key loading + the LIVE-mainnet
 // command surface. The key decrypts from sops INSIDE this process (execFileSync capture)
 // and is never printed, logged, or written to disk. EVM evidence lives in ledger `tx`

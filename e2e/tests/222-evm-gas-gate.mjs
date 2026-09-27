@@ -1,4 +1,4 @@
-// Flow 217 — the gas gate (D28 / D15.3) through the REAL app: a wallet holding ZCHF but ZERO
+// Flow 222 — the gas gate (D28 / D15.3) through the REAL app: a wallet holding ZCHF but ZERO
 // ETH is REFUSED at the send sheet with the instructive failure (fee named, the payer's own 0x
 // address — with its QR — to receive gas at, amount retained, NO broadcast), and the SAME send
 // passes in-page once the gas is funded. Gas honesty is a GATE, not a footnote.
@@ -23,7 +23,7 @@ import {
 } from '../harness/lib.mjs';
 
 export const meta = {
-  id: '217',
+  id: '222',
   name: 'evm-gas-gate',
   journey: 'pay',
   covers: ['evm-gas-gate', 'gas-honesty', 'relay-evm-pipe'],
@@ -31,19 +31,19 @@ export const meta = {
   timeoutMs: 300_000, // pays a cold harness-relay build on a fresh worktree (warm: ~8s)
 };
 
-const assert = (ok, msg) => { if (!ok) throw new Error(`[217] ${msg}`); };
+const assert = (ok, msg) => { if (!ok) throw new Error(`[222] ${msg}`); };
 const ZCHF = (n) => BigInt(n) * 10n ** 18n;
 const RECIPIENT = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'; // anvil #1 (valueless)
 const SEND_AMOUNT = ZCHF(3);
 
 export async function run() {
   const start = Date.now();
-  console.log('[217-evm-gas-gate] staging the relay pipe + anvil, booting the app…');
+  console.log('[222-evm-gas-gate] staging the relay pipe + anvil, booting the app…');
   const env = await stagePipe({recipients: []});
   const app = await setup({relay: env.relay.baseURL, evmRpcUrl: 'derive'});
   const {driver} = app;
   try {
-    await onboardWallet(driver, 'evm-217');
+    await onboardWallet(driver, 'evm-222');
     const id = await accountOf(driver);
     const device = deriveEvmKeypair(id.secretHex);
     // ZCHF only — ZERO gas. The refusal case, measured (never assumed).
@@ -55,7 +55,7 @@ export async function run() {
 
     const eth = decodeUint256(await viaPipe('eth_getBalance', [device.address, 'latest']));
     assert(eth === 0n, `device ETH must be ZERO for the refusal case (${eth})`);
-    console.log('[217-evm-gas-gate]  ✓ measured: ZCHF funded · gas ETH 0');
+    console.log('[222-evm-gas-gate]  ✓ measured: ZCHF funded · gas ETH 0');
 
     // The send sheet: destination + amount, review up, confirm enabled (the token balance is known).
     await selectEvmAsset(driver, 'evm-zchf-anvil');
@@ -69,7 +69,7 @@ export async function run() {
     const feeDeadline = Date.now() + 15_000;
     for (;;) {
       const fee = await driver.eval(() => document.querySelector('[data-testid="evm-send-review-fee"]')?.textContent?.trim() ?? '');
-      if (/≈ .+\(estimate\)/.test(fee)) { console.log(`[217-evm-gas-gate]  ✓ quotable refusal: fee line "${fee}"`); break; }
+      if (/≈ .+\(estimate\)/.test(fee)) { console.log(`[222-evm-gas-gate]  ✓ quotable refusal: fee line "${fee}"`); break; }
       if (Date.now() > feeDeadline) throw new Error(`fee line never rendered, got "${fee}"`);
       await new Promise((r) => setTimeout(r, 250));
     }
@@ -85,7 +85,7 @@ export async function run() {
     assert(!(await driver.isPresent('evm-send-hash')), 'nothing may broadcast past the gate');
     const after = await txCount();
     assert(before === after, `tx count changed during the refusal (${before} → ${after}) — something broadcast`);
-    console.log('[217-evm-gas-gate]  ✓ refused with the instructive gate · tx count unchanged (nothing broadcast)');
+    console.log('[222-evm-gas-gate]  ✓ refused with the instructive gate · tx count unchanged (nothing broadcast)');
 
     // The amount is RETAINED: the gate's back returns to the form with the same review.
     await driver.click('btn-evm-send-gasgate-back', {timeoutMs: 5_000});
@@ -115,10 +115,10 @@ export async function run() {
     assert(/Sent · seen on /.test(body), 'the funded send should confirm with "Sent · seen on <chain>"');
     const paid = await balanceOf(RECIPIENT);
     assert(paid === SEND_AMOUNT, `recipient ${paid} != ${SEND_AMOUNT} — the funded send must land exactly`);
-    console.log('[217-evm-gas-gate]  ✓ gas funded → the same send passes the gate → "Sent · seen on", 3.00 ZCHF delivered');
+    console.log('[222-evm-gas-gate]  ✓ gas funded → the same send passes the gate → "Sent · seen on", 3.00 ZCHF delivered');
   } finally {
     await app.stop();
     await env.stop();
   }
-  console.log(`[217-evm-gas-gate] PASS (${Date.now() - start}ms)`);
+  console.log(`[222-evm-gas-gate] PASS (${Date.now() - start}ms)`);
 }

@@ -49,6 +49,13 @@ MAPPING=(
   "trocador-pg.sops.json|DPAY_TROCADOR_PG_DSN|DPAY_TROCADOR_PG_DSN|optional"
 )
 
+# EVM JSON-RPC upstreams (DPAY_EVM_RPC_URL = default chain; DPAY_EVM_RPC_URL_<CHAINID> =
+# that chain, e.g. 42161 Arbitrum One / 421614 Arbitrum Sepolia). Values embed api keys →
+# SECRETS: they live in secrets/deploy.sops.json under the same names and are emitted here
+# wholesale (the chain-id set is open-ended, so it cannot be a fixed mapping row). Absent →
+# the EVM route answers 503 naming the variable (legal deploy state).
+EVM_RPC_PREFIX="DPAY_EVM_RPC_URL"
+
 fail() { echo "gen-deploy-env: FAIL — $*" >&2; exit 1; }
 
 command -v sops >/dev/null 2>&1 \
@@ -140,6 +147,21 @@ for spec in "${MAPPING[@]}"; do
 done
 
 echo "" >>"$TMP"
+
+# --- EVM RPC upstreams (secret pattern, see EVM_RPC_PREFIX above) -------------
+if [ -f "$SOPS_DIR/deploy.sops.json" ]; then
+  while read -r EKEY B64; do
+    [ -n "${EKEY:-}" ] || continue
+    VAL="$(printf '%s' "$B64" | base64 -d)"
+    printf '%s=%s\n' "$EKEY" "$VAL" >>"$TMP"
+    EMITTED+="$EKEY "
+    unset VAL
+  done < <(SOPS_AGE_KEY_FILE="$AGE_KEY" sops -d "$SOPS_DIR/deploy.sops.json" 2>/dev/null \
+    | jq -r --arg p "$EVM_RPC_PREFIX" \
+        'to_entries[] | select(.key == $p or (.key | startswith($p + "_"))) | .key + " " + (.value | @base64)' \
+        2>/dev/null)
+fi
+
 echo "# gen-stamp: $CUR_STAMP" >>"$TMP"
 
 # Idempotence guard: only replace the file when content actually differs.

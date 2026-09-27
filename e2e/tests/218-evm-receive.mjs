@@ -1,4 +1,4 @@
-// Flow 213 — the device-derived EVM address (D28 / D14), through the REAL app: the same
+// Flow 218 — the device-derived EVM address (D28 / D14), through the REAL app: the same
 // Identity.secretHex that derives the Solana key derives the EVM key at m/44'/60'/0'/0/0, and
 // the wallet renders that EIP-55-checksummed address everywhere (Balances row + Receive ▸ My
 // address, bare-address QR, copy, NO explorer link on Anvil).
@@ -23,7 +23,7 @@ import {secp256k1} from '@noble/curves/secp256k1';
 import {setup, onboardWallet, waitForWallet, accountOf, selectEvmAsset} from '../harness/lib.mjs';
 
 export const meta = {
-  id: '213',
+  id: '218',
   name: 'evm-receive',
   journey: 'deposit',
   covers: ['evm-identity', 'slip10-secp256k1', 'eip55', 'evm-device-address'],
@@ -31,12 +31,12 @@ export const meta = {
   timeoutMs: 300_000, // pays a cold harness-relay build on a fresh worktree (warm: ~8s)
 };
 
-const assert = (ok, msg) => { if (!ok) throw new Error(`[213] ${msg}`); };
+const assert = (ok, msg) => { if (!ok) throw new Error(`[218] ${msg}`); };
 const H = (i) => i + 0x80000000;
 
 export async function run() {
   const start = Date.now();
-  console.log('[213-evm-receive] SLIP-10 official vectors (secp256k1 TV1 + TV2)…');
+  console.log('[218-evm-receive] SLIP-10 official vectors (secp256k1 TV1 + TV2)…');
   const seed1 = Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex');
   // (chain code, private key) pairs from slip-0010.md — chain codes pin the HMAC data shape
   // (37 bytes: 0x00||IL or serP(K) + index), privkeys pin the (IL + parent) mod n child rule.
@@ -65,31 +65,31 @@ export async function run() {
       assert(Buffer.from(secp256k1.getPublicKey(n.privateKey, true)).toString('hex').length === 66, `${label} pubkey form at m/${path.join('/')}`);
     }
   }
-  console.log('[213-evm-receive]  ✓ 12 chains across TV1+TV2 (chain codes + child keys + pubkey form)');
+  console.log('[218-evm-receive]  ✓ 12 chains across TV1+TV2 (chain codes + child keys + pubkey form)');
 
-  console.log('[213-evm-receive] deriveEvmKeypair determinism + EIP-55 self-consistency…');
-  const deviceSeed = devSeed('213-device');
+  console.log('[218-evm-receive] deriveEvmKeypair determinism + EIP-55 self-consistency…');
+  const deviceSeed = devSeed('218-device');
   const a = deriveEvmKeypair(deviceSeed);
   const b = deriveEvmKeypair(Buffer.from(deviceSeed, 'hex'));
   assert(a.address === b.address && a.privateKeyHex === b.privateKeyHex, 'derivation must be deterministic over hex string AND raw bytes');
   assert(a.address === eip55(a.address.toLowerCase()), `derived address ${a.address} must be EIP-55-checksummed`);
   assert(a.address === eip55(evmAddressOf(a.privateKeyHex)), 'address must round-trip through the private key');
-  const other = deriveEvmKeypair(devSeed('213-other'));
+  const other = deriveEvmKeypair(devSeed('218-other'));
   assert(other.address !== a.address, 'different seeds must give different addresses');
-  console.log(`[213-evm-receive]  ✓ deterministic EIP-55 address ${a.address}`);
+  console.log(`[218-evm-receive]  ✓ deterministic EIP-55 address ${a.address}`);
 
   // ── The app legs: stage the pipe, boot the app on it, drive the REAL surfaces ────────────────
-  console.log('[213-evm-receive] staging the relay pipe + anvil, booting the app…');
+  console.log('[218-evm-receive] staging the relay pipe + anvil, booting the app…');
   const env = await stagePipe({recipients: []});
   const app = await setup({relay: env.relay.baseURL, evmRpcUrl: 'derive'});
   const {driver} = app;
   try {
-    await onboardWallet(driver, 'evm-213');
+    await onboardWallet(driver, 'evm-218');
     const id = await accountOf(driver);
     assert(id && typeof id.secretHex === 'string' && id.secretHex.length === 64, 'the app identity must carry a 64-hex seed');
     const device = deriveEvmKeypair(id.secretHex);
     assert(device.address === eip55(device.address.toLowerCase()), 'the identity-derived address must be EIP-55-checksummed');
-    console.log(`[213-evm-receive]  ✓ onboard identity derives ${device.address}`);
+    console.log(`[218-evm-receive]  ✓ onboard identity derives ${device.address}`);
 
     // Fund the DERIVED address through anvil (the harness ladder), then watch the app's own
     // balance poll show it on the row.
@@ -98,7 +98,7 @@ export async function run() {
 
     await waitForWallet(driver);
     await selectEvmAsset(driver, 'evm-zchf-anvil');
-    console.log('[213-evm-receive]  ✓ EVM asset selected (Balances row → Pay engine)');
+    console.log('[218-evm-receive]  ✓ EVM asset selected (Balances row → Pay engine)');
 
     // Receive ▸ My address: the rendered address IS the derivation, EIP-55 spelled.
     await driver.click('tab-receive');
@@ -112,7 +112,7 @@ export async function run() {
     // Copy affordance exists; Anvil (explorer: null) renders NO explorer link.
     await driver.findByTestID('btn-evm-recv-copy', {timeoutMs: 3_000});
     assert(!(await driver.isPresent('evm-recv-explorer')), 'no explorer link may render on Anvil (explorer: null)');
-    console.log('[213-evm-receive]  ✓ Receive ▸ My address: rendered == derived, bare-address QR, copy, no explorer');
+    console.log('[218-evm-receive]  ✓ Receive ▸ My address: rendered == derived, bare-address QR, copy, no explorer');
 
     // Zero-RPC-at-render: pin the connectivity oracle OFFLINE, flip the sub-mode away and back —
     // the address surface re-renders identically (pure derivation; the balance rows degrade to
@@ -123,10 +123,10 @@ export async function run() {
     const again = await driver.findByTestID('evm-recv-address', {timeoutMs: 5_000});
     assert((await again.evaluate((n) => (n.textContent ?? '').trim())) === device.address, 'the address must render with connectivity offline (no RPC in the render path)');
     await driver.eval(() => { delete globalThis.__DPAY_TEST_EVM_CONNECTIVITY; });
-    console.log('[213-evm-receive]  ✓ address renders offline-pinned (zero RPC in the render path)');
+    console.log('[218-evm-receive]  ✓ address renders offline-pinned (zero RPC in the render path)');
   } finally {
     await app.stop();
     await env.stop();
   }
-  console.log(`[213-evm-receive] PASS (${Date.now() - start}ms)`);
+  console.log(`[218-evm-receive] PASS (${Date.now() - start}ms)`);
 }

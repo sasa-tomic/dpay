@@ -1,4 +1,4 @@
-// Flow 216 — the EVM pay link (D28 / D17/D7): `…/wallet/pay/<0x…>?asset=ZCHF&network=<chain>`
+// Flow 221 — the EVM pay link (D28 / D17/D7): `…/wallet/pay/<0x…>?asset=ZCHF&network=<chain>`
 // resolves onto the evm asset and PREFILLS the send form (route disclosed, never auto-signed).
 //
 // LIVE (this skeleton): the link grammar + the link's promise, UI-independent —
@@ -23,15 +23,15 @@ import {
 } from '../harness/lib.mjs';
 
 export const meta = {
-  id: '216',
+  id: '221',
   name: 'evm-paylink',
   journey: 'pay',
   covers: ['evm-pay-link', 'link-grammar', 'chain-slugs', 'relay-evm-pipe'],
-  verifies: 'EVM pay link: the canonical /wallet/pay/<0x>?asset=ZCHF&network=<slug> grammar (registry chain slugs, decimal display amount, no ref on EVM) is pinned, the link\'s promise is real, the link prefills the REAL send form (full 0x destination + decimal amount, route disclosed before the amount commits, nothing signed), and ?asset=ZCHF&network=solana refuses wrong_network naming both the asset and the chain; the camera-scanned request loop is flow 215\'s offline claim (an EVM request is signed from its evmreq QR, never opened as a link — D21/D18).',
+  verifies: 'EVM pay link: the canonical /wallet/pay/<0x>?asset=ZCHF&network=<slug> grammar (registry chain slugs, decimal display amount, no ref on EVM) is pinned, the link\'s promise is real, the link prefills the REAL send form (full 0x destination + decimal amount, route disclosed before the amount commits, nothing signed), and ?asset=ZCHF&network=solana refuses wrong_network naming both the asset and the chain; the camera-scanned request loop is flow 220\'s offline claim (an EVM request is signed from its evmreq QR, never opened as a link — D21/D18).',
   timeoutMs: 300_000, // pays a cold harness-relay build on a fresh worktree (warm: ~8s)
 };
 
-const assert = (ok, msg) => { if (!ok) throw new Error(`[216] ${msg}`); };
+const assert = (ok, msg) => { if (!ok) throw new Error(`[221] ${msg}`); };
 
 // The chain slugs (D7): the settlement-chain slug a shared link MUST spell. The registry lives
 // once app-side (app/evm/chains.ts, stream S2); this table pins the wire spellings here so a
@@ -48,10 +48,10 @@ function payLink({origin, recipient, asset, network, amount}) {
 
 export async function run() {
   const start = Date.now();
-  const merchantSeed = devSeed('216-merchant');
+  const merchantSeed = devSeed('221-merchant');
   const merchant = deriveEvmKeypair(merchantSeed);
   const ZCHF = (n) => BigInt(n) * 10n ** 18n;
-  console.log(`[216-evm-paylink] staging: merchant ${merchant.address} holds ZCHF on chain 31337…`);
+  console.log(`[221-evm-paylink] staging: merchant ${merchant.address} holds ZCHF on chain 31337…`);
   const env = await stagePipe({recipients: [{seed: merchantSeed, zchfRaw: ZCHF(25), ethWei: 0n}]});
   try {
     // 1+2. the canonical link shapes — one per settlement chain, slugs from the registry table.
@@ -69,7 +69,7 @@ export async function run() {
       // "Arbitrum One" can never alias the pinned slug (the wrong_network refusal's raw material).
       assert(slug === slug.toLowerCase().replace(/\s+/g, '-'), `slug ${slug} must be lowercase-hyphenated (no aliasing)`);
     }
-    console.log('[216-evm-paylink]  ✓ link grammar + registry slugs pinned (arbitrum / ethereum / arbitrum-sepolia / anvil)');
+    console.log('[221-evm-paylink]  ✓ link grammar + registry slugs pinned (arbitrum / ethereum / arbitrum-sepolia / anvil)');
 
     // 3. the link's promise is REAL — the named recipient holds the named asset on the named
     // chain, read through the relay pipe.
@@ -78,18 +78,18 @@ export async function run() {
     assert(BigInt(chainId) === 31337n, 'the link names chain 31337 (anvil) — the pipe must serve that chain');
     const bal = decodeUint256(await viaPipe('eth_call', [{to: env.anvil.tokenAddress, data: encodeErc20BalanceOf(merchant.address)}, 'latest']));
     assert(bal === ZCHF(25), `merchant balance ${bal} != staged 25 ZCHF — the link must never promise money that is not there`);
-    console.log(`[216-evm-paylink]  ✓ promise verified: ${merchant.address} holds ${bal} raw ZCHF on 31337 (through the pipe)`);
+    console.log(`[221-evm-paylink]  ✓ promise verified: ${merchant.address} holds ${bal} raw ZCHF on 31337 (through the pipe)`);
 
     // 4. size/shape bounds a shared link must survive: a label at the 32-byte cap stays a URL.
     const longLabel = payLink({origin: local, recipient: merchant.address, asset: 'ZCHF', network: 'anvil', amount: '1'}) + '&label=' + 'x'.repeat(32);
     assert(longLabel.length <= 2000, 'a capped-label link must stay within the QR-safe URL bound');
 
     // ── The app legs: the link PREFILLS the send form on the evm asset, never signs ─────────────
-    console.log('[216-evm-paylink] booting the app for the prefill legs…');
+    console.log('[221-evm-paylink] booting the app for the prefill legs…');
     const app = await setup({relay: env.relay.baseURL, evmRpcUrl: 'derive'});
     const {driver} = app;
     try {
-      await onboardWallet(driver, 'evm-216');
+      await onboardWallet(driver, 'evm-221');
       const id = await accountOf(driver);
       const payer = deriveEvmKeypair(id.secretHex);
       // The payer holds a little of the asset + gas so the send sheet's review is fully live
@@ -130,7 +130,7 @@ export async function run() {
       assert(/Anvil/.test(statusTxt), `the route disclosure should name Anvil, got "${statusTxt}"`);
       // NEVER auto-signed: no send is in flight and no terminal exists.
       assert(!(await driver.isPresent('evm-send-hash')), 'a link must never sign — no tx hash may exist after prefill');
-      console.log('[216-evm-paylink]  ✓ link prefilled the send form (full 0x + amount, route disclosed, nothing signed)');
+      console.log('[221-evm-paylink]  ✓ link prefilled the send form (full 0x + amount, route disclosed, nothing signed)');
 
       // The refusal leg: ZCHF does not live on Solana — wrong_network names BOTH by name.
       const badLink = `${local}/wallet/pay/${merchant.address}?asset=ZCHF&network=solana&amount=12.50`;
@@ -138,7 +138,7 @@ export async function run() {
       await driver.findByTestID('pay-link-error-body', {timeoutMs: 10_000});
       const errTxt = (await (await driver.findByTestID('pay-link-error-body')).evaluate((n) => (n.textContent ?? '').trim()));
       assert(/ZCHF/.test(errTxt) && /Solana/.test(errTxt), `wrong_network must name the asset AND the chain, got "${errTxt}"`);
-      console.log('[216-evm-paylink]  ✓ wrong_network refused by name (ZCHF × Solana)');
+      console.log('[221-evm-paylink]  ✓ wrong_network refused by name (ZCHF × Solana)');
     } finally {
       await app.stop();
     }
@@ -147,9 +147,9 @@ export async function run() {
     // asset (route disclosed before the amount commits, full 0x rendered, nothing signed);
     // ?asset=ZCHF&network=solana refuses wrong_network NAMING both; the camera-scanned request
     // QR opens the link (flow-176 loop, evm arm).
-    console.log('[216-evm-paylink]  · TODO(app-ui): prefill / wrong_network refusal / scan-QR legs are stubbed');
+    console.log('[221-evm-paylink]  · TODO(app-ui): prefill / wrong_network refusal / scan-QR legs are stubbed');
   } finally {
     await env.stop();
   }
-  console.log(`[216-evm-paylink] PASS (${Date.now() - start}ms)`);
+  console.log(`[221-evm-paylink] PASS (${Date.now() - start}ms)`);
 }
