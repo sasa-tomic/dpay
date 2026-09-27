@@ -182,7 +182,16 @@ const DEVTOOLS_PORT_WAIT_MS = 10_000;
 // timeout scale, and both stay honest only if it knows the run owns a single shell. An
 // explicit DPAY_E2E_BROWSERS value still wins for the runner's math; the gate itself always
 // connects every lane of the process to the one admitted shell regardless.
-if (process.env.DPAY_E2E_BROWSERS === undefined) process.env.DPAY_E2E_BROWSERS = '1';
+//
+// The collapse also caps the pool's auto lanes: the load-based auto concurrency (up to 12)
+// predates the collapse, and >3 contexts sharing ONE browser process measured 2-5x flow
+// inflation (run.mjs 2026-09-16 note) — full-suite runs went RED on app-boot waits at 7-12
+// ctx/shell. 4 lanes (~3 ctx/browser, the 2026-09-17 A/B sweet spot) is the collapsed default;
+// an explicit DPAY_E2E_CONCURRENCY always wins.
+if (process.env.DPAY_E2E_BROWSERS === undefined) {
+  process.env.DPAY_E2E_BROWSERS = '1';
+  if (process.env.DPAY_E2E_CONCURRENCY === undefined) process.env.DPAY_E2E_CONCURRENCY = '4';
+}
 
 // The launch flags are the shell's identity and live HERE (the gate owns launch + adopt).
 // Verbatim from the driver's former launch path so rendering, and therefore the visual
