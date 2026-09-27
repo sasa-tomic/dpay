@@ -193,9 +193,17 @@ export class Driver {
   static async create(browserOrOpts, opts = {}) {
     const shared = browserOrOpts && typeof browserOrOpts.createBrowserContext === 'function' ? browserOrOpts : null;
     const o = shared ? opts : (browserOrOpts && typeof browserOrOpts === 'object' ? browserOrOpts : {});
-    let browser, ownsBrowser;
+    let browser, ownsBrowser, gateStop = null;
     if (shared) { browser = shared; ownsBrowser = false; }
-    else { const launched = await Driver.launchBrowser(o); browser = launched.browser; ownsBrowser = true; }
+    else {
+      const launched = await Driver.launchBrowser(o);
+      browser = launched.browser;
+      ownsBrowser = true;
+      // The gate owns the shell's lifecycle: keep its stop (disconnect + lease teardown) so
+      // close() never sends Browser.close over a connection we don't exclusively own — that
+      // would kill a shell this run only connected to, and orphan the gate's lock.
+      gateStop = launched.stop;
+    }
     // Fresh incognito context per run → fresh localStorage → fresh identity each test.
     const context = await browser.createBrowserContext();
     const page = await context.newPage();
@@ -256,7 +264,7 @@ export class Driver {
         else globalThis.__DPAY_TEST_EVM_RPC_URL = u;
       }, o.evmRpcUrl);
     }
-    const driver = new Driver(browser, context, page, ownsBrowser);
+    const driver = new Driver(browser, context, page, ownsBrowser, gateStop);
     // The create-time CDP session (locale override lives HERE — a second session stacking another
     // locale override is a protocol error, so flows that switch locale mid-run must reuse this one).
     driver.cdp = cdp;
@@ -264,11 +272,15 @@ export class Driver {
     return driver;
   }
 
-  constructor(browser, context, page, ownsBrowser = true) {
+  constructor(browser, context, page, ownsBrowser = true, gateStop = null) {
     this.browser = browser;
     this.context = context;
     this.page = page;
     this.ownsBrowser = ownsBrowser;
+    // The chrome-gate lease teardown (browser.mjs), when this Driver launched/adopted the shell
+    // through the gate. close() routes through it instead of `browser.close()` so the shared
+    // singleton shell is never killed over a mere connection.
+    this.gateStop = gateStop;
     this.allowedRequestFailureOrigins = new Set();
     this.unexpectedDiagnostics = new Set();
     this.navigationDepth = 0;
@@ -699,7 +711,11 @@ export class Driver {
       }
       try { await this.context.close(); } catch (e) { failures.push(e); }
       if (this.ownsBrowser) {
-        try { await this.browser.close(); } catch (e) { failures.push(e); }
+        if (this.gateStop) {
+          try { await this.gateStop(); } catch (e) { failures.push(e); }
+        } else {
+          try { await this.browser.close(); } catch (e) { failures.push(e); }
+        }
       }
     }
     try { this.assertNoUnexpectedDiagnostics(); } catch (e) { failures.push(e); }
