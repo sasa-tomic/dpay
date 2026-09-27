@@ -57,7 +57,6 @@ import {Wallet} from './components/Wallet';
 // `services/log.ts` for what it does and does not capture.
 installLogSink();
 
-// PROBE_CANARY Marker
 export default function App() {
   const [identity, setIdentity] = useState<Identity | null | undefined>(undefined); // undefined = loading
   // R1 — the operator's ordered relay address LIST (spec 2026-09-09 §"Direction 2"). `RELAY_DEFAULT`
