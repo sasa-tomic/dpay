@@ -821,7 +821,12 @@ export async function executeConvert(
       (replyArgHex: string) => DpayCore.icpDecodeSwapResult(replyArgHex),
     );
     if (outcome === 'unknown') {
-      return advance({...rec, step: 'stuck', failureCode: 'unknown'});
+      // The submit/poll budget died while the bytes were still live — under real prod latency the
+      // on-chain settlement can land AFTER the budget (2026-09-27 live finding: the record parked
+      // at ~+9 s while the pool paid out at ~+11 s). Watch the ledgers BEFORE the first stuck
+      // park: a late payout flips done right here; a silent ledger exhausts into the SAME honest
+      // unknown, now actually probed. The expired arm below runs the same watch.
+      return watchLedgers(rec, settleAttempts, settleIntervalMs, 'stuck');
     }
     if (outcome !== 'settled') {
       // The pool's own #err (e.g. "amountOutMinimum not met", InsufficientFunds): an ATOMIC refusal

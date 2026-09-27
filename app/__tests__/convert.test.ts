@@ -828,15 +828,38 @@ describe('executeConvert — the §4 state machine', () => {
     expect(final.failureDetail).toBe('amountOutMinimum not met');
   });
 
-  test('swap submit unknown after retries → stuck (honest unknown, instructions not a spinner)', async () => {
+  test('swap submit unknown after retries → the ledgers are watched FIRST, then stuck (honest unknown, instructions not a spinner)', async () => {
     const d = deps();
     jest.mocked(submitTransfer)
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
       .mockResolvedValue({kind: 'unknown'} as never);
+    jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
+    jest.mocked(relayFetch).mockResolvedValue(rowsRes([]) as never); // silent ledgers
     const final = await executeConvert(record(), d, OPTS);
     expect(final.step).toBe('stuck');
     expect(final.failureCode).toBe('unknown');
     expect(jest.mocked(submitTransfer).mock.calls.filter((c) => c[0].ledger === POOL)).toHaveLength(2); // retried same bytes
+    expect(relayFetch).toHaveBeenCalled(); // the pre-stuck watch actually probed (2026-09-27 live finding)
+    jest.mocked(relayFetch).mockReset();
+    jest.mocked(submitTransfer).mockReset();
+  });
+
+  test('swap submit unknown but the payout lands during the pre-stuck watch → done, never stuck (2026-09-27 live finding)', async () => {
+    const d = deps();
+    jest.mocked(submitTransfer)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
+      .mockResolvedValue({kind: 'unknown'} as never);
+    jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
+    // The pool DID execute — the budget died first (the live trip: parked ~+9 s, paid out ~+11 s).
+    jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
+    (String(path).includes('currency=7') ? rowsRes([{from: POOL, to: myPrincipal, amount: '190000000', currency: 7, block: '77', timestamp: ROW_TS}]) : rowsRes([])) as never);
+    const final = await executeConvert(record(), d, OPTS);
+    expect(final.step).toBe('done');
+    expect(final.outAmountNet).toBe('190000000');
+    expect(final.outTx).toBe('77');
+    expect(d.onUpdate.mock.calls.map((c: unknown[]) => (c[0] as ConvertRecord).step)).not.toContain('stuck');
+    jest.mocked(relayFetch).mockReset();
+    jest.mocked(submitTransfer).mockReset();
   });
 
   test('no output row in budget → pending_withdrawal; resume only re-watches (no resubmission)', async () => {
