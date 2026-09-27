@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { resolveExecutablePath } from './browser.mjs';
 import { _testCtx } from './lib.mjs';
 import { installSolAccountsHelper } from './solaccounts.mjs';
+import { trackChild, untrackChild } from './procs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
@@ -132,7 +133,34 @@ export class Driver {
       const msg = e instanceof Error ? e.message : String(e);
       throw new Error(`[driver] chromium failed to launch (${exe}):\n${msg}`);
     });
-    const stop = async () => { try { await browser.close(); } catch {} };
+    // Register the shell in the child-pid registry (same sync-exit SIGKILL backstop as relay + web).
+    // chrome-headless-shell demonstrably does NOT self-exit on Node death (2026-09-27 incident:
+    // ~30 leaked shells at 50-70% CPU each, load 16+), so "puppeteer will close it" is not a
+    // guarantee — an interrupted teardown must not orphan it.
+    const proc = browser.process?.() ?? null;
+    const pid = proc?.pid ?? null;
+    if (Number.isInteger(pid) && pid > 0) trackChild(pid);
+    const stop = async () => {
+      if (!(Number.isInteger(pid) && pid > 0)) { try { await browser.close(); } catch {} return; }
+      // Graceful CDP close, raced against a hard 5s ceiling: a wedged renderer can make close()
+      // hang forever, and a silently-hanging close is exactly the leak this guards against.
+      let closed = false;
+      try {
+        const timer = new Promise((_, rej) => {
+          const t = setTimeout(() => rej(new Error('[driver] browser.close() timed out after 5s')), 5000);
+          if (typeof t.unref === 'function') t.unref(); // never delay process exit for the timer
+        });
+        await Promise.race([browser.close().then(() => { closed = true; }), timer]);
+      } catch { closed = false; }
+      if (closed) {
+        untrackChild(pid); // clean CDP close — the process is gone, drop the pid
+      } else {
+        // Hung or thrown close: SIGKILL directly. The pid stays tracked, so killTrackedChildren
+        // remains a harmless backstop for as long as this harness process lives.
+        try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+        try { process.kill(pid, 'SIGKILL'); } catch { /* ESRCH — already dead */ }
+      }
+    };
     return { browser, stop };
   }
 
