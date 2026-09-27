@@ -37,10 +37,11 @@ describe('flow 60 — NFC failure modes: honest terminals, no debit, no false su
   it('transport error → Tap failed; unsupported asset auto-declines; late error after settling ignored', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const m = await onboardWallet('jest-nfc-err');
+    const dispatch = (event: NfcEvent): Promise<void> => dispatchFor(m, event);
     await m.driver.findByTestID('pay-scan', {timeoutMs: 5000});
 
     // --- 1. TRANSPORT ERROR mid-tap. ------------------------------------------------------------
-    await nfcPhaseWalk(m, dispatchFor, ['linking'], {statusId: 'nfc-status', text: null});
+    await nfcPhaseWalk(m, dispatch, ['linking'], {statusId: 'nfc-status', text: null});
     await dispatchFor(m, {type: 'error', role: 'card', reason: 'Lost the radio link'});
     expect(await m.driver.waitForText('Tap failed', {timeoutMs: 5000})).toBe(true);
     expect(m.driver.bodyText()).not.toMatch(/\bPaid\b/);
@@ -54,7 +55,7 @@ describe('flow 60 — NFC failure modes: honest terminals, no debit, no false su
     await armPayScan(m);
 
     // --- 2. FAIL-CLOSED AUTO-DECLINE (unsupported asset — no review card to decline from). ------
-    await nfcPhaseWalk(m, dispatchFor, ['linking'], {statusId: 'nfc-status', text: null});
+    await nfcPhaseWalk(m, dispatch, ['linking'], {statusId: 'nfc-status', text: null});
     await dispatchFor(m, {
       type: 'request', role: 'card',
       toHex: '11'.repeat(32), amount: '5000', nonceHex: 'cd'.repeat(16),
@@ -72,9 +73,9 @@ describe('flow 60 — NFC failure modes: honest terminals, no debit, no false su
     await armPayScan(m);
 
     // --- 3. LATE ERROR AFTER SETTLING IS IGNORED (no false failure over a decided outcome). -----
-    await nfcPhase(m, dispatchFor, 'linking', {statusId: 'nfc-status', text: null});
-    await nfcPhase(m, dispatchFor, 'exchanging', {text: null});
-    expect(await nfcPhase(m, dispatchFor, 'settling')).toBe(true); // committed=true
+    await nfcPhase(m, dispatch, 'linking', {statusId: 'nfc-status', text: null});
+    await nfcPhase(m, dispatch, 'exchanging', {text: null});
+    expect(await nfcPhase(m, dispatch, 'settling')).toBe(true); // committed=true
     await dispatchFor(m, {type: 'error', role: 'card', reason: 'should be ignored'});
     await m.driver.settleFrames(10); // give React its frames; the bug would un-show "Confirming"
     const bodyAfterLate = m.driver.bodyText();

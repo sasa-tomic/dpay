@@ -120,8 +120,9 @@ export const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
 export const PAY_LAMPORTS = '1000000'; // 0.001 SOL
 
 /** Build a solreq:v2 URI; `opts.expired` anchors iat/exp in the past (exp-iat ≤ 90 so the
- *  structural decode passes and the freshness gate is what fires). */
-export function buildSolReq(opts: {expired?: boolean; rid?: string} = {}): string {
+ *  structural decode passes and the freshness gate is what fires). `amt` is the wire the request
+ *  carries — flow 47 passes the NETTED wire (price − 5000 fee), the others the gross. */
+export function buildSolReq(opts: {expired?: boolean; rid?: string; amt?: string} = {}): string {
   const now = Math.floor(Date.now() / 1000);
   const iat = opts.expired ? now - 85 : now;
   const exp = opts.expired ? now - 5 : iat + 90;
@@ -130,7 +131,7 @@ export function buildSolReq(opts: {expired?: boolean; rid?: string} = {}): strin
     bh: 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN',
     lvh: 300_000_000, slot: 250_000_000,
     iat, exp,
-    to: MERCHANT_ADDR, amt: PAY_LAMPORTS, cur: 'SOL',
+    to: MERCHANT_ADDR, amt: opts.amt ?? PAY_LAMPORTS, cur: 'SOL',
     mint: null, toAta: null, name: 'merchant', memo: '',
   };
   return 'solreq:v2?' + Buffer.from(JSON.stringify(obj)).toString('base64url');

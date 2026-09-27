@@ -17,23 +17,25 @@
  * so lib (and the whole app graph) must be required lazily AFTER the override is set. The RPC stub
  * is per-test state, cleared in afterEach.
  */
-import {describe, it, expect, afterEach} from '@jest/globals';
-import {buildSolReq, extractSig, nfcPhase, nfcPhaseWalk, setSolStub, solEnv, type NfcEvent} from './h';
+import {describe, it, expect, afterEach, beforeEach} from '@jest/globals';
+import {buildSolReq, clickByAria, extractSig, makeSolStub, nfcPhase, nfcPhaseWalk, setSolStub, solEnv, type NfcEvent} from './h';
 import type {Mount} from '../harness/lib';
 
 const REQ_RID = 'c'.repeat(32);
 const g = globalThis as unknown as Record<string, unknown>;
-
-const dispatchFor = async (m: Mount, event: NfcEvent): Promise<void> => {
-  await lib().armNfcCard(m, 'sol');
-  (g.__DPAY_TEST_SOL_NFC_SESSION as (e: NfcEvent) => void)(event);
-};
 
 /** The lazy lib handle — solEnv() set the RPC override first; requiring lib now loads the app. */
 let libRef: ReturnType<typeof solEnv> | null = null;
 const lib = (): ReturnType<typeof solEnv> => {
   libRef ??= solEnv();
   return libRef!;
+};
+
+/** The flow-steps.mjs dispatch-closure shape: the mount is closed over per test, the walker passes
+ *  only the event. */
+const makeDispatch = (m: Mount) => async (event: NfcEvent): Promise<void> => {
+  await lib().armNfcCard(m, 'sol');
+  (g.__DPAY_TEST_SOL_NFC_SESSION as (e: NfcEvent) => void)(event);
 };
 
 afterEach(() => {
@@ -45,11 +47,17 @@ afterEach(() => {
   g.__DPAY_TEST_NFC_READER_REQUEST = undefined;
 });
 
+// The stub answers the balance polls too — with the override 'stub' but no stub object, fetch
+// would try to parse the literal 'stub' URL. The offline cases simply never touch the rest.
+const stubHandles = {sig: null, txDetail: null, getTxReads: 0};
+beforeEach(() => { setSolStub(makeSolStub(stubHandles)); });
+
 describe('flow 47 — SOL v2 NFC tap: netted request auto-signs, receipt binds, honest pending', () => {
   it('arm → request auto-sign → "Paying 0.001 SOL" → receipt (rid+sig) → "Sent · awaiting"', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const {onboardWallet, openBalances, selectCurrency, waitForWallet} = lib();
     const m = await onboardWallet('jest-sol-nfc');
+    const dispatch = makeDispatch(m);
 
     await waitForWallet(m, {timeoutMs: 8000});
     await openBalances(m, {timeoutMs: 5000});
@@ -59,10 +67,11 @@ describe('flow 47 — SOL v2 NFC tap: netted request auto-signs, receipt binds, 
     await m.driver.findByTestID('sol-pay-scan', {timeoutMs: 5000});
 
     // linking → "Connecting…".
-    await nfcPhaseWalk(m, dispatchFor, ['linking'], {statusId: 'sol-nfc-status', text: null});
+    await nfcPhaseWalk(m, dispatch, ['linking'], {statusId: 'sol-nfc-status', text: null});
 
     // request → AUTO-SIGN on arrival (the "Pay Now" gate that armed the card was the press).
-    await dispatchFor(m, {type: 'request', role: 'card', solreqUri: buildSolReq({rid: REQ_RID})});
+    // The request carries the NETTED wire (995000 = the 0.001 price − the 5000-lamport payee fee).
+    await dispatch({type: 'request', role: 'card', solreqUri: buildSolReq({rid: REQ_RID, amt: '995000'})});
     expect(await m.driver.waitForText('Communicating', {timeoutMs: 6000})).toBe(true);
     const body = m.driver.bodyText();
     expect(body).toContain('Hold the phones together to send');
@@ -77,7 +86,7 @@ describe('flow 47 — SOL v2 NFC tap: netted request auto-signs, receipt binds, 
 
     // receipt (status 0 SETTLED, rid+sig exact match) → honest pending (NfcTapView's "Paid ✓"
     // never renders — SolPayMode switches to the paid phase in the same commit).
-    await dispatchFor(m, {type: 'receipt', role: 'card', status: 0, rid: REQ_RID, sig: extractSig(solpayUri!)});
+    await dispatch({type: 'receipt', role: 'card', status: 0, rid: REQ_RID, sig: extractSig(solpayUri!)});
     expect(await m.driver.waitForText('awaiting', {timeoutMs: 5000})).toBe(true);
     expect(m.driver.bodyText()).toMatch(/Sent/);
 
@@ -89,8 +98,8 @@ describe('flow 66 — SOL v2 NFC failure modes', () => {
   it('expired auto-declines at sign; transport error → Tap failed; late error after settling ignored; reader sees the decline', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const {onboardWallet, openBalances, selectCurrency, waitForWallet} = lib();
-    setSolStub(null); // cases 1-3 are fully offline; the stub-less env keeps them honest
     const m = await onboardWallet('jest-sol-nfc-err');
+    const dispatch = makeDispatch(m);
 
     await waitForWallet(m, {timeoutMs: 8000});
     await openBalances(m, {timeoutMs: 5000});
@@ -99,8 +108,8 @@ describe('flow 66 — SOL v2 NFC failure modes', () => {
     await m.driver.findByTestID('sol-pay-scan', {timeoutMs: 5000});
 
     // --- 1. EXPIRED REQUEST → AUTO-DECLINE AT SIGN (the expiry gate is authoritative there). ---
-    await nfcPhaseWalk(m, dispatchFor, ['linking'], {statusId: 'sol-nfc-status', text: null});
-    await dispatchFor(m, {type: 'request', role: 'card', solreqUri: buildSolReq({expired: true, rid: 'd'.repeat(32)})});
+    await nfcPhaseWalk(m, dispatch, ['linking'], {statusId: 'sol-nfc-status', text: null});
+    await dispatch({type: 'request', role: 'card', solreqUri: buildSolReq({expired: true, rid: 'd'.repeat(32)})});
     expect(await m.driver.waitForText('Declined', {timeoutMs: 5000})).toBe(true);
     const expiredBody = m.driver.bodyText();
     expect(expiredBody).not.toMatch(/\bPaid\b/);
@@ -110,8 +119,8 @@ describe('flow 66 — SOL v2 NFC failure modes', () => {
     await m.driver.waitGone('sol-nfc-status', {timeoutMs: 5000});
 
     // --- 2. TRANSPORT ERROR mid-tap: honest "Tap failed", no fake Paid. ------------------------
-    await nfcPhaseWalk(m, dispatchFor, ['linking'], {statusId: 'sol-nfc-status', text: null});
-    await dispatchFor(m, {type: 'error', role: 'card', reason: 'Lost the radio link'});
+    await nfcPhaseWalk(m, dispatch, ['linking'], {statusId: 'sol-nfc-status', text: null});
+    await dispatch({type: 'error', role: 'card', reason: 'Lost the radio link'});
     expect(await m.driver.waitForText('Tap failed', {timeoutMs: 5000})).toBe(true);
     expect(m.driver.bodyText()).not.toMatch(/\bPaid\b/);
     expect(m.driver.bodyText()).toContain('Lost the radio link');
@@ -119,9 +128,9 @@ describe('flow 66 — SOL v2 NFC failure modes', () => {
     await m.driver.waitGone('sol-nfc-status', {timeoutMs: 5000});
 
     // --- 3. LATE ERROR AFTER SETTLING IGNORED (no false failure over a decided outcome). -------
-    await nfcPhaseWalk(m, dispatchFor, ['linking', 'exchanging'], {statusId: 'sol-nfc-status', text: null});
-    expect(await nfcPhase(m, dispatchFor, 'settling')).toBe(true); // committed=true; "Confirming…"
-    await dispatchFor(m, {type: 'error', role: 'card', reason: 'should be ignored'});
+    await nfcPhaseWalk(m, dispatch, ['linking', 'exchanging'], {statusId: 'sol-nfc-status', text: null});
+    expect(await nfcPhase(m, dispatch, 'settling')).toBe(true); // committed=true; "Confirming…"
+    await dispatch({type: 'error', role: 'card', reason: 'should be ignored'});
     // Give React its frames: if the bug existed (error overwrites the decided phase), "Confirming"
     // would be gone after the flush.
     await m.driver.settleFrames(10);
@@ -140,8 +149,8 @@ describe('flow 66 — SOL v2 NFC failure modes', () => {
     await m.driver.type('sol-req-amount-input', '0.025', {timeoutMs: 5000});
     await m.driver.click('btn-sol-req-make', {timeoutMs: 5000});
     await m.driver.findByTestID('sol-req-qr', {timeoutMs: 8000}); // reader is now mounted
-    await nfcPhaseWalk(m, dispatchFor, ['linking'], {role: 'reader', statusId: 'sol-nfc-status', text: null});
-    expect(await nfcPhaseWalk(m, dispatchFor, ['declined'], {role: 'reader', text: 'Declined', timeoutMs: 5000})).toBeTruthy();
+    await nfcPhaseWalk(m, dispatch, ['linking'], {role: 'reader', statusId: 'sol-nfc-status', text: null});
+    expect(await nfcPhaseWalk(m, dispatch, ['declined'], {role: 'reader', text: 'Declined', timeoutMs: 5000})).toBeTruthy();
     const readerBody = m.driver.bodyText();
     expect(readerBody).not.toMatch(/\bPaid\b/);
     expect(readerBody).not.toMatch(/Received/);
@@ -164,6 +173,7 @@ describe('flow 139 — SOL NFC receipt code 3 (settle-verify mismatch) is NEVER 
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const {onboardWallet, openBalances, selectCurrency, waitForWallet} = lib();
     const m = await onboardWallet('jest-sol-mismatch');
+    const dispatch = makeDispatch(m);
 
     await waitForWallet(m, {timeoutMs: 8000});
     await openBalances(m, {timeoutMs: 5000});
@@ -171,8 +181,8 @@ describe('flow 139 — SOL NFC receipt code 3 (settle-verify mismatch) is NEVER 
     await m.driver.click('tab-pay', {timeoutMs: 5000});
     await m.driver.findByTestID('sol-pay-scan', {timeoutMs: 5000});
 
-    await nfcPhaseWalk(m, dispatchFor, ['linking'], {statusId: 'sol-nfc-status'});
-    await dispatchFor(m, {type: 'request', role: 'card', solreqUri: buildSolReq({rid: REQ_RID})});
+    await nfcPhaseWalk(m, dispatch, ['linking'], {statusId: 'sol-nfc-status'});
+    await dispatch({type: 'request', role: 'card', solreqUri: buildSolReq({rid: REQ_RID})});
     expect(await m.driver.waitForText('Communicating', {timeoutMs: 6000})).toBe(true);
 
     const solpayUri = g.__DPAY_SOL_NFC_LAST as string | undefined;
@@ -180,7 +190,7 @@ describe('flow 139 — SOL NFC receipt code 3 (settle-verify mismatch) is NEVER 
     expect(solpayUri!.startsWith('solpay:v2?')).toBe(true);
 
     // receipt code 3 (MISMATCH) with an EXACT rid+sig match → decideSolPayerReceiptV2 → pending.
-    await dispatchFor(m, {type: 'receipt', role: 'card', status: 3, rid: REQ_RID, sig: extractSig(solpayUri!)});
+    await dispatch({type: 'receipt', role: 'card', status: 3, rid: REQ_RID, sig: extractSig(solpayUri!)});
     expect(await m.driver.waitForText('awaiting', {timeoutMs: 5000})).toBe(true);
     const body = m.driver.bodyText();
     expect(body).toMatch(/Sent/);
