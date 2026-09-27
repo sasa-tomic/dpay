@@ -571,6 +571,9 @@ async function openLease({ key, executablePath, extraArgs }) {
       executablePath,
       headless: true,
       userDataDir: profileDir,
+      // DPAY_E2E_CHROME_DUMPIO=1 pipes the shell's own stderr into the run log — the only way
+      // to see WHY a shell died mid-suite (crash, OOM kill) since the gate owns the process.
+      dumpio: process.env.DPAY_E2E_CHROME_DUMPIO === '1',
       args: [...BASE_LAUNCH_ARGS, ...extraArgs],
     });
   } catch (e) {
