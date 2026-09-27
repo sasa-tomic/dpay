@@ -34,6 +34,7 @@ import os from 'node:os';
 import fs from 'node:fs';
 import { stopSession, killTrackedChildren, _testCtx, dumpDiagnosticsFor, laneBrowser, primeBrowserShards } from './harness/lib.mjs';
 import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
+import { PROFILING, profileSnapshot, profileOpTotals, profilePhaseTotals } from './harness/profile.mjs';
 
 // Default concurrency: 12. The host has 16 cores; each parallel test is one chrome incognito context
 // against the shared relay + web + browser process. 12 leaves headroom for the relay/web/V8 and is
@@ -385,6 +386,11 @@ export async function runTestsSubset(tests, opts = {}) {
   if (!keepSession) await stopSession();
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(2);
+
+  // Profiler dump (DPAY_E2E_PROFILE=1): write the phase/op spans + print the "where did the
+  // seconds go" summary. Best-effort — never affects the verdict. Skipped in watch mode
+  // (keepSession), where a partial re-run would produce a misleading cumulative dump.
+  if (PROFILING && !keepSession) dumpProfile(tests, results, elapsed);
   const passed = [...results.values()].filter((r) => r.ok).length;
   const total = tests.length;
 
@@ -438,6 +444,54 @@ export async function runTestsSubset(tests, opts = {}) {
   }
 
   return { passed, total, elapsed, firstFailure, results, timeoutScale };
+}
+
+/**
+ * Profiler summary + JSON dump (DPAY_E2E_PROFILE=1). Prints three tables — suite-level op totals
+ * (which op class eats the wall clock), phase totals (where the fixed costs sit), and the slowest
+ * flows with their phase split — and writes the full span dump to `$DPAY_E2E_PROFILE` when it is a
+ * path, else `e2e/shots/profile-<ts>.json`.
+ */
+function dumpProfile(tests, results, elapsed) {
+  try {
+    const opTotals = profileOpTotals();
+    const phaseTotals = profilePhaseTotals();
+    const snap = profileSnapshot();
+
+    console.log('\n--- profile: op totals (all flows, inclusive) ---');
+    for (const t of opTotals.slice(0, 14)) {
+      console.log(`  ${t.op.padEnd(18)} ×${String(t.count).padStart(5)}  total ${(t.totalMs / 1000).toFixed(1)}s  max ${(t.maxMs / 1000).toFixed(2)}s`);
+    }
+    console.log('--- profile: phase totals ---');
+    for (const t of phaseTotals) {
+      console.log(`  ${t.name.padEnd(26)} ×${String(t.count).padStart(4)}  total ${(t.totalMs / 1000).toFixed(1)}s  max ${(t.maxMs / 1000).toFixed(2)}s`);
+    }
+    // Slowest flows with the phase split attributed to them (boot/context/teardown).
+    const byFile = new Map();
+    for (const p of snap.phases) {
+      if (!p.file) continue;
+      let e = byFile.get(p.file);
+      if (!e) { e = { file: p.file, totalMs: 0 }; byFile.set(p.file, e); }
+      e.totalMs += p.ms;
+    }
+    const slow = tests
+      .map((t) => ({ file: t.file, wall: results.get(t.file)?.ms ?? 0, phases: byFile.get(t.file)?.totalMs ?? 0 }))
+      .sort((a, b) => b.wall - a.wall)
+      .slice(0, 12);
+    console.log('--- profile: slowest flows (wall vs harness-phase time) ---');
+    for (const s of slow) {
+      console.log(`  ${s.file.padEnd(44)} wall ${(s.wall / 1000).toFixed(2)}s  harness phases ${(s.phases / 1000).toFixed(2)}s`);
+    }
+
+    const out = process.env.DPAY_E2E_PROFILE !== '1' && process.env.DPAY_E2E_PROFILE !== ''
+      ? process.env.DPAY_E2E_PROFILE
+      : new URL('./shots/profile-' + Date.now() + '.json', import.meta.url).pathname;
+    fs.mkdirSync(new URL('.', import.meta.url).pathname + '/shots', { recursive: true });
+    fs.writeFileSync(out, JSON.stringify({ elapsedSec: Number(elapsed), opTotals, phaseTotals, ...snap }, null, 2));
+    console.log(`--- profile: full dump → ${out}`);
+  } catch (e) {
+    console.error(`(profile dump failed: ${e instanceof Error ? e.message : e})`);
+  }
 }
 
 /**

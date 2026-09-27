@@ -114,7 +114,8 @@ export async function run() {
     // 1. Onboard a funded wallet ($100 demo). The harness preamble leaves the app on the Pay tab.
     console.log('[40-visual-regression] onboarding…');
     await onboardWallet(driver, 'e2e-visual');
-    await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
+    // (Funding is asserted by the shared preamble on the DEMO row; the old bare Pay-surface
+    // ∂100.00 wait never resolved post-currency-first and only burned its full timeout.)
     await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
 
     // 2. Capture wallet-Pay surface. The TripStrip no longer renders here (it is Home-only since

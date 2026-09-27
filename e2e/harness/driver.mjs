@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { resolveExecutablePath, acquireBrowser } from './browser.mjs';
 import { _testCtx } from './lib.mjs';
 import { installSolAccountsHelper } from './solaccounts.mjs';
+import { PROFILING, profOp, profSpan } from './profile.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
@@ -292,6 +293,10 @@ export class Driver {
     this.timeline = [];
     this.timelineHead = 0;
     this.consoleLog = [];
+    // Profiler attribution (set by lib.mjs setup() once the owning test file is known) + the
+    // opt-in per-method timing wrapper. See harness/profile.mjs.
+    this.profileFile = null;
+    if (PROFILING) installDriverProfiler(this);
   }
 
   /** Explicitly permit transport failures to one origin. Offline flows must call this before they
@@ -670,6 +675,39 @@ export class Driver {
     );
   }
 
+  /** Instant multi-probe: WHICH of `testIDs` are in the DOM right now — ONE CDP roundtrip, no
+   *  waiting. Returns the present subset in the caller's order (priority order), so the first
+   *  element is the caller's preferred answer. This is the cheap building block for decision
+   *  loops that used to pay a full `findByTestID` timeout per absent candidate (each miss burns
+   *  its whole timeout — a 1s probe that misses costs exactly 1s; five probes in a loop cost 5s). */
+  async whichPresent(testIDs) {
+    this._recordTimeline('whichPresent', testIDs);
+    const sels = testIDs.map((t) => `[data-testid="${cssEscape(t)}"]`);
+    const present = await this.page.evaluate((sels) => sels.map((s) => document.querySelector(s) != null), sels);
+    return testIDs.filter((_, i) => present[i]);
+  }
+
+  /** Wait until ANY of `testIDs` mounts; resolves with the first winner (caller's priority order
+   *  breaks ties within one evaluation). In-page rAF polling — one CDP roundtrip total, so a
+   *  five-candidate wait costs the same as a single-candidate one. This is the event-driven
+   *  replacement for "probe each candidate with a full timeout, catch, probe the next". */
+  async waitForFirstTestID(testIDs, opts = {}) {
+    this._recordTimeline('waitForFirstTestID', testIDs);
+    const timeoutMs = scaled(opts.timeoutMs ?? 5_000);
+    const sels = testIDs.map((t) => `[data-testid="${cssEscape(t)}"]`);
+    let idxHandle;
+    try {
+      idxHandle = await this.page.waitForFunction(
+        (sels) => sels.findIndex((s) => document.querySelector(s) != null),
+        { timeout: timeoutMs },
+        sels,
+      );
+    } catch (e) {
+      throw new Error(`[driver] none of [${testIDs.join(', ')}] appeared within ${timeoutMs}ms: ${e instanceof Error ? e.message : e}`);
+    }
+    return testIDs[await idxHandle.jsonValue()];
+  }
+
   /** Wipe localStorage (forces the app's first-run identity flow on the next load). */
   async clearStorage() {
     this._recordTimeline('clearStorage', null);
@@ -815,6 +853,48 @@ export class Driver {
     }
     return lines.join('\n');
   }
+}
+
+/**
+ * Wrap the Driver's public methods with per-op timers (PROFILING builds only). Measured time is
+ * INCLUSIVE (click includes its inner findByTestID) — the summary reads `click N× total`, and the
+ * known nesting is documented here rather than reconstructed at runtime. Attribution uses
+ * `driver.profileFile` at RECORD time (lib.mjs sets it before the flow body runs, so every op a
+ * flow makes lands on the right file).
+ */
+const PROFILED_OPS = [
+  'navigate', 'waitReady', 'findByTestID', 'waitForText', 'click', 'type', 'typeByPlaceholder',
+  'readText', 'readInputValue', 'bodyText', 'screenshot', 'eval', 'pressKey', 'waitForFunction',
+  'waitAtRest', 'settleFrames', 'waitGone', 'isPresent', 'whichPresent', 'waitForFirstTestID',
+  'clearStorage', 'addInitScript', 'removeInitScript',
+];
+function installDriverProfiler(driver) {
+  for (const op of PROFILED_OPS) {
+    const orig = driver[op];
+    driver[op] = function (...args) {
+      const t0 = performance.now();
+      let out;
+      try {
+        out = orig.apply(this, args);
+      } catch (e) {
+        profOp(this.profileFile, op, performance.now() - t0);
+        throw e;
+      }
+      if (out && typeof out.then === 'function') {
+        return out.finally(() => profOp(this.profileFile, op, performance.now() - t0));
+      }
+      profOp(this.profileFile, op, performance.now() - t0);
+      return out;
+    };
+  }
+  // Teardown cost is a phase, not an op (it happens once per flow, and close() is not on the
+  // per-flow hot path the op table is for).
+  const origClose = driver.close.bind(driver);
+  driver.close = (...args) => {
+    const file = driver.profileFile;
+    const stop = profSpan('teardown.driverClose', file);
+    return origClose(...args).finally(stop);
+  };
 }
 
 /** Minimal CSS-string escaper for `data-testid` attribute selectors (handles quotes / brackets). */

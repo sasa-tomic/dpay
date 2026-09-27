@@ -35,7 +35,8 @@ export async function run() {
     // 1. Onboard a funded wallet (∂100 DEMO via the onboarding faucet).
     console.log('[39-store-screens] onboarding…');
     await onboardWallet(driver, 'Alex');
-    await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
+    // (∂100.00 funding is asserted by the shared preamble on the DEMO row — no bare wait here;
+    // it never resolved on Pay after the currency-first change and only burned its timeout.)
 
     const account = await accountOf(driver);
     const hex = account.publicHex;

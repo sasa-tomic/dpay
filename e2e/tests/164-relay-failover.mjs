@@ -30,7 +30,7 @@
 import {
   setup, assert, assertIncludes, accountOf, faucetAccount,
   skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent,
-  waitForEnabled, WALLET_READY,
+  waitForEnabled, WALLET_READY, openBalances,
 } from '../harness/lib.mjs';
 import {startRelay, pickFreePort} from '../harness/relay.mjs';
 
@@ -97,12 +97,16 @@ export async function run() {
     assertIncludes(listText, deadOrigin, '…including the dead first one (order = priority)');
     await driver.click('btn-settings-close', {timeoutMs: 4_000});
 
-    // Fund the SAME account on relay2 (out of band — the app never switched anything). The header
-    // can only learn this number by walking dead → relay2.
+    // Fund the SAME account on relay2 (out of band — the app never switched anything). The app
+    // can only learn this number by walking dead → relay2, and the learned DEMO balance renders
+    // on the accounts-route DEMO row (currency-first: the Pay surface headlines MAIN).
     console.log(`[164-relay-failover] funding ∂100.00 on relay2 (${r2.baseURL}) for the onboarded account…`);
     const fund = await faucetAccount(r2.baseURL, identity.publicHex, FUND_RAW_DEMO);
     assert(fund.ok, `relay2 faucet must fund the account (got ${fund.status}: ${JSON.stringify(fund.body)})`);
-    await driver.waitForText('∂100.00', {timeoutMs: 15_000});
+    await openBalances(driver, {timeoutMs: 8_000});
+    const arrived = await driver.waitForText('∂100.00', {timeoutMs: 15_000});
+    assert(arrived, 'the DEMO balance must arrive through the relay walk (dead primary → relay2)');
+    await driver.click('tab-pay', {timeoutMs: 4_000});
     console.log('[164-relay-failover] ✓ ∂100.00 arrived — the balance walked past the dead primary to relay2');
 
     // And the walk really TRIED the dead primary first (not silently skipped): real transport

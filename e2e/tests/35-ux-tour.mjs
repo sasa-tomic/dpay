@@ -37,7 +37,9 @@ export async function run() {
     //    `onboardWallet` helper ends on the Pay tab (it selects DEMO and restores Pay).
     console.log('[35-ux-tour] onboarding…');
     await onboardWallet(driver, 'e2e-tour');
-    await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
+    // (The old bare ∂100.00 wait here was dead code: since the currency-first app change the DEMO
+    // balance renders on the accounts route, never on Pay — the shared preamble asserts funding
+    // there now, so this surface is reached already proven.)
     await driver.screenshot('35-tour-wallet-pay');
     console.log('[35-ux-tour] ✓ shot: onboarded wallet (Pay tab)');
 
