@@ -157,10 +157,12 @@
   fail-closed (unreachable DSN refuses startup; a refused access-log write refuses the request);
   else the JSONL files `trocador-access.jsonl`/`trocador-orders.jsonl` behind
   `DPAY_TROCADOR_LOG_DIR` for the offline dev loop. OPS MUST wire the DSN in the deploy env (its
-  tracked credential lives in `secrets/trocador-pg.sops.json` — decrypt into the env, never into a
-  plaintext .env; see `deploy/.env.example`): the
+  tracked credential lives in `secrets/trocador-pg.sops.json` — now emitted into the generated
+  `deploy/.env` by `scripts/gen-deploy-env.sh`; NOTE: emitting it ACTIVATES the PG-backed store,
+  so the backed-up Postgres must be reachable at the next `just up` — the relay refuses to start
+  otherwise, by design): the
   prod compose stack mounts NO volume, so flat files die on every redeploy — `DPAY_TROCADOR_PG_DSN`
-  is already a passthrough line in `deploy/docker-compose.yml` + `deploy/.env.example`), the
+  is already a passthrough line in `deploy/docker-compose.yml`), the
   webhook route (`/api/v1/trocador/webhook`, ≤1/min fallback polling
   stopping at the first terminal state), the upstream limiters, the privacy-policy section
   (`/privacy` §7), and the live probe — are landing in this branch. FIRST PROBE RUN 2026-09-22

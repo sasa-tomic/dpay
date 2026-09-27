@@ -148,7 +148,7 @@ if (probeEnabled) {
           `the Solana proxy at ${RELAY_BASE} answered 503 solana-unconfigured`,
           '    The relay has no DPAY_SOLANA_RPC_URL — its Solana rail is dark by configuration.',
           '    stage-relay-probe.sh reads it from deploy/.env; add the FULL provider endpoint',
-          '    (incl. api key — deploy/.env.example) there and re-run.',
+          '    (incl. api key — sops secrets/deploy.sops.json, then just deploy-env).',
         ]);
       } else if (!r.ok) {
         findings.push([`the Solana proxy at ${RELAY_BASE} answered HTTP ${r.status}: ${body}`]);

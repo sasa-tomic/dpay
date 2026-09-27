@@ -1,7 +1,7 @@
 # dpay relay stack: the relay (dpay's only online piece) behind a Cloudflare Tunnel.
 #
 #   just image                # build the image (host-built binary → slim runtime)
-#   cp .env.example .env      # set DPAY_CANISTER_ID and CF_TUNNEL_TOKEN
+#   just deploy-env           # generate .env (DPAY_CANISTER_ID -> deploy/env.config, CF_TUNNEL_TOKEN -> sops)
 #   # one-time: create the tunnel and public hostname in Cloudflare Zero Trust (see README.md)
 #   docker compose up -d      # relay + cloudflared  (see README.md)
 #
