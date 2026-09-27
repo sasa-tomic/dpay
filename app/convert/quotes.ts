@@ -278,6 +278,7 @@ export async function createCeFiOrder(
         settleAddress: args.settleAddress,
         refundAddress: args.refundAddress,
         depositLedger: args.depositLedger,
+        settleLedger: args.settleLedger,
       }, timeoutMs);
     case 'trocador': {
       if (quote.rateId == null || quote.provider == null) throw new Error('shape');

@@ -144,7 +144,10 @@ export async function fetchSideShiftQuote(
  *  OWN refund address ON THE DEPOSIT RAIL — where the venue returns the funds if the
  *  deposit fails or the order expires (a fund-loss class defect without it: the venue
  *  would keep them). `depositLedger` names that rail (the device's rail id — never
- *  forwarded to the venue) so the relay can scope the refund-address check. The venue
+ *  forwarded to the venue) so the relay can scope the refund-address check; `settleLedger`
+ *  (2026-09-27, the EVM-native widening) names the SETTLE rail so the relay can gate the
+ *  settle address on the rail the quote actually named — an ICP deposit may settle on
+ *  `ethereum` now, which the old icp↔solana complement could not express. The venue
  *  answers with ITS deposit address, which the record shows to the user verbatim (this
  *  screen is the honest CeFi handoff: nothing is signed, the user sends). The relay
  *  re-validates both addresses and refuses an order whose refund address is missing or
@@ -152,7 +155,7 @@ export async function fetchSideShiftQuote(
 export async function createSideShiftFixedShift(
   relayUrl: string,
   venue: VenueEntry,
-  args: {quoteId: string; settleAddress: string; refundAddress: string; depositLedger: string; settleMemo?: string},
+  args: {quoteId: string; settleAddress: string; refundAddress: string; depositLedger: string; settleLedger?: string; settleMemo?: string},
   timeoutMs = 8000,
 ): Promise<SideShiftFixedShift> {
   if (venue.kind !== 'cefi' || venue.testnet) throw new Error('refused');
@@ -168,6 +171,7 @@ export async function createSideShiftFixedShift(
         settleAddress: args.settleAddress,
         refundAddress: args.refundAddress,
         depositLedger: args.depositLedger,
+        ...(args.settleLedger != null && args.settleLedger.length > 0 ? {settleLedger: args.settleLedger} : {}),
         ...(args.settleMemo != null ? {settleMemo: args.settleMemo} : {}),
       }),
     }, timeoutMs);

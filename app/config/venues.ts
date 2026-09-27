@@ -12,11 +12,19 @@
 //   - fixture entries — invented offline stand-ins are never BUNDLED (they reach a wallet only
 //     when the offline test relay serves them knob-gated, V5).
 import {BUNDLED_NETWORKS, icpCatalogOf} from './catalog';
+import {EVM_NATIVE_VENUES} from './evmConvert';
 import {
   EURC_MINT_ADDRESS,
   USDC_MINT_ADDRESS,
   WRAPPED_SOL_MINT_ADDRESS,
 } from '../solana/tokens';
+
+// Compile-time pin: the adapter-owned EVM-native rows (config/evmConvert.ts) must remain
+// registry-shaped — assignable to `VenueEntry` field for field. The pin is the ONE type
+// contract between that dependency-free module and this registry; if `VenueEntry` gains a
+// required field (or a row drifts), this line fails the typecheck instead of the lookup.
+const _evmNativeRowsAreVenueEntries: readonly VenueEntry[] = EVM_NATIVE_VENUES;
+void _evmNativeRowsAreVenueEntries;
 
 // Extensible by design: each new venue kind is a new value here + in the truth file, not a
 // schema break (`kind` stays a plain string on the wire).
@@ -286,7 +294,14 @@ export function registeredVenues(): readonly VenueEntry[] {
 }
 
 export function venueOfId(venueId: string): VenueEntry | null {
-  return registeredVenues().find(v => v.venue_id === venueId) ?? null;
+  return registeredVenues().find(v => v.venue_id === venueId)
+    // The EVM-native cefi rows (2026-09-27) ride OUTSIDE the drift-alarmed registry —
+    // native ETH has no catalog row, so the truth file cannot carry their venue row
+    // (app/config/evmConvert.ts for the full why). prepare's signing-boundary red line
+    // resolves the record's venue through THIS lookup, so the adapter-owned rows must
+    // resolve here exactly like a bundled one.
+    ?? EVM_NATIVE_VENUES.find(v => v.venue_id === venueId)
+    ?? null;
 }
 
 // --- the counterparty's display identity (round-1 validation item 9) --------------------------------

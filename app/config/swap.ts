@@ -40,6 +40,7 @@ import {
 } from './venues';
 import {hubRoutes, multihopRoutesFrom, type HubRoute, type MultihopRoute} from '../routes';
 import {resolveConvertDestinations, type ComposedConvertRoute} from './convert';
+import {ETH_NATIVE_CHAIN_ID, ETH_NATIVE_DECIMALS, ETH_NATIVE_RAIL_ID, ETH_NATIVE_SYMBOL, evmNativeVenuesForLedger} from './evmConvert';
 import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 
 /** Mint → {symbol, decimals} for venue-pair mints: the wrapped-SOL identifier resolves to SOL
@@ -62,7 +63,14 @@ export type SwapRow =
   | {kind: 'hub'; rowId: string; route: HubRoute}
   | {kind: 'composed'; rowId: string; route: ComposedConvertRoute}
   | {kind: 'crossrail'; rowId: string; route: MultihopRoute}
-  | {kind: 'cefi'; rowId: string; venue: VenueEntry; inLedgerOrMint: string; outLedger: string | null; outMint: string | null; outSym: string; outDecimals: number}
+  | {kind: 'cefi'; rowId: string; venue: VenueEntry; inLedgerOrMint: string; outLedger: string | null; outMint: string | null; outSym: string; outDecimals: number;
+     /** The settle side's RAIL-CANONICAL id when the venue pays NATIVE gas on an EVM chain
+      *  (the 2026-09-27 widening: ICP → native ETH, `ETH_NATIVE_RAIL_ID`) — the settle
+      *  address is the device's EVM address (chain-independent derivation), not an IC
+      *  account id and not a Solana pubkey. Null on every IC-ledger and Solana-mint settle
+      *  (the discriminator the sheet and the quote call key on — the quote sends it as the
+      *  settle rail id, exactly what the relay maps onto the venue's coin/network codes). */
+     outRailId: string | null}
   | {kind: 'solamm'; rowId: string; venue: VenueEntry; inMint: string; outMint: string; outSym: string; outDecimals: number};
 
 /** One TARGET CURRENCY and every row that reaches it from the standing source. */
@@ -71,12 +79,17 @@ export type SwapTarget = {currency: HomeCurrency; rows: SwapRow[]};
 /** One TARGET RAIL, resolved from the CATALOG and the Solana token registry — deliberately NOT
  *  from the wallet's selectable-asset list: the asset list is RPC-gated (a Solana rail whose
  *  endpoint is unconfigured renders no rows), while a swap TARGET is a registry fact — the CCTP
- *  route lands USDC on Solana whether or not this device has ever polled that rail. */
-type SwapRail = {kind: 'ic'; ledger: string} | {kind: 'sol'; mint: string};
+ *  route lands USDC on Solana whether or not this device has ever polled that rail. The
+ *  EVM-native rail (native ETH on Ethereum) is the EXCEPTION: it is RPC-gated like the asset
+ *  list (`evmEnabled`), because its completion UX is the chain's own balance surface — a
+ *  destination whose arrival the device cannot show is a silent dead end (the 84d07b3 rule). */
+type SwapRail = {kind: 'ic'; ledger: string} | {kind: 'sol'; mint: string}
+  | {kind: 'evm-native'; railId: string; chainId: number};
 
 /** Every mainnet rail that settles `currency`, in preference order: the IC catalog rows whose
- *  link token settles it, then the SOL-registry mints. Derived, never hardcoded. */
-function railsOfCurrency(currency: HomeCurrency, catalog: CurrencyDescriptor[]): SwapRail[] {
+ *  link token settles it, then the SOL-registry mints, then the EVM-native settle rails
+ *  (`evmConvert.ts`, gated on the caller's EVM-rail enablement). Derived, never hardcoded. */
+function railsOfCurrency(currency: HomeCurrency, catalog: CurrencyDescriptor[], evmEnabled: boolean): SwapRail[] {
   const rails: SwapRail[] = [];
   for (const row of catalog) {
     if (row.testnet || row.ledger == null || row.ledger === '') continue;
@@ -86,6 +99,12 @@ function railsOfCurrency(currency: HomeCurrency, catalog: CurrencyDescriptor[]):
     if (currencyOfLinkToken(name) !== currency) continue;
     // Native SOL rides the registry's WRAPPED identifier (the venue rows' own convention).
     rails.push({kind: 'sol', mint: info.mint ?? WRAPPED_SOL_MINT_ADDRESS});
+  }
+  // The EVM-native settle rails: first (and only) is native ETH on Ethereum mainnet —
+  // gated, like the asset list, on the EVM rail being configured at all (the per-chain
+  // endpoint refinement is the completion surface's own honesty, not the pair walk's).
+  if (evmEnabled && currency === 'ETH') {
+    rails.push({kind: 'evm-native', railId: ETH_NATIVE_RAIL_ID, chainId: ETH_NATIVE_CHAIN_ID});
   }
   return rails;
 }
@@ -100,8 +119,13 @@ export function resolveSwapTargets(args: {
   source: SelectableAsset;
   /** The currencies offered as targets, in presentation order, source EXCLUDED by the caller. */
   targetCurrencies: readonly HomeCurrency[];
+  /** Whether the EVM rail is configured (the same `isEvmRailConfigured` gate the EVM asset
+   *  surfaces read). Gates the EVM-NATIVE settle rails only — absent/false resolves exactly
+   *  the pre-ETH walk (byte-stable history for every other row). */
+  evmEnabled?: boolean;
 }): SwapTarget[] | null {
   const {catalog, source, targetCurrencies} = args;
+  const evmEnabled = args.evmEnabled ?? false;
   const inLedger = source.protocol === 'ic'
     ? catalog.find(c => c.currency === source.currency)?.ledger ?? null
     : null;
@@ -144,9 +168,10 @@ export function resolveSwapTargets(args: {
     const cross: SwapRow[] = [];
     const cefi: SwapRow[] = [];
     const amm: SwapRow[] = [];
-    for (const rail of railsOfCurrency(currency, catalog)) {
+    for (const rail of railsOfCurrency(currency, catalog, evmEnabled)) {
       const ledger = rail.kind === 'ic' ? rail.ledger : null;
       const mint = rail.kind === 'sol' ? rail.mint : null;
+      const evmRailId = rail.kind === 'evm-native' ? rail.railId : null;
       // DIRECT — a registered pool trading the two IC ledgers.
       if (inLedger != null && ledger != null) {
         for (const v of venuesForPair(inLedger, ledger)) {
@@ -181,7 +206,7 @@ export function resolveSwapTargets(args: {
           if (cefiOtherSide(v, inLedger) !== mint) continue;
           const tok = solAssetOfMint(mint);
           if (tok == null) continue;
-          cefi.push({kind: 'cefi', rowId: v.venue_id, venue: v, inLedgerOrMint: inLedger, outLedger: null, outMint: mint, outSym: tok.symbol, outDecimals: tok.decimals});
+          cefi.push({kind: 'cefi', rowId: v.venue_id, venue: v, inLedgerOrMint: inLedger, outLedger: null, outMint: mint, outSym: tok.symbol, outDecimals: tok.decimals, outRailId: null});
         }
       }
       if (inMint != null && ledger != null) {
@@ -191,7 +216,18 @@ export function resolveSwapTargets(args: {
           if (row == null || row.decimals == null) continue;
           const sym = row.backing_symbol ?? row.symbol;
           if (sym == null) continue;
-          cefi.push({kind: 'cefi', rowId: v.venue_id, venue: v, inLedgerOrMint: inMint, outLedger: ledger, outMint: null, outSym: sym, outDecimals: row.decimals});
+          cefi.push({kind: 'cefi', rowId: v.venue_id, venue: v, inLedgerOrMint: inMint, outLedger: ledger, outMint: null, outSym: sym, outDecimals: row.decimals, outRailId: null});
+        }
+      }
+      // CEFI, EVM-NATIVE settle (2026-09-27): an IC source paying an adapter-owned venue
+      // whose payout is NATIVE gas on an EVM chain — first ICP → native ETH. The settle
+      // side has no catalog row and no mint, so the walk keys on the settle RAIL id; the
+      // row carries it verbatim (the settle address is the device's EVM address — the
+      // derivation is a function of the key, not of the chain).
+      if (inLedger != null && evmRailId != null) {
+        for (const v of evmNativeVenuesForLedger(inLedger)) {
+          if (cefiOtherSide(v, inLedger) !== evmRailId) continue;
+          cefi.push({kind: 'cefi', rowId: v.venue_id, venue: v, inLedgerOrMint: inLedger, outLedger: null, outMint: null, outSym: ETH_NATIVE_SYMBOL, outDecimals: ETH_NATIVE_DECIMALS, outRailId: evmRailId});
         }
       }
       // SOLAMM — a registered Solana venue trading the SOL-rail pair.

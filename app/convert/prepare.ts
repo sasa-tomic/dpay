@@ -243,6 +243,14 @@ export function prepareCeFiConvertRecord(args: {
       ...(order.depositMemo != null ? {depositMemo: order.depositMemo} : {}),
       ...(Number.isSafeInteger(expiresAtMs) && expiresAtMs > 0 ? {expiresAtMs} : {}),
     },
+    // destAddress is the payout's durable destination: for the EVM-native settle widening
+    // (2026-09-27, outLedger === ETH_NATIVE_RAIL_ID) this is the device's OWN EVM address,
+    // EIP-55-checksummed. INBOUND NATIVE ETH HAS NO ERC-20 TRANSFER LOG — a plain value
+    // transfer emits no Transfer event, so it intentionally does not appear in the EVM
+    // chain-history surface (evm/history.ts reads Transfer logs only). The COMPLETION
+    // PROOF is this record (outAmountNet + outTx = the venue's settleHash) plus the
+    // native gas balance the EVM receive/send surfaces read (eth_getBalance — useEvmBalances'
+    // gas map); the done panel names the payout address (convert-payout-address).
     destAddress: settleAddress,
     destSymbol: args.outSymbol,
   };

@@ -235,6 +235,7 @@ export const convertDe: ConvertMessages = {
     destRow: (sym, network, venue) => `${sym} auf ${network} — über ${venue} (Tauschdienst)`,
     destRowMulti: (sym, network) => `${sym} auf ${network}`,
     settleAddressLabel: 'Die Auszahlung landet an deiner eigenen Adresse im Zielnetzwerk',
+    settleRailEthereum: 'Auszahlung in nativem ETH auf Ethereum Mainnet',
     depositAddressLabel: 'Einzahlungs-Adresse',
     depositAmountLabel: 'Genauer Einzahlungsbetrag',
     depositMemoLabel: 'Memo (erforderlich)',
