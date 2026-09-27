@@ -738,15 +738,15 @@ anvil flows delete/replace it; `__DPAY_TEST_EVM_RPC_URL = ''` stays the jest def
 the offline phases by pointing the seam at a dead URL during sign (the flow-46 offline
 discipline, `e2e/tests/46-sol-offline-handoff.mjs`).
 
-### D28 — New e2e flows (next free ids; the suite currently ends at 212)
+### D28 — New e2e flows (renumbered 218-222 at the main merge: main's composed-convert flow landed as 213 first)
 
 | id | file | proves |
 |----|------|--------|
 | 218 | `e2e/tests/218-evm-receive.mjs` | device-derived 0x address renders EIP-55-checksummed in Balances + Receive ▸ My address (QR + copy + explorer link, no explorer on Anvil); the address matches `deriveEvmAddress(seed)` asserted jest-side via golden vectors; zero RPC at render (seam `''`). |
-| 214 | `e2e/tests/214-evm-send-history.mjs` | anvil funded → send sheet quotes a fee, passes the gas gate, signs + broadcasts THROUGH the harness relay's evm proxy (stub→anvil upstream hit recorded), receipt confirms "seen on Anvil", history row appears via the `eth_getLogs` poll, balance drops by amount+fee. |
-| 215 | `e2e/tests/215-evm-offline-claim.mjs` | the offline permit loop: merchant request QR (`evmreq:v1`) → payer signs OFFLINE (dead-URL seam) → claim QR scanned back → merchant settle (permit + transferFrom through the pipe) → both screens flip; the double-hand-off second settle settles NOTHING and reports settled/failed without a second spend (D24.4). |
-| 216 | `e2e/tests/216-evm-paylink.mjs` | `…/wallet/pay/<0x…>?asset=ZCHF&network=arbitrum` prefills the send form on the evm asset (route disclosed, never auto-signed); `network=solana` + `asset=ZCHF` refuses `wrong_network` by name; camera-scanned request QR opens the link (the flow-176 loop, evm arm). |
-| 217 | `e2e/tests/217-evm-gas-gate.mjs` | a zero-ETH wallet with mock ZCHF refuses to send with the D15.3 instructive gate (fee shown, receive-ETH instruction, no broadcast), and passes once funded. |
+| 219 | `e2e/tests/219-evm-send-history.mjs` | anvil funded → send sheet quotes a fee, passes the gas gate, signs + broadcasts THROUGH the harness relay's evm proxy (stub→anvil upstream hit recorded), receipt confirms "seen on Anvil", history row appears via the `eth_getLogs` poll, balance drops by amount+fee. |
+| 220 | `e2e/tests/220-evm-offline-claim.mjs` | the offline permit loop: merchant request QR (`evmreq:v1`) → payer signs OFFLINE (dead-URL seam) → claim QR scanned back → merchant settle (permit + transferFrom through the pipe) → both screens flip; the double-hand-off second settle settles NOTHING and reports settled/failed without a second spend (D24.4). |
+| 221 | `e2e/tests/221-evm-paylink.mjs` | `…/wallet/pay/<0x…>?asset=ZCHF&network=arbitrum` prefills the send form on the evm asset (route disclosed, never auto-signed); `network=solana` + `asset=ZCHF` refuses `wrong_network` by name; camera-scanned request QR opens the link (the flow-176 loop, evm arm). |
+| 222 | `e2e/tests/222-evm-gas-gate.mjs` | a zero-ETH wallet with mock ZCHF refuses to send with the D15.3 instructive gate (fee shown, receive-ETH instruction, no broadcast), and passes once funded. |
 
 All five ride the existing `setup()` harness (`e2e/tests/45-sol-receive.mjs` shape) and the
 `__DPAY_TEST_POLL` cadence override; none touches real networks.
