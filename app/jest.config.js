@@ -51,8 +51,10 @@ module.exports = {
   projects: [
     {
       // The DEFAULT tier: component + service tests (`just test-app`). Most new tests belong here.
+      // (In projects mode, root-level setupFiles do NOT cascade — every project names its own.)
       displayName: 'domain',
       ...common,
+      setupFiles: ['<rootDir>/jest.setup.js'],
       testPathIgnorePatterns: [...testPathIgnorePatterns, '<rootDir>/__tests__/flow/'],
     },
     {
