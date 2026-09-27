@@ -779,7 +779,12 @@ export async function settleEvmClaim(input: EvmSettleInput): Promise<EvmSettleRe
   } catch (e) {
     return classifyPermitFailure(e);
   }
-  const need = 2n * gasUnits * price;
+  // The SIGNED worst case per tx is maxFeePerGas = 2×base + priority (the send path's
+  // arithmetic — a maxFeePerGas pinned AT the current base fee would tip 0 and strand the
+  // settle in the mempool the moment the base fee rises). The gate demands TWO txs of that
+  // worst case (permit + transferFrom, D24.1).
+  const maxFeePerGas = price * 2n + priority;
+  const need = 2n * gasUnits * maxFeePerGas;
   if (balance < need) {
     const native = EVM_CHAINS[req.chainId as EvmChainId]?.nativeSymbol ?? 'ETH';
     return fail(
@@ -807,7 +812,7 @@ export async function settleEvmClaim(input: EvmSettleInput): Promise<EvmSettleRe
         chainId: req.chainId,
         nonce,
         maxPriorityFeePerGas: priority,
-        maxFeePerGas: price,
+        maxFeePerGas,
         gasLimit,
         to: tokenAddress,
         value: 0n,

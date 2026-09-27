@@ -79,7 +79,7 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
   const [txHash, setTxHash] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState('');
   const [accepted, setAccepted] = useState(false);
-  const [gate, setGate] = useState<{requiredWei: string; address: string} | null>(null);
+  const [gate, setGate] = useState<{requiredWei: string; address: string; nativeSymbol: string} | null>(null);
   const [saved, setSaved] = useState<SavedAddress[]>([]);
   const [saveName, setSaveName] = useState('');
   const [quote, setQuote] = useState<EvmFeeQuote | null>(null);
@@ -143,12 +143,18 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
       // Self-sends are legal — warn, never block (the SOL sheet's rule).
       return {ok: true, destination: text, message: M.evm.selfSend, tone: 'warn'};
     }
-    const badSum = eip55ChecksumBad(text);
     // D15.1: a checksum verdict is a WARNING with an explicit continue, never a block — a
-    // fully-lower/upper address is legal EVM with nothing to check, and a mismatch is the
-    // sender's typo to catch by reading the warning, not by a disabled button.
-    if (badSum === true) return {ok: true, destination: text, message: M.evm.badChecksum, tone: 'warn'};
-    if (badSum === null) return {ok: true, destination: text, message: M.evm.uncheckableChecksum, tone: 'warn'};
+    // fully-lower/upper address is legal EVM but carries NO checksum to verify (say so once),
+    // and a mismatch is the sender's typo to catch by reading the warning, not by a disabled
+    // button. eip55ChecksumBad answers true ONLY for a mixed-case address that fails its own
+    // checksum; a one-case address answers false, so the mixed-case test is what separates
+    // "uncheckable" from "verified".
+    const body = text.slice(2);
+    const mixedCase = /[a-f]/.test(body) && /[A-F]/.test(body);
+    if (mixedCase && eip55ChecksumBad(text)) {
+      return {ok: true, destination: text, message: M.evm.badChecksum, tone: 'warn'};
+    }
+    if (!mixedCase) return {ok: true, destination: text, message: M.evm.uncheckableChecksum, tone: 'warn'};
     return {ok: true, destination: text, message: M.evm.route(asset.chainName), tone: 'ok' as 'bad' | 'warn' | 'ok'};
   }, [address, selfAddress, asset.chainName]);
   const destination = resolved != null && resolved.ok ? resolved.destination : null;
@@ -228,9 +234,9 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
       console.warn(`money: evm send sheet ERROR (accepted=${broadcast.hash !== null}): ${msg}`);
       if (isEvmGasGateError(e)) {
         // THE GATE (D15.3): refused BEFORE any signing material existed. Amount retained; the
-        // gate surface instructs (fee, receive-ETH at the payer's own 0x).
-        const g = e as unknown as {requiredWei: string; address: string};
-        setGate({requiredWei: g.requiredWei, address: g.address});
+        // gate surface instructs (fee, receive-gas-coin at the payer's own 0x).
+        const g = e as unknown as {requiredWei: string; address: string; nativeSymbol?: string};
+        setGate({requiredWei: g.requiredWei, address: g.address, nativeSymbol: g.nativeSymbol ?? 'ETH'});
         setPhase('gasgate');
         return;
       }
@@ -322,7 +328,7 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
             <Text testID="evm-send-gasgate-body" style={S.warnNote}>
               {M.evm.gasGateBody(fmtNative(gate.requiredWei), chainName)}
             </Text>
-            <Text style={S.dim2}>{M.evm.gasGateAddressLabel('ETH')}</Text>
+            <Text style={S.dim2}>{M.evm.gasGateAddressLabel(gate.nativeSymbol)}</Text>
             <Text testID="evm-send-gasgate-addr" selectable={true} style={S.sheetAddr}>{gate.address}</Text>
             <View testID="evm-send-gasgate-qr" style={S.qrCard}><QrCode value={gate.address} size={QR_SIZE_SMALL} ecl="M" /></View>
           </View>

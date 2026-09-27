@@ -55,20 +55,27 @@ export function useEvmHistory(
         if (!fresh()) return;
         let droppedTotal = 0;
         let sawFailure: EvmReadFailure | null = null;
-        const txns: Txn[] = [];
+        const okRows: Txn[] = [];
+        const failedLegs = new Set<string>(); // rows these legs own stay the last truth
         for (const {k, out} of results) {
+          const legId = `evm:${k.chainId}:${k.token}`;
           if (out.kind === 'offline') continue; // that chain's rail is off — nothing was read
           if (out.kind === 'error') {
             sawFailure = sawFailure ?? out.failure;
-            continue; // keep the prior list — an unreadable poll is not an empty ledger
+            failedLegs.add(legId);
+            continue; // the FAILED leg's prior rows are kept below — a partial read never blanks them
           }
           droppedTotal += out.dropped;
-          txns.push(...out.rows.map(row => toTxn(row, `evm:${k.chainId}:${k.token}`)));
+          okRows.push(...out.rows.map(row => toTxn(row, legId)));
         }
         setFailure(sawFailure);
         setDropped(droppedTotal);
-        if (sawFailure === null) txns.sort((a, b) => b.ts - a.ts); // newest-first across rows
-        setHistory(txns);
+        setHistory(prev => {
+          const kept = prev.filter(t => failedLegs.has(t.assetId)); // failed legs: last truth stays
+          const txns = [...okRows, ...kept];
+          if (sawFailure === null) txns.sort((a, b) => b.ts - a.ts); // newest-first across rows
+          return txns;
+        });
       } catch (e) {
         if (ctrl.signal.aborted || !fresh()) return;
         console.warn(`useEvmHistory fetch failed for ${address}:`, e);
