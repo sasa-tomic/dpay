@@ -69,6 +69,10 @@ export async function fetchEvmHistory(
   opts?: {signal?: AbortSignal},
 ): Promise<EvmHistory> {
   const signal = opts?.signal;
+  // The wallet address as an EVENT TOPIC: a topic is a 32-byte word, so the 20-byte address is
+  // left-padded — an unpadded topic matches nothing (a silent empty ledger, the worst failure
+  // shape for a history reader).
+  const walletTopic = '0x' + address.toLowerCase().replace(/^0x/, '').padStart(64, '0');
   const wallet = address.toLowerCase();
   const token = tokenAddress.toLowerCase();
   const TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
@@ -93,8 +97,8 @@ export async function fetchEvmHistory(
     // positions, OR-ed within an array, and there is no single shape for an OR across two
     // positions. Both legs of one page, then the dedupe below.
     const logs = (await Promise.all([
-      ethGetLogs(urls, {...range, topics: [TRANSFER_TOPIC, wallet, null]}, {signal}),
-      ethGetLogs(urls, {...range, topics: [TRANSFER_TOPIC, null, wallet]}, {signal}),
+      ethGetLogs(urls, {...range, topics: [TRANSFER_TOPIC, walletTopic, null]}, {signal}),
+      ethGetLogs(urls, {...range, topics: [TRANSFER_TOPIC, null, walletTopic]}, {signal}),
     ])).flat();
     for (const log of logs) {
       // Identity: (txHash, logIndex) — a transfer event is unique by its position in the tx.

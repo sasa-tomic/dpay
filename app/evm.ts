@@ -51,6 +51,7 @@ import {
   setEvmRpcUrl as setEvmRpcUrlOverride,
 } from './evm/endpoints';
 import {deriveEvmKeypair} from './evm/identity';
+import {EVM_CHAINS, setEvmCatalogDeployment, type EvmChainId} from './evm/chains';
 import {
   isEvmEndpointRefusal,
   isEvmGasGateError,
@@ -479,6 +480,19 @@ export async function findEvmSettledTransfer(
   if (evmRpcUrl(chainId) === '') throw new Error(`EVM is not configured on this device (chain ${chainId})`);
   const {findEvmSettledTransfer: find} = await import('./evm/settle');
   return find(chainId, tokenAddress, owner, to, rawAmount, fromBlock, signal);
+}
+
+/** Sync the registry with the CATALOG's evm rows (D3/D6): a served ZCHF row on a chain the
+ *  pinned registry does not know (the env-gated Anvil dev row) IS the deployment — install it so
+ *  requests, permit domains and settles resolve the token the user actually selected. The mainnet
+ *  pins always win for their own chains. Called from the Wallet on every catalog change. */
+export function syncEvmCatalogDeployments(rows: ReadonlyArray<{chainId: number; token: string; address: string}>): void {
+  for (const row of rows) {
+    if (row.token !== 'ZCHF') continue;
+    if (resolveEvmTokenAddress(row.chainId, row.token) !== null) continue; // pinned (or already synced)
+    if (EVM_CHAINS[row.chainId as EvmChainId] === undefined) continue; // unknown chain — never invent
+    setEvmCatalogDeployment(row.chainId as EvmChainId, row.address);
+  }
 }
 
 /** Whether ANY known EVM chain has an endpoint configured — the rail-visibility gate the

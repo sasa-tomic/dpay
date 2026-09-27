@@ -14,7 +14,7 @@ import {C, FONT} from '../config/palette';
 import {IconCheck, IconChevronDown, IconClock, IconCopy, IconQr, IconShare} from './icons';
 import {QR_SIZE} from '../config/constants';
 import {SOL_ACTIVE_POLL_WINDOW_MS} from '../config/constants';
-import {fmtAssetCompact, toUnits} from '../lib/format';
+import {fmtAssetCompact} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import type {AssetId, Identity} from '../lib/types';
 import type {SelectableAsset} from '../config/assets';
@@ -33,7 +33,8 @@ import {
   type EvmReqV1,
 } from '../evm';
 import {deriveEvmAddress} from '../evm';
-import {EVM_CHAINS, type EvmChainId} from '../evm/chains';
+import {EVM_CHAINS, toBaseUnitsSoft, type EvmChainId} from '../evm/chains';
+import {toChecksumAddress} from '../evm/identity';
 import {useReportLock} from '../hooks/useReportLock';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useShareFeedback} from '../hooks/useShareFeedback';
@@ -66,8 +67,7 @@ const NOTE_CHAINS = 'Ethereum and Arbitrum One';
  * on ERC-20); the offline claim path is the deterministic exception: the settle echoes the rid
  * this device minted.
  */
-export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balances, catalog, onSelectAsset, onSelectAssetProgrammatic, subMode, onSubModeChange, onLockChange, gasWei, gasChecking = false, homeCurrency = null, onReceiveRailChange, onWatchRefresh}: {
-  identity: Identity;
+export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balances, catalog, onSelectAsset, onSelectAssetProgrammatic, subMode, onSubModeChange, onLockChange, gasWei, gasChecking = false, homeCurrency = null, onReceiveRailChange, onWatchRefresh}: {  identity: Identity;
   /** The SELECTED EVM asset row — this mode only mounts while one is selected. */
   asset: SelectableAsset & {protocol: 'evm'};
   assets: SelectableAsset[];
@@ -87,7 +87,9 @@ export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balanc
   /** Re-fires the balance poll while the address screen is up (the watch-the-deposit cadence). */
   onWatchRefresh?: () => void;
 }) {
-  const evmAddress = useMemo(() => deriveEvmAddress(identity.secretHex), [identity.secretHex]);
+  // The device's 0x address, EIP-55-CHECKSUMMED for display/QR (D14 — the bare checksummed
+  // address is the QR payload; the derivation is lowercase, the checksum is the display form).
+  const evmAddress = useMemo(() => toChecksumAddress(deriveEvmAddress(identity.secretHex)), [identity.secretHex]);
   const claimsKey = useMemo(() => evmClaimsKey(evmAddress), [evmAddress]);
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
@@ -204,7 +206,7 @@ export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balanc
   // the claim queue stores the FULL req with every claim, so a kill/restart reconciles from the
   // queue itself (the solMerchantPersist role, one shape further down).
   async function makeRequest() {
-    const typedRaw = toUnits(amount, decimals);
+    const typedRaw = toBaseUnitsSoft(amount, decimals);
     if (!typedRaw || typedRaw === '0') return;
     setBusy(true);
     setErr(null);
@@ -476,7 +478,7 @@ export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balanc
       ) : null}
       {err ? <Text testID="evm-req-err" style={S.err}>{err}</Text> : null}
       {(() => {
-        const blocked = busy || cmpRaw(toUnits(amount, decimals), '0') === 0;
+        const blocked = busy || cmpRaw(toBaseUnitsSoft(amount, decimals), '0') === 0;
         return (
           <Pressable
             testID="btn-evm-req-make"

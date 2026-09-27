@@ -70,6 +70,7 @@ export type EvmMessages = {
   selfSend: string;
   amountLabel: (symbol: string) => string;
   amountPlaceholder: string;
+  feeLabel: string;
   feeEstimate: (amount: string) => string;
   needsGas: (symbol: string) => string;
   reviewTitle: string;
@@ -146,7 +147,8 @@ export const evmEn: EvmMessages = {
   selfSend: 'This is your own address',
   amountLabel: symbol => `Amount (${symbol})`,
   amountPlaceholder: '0.00',
-  feeEstimate: amount => `Fee ≈ ${amount} (estimate)`,
+  feeLabel: 'Fee',
+  feeEstimate: amount => `≈ ${amount} (estimate)`,
   needsGas: symbol => `Sending also needs a little ETH for the network fee`,
   reviewTitle: 'Review',
   reviewAmount: amount => `Send ${amount}`,

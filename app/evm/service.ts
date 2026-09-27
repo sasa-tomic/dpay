@@ -314,7 +314,9 @@ export interface EvmSendInput {
   readonly chainId: number;
   readonly tokenAddress: string;
   readonly to: string;
-  /** Exact raw smallest units (decimal-digit string; uint256-safe). */
+  /** The human-typed DISPLAY amount (decimal string — "42", "1.5"), converted to raw smallest
+   *  units here at uint256 width (`toBaseUnits`). The name mirrors the wire field; the VALUE is
+   *  what the payer typed. */
   readonly rawAmount: string;
   /** The token's smallest-unit decimal count (the catalog row's decimals — the caller reads it
    *  off the asset row, never a guess; ZCHF is 18). */

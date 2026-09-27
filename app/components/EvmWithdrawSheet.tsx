@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {fmtAssetCompact, fmtTime, short, toUnits} from '../lib/format';
+import {fmtAssetCompact, fmtTime, short} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
 import {detectAddressShape, chainNameOfShape} from '../lib/destination';
@@ -22,7 +22,7 @@ import {
 } from '../evm';
 import {encodeTransfer} from '../evm/abi';
 import {toHex0x} from '../evm/tx';
-import {fromBaseUnits} from '../evm/chains';
+import {fromBaseUnits, toBaseUnitsSoft} from '../evm/chains';
 import {eip55ChecksumBad} from '../lib/eip55';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
 import {saveTxNote} from '../services/txNotes';
@@ -149,7 +149,8 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
   }, [address, selfAddress, asset.chainName]);
   const destination = resolved != null && resolved.ok ? resolved.destination : null;
 
-  const raw = toUnits(amountStr, decimals);
+  // uint256-width soft parse: toUnits' u64 bound would read 42 ZCHF (18 dec) as overflow.
+  const raw = toBaseUnitsSoft(amountStr, decimals);
   const balanceKnown = balance != null;
   const overBalance = balanceKnown && cmpRaw(raw, balance!) > 0;
   const canReview = resolved?.ok === true && raw !== '0' && balanceKnown && !overBalance;
@@ -208,7 +209,7 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
     const broadcast: {hash: string | null} = {hash: null};
     try {
       const {txHash: hash} = await sendErc20(identity.secretHex, {
-        chainId, tokenAddress: asset.address, to, rawAmount: raw, decimals,
+        chainId, tokenAddress: asset.address, to, rawAmount: amountStr, decimals,
       }, signal, (h) => { broadcast.hash = h; setAccepted(true); });
       setTxHash(hash);
       setPhase('done');
@@ -384,7 +385,7 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
               <Text style={S.reviewLabel}>{M.evm.reviewTitle}</Text>
               <Text testID="evm-send-review-amount" style={S.reviewAmount}>{M.evm.reviewAmount(fmt(raw))}</Text>
               <View style={S.reviewRow}>
-                <Text style={S.reviewRowLabel}>{M.evm.feeEstimate('')}</Text>
+                <Text style={S.reviewRowLabel}>{M.evm.feeLabel}</Text>
                 <Text testID="evm-send-review-fee" style={S.reviewRowValue}>{feeLine}</Text>
               </View>
               {notedDestination != null ? (

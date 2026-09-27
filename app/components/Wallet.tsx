@@ -38,8 +38,8 @@ import {deriveSolanaAddress, createTokenAta} from '../solana';
 import {isValidSolanaAddress} from '../solana/identity';
 import {isValidEvmAddress} from '../evm';
 import {friendlySolError} from '../solana/errors';
-import {deriveEvmAddress, isEvmRailConfigured} from '../evm';
-import {evmSectionsOf, visibleEvmKeys} from '../lib/evmCatalog';
+import {deriveEvmAddress, isEvmRailConfigured, syncEvmCatalogDeployments} from '../evm';
+import {visibleEvmKeys} from '../lib/evmCatalog';
 import {readDepositDeepLink, readPayLink, readPaymentDeeplink, parsePayLink, parseCheckoutCode, decodeDeeplink, type PayLink, type PayLinkParse} from '../lib/deepLink';
 import {WordmarkLink} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
@@ -434,11 +434,18 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     try { return deriveEvmAddress(identity.secretHex); }
     catch (e) { console.warn('deriveEvmAddress failed:', e instanceof Error ? e.message : String(e)); return null; }
   }, [identity.secretHex]);
-  const evmSections = useMemo(() => evmSectionsOf(networks), [networks]);
+  // The PARSED evm sections (the catalog already carries parsed EvmAsset rows — never re-parse
+  // them through the raw-envelope helper). The keys tuple mirrors the builder's rows exactly.
+  const evmSections = useMemo(() => networks.filter(s => s.protocol === 'evm'), [networks]);
   const evmKeys = useMemo(
     () => (!evmRailOn || !evmAddress ? [] : visibleEvmKeys(evmSections, {showTestnet, evmEnabled: true})),
     [evmRailOn, evmAddress, evmSections, showTestnet],
   );
+  // Catalog-driven deployments: a relay-served ZCHF row on an unpinned dev chain (Anvil) IS the
+  // token contract — install it so requests/domains/settles resolve what the user selected (D3).
+  useEffect(() => {
+    syncEvmCatalogDeployments(evmSections.flatMap(s => s.assets));
+  }, [evmSections]);
   const {tokens: evmTokens, gas: evmGas, freshAt: evmFreshAt, refresh: refreshEvmBalances} = useEvmBalances(identity.secretHex, evmKeys);
   const {history: evmHistory, dropped: evmDropped, failure: evmHistoryFailure, refreshHistory: refreshEvmHistory} = useEvmHistory(evmAddress, evmKeys);
   const ledgerHistory = useMemo(() => mergeHistoryByTime(mergeHistoryByTime(history, solHistory), evmHistory), [history, solHistory, evmHistory]);

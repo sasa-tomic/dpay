@@ -299,6 +299,10 @@ export async function setup(opts = {}) {
     // SOL candidates from the relay list it was booted with (the harness relay's base is
     // known only after getSession started it, and the derivation needs no base from us).
     solRpcUrl: opts.solRpcUrl === 'relay' ? 'derive' : opts.solRpcUrl,
+    // The EVM seam's own override (the solRpcUrl mirror): 'derive' DELETES the suite default
+    // ('') so the app derives the per-chain route from its relay list — the production path
+    // the anvil flows exercise; any other string is the whole candidate list.
+    evmRpcUrl: opts.evmRpcUrl === 'derive' ? 'derive' : opts.evmRpcUrl,
     dark: opts.dark,
     locale: opts.locale,
   });
@@ -1109,6 +1113,10 @@ export async function selectEvmAsset(driver, testKey, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 5_000;
   await openBalances(driver, { timeoutMs });
   if (!(await driver.isPresent(`asset-${testKey}`))) {
+    // The dev rows hide behind the testnet toggle, and the toggle itself renders only once the
+    // relay catalog (which is what carries the env-gated evm dev sections) has landed — wait for
+    // it rather than probing once.
+    await driver.findByTestID('btn-toggle-testnet', { timeoutMs: 15_000 });
     await driver.click('btn-toggle-testnet', { timeoutMs });
     await driver.findByTestID(`asset-${testKey}`, { timeoutMs });
   }

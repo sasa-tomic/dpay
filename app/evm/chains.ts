@@ -94,6 +94,19 @@ export interface EvmTokenOverride {
 // global) because the only writer is the e2e driver in-process; nothing native crosses it.
 let devTokenOverride: EvmTokenOverride | null = null;
 
+// The CATALOG-derived deployments (D3/D6): a relay-served ZCHF row on a chain the pinned
+// registry does not know (the env-gated Anvil / Arbitrum Sepolia dev rows) IS the deployment —
+// the row was parsed fail-closed (EIP-55 verified) and the user selected it. The seam syncs
+// these from the catalog (`app/evm.ts#syncEvmCatalogDeployments`); the domain kind is 'minimal'
+// because the dev mock mirrors real ZCHF's ERC20PermitLight domain exactly (spec addendum 1).
+const catalogDeployments = new Map<EvmChainId, string>();
+
+/** Install the catalog-derived ZCHF deployment for a dev chain (the pinned mainnet registry
+ *  always wins for its own chains — this table only fills the env-gated gaps). */
+export function setEvmCatalogDeployment(chainId: EvmChainId, address: string): void {
+  catalogDeployments.set(chainId, address);
+}
+
 /** Inject the dev/testnet mock token for `chainId` (e2e driver / dev builds only). Pure state —
  *  takes effect on the next `evmZchfToken()`/`evmZchfDeployment()` read, no network, no
  *  notifications. */
@@ -117,6 +130,8 @@ export function evmZchfDeployment(chainId: EvmChainId): ZchfDeployment | null {
   if (devTokenOverride?.chainId === chainId) {
     return {address: devTokenOverride.address, domainKind: devTokenOverride.domainKind};
   }
+  const fromCatalog = catalogDeployments.get(chainId);
+  if (fromCatalog !== undefined) return {address: fromCatalog, domainKind: 'minimal'};
   return ZCHF_TOKEN[chainId] ?? null;
 }
 
@@ -145,6 +160,17 @@ export function toBaseUnits(amount: string, decimals: number): bigint {
     throw new Error(`amount "${amount}" has more than ${decimals} decimals`);
   }
   return BigInt(whole + frac.padEnd(decimals, '0'));
+}
+
+/** The UI form's soft parser: a malformed or over-precise entry parses to '0' (the form gates on
+ *  a non-zero raw), never a throw — `toUnits`' contract at uint256 width (ERC-20 amounts exceed
+ *  the u64 bound the IC parser enforces: 42 ZCHF at 18 decimals is already past 2^64). */
+export function toBaseUnitsSoft(amount: string, decimals: number): string {
+  try {
+    return toBaseUnits(amount, decimals).toString();
+  } catch {
+    return '0';
+  }
 }
 
 /** 1500000000000000000n (18 decimals) → "1.5" — the shortest exact decimal string. */
