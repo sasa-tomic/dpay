@@ -73,6 +73,17 @@ services:
       # Per-call upstream timeout for the proxy, ms (default 10000; 0 refused at startup).
       DPAY_SOLANA_TIMEOUT_MS: ${DPAY_SOLANA_TIMEOUT_MS:-}
 
+      # The EVM JSON-RPC proxy (POST /api/v1/evm/rpc[/chainId]) — the Solana pipe's EVM twin
+      # (crates/dpay-relay/src/evm.rs). DPAY_EVM_RPC_URL is the DEFAULT-chain (1) provider
+      # endpoint INCLUDING its api key (SECRET — never logged, never echoed, never committed);
+      # a per-chain var configures that chain directly and wins for it. A served chain with no
+      # upstream answers 503 naming its variable; a chain id outside the served set 404s.
+      DPAY_EVM_RPC_URL: ${DPAY_EVM_RPC_URL:-}
+      DPAY_EVM_RPC_URL_42161: ${DPAY_EVM_RPC_URL_42161:-}
+      DPAY_EVM_RPC_URL_421614: ${DPAY_EVM_RPC_URL_421614:-}
+      # Per-call upstream timeout for the proxy, ms (default 10000; 0 refused at startup).
+      DPAY_EVM_TIMEOUT_MS: ${DPAY_EVM_TIMEOUT_MS:-}
+
       # The Trocador partner-agreement compliance records (access log + order store). SET the
       # DSN in prod — it is REQUIRED for durable records: this stack mounts NO volume, so the
       # JSONL fallback (unset) writes into the ephemeral container cwd and dies on every
