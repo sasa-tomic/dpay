@@ -13,6 +13,8 @@ search; otherwise at most 10 minutes, then record the outcome here.
 | EURC (Solana) | none | receive-side exercises are free with an existing EURC balance (float holds some) | 2026-09-26 | Circle issues EURC mainnet-only. Design-time knowledge. |
 | Trocador (CeFi) | none | smallest supported order (venue minimum, roughly $5-20) | 2026-09-26 | Mainnet-only; partner API terms (poll floor) apply. Design-time knowledge. |
 | SideShift (CeFi) | none | smallest supported order | 2026-09-26 | Mainnet-only; exact-amount deposit windows. Design-time knowledge. |
+| ZCHF (ERC-20) reads | yes (keyless, free) | `just evm-probe-mainnet` — symbol/decimals/DOMAIN_SEPARATOR on publicnode + arb1 | 2026-09-27 | READ path free and proven. WRITES (a real transfer round trip) are mainnet-only: gas is dust ETH, no ZCHF faucet on either chain. |
+| Arbitrum Sepolia (D29) | unverified | claim a faucet, run the round trip in `scripts/evm-probe-arbitrum-sepolia.mjs` (NOT YET WRITTEN) | 2026-09-27 | Not searched yet (no script, no need while no live trip is scheduled). Write the probe before any Sepolia attempt. |
 
 ## Practical routes with the current float (2026-09-26)
 
