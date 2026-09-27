@@ -164,6 +164,14 @@ export function resolveExecutablePath() {
 const GATE_ROOT = '/tmp/opencode';
 const LOCK_DIR = join(GATE_ROOT, 'dpay-chrome.lock');
 const LOCK_OWNER_FILE = join(LOCK_DIR, 'owner.json');
+// Profile dirs live UNDER A SUBDIR on purpose. Older copies of this gate (already merged to
+// other agents' worktrees) matched shells by a `dpay-chrome-` cmdline prefix and killed
+// "wedged" ones on a 1s probe timeout — under load that is a healthy shell and the kill lands
+// on a live run. Keeping this tree's shells OUTSIDE the old prefix makes those sweeps classify
+// them as foreign and skip them; this tree's own sweep uses the same new constant. The LOCK and
+// the DISCOVERY FILES stay at their published machine-global paths so every gate copy still
+// serializes against every other.
+const PROFILE_ROOT = join(GATE_ROOT, 'dpay-gate');
 const STALE_LOCK_MS = 30_000;                       // spec: 30s stale TTL for the mkdir-mutex
 const PROBE_TIMEOUT_MS = 250;                       // spec: ~250ms /json/version budget
 // `Number(x) || default` would swallow a deliberate 0 (used to test the sweep); guard instead.
@@ -239,7 +247,7 @@ function discoveryPathFor(key) {
   return join(GATE_ROOT, `dpay-chrome-${CHROME_BUILD_ID}${key ? `-${key}` : ''}.json`);
 }
 function profileDirFor(key) {
-  return join(GATE_ROOT, `dpay-chrome-${CHROME_BUILD_ID}-profile${key ? `-${key}` : ''}`);
+  return join(PROFILE_ROOT, `chrome-${CHROME_BUILD_ID}-profile${key ? `-${key}` : ''}`);
 }
 
 // ── process-liveness helpers (Linux /proc) ──────────────────────────────────────────
@@ -565,6 +573,7 @@ async function openLease({ key, executablePath, extraArgs }) {
   // clear any debris (a hard-killed shell leaves a SingletonLock that would block startup).
   const puppeteer = await pp();
   try { rmSync(profileDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  mkdirSync(PROFILE_ROOT, { recursive: true });
   let browser;
   try {
     browser = await puppeteer.launch({
@@ -594,6 +603,12 @@ async function openLease({ key, executablePath, extraArgs }) {
   // SIGKILLs the shell from the sync exit handler, so a launched shell can never outlive us.
   // The exe fragment makes that fallback pid-recycling-safe on this shared box (see procs.mjs).
   trackChild(pid, 'chrome-headless-shell');
+  // Forensics: a shell that dies MID-RUN is an infrastructure incident (external SIGKILL, OOM,
+  // crash). The (code, signal) pair is the fingerprint — silence with SIGKILL means something
+  // outside this process killed it; chrome prints "Received signal N" for its own crashes.
+  proc.on('exit', (code, sig) => {
+    console.log(`[chrome-gate] shell pid=${pid} exited (code=${code}, signal=${sig ?? 'none'})`);
+  });
   writeDiscoveryAtomic(discoveryPath, { pid, port, started: Date.now() });
   _launchedDiscovery.set(key, discoveryPath);
   console.log(`[chrome-gate] launched chrome-headless-shell pid=${pid} port=${port} (machine-global singleton; lock held for the run's browser lifetime)`);
@@ -705,7 +720,7 @@ export async function sweepChromeGate({ minIdleMs = SWEEP_MIN_IDLE_MS } = {}) {
     if (!argv) continue;
     const isChild = argv.some((a) => a.startsWith('--type='));
     const udd = argv.find((a) => a.startsWith('--user-data-dir='))?.slice('--user-data-dir='.length);
-    const isGateProcess = (argv[0] ?? '').includes('chrome-headless-shell') && udd?.startsWith(`${GATE_ROOT}/dpay-chrome-`);
+    const isGateProcess = (argv[0] ?? '').includes('chrome-headless-shell') && udd?.startsWith(`${PROFILE_ROOT}/`);
     if (!isGateProcess) { foreign += 1; continue; } // other projects' shells (and their children): NEVER touched
     if (isChild) { gateChildren += 1; continue; } // our renderer/gpu child: dies with its main process
     const ageMs = procAgeMs(pid) ?? 0;
