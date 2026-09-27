@@ -114,7 +114,10 @@ export class Driver {
         '  - set DPAY_CHROMIUM to a real chrome/chromium binary.'
       );
     }
-    return acquireBrowser({ executablePath: exe, extraArgs: opts.extraArgs ?? [] });
+    // shardId > 0 names a SECOND gate slot (its own shell + profile dir) for multi-shell runs —
+    // see browser.mjs gateKey. Same binary, same flags: rendering (and therefore the visual
+    // baselines) is identical on every shard.
+    return acquireBrowser({ executablePath: exe, extraArgs: opts.extraArgs ?? [], shardId: opts.shardId ?? 0 });
   }
 
   /** Attach page diagnostics and retain every unexpected error so teardown fails the flow. */

@@ -233,15 +233,30 @@ async function pp() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Short identity of the launch-arg set. The spec's exact discovery filename
- *  `dpay-chrome-<build>.json` is reserved for the default args (every standard recipe);
- *  a caller with extra args (web-scan-smoke's fake-camera flags) or a DPAY_CHROMIUM override
- *  gets a suffixed slot so the two shell flavors never adopt each other. */
-function gateKey(extraArgs, executablePath) {
+/** Short identity of the launch-arg set + shard slot. The spec's exact discovery filename
+ *  `dpay-chrome-<build>.json` is reserved for the default args, shard 0 (every standard recipe);
+ *  a caller with extra args (web-scan-smoke's fake-camera flags), a DPAY_CHROMIUM override, or a
+ *  multi-shell shard id gets an 8-hex suffixed slot so the flavors never adopt each other. */
+function gateKey(extraArgs, executablePath, shardId = 0) {
   const args = [...(extraArgs ?? [])].sort();
-  if (args.length === 0 && !process.env.DPAY_CHROMIUM) return '';
-  return createHash('sha256').update(JSON.stringify(args)).update(executablePath ?? '').digest('hex').slice(0, 8);
+  if (args.length === 0 && !process.env.DPAY_CHROMIUM && shardId <= 0) return '';
+  return createHash('sha256')
+    .update(JSON.stringify(args))
+    .update(executablePath ?? '')
+    .update(shardId > 0 ? `shard:${shardId}` : '')
+    .digest('hex')
+    .slice(0, 8);
 }
+
+/**
+ * Multi-shell runs: shard k>0 names its own discovery file + profile dir under this gate, so ONE
+ * run can drive several chrome-headless-shell processes (per-lane isolation is unchanged — every
+ * test still gets a fresh incognito context; only the owning process differs). All of a run's
+ * shard leases hold the same machine-global admission lock (refcounted per pid), so two concurrent
+ * RUNS still queue — the 2026-09-27 one-shell-per-machine acceptance is preserved at RUN
+ * granularity, not shell granularity. Every shard is tracked (procs.mjs) and torn down with the
+ * run's last connection, exactly like the primary shell.
+ */
 
 function discoveryPathFor(key) {
   return join(GATE_ROOT, `dpay-chrome-${CHROME_BUILD_ID}${key ? `-${key}` : ''}.json`);
@@ -374,8 +389,20 @@ function installGateExitHook() {
 
 /** Acquire the machine-global admission lock. Re-entrant for this pid (a process never
  *  contends with itself); waits behind a LIVE holder; steals only from a holder that is both
- *  older than the stale TTL and verifiably dead. Throws (loud) past the wait cap. */
-async function acquireGateLock() {
+ *  older than the stale TTL and verifiably dead. Throws (loud) past the wait cap.
+ *
+ *  Concurrent same-pid acquires (multi-shard priming fires several launches at once) are
+ *  SERIALIZED through an in-process promise chain: without it, callers that arrive while the
+ *  first mkdir is in flight all fall into the wait loop, see the lock held by their OWN pid,
+ *  and spin (never stealing from self, never winning mkdir) until the wait cap. */
+let _lockChain = Promise.resolve();
+function acquireGateLock() {
+  const next = _lockChain.then(() => _acquireGateLockWait());
+  _lockChain = next.catch(() => { /* the chain must survive a failed acquire */ });
+  return next;
+}
+
+async function _acquireGateLockWait() {
   mkdirSync(GATE_ROOT, { recursive: true });
   if (_lockHolds > 0) {
     const owner = readLockOwner();
@@ -522,8 +549,8 @@ const _leases = new Map(); // key -> Promise<lease>
  * connection drops, and only if this process launched it (an adopted shell outlives us by
  * design; the sweep owns idle reaping).
  */
-export async function acquireBrowser({ executablePath, extraArgs = [] }) {
-  const key = gateKey(extraArgs, executablePath);
+export async function acquireBrowser({ executablePath, extraArgs = [], shardId = 0 }) {
+  const key = gateKey(extraArgs, executablePath, shardId);
   let leasePromise = _leases.get(key);
   if (!leasePromise) {
     leasePromise = openLease({ key, executablePath, extraArgs }).catch((e) => { _leases.delete(key); throw e; });
@@ -611,7 +638,7 @@ async function openLease({ key, executablePath, extraArgs }) {
   });
   writeDiscoveryAtomic(discoveryPath, { pid, port, started: Date.now() });
   _launchedDiscovery.set(key, discoveryPath);
-  console.log(`[chrome-gate] launched chrome-headless-shell pid=${pid} port=${port} (machine-global singleton; lock held for the run's browser lifetime)`);
+  console.log(`[chrome-gate] launched chrome-headless-shell pid=${pid} port=${port}${key ? ` (shard slot ${key})` : ''} (machine-global gate; lock held for the run's browser lifetime)`);
   return {
     key, conns: 0, pid, port, launched: true,
     connect: () => pp().then((p) => p.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null })),

@@ -164,15 +164,15 @@ e2e-sweep:
 e2e:
     python3 scripts/testruns.py run e2e --sh 'node e2e/harness/sweep.mjs && cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && node run.mjs'
 
-# visual-regression gate (fast iteration on flow 40 alone): re-capture the 5 primary surfaces and
-# pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift >0.5%. Catches the
-# exact class of style/layout regression that sails through the testID+textContent e2e net. NOTE:
-# flow 40 IS part of the default suite (see FLOWS.md for the canonical count), so `just verify` → `check e2e` already runs the pixel-diff —
-# this standalone recipe re-runs ONLY flow 40 in isolation for fast feedback after a UI tweak (no
-# banner, no other flows). On an intentional UI change, regenerate the baselines via
-# `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
+# visual/pixel gate: the flows whose SUBJECT is pixels — screenshot capture, pixel-diff baselines,
+# QR decodeability, geometry-fits-viewport, offline boot of the shipped bytes. Nine flows:
+# 35 (UX tour captures), 39 (store screens), 40 + 84 (light/dark pixel-diff), 78 (QR scannable),
+# 83 (mobile viewport), 146 (money forms fit), 151 (offline web boot), 158 (header fits).
+# These stay chrome-bound forever (the DOM-flow net migrated to jest); this recipe is their fast
+# iteration entry. Flow 40 ALSO runs in the default `just e2e` suite (see FLOWS.md; never hardcode
+# a count here). On an intentional UI change, regenerate baselines via `just e2e-visual-seed`.
 e2e-visual:
-    python3 scripts/testruns.py run e2e-visual --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=40-visual-regression node run.mjs'
+    python3 scripts/testruns.py run e2e-visual --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=35-ux-tour,39-store-screens,40-visual-regression,78-qr-scannable,84-visual-dark,151-offline-web-boot,83-mobile-viewport,146-money-forms-fit,158-header-fits node run.mjs'
 
 # regenerate the visual-regression baselines from the current app surfaces (run after an intentional
 # UI/style change). Writes e2e/shots/baselines/<surface>.png for each of the 5 surfaces. COMMIT the

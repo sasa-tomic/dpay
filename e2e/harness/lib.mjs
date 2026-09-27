@@ -169,7 +169,7 @@ export async function laneBrowser(index) {
   if (shard === 0) return s.browser;
   if (!_shardBrowsers.has(shard)) {
     const stopShard = profSpan('session.shardLaunch');
-    const { browser, stop } = await Driver.launchBrowser();
+    const { browser, stop } = await Driver.launchBrowser({ shardId: shard });
     stopShard();
     _shardBrowsers.set(shard, browser);
     s.addStop(stop);
@@ -1094,14 +1094,32 @@ export async function openConvertFor(driver, key, opts = {}) {
   await driver.click(`btn-accounts-convert-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
   // A LIVE conversion record renders the RECORD VIEW on entry (no `convert-screen` chrome —
   // the per-record panels carry their own roots). Wait for the FORM screen or any record
-  // root, whichever this entry carries. ONE `waitForFirstTestID` (in-page polling, one CDP
-  // roundtrip) instead of the old 250ms Node-side eval poll — same candidates, same contract.
+  // root, whichever this entry carries. ONE `whichPresent` probe per 100ms tick (instant — no
+  // paid timeouts, one roundtrip per tick).
+  //
+  // THE RE-PRESS: a tap can be swallowed by a re-render — the balance poll (fast-poll seam,
+  // 150ms) replaces the row node between find and press, the press lands on a node React
+  // already replaced, and NOTHING mounts with no error reported (the same silent-no-op the
+  // walkthrough/practice helpers confirm-by-effect against). Exposed 2026-09-28 when the
+  // preamble fix made flow 40 reach this step ~117s earlier: the fresh ICP credit landed
+  // mid-openBalances and re-rendered the row under the tap. One verified-effect re-press after
+  // a short grace covers it; the entry deadline and candidate set are unchanged.
   const entryCandidates = ['convert-screen', 'convert-state', 'crossrail-crossing', 'convert-awaiting-deposit', 'convert-provider-processing', 'convert-done', 'convert-pending', 'convert-fund', 'convert-unavailable'];
-  const entryTimeoutMs = (opts.timeoutMs ?? 5_000) + 4_000;
-  try {
-    await driver.waitForFirstTestID(entryCandidates, { timeoutMs: entryTimeoutMs });
-  } catch (e) {
-    throw new Error(`openConvertFor: the ${currency} convert surface never rendered (no form, record, gate, or unavailable panel within ${Math.round(entryTimeoutMs / 1000)}s) — ${e.message}`);
+  const entryStarted = Date.now();
+  const entryDeadline = entryStarted + (opts.timeoutMs ?? 5_000) + 4_000;
+  const repressAt = entryStarted + 2_000;
+  let rePressed = false;
+  for (;;) {
+    if ((await driver.whichPresent(entryCandidates)).length > 0) break;
+    const now = Date.now();
+    if (!rePressed && now >= repressAt) {
+      rePressed = true;
+      try { await driver.click(`btn-accounts-convert-${currency}`, { timeoutMs: 2_000 }); } catch { /* the deadline check below reports it */ }
+    }
+    if (now > entryDeadline) {
+      throw new Error(`openConvertFor: the ${currency} convert surface never rendered (no form, record, gate, or unavailable panel within ${Math.round((opts.timeoutMs ?? 5_000) + 4_000)}s)`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
   }
   // The zero-balance FUND GATE can flash first when the entry races the wallet's first balance
   // poll (a fast two-click entry lands before the poll answers — the gate reads the poll's
