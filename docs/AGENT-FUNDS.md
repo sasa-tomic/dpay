@@ -49,7 +49,7 @@ the same phone paid order `2610` in VCHF: ledger block `81,062`, submitted as th
 
 ONE entry point — `just funds <subcommand>` (founder ask 2026-09-20: a single way to do all of it):
 
-    just funds                  # overview: EVERY wallet + EVERY live balance + the abandoned watch
+    just funds                  # overview: EVERY wallet + EVERY live balance + CHF totals + fees paid + the abandoned watch
     just funds address [W]      # the funding address, no decryption
                                 # (W: icp-float | sol-rail | sol-float | evm-float)
     just funds balance [W]      # live census for one wallet, measured (UNREADABLE is never 0)

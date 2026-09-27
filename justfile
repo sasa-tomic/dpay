@@ -748,7 +748,7 @@ cleanup wipe='': stop
 # --- agent test float (real mainnet money — rules in CLAUDE.md, mechanism in docs/AGENT-FUNDS.md) ---
 
 # THE one entry point for the test float (founder ask 2026-09-20: a single way to do all of it).
-#   just funds                  overview: every wallet + every live balance + the abandoned watch
+#   just funds                  overview: every wallet + every live balance + totals in CHF + fees paid + the abandoned watch
 #   just funds address [W]      the funding address, no decryption
 #                               (W: icp-float | sol-rail | sol-float | evm-float)
 #   just funds balance [W]      live census for one wallet, measured (UNREADABLE is never 0)
