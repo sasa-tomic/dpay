@@ -153,3 +153,44 @@ export function assertEq(actual: unknown, expected: unknown, label: string): voi
     throw new Error(`[assert] ${label}: expected ${String(expected)}, got ${String(actual)}`);
   }
 }
+
+// --- the account-identifier oracle (e2e/harness/wire.mjs, verbatim) ------------------------------
+// An INDEPENDENT oracle for the ICRC-1 AccountIdentifier derivation (cross-pinned against Rust
+// goldens in crates/dpay-icp/tests/goldens.rs) — flow 107 names a destination in the
+// account-identifier namespace and reads the credit back at the owning principal.
+import {createHash} from 'node:crypto';
+
+function sha224(b: Uint8Array): Uint8Array {
+  return Uint8Array.from(createHash('sha224').update(b).digest());
+}
+
+function crc32(b: Uint8Array): number {
+  const table: number[] = [];
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  let crc = 0xffffffff;
+  for (const byte of b) crc = table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** Principal (29-byte self-authenticating) from a raw 32B ed25519 pubkey: SHA224(DER(pub)) | 0x02. */
+export function icpPrincipalBytes(pubHex: string): Uint8Array {
+  const raw = Uint8Array.from(pubHex.match(/../g)!.map((h) => parseInt(h, 16)));
+  const der = Uint8Array.from(Buffer.concat([
+    Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(raw),
+  ]));
+  return Uint8Array.from([...sha224(der), 0x02]);
+}
+
+/** The ICP ledger's ACCOUNT IDENTIFIER for a principal + subaccount, as 64-char lowercase hex:
+ *  `CRC32(h) BE ‖ h` where `h = SHA224("\x0Aaccount-id" ‖ owner ‖ subaccount)`. */
+export function icpAccountIdentifierHex(pubHex: string, subaccount: Uint8Array = new Uint8Array(32)): string {
+  const owner = icpPrincipalBytes(pubHex);
+  const h = sha224(Buffer.concat([Buffer.from('\x0Aaccount-id', 'binary'), Buffer.from(owner), Buffer.from(subaccount)]));
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.from(h)));
+  return Buffer.concat([crc, Buffer.from(h)]).toString('hex');
+}
