@@ -431,6 +431,41 @@ reconcile currency='all':
 faucet-verify *args:
     bash scripts/faucet-verify.sh {{args}}
 
+# smoke tier (spec tmp/jest-flow-migration-spec.md §3): ONLY the files in
+# app/__tests__/smoke/manifest.ts, pure node, <=250ms/test (budget wrapper), <=12s total
+# (the timeout 20s wrapper is the hard kill). THE iteration gate — seconds-fast forever.
+# `just timing smoke` reads the per-test JSON this recipe records. DPAY_SMOKE_TIMING lets
+# scripts/smoke-watch.mjs capture the same JSON testruns.py consumes (testruns owns
+# DPAY_TESTRUNS_TIMING and deletes its temp file after reading).
+smoke:
+    python3 scripts/testruns.py run smoke --sh 'cd app && timeout 20s env DPAY_SMOKE=1 npx jest --selectProjects smoke --silent --maxWorkers=4 --json --outputFile="${DPAY_SMOKE_TIMING:-${DPAY_TESTRUNS_TIMING:-/dev/null}}" $(node ../scripts/smoke-files.mjs)'
+
+# smoke budget watchdog: runs `just smoke` once, compares wall + per-test times against the
+# budgets, writes tmp/smoke-watch-status.json, exits nonzero with a one-line verdict when over.
+# THE alert condition — over budget = a fix agent flattens/merges; never raise the budget.
+smoke-watch:
+    node scripts/smoke-watch.mjs
+
+# flow suite (ported e2e, full-app jest; spawns the test relay ONCE via globalSetup). Merge-gate
+# activity — never part of the dev-loop iteration (AGENTS.md test tiers).
+flow:
+    python3 scripts/testruns.py run flow --sh 'cd app && npx jest --selectProjects flow --silent --maxWorkers=4 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
+
+# real-chain proofs: anvil + relay pipe, no browser, NO jest (reuses e2e/harness/evm/{anvil,pipe}.mjs
+# via plain-node scripts in e2e/anvil/*.mjs — wave D of the migration owns those scripts; until
+# they exist this recipe fails loud instead of passing vacuously).
+node-anvil:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}"
+    shopt -s nullglob
+    scripts=(e2e/anvil/*.mjs)
+    if [ ${#scripts[@]} -eq 0 ]; then
+      echo "node-anvil: no e2e/anvil/*.mjs scripts yet — the migration's node-anvil wave owns them (harness: e2e/harness/evm/, template: pipe-smoke.mjs)" >&2
+      exit 1
+    fi
+    for t in "${scripts[@]}"; do node "$t" || exit 1; done
+
 # typecheck the RN app — catches bridge arity drift against the TS interfaces (tsc --noEmit, ~2s, no device)
 typecheck:
     python3 scripts/testruns.py run typecheck --sh 'cd app && npm run typecheck'
