@@ -847,6 +847,17 @@ Then, in dependency order (each item cites its decision):
    `needsResign` (D22.3's state, not an error); settle reaches the chain ONLY through the injected
    `EvmRpcLike` (`app/evm.ts` adapts its rpc client and wraps `settleEvmClaim`). Still open: the
    seam wrapper, the nonce-cache seeding in the balance poll (D16), and the request-screen flip (D18).
+   ALL THREE CLOSED same-day by the UI wave (commit series on `evm-rail`, 2026-09-27): the seam
+   wrapper is `app/evm/settle.ts` (`EvmRpcLike` over `evm/rpc.ts` — hex/bytes + hex/bigint
+   mapping, `from` on the transferFrom preflight, revert payloads on `err.data`,
+   transport-marked rejections — plus the wrong-chain gate before the engine runs) behind
+   `settleEvmClaim(secretHex, req, claim)`; the nonce cache is seeded by `useEvmBalances`'s
+   every-5th-tick piggyback (`seedEvmPermitNonces`); and the request screen flips to Received
+   when the scan-back settle succeeds (D18's deterministic rid flip). Deviations of record: the
+   D10 sketch's sync `signEvmPermitClaim(secretHex, req): EvmPayV1` is ASYNC (the nonce cache is
+   AsyncStorage — the only await, still fully offline) and returns the richer `EvmSignedClaim`;
+   unpinned dev chains (Anvil) resolve their token through `syncEvmCatalogDeployments`
+   (the served catalog row IS the deployment — D3), not the pinned registry alone.
 5. **S7 — anvil + e2e (needs S1, S5, S6):** MockZCHF blob + `evm-core.mjs` extraction (D26) →
    `just evm-anvil` + harness relay/driver injection (D26/D27) → flows 213-217 (D28).
 6. **S8 — probes + live docs (needs S4; S6 for the permit half):** Sepolia round trip (D29) →
