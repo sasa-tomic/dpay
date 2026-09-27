@@ -54,7 +54,7 @@ export const evmEs: EvmMessages = {
   amountPlaceholder: '0,00',
   feeLabel: 'Comisión',
   feeEstimate: amount => `≈ ${amount} (estimación)`,
-  needsGas: symbol => `Enviar también necesita un poco de ETH para la comisión de red`,
+  needsGas: () => `Enviar también necesita un poco de ETH para la comisión de red`,
   reviewTitle: 'Revisar',
   reviewAmount: amount => `Enviar ${amount}`,
   reviewTo: 'Para',

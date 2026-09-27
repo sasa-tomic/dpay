@@ -54,7 +54,7 @@ export const evmFr: EvmMessages = {
   amountPlaceholder: '0,00',
   feeLabel: 'Frais',
   feeEstimate: amount => `≈ ${amount} (estimation)`,
-  needsGas: symbol => `Envoyer demande aussi un peu d'ETH pour les frais de réseau`,
+  needsGas: () => `Envoyer demande aussi un peu d'ETH pour les frais de réseau`,
   reviewTitle: 'Vérification',
   reviewAmount: amount => `Envoyer ${amount}`,
   reviewTo: 'À',

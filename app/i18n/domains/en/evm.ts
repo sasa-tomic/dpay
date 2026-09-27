@@ -149,7 +149,7 @@ export const evmEn: EvmMessages = {
   amountPlaceholder: '0.00',
   feeLabel: 'Fee',
   feeEstimate: amount => `≈ ${amount} (estimate)`,
-  needsGas: symbol => `Sending also needs a little ETH for the network fee`,
+  needsGas: () => `Sending also needs a little ETH for the network fee`,
   reviewTitle: 'Review',
   reviewAmount: amount => `Send ${amount}`,
   reviewTo: 'To',

@@ -1674,7 +1674,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           ? (activeSol && solAddress
               ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} tokenBalance={selectedTokenBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solState, selectedTokenState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} />
               : activeEvm && activeEvmAsset != null
-              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} assets={assets} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckEvmBalances} recheckBusy={recheckBusy} />
+              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckEvmBalances} recheckBusy={recheckBusy} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} shownBalance={shownBalance}
@@ -1740,7 +1740,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
                   balances={balances}
                   catalog={catalog}
                   onSelectAsset={handleSelect}
-                  onSelectAssetProgrammatic={selectAsset}
                   subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                   onLockChange={setSelectionLocked}
                   gasWei={selectedEvmGas?.wei ?? null}
@@ -1819,7 +1818,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               // same strings the Balances tab shows).
               solana={{sol: solState.balance, tokens: solTokenAmounts}}
             />
-           : <Ledger history={walletHistory} catalog={catalog} assets={assets} dropped={solDropped} staleFailure={solHistoryFailure} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
+           : <Ledger history={walletHistory} catalog={catalog} assets={assets} dropped={solDropped + evmDropped} staleFailure={solHistoryFailure ?? evmHistoryFailure} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
       </ScrollView>
 
       {/* O4 S1 — persistent bottom navigation: the primary tabs moved from the top pill row

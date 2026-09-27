@@ -67,7 +67,7 @@ const NOTE_CHAINS = 'Ethereum and Arbitrum One';
  * on ERC-20); the offline claim path is the deterministic exception: the settle echoes the rid
  * this device minted.
  */
-export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balances, catalog, onSelectAsset, onSelectAssetProgrammatic, subMode, onSubModeChange, onLockChange, gasWei, gasChecking = false, homeCurrency = null, onReceiveRailChange, onWatchRefresh}: {  identity: Identity;
+export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balances, catalog, onSelectAsset, subMode, onSubModeChange, onLockChange, gasWei, gasChecking = false, homeCurrency = null, onReceiveRailChange, onWatchRefresh}: {  identity: Identity;
   /** The SELECTED EVM asset row — this mode only mounts while one is selected. */
   asset: SelectableAsset & {protocol: 'evm'};
   assets: SelectableAsset[];
@@ -75,7 +75,6 @@ export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balanc
   balances: Record<AssetId, BalanceView>;
   catalog: CurrencyDescriptor[];
   onSelectAsset: (id: AssetId) => void;
-  onSelectAssetProgrammatic: (id: AssetId) => void;
   subMode: 'request' | 'address';
   onSubModeChange: (m: 'request' | 'address') => void;
   onLockChange?: (locked: boolean) => void;

@@ -1,6 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {POLL} from '../config/constants';
-import {M} from '../i18n';
 import {short, fmtTime} from '../lib/format';
 import {getEvmHistory, type EvmHistoryRow, type EvmReadFailure} from '../evm';
 import type {EvmKey} from '../evm';

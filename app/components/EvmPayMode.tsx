@@ -48,12 +48,11 @@ import {M} from '../i18n';
  * The camera also accepts a dpay payment link and a plain 0x address (classifyScan) — the same
  * three verdicts every rail's scanner answers.
  */
-export function EvmPayMode({identity, online, asset, assets, balance, gasWei, gasChecking = false, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onOpenAddressBook, onOpenReceipt, onSent, onRecheckBalances, recheckBusy = false}: {
+export function EvmPayMode({identity, online, asset, balance, gasWei, gasChecking = false, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onOpenAddressBook, onOpenReceipt, onSent, onRecheckBalances, recheckBusy = false}: {
   identity: Identity;
   online: boolean;
   /** The SELECTED EVM asset row — this mode only mounts while one is selected. */
   asset: SelectableAsset & {protocol: 'evm'};
-  assets: SelectableAsset[];
   /** The SELECTED token's last-known raw balance (null = never read; gates honestly). */
   balance: string | null;
   /** The chain's native (gas) balance in wei — null when never read (the D19 visibility leg). */
@@ -355,6 +354,9 @@ export function EvmPayMode({identity, online, asset, assets, balance, gasWei, ga
           </Pressable>
         )}
       </View>
+      {busy ? (
+        <Text testID="evm-pay-signing" style={S.dim2}>{M.evm.signingOffline}</Text>
+      ) : null}
       {err ? <Text testID="evm-pay-err" style={S.err}>{err}</Text> : null}
     </View>
   );
