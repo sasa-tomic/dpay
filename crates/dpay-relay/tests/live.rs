@@ -474,8 +474,8 @@ fn live_read_surface_at_user_principal() {
             .unwrap_or_else(|| panic!("networks must be an array: {cb}"));
         assert_eq!(
             networks.len(),
-            3,
-            "icp mainnet + icp testnet + solana mainnet: {cb}"
+            5,
+            "icp mainnet + icp testnet + solana mainnet + evm Arbitrum One + evm Ethereum: {cb}"
         );
         let mainnet = &networks[0];
         assert_eq!(mainnet["protocol"], "icp");
