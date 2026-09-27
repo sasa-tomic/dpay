@@ -140,11 +140,15 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
       return {ok: false, destination: text, message: M.evm.wrongChain(asset.chainName, chainNameOfShape(shape) ?? ''), tone: 'bad'};
     }
     if (selfAddress != null && text.toLowerCase() === selfAddress.toLowerCase()) {
-      return {ok: false, destination: text, message: M.evm.selfSend, tone: 'warn'};
+      // Self-sends are legal — warn, never block (the SOL sheet's rule).
+      return {ok: true, destination: text, message: M.evm.selfSend, tone: 'warn'};
     }
     const badSum = eip55ChecksumBad(text);
-    if (badSum === true) return {ok: false, destination: text, message: M.evm.badChecksum, tone: 'warn'};
-    if (badSum === null) return {ok: false, destination: text, message: M.evm.uncheckableChecksum, tone: 'warn'};
+    // D15.1: a checksum verdict is a WARNING with an explicit continue, never a block — a
+    // fully-lower/upper address is legal EVM with nothing to check, and a mismatch is the
+    // sender's typo to catch by reading the warning, not by a disabled button.
+    if (badSum === true) return {ok: true, destination: text, message: M.evm.badChecksum, tone: 'warn'};
+    if (badSum === null) return {ok: true, destination: text, message: M.evm.uncheckableChecksum, tone: 'warn'};
     return {ok: true, destination: text, message: M.evm.route(asset.chainName), tone: 'ok' as 'bad' | 'warn' | 'ok'};
   }, [address, selfAddress, asset.chainName]);
   const destination = resolved != null && resolved.ok ? resolved.destination : null;
