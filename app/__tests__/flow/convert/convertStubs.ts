@@ -99,6 +99,7 @@ import {deriveEvmKeypair, toChecksumAddress} from '../../../evm/identity';
 
 export {deriveSolanaKeypair, deriveAta, deriveEvmKeypair};
 export const eip55 = (lowerHex: string): string => toChecksumAddress(lowerHex);
+export const bs58Encode = (bytes: Uint8Array): string => bs58.encode(bytes);
 
 /** The IC account identifier (the 64-hex deposit-rail address the venue's IC payout layer
  *  requires) — derived through the SAME wasm core the app uses for its refund address. */
@@ -239,7 +240,7 @@ export type SolRpcStubCfg = {
   /** keyed getTransaction: the Circle forward tx hash → tokenDetail; anything else → swapDetail. */
   forwardTxHash?: string;
   tokenDetail?: SolanaTransactionDetail;
-  swapDetail?: SolanaTransactionDetail;
+  swapDetail?: unknown;
   /** cefi flows never broadcast — the stub refuses loudly instead of echoing a signature. */
   refuseSend?: boolean;
 };
