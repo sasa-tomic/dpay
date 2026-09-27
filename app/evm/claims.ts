@@ -625,8 +625,10 @@ function sameClaimBytes(a: EvmPayV1, b: EvmPayV1): boolean {
  * Outcomes are honest by construction: 'settled' carries the winning tx hash; 'needs-resign' is
  * the stale-nonce STATE (never thrown, never terminal) with the on-chain nonce attached;
  * 'failed' is terminal with the instructive reason; 'unknown' means a broadcast whose receipt
- * never confirmed (tx MAY land — the row is preserved with the hash for reconciliation) or, with
- * txHash null, a chain answer the preflight could not get (row stays queued, retryable).
+ * never confirmed (tx MAY land — the row is preserved with the hash for reconciliation), with
+ * txHash null a chain answer the preflight could not get (row stays queued, retryable), or a
+ * raced on-chain permit revert whose permit the token would still accept now (row re-queued,
+ * retryable — the attempts guard bounds it; a terminal fail there would abandon a live claim).
  */
 export async function settleEvmClaim(input: EvmSettleInput): Promise<EvmSettleResult> {
   const {key, req, claim, tokenAddress, rpc} = input;
@@ -846,7 +848,14 @@ export async function settleEvmClaim(input: EvmSettleInput): Promise<EvmSettleRe
     // the chain's current answer — the honest path, D24.2's failed-permit mapping.
     try {
       await rpc.ethCall(tokenAddress, permitData);
-      return fail(row, 'rejected', 'permit tx reverted on-chain (no revert reason available)');
+      // The raced edge: the tx reverted AT INCLUSION while the CURRENT state would accept the
+      // same permit (transient state has moved back). The permit may still be spendable, so a
+      // terminal 'failed' would abandon a live claim — re-queue for the next settle window
+      // instead. The attempts guard (stage 2) bounds the retries; the reverted tx's hash stays
+      // on the row as the reconcile handle (a revert burns gas, but sets NO token state).
+      row = {...row, status: 'queued', txHash: permitHash, failDetail: 'permit tx reverted on-chain, but the token would accept it now — re-queued'};
+      await saveEvmClaims(key, await replaceRow(key, row));
+      return {outcome: 'unknown', row, txHash: permitHash, reason: null, detail: row.failDetail, observedNonce: null};
     } catch (e) {
       return classifyPermitFailure(e);
     }

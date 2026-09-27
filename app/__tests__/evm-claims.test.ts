@@ -695,6 +695,50 @@ describe('evm/claims — settleEvmClaim', () => {
     expect(chain.sent).toHaveLength(1); // the permit was broadcast (and reverted on-chain)
   });
 
+  test('a raced permit revert whose token would accept the permit NOW re-queues (never terminal), attempts-guarded', async () => {
+    const chain = fundedChain(10n ** 16n);
+    const req = makeReq();
+    const claim = await fullClaim(req);
+    const realSend = chain.rpc.ethSendRawTransaction;
+    const realReceipt = chain.rpc.ethGetTransactionReceipt;
+    // Force one inclusion-time revert with NO token effect: gas burned, receipt 0x0, state
+    // untouched — the post-revert re-classify eth_call then SUCCEEDS (the raced edge, the one
+    // branch a terminal fail would get wrong: the claim is still live).
+    const forceRevertOnce = () => {
+      chain.rpc.ethSendRawTransaction = async (raw) => {
+        const txHash = '0x' + hex(keccak256(raw)); // a node's tx hash IS keccak256(raw)
+        chain.rpc.ethGetTransactionReceipt = async (h) =>
+          h === txHash ? {status: '0x0'} : realReceipt(h);
+        return txHash;
+      };
+    };
+    forceRevertOnce();
+    const first = await settle(chain, req, claim);
+    expect(first.outcome).toBe('unknown');
+    expect(first.row.status).toBe('queued'); // NOT terminal failed — the permit may still land
+    expect(first.row.attempts).toBe(1);
+    expect(first.txHash).toBe(first.row.txHash); // the reverted tx stays the reconcile handle
+    expect(first.detail).toMatch(/re-queued/);
+    // the same race, repeated, is bounded: the attempts guard ends in an honest terminal failure
+    forceRevertOnce();
+    expect((await settle(chain, req, claim)).outcome).toBe('unknown');
+    forceRevertOnce();
+    expect((await settle(chain, req, claim)).outcome).toBe('unknown');
+    const fourth = await settle(chain, req, claim);
+    expect(fourth.outcome).toBe('failed');
+    expect(fourth.reason).toBe('rejected');
+    expect(fourth.detail).toMatch(/attempts/);
+    expect(chain.balanceOf(payer.address)).toBe(ZCHFn(100n)); // nothing moved through any of it
+    // the racing chain was the ONLY thing failing: an honest chain settles the same claim bytes
+    chain.rpc.ethSendRawTransaction = realSend;
+    chain.rpc.ethGetTransactionReceipt = realReceipt;
+    const freshReq = makeReq({rid: 'cd'.repeat(16)}); // the failed rid is terminal — a fresh one
+    const freshClaim = await fullClaim(freshReq); // the permit nonce was never consumed on-chain
+    const ok = await settle(chain, freshReq, freshClaim);
+    expect(ok.outcome).toBe('settled');
+    expect(chain.balanceOf(merchant.address)).toBe(ZCHFn(7n));
+  });
+
   test('expired request refuses before any spend (D24.1)', async () => {
     const chain = fundedChain(10n ** 16n);
     const req = makeReq({iat: NOW - 600, exp: NOW - 1});
