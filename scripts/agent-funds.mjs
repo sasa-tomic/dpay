@@ -31,7 +31,7 @@
 //    command only points at it.
 //
 // Usage:
-//   node scripts/agent-funds.mjs           every wallet + every live balance + CHF totals (no decryption)
+//   node scripts/agent-funds.mjs           every wallet + every live balance + CHF totals + fees (no decryption)
 //   node scripts/agent-funds.mjs --seed    additionally print the SOL seed hex — DECRYPTS
 import {readFileSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
