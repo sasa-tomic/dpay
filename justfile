@@ -312,6 +312,17 @@ swap-venue-probe:
 evm-probe-mainnet:
     node scripts/evm-probe-zchf-mainnet.mjs
 
+# OPT-IN Arbitrum Sepolia read-only probe (NEEDS NETWORK, keyless, never in check/verify): the
+# D29 free-path gate (docs/specs/2026-09-26-evm-rail-spec.md §6) — asserts the truth file pins
+# chain 421614 with NO ZCHF (absent by design), the official public RPC answers and the chain
+# advances, and the relay halves of the dev-token env-row mechanism (503 evm-unconfigured /
+# 404 evm-unknown-chain / the DPAY_EVM_SEPOLIA_TOKEN catalog row + pipe forward when the env
+# is engaged). With the env set it also checks the deployed token answers as MockZCHF-shaped
+# ERC-20PermitLight (symbol/decimals/MINIMAL permit domain). Endpoint overridable via
+# DPAY_EVM_PROBE_ARB_SEPOLIA_URL.
+evm-probe-sepolia:
+    node scripts/evm-probe-arbitrum-sepolia.mjs
+
 # OPT-IN LIVE Trocador partner probe (NEEDS NETWORK + DPAY_TROCADOR_API_KEY, never in check/verify
 # — it makes LIVE key-gated calls to the real venue): GET /coins (the full coin/network vocabulary,
 # printed pretty NEXT TO the adapter's pinned codes from crates/dpay-relay/src/trocador.rs
