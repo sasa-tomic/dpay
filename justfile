@@ -303,6 +303,15 @@ ic-index-probe:
 swap-venue-probe:
     DPAY_IC_MAINNET=1 cargo nextest run -p dpay-relay --features agent -E 'binary(swap_venue_mainnet)' --no-capture
 
+# OPT-IN mainnet READ probe (NEEDS NETWORK, keyless, never in check/verify): the D30
+# custody-semantics tripwire (docs/specs/2026-09-26-evm-rail-spec.md §6) — for BOTH pinned ZCHF
+# deployments (Ethereum + Arbitrum One) it asserts symbol/decimals/balanceOf(0x0) and that
+# DOMAIN_SEPARATOR() equals the locally computed MINIMAL permit domain (ERC20PermitLight). A
+# mismatch blocks permit signing until app/evm/chains.ts is fixed. Endpoints overridable via
+# DPAY_EVM_PROBE_ETH_URL / DPAY_EVM_PROBE_ARB_URL.
+evm-probe-mainnet:
+    node scripts/evm-probe-zchf-mainnet.mjs
+
 # OPT-IN LIVE Trocador partner probe (NEEDS NETWORK + DPAY_TROCADOR_API_KEY, never in check/verify
 # — it makes LIVE key-gated calls to the real venue): GET /coins (the full coin/network vocabulary,
 # printed pretty NEXT TO the adapter's pinned codes from crates/dpay-relay/src/trocador.rs

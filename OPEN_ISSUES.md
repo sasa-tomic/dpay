@@ -677,7 +677,8 @@ mint account together; it replaced the five-requests-every-2.5-seconds fan-out
 assertion: it fails if the poll issues the old per-rail fan-out, if a history tick re-reads a
 transaction detail, or if a backgrounded app issues anything at all.
 
-## EVM rail — generic ERC-20 custody (filed 2026-09-26, UNSTARTED)
+## EVM rail — generic ERC-20 custody (filed 2026-09-26; BUILT 2026-09-26/27 on branch `evm-rail` —
+## spec `docs/specs/2026-09-26-evm-rail-spec.md` + its addenda; remaining: the live legs below)
 
 - **Why**: founder directive 2026-09-26 — "we should add ERC-20 support anyway", driven by ZCHF /
   Frankencoin (the OISY-parity ask: OISY holds ZCHF, dpay cannot). dpay settles ck twins and
@@ -735,6 +736,16 @@ transaction detail, or if a backgrounded app issues anything at all.
   `POLL.request` precedent) as new e2e flows; `just verify` + jest + relay catalog tests with the
   `dfx/catalog_truth.json` drift alarms; mainnet + Arbitrum rows live and ONE real on-chain ZCHF
   round trip recorded before any pilot claim.
+  **State 2026-09-27:** everything OFFLINE-buildable is DONE — e2e flows 213–217 drive the real
+  app against a local anvil through the real relay pipe; both drift alarms + wire pins are in;
+  `just verify` GREEN at `d88a69b`. The live legs are NOT done and are the reason this entry
+  stays: (a) `scripts/evm-probe-arbitrum-sepolia.mjs` (spec D29) was never written and no
+  Sepolia round trip is recorded (`docs/live-testing/networks.md` has no EVM note);
+  (b) the funded mainnet round trip (D31) — the acceptance gate for any pilot claim — needs
+  the agent EVM float registered in `funds/wallets.json` + a `docs/AGENT-FUNDS.md` derivation
+  note, dust ETH on Arbitrum One, and ZCHF on one chain. The D30 mainnet READ probe ran
+  same-day (spec addendum 1: minimal permit domain, no UIMultiplier, addresses verified);
+  `scripts/evm-probe-zchf-mainnet.mjs` pins it as a standing opt-in tripwire.
 
 ## UX swarm 2026-09-08 — three independent reviewers, live build
 
