@@ -110,6 +110,16 @@
   is not backed by the partner API. Its schema remains the best adapter template in the class
   (`refund_address` at create, network-aware routes, fixed+floating with `rate_id`).
 - **SideShift return shift: EURC→ICP leg DONE 2026-09-22 (attempt #9).** The stale-ok gate, the skipPreflight broadcast posture (817954d), and the destination byte-length classifier all live-proven in one session; shift `d61b2eec59d5e5d45d6b` settled 3.34293257 ICP against the 8.8 EURC deposit (independent ICRC-1 read: float ICP now 3.39528652), reconcile CLEAN, ledger rows 138–144. Full disposition under the closed entry below — nothing pending on this leg.
+- **Convert settle-probe budget parks records on `stuck` under real prod latency (2026-09-27
+  live finding; value 5 / effort S).** The flagship leg-1 ICPSwap swap settled ON-CHAIN at
+  ~+11 s (ICP block 38641313 -> VCHF payout 82188) while the app had already parked the record
+  on `stuck` at ~+9 s. The honest-unknown design held exactly as specced (no false done, the
+  correct "do not start a second swap" guidance, funds never at risk, the record flips on its
+  own), but a real boundary-node round trip under host contention beats the probe budget, and
+  the user eats a scary unknown for a swap that settles. Fix direction: probe the IC ledgers
+  once (or stagger the first settle attempts) BEFORE the first `stuck` park. Related
+  verification gap: the stuck -> done reopen flip has never been observed live on web (the
+  observing session died first); it is e2e-covered offline only.
 - **SideShift REVERSE leg: ICP→EURC DONE 2026-09-22 (attempt #10).** The registered-until-now-unexercised `sideshift-eurc` ICP-deposit direction is live-proven end to end: order created first-press in the real app (the IC-side destination GROUP is the composed route row `convert-dest-route-multihop:…:jupiter-usdc-eurc` — the cefi venue MERGES under it as mechanism `convert-dest-mech-sideshift-eurc`, D4); settle address verified on the surface BEFORE confirm = census EURC ATA owner `BzFNJ…` verbatim; refund = the float's own 64-hex identifier `9fac39d1…2279` verbatim in the venue shift object. Shift `c3644b54ba21a36dabd8`: 3.38 ICP (venue min 3.3384 at probe), rate 2.581167159763 locked at creation, deposit broadcast 22:40:25Z (ICP block 38520213, the app's IC send sheet), venue settle transfer `sol:5uqg3tu…tcB8a` hit the ATA 22:41:02Z — **SETTLED ~37 s after broadcast** (the venue watches the IC ledger directly). Independent on-chain read: EURC ATA 0.474071 → **9.198416** = +8.724345 = the order settleAmount EXACTLY; float ICP 3.39528652 → 0.01518652 = −3.3801 (deposit + 0.0001 ledger fee). Reconcile 18 pairs CLEAN, ledger rows 145–147. The EUR rail is now a PROVEN TWO-WAY bridge on both legs; nothing pending on this leg.
 - **Route-B / CCTP USD leg (2026-09-21, cctp-live session): live-driven; the ckERC20 withdraw
   FAILED-and-was-refunded — value recovered, cause uninvestigated.** Real-app legs that worked:
