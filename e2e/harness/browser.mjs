@@ -326,6 +326,11 @@ function writeDiscoveryAtomic(path, data) {
 
 let _lockHolds = 0;
 let _exitHookInstalled = false;
+// Discovery files of shells THIS PROCESS launched and may still own. The sync `exit` hook
+// unlinks them (best-effort) because the async lease teardown that normally does it loses to
+// run.mjs's 6s force-exit timer on a SIGTERM teardown — a stale discovery file would otherwise
+// survive every abnormal exit (the next gate probe rejects it, but tidy is tidy).
+const _launchedDiscovery = new Map(); // key -> discoveryPath
 
 function readLockOwner() {
   try { return JSON.parse(readFileSync(LOCK_OWNER_FILE, 'utf8')); } catch { return null; }
@@ -343,6 +348,9 @@ function installGateExitHook() {
     const owner = readLockOwner();
     if (owner?.pid === process.pid) {
       try { rmSync(LOCK_DIR, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+    for (const discoveryPath of _launchedDiscovery.values()) {
+      try { unlinkSync(discoveryPath); } catch { /* already gone or raced */ }
     }
   });
 }
@@ -574,6 +582,7 @@ async function openLease({ key, executablePath, extraArgs }) {
   // SIGKILLs the shell from the sync exit handler, so a launched shell can never outlive us.
   trackChild(pid);
   writeDiscoveryAtomic(discoveryPath, { pid, port, started: Date.now() });
+  _launchedDiscovery.set(key, discoveryPath);
   console.log(`[chrome-gate] launched chrome-headless-shell pid=${pid} port=${port} (machine-global singleton; lock held for the run's browser lifetime)`);
   return {
     key, conns: 0, pid, port, launched: true,
@@ -592,6 +601,7 @@ async function openLease({ key, executablePath, extraArgs }) {
           try { process.kill(pid, 'SIGKILL'); } catch { /* ESRCH: already dead */ }
         }
       } finally {
+        _launchedDiscovery.delete(key);
         try { unlinkSync(discoveryPath); } catch { /* raced */ }
         releaseGateLockSync();
       }
