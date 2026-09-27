@@ -73,8 +73,9 @@ The old recipe names (`just agent-balance`, `just agent-funds --seed`, `just age
 `just funds` is the one command a fresh session runs first: it prints every wallet the agent
 controls (from the committed `funds/wallets.json` registry), each wallet's ADDRESS, and every live
 balance measured at that moment. `just funds balance` remains the only balance statement for the IC
-float; the overview renders it verbatim rather than reimplementing it. `just funds seed sol-float`
-DECRYPTS and prints the SOL seed hex — same discipline as `just funds seed icp-float`: only
+float; the overview measures it by spawning the same child with `--json` and re-renders its exact
+human format — one balance implementation per chain, not a reimplementation. `just funds seed
+sol-float` DECRYPTS and prints the SOL seed hex — same discipline as `just funds seed icp-float`: only
 immediately before an approved spend.
 
 `funds/` is the version-controlled record, and using it is a HARD rule (CLAUDE.md): every movement
