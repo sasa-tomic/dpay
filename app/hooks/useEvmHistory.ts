@@ -56,9 +56,9 @@ export function useEvmHistory(
         let droppedTotal = 0;
         let sawFailure: EvmReadFailure | null = null;
         const okRows: Txn[] = [];
-        const failedLegs = new Set<string>(); // rows these legs own stay the last truth
+        const failedLegs = new Set<Txn['assetId']>(); // rows these legs own stay the last truth
         for (const {k, out} of results) {
-          const legId = `evm:${k.chainId}:${k.token}`;
+          const legId: Txn['assetId'] = `evm:${k.chainId}:${k.token}`;
           if (out.kind === 'offline') continue; // that chain's rail is off — nothing was read
           if (out.kind === 'error') {
             sawFailure = sawFailure ?? out.failure;
