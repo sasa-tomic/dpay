@@ -2,8 +2,9 @@
  * Flow 12 settings — the jest twin of `e2e/tests/12-settings.mjs`. (SettingsRelayList /
  * SettingsSolanaRpc tests pin the panels; this ports the live sheet walk.)
  *
- * The header shows ONLY the username (no hex); the relay input holds the ACTIVE relay (cold-loaded
- * through the location stub's `?relay=` — the same surface the browser uses), normalizes on Apply,
+ * The header shows ONLY the username (no hex); the relay input holds the ACTIVE relay (the baked
+ * RELAY_DEFAULT — the harness fetch rewrite transparently redirects it to the test relay; `?relay=`
+ * is a browser-BUILD layer (e2e/web/shims.ts), not app code, so jest boots on the default), normalizes on Apply,
  * persists across reload, and applies as a LIST (one address per line, order = priority); the
  * Solana endpoint row refuses plain http by name, accepts mainnet https, and treats EMPTY as a real
  * value (restores the built-in); reset shows a confirmation and only confirming clears the identity.
@@ -16,8 +17,8 @@ import {
   assertEq, assertIncludes, chooseHomeCurrencyIfPresent, generateKeypair, faucetAccount,
   selectDemoAsset, waitForWallet,
 } from '../harness/lib';
-import {relayBaseURL} from '../harness/relayClient';
 import {freshContext} from '../onboard/helpers';
+import {RELAY_DEFAULT} from '../../../relayConfig';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {
@@ -27,8 +28,8 @@ const AsyncStorage = require('@react-native-async-storage/async-storage') as {
 
 const USERNAME = 'jest-set';
 
-/** onboardWallet's seeded fast path, booted through a `?relay=` URL (the twin's setup contract). */
-async function onboardWithRelayParam(): Promise<Mount> {
+/** onboardWallet's seeded fast path (the same seed the harness sugar plants). */
+async function onboardSeeded(): Promise<Mount> {
   const kp = await generateKeypair();
   const fund = await faucetAccount(kp.publicHex);
   expect(fund.ok).toBe(true);
@@ -39,7 +40,7 @@ async function onboardWithRelayParam(): Promise<Mount> {
     at: {walkthroughDone: now, recoverySaved: now, flowUnderstood: now},
     seen: ['firstRunPractice'],
   }));
-  const m = await mountApp({url: `/?relay=${encodeURIComponent(relayBaseURL())}`});
+  const m = await mountApp();
   await chooseHomeCurrencyIfPresent(m);
   await waitForWallet(m, {timeoutMs: 10_000});
   await selectDemoAsset(m);
@@ -49,7 +50,7 @@ async function onboardWithRelayParam(): Promise<Mount> {
 describe('flow 12 — settings', () => {
   it('username-only header; relay list edits + persists; Solana endpoint refuses http and accepts empty; reset confirms', async () => {
     await freshContext();
-    const m = await onboardWithRelayParam();
+    const m = await onboardSeeded();
     const identity = await AsyncStorage.getItem('dpay.identity.v1');
     const accountHex = (JSON.parse(identity ?? '{}') as {publicHex?: string}).publicHex ?? '';
     expect(accountHex).toHaveLength(64);
@@ -63,8 +64,10 @@ describe('flow 12 — settings', () => {
     await m.driver.click('btn-settings', {timeoutMs: 4000});
     await m.driver.click('btn-advanced-toggle', {timeoutMs: 4000});
 
-    // 3. The relay input holds the relay URL the app is using; custody honesty lives here too.
-    const relay = relayBaseURL();
+    // 3. The relay input holds the relay URL the app is using (RELAY_DEFAULT — every request to it
+    // is rewritten to the test relay by the harness, so edits OF this URL stay on the test relay);
+    // custody honesty lives here too.
+    const relay = RELAY_DEFAULT;
     assertEq(m.driver.readInputValue('settings-relay'), relay, 'settings-relay should hold the active relay URL');
     await m.driver.findByTestID('privacy-policy', {timeoutMs: 4000});
     const aboutText = m.driver.readText('about-custody');

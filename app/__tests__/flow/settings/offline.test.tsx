@@ -7,6 +7,8 @@
  * port-policy artifact), the header shows the offline indicator, and the wallet still renders.
  */
 import {describe, it, expect} from '@jest/globals';
+
+const g = globalThis as unknown as Record<string, unknown>;
 import {
   goOffline, onboardWallet, openBalances, waitForWallet,
 } from '../harness/lib';
@@ -16,20 +18,21 @@ describe('flow 13 — offline', () => {
     // Onboard against the GOOD relay (∂100 — the wallet works when online).
     const m = await onboardWallet('e2e-offline');
 
-    // Retarget at a GENUINELY-DEAD relay and record the underlying request failures.
-    await goOffline(m);
-    m.driver.collectFetchFailures();
-    const failures = (): Array<{url: string; error?: string}> => m.driver.fetchFailures;
+    // Retarget at a GENUINELY-DEAD relay and record the underlying request failures. Only THIS
+    // origin's failures count: the snapshot's earlier entries belong to the onboarding churn.
+    const {deadRelay} = await goOffline(m);
 
     // Capability fail-closed: no DEMO faucet advertised while the relay is unreachable.
     await openBalances(m);
     expect(m.driver.isPresent('btn-topup')).toBe(false);
 
     // The RIGHT-REASON gate: the balance poll must have failed with a CONNECTION-class error.
-    let failed: Array<{url: string; error?: string}> = [];
-    for (let i = 0; i < 20 && failed.length === 0; i++) {
-      failed = failures().filter((f) => f.url.includes('/api/v1/balances'));
-      if (failed.length === 0) await new Promise((r) => setTimeout(r, 50));
+    // (Re-collect per iteration: the driver's snapshot only advances when collected.)
+    let failed: Array<{url: string; origin: string; error?: string}> = [];
+    for (let i = 0; i < 40 && failed.length === 0; i++) {
+      m.driver.collectFetchFailures();
+      failed = m.driver.fetchFailures.filter((f) => f.url.includes('/api/v1/balances') && f.origin === deadRelay);
+      if (failed.length === 0) await new Promise((r) => setTimeout(r, 100));
     }
     expect(failed.length > 0).toBe(true);
     const errText = failed[0].error ?? '';
