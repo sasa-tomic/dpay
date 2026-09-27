@@ -84,6 +84,31 @@ services:
       # Per-call upstream timeout for the proxy, ms (default 10000; 0 refused at startup).
       DPAY_EVM_TIMEOUT_MS: ${DPAY_EVM_TIMEOUT_MS:-}
 
+      # The SideShift partner-key proxy (POST /api/v1/sideshift/quotes + /sideshift/shifts/fixed).
+      # BOTH credentials together; either unset → the routes still register but answer 503 naming
+      # the variable (legal deploy state). SECRET — never logged, never echoed, never committed.
+      DPAY_SIDESHIFT_SECRET: ${DPAY_SIDESHIFT_SECRET:-}
+      DPAY_SIDESHIFT_AFFILIATE_ID: ${DPAY_SIDESHIFT_AFFILIATE_ID:-}
+      # Optional API base override (default https://sideshift.ai/api/v2 — the offline loop points
+      # it at a stub; leave unset in prod).
+      DPAY_SIDESHIFT_API_BASE: ${DPAY_SIDESHIFT_API_BASE:-}
+
+      # The Trocador partner key (POST /api/v1/trocador/*). Unset → the routes answer 503 naming
+      # the variable. SECRET — decrypt from sops into the env, never a plaintext .env (see
+      # .env.example). Optional API base override; the default is the verified live host.
+      DPAY_TROCADOR_API_KEY: ${DPAY_TROCADOR_API_KEY:-}
+      DPAY_TROCADOR_API_BASE: ${DPAY_TROCADOR_API_BASE:-}
+
+      # The public origin stamped into Trocador webhook params (optional — derived from the
+      # request when unset). Set it when the derived origin is wrong for the tunnel.
+      DPAY_PUBLIC_ORIGIN: ${DPAY_PUBLIC_ORIGIN:-}
+      # Whether X-Forwarded-For may name the client IP for the agreement's per-client bounds
+      # (default false). The tunnel IS the proxy — set true only with that understood.
+      DPAY_TRUST_PROXY: ${DPAY_TRUST_PROXY:-}
+      # Optional per-client bounds, calls/minute (defaults 6 and 4; 0 refused at startup):
+      DPAY_TROCADOR_RATE_PER_MIN: ${DPAY_TROCADOR_RATE_PER_MIN:-}
+      DPAY_TROCADOR_TRADE_PER_MIN: ${DPAY_TROCADOR_TRADE_PER_MIN:-}
+
       # The Trocador partner-agreement compliance records (access log + order store). SET the
       # DSN in prod — it is REQUIRED for durable records: this stack mounts NO volume, so the
       # JSONL fallback (unset) writes into the ephemeral container cwd and dies on every
