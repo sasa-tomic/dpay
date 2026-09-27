@@ -14,8 +14,9 @@ payment code reads this first and updates it with findings in the SAME session.
    and append the dead end to the log with the date.
 3. **Real money.** The agent float is REAL money: float policy lives in `CLAUDE.md` (CHF 25
    ceiling, <=CHF 2 auto-spend, smallest amount the platform allows, never retry failed or
-   abnormally-slow transfers). Measure, never assume: `just funds`. Ledger every movement via
-   `scripts/funds.mjs` into `funds/ledger.jsonl`.
+   abnormally-slow transfers). Measure, never assume: `just funds`. AI agents MUST USE `just funds`
+   to record ANY MOVEMENTS THEY MAKE (HARD HARD RULE) — `just funds add` appends to
+   `funds/ledger.jsonl`, `just funds doc` re-renders.
 4. **Round trip.** The acceptance bar is a real round trip per affected path (convert there and
    back, pay and be paid back), driven through the real UI, adversarially where the venue itself
    produces refusals. Blocked: skip, continue the session, disclose in the final report.
