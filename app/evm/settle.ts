@@ -34,6 +34,7 @@ import {
 import {deriveEvmKeypair} from './identity';
 import {isEvmEndpointRefusal, isEvmRelayPathDown, isEvmWrongChainError} from './errors';
 import {
+  ethBlockNumber,
   ethCall,
   ethEstimateGas,
   ethGasPrice,
@@ -45,6 +46,7 @@ import {
   ethSendRawTransaction,
   type EvmLog,
 } from './rpc';
+import {EVM_HISTORY_MAX_PAGES, EVM_LOG_PAGE_SIZE} from './constants';
 import {evmRpcUrl, evmRpcUrls} from './endpoints';
 import {ensureChain, type EvmKey} from './service';
 import {toHex0x} from './tx';
@@ -105,6 +107,24 @@ export function adaptEvmRpc(chainId: number, signal?: AbortSignal): EvmRpcLike {
   };
 }
 
+/** The log scans' block floor. Providers cap the eth_getLogs block RANGE (the history walk pages
+ *  under the same cap, D9), and an unclamped fromBlock 0 asks for a WHOLE chain in one request —
+ *  which strict providers refuse, so the re-entry scan failed closed exactly where it mattered.
+ *  The floor is the history walk's own recent window (tip − MAX_PAGES × PAGE_SIZE); it is a
+ *  range-shaped answer, never a correctness one: the token's permit nonce is the real double-spend
+ *  guard, so a Transfer older than the window degrades to the honest needs-resign / still-pending
+ *  paths, never to a second spend. An unreadable tip degrades to 0 — the scan then either succeeds
+ *  on a lenient provider or fails LOUDLY on a strict one (never silently skipped). */
+async function evmLogFloor(urls: readonly string[], signal?: AbortSignal): Promise<number> {
+  try {
+    const tip = Number(BigInt(await ethBlockNumber(urls, {signal})));
+    if (!Number.isFinite(tip) || tip < 1) return 0;
+    return Math.max(1, tip - EVM_HISTORY_MAX_PAGES * EVM_LOG_PAGE_SIZE);
+  } catch {
+    return 0; // fail-closed honesty: unclamped, the provider's own refusal is the answer
+  }
+}
+
 /**
  * The seam's settle wrapper (the claims stream's SEAM CONTRACT, D24): resolve the merchant key
  * from the device seed, the token contract from the registry, the queue key from the device
@@ -132,6 +152,8 @@ export async function settleEvmClaimForDevice(
     claim,
     tokenAddress,
     rpc: adaptEvmRpc(req.chainId, signal),
+    // the re-entry scan's clamped floor (strict getLogs ranges refuse fromBlock 0)
+    fromBlock: await evmLogFloor(urls, signal),
   });
 }
 
@@ -172,7 +194,9 @@ function addressTopic(address: string): string {
  * Did the payment ALREADY land? The payer-side claim check: the first on-chain
  * `Transfer(owner → to, amount)` log since `fromBlock`, as its tx hash — null when nothing
  * matches (read-only; nothing here spends). Mirrors the engine's own re-entry scan (D24.1's
- * duplicate check) so both sides of a hand-off ask the chain the same question.
+ * duplicate check) so both sides of a hand-off ask the chain the same question. `fromBlock`
+ * (default 0) is clamped UP to the recent-window floor — a strict provider's getLogs range
+ * limit must not fail the check closed (see `evmLogFloor`).
  */
 export async function findEvmSettledTransfer(
   chainId: number,
@@ -189,10 +213,12 @@ export async function findEvmSettledTransfer(
   const amount = BigInt(rawAmount);
   const ownerL = owner.toLowerCase();
   const toL = to.toLowerCase();
+  // The caller's floor (a claim-arrival block, when one is known) wins; the window is the minimum.
+  const startBlock = Math.max(fromBlock, await evmLogFloor(urls, signal));
   const logs = await ethGetLogs(urls, {
     address: tokenAddress,
     topics: [TRANSFER_EVENT_TOPIC, addressTopic(ownerL), addressTopic(toL)],
-    fromBlock: '0x' + BigInt(fromBlock).toString(16),
+    fromBlock: '0x' + BigInt(startBlock).toString(16),
     toBlock: 'latest',
   }, {signal});
   for (const log of logs) {

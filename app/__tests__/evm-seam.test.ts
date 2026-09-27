@@ -212,4 +212,48 @@ describe('evm seam — configured (isolated registry, mocked fetch)', () => {
     expect(read.gas[31337]).toEqual({kind: 'error', failure: 'refused'});
     expect(calls.every((c) => c.method === 'eth_chainId')).toBe(true);
   });
+
+  test('the payer settled-check clamps its getLogs floor to the recent window (strict ranges)', async () => {
+    const seam = configuredSeam();
+    const bodies: Array<{method: string; params: Array<Record<string, string>>}> = [];
+    (globalThis as unknown as {fetch: unknown}).fetch = (async (url: string | URL, init?: {body?: string}) => {
+      const u = String(url);
+      const parsed = JSON.parse(init?.body ?? '{}') as {method?: string; params?: Array<Record<string, string>>};
+      bodies.push({method: parsed.method ?? '?', params: parsed.params ?? []});
+      if (!u.startsWith('https://stub.test')) throw new Error(`NON-RAIL request observed: ${u}`);
+      const route: Record<string, string> = {eth_chainId: '0x7a69', eth_blockNumber: '0x186a0'}; // tip 100000
+      if (parsed.method === 'eth_getLogs') return res(200, envelope([]));
+      const entry = route[parsed.method ?? ''];
+      if (entry === undefined) throw new Error(`no route for ${parsed.method}`);
+      return res(200, envelope(entry));
+    }) as typeof fetch;
+    const found = await seam.findEvmSettledTransfer(31337, TOKEN, '0x' + '22'.repeat(20), '0x' + '33'.repeat(20), '1');
+    expect(found).toBeNull();
+    const getLogs = bodies.find((b) => b.method === 'eth_getLogs');
+    expect(getLogs).toBeDefined();
+    // tip 100000 − MAX_PAGES(10) × PAGE_SIZE(2000) = 80000 — NOT 0: a strict provider's getLogs
+    // range limit must not fail the re-entry / settled-check closed (the fromBlock-0 bug).
+    expect(getLogs!.params[0].fromBlock).toBe('0x' + (100000 - 10 * 2000).toString(16));
+    expect(getLogs!.params[0].toBlock).toBe('latest');
+    expect(bodies.map((b) => b.method)).toEqual(['eth_chainId', 'eth_blockNumber', 'eth_getLogs']);
+  });
+
+  test('an unreadable tip degrades the clamp to the raw floor: the scan runs unclamped, never skipped', async () => {
+    const seam = configuredSeam();
+    const bodies: Array<{method: string; params: Array<Record<string, string>>}> = [];
+    (globalThis as unknown as {fetch: unknown}).fetch = (async (url: string | URL, init?: {body?: string}) => {
+      const u = String(url);
+      const parsed = JSON.parse(init?.body ?? '{}') as {method?: string; params?: Array<Record<string, string>>};
+      bodies.push({method: parsed.method ?? '?', params: parsed.params ?? []});
+      if (!u.startsWith('https://stub.test')) throw new Error(`NON-RAIL request observed: ${u}`);
+      if (parsed.method === 'eth_blockNumber') throw new Error('tip read refused'); // the fallback leg
+      if (parsed.method === 'eth_getLogs') return res(200, envelope([]));
+      if (parsed.method === 'eth_chainId') return res(200, envelope('0x7a69'));
+      throw new Error(`no route for ${parsed.method}`);
+    }) as typeof fetch;
+    const found = await seam.findEvmSettledTransfer(31337, TOKEN, '0x' + '22'.repeat(20), '0x' + '33'.repeat(20), '1');
+    expect(found).toBeNull(); // the scan still RAN — fail-closed honesty preserved
+    const getLogs = bodies.find((b) => b.method === 'eth_getLogs');
+    expect(getLogs!.params[0].fromBlock).toBe('0x0');
+  });
 });
