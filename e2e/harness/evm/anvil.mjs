@@ -50,7 +50,9 @@ export const ANVIL_DEPLOYER = eip55(evmAddressOf(ANVIL_ACCOUNT_0_PRIV)); // 0xf3
 // The fixed dev seed — deterministic, DOCUMENTED, valueless (a scratch local chain only; never a
 // secret). Deriving it from a phrase (instead of a bare magic literal) keeps it out of the "looks
 // like a key" class while staying stable across machines, so anvil.json's device address is too.
-const DEV_SEED = Buffer.from(sha256(Buffer.from('dpay evm anvil dev seed — valueless, offline only', 'utf8'))).toString('hex');
+// Exported so live-chain scripts (evm-sepolia-roundtrip) can derive the SAME seed's further
+// indices — a harness-derived counterparty — without re-stating the phrase.
+export const DEV_SEED = Buffer.from(sha256(Buffer.from('dpay evm anvil dev seed — valueless, offline only', 'utf8'))).toString('hex');
 // Defaults mirroring D26.3: 10 finney of gas + a working ZCHF balance to pay with.
 export const DEV_DEFAULT_ETH_WEI = 10_000_000_000_000n;    // 10 finney = 0.01 ETH
 export const DEV_DEFAULT_ZCHF_RAW = 50_000n * 10n ** 18n;  // 50,000 ZCHF
