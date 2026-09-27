@@ -9,12 +9,13 @@
  * no Approve click; the signed envelope is stashed by the shim on __DPAY_TEST_NFC_APPROVED_WIRE),
  * and an error event surfaces the honest "Tap failed" terminal.
  *
- * Not ported (browser-only): the Done-button dismiss (a DOM querySelector in the e2e flow; the
- * re-arm path it enables is M2 batch D's full-parity concern).
+ * Not ported (browser-only): the screenshots; the Done-dismiss + re-arm phase walk IS ported here
+ * (batch D's full-parity leg — clickByAria + the pure-phase walk over the re-armed session).
  */
 import {describe, it, expect} from '@jest/globals';
 import {armNfcCard, assert, onboardWallet} from '../harness/lib';
 import type {Mount} from '../harness/lib';
+import {clickByAria, nfcPhaseWalk} from './h';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
@@ -23,6 +24,8 @@ const dispatch = async (m: Mount, event: NfcEvent): Promise<void> => {
   await armNfcCard(m, 'ic');
   (g.__DPAY_TEST_NFC_SESSION as (e: NfcEvent) => void)(event);
 };
+/** The walker-facing closure: the mount is closed over, the walker passes only the event. */
+const dispatchFrom = (m: Mount) => async (event: NfcEvent): Promise<void> => dispatch(m, event);
 
 describe('flow 11 — NFC tap phases through the real event bus', () => {
   it('linking → request AUTO-SIGNS → exchanging; an error surfaces the honest terminal', async () => {
@@ -62,6 +65,14 @@ describe('flow 11 — NFC tap phases through the real event bus', () => {
     // Error terminal: the honest failure state, no fake success.
     await dispatch(m, {type: 'error', role: 'card', reason: 'jest: end the auto-sign session'});
     expect(await m.driver.waitForText('Tap failed', {timeoutMs: 5000})).toBe(true);
+
+    // Done re-arms for the pure-phase walk (batch D's full-parity leg: the terminal escape).
+    expect(await clickByAria(m, 'Done')).toBe('Done');
+    await m.driver.waitGone('nfc-status', {timeoutMs: 5000});
+
+    // PURE-PHASE WALK (post-terminal re-arm, no request involved): linking → exchanging →
+    // settling — the envelope has left the NFC transport; ledger polling now owns the outcome.
+    await nfcPhaseWalk(m, dispatchFrom(m), ['linking', 'exchanging', 'settling'], {statusId: 'nfc-status'});
 
     await m.unmount();
   }, 90_000);

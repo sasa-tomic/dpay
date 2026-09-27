@@ -85,6 +85,11 @@ async function untilSeam<T>(read: () => T | null, what: string, tries = 100): Pr
  *  card seam, stash sig + settle-gate fixture (unless seedDetail=false), dismiss the overlay,
  *  open the merchant scanner, scan the signed solpay. */
 async function merchantCycle(m: Mount, amount: string, splice: ((d: Record<string, any>) => void) | null = null, seedDetail = true): Promise<{solpayUri: string; sig: string}> {
+  // Clear BOTH cycle stashes up front: the reader re-arms on btn-sol-req-make and the card
+  // re-signs on request arrival — a stash from the previous leg would pass the shape check while
+  // failing the merchant's strict verify cross-leg (same-latency trap as the e2e page reload).
+  delete g.__DPAY_SOL_REQ_LAST;
+  delete g.__DPAY_SOL_NFC_LAST;
   await m.driver.click('tab-receive', {timeoutMs: 5000});
   await m.driver.findByTestID('sol-req-amount-input', {timeoutMs: 5000});
   await m.driver.type('sol-req-amount-input', amount, {timeoutMs: 5000});
@@ -123,6 +128,8 @@ async function merchantCycle(m: Mount, amount: string, splice: ((d: Record<strin
   await m.driver.findByTestID('sol-req-qr', {timeoutMs: 5000});
   await clickByAria(m, "Scan the payer's signed code", []);
   expect(await m.driver.waitForText("Scan the payer's signed code", {timeoutMs: 5000})).toBe(true);
+  // The camera seam arms ASYNC after the scanner mounts — wait for the listener, then inject.
+  await lib().armPayScan(m);
   (g.__DPAY_TEST_SCAN as (v: string) => void)(solpayUri);
   return {solpayUri, sig};
 }
@@ -201,6 +208,7 @@ describe('flow 51 — SOL v2 merchant broadcast (the full cycle through SolRecei
     await m.driver.findByTestID('sol-req-qr', {timeoutMs: 5000});
     await clickByAria(m, "Scan the payer's signed code", []);
     expect(await m.driver.waitForText("Scan the payer's signed code", {timeoutMs: 5000})).toBe(true);
+    await lib().armPayScan(m); // the camera seam arms async after the scanner mounts
     (g.__DPAY_TEST_SCAN as (v: string) => void)(solpayUri);
 
     await m.driver.findByTestID('sol-req-status', {timeoutMs: 15000});
@@ -298,6 +306,7 @@ describe('flow 74 — SOL v2 USDC full cycle (signSplPayment / TransferChecked e
     await m.driver.findByTestID('sol-req-qr', {timeoutMs: 5000});
     await clickByAria(m, "Scan the payer's signed code", []);
     expect(await m.driver.waitForText("Scan the payer's signed code", {timeoutMs: 5000})).toBe(true);
+    await lib().armPayScan(m); // the camera seam arms async after the scanner mounts
     (g.__DPAY_TEST_SCAN as (v: string) => void)(solpayUri);
 
     await m.driver.findByTestID('sol-req-status', {timeoutMs: 15000});
@@ -341,6 +350,11 @@ describe('flow 138 — the settle gate\u2019s three verdicts, each reaching the 
       },
     }));
     const legB = await merchantCycle(m, '0.03', null, false);
+    for (let i = 0; i < 40; i++) {
+      if (m.driver.bodyText().includes('Broadcasting')) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    console.log('LEG-B body:', m.driver.bodyText().replace(/\s+/g, ' ').slice(0, 420), '| reads:', handles.getTxReads, '| sig set:', handles.sig != null);
     expect(await m.driver.waitForText('Broadcasting', {timeoutMs: 15000})).toBe(true);
     // Let several polls land while unreadable — counted by the stub, not slept through.
     for (let i = 0; i < 100 && handles.getTxReads < 8; i++) await new Promise((r) => setTimeout(r, 50));
