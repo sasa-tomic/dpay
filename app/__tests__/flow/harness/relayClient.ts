@@ -12,8 +12,6 @@
  * identities, so there is no cross-test account state to collide.
  */
 
-type G = Record<string, unknown>;
-
 export function relayBaseURL(): string {
   const u = process.env.DPAY_JEST_RELAY_URL;
   if (!u || !u.startsWith('http')) {
@@ -100,9 +98,10 @@ export async function icpCatalog(timeoutMs = 4000): Promise<Array<{currency: num
   const r = await request('GET', '/api/v1/currencies', {timeoutMs});
   if (!r.ok) throw new Error(`GET currencies → HTTP ${r.status}`);
   const j = await r.json() as {networks?: Array<{protocol: string; environment: string; assets: unknown[]}>};
-  if (!Array.isArray(j?.networks)) throw new Error(`GET currencies: unexpected body (want v2 {networks:[…]})`);
+  const networks = j?.networks;
+  if (!Array.isArray(networks)) throw new Error('GET currencies: unexpected body (want v2 {networks:[…]})');
   const section = (environment: string) =>
-    j.networks.find((n) => n.protocol === 'icp' && n.environment === environment)?.assets ?? [];
+    networks.find((n) => n.protocol === 'icp' && n.environment === environment)?.assets ?? [];
   return [...section('mainnet'), ...section('testnet')] as Array<{currency: number; ledger?: string; fee?: string} & Record<string, unknown>>;
 }
 

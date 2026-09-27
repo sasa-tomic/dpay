@@ -28,7 +28,7 @@ describe('flow 04 — deposit copy: the real address reaches the clipboard', () 
     g.__DPAY_TEST_CLIPBOARD = '';
     await m.driver.click('btn-deposit-copy', {timeoutMs: 5000});
     await m.driver.waitForFunction(
-      () => (g.__DPAY_TEST_CLIPBOARD as string | undefined)?.length > 0,
+      () => ((g.__DPAY_TEST_CLIPBOARD as string | undefined)?.length ?? 0) > 0,
       {timeoutMs: 4000, label: 'the clipboard seam receives the write'},
     );
     expect(g.__DPAY_TEST_CLIPBOARD).toBe(address);

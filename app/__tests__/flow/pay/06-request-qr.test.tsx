@@ -9,7 +9,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {
-  accountOf, assertEq, assertIncludes, DpayCore, onboardSlowPath, selectDemoAsset, waitForWallet,
+  accountOf, assertEq, DpayCore, onboardSlowPath, selectDemoAsset, waitForWallet,
 } from '../harness/lib';
 import {mountApp} from '../harness/mount';
 

@@ -1,7 +1,6 @@
-import React from 'react';
-
-/**
- * Flow-tier recorder mock for `react-native-qrcode-svg` (flow-project moduleNameMapper only —
+// The JSX transform needs no React import under the automatic runtime; a component that renders
+// null needs nothing else.
+/** Flow-tier recorder mock for `react-native-qrcode-svg` (flow-project moduleNameMapper only —
  * domain tests keep the real SVG renderer). Renders nothing and stashes the EXACT encoded value
  * on `globalThis.__DPAY_QR_LAST` on every render — the SAME seam name and semantics as the e2e
  * web shim (`e2e/web/qrcode.tsx`), so ported flows read the identical global they read in the

@@ -30,7 +30,7 @@ const g = globalThis as unknown as G;
 // capability-guarded (`typeof globalThis.location === 'undefined'` etc.), so aliasing window →
 // globalThis simply lets the e2e shims' `typeof window !== 'undefined'` guards and seam stashes
 // behave like the browser's.
-if (typeof window === 'undefined') {
+if ((globalThis as unknown as {window?: unknown}).window === undefined) {
   g.window = globalThis;
 }
 
@@ -53,14 +53,14 @@ console.error = (...args: unknown[]) => {
 // history stub below carrying the real routing code. Everything the 'web' branch touches is
 // capability-guarded (navigator/matchMedia/ethereum degrade to their guarded fallbacks).
 jest.mock('react-native/Libraries/Utilities/Platform', () => {
-  const mod = jest.requireActual('react-native/Libraries/Utilities/Platform');
+  const mod = jest.requireActual('react-native/Libraries/Utilities/Platform') as Record<string, unknown> & {__esModule?: boolean; default?: Record<string, unknown>};
   const base = mod && typeof mod === 'object' && 'default' in mod ? mod.default : mod;
   // Copy via property DESCRIPTORS so Platform's getter-defined props (isPad, Version, …) stay
   // lazy instead of being invoked at mock time, then flip the OS.
-  const mocked = Object.create(Object.getPrototypeOf(base ?? {}), Object.getOwnPropertyDescriptors(base ?? {}));
+  const mocked = Object.create(Object.getPrototypeOf(base ?? {}), Object.getOwnPropertyDescriptors(base ?? {})) as Record<string, unknown> & Record<string, any>;
   mocked.OS = 'web';
   if (typeof mocked.select !== 'function') {
-    mocked.select = (spec: Record<string, unknown>) => spec[mocked.OS];
+    mocked.select = (spec: Record<string, unknown>) => spec['web'];
   }
   // Mirror the REAL module's export shape ({default} + __esModule — consumers do
   // `require('…/Platform').default`), so both named and default import styles keep working.
@@ -257,8 +257,11 @@ export function keydownHandlers(): Array<(e: {key: string}) => void> {
 }
 
 // --- 7. per-test lifecycle (registered by jest.flow-after-env.js, a setupFilesAfterEnv file —
-// lifecycle hooks are only available AFTER the test framework is installed, never in setupFiles)
+// lifecycle hooks are only available AFTER the test framework is installed, never in setupFiles;
+// they are jest's injected GLOBALS there — @jest/globals' own bindings don't work from after-env)
 const clipboardKey = '__DPAY_TEST_CLIPBOARD';
+declare function beforeEach(fn: () => void | Promise<void>): void;
+declare function afterEach(fn: () => void): void;
 export function installFlowLifecycle(): void {
   beforeEach(async () => {
     g[clipboardKey] = '';

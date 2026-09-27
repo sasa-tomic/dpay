@@ -134,7 +134,7 @@ export async function waitForEnabled(m: Mount, testID: string, opts: {timeoutMs?
 }
 
 /** The persisted wallet identity (the app's own storage record), or null. */
-export async function accountOf(m: Mount): Promise<{secretHex: string; publicHex: string; username: string} | null> {
+export async function accountOf(_m: Mount): Promise<{secretHex: string; publicHex: string; username: string} | null> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const AsyncStorage = require('@react-native-async-storage/async-storage') as {getItem: (k: string) => Promise<string | null>};
   const v = await AsyncStorage.getItem('dpay.identity.v1');
