@@ -73,6 +73,15 @@ services:
       # Per-call upstream timeout for the proxy, ms (default 10000; 0 refused at startup).
       DPAY_SOLANA_TIMEOUT_MS: ${DPAY_SOLANA_TIMEOUT_MS:-}
 
+      # The CeFi venue proxies (crates/dpay-relay/src/sideshift.rs, trocador.rs): the relay
+      # attaches the partner credentials server-side; the device never sees them. Both sideshift
+      # vars must be set for the SideShift proxy to serve (unset → the route answers 503 naming
+      # the variable). Trocador quotes serve without the key (public rate); the key raises the
+      # partner status read. SECRET — never logged, never echoed, never committed.
+      DPAY_SIDESHIFT_SECRET: ${DPAY_SIDESHIFT_SECRET:-}
+      DPAY_SIDESHIFT_AFFILIATE_ID: ${DPAY_SIDESHIFT_AFFILIATE_ID:-}
+      DPAY_TROCADOR_API_KEY: ${DPAY_TROCADOR_API_KEY:-}
+
       # The Trocador partner-agreement compliance records (access log + order store). SET the
       # DSN in prod — it is REQUIRED for durable records: this stack mounts NO volume, so the
       # JSONL fallback (unset) writes into the ephemeral container cwd and dies on every
