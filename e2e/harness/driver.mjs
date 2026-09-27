@@ -1,19 +1,18 @@
-// CDP driver — launches chrome-headless-shell (the vendored binary, resolved via browser.mjs) and
-// drives the page with a tiny Puppeteer-core wrapper. Methods are test-flow-shaped: navigate, find
-// by testID (RN renders testID -> web data-testid under RNW — verified), click, type, read text,
-// wait for text, screenshot. Each call has a timeout + descriptive errors; nothing is swallowed.
+// CDP driver — acquires the machine-global chrome-headless-shell through the gate (browser.mjs:
+// discovery-before-spawn + the cross-run admission lock) and drives the page with a tiny
+// Puppeteer-core wrapper. Methods are test-flow-shaped: navigate, find by testID (RN renders
+// testID -> web data-testid under RNW — verified), click, type, read text, wait for text,
+// screenshot. Each call has a timeout + descriptive errors; nothing is swallowed.
 //
 // Per the rules: a fresh browser CONTEXT per run (blank localStorage) so tests are idempotent and
 // independent — the app's first-run key generation runs every time, with a throwaway identity.
-import puppeteer from 'puppeteer-core';
 import { mkdirSync, statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { resolveExecutablePath } from './browser.mjs';
+import { resolveExecutablePath, acquireBrowser } from './browser.mjs';
 import { _testCtx } from './lib.mjs';
 import { installSolAccountsHelper } from './solaccounts.mjs';
-import { trackChild, untrackChild } from './procs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
@@ -98,9 +97,13 @@ export class Driver {
   appBoot = null;
   appBooted = false;
 
-  /** Launch the headless browser once (shared across tests in a run). Returns `{browser, stop}` —
-   *  tests create their own fresh incognito CONTEXT from this browser via `create(browser)`, so each
-   *  gets an isolated localStorage/identity without paying the ~1.5s browser-launch cost per test. */
+  /** Acquire the run's browser through the machine-global chrome gate (browser.mjs): reuse the
+   *  singleton shell when one is alive (puppeteer.connect), else launch it under the cross-run
+   *  admission lock. Returns `{browser, stop}` — tests create their own fresh incognito CONTEXT
+   *  from this browser via `create(browser)`, so each gets an isolated localStorage/identity
+   *  without paying a browser-launch cost per test. `stop` DISCONNECTS this connection only;
+   *  the gate owns the shell's lifecycle: it is torn down (with the pid-registry SIGKILL
+   *  backstop) when the run's LAST connection drops, and only if this run launched it. */
   static async launchBrowser(opts = {}) {
     const exe = resolveExecutablePath();
     if (!exe) {
@@ -110,58 +113,7 @@ export class Driver {
         '  - set DPAY_CHROMIUM to a real chrome/chromium binary.'
       );
     }
-    const browser = await puppeteer.launch({
-      executablePath: exe,
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--force-color-profile=srgb',
-        '--font-render-hinting=none',
-        '--hide-scrollbars',
-        // The web app is served on a different port than the relay (sirv + the relay's axum). CORS
-        // is a browser-only constraint the REAL phone app never has (Android fetch doesn't enforce
-        // it); rather than add CORS headers to the prod relay JUST for the browser harness, disable
-        // the check in the headless browser. Standard e2e practice; matches what the real app sees.
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
-        ...(opts.extraArgs ?? []),
-      ],
-    }).catch((e) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(`[driver] chromium failed to launch (${exe}):\n${msg}`);
-    });
-    // Register the shell in the child-pid registry (same sync-exit SIGKILL backstop as relay + web).
-    // chrome-headless-shell demonstrably does NOT self-exit on Node death (2026-09-27 incident:
-    // ~30 leaked shells at 50-70% CPU each, load 16+), so "puppeteer will close it" is not a
-    // guarantee — an interrupted teardown must not orphan it.
-    const proc = browser.process?.() ?? null;
-    const pid = proc?.pid ?? null;
-    if (Number.isInteger(pid) && pid > 0) trackChild(pid);
-    const stop = async () => {
-      if (!(Number.isInteger(pid) && pid > 0)) { try { await browser.close(); } catch {} return; }
-      // Graceful CDP close, raced against a hard 5s ceiling: a wedged renderer can make close()
-      // hang forever, and a silently-hanging close is exactly the leak this guards against.
-      let closed = false;
-      try {
-        const timer = new Promise((_, rej) => {
-          const t = setTimeout(() => rej(new Error('[driver] browser.close() timed out after 5s')), 5000);
-          if (typeof t.unref === 'function') t.unref(); // never delay process exit for the timer
-        });
-        await Promise.race([browser.close().then(() => { closed = true; }), timer]);
-      } catch { closed = false; }
-      if (closed) {
-        untrackChild(pid); // clean CDP close — the process is gone, drop the pid
-      } else {
-        // Hung or thrown close: SIGKILL directly. The pid stays tracked, so killTrackedChildren
-        // remains a harmless backstop for as long as this harness process lives.
-        try { proc.kill('SIGKILL'); } catch { /* already dead */ }
-        try { process.kill(pid, 'SIGKILL'); } catch { /* ESRCH — already dead */ }
-      }
-    };
-    return { browser, stop };
+    return acquireBrowser({ executablePath: exe, extraArgs: opts.extraArgs ?? [] });
   }
 
   /** Attach page diagnostics and retain every unexpected error so teardown fails the flow. */
