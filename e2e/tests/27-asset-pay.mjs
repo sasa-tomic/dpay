@@ -123,8 +123,8 @@ export async function run() {
     //     — NOT a misleading dollar amount. The fee rides ONLY as the annotation line
     //     ("− 0.0000001 BTC fees"), never inside the headline (founder rule 2026-09-14). The
     //     history hook fetches EVERY catalog currency, so the currency-1 rail row lands regardless
-    //     of the active asset. 'RECENT' is uppercased via CSS text-transform (matches flow 07's
-    //     anchor).
+    //     of the active asset. The 'Recent' heading is the openHistory anchor (sentence case
+    //     since the 2026-09-26 caps sweep; matches flow 07's anchor).
     assert(await openHistory(driver, { timeoutMs: 5_000 }), 'the Ledger should render the ckBTC payment row once it lands in history');
     const ledgerBody = await driver.bodyText();
     assertIncludes(ledgerBody, '0.0005001 BTC', 'Ledger row must show the fee-inclusive net ckBTC debit (−0.0005001 BTC = 50_000 sats + the pinned 10-sat ledger fee), not a $ amount');

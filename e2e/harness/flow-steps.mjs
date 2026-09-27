@@ -62,5 +62,5 @@ export async function nfcPhaseWalk(driver, dispatch, phases, opts = {}) {
  */
 export async function openHistory(driver, opts = {}) {
   await driver.click('tab-transactions', { timeoutMs: opts.timeoutMs ?? 4_000 });
-  return driver.waitForText('RECENT', { timeoutMs: opts.recentMs ?? 8_000 });
+  return driver.waitForText('Recent', { timeoutMs: opts.recentMs ?? 8_000 });
 }

@@ -18,6 +18,10 @@ It is not a historical snapshot — it is maintained alongside the code:
 
 **Canister topology lives in `docs/CANISTERS.md`** — the authoritative map of which canisters exist on mainnet, who owns them, and what each is for. Do not restate its inventory here; the copy that used to sit on this line had drifted. The tracked `canister_ids.json` (repo root) holds the durable mainnet ids of the owned canisters; the deploy script resolves canister names against it, so adding an owned canister means adding both a `dfx.json` entry and its `ic` id there.
 
+## Secrets and deploy/.env
+
+Secrets live sops-encrypted in `secrets/*.sops.json` (rules + age recipients: `.sops.yaml`; agent identity: `.dev/age/agent-key.txt`). `deploy/.env` is AUTO-GENERATED (`scripts/gen-deploy-env.sh`, `just deploy-env`) from `deploy/env.config` (tracked non-secret config) + those sops files — never edit `.env` by hand. To add or rotate a secret: `sops secrets/<file>.sops.json`, then `just deploy-env` (every deploy path regenerates automatically). Never print or commit secret values.
+
 ## Working in this repo
 
 Inner loop runs fully offline via `just` and completes in seconds (`just verify` = core + canister + relay + e2e; `just test-core`, `just test-canister`, `just test-relay`, `just sim`, `just ffi` for individual slices). `third_party/` is the canonical local source cache — look there first; `.dev/`, `third_party/`, `vendor/`, and `target/` are gitignored. Exactly TWO `third_party/` entries are load-bearing — `bin/pocket-ic` (the PocketIC server, `POCKET_IC_BIN`) and `ic-icrc1-ledger/` (the real DFINITY ICRC-1 ledger wasm + .did installed by the canister/icp/relay-live tests, `dfx.json`, and the deploy scripts); everything else in there is research material no recipe reads. Because the dir is gitignored, a fresh WORKTREE lacks both — `just third-party` repairs them from a sibling checkout, and the `third-party-check` preflight (wired into `test-canister`/`test-icp`/`test-live`/`sim`) fails with that instruction instead of a cryptic test/linker failure. The Android emulator / physical devices are an outer-loop fidelity gate only, never on the inner loop.

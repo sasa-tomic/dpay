@@ -17,6 +17,7 @@
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor,
   pickSwapTarget,
   pickSwapVenue,
+  typeConvertAmount,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {installSideShiftStub, setSideShiftStatus, sideShiftStubState} from '../harness/sideshift.mjs';
@@ -49,14 +50,14 @@ async function reopenConvert(driver) {
     try {
       await openConvertFor(driver, 'icp', {timeoutMs: 8_000});
       await pickSwapTarget(driver, 'SOL');
-      await pickSwapVenue(driver, 'sideshift');
+      // SideShift is the sheet's auto pick on this pair (single device-signable row) — no pick step exists.
       opened = true;
     } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
   }
 }
 
 async function pickCefiAndConfirm(driver) {
-  await driver.type('convert-amount', AMOUNT_TEXT);
+  await typeConvertAmount(driver, AMOUNT_TEXT);
   await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
   await driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
   await driver.waitForText('SideShift', {timeoutMs: 8_000});
@@ -88,7 +89,7 @@ export async function run() {
     // --- §1 the order is born into waiting; the handoff names the shift id + expiry window
     await openConvertFor(driver, 'icp');
     await pickSwapTarget(driver, 'SOL');
-    await pickSwapVenue(driver, 'sideshift');
+    // SideShift is the sheet's auto pick on this pair (single device-signable row) — no pick step exists.
     await pickCefiAndConfirm(driver);
     const handoff = await driver.readText('convert-awaiting-deposit');
     assertIncludes(handoff, SHIFT_ID, 'the venue\'s shift id renders (the status-page handle)');

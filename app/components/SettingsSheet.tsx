@@ -47,6 +47,30 @@ import {relayBuildDrift} from '../services/relay';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
+/** The privacy link — if the OS has no browser handler, the URL itself renders beneath:
+ *  a silent no-op tap is a dead end, and dead ends are bugs. */
+function PrivacyLink() {
+  const [failed, setFailed] = useState(false);
+  return (
+    <View>
+      <Pressable
+        testID="privacy-policy"
+        style={S.linkBtn}
+        onPress={() => { Linking.openURL(PRIVACY_URL).catch(() => setFailed(true)); }}
+        accessibilityRole="link"
+        accessibilityLabel={M.settings.about.privacy}>
+        {/* P4 — external-link glyph signals the link opens outside the app (IconExternalLink
+            renders no textContent, so the census/asserted label is untouched). */}
+        <View style={S.linkRow}>
+          <IconExternalLink size={12} color={C.sub2} />
+          <Text style={S.linkTextMuted}>{M.settings.about.privacy}</Text>
+        </View>
+      </Pressable>
+      {failed ? <Text style={S.err}>{M.common.linkFallback(PRIVACY_URL)}</Text> : null}
+    </View>
+  );
+}
+
 export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRpcApplied, setEvmRpc, onEvmRpcApplied, setIcGateway, onIcGatewayApplied, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, openAdvanced, onOpenStep, onOpenAddressBook}: {
   // R1: the operator's ordered relay address list (first = preferred). The editor below is a
   // LIST editor — one address per line — but it keeps the relay row's old draft/Apply contract:
@@ -907,19 +931,7 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                 cannot move, freeze, or recover funds, and there is no dpay account. Settings is
                 the on-demand surface: nobody has to read this unless they go looking. */}
             <Text style={S.dim2} testID="about-custody">{M.settings.about.custody}</Text>
-            <Pressable
-              testID="privacy-policy"
-              style={S.linkBtn}
-              onPress={() => Linking.openURL(PRIVACY_URL)}
-              accessibilityRole="link"
-              accessibilityLabel={M.settings.about.privacy}>
-              {/* P4 — external-link glyph signals the link opens outside the app (IconExternalLink
-                  renders no textContent, so the census/asserted label is untouched). */}
-              <View style={S.linkRow}>
-                <IconExternalLink size={12} color={C.sub2} />
-                <Text style={S.linkTextMuted}>{M.settings.about.privacy}</Text>
-              </View>
-            </Pressable>
+            <PrivacyLink />
           </View>
 
         </ScrollView>

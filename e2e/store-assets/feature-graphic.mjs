@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generate the Play Store feature graphic (1024×500) — the wide banner shown at the top of the
+// Generate the Play Store feature graphic (1024×500) - the wide banner shown at the top of the
 // listing. Dark brand gradient + large headline + asset badges, rendered via headless chrome.
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
@@ -13,7 +13,7 @@ const SHOTS = join(__dirname, '..', 'shots');
 const OUT = join(__dirname, '..', '..', '.dev', 'store-assets');
 mkdirSync(OUT, { recursive: true });
 
-const BRAND = '#D03F00'; // app/config/palette.ts LIGHT.brand — the FILL step of the tangerine ramp
+const BRAND = '#0E5F53'; // app/config/palette.ts LIGHT.brand - the FILL step of the petrol ramp
 const BG = '#06070a';
 const INK = '#f1f4f7';
 const SUB = '#a6afba';
@@ -58,7 +58,7 @@ body {
     <div class="l1">Pay anyone,</div>
     <div class="l2">anywhere</div>
   </div>
-  <div class="sub">Non-custodial crypto wallet.<br>Bitcoin, USDC &amp; more — even offline.</div>
+  <div class="sub">Non-custodial crypto wallet.<br>Bitcoin, USDC &amp; more - even offline.</div>
   <div class="wordmark">dpay<span class="dot">·</span></div>
   <div class="badges">
     <span class="badge">BTC</span>

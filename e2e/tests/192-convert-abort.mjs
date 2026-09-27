@@ -16,6 +16,7 @@ import {
   faucetAccount,
   openBalances, openConvertFor,
   selectCurrency,
+  typeConvertAmount,
 } from '../harness/lib.mjs';
 import { startRelay } from '../harness/relay.mjs';
 
@@ -67,7 +68,7 @@ export async function run() {
       (await driver.findByTestID('convert-screen', { timeoutMs: 8_000 })) != null,
       'the Convert surface opens for ICP',
     );
-    await driver.type('convert-amount', '1');
+    await typeConvertAmount(driver, '1');
     await driver.findByTestID('convert-quote-source', { timeoutMs: 10_000 });
 
     console.log('[192-convert-abort] arming the ic_delay knob — the swap reply stays pending 12 s…');

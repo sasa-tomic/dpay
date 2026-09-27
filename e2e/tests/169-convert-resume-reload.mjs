@@ -2,7 +2,7 @@
 // (mounted from Wallet on load, no Convert screen open anywhere) drives it to done.
 //
 // This is the multi-venue-readiness V6 recovery pin, in three observable moves:
-//   * the record persists under the IDENTITY-SCOPED key `dpay.convert.v2.<publicHex>` — read
+//   * the record persists under the IDENTITY-SCOPED key `dpay.convert.v3.<publicHex>` — read
 //     straight from localStorage (RN-web AsyncStorage maps 1:1), proving the store scope too;
 //   * after `navigate('/')` (the full reload — same browser context, identity + record persist),
 //     the venue queue is drained (`settle_pending`) and the record reaches `done` with an `outTx`
@@ -17,6 +17,7 @@
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, openConvertFor,
+  typeConvertAmount,
 } from '../harness/lib.mjs';
 
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
@@ -62,7 +63,7 @@ export async function run() {
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
 
     await openConvertFor(driver, 'icp');
-    await driver.type('convert-amount', '1');
+    await typeConvertAmount(driver, '1');
     await driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
 
     // Park the conversion on the honest pending (venue holds the output).
@@ -74,7 +75,7 @@ export async function run() {
       await driver.click('btn-convert-confirm', {timeoutMs: 6_000});
       pending = await driver.findByTestID('convert-pending', {timeoutMs: 20_000}).catch(() => null);
       if (pending == null) {
-        const changed = await driver.readText('convert-quote-changed').catch(() => null);
+        const changed = await driver.readText('convert-moved-note').catch(() => null);
         if (changed == null) break; // no panel and no interrupt — surface the failure below
         console.log('[169-convert-resume-reload] pool drifted → re-confirmed at the fresh quote');
       }
@@ -82,14 +83,21 @@ export async function run() {
     assert(pending != null, 'pending_withdrawal panel renders before the reload');
 
     // The record persists under the IDENTITY-SCOPED key (V6): read it straight from localStorage.
-    const scopedKey = `dpay.convert.v2.${account.publicHex}`;
-    const parked = await driver.eval((k) => {
-      const raw = window.localStorage.getItem(k);
-      if (raw == null) return null;
-      const all = JSON.parse(raw);
-      const rec = Object.values(all)[0];
-      return rec == null ? null : {step: rec.step, legs: Array.isArray(rec.legs) ? rec.legs.length : 0};
-    }, scopedKey);
+    // The engine's advance and its persist are two steps — under load the panel can render a
+    // beat before the store write lands, so poll briefly instead of reading once (the assert
+    // below is unchanged: the PARKED step must be pending_withdrawal).
+    const scopedKey = `dpay.convert.v3.${account.publicHex}`;
+    let parked = null;
+    for (let i = 0; i < 20 && (parked == null || parked.step !== 'pending_withdrawal'); i++) {
+      parked = await driver.eval((k) => {
+        const raw = window.localStorage.getItem(k);
+        if (raw == null) return null;
+        const all = JSON.parse(raw);
+        const rec = Object.values(all)[0];
+        return rec == null ? null : {step: rec.step, legs: Array.isArray(rec.legs) ? rec.legs.length : 0};
+      }, scopedKey);
+      if (parked == null || parked.step !== 'pending_withdrawal') await new Promise((r) => setTimeout(r, 250));
+    }
     assert(parked != null, `record persisted under the scoped key ${scopedKey}`);
     assert(parked.step === 'pending_withdrawal', `parked record step is pending_withdrawal (saw ${parked?.step})`);
     assertEq(parked.legs, 2, 'the signed legs are frozen in the record (nothing to re-build)');
@@ -129,7 +137,7 @@ export async function run() {
 
     // A terminal record is NOT resurrected: opening Convert shows the form, not a done panel.
     await openConvertFor(driver, 'icp');
-    await driver.type('convert-amount', '1'); // fresh mount: the quote (and headline) need the amount
+    await typeConvertAmount(driver, '1'); // fresh mount: the quote (and headline) need the amount
     await driver.findByTestID('convert-headline', {timeoutMs: 10_000});
     const doneGone = await driver.findByTestID('convert-done', {timeoutMs: 3_000}).catch(() => null);
     assert(doneGone == null, 'the done record is not resurrected onto the reopened screen (the balance tells the outcome)');

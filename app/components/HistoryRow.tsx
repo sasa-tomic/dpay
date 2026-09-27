@@ -5,6 +5,7 @@ import {C} from '../config/palette';
 import {fmtCurrencyAmountCompact, type CurrencyDescriptor} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {fmtAssetCompact} from '../lib/format';
+import {venuePartyOf} from '../config/venues';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {AppModal} from './AppModal';
@@ -85,7 +86,12 @@ export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress,
   const amtTxt = fmtRowAmount(t, catalog, assets, note);
   // `''`/absent never override: the store never saves an empty who/msg, but the fallback chain
   // stays total for any caller-assembled annotation.
-  const whoTxt = note?.who || t.who || '—';
+  // A conversion payout lands FROM a pool principal — a contract, not a counterparty (round-1
+  // item 9): a registered venue's principal resolves to its NAME, an execution-known pool the
+  // registry no longer names gets the neutral wording, and a note-known peer still wins. A
+  // person's principal (nothing known about it) renders exactly as before.
+  const party = venuePartyOf(t.counterparty);
+  const whoTxt = note?.who || (party?.kind === 'venue' ? party.name : '') || t.who || '—';
   const memoTxt = note?.msg || t.memo;
   // Founder rule 2026-09-14: the fee rides the row ONLY as this annotation line, never in the
   // headline. Hidden when the fee is unknown or zero.
@@ -100,15 +106,17 @@ export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress,
       accessibilityHint={M.receipt.openRowHint}
       accessibilityState={{disabled: false}}
     >
-      {/* P4 — direction glyph leading each row (t.dir is Txn's reliable 'out' | 'in' field):
-          incoming = arrow-down-left in ok green (matching the credited amount; tangerine stays
-          reserved for CTA/active), outgoing = arrow-up-right neutral. The icon renders no
-          textContent, so the asserted amounts/memos are untouched. */}
+      {/* P4 — direction glyph leading each row (t.dir is Txn's reliable 'out' | 'in' field).
+          The GLYPH is neutral ink (in = ink, out = sub — the design brief's Home skin: color
+          stays reserved for status, and the credited amount beside it already carries the ok
+          green). The icon renders no textContent, so the asserted amounts/memos are untouched. */}
       <View style={S.histDirIcon}>
-        {t.dir === 'out' ? <IconArrowUpRight size={16} color={C.sub} /> : <IconArrowDownLeft size={16} color={C.ok} />}
+        {t.dir === 'out' ? <IconArrowUpRight size={16} color={C.sub} /> : <IconArrowDownLeft size={16} color={C.ink} />}
       </View>
       <View style={S.histWhoCol}>
-        <Text style={S.histWho}>{t.dir === 'out' ? M.wallet.ledger.to(whoTxt) : M.wallet.ledger.from(whoTxt)}</Text>
+        <Text style={S.histWho}>{party?.kind === 'pool'
+          ? t.dir === 'out' ? M.wallet.ledger.toPool : M.wallet.ledger.fromPool
+          : t.dir === 'out' ? M.wallet.ledger.to(whoTxt) : M.wallet.ledger.from(whoTxt)}</Text>
         {/* Second line: WHEN, then the memo. The time used to sit to the right of the amount, where
             its own width changes (the hour's 1↔2 digits) pushed the amount sideways — the rule and
             the measurement are on `S.histAmt`. Here its width is absorbed by the flexible column.
@@ -156,6 +164,13 @@ export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress,
 function receiptFields(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[], note?: TxAnnotation) {
   const asset = assets.find(a => a.id === t.assetId);
   const solana = asset?.protocol === 'solana';
+  // The counterparty's display identity (round-1 item 9): a pool principal is a CONTRACT, not a
+  // counterparty — a registered venue resolves to its name, an execution-known pool the registry
+  // no longer names gets the neutral wording, and anything unknown keeps the ledger's own truth.
+  // The principal itself is never discarded: `partyPrincipal` keeps the checkable fact beside
+  // the name, in the mono opaque-string voice.
+  const party = venuePartyOf(t.counterparty);
+  const partyName = party?.kind === 'venue' ? party.name : party?.kind === 'pool' ? M.receipt.partyPool : '';
   return {
     solana,
     pending: t.pending === true,
@@ -169,7 +184,11 @@ function receiptFields(t: Txn, catalog: CurrencyDescriptor[], assets: Selectable
     // The FULL account, never the row's truncated display label — a truncated principal proves
     // nothing. '' means the ledger recorded no account on that side (an IC mint has no payer, a
     // burn no payee, a Solana batch no unique counterparty), which is said rather than left blank.
-    account: t.counterparty || M.receipt.noAccount,
+    account: partyName || t.counterparty || M.receipt.noAccount,
+    // The name is a DISPLAY identity, not a mono value; the raw principal rides below it when
+    // one exists (the mono line a dispute checks character by character).
+    accountIsName: partyName !== '' && t.counterparty !== '',
+    accountPrincipal: partyName !== '' ? t.counterparty : '',
     // The peer name the DEVICE knew at payment time (request to_name, link label, spay label, or
     // a saved address-book label — resolved by the caller). '' = none: the line does not render.
     peer: note?.who || '',
@@ -199,6 +218,9 @@ export function receiptText(t: Txn, catalog: CurrencyDescriptor[], assets: Selec
     `${M.receipt.assetLabel}: ${f.assetLine}`,
     `${f.partyLabel}: ${f.account}`,
   ];
+  // The checkable principal under a named party — the copy keeps the ledger truth, like the
+  // sheet's own principal line.
+  if (f.accountPrincipal) lines.push(f.accountPrincipal);
   // Annotated lines only when the device actually knows them — the same render rule as the sheet.
   if (f.fee != null) lines.push(`${M.receipt.fees}: ${f.fee}`);
   if (f.peer) lines.push(`${M.receipt.peer}: ${f.peer}`);
@@ -215,14 +237,16 @@ export function receiptText(t: Txn, catalog: CurrencyDescriptor[], assets: Selec
   return lines.join('\n');
 }
 
-/** One label + value block. The value is LEFT-aligned mono on its own line rather than right-
+/** One label + value block. The value is LEFT-aligned on its own line rather than right-
  *  aligned beside the label: a 63-character IC principal is the thing a payee checks character by
- *  character, and the review-card's right-aligned value row wraps it into a ragged column. */
-function Field({label, value, testID, note = false}: {label: string; value: string; testID: string; note?: boolean}) {
+ *  character, and the review-card's right-aligned value row wraps it into a ragged column.
+ *  `mono` (default) sets the value in Plex Mono — the opaque-string voice (principal, hash,
+ *  signature). Readable values (the wall-clock time) pass mono={false} for the sans voice. */
+function Field({label, value, testID, note = false, mono = true}: {label: string; value: string; testID: string; note?: boolean; mono?: boolean}) {
   return (
     <View style={S.receiptField}>
       <Text style={S.receiptLabel}>{label}</Text>
-      <Text testID={testID} style={note ? S.receiptNote : S.receiptValue} selectable={!note}>{value}</Text>
+      <Text testID={testID} style={note ? S.receiptNote : (mono ? S.receiptValue : S.receiptValueSans)} selectable={mono && !note}>{value}</Text>
     </View>
   );
 }
@@ -253,13 +277,17 @@ export function TxnReceipt({t, catalog, assets, onClose, note}: {t: Txn; catalog
               fee BESIDE it — only when the device knew the fee. */}
           {f.fee != null ? <Field label={M.receipt.fees} value={f.fee} testID="txn-receipt-fees" /> : null}
           <ScrollView style={S.pickScroll}>
-            <Field label={f.partyLabel} value={f.account} testID="txn-receipt-account" note={!t.counterparty} />
+            {/* The party: a named venue/peer renders in the sans voice with the raw principal
+                kept beneath it in mono (the checkable truth); an unnamed account stays the
+                principal itself; an honest absence keeps its own sentence. */}
+            <Field label={f.partyLabel} value={f.account} testID="txn-receipt-account" note={!t.counterparty} mono={!f.accountIsName} />
+            {f.accountPrincipal ? <Text testID="txn-receipt-account-principal" style={S.receiptValue} selectable>{f.accountPrincipal}</Text> : null}
             {/* Peer/Note render ONLY when the device-saved annotation exists (the receipt's own
                 rule: no label over an absent value). The Note renders in the note style — it is
                 display text, not a checkable value; Peer stays selectable like the account. */}
             {f.peer ? <Field label={M.receipt.peer} value={f.peer} testID="txn-receipt-peer" /> : null}
             {f.noteText ? <Field label={M.receipt.note} value={f.noteText} testID="txn-receipt-note" note /> : null}
-            <Field label={M.receipt.whenLabel} value={t.time} testID="txn-receipt-when" />
+            <Field label={M.receipt.whenLabel} value={t.time} testID="txn-receipt-when" mono={false} />
             <Field label={M.receipt.referenceLabel} value={f.reference} testID="txn-receipt-ref" note={!f.referenceIsValue} />
             {/* A pending row has no proof yet — an empty block index / signature under the label
                 would read as a value that failed to load, so the field is omitted entirely; the

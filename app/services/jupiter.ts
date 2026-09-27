@@ -270,7 +270,12 @@ export async function fetchJupiterQuote(
  * the bytes: the device's beneficiary verification (app/solana/tx.ts
  * verifyVenueSwapTxBeneficiaries) reads the static keys, and a v0 tx whose destination lives in
  * an address lookup table is something this wallet refuses to sign blind — asking for legacy is
- * asking for the verifiable shape.
+ * asking for the verifiable shape. Jupiter's build API REJECTS that param when the echoed quote
+ * already self-describes with `transactionVersion` (MEASURED live 2026-09-27: quotes now carry
+ * `transactionVersion: 0`, and the pair answers 400 NOT_SUPPORTED) — for those quotes the param
+ * is omitted; a v0 quote builds legacy bytes anyway (first byte 0x01, verified live on the same
+ * quote), and the beneficiary verification still refuses any ALT-indirected tx regardless of
+ * what we asked for. The fail-closed invariant lives in the verifier, never in the ask.
  */
 export async function fetchJupiterSwapTx(
   relayUrl: string,
@@ -279,6 +284,8 @@ export async function fetchJupiterSwapTx(
   opts?: {timeoutMs?: number},
 ): Promise<JupiterSwapResult> {
   const timeoutMs = opts?.timeoutMs ?? 8000;
+  const quoteSelfDescribesVersion =
+    (quote.raw as Record<string, unknown> | null | undefined)?.transactionVersion !== undefined;
   const init: RequestInit = {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -286,7 +293,7 @@ export async function fetchJupiterSwapTx(
       quoteResponse: quote.raw,
       userPublicKey,
       wrapAndUnwrapSol: true,
-      asLegacyTransaction: true,
+      ...(quoteSelfDescribesVersion ? {} : {asLegacyTransaction: true}),
     }),
   };
   const override = jupiterEndpoint();

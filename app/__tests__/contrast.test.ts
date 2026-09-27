@@ -384,8 +384,10 @@ describe('5. NON-TEXT — the marks that carry a state (WCAG 1.4.11, 3:1)', () =
       applyPalette(p);
       // An active tab is told apart from an inactive one by its FILL, not only by its label.
       expect(contrast(p.brand, p.card)).toBeGreaterThanOrEqual(NON_TEXT);
-      // The selected account row's tangerine left edge, against the card it runs down.
-      expect(String((S.assetCardActive as {borderLeftColor?: string}).borderLeftColor)).toBe(p.brand);
+      // The selected account row's 2px `brandText` selection ring (brief §IV: no left stripe;
+      // selection is a ring around the whole card), against the card it runs down.
+      expect(String((S.assetCardActive as {borderLeftColor?: string}).borderLeftColor)).toBe(p.brandText);
+      expect(String((S.assetCardActive as {borderColor?: string}).borderColor)).toBe(p.brandText);
       expect(contrast(p.brand, p.card)).toBeGreaterThanOrEqual(NON_TEXT);
       // The backup acknowledgement checkbox: unchecked it is a 2px `sub2` ring on the page and
       // NOTHING else — no label inside, no fill — so the ring is the whole control. It measured

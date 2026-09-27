@@ -22,7 +22,9 @@
 //   4. THE FULL PROVIDER LIFECYCLE on the SOL surface: awaiting_deposit → (venue
 //      processing) → done with the realized settle + payout address — the generic
 //      provider panel, rail-agnostic, plus the SOL-rail deposit-fee note.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances, openConvertFor, pickSwapTarget,
+  typeConvertAmount,
+} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
 import {icpAccountIdentifierHex} from '../harness/wire.mjs';
@@ -34,7 +36,7 @@ const AMOUNT_TEXT = '2';
 // 8 decimals) — and the order ECHOES the quote's depositAmount (quote-derived, never a
 // default; the app's prepare red line refuses a mismatched order amount).
 const SETTLE_TEXT = '0.0495 ICP';
-const DEPOSIT_ADDRESS = 'e2e-deposit-address-01';
+const DEPOSIT_ADDRESS = 'ryjl3-tyaaa-aaaaa-aaaba-cai'; // the stub's valid ICRC-1 account text
 const SHIFT_ID = 'e2e-shift-9c1d';
 const SETTLE_HASH = 'ic-settle-sig-197';
 
@@ -119,7 +121,7 @@ export async function run() {
     // --- §2 the cefi target: derived payout address FIRST, venue quote verbatim
     await pickSwapTarget(driver, 'ICP');
     assertIncludes(await driver.readText('convert-screen'), 'Convert EUR → ICP', 'the heading names the picked pair');
-    await driver.type('convert-amount', AMOUNT_TEXT);
+    await typeConvertAmount(driver, AMOUNT_TEXT);
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     assertIncludes(await driver.readText('convert-headline'), SETTLE_TEXT, 'receive estimate is the venue settle figure verbatim');
     assertIncludes(await driver.readText('convert-quote-source'), 'SideShift', 'attribution names the venue');

@@ -20,7 +20,8 @@
 
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, isDisabled, openConvertFor,
   pickSwapTarget,
-  pickSwapVenue,
+  pickSwapVenue, openOtherVenues,
+  typeConvertAmount,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {installCctpStub, FORWARD_TX_HASH} from '../harness/cctp.mjs';
@@ -98,11 +99,13 @@ export async function run() {
     // --- §1 checksum at entry + the one-time re-type gate -----------------------------------
     await openConvertFor(driver, 'icp');
     await pickSwapTarget(driver, 'SOL');
-    await driver.type('convert-amount', '5');
+    await typeConvertAmount(driver, '5');
+    // The sheet auto-picks the device-signable AMM row; Route C (the CCTP crossing) is the
+    // explicit opt-in row behind the ONE Other-venues expander (brief 5.4.1).
+    await openOtherVenues(driver);
     assert(await driver.findByTestID(ROUTE_C_ROW, { timeoutMs: 3_000 }) != null, 'the Route C row is offered');
     await driver.click(ROUTE_C_ROW);
     await driver.findByTestID('convert-headline', { timeoutMs: 15_000 });
-    await driver.click('convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter', { timeoutMs: 4_000 });
 
     console.log('[196-gas-fund] §1 checksum reject + re-entry confirm…');
     // Shape-valid but checksum-bad: refused AT ENTRY, minimal line, no re-type ask yet.
@@ -162,7 +165,7 @@ export async function run() {
     await driver.click('btn-gas-fund-wallet');
     // Quote churn re-review (the 186 loop), but through the wallet-fund gesture.
     for (let round = 0; round < 5; round++) {
-      const changed = await driver.findByTestID('convert-quote-changed', { timeoutMs: 2_000 }).catch(() => null);
+      const changed = await driver.findByTestID('convert-moved-note', { timeoutMs: 2_000 }).catch(() => null);
       if (changed == null) break;
       console.log(`[196-gas-fund] quote moved (round ${round + 1}) — re-funding`);
       if (await driver.isPresent('btn-gas-fund-wallet')) await driver.click('btn-gas-fund-wallet');

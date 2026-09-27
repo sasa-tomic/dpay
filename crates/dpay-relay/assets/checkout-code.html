@@ -4,7 +4,7 @@
      the pair that module serves; both change together with it. -->
 <!-- `scheme-auto`: this page has no theme toggle and no script, so it follows the OS scheme. That
      class is the hook the shared palette block (crates/dpay-relay/assets/palette.css) keys its
-     prefers-color-scheme rule on — see scripts/relay-palette-css.mjs for why both mechanisms
+     prefers-color-scheme rule on - see scripts/relay-palette-css.mjs for why both mechanisms
      coexist in one generated block. -->
 <html lang="en" class="scheme-auto">
 <head>
@@ -13,8 +13,8 @@
 <title>Checkout payment code | Different Pay</title>
 <meta name="description" content="You scanned a Different Pay checkout code. Here is how to pay it." />
 <meta name="color-scheme" content="light dark" />
-<meta name="theme-color" content="#F4F1E8" />
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
+<meta name="theme-color" content="#EBF0ED" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0C1312" />
 <meta name="robots" content="noindex" />
 <style>
 {{PALETTE}}
@@ -41,7 +41,7 @@
 <main class="card">
   <h1>This is a Different Pay checkout code</h1>
   <p>You pointed a camera at a shop's payment code. Nothing has been charged, and this page cannot
-     take a payment — the payment happens in your wallet, on your phone.</p>
+     take a payment; the payment happens in your wallet, on your phone.</p>
   <ol>
     <li>Install Different Pay and open it.</li>
     <li>Tap <strong>Pay</strong>, then <strong>Pay now</strong> to start the scanner.</li>
@@ -50,7 +50,7 @@
   </ol>
   <p><a class="btn" href="/">Get Different Pay</a><a class="btn secondary" href="/wallet">Open the web wallet</a></p>
   <p class="note">This checkout is paid in VCHF on the Internet Computer. Other Lightning or LNURL
-     wallets cannot pay it — they do not settle on that network — so a Different Pay wallet is what
+     wallets cannot pay it (they do not settle on that network), so a Different Pay wallet is what
      this code is for. If you do not have one, ask the shop for another way to pay.</p>
 </main>
 </body>

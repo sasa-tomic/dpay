@@ -56,6 +56,7 @@ export const es: Messages = {
   common: {
     done: 'Listo',
     cancel: 'Cancelar',
+    linkFallback: url => `No se pudo abrir el enlace. Ábrelo manualmente: ${url}`,
   },
 
   time: {

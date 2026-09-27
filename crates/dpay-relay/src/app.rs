@@ -1539,12 +1539,19 @@ async fn sideshift_stub_shift_fixed(
             "id": "e2e-shift-9c1d",
             "depositCoin": req.get("depositCoin").cloned().unwrap_or(serde_json::json!("ICP")),
             "settleCoin": req.get("settleCoin").cloned().unwrap_or(serde_json::json!("SOL")),
-            "depositAddress": "e2e-deposit-address-01",
+            // A VALID ICRC-1 account text (the ICP ledger's own principal — checksum-correct
+            // by construction): the composed route's deposit leg validates the venue's
+            // address through the core's own validators before anything signs, so the stub
+            // must issue an account the real wire would accept, not a placeholder string.
+            "depositAddress": "ryjl3-tyaaa-aaaaa-aaaba-cai",
             "settleAddress": req.get("settleAddress").cloned().unwrap_or(serde_json::json!("")),
             "depositAmount": req.get("depositAmount").cloned()
                 .unwrap_or_else(|| serde_json::json!(if quoted_deposit.is_empty() { "2" } else { &quoted_deposit })),
             "settleAmount": "0.0495",
-            "expiresAt": "2026-09-16T00:00:00.000Z",
+            // A LIVE window (far-future fixed date, deterministic offline): an order whose
+            // deposit window is already past would be refused by the composed deposit gate
+            // — the expired-window path seeds its own past date.
+            "expiresAt": "2099-01-01T00:00:00.000Z",
         })),
     )
         .into_response()

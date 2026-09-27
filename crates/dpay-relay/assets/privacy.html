@@ -6,8 +6,8 @@
 <title>Privacy Policy | Different Pay</title>
 <meta name="description" content="Privacy Policy for the Different Pay Android wallet, website, and merchant terminal." />
 <meta name="color-scheme" content="light dark" />
-<meta name="theme-color" content="#F4F1E8" />
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
+<meta name="theme-color" content="#EBF0ED" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0C1312" />
 <script>
 /* Theme choice (Wave 7, two-state since 2026-08-21): a stored 'light'/'dark' pins the theme;
    anything else (absent, legacy 'auto', garbage) follows the OS scheme. Runs pre-paint
@@ -105,13 +105,13 @@
      which emits an html.dark rule); the handful of hardcoded porcelain literals get scoped
      overrides here.
      Wave 7: keyed on `html.dark` (set by the pre-paint head script + the fixed toggle) instead
-     of a bare @media — with no stored choice the OS scheme seeds it via matchMedia, a stored
+     of a bare @media - with no stored choice the OS scheme seeds it via matchMedia, a stored
      'light'/'dark' pins it. */
   html{color-scheme:light}
   html.dark{color-scheme:dark}
     html.dark body::before{opacity:.07}
 
-  /* Wave 7 — fixed theme toggle (Light ↔ Dark flip), bottom-right; mirrors the
+  /* Wave 7 - fixed theme toggle (Light ↔ Dark flip), bottom-right; mirrors the
      landing's chip (shared 'dpay-theme' localStorage key so both pages agree). */
   .theme-toggle{
     position:fixed;right:18px;bottom:18px;z-index:80;width:44px;height:44px;border-radius:999px;
@@ -197,7 +197,7 @@
     <h2>4. When information is shared</h2>
     <p>Different Pay does not share information for advertising. Information is disclosed only as needed to provide a feature you request, operate the service, or meet legal obligations:</p>
     <ul>
-      <li><strong>Internet Computer, Solana, and ledger services.</strong> Public wallet addresses and transaction data are submitted to Internet Computer canisters, ICRC ledgers, and chain-key minter services — and, for the Solana asset rail, to Solana RPC endpoints — to execute payments, deposits, withdrawals, and receipts. Solana reads and broadcast transactions transit Different Pay's relay proxy before reaching the Solana network; the relay sees the transaction data it forwards but does not hold keys or custody funds.</li>
+      <li><strong>Internet Computer, Solana, and ledger services.</strong> Public wallet addresses and transaction data are submitted to Internet Computer canisters, ICRC ledgers, and chain-key minter services and, for the Solana asset rail, Solana RPC endpoints to execute payments, deposits, withdrawals, and receipts. Solana reads and broadcast transactions transit Different Pay's relay proxy before reaching the Solana network; the relay sees the transaction data it forwards but does not hold keys or custody funds.</li>
       <li><strong>Blockchain networks.</strong> Funding or withdrawing assets can publish addresses, amounts, and transaction data to networks such as Bitcoin, Ethereum, or Solana, where records are generally public and permanent.</li>
       <li><strong>WalletConnect and connected wallets.</strong> If you choose an external-wallet funding flow, WalletConnect and your selected wallet or provider handle pairing, connection, public account details, and transaction requests under their own terms. Different Pay never receives the external wallet's private key.</li>
       <li><strong>Cloudflare.</strong> Cloudflare provides network delivery, TLS termination, security, and tunnel infrastructure and may process standard network and security metadata on our behalf.</li>
@@ -231,7 +231,7 @@
   <section id="conversion-venue-records">
     <h2>7. Conversion venue request records</h2>
     <p>When you convert one asset through an external exchange venue (for example an exchange aggregator) from the app, those requests partly ride our relay: a venue's API needs our partner key, so at minimum the rate quote and the trade creation are made from our backend, and the status checks too wherever the venue's API is key-gated. For the requests we proxy, we are the party holding the connection data.</p>
-    <p>For every request we proxy to a venue — the rate quote, the trade creation, and each status check — we log and retain, correlated with the venue's own trade id and our internal order id:</p>
+    <p>For every request we proxy to a venue (the rate quote, the trade creation, and each status check) we log and retain, correlated with the venue's own trade id and our internal order id:</p>
     <ul>
       <li>the time of the request;</li>
       <li>your source IP address;</li>
@@ -270,7 +270,7 @@
 <footer>
   <div class="wrap"><span>Different Pay Privacy Policy</span><a href="/">∂pay home</a></div>
 </footer>
-<!-- Wave 7 — theme toggle (two-state): one click flips Light ↔ Dark; persists 'dpay-theme'
+<!-- Wave 7 - theme toggle (two-state): one click flips Light ↔ Dark; persists 'dpay-theme'
      (shared with the landing page) and keys the html.dark class set by the pre-paint head
      script. Before the first click the theme seeds from the OS scheme. -->
 <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Theme: Light. Switches between light and dark theme.">

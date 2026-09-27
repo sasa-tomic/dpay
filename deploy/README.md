@@ -18,6 +18,12 @@ relay.dpay.example  ──proxied CNAME──▶  <tunnel-uuid>.cfargotunnel.com
 `.env`. The public hostname is configured in Cloudflare Zero Trust. The same image runs the offline demo, a
 rehearsal against a local `dfx` replica, and mainnet.
 
+**`.env` is generated — never edit it.** `scripts/gen-deploy-env.sh` (`just deploy-env`) writes
+`deploy/.env` from two sources: `deploy/env.config` (tracked, non-secret config — edit this file)
+and `secrets/*.sops.json` (sops-encrypted secrets — edit with `sops secrets/<file>.sops.json`).
+Every deploy path refreshes `.env` automatically when its sources changed and refuses to run when
+sops is unusable; the file's header spells this out.
+
 **Public surface.** `/` serves the marketing landing page, `/wallet` the web wallet (the real
 RN-web app; `/merchant` 308-redirects there), `/privacy` the app and website privacy policy, the
 JSON API lives under `/api/v1/` (`/api/v1/health`, `/api/v1/faucet`,
@@ -26,20 +32,23 @@ JSON API lives under `/api/v1/` (`/api/v1/health`, `/api/v1/faucet`,
 ## One-time tunnel setup
 
 The tunnel is *remotely managed*: its config lives in Cloudflare and `cloudflared` runs it with a
-token. All Compose needs is that token in `deploy/.env` as `CF_TUNNEL_TOKEN`. Get it either way below.
+token. All Compose needs is that token in `deploy/.env` as `CF_TUNNEL_TOKEN` — which you never
+type there by hand: it is stored encrypted in `secrets/deploy.sops.json` and the generated `.env`
+picks it up. Get it either way below.
 
 ### Automated — one command, no dashboard
 
 `deploy/tunnel-provision.sh` (`just tunnel-provision`) does the whole manual setup below headlessly:
 it creates the tunnel, points its ingress at `relay:8787`, publishes the proxied DNS record, and
-writes `CF_TUNNEL_TOKEN` into `deploy/.env`. It needs a **scoped API token** (create at *My Profile →
+stores `CF_TUNNEL_TOKEN` encrypted in `secrets/deploy.sops.json` (then regenerates `deploy/.env`).
+It needs a **scoped API token** (create at *My Profile →
 API Tokens* — **not** the Global API Key) with exactly two permissions:
 
 - **Account · Cloudflare Tunnel · Edit**
 - **Zone · DNS · Edit**
 
 ```sh
-export CF_API_TOKEN=<the scoped token>          # provisioning-time secret — never written to .env
+export CF_API_TOKEN=<the scoped token>          # provisioning-time secret; persisted copy lives in sops
 export DPAY_PUBLIC_HOSTNAME=relay.dpay.example  # the hostname to serve; its zone must be on this account
 just tunnel-provision
 ```
@@ -57,8 +66,9 @@ API directly (`curl` + `jq`), which is why it can hand you the exact `CF_TUNNEL_
 In **Cloudflare Zero Trust**, open **Networks → Connectors → Cloudflare Tunnels**, create a tunnel
 named `dpay-relay`, then:
 
-1. Copy only the token from the displayed install command (`--token eyJ...`) into
-   `deploy/.env` as `CF_TUNNEL_TOKEN=eyJ...`. The token is a secret; the tunnel UUID is not the token.
+1. Copy only the token from the displayed install command (`--token eyJ...`) into sops:
+   `sops secrets/deploy.sops.json` — add `"CF_TUNNEL_TOKEN": "eyJ..."` — save, then
+   `just deploy-env`. The token is a secret; the tunnel UUID is not the token.
 2. Under the tunnel's **Public Hostnames**, add your hostname (for example `relay.dpay.example`).
 3. Set its service type to **HTTP** and URL to `relay:8787`, then save it.
 
@@ -69,9 +79,9 @@ credentials JSON, or tunnel UUID is needed by Compose.
 
 ```sh
 just image                    # host-built binary (--features agent) → slim runtime image; verified
+just deploy-env               # generate deploy/.env (env.config + secrets/*.sops.json)
 cd deploy
-cp .env.example .env          # set DPAY_CANISTER_ID and CF_TUNNEL_TOKEN
-docker compose up -d          # relay + cloudflared
+docker compose up -d          # relay + cloudflared   (set DPAY_CANISTER_ID in deploy/env.config first)
 curl -sS https://relay.dpay.example/api/v1/health   # {"status":"ok"}
 docker compose logs cloudflared | grep -i "Registered tunnel connection"   # tunnel is up
 ```
@@ -86,6 +96,9 @@ in `docker-compose.yml`.
 
 ## Configuration (`.env`)
 
+Generated from `deploy/env.config` (non-secret rows — edit there) and `secrets/*.sops.json`
+(secret rows — edit with `sops secrets/<file>.sops.json`, then `just deploy-env`):
+
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `DPAY_LEDGER` | `ic` | `ic` = real facade + ICRC ledgers via ic-agent · `memory` = in-memory demo catalog |
@@ -93,8 +106,8 @@ in `docker-compose.yml`.
 | `DPAY_IC_URL` | `https://icp-api.io` | Mainnet, or `http://host.docker.internal:4943` for a `dfx` replica on the host |
 | `DPAY_IC_FETCH_ROOT_KEY` | auto | `true` for a local replica, `false` on mainnet — see below |
 | `DPAY_ENABLE_FAUCET` | `false` | (offline fixture build only) Serve `POST /api/v1/faucet`, which credits demo funds on an in-process fake gateway. Not consulted by this image, whose faucet is the one below |
-| `DPAY_CONTROLLER_SEED` | — | (prod faucet) Hex Ed25519 seed of the controller key — same key as `DPAY_DFX_IDENTITY`'s `identity.pem`. Set → faucet live (relay-side cooldown + authenticated `mint` at the user principal) and `GET /api/v1/capabilities` reports `demo_faucet:true`; unset → relay anonymous, faucet unavailable (503 naming this variable) and the wallet offers no top-up. **Secret** |
-| `CF_TUNNEL_TOKEN` | — | **Required.** Secret token copied from the Cloudflare tunnel install command |
+| `DPAY_CONTROLLER_SEED` | — | (prod faucet) Hex Ed25519 seed of the controller key — same key as `DPAY_DFX_IDENTITY`'s `identity.pem`. Set → faucet live (relay-side cooldown + authenticated `mint` at the user principal) and `GET /api/v1/capabilities` reports `demo_faucet:true`; unset → relay anonymous, faucet unavailable (503 naming this variable) and the wallet offers no top-up. **Secret** → `secrets/deploy.sops.json` |
+| `CF_TUNNEL_TOKEN` | — | **Required.** Secret tunnel token — **Secret** → `secrets/deploy.sops.json` (`just tunnel-provision` stores it) |
 | `DPAY_CLOUDFLARED_IMAGE` | `cloudflare/cloudflared:2026.7.1` | Pinned tunnel image; override only if needed |
 
 The public hostname is configured on the tunnel in Cloudflare Zero Trust, not in `.env`.
@@ -152,19 +165,24 @@ EOF
 docker compose up -d relay && curl -sS http://127.0.0.1:8787/api/v1/health   # {"status":"ok"}
 ```
 
+This hand-written `.env` is a THROWAWAY (the generated one has a gen-stamp header; this one
+does not, so the next deploy-path run regenerates it from the sources). For a rehearsal you
+keep around, set the same values in `deploy/env.config` and run `just deploy-env` instead.
+
 `host.docker.internal` resolves via the `extra_hosts` mapping in the compose file.
 
 For mainnet, do the one-time setup here and then follow the deploy sequence in `docs/OPS.md` §3:
 
 ```sh
 icp-cli new-identity dpay                        # once — this identity BECOMES the canister controller
-echo 'DPAY_DFX_IDENTITY=dpay' >> deploy/.env      # (a cycles-funded identity; see below)
-just tunnel-provision                             # publishes the tunnel (or set CF_TUNNEL_TOKEN by hand)
+# put the identity NAME in deploy/env.config:  DPAY_DFX_IDENTITY=dpay   (a cycles-funded identity; see below)
+just tunnel-provision                             # publishes the tunnel (stores CF_TUNNEL_TOKEN in sops)
 ```
 
 `just deploy-ic` requires `DPAY_DFX_IDENTITY` — the identity that deploys **becomes the canister
 controller** (upgrade authority), so it is explicit, not "whatever identity is active." It writes the
-resulting `DPAY_CANISTER_ID` back into `deploy/.env` for you. Re-running it is a **redeploy**, and
+resulting `DPAY_CANISTER_ID` into `deploy/env.config` and the controller seed into
+`secrets/deploy.sops.json` for you (regenerating `deploy/.env`). Re-running it is a **redeploy**, and
 `DPAY_DEPLOY_MODE` chooses what that means (see the header of `scripts/dfx-deploy-ic.sh`). The
 controller is a founder key; the posture that makes that safe is `docs/GOVERNANCE.md`. The relay holds
 **one** identity — the controller seed (`DPAY_CONTROLLER_SEED`) — used only

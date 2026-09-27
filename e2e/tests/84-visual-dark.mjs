@@ -20,7 +20,7 @@
 //   cd e2e && DPAY_E2E_REGEN_BASELINES=1 DPAY_E2E_FILTER=84 node run.mjs
 // (same seeding policy as flow 40: REGEN only overwrites baselines that drifted past tolerance,
 // so a seed commit shows only genuinely-moved surfaces).
-import { setup, onboardWallet, assert, openBalances, selectCurrency, accountOf, faucetAccount, openConvertFor } from '../harness/lib.mjs';
+import { setup, onboardWallet, assert, openBalances, selectCurrency, accountOf, faucetAccount, openConvertFor, openOtherVenues, typeConvertAmount } from '../harness/lib.mjs';
 import { startRelay } from '../harness/relay.mjs';
 import { comparePng } from '../harness/pixel.mjs';
 import { existsSync } from 'node:fs';
@@ -56,7 +56,7 @@ const SURFACES = [
   // The convert venue chooser: two rows, each with its own quote, NOTHING picked (V5). Both
   // per-row quote-attribution clock lines are masked.
   { capture: '84-vr-dark-convert-chooser', baseline: 'convert-chooser',
-    masksFromTestIDs: ['convert-venue-icpswap-source', 'convert-venue-icpswap-fixture-b-source'] },
+    masksFromTestIDs: ['convert-quote-source'] },
   // The convert pre-sign checklist under a pick (the real venue): fees, counterparty, refusal —
   // the active quote's timestamp is masked.
   { capture: '84-vr-dark-convert-checklist', baseline: 'convert-checklist',
@@ -102,8 +102,8 @@ export async function run() {
     // + useColorScheme wiring saw the emulated media, not just the raw CSS media query.
     const bg = await driver.eval(() => getComputedStyle(document.querySelector('#root > div')).backgroundColor);
     assert(
-      bg === 'rgb(20, 18, 16)',
-      `app root renders DARK bg (expected rgb(20, 18, 16)=#141210, got ${bg})`,
+      bg === 'rgb(12, 19, 18)',
+      `app root renders DARK bg (expected rgb(12, 19, 18)=#0C1312, got ${bg})`,
     );
 
     const masks = {};
@@ -168,18 +168,23 @@ export async function run() {
     }
     await driver.screenshot(SURFACES[5].capture);
 
-    // 6c. CONVERT surfaces (this flow's own; flow 40 does not carry them). Fund ICP only NOW —
-    //     after the ledger capture — so the faucet row cannot perturb the ledger baseline; then
-    //     open Convert from the ICP row (the V11-gated entry), key 1 ICP, and wait for BOTH venue
-    //     quotes to settle (a spinner mid-fetch is nondeterministic pixels).
-    console.log('[84-visual-dark] convert surfaces (chooser + checklist)…');
+    // 6c. CONVERT surfaces (this flow's own; flow 40 does not carry them): the intent sheet
+    //     (the 2026-09-26 two-tap surface). Fund ICP only NOW — after the ledger capture — so
+    //     the faucet row cannot perturb the ledger baseline. Shot A: the sheet with the
+    //     Other-venues expander OPEN (both venue rows, each with its own quote). Shot B: the
+    //     review card under the ONE-TAP override to the real venue, with the fee census open —
+    //     anchored at the floor line; every clock line is masked.
+    console.log('[84-visual-dark] convert surfaces (sheet + census)…');
     const account = await accountOf(driver);
     const fund = await faucetAccount(r2.baseURL, account.publicHex, SEED, {currency: 8});
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
 
     await openConvertFor(driver, 'icp');
-    await driver.type('convert-amount', '1');
-    await driver.findByTestID('convert-venue-icpswap-quote', {timeoutMs: 10_000});
+    await typeConvertAmount(driver, '1');
+    await driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+    await openOtherVenues(driver);
+    // The sheet grammar: ICPSwap is the auto pick (its number backs the card, attributed via
+    // convert-quote-source); the fixture venue waits behind the expander with its OWN quote.
     await driver.findByTestID(`convert-venue-${FIXTURE_VENUE}-quote`, {timeoutMs: 10_000});
     await driver.eval(() => window.scrollTo(0, 0));
     for (const tid of SURFACES[6].masksFromTestIDs) {
@@ -187,17 +192,10 @@ export async function run() {
     }
     await driver.screenshot(SURFACES[6].capture);
 
-    // The checklist under a pick: click the REAL venue row, wait for the math to derive (the
-    // minimum is the last MAIN-surface line) and the quote attribution to render, then
-    // capture — anchored at the CHECKLIST card (scrollIntoView block:'start'), not the page
-    // top: the compact decision surface (slippage → minimum → Details control) is under
-    // contract and renders below the headline + venue rows. Everything above the anchor is
-    // fully off-frame, so no clock text can leak in; the quote-source mask stays as a safety
-    // net (it self-skips when off-frame). (10x-verbosity pass 2026-09-16: convert-net is gone
-    // and the fee census folds behind the convert-details control — the main surface shrank.)
-    await driver.click('convert-venue-icpswap', {timeoutMs: 5_000});
+    await driver.click(`convert-venue-${FIXTURE_VENUE}`, {timeoutMs: 5_000});
     await driver.findByTestID('convert-min-out', {timeoutMs: 10_000});
     await driver.findByTestID('convert-quote-source', {timeoutMs: 5_000});
+    await driver.click('convert-details', {timeoutMs: 5_000});
     await driver.eval(() => {
       document.querySelector('[data-testid="convert-min-out"]').scrollIntoView({block: 'start'});
     });

@@ -71,7 +71,7 @@ export function TripStrip({onOpen}: {onOpen: () => void}) {
         {/* UX round 4: the dots already encode n-of-4 — the phrase alone is warmer and shorter
             (was "3 OF 4 · one payment to go": the count twice in one slim line). */}
         <Text style={S.tripStripText} numberOfLines={1}>
-          {next ? next.short.toUpperCase() : ''}
+          {next ? next.short : ''}
         </Text>
         {/* UX 2026-08-23: a trailing arrow reads "opens a page" — the strip was discoverable but
             its affordance was invisible (a label with dots, no chevron). Points up: it opens a

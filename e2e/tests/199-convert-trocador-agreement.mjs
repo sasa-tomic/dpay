@@ -25,6 +25,7 @@
 //      rate/trade/status/webhook/webhook-unmatched kinds all present.
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances, pickSwapTarget,
   openConvertFor,
+  typeConvertAmount, openOtherVenues,
 } from '../harness/lib.mjs';
 import {startRelay, pickFreePort} from '../harness/relay.mjs';
 import {deriveSolanaKeypair} from '../harness/jupiter.mjs';
@@ -145,10 +146,12 @@ export async function run() {
     await openSolConvert(driver);
     assert(await driver.findByTestID('convert-screen', {timeoutMs: 8_000}) != null, 'Convert surface opens for SOL');
     await pickSwapTarget(driver, 'ICP');
-    await driver.click(CEFI_ROW, {timeoutMs: 8_000});
+    // SideShift is the sheet's auto pick (registry-first); Trocador is the one-tap override
+    // behind the ONE Other-venues expander.
+    await openOtherVenues(driver);
     await driver.click(TROCADOR_MECH, {timeoutMs: 8_000});
     assertIncludes(await driver.readText('convert-screen'), 'Convert SOL → ICP', 'the heading names the picked pair');
-    await driver.type('convert-amount', AMOUNT_TEXT);
+    await typeConvertAmount(driver, AMOUNT_TEXT);
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     assertIncludes(await driver.readText('convert-headline'), SETTLE_TEXT, 'receive estimate is the venue settle figure verbatim');
     assertIncludes(await driver.readText('convert-quote-source'), 'Trocador', 'attribution names the venue');

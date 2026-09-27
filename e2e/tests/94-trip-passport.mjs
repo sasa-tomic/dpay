@@ -105,7 +105,7 @@ export async function run() {
     await driver.findByTestID('trip-strip-dot-paymentTested', { timeoutMs: 3_000 }); // empty
     await driver.click('btn-trip-strip', { timeoutMs: 4_000 });
     await driver.findByTestID('passport-archive', { timeoutMs: 5_000 });
-    assertIncludes(await driver.readText('passport-count'), '2 OF 4', 'archive count after onboarding');
+    assertIncludes(await driver.readText('passport-count'), '2 of 4', 'archive count after onboarding');
     const fundsHint = await driver.readText('passport-hint');
     assertIncludes(fundsHint.toLowerCase(), 'practice',
       'the next-step hint names what does NOT count, so the user is not sent to the faucet again');
@@ -122,7 +122,7 @@ export async function run() {
     await driver.findByTestID('trip-strip-dot-fundsReady-filled', { timeoutMs: 15_000 });
     await driver.click('btn-trip-strip', { timeoutMs: 4_000 });
     await driver.findByTestID('passport-archive', { timeoutMs: 5_000 });
-    assertIncludes(await driver.readText('passport-count'), '3 OF 4', 'a real balance flips the archive to 3 OF 4');
+    assertIncludes(await driver.readText('passport-count'), '3 of 4', 'a real balance flips the archive to 3 OF 4');
     for (const key of ['recoverySaved', 'flowUnderstood', 'fundsReady']) {
       await driver.findByTestID(`passport-slot-${key}-filled`, { timeoutMs: 3_000 });
     }

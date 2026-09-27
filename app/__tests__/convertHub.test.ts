@@ -51,6 +51,7 @@ import {hubRoutes, type HubRoute} from '../routes';
 import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config/catalog';
 import {resolveConvertDestinations} from '../config/convert';
 import {setRuntimeVenues, type VenueEntry} from '../config/venues';
+import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 
 const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
 const rowOf = (currency: number) => BUNDLED.find(c => c.currency === currency)!;
@@ -285,9 +286,15 @@ describe('hubRoutes — the pure registry walk (no hardcoded hub)', () => {
 });
 
 describe('resolveConvertDestinations — the widened Convert-entry enumeration', () => {
-  test('VCHF: two direct destinations, both gain hub routes, ckETH and ckBTC are hub-only', () => {
+  test('VCHF: two direct destinations, both gain hub routes, ckETH and ckBTC are hub-only, PLUS the composed mint destinations', () => {
     const dests = resolveConvertDestinations(VCHF_LEDGER, false);
-    expect(dests.map(d => d.destLedger)).toEqual([ICP_LEDGER, CKUSDC_LEDGER, CKETH_LEDGER, CKBTC_LEDGER]);
+    // The four IC-ledger destinations (direct + hub), then the COMPOSED mint destinations
+    // (2026-09-26): every cefi venue buying an IC ledger VCHF reaches (ICP) — registry
+    // order, never ranked.
+    expect(dests.map(d => d.destLedger)).toEqual([
+      ICP_LEDGER, CKUSDC_LEDGER, CKETH_LEDGER, CKBTC_LEDGER,
+      WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS, EURC_MINT_ADDRESS,
+    ]);
     // Direct FIRST, then the hub alternative — offered, never ranked. ICP itself is reachable
     // over the ckUSDC hub (the direct VCHF↔ICP pool beside it).
     expect(dests[0].routes).toEqual([
@@ -306,6 +313,16 @@ describe('resolveConvertDestinations — the widened Convert-entry enumeration',
     expect(dests[3].routes).toEqual([
       {kind: 'hub', routeId: 'hub:icpswap:8:icpswap-ckbtc', venue1Id: 'icpswap', venue2Id: 'icpswap-ckbtc', hubLedger: ICP_LEDGER},
     ]);
+    // The composed mint destinations: VCHF → ICP → EURC is THE founder route (brief §5.4).
+    const eurc = dests.find(d => d.destLedger === EURC_MINT_ADDRESS)!;
+    expect(eurc.routes.map(r => (r.kind === 'composed' ? r.routeId : r.kind))).toEqual([
+      'composed:icpswap:sideshift-eurc',
+      'composed:hub:icpswap-vchf-ckusdc:2:icpswap-ckusdc:sideshift-eurc',
+    ]);
+    const usdc = dests.find(d => d.destLedger === USDC_MINT_ADDRESS)!;
+    const firstUsdc = usdc.routes[0];
+    expect(firstUsdc).toMatchObject({kind: 'composed', cefiVenueId: 'sideshift-usdc', settleSymbol: 'USDC'});
+    expect(firstUsdc?.kind === 'composed' ? firstUsdc.endpoints[1].ledger : '').toBe(ICP_LEDGER);
   });
 
   test('ICP keeps every direct pair and gains hub alternatives beside the direct ones', () => {

@@ -128,4 +128,4 @@ fi
 
 echo
 echo "✓ $IMAGE  ($(docker image inspect -f '{{.Size}}' "$IMAGE" | awk '{printf "%.0f MB", $1/1024/1024}'))"
-echo "  next: cd deploy && cp .env.example .env && \$EDITOR .env && docker compose up -d"
+echo "  next: cd deploy && docker compose up -d   # deploy/.env is generated: just deploy-env (secrets: sops secrets/deploy.sops.json)"

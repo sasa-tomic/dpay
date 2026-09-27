@@ -114,7 +114,6 @@ const mountProps = {
   visibleCurrencies: ['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'] as const,
   currencyBalances: {},
   onBack: () => undefined,
-  onActivity: () => undefined,
   onShowDepositAddress: () => undefined,
 };
 
@@ -129,23 +128,38 @@ const textOf = (tree: renderer.ReactTestRenderer, testID: string): string => {
   return node.findAllByType(Text).map(n => flat(n.props.children)).join(' ');
 };
 
+
+// Every mounted tree is unmounted in afterEach: the sheet arms its 1 s stale-quote clock on
+// mount, so a tree left alive after its test would keep the interval armed and hang the whole
+// file at exit (jest waits on the timer before the worker can die).
+const mountedTrees: renderer.ReactTestRenderer[] = [];
+afterEach(async () => {
+  const trees = mountedTrees.splice(0);
+  for (const t of trees) {
+    await act(async () => { t.unmount(); });
+  }
+});
+
 async function mountWithSideshiftPicked(): Promise<renderer.ReactTestRenderer> {
   let tree: renderer.ReactTestRenderer;
   await act(async () => {
     tree = renderer.create(<ConvertMode {...mountProps} />);
   });
-  // Pick the SOL target (the CeFi venue lands SOL on the Solana rail — the same landing the
-  // CCTP route composes to), then the venue's own row. Two venues serve the pair, so the
-  // pick is required before anything quotes.
+  mountedTrees.push(tree!);
+  // The sheet pre-computes the standing pair; this suite wants the SOL pair, whose ONLY row
+  // is the CeFi venue — the sheet auto-picks it (a single-venue pair has no chooser at all).
+  // Clearing the prefill first keeps the SideShift ask count exact: ONE review fetch, at the
+  // typed amount.
   await act(async () => {
-    present(tree!, 'btn-convert-target')[0].props.onPress();
+    present(tree!, 'convert-amount')[0].props.onChangeText('');
   });
   await act(async () => {
-    present(tree!, 'convert-target-SOL')[0].props.onPress();
+    present(tree!, 'convert-target-chip-SOL')[0].props.onPress();
   });
   await act(async () => {
-    present(tree!, 'convert-venue-sideshift')[0].props.onPress();
+    present(tree!, 'convert-amount')[0].props.onChangeText('1');
   });
+  await act(async () => {});
   return tree!;
 }
 

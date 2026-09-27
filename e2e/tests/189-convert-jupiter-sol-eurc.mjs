@@ -24,7 +24,9 @@
 // __DPAY_TEST_SOLANA_RPC_STUB, with
 // the getTransaction detail carrying the EURC mint row (the realized-payout oracle matches the
 // record's own out mint).
-import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor, pickSwapTarget} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor, pickSwapTarget,
+  typeConvertAmount,
+} from '../harness/lib.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
   configureJupiterStub, jupiterStubState, EURC_MINT, WRAPPED_SOL_MINT,
@@ -130,7 +132,7 @@ export async function run() {
     // §2 — Jupiter's own digits for the EUR pair, verbatim through the relay proxy.
 
     // §3 — Jupiter's own digits for the EURC pair, verbatim through the relay proxy.
-    await driver.type('convert-amount', '1');
+    await typeConvertAmount(driver, '1');
     assert(await driver.findByTestID('convert-quote-source', {timeoutMs: 10_000}) != null, 'a quote arrived (through the relay proxy)');
     assertIncludes(await driver.readText('convert-quote-source'), 'Jupiter', 'attribution names the venue');
     assertIncludes(await driver.readText('convert-quote-source'), 'fetched', 'attribution carries the read instant');
@@ -183,7 +185,12 @@ export async function run() {
     assertEq(jup.lastQuoteResponse.outAmount, OUT_EURC, 'POST body carried the VERBATIM quote (outAmount)');
     assertEq(jup.lastQuoteResponse.platformFee, null, 'POST body carried the VERBATIM quote (platformFee null)');
     assert(jup.quoteCalls.length >= 1, 'at least one quote GET (per-keystroke)');
-    for (const q of jup.quoteCalls) {
+    // The sheet's Max prefill quotes the STANDING pair (SOL→USDC) before the flow picks
+    // EURC — those pre-pick calls are legitimate; every POST-pick call must name EURC.
+    const prefillLamports189 = '5000000000'; // the Max prefill: the full 5 SOL balance
+    const postPick = jup.quoteCalls.filter((q) => q.outputMint === EURC_MINT && q.amount !== prefillLamports189);
+    assert(postPick.length >= 1, 'at least one post-pick quote GET at the typed amount named the EURC pair');
+    for (const q of postPick) {
       assertEq(q.inputMint, WRAPPED_SOL_MINT, 'quote GET asked for the wrapped-SOL mint');
       assertEq(q.outputMint, EURC_MINT, 'quote GET asked for the PICKED pair\'s EURC mint');
       assertEq(q.amount, IN_LAMPORTS, 'quote GET carried the raw lamport amount');

@@ -17,6 +17,7 @@
 //   * Screenshots: the fund gate, the refusal, and the armed decision surface.
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openConvertFor,
+  typeConvertAmount,
 } from '../harness/lib.mjs';
 
 const SEED = 50000000; // 0.5 ICP — enough to convert a little, never enough for the 2 ICP attempt
@@ -87,7 +88,7 @@ export async function run() {
     await openConvert(driver);
     assertIncludes(await driver.readText('convert-balance'), '0.5 ICP', 'the balance line shows the funded amount, with ONE unit');
 
-    await driver.type('convert-amount', '2');
+    await typeConvertAmount(driver, '2');
     await driver.waitForFunction(
       () => document.querySelector('[data-testid="convert-insufficient"]') != null,
       { timeoutMs: 8_000 },
@@ -100,15 +101,15 @@ export async function run() {
 
     // --- half 3: an affordable amount re-arms the confirm, headline first ----------------------
     console.log('[145-convert-fund-gate] drop to 0.1 ICP → the confirm re-arms, headline leads…');
-    await driver.type('convert-amount', '0.1');
+    await typeConvertAmount(driver, '0.1');
     await driver.waitForFunction(
-      () => document.querySelector('[data-testid="convert-headline"]') != null
-        && document.querySelector('[data-testid="convert-insufficient"]') == null,
+      () => document.querySelector('[data-testid="btn-convert-confirm"]') != null
+        && document.querySelector('[data-testid="btn-convert-confirm"]').getAttribute('aria-disabled') !== 'true',
       { timeoutMs: 12_000 },
     );
     assert((await confirmDisabled(driver)) !== 'true', 'the confirm re-arms once the amount fits');
     const headline = await driver.readText('convert-headline');
-    assertIncludes(headline, "You'll receive", 'the screen leads with what the user receives');
+    assertIncludes(headline, 'You receive', 'the screen leads with what the user receives');
     assertIncludes(headline, 'VCHF', 'the headline is in the asset the user ends up holding');
     // The census folds behind the ONE Details control (10x-verbosity pass 2026-09-16): open
     // it and the rate + pool principal are still spelled on their own lines. The net end-state

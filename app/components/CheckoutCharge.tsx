@@ -647,7 +647,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
               <Pressable
                 key={r.id}
                 testID={`checkout-asset-${(r.linkToken ?? r.symbol).toLowerCase()}`}
-                style={[S.railPill, on && S.railPillActive]}
+                style={[S.railPill, on && S.railPillActive, opening && S.dim]}
                 disabled={opening}
                 onPress={() => {
                   setSettleId(r.id);

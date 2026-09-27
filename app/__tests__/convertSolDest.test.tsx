@@ -128,7 +128,6 @@ const mountProps = (asset: SelectableAsset) => ({
   visibleCurrencies: ['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'] as const,
   currencyBalances: {},
   onBack: () => undefined,
-  onActivity: () => undefined,
   onShowDepositAddress: () => undefined,
   solana: {sol: '5000000000', tokens: {} as Record<string, string | null>},
 });
@@ -136,10 +135,6 @@ const mountProps = (asset: SelectableAsset) => ({
 const present = (tree: renderer.ReactTestRenderer, testID: string): renderer.ReactTestInstance[] =>
   tree.root.findAll(n => n.props != null && n.props.testID === testID);
 const exists = (tree: renderer.ReactTestRenderer, testID: string): boolean => present(tree, testID).length > 0;
-const checked = (tree: renderer.ReactTestRenderer, testID: string): boolean | undefined => {
-  const node = present(tree, testID)[0];
-  return (node?.props.accessibilityState as {checked?: boolean} | undefined)?.checked;
-};
 const textOf = (tree: renderer.ReactTestRenderer, testID: string): string => {
   const node = present(tree, testID)[0];
   if (node == null) return '';
@@ -152,43 +147,71 @@ const lastQuoteCall = (): {venueId: string; inputMint: string; outputMint: strin
   const [_relayUrl, venue, inputMint, outputMint, amount] = calls[calls.length - 1];
   return {venueId: venue.venue_id, inputMint, outputMint, amount};
 };
+
+// Every mounted tree is unmounted in afterEach: the sheet arms its 1 s stale-quote clock on
+// mount, so a tree left alive after its test would keep the interval armed and hang the whole
+// file at exit (jest waits on the timer before the worker can die).
+const mountedTrees: renderer.ReactTestRenderer[] = [];
+afterEach(async () => {
+  const trees = mountedTrees.splice(0);
+  for (const t of trees) {
+    await act(async () => { t.unmount(); });
+  }
+});
+
 /** Mount + flush the mount-time quote effect (if any). */
 async function mount(asset: SelectableAsset): Promise<renderer.ReactTestRenderer> {
   let tree: renderer.ReactTestRenderer;
   await act(async () => {
     tree = renderer.create(<ConvertMode {...mountProps(asset)} />);
   });
+  mountedTrees.push(tree!);
   return tree!;
 }
 
-describe('SOL source target-currency picker (the swap screen)', () => {
-  /** Open the target list and pick a target row (the two gestures every switch takes). */
+describe('SOL source target-currency picker (the intent sheet)', () => {
+  /** The ONE-chip gesture every switch takes (the sheet pre-computes; changing the target
+   *  stays optional). Flushes the re-keyed quote effect before returning. */
   const pickTarget = async (tree: renderer.ReactTestRenderer, code: string): Promise<void> => {
     await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
+      present(tree, `convert-target-chip-${code}`)[0].props.onPress();
     });
-    await act(async () => {
-      present(tree, `convert-target-${code}`)[0].props.onPress();
-    });
+    await act(async () => {});
+  };
+  /** The standing target has NO chip (it IS the line) and names itself in the heading. */
+  const standing = (tree: renderer.ReactTestRenderer, code: string): boolean =>
+    !exists(tree, `convert-target-chip-${code}`) && textOf(tree, 'convert-screen').includes(`\u2192 ${code}`);
+  /** Mount + flush the sheet's own mount-time work (the Max prefill re-keys the quote fetch). */
+  const mountFlushed = async (asset: SelectableAsset): Promise<renderer.ReactTestRenderer> => {
+    const tree = await mount(asset);
+    await act(async () => {});
+    return tree;
   };
 
-  test('SOL input: the standing target is USD (registry row 0), the single venue arms without a pick', async () => {
-    const tree = await mount(SOL_ASSET);
+  test('SOL input: the standing target is USD (registry row 0); the sheet pre-fills Max and arms tap 2', async () => {
+    const tree = await mountFlushed(SOL_ASSET);
     expect(exists(tree, 'convert-unavailable')).toBe(false);
-    // The target list carries USD (jupiter), EUR (jupiter-eurc) and ICP (the CeFi venues).
-    await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
-    });
-    for (const code of ['USD', 'EUR', 'ICP']) {
-      expect(exists(tree, `convert-target-${code}`)).toBe(true);
+    // The chips carry every OTHER reachable currency; USD IS the standing line.
+    expect(standing(tree, 'USD')).toBe(true);
+    for (const code of ['EUR', 'ICP']) {
+      expect(exists(tree, `convert-target-chip-${code}`)).toBe(true);
     }
-    expect(checked(tree, 'convert-target-USD')).toBe(true);
-    expect(checked(tree, 'convert-target-EUR')).toBe(false);
-    // No amount typed → no venue ask yet. Typing asks the STANDING pair (registry row 0's).
-    expect(jest.mocked(fetchJupiterQuote).mock.calls.length).toBe(0);
-    const input = present(tree, 'convert-amount')[0];
+    // Pre-computed: the amount is pre-filled to the full spendable balance (a SOL-side route
+    // carries no input-fee overhead) and the standing pair is ALREADY quoted on open.
+    expect(present(tree, 'convert-amount')[0].props.value).toBe('5');
+    expect(lastQuoteCall()).toEqual({
+      venueId: 'jupiter',
+      inputMint: WRAPPED_SOL_MINT_ADDRESS,
+      outputMint: USDC_MINT_ADDRESS,
+      amount: '5000000000',
+    });
+    // Single-venue pair: one attributed pick line, no venue expander, tap 2 armed.
+    expect(exists(tree, 'btn-convert-venues-other')).toBe(false);
+    expect(textOf(tree, 'convert-venue-auto')).toContain('Executed via');
+    expect(present(tree, 'btn-convert-confirm')[0].props.disabled).toBe(false);
+    // Typing re-quotes at the typed amount.
     await act(async () => {
-      input.props.onChangeText('1');
+      present(tree, 'convert-amount')[0].props.onChangeText('1');
     });
     expect(lastQuoteCall()).toEqual({
       venueId: 'jupiter',
@@ -199,57 +222,40 @@ describe('SOL source target-currency picker (the swap screen)', () => {
     expect(textOf(tree, 'convert-headline')).toContain('10.36 USDC');
   });
 
-  test('switching target re-quotes the picked pair, resets the quote, keeps the amount', async () => {
-    const tree = await mount(SOL_ASSET);
-    const input = present(tree, 'convert-amount')[0];
-    await act(async () => {
-      input.props.onChangeText('1');
-    });
-    // USDC quote arrived under the standing pair.
-    expect(exists(tree, 'convert-headline')).toBe(true);
-    expect(textOf(tree, 'convert-headline')).toContain('10.36 USDC');
-    expect(textOf(tree, 'convert-screen')).toContain('Convert SOL → USD');
+  test('switching target re-quotes the picked pair, keeps the amount, resets the quote', async () => {
+    const tree = await mountFlushed(SOL_ASSET);
+    expect(textOf(tree, 'convert-headline')).toContain('10.36 USDC'); // the mock digits are per-mint
 
-    // Pick EUR: the OLD quote resets immediately (no stale USDC digits under the EUR pair),
-    // the amount survives, and the fresh quote is asked from the EUR venue's own pair.
+    // Pick EUR: the amount SURVIVES (it is a SOURCE-unit figure), the fresh quote is asked
+    // from the EUR venue's own pair, and the old pair's digits never render under the new one.
     await pickTarget(tree, 'EUR');
-    // The pick closes the list; re-open it to read the radio states.
-    await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
-    });
-    expect(checked(tree, 'convert-target-USD')).toBe(false);
-    expect(checked(tree, 'convert-target-EUR')).toBe(true);
-    expect(present(tree, 'convert-amount')[0].props.value).toBe('1');
     expect(lastQuoteCall()).toEqual({
       venueId: 'jupiter-eurc',
       inputMint: WRAPPED_SOL_MINT_ADDRESS,
       outputMint: EURC_MINT_ADDRESS,
-      amount: '1000000000',
+      amount: '5000000000',
     });
-    expect(textOf(tree, 'convert-screen')).toContain('Convert SOL → EUR');
+    expect(standing(tree, 'EUR')).toBe(true);
+    expect(textOf(tree, 'convert-screen')).toContain('Convert SOL \u2192 EUR');
     expect(textOf(tree, 'convert-headline')).toContain('84.12 EURC');
     expect(textOf(tree, 'convert-headline')).not.toContain('USDC');
+    expect(present(tree, 'convert-amount')[0].props.value).toBe('5');
   });
 
-  test('USDC input (USD on the SOL rail): the source row is disabled, the standing target is the stable pair EUR via jupiter-usdc-eurc', async () => {
+  test('USDC input (USD on the SOL rail): the source is no chip at all, the standing target is the stable twin EUR', async () => {
     const tree = await mount(USDC_ASSET);
+    await act(async () => {});
     expect(exists(tree, 'convert-unavailable')).toBe(false);
-    // The targets: EUR (the stable-first FX pair — the standing pair), SOL (jupiter), ICP (the
-    // CeFi venues). The source's own currency (USD) renders DISABLED.
+    // The source's own currency is the line's other side of the walk: never offered as a chip.
+    expect(exists(tree, 'convert-target-chip-USD')).toBe(false);
+    expect(exists(tree, 'convert-target-chip-EUR')).toBe(false); // EUR IS the standing line
+    expect(exists(tree, 'convert-target-chip-SOL')).toBe(true);
+    expect(exists(tree, 'convert-target-chip-ICP')).toBe(true);
+    expect(textOf(tree, 'convert-screen')).toContain('Convert USD \u2192 EUR');
+    // An unread balance is not a zero and pre-fills nothing: typing makes the ask.
+    expect(jest.mocked(fetchJupiterQuote).mock.calls.length).toBe(0);
     await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
-    });
-    const sameRow = present(tree, 'convert-target-USD')[0];
-    expect((sameRow.props.accessibilityState as {disabled?: boolean}).disabled).toBe(true);
-    expect(exists(tree, 'convert-target-EUR')).toBe(true);
-    expect(exists(tree, 'convert-target-ICP')).toBe(true);
-    expect(checked(tree, 'convert-target-EUR')).toBe(true);
-    await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress(); // close it again
-    });
-    const input = present(tree, 'convert-amount')[0];
-    await act(async () => {
-      input.props.onChangeText('1');
+      present(tree, 'convert-amount')[0].props.onChangeText('1');
     });
     // The standing pair quotes the stable FX venue from the USDC mint.
     expect(lastQuoteCall()).toEqual({
@@ -258,8 +264,7 @@ describe('SOL source target-currency picker (the swap screen)', () => {
       outputMint: EURC_MINT_ADDRESS,
       amount: '1000000',
     });
-    expect(textOf(tree, 'convert-screen')).toContain('Convert USD → EUR');
-    // Pick SOL: the volatile leg stays one pick away, quoted from the USDC mint.
+    // Pick SOL: the volatile leg stays one chip away, quoted from the USDC mint.
     await pickTarget(tree, 'SOL');
     expect(lastQuoteCall()).toEqual({
       venueId: 'jupiter',
@@ -267,22 +272,17 @@ describe('SOL source target-currency picker (the swap screen)', () => {
       outputMint: WRAPPED_SOL_MINT_ADDRESS,
       amount: '1000000',
     });
-    expect(textOf(tree, 'convert-screen')).toContain('Convert USD → SOL');
+    expect(textOf(tree, 'convert-screen')).toContain('Convert USD \u2192 SOL');
   });
 
   test('EURC input: standing USD via jupiter-usdc-eurc (stable-first), SOL second via jupiter-eurc', async () => {
     const tree = await mount(EURC_ASSET);
+    await act(async () => {});
     expect(exists(tree, 'convert-unavailable')).toBe(false);
+    expect(standing(tree, 'USD')).toBe(true);
+    expect(exists(tree, 'convert-target-chip-SOL')).toBe(true);
     await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
-    });
-    expect(checked(tree, 'convert-target-USD')).toBe(true);
-    await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress(); // close it again
-    });
-    const input = present(tree, 'convert-amount')[0];
-    await act(async () => {
-      input.props.onChangeText('1');
+      present(tree, 'convert-amount')[0].props.onChangeText('1');
     });
     // The standing pair is the stable-first FX pair, quoted from the EURC mint.
     expect(lastQuoteCall()).toEqual({
@@ -291,15 +291,10 @@ describe('SOL source target-currency picker (the swap screen)', () => {
       outputMint: USDC_MINT_ADDRESS,
       amount: '1000000',
     });
-    expect(textOf(tree, 'convert-screen')).toContain('Convert EUR → USD');
-    // Pick SOL: the volatile leg is one pick away, quoted from the EURC mint. The pick closes
-    // the list; re-open it to read the radio states.
+    expect(textOf(tree, 'convert-screen')).toContain('Convert EUR \u2192 USD');
+    // Pick SOL: the volatile leg is one chip away, quoted from the EURC mint.
     await pickTarget(tree, 'SOL');
-    await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
-    });
-    expect(checked(tree, 'convert-target-USD')).toBe(false);
-    expect(checked(tree, 'convert-target-SOL')).toBe(true);
+    expect(standing(tree, 'SOL')).toBe(true);
     expect(present(tree, 'convert-amount')[0].props.value).toBe('1');
     expect(lastQuoteCall()).toEqual({
       venueId: 'jupiter-eurc',
@@ -307,20 +302,19 @@ describe('SOL source target-currency picker (the swap screen)', () => {
       outputMint: WRAPPED_SOL_MINT_ADDRESS,
       amount: '1000000',
     });
-    expect(textOf(tree, 'convert-screen')).toContain('Convert EUR → SOL');
+    expect(textOf(tree, 'convert-screen')).toContain('Convert EUR \u2192 SOL');
   });
 
   test('a failed confirm leaves an error line that picking another target clears', async () => {
     const tree = await mount(SOL_ASSET);
-    const input = present(tree, 'convert-amount')[0];
+    await act(async () => {});
     await act(async () => {
-      input.props.onChangeText('1');
+      present(tree, 'convert-amount')[0].props.onChangeText('1');
     });
     // The confirm gesture's re-quote fails: an error line renders under the USD pair.
     jest.mocked(fetchJupiterQuote).mockImplementationOnce(async () => ({ok: false as const, code: 'unreachable' as const, status: 503}));
-    const confirm = present(tree, 'btn-convert-confirm')[0];
     await act(async () => {
-      confirm.props.onPress();
+      present(tree, 'btn-convert-confirm')[0].props.onPress();
     });
     expect(exists(tree, 'convert-confirm-err')).toBe(true);
 
@@ -330,11 +324,11 @@ describe('SOL source target-currency picker (the swap screen)', () => {
     expect(textOf(tree, 'convert-headline')).toContain('84.12 EURC');
   });
 
-  test('the target picker is frozen while a confirm is in flight', async () => {
+  test('the target chips are frozen while a confirm is in flight', async () => {
     const tree = await mount(SOL_ASSET);
-    const input = present(tree, 'convert-amount')[0];
+    await act(async () => {});
     await act(async () => {
-      input.props.onChangeText('1');
+      present(tree, 'convert-amount')[0].props.onChangeText('1');
     });
     // A confirm whose re-quote never resolves pins confirmBusy for the gesture below.
     let release: (q: ReturnType<typeof quoteOf>) => void = () => undefined;
@@ -347,14 +341,14 @@ describe('SOL source target-currency picker (the swap screen)', () => {
       present(tree, 'btn-convert-confirm')[0].props.onPress();
     });
 
-    // Mid-flight: the picker is frozen — the chip does not even open the list (the in-flight
-    // confirm closes over THIS pair, and its late setQuote must never land under a newly
-    // picked pair's heading).
+    // Mid-flight: the chip press is a no-op (the in-flight confirm closes over THIS pair,
+    // and its late setQuote must never land under a newly picked pair's heading).
     await act(async () => {
-      present(tree, 'btn-convert-target')[0].props.onPress();
+      present(tree, 'convert-target-chip-EUR')[0].props.onPress();
     });
-    expect(exists(tree, 'convert-target-list')).toBe(false);
-    expect(checked(tree, 'convert-target-USD')).toBe(undefined);
+    expect(textOf(tree, 'convert-screen')).toContain('Convert SOL \u2192 USD');
+    const calls = jest.mocked(fetchJupiterQuote).mock.calls;
+    expect(calls[calls.length - 1][2]).toBe(WRAPPED_SOL_MINT_ADDRESS); // no EUR ask started
 
     await act(async () => {
       release(quoteOf('jupiter', WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS, '1000000000'));

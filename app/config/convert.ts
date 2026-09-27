@@ -15,8 +15,9 @@
  * fact; the execution protection is the venue's own amounts plus the signed minimum-out.
  */
 import {BUNDLED_VENUES} from './venues';
-import {hubRoutes} from '../routes';
+import {hubEndpointOf, hubRoutes, type HubEndpoint, type HubLeg} from '../routes';
 import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from './catalog';
+import {solAssetOfMint} from './swap';
 
 /** Slippage choices on the Convert screen (spec §5): 0.5% / 1% / 3%, default 1%. */
 export const CONVERT_SLIPPAGE_BPS_OPTIONS = [50, 100, 300] as const;
@@ -34,11 +35,20 @@ export const CONVERT_APPROVE_LIFETIME_S = 600;
  * AsyncStorage key for ONE IDENTITY's persisted conversion records (multi-venue readiness V6):
  * the convert store is a per-wallet store like every other one (offramp `dpay.offramp.<pub>`,
  * sol merchant `dpay.sol.merchant.v1.<pub>`) and now scopes the same way — records whose legs
- * were signed by THIS device key. One record per swap id; v2 = the legs schema (V2).
+ * were signed by THIS device key. One record per swap id; v3 = the composed IC+CeFi widening
+ * (the deposit-leg record, 2026-09-26). Every earlier generation is adopted ONCE on first
+ * load: v1 (pre-legs) and the unscoped v2 store below, plus the per-identity v2 store this
+ * key replaced (the `dpay.convert.v2.<pub>` scoped store — the immediately-prior generation).
  */
 export function convertStoreKey(publicHex: string): string {
-  return `dpay.convert.v2.${publicHex}`;
+  return `dpay.convert.v3.${publicHex}`;
 }
+
+/** The prior GENERATION's per-identity store prefix (`dpay.convert.v2.<pub>`): read ONCE per
+ *  identity when no v3 store exists, adopted into the v3 key, then retired — the same
+ *  one-time-migration shape every generation before it used. (Single-active-identity is the
+ *  real deployment: the founder device.) */
+export const CONVERT_PRIOR_SCOPED_STORAGE_PREFIX = 'dpay.convert.v2';
 
 /** The pre-scoping v2 store key (every record under one key, whichever identity was active).
  *  Read ONCE per identity: an identity with no scoped store ADOPTS whatever is here into its
@@ -153,13 +163,36 @@ export function resolveConvertDirection(
 
 // --- the IC hub 2-hop widening (2026-09-18, spec §11): destination enumeration ---------------------
 
-/** ONE route option from an asset to ONE destination ledger, in the shape the Convert screen
+/** ONE route option from an asset to ONE destination, in the shape the Convert screen
  *  renders: `direct` = a single registered ic_amm venue for the pair (today's standing
  *  behavior); `hub` = a 2-leg from→hub→dest composition over two venues (app/routes.ts
- *  hubRoutes). Registry order throughout — direct routes before hub routes, never ranked. */
+ *  hubRoutes); `composed` = an IC→CeFi chain (design brief 2026-09-26 §5.4 item 2): the IC
+ *  legs land the hub asset in the wallet, then a REGISTERED cefi venue's order carries it
+ *  to a Solana-rail mint — the engine executes the venue's deposit transfer as a
+ *  device-signed leg of the SAME intent (convert/prepare + execute). Registry order
+ *  throughout — direct routes before hub routes before composed, never ranked. */
+export type ComposedConvertRoute = {
+  kind: 'composed';
+  routeId: string;
+  /** The IC legs in execution order (one direct pool leg, or the two legs of a hub route) —
+   *  each names its registered venue, pool endpoint, and ordered ledger pair. */
+  legs: HubLeg[];
+  /** The IC endpoints in walk order: endpoints[i] is leg i's source, endpoints[legs.length]
+   *  the final IC ledger — the CeFi DEPOSIT ledger (fully priced catalog rows throughout). */
+  endpoints: HubEndpoint[];
+  /** The CeFi venue that holds the order (registry id — facts are looked up, never assumed). */
+  cefiVenueId: string;
+  /** The settle side: the Solana-rail mint the venue pays, with its registry-resolved
+   *  symbol + decimals (a leg that cannot be NAMED is never a route). */
+  settleMint: string;
+  settleSymbol: string;
+  settleDecimals: number;
+};
+
 export type ConvertRouteOption =
   | {kind: 'direct'; venueId: string}
-  | {kind: 'hub'; routeId: string; venue1Id: string; venue2Id: string; hubLedger: string};
+  | {kind: 'hub'; routeId: string; venue1Id: string; venue2Id: string; hubLedger: string}
+  | ComposedConvertRoute;
 
 /** One hub-reachable destination: the dest IC ledger + every route that reaches it. */
 export type ConvertDestination = {
@@ -167,19 +200,25 @@ export type ConvertDestination = {
   routes: ConvertRouteOption[];
 };
 
-/** Every IC destination an asset can convert to — directly OR over one hub leg. This is the
- *  Convert-entry enablement widened from "a direct venue exists" to "ANY route exists": an
- *  asset with no direct pool but a hub path (e.g. VCHF → ckETH via ICP) converts as ONE
- *  intent, and where both shapes exist both are OFFERED, never ranked. Same posture as
- *  resolveConvertDirection (kept above, unchanged, for its existing callers): the BUNDLED
- *  registry is the truth, mainnet rows only, and hubRoutes fails closed on any missing
- *  number (a leg that cannot be priced is not a route). First-encounter destination order. */
+/** Every destination an asset can convert to — directly, over one hub leg, OR as a COMPOSED
+ *  IC→CeFi chain. This is the Convert-entry enablement widened from "a direct venue exists"
+ *  to "ANY route exists": an asset with no direct pool but a hub path (e.g. VCHF → ckETH via
+ *  ICP) converts as ONE intent, and (2026-09-26) a pool/hub leg that lands on an asset a
+ *  registered CeFi venue buys extends into a composed route (VCHF → ICP → EURC via
+ *  SideShift's ICP order). Same posture as resolveConvertDirection (kept above, unchanged,
+ *  for its existing callers): the BUNDLED registry is the truth, mainnet rows only, and the
+ *  walk fails closed on any leg that cannot be priced or named. First-encounter destination
+ *  order.
+ *
+ *  `catalogArg` overrides the bundled IC catalog (jest only — the fail-closed gates are
+ *  pinned against doctored rows); production callers never pass it. */
 export function resolveConvertDestinations(
   ledger: string | undefined,
   isTestnet: boolean,
+  catalogArg?: CurrencyDescriptor[],
 ): ConvertDestination[] {
   if (!ledger || isTestnet) return [];
-  const catalog: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
+  const catalog: CurrencyDescriptor[] = catalogArg ?? icpCatalogOf(BUNDLED_NETWORKS);
   if (!catalog.some(c => c.ledger === ledger && !c.testnet)) return [];
   const byDest = new Map<string, ConvertDestination>();
   const push = (destLedger: string, route: ConvertRouteOption): void => {
@@ -211,6 +250,58 @@ export function resolveConvertDestinations(
       venue2Id: hr.legs[1].venueId,
       hubLedger: hr.hub.ledger,
     });
+  }
+  // The COMPOSED walk (2026-09-26): every registered CeFi venue whose DEPOSIT side is a
+  // fully priced IC ledger this source can reach (a direct pool, else a hub composition)
+  // extends into a composed route. The settle side must be a mint the Solana registry can
+  // name (symbol + decimals) — a leg that cannot be priced is not a route, like every walk
+  // above. The source's own ledger is skipped: a CeFi deposit straight from the source is
+  // the plain cefi row's surface, not a composition. Destinations key on the SETTLE MINT
+  // (a Solana-rail id, disjoint from the IC-ledger keys above). Registry order throughout:
+  // cefi venues outer, per-venue IC legs direct-before-hub, never ranked.
+  for (const venue of BUNDLED_VENUES) {
+    if (venue.kind !== 'cefi' || venue.testnet) continue;
+    for (const mid of venue.pair_ledgers) {
+      if (mid === ledger) continue;
+      const settleMint = mid === venue.pair_ledgers[0] ? venue.pair_ledgers[1] : venue.pair_ledgers[0];
+      const settle = solAssetOfMint(settleMint);
+      if (settle == null) continue;
+      const hubRow = catalog.find(c => c.ledger === mid && !c.testnet);
+      if (hubRow == null || hubRow.fee == null || hubRow.decimals == null
+        || (hubRow.backing_symbol ?? hubRow.symbol) == null) continue;
+      for (const pool of BUNDLED_VENUES) {
+        if (pool.kind !== 'ic_amm' || pool.testnet) continue;
+        const i = pool.pair_ledgers.indexOf(ledger);
+        if (i < 0) continue;
+        const other = pool.pair_ledgers[i === 0 ? 1 : 0];
+        if (other !== mid) continue;
+        const srcEp = hubEndpointOf(catalog, ledger);
+        const midEp = hubEndpointOf(catalog, mid);
+        if (srcEp == null || midEp == null) continue;
+        push(settleMint, {
+          kind: 'composed',
+          routeId: `composed:${pool.venue_id}:${venue.venue_id}`,
+          legs: [{venueId: pool.venue_id, pool: pool.endpoint, fromLedger: ledger, toLedger: mid}],
+          endpoints: [srcEp, midEp],
+          cefiVenueId: venue.venue_id,
+          settleMint,
+          settleSymbol: settle.symbol,
+          settleDecimals: settle.decimals,
+        });
+      }
+      for (const hr of hubRoutes(catalog, ledger, mid)) {
+        push(settleMint, {
+          kind: 'composed',
+          routeId: `composed:${hr.routeId}:${venue.venue_id}`,
+          legs: hr.legs.map(l => ({...l})),
+          endpoints: [hr.from, hr.hub, hr.dest],
+          cefiVenueId: venue.venue_id,
+          settleMint,
+          settleSymbol: settle.symbol,
+          settleDecimals: settle.decimals,
+        });
+      }
+    }
   }
   return [...byDest.values()];
 }

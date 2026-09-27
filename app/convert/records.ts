@@ -2,16 +2,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {DpayCore} from '../services/native';
 import {
   CONVERT_LEGACY_STORAGE_KEY,
+  CONVERT_PRIOR_SCOPED_STORAGE_PREFIX,
   CONVERT_UNSCOPED_STORAGE_KEY,
   convertStoreKey,
 } from '../config/convert';
 import {icAmmVenueForPair, venueEndpointOf, venueOfId} from '../config/venues';
 import {
+  COMPOSED_CONVERT_STEPS,
   CONVERT_STEPS,
   CROSSRAIL_CONVERT_STEPS,
   PROVIDER_CONVERT_STEPS,
   PROVIDER_ONLY_STEPS,
   SOLANA_CONVERT_STEPS,
+  type ComposedDepositInfo,
   type ConvertRecord,
   type ConvertStep,
   type CrossRailInfo,
@@ -149,6 +152,59 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   if (!CONVERT_STEPS.includes(r.step as ConvertStep)) return null;
   rec.step = r.step as ConvertStep;
   if (typeof r.acknowledgedStuckAtMs === 'number') rec.acknowledgedStuckAtMs = r.acknowledgedStuckAtMs;
+  // The COMPOSED IC→CeFi block (2026-09-26, brief §5.4 item 2): parsed BEFORE the plan so
+  // the plan-shape checks below can key on it. Every venue-issued string must be present
+  // and well-formed — a half-written deposit block on a record the engine signs against is
+  // refused like any other corrupt money field (per-record salvage drops it, never the
+  // store). Durable facts only: the order's ids, the venue's verbatim address + amounts,
+  // the fee, the windows, and the sent evidence as it arrives.
+  let composedDeposit: ComposedDepositInfo | undefined;
+  if (r.composedDeposit != null) {
+    const c = r.composedDeposit as Record<string, unknown>;
+    if (!c || typeof c !== 'object') return null;
+    const cs = (k: string): string | null =>
+      (typeof c[k] === 'string' && (c[k] as string).length > 0 ? c[k] as string : null);
+    const digits = (k: string): string | null => {
+      const v = cs(k);
+      return v != null && /^\d+$/.test(v) ? v : null;
+    };
+    const venueId = cs('venueId');
+    const orderId = cs('orderId');
+    const depositAddress = cs('depositAddress');
+    const depositOwner = cs('depositOwner');
+    const amountDecimal = cs('amountDecimal');
+    const amountRaw = digits('amountRaw');
+    const fee = digits('fee');
+    const settleSymbol = cs('settleSymbol');
+    const settleDecimals =
+      typeof c.settleDecimals === 'number' && Number.isSafeInteger(c.settleDecimals) && c.settleDecimals >= 0
+        ? c.settleDecimals
+        : null;
+    if (venueId == null || orderId == null || depositAddress == null || depositOwner == null
+      || amountDecimal == null || amountRaw == null || fee == null
+      || settleSymbol == null || settleDecimals == null) return null;
+    const expiresAtMs =
+      typeof c.expiresAtMs === 'number' && Number.isSafeInteger(c.expiresAtMs) && c.expiresAtMs > 0
+        ? c.expiresAtMs
+        : null;
+    composedDeposit = {
+      venueId,
+      orderId,
+      depositAddress,
+      depositOwner,
+      amountDecimal,
+      amountRaw,
+      fee,
+      settleSymbol,
+      settleDecimals,
+      ...(cs('depositMemo') != null ? {depositMemo: cs('depositMemo') as string} : {}),
+      ...(cs('settleAmountDecimal') != null ? {settleAmountDecimal: cs('settleAmountDecimal') as string} : {}),
+      ...(cs('settleAmountRaw') != null ? {settleAmountRaw: cs('settleAmountRaw') as string} : {}),
+      ...(expiresAtMs != null ? {expiresAtMs} : {}),
+      ...(cs('sentTx') != null ? {sentTx: cs('sentTx') as string} : {}),
+    };
+    rec.composedDeposit = composedDeposit;
+  }
   if (typeof r.abortedAtMs === 'number') rec.abortedAtMs = r.abortedAtMs;
   if (typeof r.abortedFromStep === 'string' && (CONVERT_STEPS as string[]).includes(r.abortedFromStep)) {
     rec.abortedFromStep = r.abortedFromStep as ConvertStep;
@@ -232,7 +288,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   let legPlan: LegPlan[] | undefined;
   if (r.legPlan != null) {
     if (!Array.isArray(r.legPlan)) return null;
-    const kinds: LegKind[] = ['approve', 'swap', 'approve_gas', 'withdraw_erc20', 'cctp_burn', 'sol_swap'];
+    const kinds: LegKind[] = ['approve', 'swap', 'approve_gas', 'withdraw_erc20', 'cctp_burn', 'sol_swap', 'deposit_transfer'];
     const states: LegState[] = ['pending', 'sent', 'confirmed', 'failed'];
     const parsed: LegPlan[] = [];
     for (const p of r.legPlan) {
@@ -349,6 +405,42 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     }
   } else if (legs.length > 0 && legs.length !== 2) return null;
   if (r.gasPre != null && rec.gasPre == null) return null; // gasPre rides a PLANNED record only
+  // The COMPOSED shape (2026-09-26, brief §5.4 item 2): exactly three planned legs in the
+  // approve/swap/deposit_transfer order, the deposit transfer targeting the record's own
+  // hop ledger, and the providerRef the final phase polls (whose orderId MUST be the
+  // deposit block's — one order, one id). A record carrying the deposit block lives in the
+  // composed vocabulary only; cross-rail/gas-fund/Solana shapes are mutually exclusive
+  // with it (the solanaLeg check runs after that block parses).
+  if (composedDeposit != null) {
+    if (crossRail != null || rec.gasPre != null) return null;
+    if (!COMPOSED_CONVERT_STEPS.has(rec.step)) return null;
+    // 1 or 2 IC legs (each approve+swap), then the deposit transfer — the plan is the legs'
+    // mirror, and the swap/approve rhythm is pinned.
+    if (legPlan == null) return null;
+    const icLegs = (legPlan.length - 1) / 2;
+    if (!Number.isInteger(icLegs) || icLegs < 1 || icLegs > 2
+      || legs.length !== icLegs * 2 + 1) return null;
+    for (let k = 0; k < icLegs; k += 1) {
+      if (legPlan[k * 2]!.kind !== 'approve' || legPlan[k * 2 + 1]!.kind !== 'swap') return null;
+    }
+    if (legPlan[legPlan.length - 1]!.kind !== 'deposit_transfer') return null;
+    const depositLeg = legs[legs.length - 1]!;
+    if (depositLeg.canister !== (rec.destLedger ?? rec.hopLedger)
+      || (depositLeg.method !== 'icrc1_transfer' && depositLeg.method !== 'transfer')) return null;
+    const pr = r.providerRef;
+    if (!pr || typeof pr !== 'object' || typeof (pr as Record<string, unknown>).orderId !== 'string') return null;
+    const pOrderId = (pr as Record<string, unknown>).orderId as string;
+    if (pOrderId.length === 0 || pOrderId !== composedDeposit.orderId) return null;
+    const statusUrl = (pr as Record<string, unknown>).statusUrl;
+    if (statusUrl != null && (typeof statusUrl !== 'string' || (statusUrl as string).length === 0)) return null;
+    const relayOrderId = (pr as Record<string, unknown>).relayOrderId;
+    if (relayOrderId != null && (typeof relayOrderId !== 'string' || relayOrderId.length === 0)) return null;
+    rec.providerRef = {
+      orderId: pOrderId,
+      ...(statusUrl != null ? {statusUrl: String(statusUrl)} : {}),
+      ...(relayOrderId != null ? {relayOrderId: relayOrderId as string} : {}),
+    };
+  }
   // The SOLANA WIDENING (2026-09-15): `solanaLeg` — ONE signed Solana transaction. Mutually
   // exclusive with legs>0, legPlan, and providerRef (a record is exactly ONE of the three
   // shapes); when present, `legs` must be empty and the step must be in the Solana driver's
@@ -379,6 +471,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
       rec.solFeeLamports = r.solFeeLamports;
     }
   }
+  if (composedDeposit != null && solanaLeg != null) return null; // composed never carries a Solana leg
   // A legs>0 record parked at `quote`/`confirming` is a shape no driver can advance: the
   // executor only knows approving→approved→swapping→settling→pending_withdrawal, so the resume
   // engine would re-arm a no-op drive forever with no escape (the unreachable-by-construction
@@ -389,7 +482,10 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // provider vocabulary except the shared terminal `done`) is equally driverless — the IC
   // executor's transition set never visits those steps and the provider driver never picks a
   // record with legs — so the same eternal no-op poll would arm. Refuse it the same way.
-  if (legs.length > 0 && PROVIDER_ONLY_STEPS.has(rec.step)) return null;
+  // THE COMPOSED EXCEPTION (2026-09-26): a composed record's OWN final phase lives in the
+  // provider vocabulary (the venue poll advances it once the deposit transfer is sent) —
+  // its engine dispatch keys on composedDeposit, so these steps are drivable for it.
+  if (legs.length > 0 && composedDeposit == null && PROVIDER_ONLY_STEPS.has(rec.step)) return null;
   if (legs.length === 0 && solanaLeg == null) {
     const pr = r.providerRef;
     if (!pr || typeof pr !== 'object' || typeof (pr as Record<string, unknown>).orderId !== 'string') return null;
@@ -447,11 +543,13 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // rail entirely (ICP → SOL: there IS no numeric catalog currency for SOL) — and it needs
   // none, because the provider driver advances it by statusUrl alone, never a ledger watch.
   // Its identifiers are the ledger/mint pair + symbols, already enforced above.
-  // (venueId was null-checked in the loop above; the `?? ''` is for the type-narrower —
-  // venueOfId('') resolves no venue, so the classification is still fail-closed.)
+  // The COMPOSED widening (2026-09-26): the same half-pair rule — the out side is the settle
+  // MINT, the hub side's numeric id lives on hopCurrency (the probe's key). (venueId was
+  // null-checked in the loop above; the `?? ''` is for the type-narrower — venueOfId('')
+  // resolves no venue, so the classification is still fail-closed.)
   const cefiProviderRecord = legs.length === 0 && solanaLeg == null
     && venueOfId(rec.venueId ?? '')?.kind === 'cefi';
-  if ((solanaLeg == null || crossRail != null) && !cefiProviderRecord
+  if ((solanaLeg == null || crossRail != null) && !cefiProviderRecord && composedDeposit == null
     && (rec.inCurrency == null || rec.outCurrency == null)) return null;
   if (rec.id !== id) return null;
   const full = rec as ConvertRecord;
@@ -567,6 +665,15 @@ export function isHubConvertRecord(rec: ConvertRecord): boolean {
     && plan[2].kind === 'approve' && plan[3].kind === 'swap';
 }
 
+/** The COMPOSED IC→CeFi record shape (2026-09-26, brief §5.4 item 2): planned, three legs
+ *  (approve/swap/deposit_transfer), the venue's deposit block frozen, providerRef present.
+ *  Hydration enforces the full shape; this is the resume engine's cheap dispatch key (a
+ *  composed record drives as IC legs + deposit leg through the planned executor, then
+ *  switches to the provider poll for the venue's final phase). */
+export function isComposedConvertRecord(rec: ConvertRecord): boolean {
+  return rec.composedDeposit != null;
+}
+
 export async function loadConvertRecords(publicHex: string): Promise<Record<string, ConvertRecord>> {
   const scopedKey = convertStoreKey(publicHex);
   try {
@@ -583,18 +690,20 @@ export async function loadConvertRecords(publicHex: string): Promise<Record<stri
       }
       return salvaged.records;
     }
-    // No scoped store yet: fold BOTH legacy sources into ONE pass — the pre-legs v1 store
+    // No scoped store yet: fold ALL legacy sources into ONE pass — the pre-legs v1 store
     // first (the older generation), the pre-scoping unscoped v2 store OVERLAYING it on id
-    // collision (the newer generation wins; the unscoped branch used to return early and
-    // orphan v1 records whenever a non-empty unscoped v2 store existed). One scoped write,
-    // then each legacy key is retired ONLY if its own salvage was total: a key that lost
-    // records to corruption STAYS on disk (source preserved for manual recovery) while its
-    // valid records still land in the scoped store. The adopting identity is the one that
-    // wrote the unscoped stores (single-active-identity deployment) and a record must
-    // survive an app upgrade, byte-frozen.
+    // collision, then the PRIOR per-identity v2 store (this key's immediate predecessor,
+    // 2026-09-26) overlaying both (the newest generation wins). One v3 write, then each
+    // legacy key is retired ONLY if its own salvage was total: a key that lost records to
+    // corruption STAYS on disk (source preserved for manual recovery) while its valid
+    // records still land in the v3 store. The adopting identity is the one that wrote the
+    // prior stores (single-active-identity deployment) and a record must survive an app
+    // upgrade, byte-frozen. Composed-shape records only ever exist in a v3 store — a v2
+    // record hydrates under v3 unchanged (the shapes are additive).
     const legacy: Array<{key: string; raw: string | null}> = [
       {key: CONVERT_LEGACY_STORAGE_KEY, raw: await AsyncStorage.getItem(CONVERT_LEGACY_STORAGE_KEY)},
       {key: CONVERT_UNSCOPED_STORAGE_KEY, raw: await AsyncStorage.getItem(CONVERT_UNSCOPED_STORAGE_KEY)},
+      {key: `${CONVERT_PRIOR_SCOPED_STORAGE_PREFIX}.${publicHex}`, raw: await AsyncStorage.getItem(`${CONVERT_PRIOR_SCOPED_STORAGE_PREFIX}.${publicHex}`)},
     ];
     if (legacy.every(s => s.raw == null)) return {};
     const merged: Record<string, ConvertRecord> = {};

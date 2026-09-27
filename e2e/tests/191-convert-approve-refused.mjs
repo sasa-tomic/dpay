@@ -21,6 +21,7 @@
 import {
   setup, assert, assertEq, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, openConvertFor,
+  typeConvertAmount,
 } from '../harness/lib.mjs';
 import { generateKeypair } from '../harness/wire.mjs';
 import { startRelay } from '../harness/relay.mjs';
@@ -56,7 +57,7 @@ export async function run() {
 
     await openConvertFor(driver, 'icp');
     assert(await driver.findByTestID('convert-screen', { timeoutMs: 8_000 }) != null, 'Convert surface opens for ICP');
-    await driver.type('convert-amount', '1');
+    await typeConvertAmount(driver, '1');
     await driver.findByTestID('convert-quote-source', { timeoutMs: 10_000 });
 
     console.log('[191-convert-approve-refused] arming the approve_fail knob (AllowanceChanged{0}, the live-defect shape)…');

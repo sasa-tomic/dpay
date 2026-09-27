@@ -339,7 +339,7 @@ describe('loadVenueRegistry — cache + bundled fallback (V5)', () => {
   });
 });
 
-describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => {
+describe('hydrateConvertStore — the dpay.convert.v3 record round-trip', () => {
   test('a full record survives JSON round-trip byte-for-byte', () => {
     const rec = record({step: 'done', outAmountNet: '189990000', outTx: '77'});
     const out = hydrateConvertStore(JSON.parse(JSON.stringify({abc123: rec})));
@@ -403,9 +403,9 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     // load verbatim (no removeItem, no re-setItem — the record stays recoverable on disk).
     const PUB = 'cc'.repeat(32);
     const poisoned = JSON.stringify({abc123: record({step: 'quote'})});
-    await AsyncStorage.setItem(`dpay.convert.v2.${PUB}`, poisoned);
+    await AsyncStorage.setItem(`dpay.convert.v3.${PUB}`, poisoned);
     expect(await loadConvertRecords(PUB)).toEqual({});
-    expect(await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`)).toBe(poisoned);
+    expect(await AsyncStorage.getItem(`dpay.convert.v3.${PUB}`)).toBe(poisoned);
   });
   test('a legs==0 record at an IC-driver step is REJECTED — the provider driver can never advance it', () => {
     // The mirror hole of the quadrant above: a legless record parked at approving/swapping/
@@ -438,16 +438,16 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     const PUB = 'ee'.repeat(32);
     const good = record({id: 'good1'});
     const poisoned = JSON.stringify({good1: good, abc123: record({step: 'quote'})});
-    await AsyncStorage.setItem(`dpay.convert.v2.${PUB}`, poisoned);
+    await AsyncStorage.setItem(`dpay.convert.v3.${PUB}`, poisoned);
     expect(await loadConvertRecords(PUB)).toEqual({good1: good}); // the sibling survives the poison
-    expect(await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`)).toBe(poisoned); // load rewrites nothing
+    expect(await AsyncStorage.getItem(`dpay.convert.v3.${PUB}`)).toBe(poisoned); // load rewrites nothing
     const {saveConvertRecord} = await import('../convert');
     await saveConvertRecord(PUB, record({id: 'fresh'}));
     const after = await loadConvertRecords(PUB);
     expect(Object.keys(after).sort()).toEqual(['fresh', 'good1']);
     // Clean bytes now: the store on disk is exactly the salvaged working set + the new record —
     // the corrupt record's bytes are gone (structural equality; hydration rebuilds field order).
-    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`))!)).toEqual(after);
+    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v3.${PUB}`))!)).toEqual(after);
   });
   test('a CeFi-shaped record — empty legs + providerRef — round-trips', () => {
     const rec = record({
@@ -549,7 +549,7 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
   });
   test('saveConvertRecord → loadConvertRecords round-trip via the IDENTITY-SCOPED key', async () => {
     const PUB = 'aa'.repeat(32);
-    await AsyncStorage.setItem(`dpay.convert.v2.${PUB}`, 'not json at all');
+    await AsyncStorage.setItem(`dpay.convert.v3.${PUB}`, 'not json at all');
     expect(await loadConvertRecords(PUB)).toEqual({}); // corrupt store is empty, not fatal
     const rec = record({step: 'stuck', failureCode: 'unknown'});
     const {saveConvertRecord} = await import('../convert');
@@ -590,7 +590,7 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     expect(loaded.abc123?.venueId).toBe(VENUE.venue_id);
     expect(loaded.abc123?.legs).toHaveLength(2);
     // The SCOPED v2 store now holds the migrated record and the v1 key is GONE (one-time migration).
-    const v2raw = await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`);
+    const v2raw = await AsyncStorage.getItem(`dpay.convert.v3.${PUB}`);
     expect(JSON.parse(v2raw!).abc123.legs).toHaveLength(2);
     expect(await AsyncStorage.getItem('dpay.convert.v1')).toBeNull();
     // A second load reads the scoped store directly — the migration never runs twice.
@@ -607,7 +607,7 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     await AsyncStorage.setItem('dpay.convert.v2', JSON.stringify({abc123: rec}));
     const loaded = await loadConvertRecords(PUB);
     expect(loaded.abc123?.id).toBe('abc123');
-    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`))!)).toEqual({abc123: rec});
+    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v3.${PUB}`))!)).toEqual({abc123: rec});
     expect(await AsyncStorage.getItem('dpay.convert.v2')).toBeNull(); // retired, not left behind
     expect(await loadConvertRecords('cc'.repeat(32))).toEqual({}); // nobody else inherits them
     // An empty unscoped store adopts nothing and still falls through to the v1 check.
@@ -627,7 +627,7 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     const loaded = await loadConvertRecords(PUB);
     expect(Object.keys(loaded)).toEqual(['good1']);
     expect(loaded.good1?.legs).toHaveLength(2);
-    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`))!)).toEqual(loaded); // valid records copied
+    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v3.${PUB}`))!)).toEqual(loaded); // valid records copied
     expect(await AsyncStorage.getItem('dpay.convert.v1')).not.toBeNull(); // source preserved — salvage was not total
   });
   test('a PARTIALLY corrupt unscoped v2 store: valid records adopt, the unscoped KEY SURVIVES on disk', async () => {
@@ -635,7 +635,7 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     const good = record({id: 'good1'});
     await AsyncStorage.setItem('dpay.convert.v2', JSON.stringify({good1: good, abc123: {...record(), step: 'weird'}}));
     expect(await loadConvertRecords(PUB)).toEqual({good1: good});
-    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`))!)).toEqual({good1: good});
+    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v3.${PUB}`))!)).toEqual({good1: good});
     expect(await AsyncStorage.getItem('dpay.convert.v2')).not.toBeNull(); // kept — salvage was not total
   });
   test('BOTH legacy sources fold in ONE pass: v1 migrated first, unscoped v2 overlays on id collision', async () => {
@@ -657,7 +657,7 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     expect(loaded.shared?.legs[0]?.envelopeHex).toBe('aacc'); // …not v1's 'v1env' bytes
     expect(await AsyncStorage.getItem('dpay.convert.v1')).toBeNull();
     expect(await AsyncStorage.getItem('dpay.convert.v2')).toBeNull();
-    expect(Object.keys(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`))!)).sort())
+    expect(Object.keys(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v3.${PUB}`))!)).sort())
       .toEqual(['old1', 'shared', 'unscoped1']);
     expect(await loadConvertRecords('cc'.repeat(32))).toEqual({}); // nobody else inherits them
   });
@@ -1026,8 +1026,9 @@ describe('fail-closed copy — all four locales carry it', () => {
     // venue the quote is attributed to — no locale may hardcode it (V1).
     expect(d.counterparty(VENUE.display_name)).toContain(VENUE.display_name);
     expect(d.counterparty(VENUE.display_name)).not.toContain(POOL); // the principal is not copy
-    expect(d.unavailableTitle('X')).toContain('X');
-    expect(d.unavailableBody('ICP ↔ Swiss francs (VCHF)', VENUE.display_name)).toContain(VENUE.display_name);
+    expect(d.noPathTitle('X')).toContain('X');
+    expect(d.noPathBody('ICP ↔ Swiss francs (VCHF)')).toContain('ICP ↔ Swiss francs (VCHF)');
+    expect(d.depositRefusedBody('ICP', 'SomeFutureVenue')).toContain('SomeFutureVenue');
     expect(d.detailsLabel.length).toBeGreaterThan(0); // the one Details control (verbosity pass 2026-09-16)
     // The parameterized copy still speaks the passed-in venue, not a baked one.
     expect(d.quoteSource('12:00', 'SomeFutureVenue')).toContain('SomeFutureVenue');
@@ -1037,7 +1038,8 @@ describe('fail-closed copy — all four locales carry it', () => {
     for (const d of Object.values(domains)) {
       const samples = [
         d.counterparty('V'),
-        d.unavailableBody('pair', 'V'),
+        d.noPathBody('pair'),
+        d.depositRefusedBody('ICP', 'V'),
         d.quoteSource('now', 'V'),
         d.poolFeeTier('0.30%', 'V'),
         d.disclosures.byKey.icpswap('V'),

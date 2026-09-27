@@ -19,6 +19,7 @@
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, openConvertFor,
+  typeConvertAmount,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
@@ -81,7 +82,7 @@ export async function run() {
     // selectCurrency makes ICP the active asset and leaves on Pay; re-open the accounts route so
     // Convert (which renders on the SELECTED row only) is on screen.
     await openConvertFor(driver, 'icp');
-    await driver.type('convert-amount', '1');
+    await typeConvertAmount(driver, '1');
     await driver.findByTestID('convert-quote-source', { timeoutMs: 10_000 });
 
     // Hold the venue's output leg BEFORE confirming — the pool will #ok and keep the VCHF.
@@ -98,7 +99,7 @@ export async function run() {
       // → pending_withdrawal. NOT done.
       pending = await driver.findByTestID('convert-pending', { timeoutMs: 20_000 }).catch(() => null);
       if (pending == null) {
-        const changed = await driver.readText('convert-quote-changed').catch(() => null);
+        const changed = await driver.readText('convert-moved-note').catch(() => null);
         if (changed != null) {
           // Shared-pool drift tripped the confirm re-quote (§5: never sign a stale number) —
           // re-read the pool and re-confirm against the number the screen now shows.

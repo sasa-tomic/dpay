@@ -1,9 +1,12 @@
 import {DpayCore} from '../services/native';
 import {icStampExpiry} from '../services/icp';
-import {randNonceHex, rawToDecimal} from '../lib/format';
-import {type CurrencyDescriptor} from '../config/catalog';
-import {CONVERT_APPROVE_LIFETIME_S} from '../config/convert';
+import {bytesToHex, randNonceHex, rawToDecimal, toUnits} from '../lib/format';
+import {utf8ToBytes} from '../lib/base64url';
+import {type CurrencyDescriptor, BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {CONVERT_APPROVE_LIFETIME_S, CONVERT_CEFI_CONFIRM_TIMEOUT_MS, type ComposedConvertRoute} from '../config/convert';
 import {DPAY_CANISTER_PRINCIPALS, cefiFamilyOf, cefiOtherSide, venueOfId} from '../config/venues';
+import {CCTP_DESTINATION_NETWORK} from '../routes';
+import {deriveSolanaAddress} from '../solana/identity';
 import {
   sideShiftStatusUrl,
   type SideShiftFixedShift,
@@ -13,8 +16,8 @@ import {
   type TrocadorTrade,
 } from '../services/trocador';
 import {M} from '../i18n';
-import {type ConvertRecord} from './types';
-import {type ConvertMath, type ConvertQuote} from './quotes';
+import {type ConvertRecord, type LegPlan, type SignedLeg} from './types';
+import {type CeFiQuoteResult, type ConvertMath, type ConvertQuote, ceFiServiceError, createCeFiOrder, fetchCeFiQuoteResult} from './quotes';
 import {sameDecimalAmount} from './records';
 // --- prepare (confirming): build + sign BOTH envelopes once — never rebuild after this --------------
 
@@ -242,5 +245,329 @@ export function prepareCeFiConvertRecord(args: {
     },
     destAddress: settleAddress,
     destSymbol: args.outSymbol,
+  };
+}
+
+// --- the composed IC→CeFi prepare (2026-09-26, design brief §5.4 item 2) ----------------------------
+
+/** The review's IC quote moved before the confirm gesture landed — the caller re-reviews
+ *  (the sheet shows old then new inline and re-arms the same button). Thrown BEFORE the
+ *  venue order is created, so a re-review never orphans a venue-side order. */
+export class ComposedQuoteChangedError extends Error {
+  readonly reviewedGrossRaw: string;
+  readonly freshGrossRaw: string;
+  constructor(args: {inSymbol: string; inDecimals: number; reviewedGrossRaw: string; freshGrossRaw: string}) {
+    super(M.convert.rateMoved(
+      `${rawToDecimal(args.reviewedGrossRaw, args.inDecimals)} ${args.inSymbol}`,
+      `${rawToDecimal(args.freshGrossRaw, args.inDecimals)} ${args.inSymbol}`,
+    ));
+    this.name = 'ComposedQuoteChangedError';
+    this.reviewedGrossRaw = args.reviewedGrossRaw;
+    this.freshGrossRaw = args.freshGrossRaw;
+  }
+}
+
+/** The ICP ledger is the ONE IC ledger whose legacy `transfer` reaches a 64-hex account
+ *  identifier — derived from the catalog row, never a literal here. */
+const ICP_MAINNET_LEDGER = icpCatalogOf(BUNDLED_NETWORKS).find(c => c.currency === 8 && !c.testnet)?.ledger ?? '';
+
+/**
+ * Prepare ONE COMPOSED IC→CeFi intent as a single signed record (brief §5.4 item 2): the
+ * IC legs (one direct pool leg, or a 2-leg hub composition) land the hub asset in the
+ * wallet, and a REGISTERED cefi venue's order carries it the rest of the way — with the
+ * venue's deposit transfer signed HERE as the LAST leg of the SAME intent.
+ *
+ * Order of operations is the whole point: the venue order is created FIRST (steps 3-4), so
+ * the venue's OWN deposit address and locked figure are known before ANYTHING is signed
+ * (step 5). The transfer then signs to the venue's own address for the EXACT order amount —
+ * the amount the IC chain is floored to deliver (its last leg's min-out) — and the user
+ * consents to all of it on the ONE review. dpay is never a party: the order is the user's,
+ * the transfer is the user's signature, the payout lands at the user's own settle address.
+ *
+ * Red lines, every leg (the phone signs, so the phone enforces): each quote's venue
+ * registered with its endpoint AS the quoted pool, each quote FOR its route leg, no
+ * dpay-owned canister anywhere in the target set, the deposit address resolved through the
+ * core's own validators (ICRC-1 text or the ICP ledger's account identifier — never
+ * guessed), and the venue's deposit address never the user's own account.
+ */
+export async function prepareComposedConvertRecord(args: {
+  /** The record id — minted by the CONFIRM PATH before order creation and sent to the
+   *  relay as the trade's `clientOrderId` (the cefi prepare's correlation rule). */
+  id: string;
+  secretHex: string;
+  publicHex: string;
+  relayUrl: string;
+  route: ComposedConvertRoute;
+  inDesc: CurrencyDescriptor;
+  /** Leg 1's quote — FRESH at confirm (the caller re-quotes; the engine re-verifies). */
+  quote1: ConvertQuote;
+  math1: ConvertMath;
+  /** Leg 2's quote + math for a hub-composed IC phase (`route.legs.length === 2`), quoted
+   *  on `math1.minOut` — enforced below. Absent for a direct IC leg. */
+  quote2?: ConvertQuote;
+  math2?: ConvertMath;
+  /** The reviewed IC gross (the review card's figure). A fresh gross that differs throws
+   *  ComposedQuoteChangedError — re-review, nothing created, nothing signed. */
+  reviewedGrossRaw: string;
+}): Promise<ConvertRecord> {
+  const {route, quote1, math1} = args;
+  const quote2 = args.quote2;
+  const math2 = args.math2;
+  const icLegs = route.legs.length;
+  if ((icLegs !== 1 && icLegs !== 2) || route.endpoints.length !== icLegs + 1) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  if (icLegs === 2 && (quote2 == null || math2 == null)) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  const depositEp = route.endpoints[icLegs]!;
+  if (depositEp.fee == null || depositEp.decimals == null) {
+    throw new Error(M.convert.errors.quoteUnavailable('symbol'));
+  }
+  const inSymbol = args.inDesc.backing_symbol ?? args.inDesc.symbol;
+  if (inSymbol == null) throw new Error(M.convert.errors.quoteUnavailable('symbol'));
+  if (quote1.zeroForOne == null || (icLegs === 2 && quote2!.zeroForOne == null)) {
+    throw new Error(M.convert.errors.quoteUnavailable('direction'));
+  }
+  // (1) Signing-boundary red lines, per IC leg: the quote's own venue registered with its
+  // endpoint AS the quoted pool, and each quote FOR its route leg.
+  const leg1 = route.legs[0]!;
+  const venue1 = venueOfId(quote1.venueId);
+  if (venue1 == null || venue1.endpoint !== quote1.pool || quote1.pool !== leg1.pool
+    || quote1.tokenInLedger !== leg1.fromLedger || quote1.tokenOutLedger !== leg1.toLedger
+    || leg1.fromLedger !== route.endpoints[0]!.ledger || leg1.toLedger !== route.endpoints[1]!.ledger) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  if (icLegs === 2) {
+    const leg2 = route.legs[1]!;
+    if (quote2 == null) throw new Error(M.convert.errors.quoteUnavailable('pool'));
+    const venue2 = venueOfId(quote2.venueId);
+    if (venue2 == null || venue2.endpoint !== quote2.pool || quote2.pool !== leg2.pool
+      || quote2.tokenInLedger !== leg2.fromLedger || quote2.tokenOutLedger !== leg2.toLedger
+      || leg2.fromLedger !== route.endpoints[1]!.ledger || leg2.toLedger !== depositEp.ledger) {
+      throw new Error(M.convert.errors.quoteUnavailable('pool'));
+    }
+    // The composition floor: leg 2 must be quoted on EXACTLY leg 1's min-you'll-receive.
+    if (quote2.amountIn !== math1.minOut) {
+      throw new Error(M.convert.errors.quoteUnavailable('pool'));
+    }
+  }
+  for (const target of [...route.endpoints.map(e => e.ledger), ...route.legs.map(l => l.pool)]) {
+    if (DPAY_CANISTER_PRINCIPALS.includes(target)) {
+      throw new Error(M.convert.errors.quoteUnavailable('venue'));
+    }
+  }
+  // (2) THE QUOTE-CHANGED GATE — before the venue order exists, so a re-review never
+  // orphans one. (The CeFi settle figure gets NO exact-match gate: a ticking venue rate
+  // can never be matched and the gate would livelock — the ORDER is the lock, the standing
+  // cefi rule; its locked figures freeze onto the record verbatim.)
+  if (args.reviewedGrossRaw !== quote1.amountOutGross) {
+    throw new ComposedQuoteChangedError({
+      inSymbol, inDecimals: args.inDesc.decimals ?? 8,
+      reviewedGrossRaw: args.reviewedGrossRaw, freshGrossRaw: quote1.amountOutGross,
+    });
+  }
+  // (3) The cefi venue must be a real registered row serving exactly this deposit→settle.
+  const cefiVenue = venueOfId(route.cefiVenueId);
+  if (cefiVenue == null || cefiVenue.kind !== 'cefi' || cefiVenue.testnet
+    || cefiOtherSide(cefiVenue, depositEp.ledger) !== route.settleMint) {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  // (4) The deposit amount is the IC chain's GUARANTEED minimum (its last leg's floor):
+  // the swap can deliver more (the surplus stays in-wallet) but never less, so the venue's
+  // locked order prices an amount the chain is floored to fund.
+  const minOut1 = await DpayCore.icpSwapMinOut(quote1.amountOutGross, math1.slippageBps);
+  if (!/^\d+$/.test(minOut1) || BigInt(minOut1) <= 0n) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  const minOutFinal = icLegs === 2 ? math2!.minOut : minOut1;
+  if (!/^\d+$/.test(minOutFinal) || BigInt(minOutFinal) <= 0n) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  const depositAmountDecimal = rawToDecimal(minOutFinal, depositEp.decimals);
+  // (5) THE ORDER FIRST — the venue's own deposit address + locked figure are known before
+  // anything signs. The settle address is the user's own derived address (never typed);
+  // the refund address is the user's own account ON THE DEPOSIT RAIL (the fund-loss guard,
+  // the account-identifier form the venue's ICP payout layer requires).
+  const settleAddress = deriveSolanaAddress(args.secretHex);
+  const refundPrincipal = await DpayCore.icpPrincipalFromPubkey(args.publicHex);
+  const refundAddress = await DpayCore.icpAccountIdFromPrincipal(refundPrincipal, '');
+  let quoteRes: CeFiQuoteResult;
+  try {
+    quoteRes = await fetchCeFiQuoteResult(
+      args.relayUrl, cefiVenue, depositEp.ledger, route.settleMint,
+      depositAmountDecimal, CONVERT_CEFI_CONFIRM_TIMEOUT_MS,
+    );
+  } catch (e) {
+    throw ceFiServiceError(e, cefiVenue.display_name);
+  }
+  let order: SideShiftFixedShift | TrocadorTrade;
+  try {
+    order = await createCeFiOrder(args.relayUrl, cefiVenue, quoteRes, {
+      settleAddress,
+      refundAddress,
+      depositLedger: depositEp.ledger,
+      settleLedger: route.settleMint,
+      depositAmountDecimal,
+      clientOrderId: args.id,
+    }, CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
+  } catch (e) {
+    throw ceFiServiceError(e, cefiVenue.display_name);
+  }
+  // (6) The order's own verdict, verified before a byte is signed: same-amount deposit
+  // (decimal-value compare — a venue that reformats its own echo still adopts; a DIFFERENT
+  // amount is a different trade and refuses, the standing cefi rule), a real order id, a
+  // real deposit address.
+  const orderId = 'id' in order ? order.id : order.tradeId;
+  if (orderId.length === 0 || order.depositAddress.length === 0) {
+    throw new Error(M.convert.errors.quoteUnavailable('order'));
+  }
+  if (!sameDecimalAmount(order.depositAmount, depositAmountDecimal)) {
+    throw new Error(M.convert.errors.quoteUnavailable('deposit'));
+  }
+  // (7) The deposit destination, resolved through the core's own validators — ICRC-1
+  // account text first, else the ICP ledger's 64-hex account identifier (the one namespace
+  // only the ICP ledger's legacy transfer reaches, and its memo is a bare nat64, so a
+  // venue memo cannot ride there — refuse rather than drop it). Anything else is refused,
+  // never guessed. The venue's address must never be a dpay canister or the user's own
+  // account (a hostile registry must not turn the deposit into a self-transfer).
+  const memoHex = order.depositMemo != null && order.depositMemo.length > 0
+    ? bytesToHex(utf8ToBytes(order.depositMemo))
+    : '';
+  let depositMethod: 'icrc1_transfer' | 'transfer';
+  let depositOwner: string;
+  let depositArgHex: string;
+  let icrc: {owner: string; subaccountHex: string} | null = null;
+  try {
+    icrc = await DpayCore.icpValidateIcrcAccount(order.depositAddress);
+  } catch {
+    icrc = null;
+  }
+  if (icrc != null) {
+    depositMethod = 'icrc1_transfer';
+    depositOwner = icrc.owner;
+    depositArgHex = await DpayCore.icpTransferArg(icrc.owner, icrc.subaccountHex, '', minOutFinal, depositEp.fee, memoHex);
+  } else {
+    let acct: string | null = null;
+    try {
+      acct = await DpayCore.icpValidateAccountId(order.depositAddress);
+    } catch {
+      acct = null;
+    }
+    const memo = order.depositMemo;
+    if (acct == null || depositEp.ledger !== ICP_MAINNET_LEDGER || (memo != null && memo.length > 0)) {
+      throw new Error(M.convert.errors.quoteUnavailable('order'));
+    }
+    depositMethod = 'transfer';
+    depositOwner = acct;
+    depositArgHex = await DpayCore.icpLegacyTransferArg(acct, '', minOutFinal, depositEp.fee, '0');
+  }
+  if (DPAY_CANISTER_PRINCIPALS.includes(depositOwner.toLowerCase())) {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  if (depositOwner.toLowerCase() === refundPrincipal.toLowerCase()) {
+    throw new Error(M.convert.errors.quoteUnavailable('order'));
+  }
+  // (8) ALL the signing, one pass, one shared envelope window: the IC legs (the direct
+  // flow's exact approve+swap pair, per leg), then the deposit transfer LAST — to the
+  // venue's own address, for the EXACT order amount, hub fee on top (never out of the
+  // order figure).
+  const allowanceExpiryNs = await icStampExpiry(args.secretHex, CONVERT_APPROVE_LIFETIME_S);
+  const envExpiry = await icStampExpiry(args.secretHex);
+  const expiresAtMs = Number(BigInt(envExpiry) / 1_000_000n);
+  const legs: SignedLeg[] = [];
+  const legPlan: LegPlan[] = [];
+  for (let k = 0; k < icLegs; k += 1) {
+    const q = k === 0 ? quote1 : quote2!;
+    const m = k === 0 ? math1 : math2!;
+    const fromEp = route.endpoints[k]!;
+    const toEp = route.endpoints[k + 1]!;
+    const floor = k === 0 ? minOut1 : minOutFinal;
+    const approveAmount = (BigInt(q.amountIn) + BigInt(m.inFee)).toString();
+    const approveArgHex = await DpayCore.icpApproveArg(q.pool, '', '', approveAmount, '', allowanceExpiryNs, '', m.inFee);
+    const approveSigned = await DpayCore.icpSignUpdate(args.secretHex, fromEp.ledger, 'icrc2_approve', approveArgHex, envExpiry);
+    legs.push({canister: fromEp.ledger, method: 'icrc2_approve', argHex: approveArgHex, envelopeHex: approveSigned.envelopeHex, requestIdHex: approveSigned.requestIdHex, expiresAtMs});
+    legPlan.push({kind: 'approve', canister: fromEp.ledger, fee: m.inFee, state: 'pending'});
+    const swapArgHex = await DpayCore.icpDepositAndSwapArg(q.amountIn, floor, m.inFee, toEp.fee, q.zeroForOne as boolean);
+    const swapSigned = await DpayCore.icpSignUpdate(args.secretHex, q.pool, 'depositFromAndSwap', swapArgHex, envExpiry);
+    legs.push({canister: q.pool, method: 'depositFromAndSwap', argHex: swapArgHex, envelopeHex: swapSigned.envelopeHex, requestIdHex: swapSigned.requestIdHex, expiresAtMs});
+    legPlan.push({kind: 'swap', canister: q.pool, fee: '', state: 'pending'});
+  }
+  const depositSigned = await DpayCore.icpSignUpdate(args.secretHex, depositEp.ledger, depositMethod, depositArgHex, envExpiry);
+  legs.push({canister: depositEp.ledger, method: depositMethod, argHex: depositArgHex, envelopeHex: depositSigned.envelopeHex, requestIdHex: depositSigned.requestIdHex, expiresAtMs});
+  legPlan.push({kind: 'deposit_transfer', canister: depositEp.ledger, fee: depositEp.fee, state: 'pending'});
+
+  const orderExpiresAtMs = order.expiresAt != null ? Date.parse(order.expiresAt) : NaN;
+  const settleAmountRaw = order.settleAmount != null ? toUnits(order.settleAmount, route.settleDecimals) : null;
+  const relayOrderId = 'relayOrderId' in order && typeof order.relayOrderId === 'string'
+    && order.relayOrderId.length > 0
+    ? order.relayOrderId
+    : null;
+  const firstHub = route.endpoints[1]!;
+  return {
+    id: args.id,
+    createdAtMs: Date.now(),
+    step: 'approving',
+    venueId: quote1.venueId,
+    ...(icLegs === 2 ? {venue2Id: quote2!.venueId} : {}),
+    inCurrency: args.inDesc.currency,
+    inLedger: args.inDesc.ledger,
+    inSymbol,
+    inDecimals: args.inDesc.decimals ?? undefined,
+    // The OUT side is the SETTLE (final destination) — mint-keyed, the cefi precedent. The
+    // first watchable ledger (swap1's payout) lives on hop*; a second IC leg's facts on the
+    // hub record's dest*/venue2Id fields (the leg-2 watch keys on exactly those).
+    outLedger: route.settleMint,
+    outSymbol: route.settleSymbol,
+    outDecimals: route.settleDecimals,
+    hopLedger: firstHub.ledger,
+    hopSymbol: firstHub.symbol,
+    hopCurrency: firstHub.currency,
+    hopDecimals: firstHub.decimals,
+    ...(icLegs === 2 ? {
+      destLedger: depositEp.ledger,
+      destCurrency: depositEp.currency,
+      destDecimals: depositEp.decimals,
+      destFee: depositEp.fee,
+      expectedGross2: quote2!.amountOutGross,
+      expectedNet2: math2!.netOut,
+      feeMillionths2: quote2!.feeMillionths,
+    } : {}),
+    amountIn: quote1.amountIn,
+    expectedGross: quote1.amountOutGross,
+    // The end-state line is the venue's OWN locked settle figure, in the OUT (settle)
+    // asset's units — the IC hub fees are the legs' own census, never blended into it.
+    expectedNet: settleAmountRaw ?? '0',
+    inFee: math1.inFee,
+    outFee: '0', // the settle side carries no IC ledger fee (a mint) — nothing dpay-derived
+    slippageBps: math1.slippageBps,
+    legs,
+    legPlan,
+    destAddress: settleAddress,
+    destSymbol: route.settleSymbol,
+    destNetwork: CCTP_DESTINATION_NETWORK,
+    providerRef: {
+      orderId,
+      statusUrl: cefiFamilyOf(cefiVenue) === 'trocador'
+        ? trocadorStatusUrl(args.relayUrl, orderId)
+        : sideShiftStatusUrl(orderId),
+      ...(relayOrderId != null ? {relayOrderId} : {}),
+    },
+    composedDeposit: {
+      venueId: cefiVenue.venue_id,
+      orderId,
+      depositAddress: order.depositAddress,
+      depositOwner,
+      amountDecimal: order.depositAmount,
+      amountRaw: minOutFinal,
+      fee: depositEp.fee,
+      settleSymbol: route.settleSymbol,
+      settleDecimals: route.settleDecimals,
+      ...(order.depositMemo != null && order.depositMemo.length > 0 ? {depositMemo: order.depositMemo} : {}),
+      ...(order.settleAmount != null && settleAmountRaw != null
+        ? {settleAmountDecimal: order.settleAmount, settleAmountRaw}
+        : {}),
+      ...(Number.isSafeInteger(orderExpiresAtMs) && orderExpiresAtMs > 0 ? {expiresAtMs: orderExpiresAtMs} : {}),
+    },
   };
 }

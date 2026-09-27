@@ -18,7 +18,7 @@
 //     the pair (checklist on the angxa pool, attributed ICPSwap) and the ICP→ckETH quote
 //     renders an 18-decimal amount_out — no execution on this leg.
 // Private relay (startRelay, the flow-168 pattern): execution mutates pool state.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor, pickSwapTarget,
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor, pickSwapTarget, openOtherVenues, typeConvertAmount,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
@@ -85,16 +85,22 @@ export async function run() {
     // The standing pair is stable-first CHF (the 2026-09-25 founder rule); this flow's facts
     // live on the ckUSDC ↔ ICP pair, so it is picked explicitly.
     await pickSwapTarget(driver, 'ICP');
-    await driver.type('convert-amount', '100');
-    // ONE VENUE on this pair → no venue CHOICE: the direct pool is the standing pick (the
-    // single-venue rule), the checklist surfaces directly, quoting through the pool. The
-    // venue area still renders the composed via-VCHF hub as an explicit opt-in row (a hub is
-    // an explicit switch away, never chosen for the user).
+    await typeConvertAmount(driver, '100');
+    // ONE VENUE on this pair → the sheet AUTO-PICKS the direct pool and discloses it
+    // mechanically (the single-venue form — no comparison that never happened); the composed
+    // via-VCHF hub waits behind the ONE Other-venues expander as an explicit opt-in row.
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-    assert(await driver.findByTestID('convert-venue-icpswap-ckusdc', {timeoutMs: 4_000}) != null,
-      'the direct pool row renders (the standing pick — one venue, nothing to choose)');
+    const autoLine = await driver.readText('convert-venue-auto');
+    assertIncludes(autoLine, 'Executed via', 'the pick line names its executor (the mechanical disclosure)');
+    assert(!autoLine.includes('of 2 venues'), 'a single-venue pair carries the one-venue disclosure, not a comparison');
     assert(await driver.findByTestID('convert-venue-none', {timeoutMs: 1_000}).catch(() => null) == null,
       'the single venue IS the standing pick — nothing is withheld for a choice that does not exist');
+    await openOtherVenues(driver);
+    const hubRow = await driver.eval(() =>
+      [...document.querySelectorAll('[data-testid]')]
+        .map((el) => el.getAttribute('data-testid'))
+        .find((t) => t != null && t.startsWith('convert-venue-hub:')) ?? null);
+    assert(hubRow != null, 'the composed via-VCHF hub waits in the expander as an explicit opt-in row');
     assert(await driver.findByTestID('convert-unavailable', {timeoutMs: 500}).catch(() => null) == null,
       'the ckUSDC pair is venue-PAIRED now (no fail-closed panel — it was venue-less before 2026-09-15)');
 
@@ -133,7 +139,7 @@ export async function run() {
     // Confirm (a quote-changed interrupt would demand a re-confirm — retry a few rounds).
     for (let round = 0; round < 5; round++) {
       await driver.click('btn-convert-confirm');
-      const changed = await driver.findByTestID('convert-quote-changed', {timeoutMs: 2_000}).catch(() => null);
+      const changed = await driver.findByTestID('convert-moved-note', {timeoutMs: 2_000}).catch(() => null);
       if (changed == null) break;
       console.log(`[183-convert-pairs] quote moved (round ${round + 1}) — re-reviewing and confirming again`);
       // Re-derive the oracle after the move so the settled figures stay the pool's own.
@@ -162,7 +168,7 @@ export async function run() {
     const fundEth = await faucetAccount(r2.baseURL, account.publicHex, SEED_ETH, {currency: 6});
     assert(fundEth.ok, `faucet ckETH credit ok (status ${fundEth.status})`);
     await openConvertFor(driver, 'cketh');
-    await driver.type('convert-amount', '0.002');
+    await typeConvertAmount(driver, '0.002');
     // Single venue on the ckETH pair too → the direct pool stands, checklist surfaces directly.
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     assert(await driver.findByTestID('convert-venue-none', {timeoutMs: 1_000}).catch(() => null) == null,

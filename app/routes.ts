@@ -244,6 +244,7 @@ function hubEndpointOf(catalog: CurrencyDescriptor[], ledger: string): HubEndpoi
   if (symbol == null) return null; // a leg that cannot be NAMED cannot be shown — fail closed
   return {currency: row.currency, ledger: row.ledger, symbol, decimals: row.decimals, fee: row.fee, network: row.network};
 }
+export {hubEndpointOf};
 
 /** Every 2-leg IC-mainnet hub route from `fromLedger` (optionally narrowed to one
  *  `toLedger`). Same posture as multihopRoutesFrom: walk the registry (ic_amm, non-testnet,

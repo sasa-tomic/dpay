@@ -35,6 +35,7 @@
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency, openConvertFor,
   pickSwapTarget,
   pickSwapVenue,
+  typeConvertAmount, openOtherVenues,
 } from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {
@@ -213,14 +214,17 @@ export async function run() {
     const ids = await driver.eval(() => Array.from(document.querySelectorAll('[data-testid]')).map(n => n.getAttribute('data-testid')).filter(t => t.startsWith('convert-')));
     console.log('PROBE-SURFACE ' + JSON.stringify([...new Set(ids)]));
     await pickSwapTarget(driver, 'EUR');
-    await driver.type('convert-amount', '5');
+    await typeConvertAmount(driver, '5');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
 
     // The original Route C SOL row lives on the SOL target; the EUR target carries the
     // generalization beside its own CeFi venue (each mechanism IS a row now).
     await pickSwapTarget(driver, 'SOL');
+    await openOtherVenues(driver);
     assert(await driver.findByTestID(ROUTE_C_SOL_ROW, {timeoutMs: 3_000}) != null, 'the original Route C SOL row is still offered');
     await pickSwapTarget(driver, 'EUR');
+    // The expander's open state survives a target change (it keys to the sheet, not the pair),
+    // so the EUR pair's rows are already on screen — do NOT toggle again.
     assert(await driver.findByTestID(ROUTE_C_EURC_ROW, {timeoutMs: 3_000}) != null, 'the Route C EURC row is offered beside the CeFi venue (the generalization)');
     await driver.click(ROUTE_C_EURC_ROW);
     await driver.type('convert-dest-address', DEST);
@@ -241,7 +245,7 @@ export async function run() {
     // Confirm (quote-changed interrupt → re-review, same as 184/186).
     for (let round = 0; round < 5; round++) {
       await driver.click('btn-convert-confirm');
-      const changed = await driver.findByTestID('convert-quote-changed', {timeoutMs: 2_000}).catch(() => null);
+      const changed = await driver.findByTestID('convert-moved-note', {timeoutMs: 2_000}).catch(() => null);
       if (changed == null) break;
       console.log(`[195-crossrail-eurc] quote moved (round ${round + 1}) — re-reviewing`);
       const re = await relayQuote(r2.baseURL, CKUSDC_POOL, ICP_LEDGER, CKUSDC_LEDGER, AMOUNT_IN_ICP);

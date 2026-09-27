@@ -19,6 +19,8 @@ import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILITIES, type RelayCapabilities} from '../services/relay';
 import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
+import {setRuntimePoolNames, venueOfId} from '../config/venues';
+import {convertResumeSnapshot, subscribeConvertRecords} from '../convertResume';
 import {normalizePendingKey, removePendingPays} from '../services/pendingPays';
 import {solanaTokenInfo} from '../solana/tokens';
 import {useHotkeys} from '../hooks/useHotkeys';
@@ -1037,6 +1039,48 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // wallet load — mounted screen or not. A record landing in a terminal state IS account
   // activity (a payout arrived), so the engine's terminal callback is the same ledger refresh.
   useConvertResumeEngine({identity, relayUrl, onTerminal: onActivity});
+  // The records ALSO name the conversion's execution identities (round-1 item 9): a swap leg's
+  // pool canister and a composed route's venue deposit owner are counterparties the LEDGER
+  // renders as bare principals. Each leg's owning venue is resolved ONCE here and pushed into
+  // the venue module's display overlay, so history rows + receipts name the venue — and a pool
+  // whose venue row has since left the registry degrades to the neutral pool wording, never a
+  // principal styled as a counterparty.
+  const [convertRecords, setConvertRecords] = useState(() => convertResumeSnapshot());
+  useEffect(() => subscribeConvertRecords(setConvertRecords), []);
+  useEffect(() => {
+    const names = new Map<string, string>();
+    const venueNameOf = (venueId: string | undefined): string | null => {
+      if (venueId == null) return null;
+      const v = venueOfId(venueId);
+      return v != null ? v.display_name : null; // '' would misname; null = unresolvable
+    };
+    for (const rec of Object.values(convertRecords)) {
+      // Swap legs: the plan's swap entries pair with the record's venue facts by ordinal
+      // (0 → venueId, ≥1 → venue2Id) — the same mapping the executor's tx notes use. The
+      // gas-fund PRE-legs sit ahead of the route's legs and name no conversion counterparty
+      // (their pool only pulls; no row ever pays out of it), so they are skipped the same way
+      // the executor skips them.
+      const legPlan = rec.legPlan ?? [];
+      const preLegCount = rec.gasPre != null ? rec.gasPre.legs.length * 2 : 0;
+      let ordinal = 0;
+      for (let i = preLegCount; i < legPlan.length; i += 1) {
+        if (legPlan[i]?.kind !== 'swap') continue;
+        const canister = rec.legs[i]?.canister;
+        if (canister != null) {
+          const name = venueNameOf(ordinal >= 1 ? (rec.venue2Id ?? rec.venueId) : rec.venueId);
+          if (!names.has(canister.toLowerCase())) names.set(canister.toLowerCase(), name ?? '');
+        }
+        ordinal += 1;
+      }
+      // The composed route's deposit address (which only ever exists as THIS order's target).
+      const cd = rec.composedDeposit;
+      if (cd != null) {
+        const name = venueNameOf(cd.venueId);
+        if (name != null && !names.has(cd.depositOwner.toLowerCase())) names.set(cd.depositOwner.toLowerCase(), name);
+      }
+    }
+    setRuntimePoolNames(names);
+  }, [convertRecords]);
   // The SOL rail's twin of `onActivity`: a confirmed send moves the balance AND adds a ledger row,
   // so both are re-read rather than waiting out the poll. The two token callbacks stay separate
   // because the BALANCES are independent (a SOL send must not perturb the USDC status); the
@@ -1501,9 +1545,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
 
   return (
     <SafeAreaView style={S.root}>
-      {/* Traveler Paper: porcelain bg ⇒ DARK status-bar icons (light-content was the dark-theme
-          remnant — white icons on #F4F1E8 were near-invisible). */}
+      {/* Ballast: mist bg ⇒ DARK status-bar icons (light-content; white icons on #EBF0ED
+          would be near-invisible). */}
       <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} translucent={false} />
+      {mode !== 'convert' ? (
       <View style={S.header}>
         {/* Row 1 — the utility cluster and who this wallet is. Row 2 is the account chip, which
             used to sit beside this block and squeeze it to ~20 px on any 8-decimal balance. */}
@@ -1589,6 +1634,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           <Text testID="back-exit-hint" style={S.balBackHint}>{M.wallet.balance.backAgainToExit}</Text>
         ) : null}
       </View>
+      ) : null}
+      {/* The convert route keeps its own header (ConvertHeader names the pair) and needs the
+          vertical room: the intent sheet's one CTA must sit at the thumb arc on a phone viewport,
+          and the Settlement Field floods from the top edge when money moves. */}
 
       {/* Trip Ready J5b (UX hardening 2026-08-23) — the home-surface readiness line. Live progress
           that taps straight into the passport ARCHIVE (the permanent record; one fact, two
@@ -1805,7 +1854,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               // action onto the selected currency's row). Returning to Home would drop the user
               // somewhere they never were.
               onBack={openAccounts}
-              onActivity={onActivity}
               // The zero-balance gate's action — the SAME deposit trip the Pay tab's gate fires.
               onShowDepositAddress={() =>
                 goToDeposit(selectedAsset != null ? selectedAsset.id : `ic:${selectedCurrency}`)

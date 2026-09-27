@@ -427,7 +427,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
             <TextInput
               testID="sol-send-save-name"
               accessibilityLabel={M.withdraw.send.saveNamePlaceholder}
-              style={S.withdrawAddrInput}
+              style={S.withdrawNameInput}
               value={saveName}
               onChangeText={setSaveName}
               placeholder={M.withdraw.send.saveNamePlaceholder}

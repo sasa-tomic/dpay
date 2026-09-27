@@ -144,6 +144,8 @@ export const walletFr: WalletMessages = {
     filter: label => `Filtrer ${label}`,
     to: who => `à ${who}`,
     from: who => `de ${who}`,
+    fromPool: 'd’un pool de liquidité',
+    toPool: 'à un pool de liquidité',
     fees: fee => `− ${fee} de frais`,
     mintCounterparty: 'la démo',
     failed: 'Échec — seuls les frais de réseau ont été prélevés',
@@ -167,7 +169,7 @@ export const walletFr: WalletMessages = {
 };
 
 /** Month abbreviations for the passport stamp date — French caps, as inked on a document page. */
-const FR_MONTHS = ['JANV', 'FÉVR', 'MARS', 'AVR', 'MAI', 'JUIN', 'JUIL', 'AOÛT', 'SEPT', 'OCT', 'NOV', 'DÉC'];
+const FR_MONTHS = ['Janv', 'Févr', 'Mars', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sept', 'Oct', 'Nov', 'Déc'];
 
 export const educationFr: EducationMessages = {
   campaignLine: 'Sans réseau ? Aucun souci.',
@@ -176,22 +178,22 @@ export const educationFr: EducationMessages = {
   walkthrough: {
     scenes: {
       offline: {
-        eyebrow: 'D’ABORD, LE DÉROULEMENT',
+        eyebrow: 'D’abord, le déroulement',
         title: 'Un téléphone demande, l’autre paie',
         body: 'L’autre téléphone affiche une demande. Vous la scannez, vérifiez le montant, puis approuvez. Sa connexion envoie le paiement si le vôtre est hors ligne.',
       },
       key: {
-        eyebrow: 'VOTRE ARGENT',
+        eyebrow: 'Votre argent',
         title: 'Votre clé reste sur ce téléphone',
         body: 'dpay ne détient aucun argent et ne peut pas approuver de paiements à votre place. Il n’y a pas de compte dpay — seulement votre clé.',
       },
       exact: {
-        eyebrow: 'AUCUNE SURPRISE',
+        eyebrow: 'Aucune surprise',
         title: 'Payez exactement l’actif demandé',
         body: 'Le commerçant demande un actif précis. Vous vérifiez le montant et vous approuvez. dpay ne convertit jamais.',
       },
     },
-    stageTags: ['01 — RÉSEAU', '02 — CLÉ', '03 — ACTIF'],
+    stageTags: ['Réseau', 'Clé', 'Actif'],
     close: 'Fermer la présentation de dpay',
     skip: 'Passer l’intro',
     back: 'Retour',
@@ -202,7 +204,7 @@ export const educationFr: EducationMessages = {
 
   practice: {
     sheetTitle: 'Paiement d’entraînement',
-    eyebrow: 'ENTRAÎNEMENT',
+    eyebrow: 'Entraînement',
     payeeName: 'Commerçant d’entraînement',
     title: 'Faites un vrai paiement',
     cardLine: 'Le code qu’un commerçant vous montrerait.',
@@ -255,14 +257,14 @@ export const educationFr: EducationMessages = {
   passport: {
     title: 'Prêt pour le voyage',
     stamps: {
-      recoverySaved: {label: 'MOTS\nNOTÉS', hint: 'Copiez vos mots de récupération dans les Paramètres', short: 'encore la sauvegarde'},
-      flowUnderstood: {label: 'PARCOURS\nVU', hint: 'Faites le paiement d’entraînement — ou faites un paiement', short: 'encore le parcours'},
-      fundsReady: {label: 'FONDS\nCHARGÉS', hint: 'Ajoutez de l’argent utilisable — les fonds d’entraînement ne comptent pas', short: 'encore des fonds'},
-      paymentTested: {label: 'PREMIER\nPAIEMENT', hint: 'Faites un paiement — envoyé ou reçu', short: 'encore un paiement'},
+      recoverySaved: {label: 'Mots\nnotés', hint: 'Copiez vos mots de récupération dans les Paramètres', short: 'encore la sauvegarde'},
+      flowUnderstood: {label: 'Parcours\nvu', hint: 'Faites le paiement d’entraînement — ou faites un paiement', short: 'encore le parcours'},
+      fundsReady: {label: 'Fonds\nchargés', hint: 'Ajoutez de l’argent utilisable — les fonds d’entraînement ne comptent pas', short: 'encore des fonds'},
+      paymentTested: {label: 'Premier\npaiement', hint: 'Faites un paiement — envoyé ou reçu', short: 'encore un paiement'},
     },
     close: title => `Fermer ${title}`,
     stripLabel: filled => `Prêt pour le voyage ${filled} sur 4`,
-    count: filled => `${filled} SUR 4`,
+    count: filled => `${filled} sur 4`,
     goToStep: hint => `Aller : ${hint}`,
     nextTag: 'À faire',
     nextLabel: hint => `À faire : ${hint}`,

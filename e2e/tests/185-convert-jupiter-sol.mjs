@@ -36,7 +36,9 @@
 // hits endpoint itself); the cluster is the __DPAY_TEST_SOLANA_RPC_STUB
 // every SOL flow uses, with sendTransaction decoding the real bytes and returning the tx's own
 // signature so the driver's node-signature identity check passes exactly as against a real node.
-import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf, openConvertFor,
+  typeConvertAmount,
+} from '../harness/lib.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
   configureJupiterStub, jupiterStubState, USDC_MINT, WRAPPED_SOL_MINT,
@@ -147,7 +149,7 @@ export async function run() {
     assert(await driver.isPresent('convert-venue-jupiter') === false, 'no venue chooser for the single solana_amm venue');
 
     // §2 — Jupiter's own digits, verbatim through the relay proxy.
-    await driver.type('convert-amount', '1');
+    await typeConvertAmount(driver, '1');
     assert(await driver.findByTestID('convert-quote-source', {timeoutMs: 10_000}) != null, 'a quote arrived (through the relay proxy)');
     const quoteSource = await driver.readText('convert-quote-source');
     assertIncludes(quoteSource, 'Jupiter', 'attribution names the venue');
@@ -179,7 +181,8 @@ export async function run() {
     assert(await driver.findByTestID('convert-net', {timeoutMs: 1_000}).catch(() => null) == null,
       'the net end-state line is gone (verbosity pass 2026-09-16): the headline IS the end state');
     for (const bps of [50, 100, 300]) {
-      assert(await driver.findByTestID(`convert-bps-${bps}`, {timeoutMs: 3_000}) != null, `slippage chip ${bps} present`);
+      assert(await driver.findByTestID(`convert-bps-${bps}`, {timeoutMs: 1_000}).catch(() => null) == null,
+        `slippage chip ${bps} is gone (a disclosed default inside Details, not a decision)`);
     }
     assertIncludes(await driver.readText('convert-balance'), '5 SOL', 'balance line is the SOL rail balance');
     await driver.screenshot('185-convert-sol-checklist');
@@ -210,12 +213,18 @@ export async function run() {
     assertEq(jup.lastQuoteResponse.outAmount, OUT_USDC, 'POST body carried the VERBATIM quote (outAmount)');
     assertEq(jup.lastQuoteResponse.platformFee, null, 'POST body carried the VERBATIM quote (platformFee null)');
     assert(jup.quoteCalls.length >= 1, 'at least one quote GET (per-keystroke)');
-    for (const q of jup.quoteCalls) {
+    // The sheet's Max prefill legitimately quotes the FULL balance on open (brief 5.2:
+    // "convert what I have"); every quote AFTER that prefill must be at the typed amount.
+    const prefillLamports = '5000000000';
+    const postPrefill = [...jup.quoteCalls];
+    while (postPrefill.length > 0 && postPrefill[0].amount === prefillLamports) postPrefill.shift();
+    for (const q of postPrefill) {
       assertEq(q.inputMint, WRAPPED_SOL_MINT, 'quote GET asked for the wrapped-SOL mint');
       assertEq(q.outputMint, USDC_MINT, 'quote GET asked for the USDC mint');
       assertEq(q.amount, IN_LAMPORTS, 'quote GET carried the raw lamport amount');
       assertEq(q.slippageBps, '100', 'quote GET carried the chosen slippage');
     }
+    assertEq(postPrefill[postPrefill.length - 1].amount, IN_LAMPORTS, 'the LAST quote GET is the typed amount');
 
     console.log(`GREEN 185 — SOL→USDC(Solana) via Jupiter: quote verbatim, device-signed venue tx, one broadcast, realized credit 10.36 USDC (sig ${sent[0].signature.slice(0, 12)}…)`);
   } finally {

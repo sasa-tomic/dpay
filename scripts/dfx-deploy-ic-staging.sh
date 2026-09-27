@@ -61,7 +61,7 @@ require_cmd dfx "dfx not found on PATH"
 load_identity "DPAY_DFX_IDENTITY is required — the identity that provisions + controls the staging facade.
   it MUST be 'dpay' (the ADMIN_CALLERS entry authorized to call provision_ledger_canister).
   create it:  icp-cli new-identity dpay   (or: dfx identity new dpay)
-  set it:     DPAY_DFX_IDENTITY=dpay in deploy/.env (or the environment)"
+  set it:     DPAY_DFX_IDENTITY=dpay in deploy/env.config (or the environment)"
 
 echo "== staging deploy: network=$NETWORK   identity=$IDENT   principal=$PRINCIPAL =="
 if [ "$NETWORK" != "local" ]; then
@@ -181,10 +181,10 @@ echo "== lock the staging facade: set_controller(deploy identity) =="
 # After this, mint/burn/reconcile on the staging facade are gated to this principal (the controller).
 dfx_i canister call "$CANISTER" set_controller "(opt principal \"$PRINCIPAL\")" --network "$NETWORK"
 
-# --- record the staging ids in deploy/.env (mainnet only — local rehearsal leaves it untouched) -
+# --- record the staging ids in deploy/env.config (mainnet only — local rehearsal leaves it) -
 if [ "$NETWORK" != "local" ]; then
-  env_set DPAY_STAGING_CANISTER_ID "$STAGING_CID" deploy/.env
-  env_set DPAY_STAGING_DUSD_LEDGER_ID "$DUSD_LEDGER_CID" deploy/.env
+  env_set_config DPAY_STAGING_CANISTER_ID "$STAGING_CID"
+  env_set_config DPAY_STAGING_DUSD_LEDGER_ID "$DUSD_LEDGER_CID"
 fi
 
 echo

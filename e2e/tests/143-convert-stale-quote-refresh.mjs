@@ -12,7 +12,9 @@
 //     flows, so sibling swaps also move it) raises the quote-changed review interrupt, and confirm
 //     stays armed: the user re-reviews, and the on-confirm re-quote is the signing gate;
 //   * Screenshots: the stale notice mid-refresh, the interrupt, and the refreshed surface.
-import {setup, assert, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, openConvertFor, selectCurrency} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, openConvertFor, selectCurrency,
+  typeConvertAmount,
+} from '../harness/lib.mjs';
 
 const SEED = 300000000; // 3 ICP (plain Number — the faucet body is JSON)
 
@@ -41,13 +43,13 @@ export async function run() {
     // selectCurrency makes ICP the active asset and leaves on Pay; re-open the accounts route so
     // Convert (which renders on the SELECTED row only) is on screen.
     await openConvertFor(driver, 'icp');
-    await driver.type('convert-amount', '1');
+    await typeConvertAmount(driver, '1');
     await driver.findByTestID('convert-quote-source', { timeoutMs: 10_000 });
 
     // Fresh: attributed + timestamped, no stale notice, no quote-changed interrupt.
     assertIncludes(await driver.readText('convert-quote-source'), 'Quote from ICPSwap, fetched', 'fresh quote renders attributed + timestamped');
     assert(await driver.findByTestID('convert-stale', { timeoutMs: 1_000 }).catch(() => null) == null, 'no staleness notice on a fresh quote');
-    assert(await driver.findByTestID('convert-quote-changed', { timeoutMs: 1_000 }).catch(() => null) == null, 'no quote-changed interrupt on a fresh quote');
+    assert(await driver.findByTestID('convert-moved-note', { timeoutMs: 1_000 }).catch(() => null) == null, 'no quote-changed interrupt on a fresh quote');
     const fetchedBefore = await driver.readText('convert-quote-source');
 
     // Deterministic re-fetch proof: record every /api/v1/swap_quote request the surface issues
@@ -96,12 +98,12 @@ export async function run() {
       body: JSON.stringify({ pool: '65mrh-fqaaa-aaaar-qapoa-cai', fee_millionths: 4000 }),
     });
     assert(knob.ok, `swap_pool knob ok (status ${knob.status})`);
-    const changedLine = await driver.findByTestID('convert-quote-changed', { timeoutMs: 15_000 });
+    const changedLine = await driver.findByTestID('convert-moved-note', { timeoutMs: 15_000 });
     assert(changedLine != null, 'a REAL quote move raises the quote-changed review interrupt');
-    const changedText = await driver.readText('convert-quote-changed');
-    assertIncludes(changedText, 'Quote changed', 'the interrupt names what happened');
-    assertIncludes(changedText, 'Review and confirm again', 'the interrupt demands re-review before signing');
-    await driver.screenshot('143-convert-quote-changed');
+    const changedText = await driver.readText('convert-moved-note');
+    assertIncludes(changedText, 'The rate moved', 'the interrupt names what happened, both figures inline');
+    assertIncludes(changedText, 'Confirm again', 'the interrupt re-arms the same button: one extra tap only when the number moved');
+    await driver.screenshot('143-convert-moved-note');
 
     // Confirm stays armed through the interrupt — the user re-reviews and re-confirms; the
     // on-confirm re-quote is the gate that actually blocks signing a stale number.

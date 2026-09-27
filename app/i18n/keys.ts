@@ -64,6 +64,8 @@ export type Messages = {
   common: {
     done: string;
     cancel: string;
+    /** Shown when the OS has no handler for an external link — the URL itself is the fallback. */
+    linkFallback: (url: string) => string;
   };
 
   /**

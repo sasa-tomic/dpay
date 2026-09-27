@@ -128,7 +128,7 @@ export async function run() {
 
     // --- U-F4: keyboard focus paints a ring, pointer focus does not -------------------
     // The web entries (e2e/web/index.html + wallet.html) inject a global `:focus-visible` rule
-    // (outline 2px solid #FF5A1F — the palette brand). Prove BOTH halves in the real DOM:
+    // (outline 2px solid #0E5F53 - the palette brand). Prove BOTH halves in the real DOM:
     //   (a) a Tab keypress focuses the first focusable WITH the ring (computed outlineStyle
     //       'solid' in the brand color) — keyboard users always see where they are;
     //   (b) a real mouse click focuses a button WITHOUT the ring (outlineStyle 'none') — the
@@ -148,10 +148,10 @@ export async function run() {
     });
     assert(kb.tag !== 'BODY' && kb.tag !== '', `Tab should focus a real element, got activeElement=${kb.tag || 'none'}`);
     assert(kb.outlineStyle === 'solid', `keyboard-focused <${kb.tag} role=${kb.role}> must paint the :focus-visible ring (outlineStyle "${kb.outlineStyle}")`);
-    // The ring is `LIGHT.brand` (#D03F00) and is deliberately the SAME in both themes: a focus
-    // indicator must clear 3:1 on whatever it is drawn on, and this one value does on porcelain
-    // (4.13) and on the warm near-black (4.26). See the rule's comment in e2e/web/wallet.html.
-    assertIncludes(kb.outlineColor, '208, 63, 0', 'the focus ring must use the brand color #D03F00');
+    // The ring is `LIGHT.brand` (#0E5F53) and is deliberately the SAME in both themes: a focus
+    // indicator must clear 3:1 on whatever it is drawn on, and this one value does on the mist
+    // page (~6.5) and on the petrol-black night (~5). See the rule's comment in e2e/web/wallet.html.
+    assertIncludes(kb.outlineColor, '14, 95, 83', 'the focus ring must use the brand color #0E5F53');
     console.log(`[14-keyboard] ✓ Tab focuses <${kb.tag} role=${kb.role}> with the brand focus ring`);
 
     await driver.eval(() => { (document.activeElement)?.blur?.(); });

@@ -1,13 +1,13 @@
 <!doctype html>
 <!-- Served at /checkout/{id} by crates/dpay-relay/src/checkout.rs (`checkout_page`), inside the same
      DPAY_ENABLE_CHECKOUT gate as the checkout's other routes. The id comes from the URL; the charge is
-     rendered CLIENT-SIDE from GET /api/v1/checkout/{id} — the server interpolates nothing into this
+     rendered CLIENT-SIDE from GET /api/v1/checkout/{id} - the server interpolates nothing into this
      page (the merchant name is CLAIMED, so it never touches Rust string building on this route).
      The states and their copy mirror ChargeState's own documentation in checkout.rs; every terminal
      state names the next action. -->
 <!-- `scheme-auto`: this page has no theme toggle and no pre-paint script, so it follows the OS
      scheme. That class is the hook the shared palette block
-     (crates/dpay-relay/assets/palette.css) keys its prefers-color-scheme rule on — see
+     (crates/dpay-relay/assets/palette.css) keys its prefers-color-scheme rule on - see
      scripts/relay-palette-css.mjs for why both theme mechanisms live in one generated block. -->
 <html lang="en" class="scheme-auto">
 <head>
@@ -16,8 +16,8 @@
 <title>Cashier | Different Pay</title>
 <meta name="description" content="Watch a Different Pay charge from the cashier's side." />
 <meta name="color-scheme" content="light dark" />
-<meta name="theme-color" content="#F4F1E8" />
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
+<meta name="theme-color" content="#EBF0ED" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0C1312" />
 <meta name="robots" content="noindex" />
 <style>
 {{PALETTE}}
@@ -43,20 +43,20 @@
 <main class="card">
   <h1>Cashier</h1>
   <p class="price" id="price">…</p>
-  <p class="settles">settles in VCHF — 1:1 with CHF</p>
+  <p class="settles">settles in VCHF, 1:1 with CHF</p>
   <p class="state idle" id="state">Reaching the checkout…</p>
   <p class="next" id="next"></p>
-  <p class="note">Paid or not, this page never opens, cancels or refunds a charge — those
+  <p class="note">Paid or not, this page never opens, cancels or refunds a charge; those
      live in the Different Pay app, under the shop's own key. It only watches.</p>
 </main>
 <script>
 "use strict";
-// The charge id is the path's last segment — the page is served for any id, known or not.
+// The charge id is the path's last segment - the page is served for any id, known or not.
 const id = location.pathname.split("/").filter(Boolean).pop();
 const $ = (s) => document.getElementById(s);
 const POLL_MS = 3000; // > the checkout's 2 s observe window, and gentle on the relay
 // Every poll is BOUNDED. Without this an unanswering relay leaves `await fetch` pending forever and
-// the loop below never ticks again — the counter freezes on "Waiting for the customer to pay…" with
+// the loop below never ticks again - the counter freezes on "Waiting for the customer to pay…" with
 // no countdown and no way to tell a stalled page from a live one. Comfortably over the checkout's own
 // ledger walk (the route observes the merchant's history before answering).
 const POLL_TIMEOUT_MS = 8000;
@@ -65,7 +65,7 @@ function chf(cents) {
   const whole = Math.floor(cents / 100), rem = String(cents % 100).padStart(2, "0");
   return `CHF ${whole}.${rem}`;
 }
-// Every server-derived string goes through textContent — the merchant name is CLAIMED (it is what
+// Every server-derived string goes through textContent - the merchant name is CLAIMED (it is what
 // the shop signed into its own checkout-open, never anything this relay verified), so it is never parsed
 // as markup here. It is `merchant_name`: the field beside it, `merchant`, was the destination
 // PRINCIPAL, and printing it here put 63 characters of base32 where the cashier expected the shop's
@@ -85,15 +85,15 @@ function render(charge) {
       $("state").className = "state ok";
       $("state").textContent = "Paid ✓";
       next.textContent = charge.paid
-        ? `Credited on the ledger — block ${charge.paid.block}. Nothing more is owed.`
+        ? `Credited on the ledger, block ${charge.paid.block}. Nothing more is owed.`
         : "Credited on the ledger. Nothing more is owed.";
       return false; // terminal: stop polling
     case "superseded":
       $("state").className = "state";
       $("state").textContent = "Replaced by a newer charge";
-      next.textContent = "This code is dead — scan the new one with the customer.";
+      next.textContent = "This code is dead, scan the new one with the customer.";
       // Still watching: a transfer already in flight can credit even a replaced charge, and
-      // Paid outranks every void cause — the cashier must see that happen.
+      // Paid outranks every void cause - the cashier must see that happen.
       return true;
     case "cancelled":
       $("state").className = "state";
@@ -121,14 +121,14 @@ function tick(expiresAt) {
 function unknown() {
   $("state").textContent = "No such charge on this checkout.";
   $("next").textContent =
-    "This link names a charge this relay does not have — check it came from the app's " +
+    "This link names a charge this relay does not have; check it came from the app's " +
     "own Share, or open a fresh charge there.";
 }
 function unreachable() {
   $("state").textContent = "Reaching the checkout…";
-  $("next").textContent = "The checkout is not answering yet — this page keeps trying.";
+  $("next").textContent = "The checkout is not answering yet; this page keeps trying.";
 }
-// The cashier is told ONE thing on any unreadable answer — "not answering yet, still trying" — and
+// The cashier is told ONE thing on any unreadable answer ("not answering yet, still trying") and
 // that is right, because there is nothing else they can do at a counter. The console is where the
 // two cases are told apart: a REFUSAL names its status and body, a transport failure names its
 // error. Neither is swallowed; a page that keeps retrying silently is indistinguishable from a page
@@ -157,7 +157,7 @@ async function poll() {
     return render(charge);
   } catch (e) {
     const why = e && e.name === "AbortError" ? `no answer within ${POLL_TIMEOUT_MS} ms` : "transport failure";
-    console.warn(`checkout page: GET ${url} — ${why}:`, e);
+    console.warn(`checkout page: GET ${url} - ${why}:`, e);
     unreachable();
     return true;
   } finally {

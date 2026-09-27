@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <!-- Phone-first viewport: the RN styles are designed for a phone screen. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-    <meta name="theme-color" content="#F4F1E8" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
+    <meta name="theme-color" content="#EBF0ED" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0C1312" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="description" content="dpay web wallet — the same app, in your browser. Non-custodial: your key never leaves this device." />
+    <meta name="description" content="dpay web wallet - the same app, in your browser. Non-custodial: your key never leaves this device." />
     <link rel="icon" href="/icon-192.png" />
     <!-- Both files are emitted by the web-prod build (see `dpayWebProdAssets` in
          e2e/vite.config.js) and served from the relay's root, which is also the service worker's
@@ -16,40 +16,39 @@
     <title>dpay · Wallet</title>
     <!-- CSP: wasm-unsafe-eval is REQUIRED (the DpayCore shim compiles /assets/dpay-core-*.wasm).
          connect-src allows any scheme so the ?relay=<url> override (a user-chosen relay endpoint)
-         keeps working. frame-ancestors is NOT here — it is ignored via <meta> (console error);
+         keeps working. frame-ancestors is NOT here - it is ignored via <meta> (console error);
          the relay sends it as a real header on /wallet. -->
     <meta http-equiv="Content-Security-Policy"
           content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https: http:; base-uri 'none'; object-src 'none'" />
     <style>
-      /* `#root` must be a bounded flex column (mirrors e2e/web/index.html — see the note there):
+      /* `#root` must be a bounded flex column (mirrors e2e/web/index.html - see the note there):
        * react-native-web's root uses flex:1, which collapses under a display:block parent. */
-      html, body, #root { margin: 0; padding: 0; height: 100%; background: #F4F1E8; }
+      html, body, #root { margin: 0; padding: 0; height: 100%; background: #EBF0ED; }
       /* Wave-4 dual theme: the page bg (behind the RN tree) follows the OS scheme so the
-         first paint — before the bundle applies its palette — is already dark on a dark OS
-         (no light flash). Mirrors palette.ts DARK.bg (#141210, warm near-black). The RN
+         first paint - before the bundle applies its palette - is already dark on a dark OS
+         (no light flash). Mirrors palette.ts DARK.bg (#0C1312, deep petrol-black). The RN
          root itself re-paints with the same value via S.root/screenFrame. */
       @media (prefers-color-scheme: dark) {
-        html, body, #root { background: #141210; }
+        html, body, #root { background: #0C1312; }
       }
       #root { display: flex; flex-direction: column; }
-      /* Keyboard focus ring (U-F4): :focus-visible paints ONLY for keyboard focus — pointer/touch
+      /* Keyboard focus ring (U-F4): :focus-visible paints ONLY for keyboard focus - pointer/touch
        * focus never shows it (and the e2e visual flow screenshots unfocused elements, so baselines
-       * are unaffected). #D03F00 is `LIGHT.brand`, the FILL step of the tangerine ramp — a focus
+       * are unaffected). #0E5F53 is `LIGHT.brand`, the FILL step of the petrol ramp - a focus
        * indicator has to clear 3:1 against what it is drawn on (WCAG 2.4.11), and it is drawn on
-       * BOTH themes' pages from this one rule, so it needs a value that works on both: 4.13:1 on
-       * porcelain, 4.26:1 on the warm near-black. The retired #FF5A1F measured 2.76:1 on
-       * porcelain. HTML-only file: never ships to native Android, which has its own focus
-       * handling. */
+       * BOTH themes' pages from this one rule, so it needs a value that works on both: ~6.5:1 on
+       * the mist page, ~5:1 on the petrol-black night. HTML-only file: never ships to native
+       * Android, which has its own focus handling. */
       button:focus-visible, [role='button']:focus-visible, a:focus-visible,
       input:focus-visible, textarea:focus-visible {
-        outline: 2px solid #D03F00;
+        outline: 2px solid #0E5F53;
         outline-offset: 2px;
       }
-      /* Space Grotesk + IBM Plex Mono — SUBSETTED WOFF2 built from the exact TTFs Android serves
+      /* Space Grotesk + IBM Plex Mono - SUBSETTED WOFF2 built from the exact TTFs Android serves
          from res/font (scripts/subset-web-fonts.py, run by `just fonts`; it proves coverage is
          unchanged over every codepoint the app can paint). Family names match the RN res/font
          resource names so ONE fontFamily string in styles.ts resolves on both platforms. Served
-         as hashed /assets/* by the vite build, and NEVER re-compressed by the relay — woff2 is
+         as hashed /assets/* by the vite build, and NEVER re-compressed by the relay - woff2 is
          brotli inside the container. */
       @font-face { font-family: 'space_grotesk_500'; src: url('./fonts/space_grotesk_500.woff2') format('woff2'); font-weight: 500; font-display: swap; }
       @font-face { font-family: 'space_grotesk_600'; src: url('./fonts/space_grotesk_600.woff2') format('woff2'); font-weight: 600; font-display: swap; }
@@ -61,7 +60,7 @@
     <div id="root"></div>
     <script type="module" src="./entry.tsx"></script>
     <!-- Offline boot (OPEN_ISSUES X10). A separate module from the app bundle, and loaded only by
-         THIS page — see e2e/web/sw-register.ts for why the e2e dist has no worker. -->
+         THIS page - see e2e/web/sw-register.ts for why the e2e dist has no worker. -->
     <script type="module" src="./sw-register.ts"></script>
   </body>
 </html>

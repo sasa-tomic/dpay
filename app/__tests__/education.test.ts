@@ -19,7 +19,7 @@ const CATALOGS = {en, de, es, fr};
 describe('education copy (the comprehension contract)', () => {
   test('exactly three scenes with the spec ids/eyebrows', () => {
     expect(walkthroughScenes().map(s => s.id)).toEqual(['offline', 'key', 'exact']);
-    expect(walkthroughScenes().map(s => s.eyebrow)).toEqual(['FIRST, HOW A PAYMENT WORKS', 'YOUR MONEY', 'NO SURPRISES']);
+    expect(walkthroughScenes().map(s => s.eyebrow)).toEqual(['First, how a payment works', 'Your money', 'No surprises']);
     expect(walkthroughScenes().map(s => s.visual)).toEqual(['offlineHandoff', 'keyOnDevice', 'exactlyOneAsset']);
   });
 

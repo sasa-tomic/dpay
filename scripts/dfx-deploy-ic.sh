@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Deploy (or redeploy) the dpay canister to ICP MAINNET (the built-in `ic` network) as an explicit
-# named dfx identity, then write the resulting canister id back into deploy/.env so the relay picks
-# it up. The mainnet sibling of scripts/dfx-deploy.sh (which stands up a throwaway LOCAL replica and
+# named dfx identity, then write the resulting canister id back into the deploy config so the relay
+# picks it up. The mainnet sibling of scripts/dfx-deploy.sh (which stands up a throwaway LOCAL replica and
 # self-tests a settlement). This is the ONE mainnet deploy path: it builds the wasm, refreshes the
 # candid, (re)installs the facade with the init arg `record { demo_ledger; per_tx_cap; controller }`
 # (demo_ledger = the mainnet DUSD ledger, cross-checked below), arms the internal controller cell
 # with the relay's dedicated Ed25519 faucet key, reads back a couple of *free* query calls, and
-# writes DPAY_CANISTER_ID + DPAY_CONTROLLER_SEED to deploy/.env.
+# writes DPAY_CANISTER_ID (deploy/env.config) + DPAY_CONTROLLER_SEED (secrets/deploy.sops.json);
+# deploy/.env is regenerated from those sources.
 #
 # There is NO currency registration anymore (founder decision 2026-08-28: the canister's registry
 # is gone). Every non-DEMO asset the facade serves is a compile-time FIXED_ASSETS const, and the
@@ -27,7 +28,7 @@
 # Identity (DPAY_DFX_IDENTITY) is REQUIRED and load-bearing: `dfx deploy --network ic` spends the
 # identity's cycles AND makes it the CANISTER CONTROLLER (upgrade authority). Create one with
 # `icp-cli new-identity dpay` (or `dfx identity new dpay`) — both land in the dfx identity store —
-# and set DPAY_DFX_IDENTITY=dpay in deploy/.env (or the environment).
+# and set DPAY_DFX_IDENTITY=dpay in deploy/env.config (or the environment).
 #
 #   DPAY_DFX_IDENTITY   (required)  named dfx identity to deploy as → becomes the controller
 #   DPAY_DEPLOY_MODE    (redeploy)  dfx install mode; defaults to `upgrade` when the canister already
@@ -35,7 +36,7 @@
 #                                   zero). `install` = empty canister only. (Empty → install.)
 #   DPAY_DFX_NETWORK    (optional)  dfx network; default `ic` (mainnet). Set `local` to rehearse the
 #                                   whole flow against a running local replica before spending cycles.
-#   DPAY_CANISTER_ID    (deploy/.env) if set, deploy TARGETS that existing canister (dfx installs into
+#   DPAY_CANISTER_ID    (deploy/env.config) if set, deploy TARGETS that existing canister (dfx installs into
 #                                   / upgrades it — no new canister, no create-cycles). Unset → create.
 #
 # Two money-critical caveats for this demo-phase canister:
@@ -74,7 +75,7 @@ require_cmd candid-extractor "candid-extractor not found — cargo install candi
 # a commit; from a dirty tree that row would be a lie about what the IC is running. Refused BEFORE
 # the build, the identity load and the cycles, and before the pin rewrite at the end makes the tree
 # dirty by construction — so a second unrecorded upgrade cannot stack on an unrecorded first one.
-# A local rehearsal is exempt for the same reason it never writes deploy/.env or the pin: it records
+# A local rehearsal is exempt for the same reason it never writes the deploy config or the pin: it records
 # nothing and claims no commit, and it is rehearsed precisely while the change is still uncommitted.
 if [ "$NETWORK" != "local" ]; then
   require_cmd git "git not found — this upgrade must be attributable to a commit (docs/UPGRADES.md)"
@@ -91,7 +92,7 @@ identity_load_hint() {
 }
 load_identity "DPAY_DFX_IDENTITY is required — the identity that deploys becomes the canister CONTROLLER.
   create it:  icp-cli new-identity dpay   (or: dfx identity new dpay)
-  set it:     DPAY_DFX_IDENTITY=dpay in deploy/.env (or the environment)"
+  set it:     DPAY_DFX_IDENTITY=dpay in deploy/env.config (or the environment)"
 
 echo "== preflight: reach $NETWORK + the identity that will control the canister =="
 dfx ping "$NETWORK" >/dev/null || { echo "cannot reach the '$NETWORK' network (dfx ping $NETWORK failed)" >&2; exit 1; }
@@ -128,7 +129,7 @@ if [ "$NETWORK" != "local" ]; then
 fi
 
 # --- resolve the deploy TARGET + MODE ----------------------------------------------------------
-# The operator's source of truth for "which canister" is DPAY_CANISTER_ID in deploy/.env. On a real
+# The operator's source of truth for "which canister" is DPAY_CANISTER_ID in deploy/env.config. On a real
 # (remote) network, if it is set, point dfx at that exact canister so deploy installs/upgrades IT
 # instead of trying to create — and pay cycles for — a brand-new one. dfx reads canister ids for
 # remote networks from ./canister_ids.json (regenerated here from .env, so .env stays authoritative).
@@ -255,21 +256,22 @@ else
        echo "      (Governed canister? See docs/GOVERNANCE.md.)" >&2 ;;
   esac
 fi
-# Persist the seed for the relay container (compose reads deploy/.env). Written even if arming WARNed
-# — it is still the key the relay must sign with once governance is resolved. Local rehearsals never
-# touch deploy/.env (same discipline as DPAY_CANISTER_ID).
+# Persist the seed for the relay container (compose reads the generated deploy/.env). Written even
+# if arming WARNed — it is still the key the relay must sign with once governance is resolved.
+# Local rehearsals never persist it (same discipline as DPAY_CANISTER_ID). The seed is a SECRET:
+# it goes to secrets/deploy.sops.json (sops), from which deploy/.env is generated.
 if [ "$NETWORK" != "local" ]; then
-  env_set DPAY_CONTROLLER_SEED "$SEED_HEX" deploy/.env
-  echo "   wrote DPAY_CONTROLLER_SEED (relay's dedicated faucet key) to deploy/.env"
+  env_set_sops DPAY_CONTROLLER_SEED "$SEED_HEX"
 fi
 
 # --- connective tissue: hand the canister id to the relay's config -----------------------------
-# Only for the real network: a local rehearsal must not overwrite the mainnet id in deploy/.env.
+# Only for the real network: a local rehearsal must not overwrite the mainnet id. Non-secret →
+# deploy/env.config (tracked), from which deploy/.env is generated.
 if [ "$NETWORK" != "local" ]; then
-  env_set DPAY_CANISTER_ID "$CID" deploy/.env
-  echo "   wrote DPAY_CANISTER_ID=$CID to deploy/.env"
+  env_set_config DPAY_CANISTER_ID "$CID"
+  echo "   wrote DPAY_CANISTER_ID=$CID to deploy/env.config"
 else
-  echo "   (local rehearsal: leaving deploy/.env untouched; local canister id $CID)"
+  echo "   (local rehearsal: leaving deploy config untouched; local canister id $CID)"
 fi
 
 # --- re-pin the integrity surface: record THIS upgrade's module hash ---------------------------
@@ -305,7 +307,8 @@ fi
 echo
 echo "done. The catalog the app renders is NOT set here — it is compiled into the relay"
 echo "      (crates/dpay-relay/src/catalog.rs); adding a currency = relay code change + 'just up'."
-echo "      deploy/.env now carries the canister id (and, on ic, the controller seed). Confirm"
+echo "      deploy/env.config now carries the canister id; on ic the controller seed went to"
+echo "      secrets/deploy.sops.json (deploy/.env regenerated from both). Confirm"
 echo "      DPAY_LEDGER=ic, DPAY_IC_URL=https://icp-api.io, and DPAY_IC_FETCH_ROOT_KEY=false there."
 echo "      First deploy on this host? Publish the tunnel too: just tunnel-provision."
 echo "      Recording this upgrade and shipping it is docs/OPS.md section 3; once the relay is up,"

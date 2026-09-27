@@ -66,7 +66,8 @@ dpay cannot refuse the accrual over the API, and what happens to that partner ba
 1. **Set `DPAY_TROCADOR_API_KEY` in the deploy environment.** Access was enabled 2026-09-22;
    their proxy may need up to 60 minutes from the email before the key answers. The key's
    tracked source of truth is `secrets/trocador.sops.json` (sops, all three age recipients) —
-   decrypt into the env, never a plaintext .env; `deploy/.env.example` carries the one-liner.
+   decrypt into the env, never a plaintext .env; `scripts/gen-deploy-env.sh` emits it into the
+   generated `deploy/.env` (already wired — `DPAY_TROCADOR_API_KEY` is in its mapping).
 2. **Set `DPAY_PUBLIC_ORIGIN` and `DPAY_TRUST_PROXY=1` in prod.** The first builds the webhook
    URL the venue probes at creation; the second makes the access log's IP field honest instead of
    a tunnel-internal address.

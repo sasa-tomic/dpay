@@ -10,29 +10,29 @@
     <style>
       /* `#root` must be a flex COLUMN of full viewport height: react-native-web's root component uses
          `flex:1`, which only fills if its parent is a bounded flex container. A bare `display:block`
-         #root (even at height:100%) collapses the flex chain to content height — so short screens
+         #root (even at height:100%) collapses the flex chain to content height - so short screens
          (e.g. the Paid phase) left a dead zone of unfilled viewport below the app, while tall screens
          (camera) only *looked* full because their content overflowed. `display:flex; flex-direction:
          column` mirrors how a real RN device bounds the root to the screen, so the web mount renders
          layout faithfully and e2e screenshots match device behavior. */
-      html, body, #root { margin: 0; padding: 0; height: 100%; background: #F4F1E8; }
+      html, body, #root { margin: 0; padding: 0; height: 100%; background: #EBF0ED; }
       /* Wave-4 dual theme: the page bg (behind the RN tree) follows the OS scheme so the
-         first paint — before the bundle applies its palette — is already dark on a dark OS
-         (no light flash). Mirrors palette.ts DARK.bg (#141210, warm near-black). The RN
+         first paint - before the bundle applies its palette - is already dark on a dark OS
+         (no light flash). Mirrors palette.ts DARK.bg (#0C1312, deep petrol-black). The RN
          root itself re-paints with the same value via S.root/screenFrame. */
       @media (prefers-color-scheme: dark) {
-        html, body, #root { background: #141210; }
+        html, body, #root { background: #0C1312; }
       }
       #root { display: flex; flex-direction: column; }
-      /* Keyboard focus ring (U-F4) — mirrors wallet.html (see the note there). */
+      /* Keyboard focus ring (U-F4) - mirrors wallet.html (see the note there). */
       button:focus-visible, [role='button']:focus-visible, a:focus-visible,
       input:focus-visible, textarea:focus-visible {
-        outline: 2px solid #D03F00;
+        outline: 2px solid #0E5F53;
         outline-offset: 2px;
       }
-      /* Space Grotesk + IBM Plex Mono — the SAME subsetted WOFF2 the shipped wallet uses (see the
+      /* Space Grotesk + IBM Plex Mono - the SAME subsetted WOFF2 the shipped wallet uses (see the
          note in wallet.html). E2e determinism: fonts load lazily and renderers fall back to the
-         system stack if not ready — no layout assertions depend on font metrics. */
+         system stack if not ready - no layout assertions depend on font metrics. */
       @font-face { font-family: 'space_grotesk_500'; src: url('./fonts/space_grotesk_500.woff2') format('woff2'); font-weight: 500; font-display: swap; }
       @font-face { font-family: 'space_grotesk_600'; src: url('./fonts/space_grotesk_600.woff2') format('woff2'); font-weight: 600; font-display: swap; }
       @font-face { font-family: 'space_grotesk_700'; src: url('./fonts/space_grotesk_700.woff2') format('woff2'); font-weight: 700; font-display: swap; }

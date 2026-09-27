@@ -749,7 +749,7 @@ export const withdrawEn: WithdrawMessages = {
     noRail: 'This asset has no withdrawal rail configured',
     gasFeeErr: "Couldn't fetch the live gas fee — check your connection",
     withdrawn: 'Withdrawn ✓',
-    sentTo: 'sent to',
+    sentTo: 'Sent to',
     copyDestinationLabel: 'Copy destination address',
     withdrawing: amount => `Withdrawing ${amount}…`,
     sendToNative: (networkLabel, nativeAsset) => `Send your ${networkLabel} to a native ${nativeAsset} address`,

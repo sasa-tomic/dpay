@@ -150,7 +150,7 @@ export const onboardingEs: OnboardingMessages = {
     ...copyWordsEs,
     title: 'Haz una copia de seguridad',
     warning:
-      'Anota estas 24 palabras y guárdalas en un lugar seguro. Son la ÚNICA forma de recuperar tu billetera si pierdes este dispositivo: no hay cuenta de dpay, y ni siquiera dpay puede recuperarlas.',
+      'Anota estas 24 palabras y guárdalas en un lugar seguro. Son la única forma de recuperar tu billetera si pierdes este dispositivo: no hay cuenta de dpay, y ni siquiera dpay puede recuperarlas.',
     copyWordsHint: 'Copia las 24 palabras sin los números de posición',
     ack: 'He anotado las 24 palabras',
   },

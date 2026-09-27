@@ -3,11 +3,13 @@
 // more than one conversion surface (the IC form, the route/hub/cross-rail record views, the
 // Solana surface), so it lives exactly once. The venue fail-closed constants stay in
 // ConvertMode.tsx (the IC form owns them); this file reads REGISTERED_VENUE_NAME from there.
+import {useState} from 'react';
 import {Linking, Pressable, Text, View} from 'react-native';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
 import {BUNDLED_VENUES, venueDisplayName, venueOfId} from '../config/venues';
-import {deriveConvertMath, fetchConvertQuote, isTerminalConvertStep, type ConvertMath, type ConvertQuote, type ConvertRecord, type LegPlan} from '../convert';
+import type {ComposedConvertRoute} from '../config/convert';
+import {deriveConvertMath, fetchCeFiConvertQuote, fetchConvertQuote, isTerminalConvertStep, type ConvertMath, type ConvertQuote, type ConvertRecord, type LegPlan} from '../convert';
 import type {HubRoute} from '../routes';
 import {SOLANA_TOKENS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
@@ -50,6 +52,70 @@ export const fetchHubQuotes = async (
   const m2 = await deriveConvertMath(q2, route.hub.fee, route.dest.fee, slippageBps);
   return {q1, m1, q2, m2};
 };
+
+/** One COMPOSED row's review bundle (2026-09-26): the IC legs' quotes + math under the exact
+ *  hub discipline (a second leg is sized on m1.minOut — the compounding floor prepare
+ *  validates), then the CeFi settle quote ON THE FLOOR — the exact amount the venue's order
+ *  will price (prepareComposedConvertRecord deposits the IC chain's final min-out). One
+ *  helper so the live fetch, and the confirm-time re-quote, fetch byte-identical bundles.
+ *  A CeFiNoQuoteError from the settle leg propagates: the venue's own listed-but-unquoted
+ *  verdict is a state, not a failure. */
+export type ComposedBundle = {
+  q1: ConvertQuote;
+  m1: ConvertMath;
+  q2: ConvertQuote | null;
+  m2: ConvertMath | null;
+  /** The settle leg's CeFi quote — deposit = the IC chain's final floor. */
+  cefi: ConvertQuote;
+};
+
+export const fetchComposedQuotes = async (
+  relayUrl: string,
+  route: ComposedConvertRoute,
+  amountIn: string,
+  inFee: string,
+  slippageBps: number,
+): Promise<ComposedBundle> => {
+  const depEp = route.endpoints[route.legs.length]!;
+  if (depEp.fee == null || depEp.decimals == null) throw new Error(M.convert.errors.quoteUnavailable('symbol'));
+  let q1: ConvertQuote;
+  let m1: ConvertMath;
+  let q2: ConvertQuote | null = null;
+  let m2: ConvertMath | null = null;
+  if (route.legs.length === 1) {
+    q1 = await fetchConvertQuote(
+      relayUrl, route.endpoints[0]!.ledger, depEp.ledger, amountIn,
+      {venue: venueOfId(route.legs[0]!.venueId) ?? undefined},
+    );
+    m1 = await deriveConvertMath(q1, inFee, depEp.fee, slippageBps);
+  } else {
+    q1 = await fetchConvertQuote(
+      relayUrl, route.endpoints[0]!.ledger, route.endpoints[1]!.ledger, amountIn,
+      {venue: venueOfId(route.legs[0]!.venueId) ?? undefined},
+    );
+    m1 = await deriveConvertMath(q1, inFee, route.endpoints[1]!.fee, slippageBps);
+    q2 = await fetchConvertQuote(
+      relayUrl, route.endpoints[1]!.ledger, depEp.ledger, m1.minOut,
+      {venue: venueOfId(route.legs[1]!.venueId) ?? undefined},
+    );
+    m2 = await deriveConvertMath(q2, route.endpoints[1]!.fee, depEp.fee, slippageBps);
+  }
+  // The settle leg quotes the IC chain's FINAL floor — the exact amount the venue's order
+  // will price (prepareComposedConvertRecord deposits minOutFinal).
+  const floor = m2 != null ? m2.minOut : m1.minOut;
+  const cefiVenue = venueOfId(route.cefiVenueId);
+  if (cefiVenue == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  // RAW floor in — fetchCeFiConvertQuote decimals the deposit itself (its own contract).
+  const cefi = await fetchCeFiConvertQuote(
+    relayUrl, cefiVenue, depEp.ledger, route.settleMint, floor,
+    {inDecimals: depEp.decimals, outDecimals: route.settleDecimals},
+  );
+  return {q1, m1, q2, m2, cefi};
+};
+
+/** The composed bundle's FINAL floor, in the deposit (hub) ledger's raw units — the exact
+ *  figure the venue order prices and the deposit transfer signs. */
+export const composedFloorRaw = (b: ComposedBundle): string => (b.m2 != null ? b.m2.minOut : b.m1.minOut);
 
 /** A record past 'quote'/'confirming' means signed bytes or a provider order exist — the screen
  *  must show state, not a form. The terminal set is app/convert.ts's OWN export — never a
@@ -156,7 +222,9 @@ const CONVERTED_PAIR_LABEL: string = (() => {
   return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 })();
 
-export function UnavailablePanel({selectedAsset, onBack}: {selectedAsset: SelectableAsset | null; onBack: () => void}) {
+export function UnavailablePanel(
+  {selectedAsset, onBack, onAddMoney}: {selectedAsset: SelectableAsset | null; onBack: () => void; onAddMoney?: () => void},
+) {
   // SelectableAsset.symbol already carries the backing display name (CHF for VCHF, ICP for ICP,
   // USDC for ckUSDC) — the same symbol every other surface shows for the row.
   const label = selectedAsset == null ? '' : selectedAsset.symbol;
@@ -164,11 +232,21 @@ export function UnavailablePanel({selectedAsset, onBack}: {selectedAsset: Select
     <View testID="convert-unavailable" style={S.convertWrap}>
       <ConvertHeader title={M.convert.actionConvert} onBack={onBack} />
       <Text testID="convert-unavailable-title" style={S.convertUnavailableTitle}>
-        {M.convert.unavailableTitle(label)}
+        {M.convert.noPathTitle(label)}
       </Text>
       <Text testID="convert-unavailable-body" style={S.convertUnavailableBody}>
-        {M.convert.unavailableBody(CONVERTED_PAIR_LABEL, REGISTERED_VENUE_NAME)}
+        {M.convert.noPathBody(CONVERTED_PAIR_LABEL)}
       </Text>
+      {onAddMoney != null ? (
+        <Pressable
+          testID="btn-convert-add-money"
+          style={S.primary}
+          onPress={onAddMoney}
+          accessibilityRole="button"
+          accessibilityLabel={M.convert.noPathAction}>
+          <Text style={S.primaryText}>{M.convert.noPathAction}</Text>
+        </Pressable>
+      ) : null}
       <View style={S.convertFooting}>
         <IconSwap size={20} color={C.sub} />
       </View>
@@ -222,6 +300,18 @@ export function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister:
   }
   if (lp.kind === 'cctp_burn') {
     return M.convert.crossrail.legCctpBurn(record.hopSymbol ?? record.outSymbol, record.destNetwork ?? '');
+  }
+  if (lp.kind === 'deposit_transfer') {
+    // The composed route's final leg: the device-signed transfer that funds the venue
+    // order. The pre-provisioned depositLeg copy IS this leg's line — pending names the
+    // send, sent/confirmed name the venue-side wait. The amount is the record's frozen
+    // order figure in the deposit (hop) ledger's own unit — every reachable composed route
+    // deposits the hop asset (endpoints[1]).
+    const dep = record.composedDeposit;
+    const amt = fmtAssetCompact(dep?.amountRaw ?? record.amountIn, record.hopDecimals ?? 8, record.hopSymbol ?? '');
+    return lp.state === 'pending'
+      ? M.convert.depositLegPending(venueDisplayName(dep?.venueId ?? record.venueId), amt)
+      : M.convert.depositLegSent(venueDisplayName(dep?.venueId ?? record.venueId), amt);
   }
   if (lp.kind === 'swap') {
     // Hub records run TWO swap legs (D14, same leg vocabulary parameterised per hop):
@@ -277,21 +367,31 @@ export function plannedLegFee(record: ConvertRecord, lp: LegPlan, legCanister: s
   if (lp.kind === 'approve_gas') {
     return fmtAssetCompact(lp.fee, record.gasDecimals ?? 18, record.gasSymbol ?? 'ckETH');
   }
+  if (lp.kind === 'deposit_transfer') {
+    // The deposit transfer pays the deposit (hop) ledger's own fee on top of the order
+    // figure — never out of it.
+    return fmtAssetCompact(lp.fee, record.hopDecimals ?? 8, record.hopSymbol ?? '');
+  }
   return null;
 }
 
 
 /** A plain external link row (Etherscan / Circle status) — Linking.openURL is the same OS
- *  path Settings' privacy link and the Trust fund button already use; inert nowhere. */
+ *  path Settings' privacy link uses. If the OS has no handler for the URL, the address itself
+ *  renders beneath the row: a silent no-op tap is a dead end, and dead ends are bugs. */
 export function LinkRow({testID, label, href}: {testID: string; label: string; href: string}) {
+  const [failed, setFailed] = useState(false);
   return (
-    <Pressable
-      testID={testID}
-      style={S.linkBtn}
-      onPress={() => { Linking.openURL(href).catch(() => undefined); }}
-      accessibilityRole="link"
-      accessibilityLabel={label}>
-      <Text style={S.linkText}>{label}</Text>
-    </Pressable>
+    <View>
+      <Pressable
+        testID={testID}
+        style={S.linkBtn}
+        onPress={() => { Linking.openURL(href).catch(() => setFailed(true)); }}
+        accessibilityRole="link"
+        accessibilityLabel={label}>
+        <Text style={S.linkText}>{label}</Text>
+      </Pressable>
+      {failed ? <Text style={S.err}>{M.common.linkFallback(href)}</Text> : null}
+    </View>
   );
 }
