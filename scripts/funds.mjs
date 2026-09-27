@@ -6,7 +6,7 @@
 // reachable as `just funds <subcommand>` (founder ask 2026-09-20: ONE way to do all of it; the
 // old `just agent-*` recipe names were deleted 2026-09-20 — no forwarding stubs).
 //
-//   (bare)        overview — every wallet + every live balance + the abandoned-principal watch
+//   (bare)        overview — every wallet + every live balance + CHF totals + fees paid + the abandoned watch
 //   balance [W]   one wallet's live census, measured (default: the IC float; UNREADABLE never 0)
 //   history [W]   what the money DID: ICP transfers + block indexes (IC wallets; default icp-float)
 //   address [W]   the funding address, no decryption (default: icp-float; + funding-safety block)
