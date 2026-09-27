@@ -11,7 +11,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {armNfcCard, onboardWallet, openBalances, selectCurrency, waitForWallet, type Mount} from '../harness/lib';
-import {clickByAria, has, nfcPhase, nfcPhaseWalk, type NfcEvent} from './h';
+import {clickByAria, has, nfcPhase, type NfcEvent} from './h';
 
 const g = globalThis as unknown as Record<string, unknown>;
 

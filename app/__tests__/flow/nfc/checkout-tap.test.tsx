@@ -14,7 +14,7 @@
 import {describe, it, expect, afterEach} from '@jest/globals';
 import {
   accountOf, assert, assertEq, assertIncludes, DpayCore, faucetAccount, generateKeypair,
-  getBalance, icpCatalog, onboardWallet, openBalances, railPrincipalText, selectCurrency, type Mount,
+  getBalance, icpCatalog, onboardWallet, openBalances, railPrincipalText, selectCurrency,
 } from '../harness/lib';
 import {clickByAria, type NfcEvent} from './h';
 
@@ -28,6 +28,7 @@ const PAY_RAW = PRICE_RAW - FEE; // the settlement amount: the price less the fe
 const PAYER_SEED = 2_000_000_000;
 
 type CheckoutOpen = {merchant?: string; reference?: string; id?: string};
+type NfcResult = {status: number; nonceHex: string; requestIdHex: string};
 
 let restoreFetch: (() => void) | null = null;
 afterEach(() => {
@@ -109,9 +110,9 @@ describe('flow 117 — a tap credits the shop’s own charge (the reference is t
     await m.driver.findByTestID('nfc-status', {timeoutMs: 5000});
     expect(m.driver.isPresent('checkout-qr')).toBe(false);
 
-    let queued: {status?: number; requestIdHex?: string; nonceHex?: string} | null = null;
+    let queued: NfcResult | null = null;
     for (let i = 0; i < 200 && !queued; i++) {
-      queued = (g.__DPAY_TEST_NFC_RESULT as typeof queued) ?? null;
+      queued = (g.__DPAY_TEST_NFC_RESULT as NfcResult | null) ?? null;
       if (!queued) await new Promise((r) => setTimeout(r, 50));
     }
     assertEq(queued?.status, 0, 'the merchant must reach a settled verdict from exact ledger history');

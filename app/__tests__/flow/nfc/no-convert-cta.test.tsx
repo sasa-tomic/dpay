@@ -14,8 +14,8 @@
  * same NfcTapView shell walked above).
  */
 import {describe, it, expect} from '@jest/globals';
-import {armNfcCard, assertEq, onboardWallet, openBalances, selectCurrency, type Mount} from '../harness/lib';
-import {buildSolReq, clickByAria, convertCtaCount, extractSig, nfcPhase, nfcPhaseWalk, type NfcEvent} from './h';
+import {armNfcCard, assertEq, onboardWallet, openBalances, selectCurrency} from '../harness/lib';
+import {buildSolReq, clickByAria, convertCtaCount, extractSig, nfcPhase, type NfcEvent} from './h';
 
 const g = globalThis as unknown as Record<string, unknown>;
 const REQ_RID = 'c'.repeat(32);

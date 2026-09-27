@@ -11,7 +11,7 @@
  * survives); 182 the RECONCILE (authoritative poll replaces the optimistic deduction, the
  * merchant settles the same memo, the settled row retires the pending row with no duplicate).
  */
-import {describe, it, expect} from '@jest/globals';
+import {describe, it, expect, afterEach} from '@jest/globals';
 import {
   accountOf, armNfcCard, armPayScan, assert, assertEq, DpayCore, faucetAccount,
   generateKeypair, getBalance, goOffline, onboardWallet, openBalances, railTransfer,

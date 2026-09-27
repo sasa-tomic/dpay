@@ -22,6 +22,11 @@ import {clickByAria, nfcPhase, nfcPhaseWalk, type NfcEvent} from './h';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
+/** The wire bundle the web shim stashes on approve (`__DPAY_TEST_NFC_APPROVED_WIRE`). */
+type ApprovedWire = {envelopeHex: string; readStateEnvelopeHex: string; requestIdHex: string};
+/** The merchant-queued result the shim stashes on confirm (`__DPAY_TEST_NFC_RESULT`). */
+type NfcResult = {status: number; nonceHex: string; requestIdHex: string};
+
 const dispatchFor = async (m: Mount, event: NfcEvent): Promise<void> => {
   await armNfcCard(m, 'ic');
   (g.__DPAY_TEST_NFC_SESSION as (e: NfcEvent) => void)(event);
@@ -136,9 +141,9 @@ describe('flow 86 — receiver settles an offline-payer NFC bundle, exactly once
 
     // Settlement queues the signed result, but the merchant UI stays nonterminal until the payer
     // accepts it (Done must not tear reader mode down before a result-only re-tap).
-    let queued: {status?: number; requestIdHex?: string} | null = null;
+    let queued: NfcResult | null = null;
     for (let i = 0; i < 200 && !queued; i++) {
-      queued = (g.__DPAY_TEST_NFC_RESULT as typeof queued) ?? null;
+      queued = (g.__DPAY_TEST_NFC_RESULT as NfcResult | null) ?? null;
       if (!queued) await new Promise((r) => setTimeout(r, 50));
     }
     expect(queued?.status).toBe(0);
@@ -171,9 +176,9 @@ describe('flow 87 — offline payer signs, never submits, and resolves Paid only
     await m.driver.findByTestID('nfc-status', {timeoutMs: 5000});
 
     // One-press: the wire poll proves the sign happened on arrival.
-    let approved: {envelopeHex?: string; readStateEnvelopeHex?: string; requestIdHex?: string} | null = null;
+    let approved: ApprovedWire | null = null;
     for (let i = 0; i < 50 && !approved; i++) {
-      approved = (g.__DPAY_TEST_NFC_APPROVED_WIRE as typeof approved) ?? null;
+      approved = (g.__DPAY_TEST_NFC_APPROVED_WIRE as ApprovedWire | null) ?? null;
       if (!approved) await new Promise((r) => setTimeout(r, 100));
     }
     assert(approved?.envelopeHex != null && approved.envelopeHex.length > 128, 'offline payer must approve a real signed IC update');
@@ -186,7 +191,7 @@ describe('flow 87 — offline payer signs, never submits, and resolves Paid only
     expect(BigInt(await getBalance(payer!.publicHex, 0))).toBe(payerBefore);
     const catalog = await icpCatalog();
     const ledger = catalog.find((c) => c.currency === 0)?.ledger ?? '';
-    const bytes = new Uint8Array(approved.envelopeHex!.match(/../g)!.map((h) => parseInt(h, 16)));
+    const bytes = new Uint8Array(approved.envelopeHex.match(/../g)!.map((h: string) => parseInt(h, 16)));
     const submit = await fetch(`${process.env.DPAY_JEST_RELAY_URL}/api/v2/canister/${ledger}/call`, {
       method: 'POST', headers: {'Content-Type': 'application/cbor'}, body: bytes,
     });

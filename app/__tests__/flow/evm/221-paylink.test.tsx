@@ -46,7 +46,7 @@ describe('flow 221 — the EVM pay link: grammar, slugs, prefill promise, wrong-
     expect(parsed.searchParams.get('network')).toBe('anvil');
     expect(parsed.searchParams.get('amount')).toBe('12.50');
     expect(parsed.searchParams.get('ref')).toBeNull(); // no ref on EVM: the request path carries rid in evmreq:v1 (D18)
-    for (const [chainId, slug] of Object.entries(CHAIN_SLUGS)) {
+    for (const slug of Object.values(CHAIN_SLUGS)) {
       const u = payLink({origin: local, recipient: merchant.address, asset: 'ZCHF', network: slug});
       expect(new URL(u).searchParams.get('network')).toBe(slug);
       // The slug is also a REFUSAL gate: lowercase+hyphenated, so a hand-typed alias can never match.

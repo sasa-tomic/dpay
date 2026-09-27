@@ -24,7 +24,7 @@ import {
   buildSolReq, clickByAria, extractSig, MERCHANT_ADDR, makeSolStub, nfcPhaseWalk, setSolStub,
   solEnv, solTxDetailFromSolpay, type NfcEvent,
 } from '../nfc/h';
-import type {Mount} from '../../harness/lib';
+import type {Mount} from '../harness/lib';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
