@@ -31,7 +31,6 @@ import {
   type EvmRpcLike,
   type EvmSettleResult,
 } from './claims';
-import {type EvmChainId, EVM_CHAINS} from './chains';
 import {deriveEvmKeypair} from './identity';
 import {isEvmEndpointRefusal, isEvmRelayPathDown, isEvmWrongChainError} from './errors';
 import {
@@ -204,8 +203,4 @@ export async function findEvmSettledTransfer(
     }
   }
   return null;
-}
-| null {
-  const c = EVM_CHAINS[chainId as EvmChainId];
-  return c ? {name: c.name, nativeSymbol: c.nativeSymbol} : null;
 }
