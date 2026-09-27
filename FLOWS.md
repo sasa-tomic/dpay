@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **209 flows**
-> (208 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **210 flows**
+> (209 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (25) · pay (50) · offline (17) · deposit (14) · withdraw (13) · convert (36) · nfc (12) · system (35) · tour (6)
+wire (1) · onboard (25) · pay (50) · offline (17) · deposit (14) · withdraw (13) · convert (37) · nfc (12) · system (35) · tour (6)
 
 ---
 
@@ -217,6 +217,7 @@ wire (1) · onboard (25) · pay (50) · offline (17) · deposit (14) · withdraw
 | 211 | remove-guard-refusals | The Remove guard refuses a KNOWN NONZERO currency (the menu names the next step and the currency stays), refuses the LAST visible currency, and ALLOWS a zero-balance hide whose re-add from the add-currency route restores the list — Remove is a list operation, nothing on chain moves. | remove, hidden-currencies, remove-guard, nonzero-refusal, last-currency-refusal, re-add |
 | 212 | currency-row-tap-sets-main | Tapping a currency row sets that currency MAIN and goes Home: the headline flips to the new currency's eyebrow, the working rail follows (the funded ICP rail after an ICP-row tap — chooseRail, funded-first, no manual routing), and the choice survives a reload. | currency-list, row-tap, set-main, working-rail, reload-resume |
 | 213 | convert-composed | The composed IC+CeFi kind converts VCHF to EURC at the ONE consent press (the 2-press grammar: entry tap, then the Convert CTA): the sheet auto-picks the composed row for the EUR target and discloses the venue + locked figure before the tap, the Convert press re-quotes fresh, creates the venue order exactly once and continues straight into the three signed legs with the deposit transfer moving exactly the IC floor to the venue's address (books match), the tracker narrates the venue facts live (order + locked figure attributed, deposit address revealed verbatim, exact amount, deposit window), the record parks at awaiting_deposit with the deposit row identity, a reload resumes the payout watch without re-creating the order, the venue's own figures complete it, and the seeded-v3 refusal paths (a past deposit window, an exact-amount corruption) land deposit_refused once with the hub asset named. | convert, composed, iccefi, sideshift, order-first, one-consent, deposit-transfer, deposit-gate, v3-store, deposit-leg-copy, reload-recovery, no-re-sign, deposit-refused, live-narration |
+| 223 | convert-cefi-eth | The EVM-native CeFi destination converts ICP to NATIVE ETH on Ethereum mainnet through the adapter-owned SideShift row, gated on the EVM rail being configured: the settle address is the device's own EVM identity (m/44'/60'/0'/0/0 over the wallet seed, EIP-55-checksummed — pinned against the harness's independent SLIP-10 implementation), the sheet names the payout rail (native ETH on Ethereum mainnet, distinct from the IC ckETH pool row), the ONE consent creates exactly one venue order whose settle address the relay validates against the named EVM-native settle rail, the record carries the settle-rail id + derived address as provenance, a reload resumes the payout watch without re-creating the order, and the venue's own settled figures complete it. | convert, cefi, sideshift, evm-native, evm-identity, eip55, partner-key, relay-proxy, deposit-handoff, provider-status, order-first, deposit-gate, v3-store, reload-recovery, no-re-sign, cross-rail |
 
 ### NFC (tap-to-pay)
 
