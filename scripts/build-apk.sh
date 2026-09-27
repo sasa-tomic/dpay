@@ -29,7 +29,9 @@ ABIS="arm64-v8a,x86_64"
 # what it SHOULD be and verify the committed file matches. Override the expected value with
 # DPAY_RELAY_URL; else derive https://<host> from deploy/.env's DPAY_PUBLIC_HOSTNAME.
 RELAY_URL="${DPAY_RELAY_URL:-}"
-if [ -z "$RELAY_URL" ] && [ -f deploy/.env ]; then
+if [ -z "$RELAY_URL" ]; then
+  # deploy/.env is generated — refresh from its sources first (fails closed when sops is unusable).
+  bash "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/gen-deploy-env.sh" -q
   host="$(grep -E '^DPAY_PUBLIC_HOSTNAME=' deploy/.env | tail -1 | cut -d= -f2- | tr -d '"'"'"' ')"
   [ -n "$host" ] && RELAY_URL="https://$host"
 fi

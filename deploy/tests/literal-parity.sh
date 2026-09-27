@@ -23,6 +23,10 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 FIXTURE_DIR=deploy/tests/fixtures
 
+# Hermetic: the runs below must not touch (or fail on) sops — sourcing deploy/env-lib.sh
+# auto-regenerates deploy/.env otherwise, which needs the age key this harness must not require.
+export DPAY_ENV_SYNC=0
+
 # A real dfx landing AHEAD of the mock in PATH would silently drive a live replica instead of being
 # captured. setup_dfx_env (deploy/dfx-lib.sh) prepends .dev/cargo/bin and $HOME/.local/share/dfx/bin;
 # the runs below jail HOME to neutralize the second, and a dfx inside the cargo toolchain bin — the

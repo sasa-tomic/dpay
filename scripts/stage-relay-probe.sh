@@ -21,16 +21,18 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 ROOT="$PWD"
 
 RPC_URL="${DPAY_SOLANA_RPC_URL:-}"
-# `|| true`: grep exits 1 when the line is absent, and under pipefail that must mean
-# "empty, fall through to the loud failure below", not a silent early exit.
-if [ -z "$RPC_URL" ] && [ -f deploy/.env ]; then
+if [ -z "$RPC_URL" ]; then
+  # deploy/.env is generated — refresh from its sources first (fails closed when sops is unusable).
+  bash "$ROOT/scripts/gen-deploy-env.sh" -q
+  # `|| true`: grep exits 1 when the line is absent, and under pipefail that must mean
+  # "empty, fall through to the loud failure below", not a silent early exit.
   RPC_URL="$(grep -E '^DPAY_SOLANA_RPC_URL=' deploy/.env | tail -1 | cut -d= -f2- || true)"
 fi
 if [ -z "$RPC_URL" ]; then
-  echo "FAIL: no DPAY_SOLANA_RPC_URL (environment or deploy/.env)." >&2
+  echo "FAIL: no DPAY_SOLANA_RPC_URL (environment or secrets/deploy.sops.json)." >&2
   echo "       The relay this build ships proxies every Solana read through that endpoint" >&2
-  echo "       (full provider URL incl. api key — see deploy/.env.example); without it the" >&2
-  echo "       rail it serves is dark. Add it to deploy/.env and re-run." >&2
+  echo "       (full provider URL incl. api key); without it the" >&2
+  echo "       rail it serves is dark. Add it: sops secrets/deploy.sops.json, then just deploy-env." >&2
   exit 1
 fi
 

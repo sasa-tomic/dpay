@@ -577,7 +577,12 @@ demo:
 image:
     bash deploy/build.sh
 
-# provision the Cloudflare Tunnel headlessly (creates tunnel + DNS, writes CF_TUNNEL_TOKEN to deploy/.env)
+# regenerate deploy/.env from deploy/env.config + secrets/*.sops.json (sops) — the only sanctioned
+# way deploy/.env comes into existence; every deploy path also runs it automatically
+deploy-env:
+    bash scripts/gen-deploy-env.sh
+
+# provision the Cloudflare Tunnel headlessly (stores CF_TUNNEL_TOKEN encrypted in secrets/deploy.sops.json)
 # needs CF_API_TOKEN + DPAY_PUBLIC_HOSTNAME in the environment; see deploy/README.md
 tunnel-provision:
     bash deploy/tunnel-provision.sh
@@ -590,6 +595,9 @@ tunnel-destroy:
 up: image
     #!/usr/bin/env bash
     set -euo pipefail
+    # deploy/.env is generated — refresh it from its sources first (no-op when fresh, fails
+    # closed naming the fix when sops is unusable).
+    bash scripts/gen-deploy-env.sh -q
     cd deploy
     # Fail before Compose interpolation if the remotely managed tunnel token is absent.
     if ! grep -Eq '^CF_TUNNEL_TOKEN=.+$' .env 2>/dev/null; then

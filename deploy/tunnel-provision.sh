@@ -68,18 +68,16 @@ cf POST "/zones/$ZONE_ID/dns_records" \
 token="$(cf GET "/accounts/$ACCOUNT_ID/cfd_tunnel/$tunnel_id/token" | jq -r '.result')"
 if [ -z "$token" ] || [ "$token" = "null" ]; then echo "tunnel token endpoint returned nothing" >&2; exit 1; fi
 
-env_file="$DEPLOY_DIR/.env"
-[ -f "$env_file" ] || echo "creating deploy/.env from .env.example — you still must set DPAY_CANISTER_ID before 'just up'"
-env_set CF_TUNNEL_TOKEN "$token" "$env_file"
+env_set_sops CF_TUNNEL_TOKEN "$token"
 
 cat <<EOF
 
 ✓ tunnel '$TUNNEL_NAME' ($tunnel_id) published
     https://$HOST  ->  http://relay:8787   (zone $ZONE_NAME, proxied CNAME)
-    CF_TUNNEL_TOKEN written to deploy/.env
+    CF_TUNNEL_TOKEN stored encrypted in secrets/deploy.sops.json; deploy/.env regenerated
 
 next:
-  1) set DPAY_CANISTER_ID (and the ledger vars) in deploy/.env
+  1) just deploy-ic                       # writes DPAY_CANISTER_ID (deploy/env.config)
   2) just up
   3) curl -sS https://$HOST/health          # {"status":"ok"}
 EOF
