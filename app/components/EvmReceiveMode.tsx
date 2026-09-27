@@ -430,7 +430,10 @@ export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balanc
           accessibilityRole="button"
           accessibilityLabel={M.receive.receiveIn(unit)}
           accessibilityState={{disabled: false}}>
-          <Text style={S.currency}>{'¤'}</Text>
+          {/* The unit text, not a glyph: no franc glyph exists in the vocabulary, and the VCHF
+              precedent renders the exact unit text for a known token ('¤' is the UNKNOWN
+              fallback — a ZCHF row is never unknown). */}
+          <Text style={S.currency}>{unit}</Text>
           <IconChevronDown size={20} color={C.sub}/>
         </Pressable>
         <TextInput

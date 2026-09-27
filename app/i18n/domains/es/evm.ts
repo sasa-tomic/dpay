@@ -20,7 +20,7 @@ export const evmEs: EvmMessages = {
   claimSettled: amount => `Recibido ✓ ${amount}`,
   claimFailedTitle: 'La solicitud falló',
   claimNeedsResign: 'El código del pagador estaba desactualizado: debe escanear tu código y firmar de nuevo. Muestra la misma solicitud.',
-  claimUnknown: 'Sin confirmar — puede que aún se liquidte. Comprueba antes de entregar.',
+  claimUnknown: 'Sin confirmar — puede que aún se liquide. Comprueba antes de entregar.',
   claimsQueued: n => `${n} solicitud${n === 1 ? '' : 'es'} en espera`,
   claimQueuedOffline: 'Sin conexión — la solicitud se liquida cuando vuelvas a estar en línea.',
   retrySettle: 'Liquidar ahora',

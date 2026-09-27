@@ -287,7 +287,9 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
         {claimedName ? <Text testID="evm-pay-payee" style={S.dim2}>{short(req.to)}</Text> : null}
         {claimedMemo ? <Text testID="evm-pay-memo" style={S.dim2}>{claimedMemo}</Text> : null}
         <Text testID="evm-pay-signed" style={S.badgeOk}>{M.pay.signedOffline}</Text>
-        <Text style={S.qrHint}>{M.evm.signingOffline}</Text>
+        {/* signingOffline is NOT repeated here: the badge above already states it, and a fact
+            stated twice is the failure mode the founder rule names. The string still serves the
+            scan-phase busy line below. */}
         <View style={S.confirmRow}>
           <Pressable
             testID="btn-evm-pay-handed"
