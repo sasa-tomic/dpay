@@ -70,7 +70,7 @@ export async function prepareSolanaConvertRecord(args: SolanaConvertPrepareArgs)
   const kp = deriveSolanaKeypair(secretHex);
   const built = await fetchJupiterSwapTx(relayUrl, quote, kp.address);
   if (!built.ok) {
-    if (built.code === 'refused') throw new Error(M.convert.errors.quoteRefused(venue.display_name));
+    if (built.code === 'refused') throw new Error(M.convert.errors.buildRefused(venue.display_name));
     throw new Error(M.convert.errors.quoteUnavailable(built.code));
   }
   const decoded = decodeVenueSwapTx(built.swap.swapTransaction);

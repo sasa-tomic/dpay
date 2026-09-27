@@ -341,6 +341,7 @@ export const convertFr: ConvertMessages = {
   errors: {
     quoteUnreachable: venue => `Impossible d'obtenir le devis de ${venue} — le relay ne répond pas. Vérifie ta connexion et réessaie.`,
     quoteRefused: venue => `${venue} a refusé d'établir un devis pour cette paire pour l'instant.`,
+    buildRefused: venue => `${venue} n'a pas pu préparer cet échange pour le moment. Rien n'a bougé, réessayez dans un instant.`,
     quoteUnavailable: code => `Devis indisponible (${code}).`,
     quoteUnconfigured: venue =>
       `${venue} n'est pas encore configuré sur ce relay — aucune identification de partenaire n'est configurée, aucun devis ne peut donc être demandé. Ton portefeuille n'a aucun problème.`,

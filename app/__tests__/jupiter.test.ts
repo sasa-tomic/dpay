@@ -259,6 +259,23 @@ describe('fetchJupiterSwapTx', () => {
     expect(r.swap.lastValidBlockHeight).toBe(300000000);
   });
 
+  test('a quote that self-describes transactionVersion builds WITHOUT asLegacyTransaction (Jupiter 400s the pair, live 2026-09-27)', async () => {
+    const v0Raw = {...quoteBody, transactionVersion: 0};
+    const quote = {...quoted(), raw: v0Raw as unknown};
+    jest.mocked(relayFetch).mockResolvedValueOnce(
+      res({swapTransaction: 'AQIDBA==', lastValidBlockHeight: 300000000}) as never,
+    );
+    const r = await fetchJupiterSwapTx(RELAY, quote, 'UserPk8888');
+    expect(r.ok).toBe(true);
+    const init = jest.mocked(relayFetch).mock.calls[0]![2] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      quoteResponse: v0Raw, // verbatim — transactionVersion rides inside the echo
+      userPublicKey: 'UserPk8888',
+      wrapAndUnwrapSol: true,
+      // asLegacyTransaction deliberately absent: the venue rejects the pair
+    });
+  });
+
   test('relay failures: marker 504 → unreachable, 4xx → refused, 5xx → unavailable', async () => {
     const quote = quoted();
     jest.mocked(relayFetch).mockResolvedValueOnce(errRes(504, MARKER) as never);

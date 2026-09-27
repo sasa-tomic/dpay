@@ -342,6 +342,7 @@ export const convertDe: ConvertMessages = {
   errors: {
     quoteUnreachable: venue => `Der Kurs von ${venue} war nicht abrufbar — das Relay antwortet nicht. Prüfe deine Verbindung und versuche es erneut.`,
     quoteRefused: venue => `${venue} hat abgelehnt, für dieses Paar gerade einen Kurs zu liefern.`,
+    buildRefused: venue => `${venue} konnte den Tausch gerade nicht vorbereiten. Nichts wurde bewegt. Erneut versuchen.`,
     quoteUnavailable: code => `Kurs nicht verfügbar (${code}).`,
     quoteUnconfigured: venue =>
       `${venue} ist auf diesem Relay noch nicht eingerichtet — es ist keine Partner-Berechtigung konfiguriert, daher kann kein Kurs angefragt werden. Mit deiner Wallet ist nichts verkehrt.`,

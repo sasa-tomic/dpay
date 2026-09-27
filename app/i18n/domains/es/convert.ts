@@ -341,6 +341,7 @@ export const convertEs: ConvertMessages = {
   errors: {
     quoteUnreachable: venue => `No se pudo alcanzar la cotización de ${venue} — el relay no responde. Revisa tu conexión y vuelve a intentarlo.`,
     quoteRefused: venue => `${venue} se negó a cotizar este par ahora mismo.`,
+    buildRefused: venue => `${venue} no pudo preparar este intercambio ahora mismo. No se movió nada, inténtalo de nuevo en un momento.`,
     quoteUnavailable: code => `Cotización no disponible (${code}).`,
     quoteUnconfigured: venue =>
       `${venue} aún no está configurado en este relay — no hay ninguna credencial de socio configurada, así que no se puede pedir una cotización. Tu monedero no tiene ningún problema.`,

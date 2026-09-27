@@ -490,6 +490,8 @@ export type ConvertMessages = {
   errors: {
     quoteUnreachable: (venue: string) => string;
     quoteRefused: (venue: string) => string;
+    /** The venue refused to BUILD the signed exchange for a quote it had just priced. Nothing has moved. */
+    buildRefused: (venue: string) => string;
     quoteUnavailable: (code: string) => string;
     /** A cefi venue whose relay holds no partner credential — the venue is ABSENT, not broken. */
     quoteUnconfigured: (venue: string) => string;
@@ -832,6 +834,7 @@ export const convertEn: ConvertMessages = {
   errors: {
     quoteUnreachable: venue => `Could not reach ${venue} for a quote. Check your connection and try again.`,
     quoteRefused: venue => `${venue} declined to quote this pair right now.`,
+    buildRefused: venue => `${venue} could not prepare this exchange just now. Nothing moved, try again in a moment.`,
     quoteUnavailable: code => `A quote could not be shown (code ${code}).`,
     quoteUnconfigured: venue =>
       `${venue} is not set up on this relay yet — no partner credential is configured, so no quote can be asked for. Nothing is wrong with your wallet.`,
