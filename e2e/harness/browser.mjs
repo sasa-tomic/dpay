@@ -660,6 +660,16 @@ async function openLease({ key, executablePath, extraArgs }) {
       // is simply no longer ours.
       if (process.env.DPAY_E2E_SHELL_KEEPALIVE !== '0') {
         try { await withCloseCeiling(browser.disconnect(), 'browser.disconnect()'); } catch { /* best-effort */ }
+        // The shell stays alive, so THIS process must stop referencing it or the runner wedges at
+        // exit: the spawned ChildProcess handle keeps the event loop referenced until the child
+        // dies — and the hand-off means it never dies here (the sweep reaps it ~10 min later, which
+        // is exactly how long the 2026-09-28 visual run hung before node finally exited). Unref the
+        // child wait-handle and its piped stdio; the next run adopts the shell via the discovery
+        // file, so nothing else in this process needs it.
+        if (proc) {
+          for (const s of [proc.stdin, proc.stdout, proc.stderr]) { try { s?.unref(); } catch { /* best-effort */ } }
+          try { proc.unref(); } catch { /* best-effort */ }
+        }
         untrackChild(pid); // we are leaving it alive: drop the exit-hook SIGKILL claim
         _launchedDiscovery.delete(key); // but the discovery file STAYS — that is the hand-off
         releaseGateLockSync();
