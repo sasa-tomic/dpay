@@ -16,8 +16,11 @@ const AsyncStorage = require('@react-native-async-storage/async-storage') as {
   getItem: (k: string) => Promise<string | null>;
 };
 
-/** The persisted-state keys that steer the first-run router (App.tsx) and Onboarding's gate. */
-const ROUTER_KEYS = ['dpay.identity.v1', 'dpay.identity.pending.v1', 'dpay.journey.v1'];
+/** The persisted-state keys that steer the first-run router (App.tsx), Onboarding's gate, and the
+ *  wallet's restored working rail (a prior test's SOL selection must not leak into the next boot). */
+const ROUTER_KEYS = [
+  'dpay.identity.v1', 'dpay.identity.pending.v1', 'dpay.journey.v1', 'dpay.selectedAsset.v1',
+];
 
 export async function freshContext(): Promise<void> {
   for (let i = 0; i < 30; i++) {
