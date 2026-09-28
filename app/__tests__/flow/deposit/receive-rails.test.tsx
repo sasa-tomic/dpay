@@ -34,8 +34,15 @@ beforeEach(() => {
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const h = require('./h') as typeof import('./h');
+// Assertion functions need an explicitly-typed call target (TS2775 — destructuring through a
+// whole-module typeof import drops the assertion signature). Explicit per-function annotations
+// keep the signatures AND the load-order contract (lazy require, no hoisted harness import).
+const {assertEq, assertIncludes} = require('../harness/lib') as {
+  assertEq: (actual: unknown, expected: unknown, label: string) => void;
+  assertIncludes: (actual: string, substring: string, label: string) => void;
+};
 const {
-  accountOf, assert, assertEq, assertIncludes, onboardWallet, openBalances, railPrincipalText,
+  accountOf, onboardWallet, openBalances, railPrincipalText,
   readStable, selectCurrency, selectSolRail, waitForWallet,
 } = h;
 
@@ -62,7 +69,7 @@ describe('flow 122 — receive rail choice: the wallet pick, disclosed, with the
     const why1 = await readStable(m, 'receive-rail-why');
     await readStable(m, 'ic-also-address');
     assertIncludes(why1, 'ckUSDC · Internet Computer', 'the default rail is named');
-    expect(why1.includes('—')).toBe(false, 'a pure preference adds no reason suffix');
+    expect(why1.includes('—')).toBe(false); // a pure preference adds no reason suffix
     const fee1 = await readStable(m, 'receive-rail-fee');
     assertIncludes(fee1, 'Internet Computer', "the fee line names the rail's network");
     assertIncludes(fee1, 'Fee 0.01 ckUSDC', "the fee is stated in the rail's own unit (0.01 ckUSDC, 6 decimals)");
@@ -79,12 +86,12 @@ describe('flow 122 — receive rail choice: the wallet pick, disclosed, with the
     const why2 = await readStable(m, 'receive-rail-why');
     await readStable(m, 'sol-receive-address');
     assertIncludes(why2, 'USDC · Solana', 'the sibling rail is named by its own line');
-    expect(why2.includes('—')).toBe(false, 'the sibling carries no reason suffix (only the pick does)');
+    expect(why2.includes('—')).toBe(false); // the sibling carries no reason suffix (only the pick does)
     const fee2 = await readStable(m, 'receive-rail-fee');
     assertIncludes(fee2, 'Solana · Fee 0.000005 SOL', 'the Solana per-transfer fee is stated in SOL');
     assertIncludes(fee2, 'one-time account rent 0.00203928 SOL', 'the USDC ATA rent is disclosed as the one-time cost');
     const solAddr = (await readStable(m, 'sol-receive-address')).trim();
-    assert(BASE58.test(solAddr), `the USDC rail address is a valid base58 Solana address, got "${solAddr}"`);
+    if (!BASE58.test(solAddr)) throw new Error(`the USDC rail address is a valid base58 Solana address, got "${solAddr}"`);
 
     // 3. Toggle back: the IC principal is the SAME (deterministic derivation of one seed).
     await m.driver.click('btn-receive-rail-left', {timeoutMs: 5000});
@@ -123,7 +130,7 @@ describe('flow 131 — EUR receive is single-rail: the plain EURC ATA, no rail m
     await m.driver.click('tab-receive', {timeoutMs: 5000});
     await m.driver.click('btn-receive-address', {timeoutMs: 5000});
     const eurcAddr1 = (await readStable(m, 'sol-receive-address')).trim();
-    assert(BASE58.test(eurcAddr1), `the EURC address is a valid base58 ATA, got "${eurcAddr1}"`);
+    if (!BASE58.test(eurcAddr1)) throw new Error(`the EURC address is a valid base58 ATA, got "${eurcAddr1}"`);
     expect(m.driver.isPresent('receive-rail-disclosure')).toBe(false);
     expect(m.driver.isPresent('receive-rail-why')).toBe(false);
     expect(m.driver.isPresent('receive-rail-fee')).toBe(false);

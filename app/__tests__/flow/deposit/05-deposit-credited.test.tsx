@@ -10,7 +10,7 @@
 import {describe, it, expect} from '@jest/globals';
 import {
   accountOf, assert, assertIncludes, faucetAccount, getBalance, onboardWallet,
-  openBalances, openReceiveAddress, railPrincipalText, selectCurrency,
+  openBalances, openReceiveAddress, selectCurrency,
 } from '../harness/lib';
 
 const DEPOSIT_CURRENCY = 1; // ckBTC — the Balances row selected for the deposit flow
@@ -57,7 +57,6 @@ describe('flow 05 — deposit credited: balance-delta detection + the credit sta
     // documented derivation `bc1qdpay` + hex(principal[:8]), tying the address to the principal
     // the faucet credits.
     const address = m.driver.readText('deposit-address');
-    const principalText = await railPrincipalText(accountHex!);
     expect(address).toMatch(/^bc1qdpay[0-9a-f]{16}$/);
 
     // Let the sheet's balance recheck capture its WATCHING BASELINE before any funds move: two

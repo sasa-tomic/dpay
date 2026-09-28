@@ -14,7 +14,7 @@
 // below the assignment; type-only imports are erased.
 (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SOLANA_RPC_URL = 'stub';
 /* eslint-disable @typescript-eslint/no-require-imports */
-const {accountOf, assertEq, assertIncludes, onboardWallet, openBalances, openReceiveAddress, railPrincipalText, selectCurrency, waitForWallet} = require('../harness/lib') as typeof import('../harness/lib');
+const {accountOf, assertEq, assertIncludes, onboardWallet, openBalances, railPrincipalText, selectCurrency, waitForWallet} = require('../harness/lib') as typeof import('../harness/lib');
 const {installSolRpcStub} = require('./solRpcStub') as typeof import('./solRpcStub');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
