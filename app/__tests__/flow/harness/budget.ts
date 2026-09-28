@@ -13,10 +13,13 @@
  * the app must refuse fast, and a stretched refusal bound would only delay catching a real bug.
  * Call sites that assert absence pass `{unscaled: true}` through the driver.
  *
- * THE FORMULA (one definition, here): factor = 1 + max(0, load1min - 3) * 0.5, clamped to [1, 6].
- * Load ≤ 3 (idle-ish 16-core box) → ×1.00, byte-identical to the old ceilings. Each 2 units of
- * load past 3 buys +1 of budget headroom. `DPAY_TEST_BUDGET_MULT` overrides the live computation
- * outright (deterministic experiments; ≥1, sane-clamped).
+ * THE FORMULA (one definition, here): factor = 1 + max(0, load1min - 3) * 1.0, clamped to [1, 6].
+ * Load ≤ 3 (idle-ish box) → ×1.00, byte-identical to the old ceilings. Each unit of load past 3
+ * buys one full extra budget multiple; the clamp bounds a genuine hang's worst-case wait at 6×.
+ * `DPAY_TEST_BUDGET_MULT` overrides the live computation outright (deterministic experiments;
+ * ≥1, sane-clamped). CALIBRATION (2026-09-28): the forced ×2 canary at ambient load 5-7 red'd
+ * 7 suites, all positive-wait expiries — the box's p50/p90 load (4.3/5.8) needs ×2.3-3.8, so
+ * the slope is 1.0, not the first-cut 0.5.
  *
  * MONOTONE HIGH-WATER. The factor is sampled at first use (≈ worker start) and on EVERY call; the
  * EFFECTIVE factor is the max seen so far in this worker. A burst mid-run must never under-budget
@@ -42,7 +45,7 @@ function load1(): number {
 
 /** factor(load) — THE formula. Exported for the run log's self-description. */
 export function factorOf(load: number): number {
-  const f = 1 + Math.max(0, load - 3) * 0.5;
+  const f = 1 + Math.max(0, load - 3) * 1.0;
   return Math.min(6, Math.max(1, f));
 }
 

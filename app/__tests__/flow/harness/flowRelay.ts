@@ -125,12 +125,17 @@ export async function startFlowRelay(opts: {port?: number; checkout?: boolean; f
     if (i >= 0) relays().splice(i, 1);
     if (child.exitCode !== null || child.signalCode) return;
     await new Promise<void>((resolve) => {
-      child.once('exit', () => resolve());
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      child.once('exit', () => {
+        if (killTimer !== undefined) clearTimeout(killTimer);
+        resolve();
+      });
       try { child.kill('SIGTERM'); } catch { resolve(); }
       // The 2s SIGTERM→SIGKILL grace scales with the load budget too: it is a teardown bound,
       // not an assertion — under starvation a healthy relay also dies slowly, and a wedged
       // teardown must never bleed into the next test (the same doctrine as the unmount race).
-      setTimeout(() => {
+      // Cleared on exit: a straggler SIGKILL timer must never outlive this file's environment.
+      killTimer = setTimeout(() => {
         try { child.kill('SIGKILL'); } catch { /* already gone */ }
       }, budgetScaled(2_000));
     });

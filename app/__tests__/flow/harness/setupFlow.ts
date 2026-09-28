@@ -374,13 +374,20 @@ export function installFlowLifecycle(): void {
     // surface) must stay the failed test's own verdict, never bleed into the next suite. The
     // bound scales with the load budget — on a starved box a HEALTHY unmount also crawls, and
     // a false bleed-into-next-suite is exactly the expensive failure class this harness exists
-    // to prevent.
+    // to prevent. The losing timer is CLEARED: a straggler firing after jest tears this file's
+    // environment down lands in the RN preset's error shim and can flip an all-green run's exit
+    // code (observed 2026-09-28: exit 1 with every suite passing).
     const mounts = lg.__DPAY_FLOW_ACTIVE_MOUNTS__ ?? [];
     for (const m of mounts.splice(0, mounts.length)) {
-      await Promise.race([
-        m.unmount().catch(() => undefined),
-        new Promise((r) => setTimeout(r, budgetScaled(5_000))),
-      ]);
+      let raceTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          m.unmount().catch(() => undefined),
+          new Promise<void>((r) => { raceTimer = setTimeout(r, budgetScaled(5_000)); }),
+        ]);
+      } finally {
+        if (raceTimer !== undefined) clearTimeout(raceTimer);
+      }
     }
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const {teardownFlowRelays} = require('./flowRelay') as {teardownFlowRelays: () => Promise<void>};

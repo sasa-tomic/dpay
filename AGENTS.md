@@ -90,7 +90,7 @@ Dev-loop tests MUST finish in SECONDS, not minutes. That is the objective of the
   relay (spawned once per run by jest's globalSetup). Screen-level behavior lives here, never in
   smoke. **Contract (2026-09-28): full `just flow` and `just e2e` must pass on the shared box
   AS-IS, at whatever load it carries.** Positive-transition wait ceilings scale with host load
-  (`app/__tests__/flow/harness/budget.ts`: ×(1 + max(0, load1min − 3) × 0.5), clamped 1..6, env
+  (`app/__tests__/flow/harness/budget.ts`: ×(1 + max(0, load1min − 3) × 1.0), clamped 1..6, env
   override `DPAY_TEST_BUDGET_MULT`; the per-test jest timeout and hooks scale with it; refusal and
   negative-probe windows stay TIGHT because the app must refuse fast). There is no rerun rubric
   and no calm-window waiting: a suite that fails in a load-scaled full run but passes ALONE means
