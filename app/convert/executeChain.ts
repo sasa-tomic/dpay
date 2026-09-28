@@ -225,6 +225,13 @@ export async function beginChainPhase2(rec: ConvertRecord, deps: ChainDriverDeps
       // The venue's echo must BE the plan figure — anything else is a different trade
       // than the plan frozen at confirm (the composed hub's own amount-echo gate).
       if (q.amountIn !== inRaw) throw new Error('amount-echo');
+      // The quote must also BE the plan's own trade — the frozen venue, pool, and ordered
+      // pair. A relay answer naming anything else is not this plan's leg: refuse, never
+      // sign past the freeze.
+      if (q.venueId !== planLeg.venueId || q.pool !== planLeg.pool
+        || q.tokenInLedger !== planLeg.fromLedger || q.tokenOutLedger !== planLeg.toLedger) {
+        throw new Error('plan-divergence');
+      }
       if (q.zeroForOne == null) throw new Error('direction');
       const m = await deriveConvertMath(q, fromFee, outFee, rec.slippageBps);
       quotes.push(q);

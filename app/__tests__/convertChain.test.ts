@@ -233,6 +233,25 @@ describe('phase 2 — the frozen plan signs, all-or-nothing', () => {
     expect(next.step).toBe('failed_leg');
     expect(next.legs).toHaveLength(0); // all-or-nothing: no partial plan persists
   });
+
+  test('a quote naming a POOL the plan never froze signs nothing (plan-divergence)', async () => {
+    const mockedQuote = jest.mocked(fetchConvertQuote);
+    mockedQuote.mockImplementation(async (_r, from, to, amount) => ({
+      venueId: 'icpswap',
+      pool: 'other-pool', // NOT the frozen plan pool
+      tokenInLedger: from,
+      tokenOutLedger: to,
+      amountIn: amount,
+      amountOutGross: '1000',
+      feeMillionths: 3000,
+      zeroForOne: true,
+      fetchedAtMs: Date.now(),
+    }) as Awaited<ReturnType<typeof fetchConvertQuote>>);
+    const next = await beginChainPhase2(MOCK_CHAIN, deps);
+    expect(next.step).toBe('failed_leg');
+    expect(next.legs).toHaveLength(0); // nothing signed past the freeze
+    expect(next.failureDetail).toContain('plan-divergence');
+  });
 });
 
 describe('phase 1 — the frozen deposit bytes, identical-bytes discipline', () => {
@@ -375,5 +394,52 @@ describe('the chain prepare (confirm path) — order first, exact deposit', () =
     // The plan leg quoted on the ESTIMATE (the review figure) — prepare's own discipline.
     expect(quoteMock.mock.calls[0]![3]).toBe('249980000');
     expect(saveConvertRecord).not.toHaveBeenCalled(); // prepare never persists — the adopt does
+  });
+
+  test('a leg quote naming a pool the route never froze refuses BEFORE the deposit signs', async () => {
+    const {fetchCeFiQuoteResult, createCeFiOrder} = await import('../convert/quotes');
+    jest.mocked(fetchCeFiQuoteResult).mockResolvedValue({
+      settleAmount: '2.5', rate: null, fetchedAtMs: 1, quoteId: 'q1', rateId: null, provider: null,
+    });
+    jest.mocked(createCeFiOrder).mockResolvedValue({
+      id: 'order-9',
+      depositAddress: '11111111111111111111111111111111',
+      depositAmount: '10.000000',
+      settleAmount: '2.5',
+      expiresAt: '2026-09-28T12:00:00Z',
+    } as never);
+    // The order EXISTS at this point (order-first) — but the divergence throw lands before
+    // the deposit leg ever builds, so no byte is signed and the record never adopts.
+    const {loadRpcForSend} = await import('../solana');
+    const loadSpy = jest.mocked(loadRpcForSend).mockImplementation(async () => {
+      throw new Error('the deposit leg must never build past a divergent quote');
+    });
+    jest.mocked(fetchConvertQuote).mockImplementation(async (_r, from, to, amount) => ({
+      venueId: 'icpswap', pool: 'not-the-plan-pool', tokenInLedger: from, tokenOutLedger: to,
+      amountIn: amount, amountOutGross: '1000', feeMillionths: 3000, zeroForOne: true, fetchedAtMs: 1,
+    }) as Awaited<ReturnType<typeof fetchConvertQuote>>);
+    await expect(prepareChainConvertRecord({
+      id: 'rec-2',
+      secretHex: 'aa',
+      publicHex: 'bb',
+      relayUrl: 'https://relay.test',
+      route: {
+        kind: 'chain',
+        routeId: 'chain:sideshift-eurc:icpswap',
+        cefiVenueId: 'sideshift-eurc',
+        depositMint: EURC_MINT_ADDRESS,
+        depositSymbol: 'EURC',
+        depositDecimals: 6,
+        legs: [{venueId: 'icpswap', pool: 'pool-principal', fromLedger: ICP_LEDGER, toLedger: 'vchf-ledger'}],
+        endpoints: [
+          {currency: 8, ledger: ICP_LEDGER, symbol: 'ICP', decimals: 8, fee: '10000', network: 'Internet Computer'},
+          {currency: 7, ledger: 'vchf-ledger', symbol: 'VCHF', decimals: 8, fee: '10000', network: 'Internet Computer'},
+        ],
+      },
+      amountRaw: '10000000',
+      slippageBps: 100,
+      settleAddressIc: 'account-id-text',
+    })).rejects.toThrow();
+    expect(loadSpy).not.toHaveBeenCalled();
   });
 });

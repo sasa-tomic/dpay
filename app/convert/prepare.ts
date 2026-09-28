@@ -693,6 +693,13 @@ export async function prepareChainConvertRecord(args: {
   const leg1 = icLegs[0]!;
   const quote1 = await fetchConvertQuote(args.relayUrl, leg1.fromLedger, leg1.toLedger, leg1In,
     {venue: venueOfId(leg1.venueId) ?? undefined});
+  // The quote must BE the plan leg's own trade (venue, pool, ordered pair) — a relay
+  // answer naming anything else is not this route's leg, and the disclosure figure would
+  // not be the plan's. Fail before the deposit signs.
+  if (quote1.venueId !== leg1.venueId || quote1.pool !== leg1.pool
+    || quote1.tokenInLedger !== leg1.fromLedger || quote1.tokenOutLedger !== leg1.toLedger) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
   if (quote1.zeroForOne == null) throw new Error(M.convert.errors.quoteUnavailable('direction'));
   const math1 = await deriveConvertMath(quote1, midEp.fee, route.endpoints[1]!.fee, args.slippageBps);
   let quote2: ConvertQuote | null = null;
@@ -708,6 +715,10 @@ export async function prepareChainConvertRecord(args: {
     if (leg2.toLedger !== destEp.ledger) throw new Error(M.convert.errors.quoteUnavailable('pool'));
     quote2 = await fetchConvertQuote(args.relayUrl, leg2.fromLedger, leg2.toLedger, leg2In,
       {venue: venueOfId(leg2.venueId) ?? undefined});
+    if (quote2.venueId !== leg2.venueId || quote2.pool !== leg2.pool
+      || quote2.tokenInLedger !== leg2.fromLedger || quote2.tokenOutLedger !== leg2.toLedger) {
+      throw new Error(M.convert.errors.quoteUnavailable('pool'));
+    }
     if (quote2.zeroForOne == null) throw new Error(M.convert.errors.quoteUnavailable('direction'));
     math2 = await deriveConvertMath(quote2, hubEp.fee, destEp.fee, args.slippageBps);
   }
