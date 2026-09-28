@@ -47,8 +47,10 @@ export async function run() {
     await faucetCurrency(relayBaseURL, hex, 1, 5_000_000); // 0.05000000 BTC
     await faucetCurrency(relayBaseURL, hex, 2, 25_000_000); // 25.00 USDC
 
-    // Wait for the balance poll to reflect funded amounts.
-    await driver.waitForText('0.05 BTC', { timeoutMs: 8_000 }).catch(() => {});
+    // Wait for the balance poll to reflect funded amounts. Best-effort by design (the ckBTC row
+    // renders on the accounts route, not necessarily on the screen up here) — a short bound, not
+    // a full-length wait: the funding itself is relay-side instant and the shots guard themselves.
+    await driver.waitForText('0.05 BTC', { timeoutMs: 3_000 }).catch(() => {});
 
     // 3. Do a payment so the Ledger has history: Alex requests ∂12.50, an in-test payer wallet
     // settles it on the rail (icrc1_transfer with memo = request nonce).
