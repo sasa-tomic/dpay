@@ -95,12 +95,14 @@ services:
       # The EVM JSON-RPC proxy (POST /api/v1/evm/rpc[/chainId]) — the Solana pipe's EVM twin
       # (crates/dpay-relay/src/evm.rs). DPAY_EVM_RPC_URL is the DEFAULT-chain (1) provider
       # endpoint INCLUDING its api key (SECRET — never logged, never echoed, never committed);
-      # a per-chain var configures that chain directly and wins for it (DPAY_EVM_RPC_URL_42161
-      # = Arbitrum One — the ZCHF rail; DPAY_EVM_RPC_URL_421614 = Arbitrum Sepolia). A served
+      # a per-chain var configures that chain directly and wins for it (DPAY_EVM_RPC_URL_1
+      # = Ethereum — the ZCHF rail; DPAY_EVM_RPC_URL_42161 = Arbitrum One; 
+      # DPAY_EVM_RPC_URL_421614 = Arbitrum Sepolia). A served
       # chain with no upstream answers 503 naming its variable; an unserved chain id 404s.
       # Values live in sops (secrets/deploy.sops.json, key pattern DPAY_EVM_RPC_URL*) and land
       # in the generated deploy/.env — see scripts/gen-deploy-env.sh.
       DPAY_EVM_RPC_URL: ${DPAY_EVM_RPC_URL:-}
+      DPAY_EVM_RPC_URL_1: ${DPAY_EVM_RPC_URL_1:-}
       DPAY_EVM_RPC_URL_42161: ${DPAY_EVM_RPC_URL_42161:-}
       DPAY_EVM_RPC_URL_421614: ${DPAY_EVM_RPC_URL_421614:-}
       # Per-call upstream timeout for the proxy, ms (default 10000; 0 refused at startup).
