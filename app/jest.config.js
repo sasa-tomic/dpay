@@ -43,6 +43,12 @@ const common = {
 // no tests (an error) — an unlisted file can never sneak into the tier.
 const smokeActive = process.env.DPAY_SMOKE === '1';
 
+// node-anvil tier admission is env-gated the same way: `just node-anvil` sets DPAY_NODE_ANVIL=1
+// (the project globalSetup then stages ONE anvil + relay pipe for the whole run). With the env
+// unset the project discovers NOTHING — a bare full-jest run (`just test-app`) never spawns a
+// chain, and the setup/teardown no-op on top (belt and braces).
+const nodeAnvilActive = process.env.DPAY_NODE_ANVIL === '1';
+
 module.exports = {
   // Root-level (applies to every project): the honest hang backstop — see the single-project-era
   // note at the bottom of this file for the measured reasoning.
@@ -55,7 +61,7 @@ module.exports = {
       displayName: 'domain',
       ...common,
       setupFiles: ['<rootDir>/jest.setup.js'],
-      testPathIgnorePatterns: [...testPathIgnorePatterns, '<rootDir>/__tests__/flow/'],
+      testPathIgnorePatterns: [...testPathIgnorePatterns, '<rootDir>/__tests__/flow/', '<rootDir>/__tests__/node-anvil/'],
     },
     {
       // The FLOW tier (`just flow`): full <App/> mounts against the REAL test-helpers relay,
@@ -98,9 +104,29 @@ module.exports = {
       ...common,
       setupFiles: ['<rootDir>/jest.setup.js', '<rootDir>/__tests__/smoke/budget-setup.js'],
       testPathIgnorePatterns: smokeActive
-        ? [...testPathIgnorePatterns, '<rootDir>/__tests__/flow/']
+        ? [...testPathIgnorePatterns, '<rootDir>/__tests__/flow/', '<rootDir>/__tests__/node-anvil/']
         // Env unset → discover nothing (never double-run the roster under a bare full jest).
         : ['<rootDir>/__tests__/'],
+    },
+    {
+      // The NODE-ANVIL tier (`just node-anvil`): real-chain EVM proofs with NO browser and NO DOM
+      // mount — a scratch anvil (31337, 1s blocks) + the REAL test-helpers relay staged ONCE per
+      // run by the globalSetup child (jest.node-anvil-setup.js →
+      // __tests__/node-anvil/stage-child.mjs, which imports e2e/harness/evm/{anvil,pipe}.mjs
+      // verbatim; test code never imports those, babel's CJS transform breaks import.meta.url).
+      // The app's own seam (`../evm`) drives the chain THROUGH the relay pipe; assertions read
+      // REAL anvil state DIRECT as the second source. Env-gated like smoke: DPAY_NODE_ANVIL=1
+      // admits it, unset discovers nothing.
+      displayName: 'node-anvil',
+      ...common,
+      testMatch: ['<rootDir>/__tests__/node-anvil/**/*.test.@(ts|tsx)'],
+      setupFiles: ['<rootDir>/jest.setup.js'],
+      globalSetup: '<rootDir>/jest.node-anvil-setup.js',
+      globalTeardown: '<rootDir>/jest.node-anvil-teardown.js',
+      testPathIgnorePatterns: nodeAnvilActive ? testPathIgnorePatterns : ['<rootDir>/__tests__/'],
+      // ONE anvil + ONE relay serve the whole run; the three files run SERIALLY against them
+      // (each file uses its own deterministic device identities, so there is no cross-file state).
+      maxWorkers: 1,
     },
   ],
 };

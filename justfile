@@ -451,20 +451,34 @@ smoke-watch:
 flow:
     python3 scripts/testruns.py run flow --sh 'cd app && npx jest --selectProjects flow --silent --maxWorkers=4 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
-# real-chain proofs: anvil + relay pipe, no browser, NO jest (reuses e2e/harness/evm/{anvil,pipe}.mjs
-# via plain-node scripts in e2e/anvil/*.mjs — wave D of the migration owns those scripts; until
-# they exist this recipe fails loud instead of passing vacuously).
+# real-chain proofs: anvil + relay pipe, NO browser, NO DOM mount (jest project `node-anvil`).
+# ONE scratch anvil (31337, 1s blocks) + the REAL test-helpers relay are staged ONCE per run by
+# the jest globalSetup (app/jest.node-anvil-setup.js → app/__tests__/node-anvil/stage-child.mjs,
+# which reuses e2e/harness/evm/{anvil,pipe}.mjs verbatim and sets the DPAY_EVM_RPC_URL[_31337] /
+# DPAY_EVM_ANVIL_TOKEN env itself, so nothing leaks in from the shell). The app's own evm seam
+# drives the chain THROUGH the relay pipe (sendErc20 / settleEvmClaim / balance+history polls);
+# assertions read REAL anvil state DIRECT as the second source. Teardown is three-layered
+# (teardown group-kill → the child's SIGTERM handler → its sync exit SIGKILL backstop, the
+# e2e/harness/procs.mjs discipline) with an orphan sweep behind it.
+# Warm target < 90s; a FRESH worktree pays the one-time relay build (~70s, same as `just flow`).
 node-anvil:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{root}}"
-    shopt -s nullglob
-    scripts=(e2e/anvil/*.mjs)
-    if [ ${#scripts[@]} -eq 0 ]; then
-      echo "node-anvil: no e2e/anvil/*.mjs scripts yet — the migration's node-anvil wave owns them (harness: e2e/harness/evm/, template: pipe-smoke.mjs)" >&2
+    if [ ! -x "$HOME/.foundry/bin/anvil" ] && [ ! -x third_party/bin/anvil ]; then
+      echo "node-anvil: anvil not found — fix (one line): curl -L https://foundry.paradigm.xyz | bash && foundryup" >&2
       exit 1
     fi
-    for t in "${scripts[@]}"; do node "$t" || exit 1; done
+    # the staging child imports @noble/* from the e2e workspace (the `just evm-anvil` precedent)
+    [ -d e2e/node_modules ] || npm --prefix e2e install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    python3 scripts/testruns.py run node-anvil --sh 'cd app && DPAY_NODE_ANVIL=1 npx jest --selectProjects node-anvil --silent --maxWorkers=1 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
+    just node-anvil-cleanup
+
+# orphan sweep behind `just node-anvil`: the staging child's three teardown layers make a leaked
+# chain structurally rare; this is the pocketic-cleanup precedent (best-effort, never fails).
+# Scoped to the scratch 31337 chain shape both this recipe and `just evm-anvil` spawn.
+node-anvil-cleanup:
+    @if pkill -f 'anvil --host 127\.0\.0\.1 --port .* --chain-id 31337' 2>/dev/null; then echo "  ✓ leaked node-anvil chain stopped"; else echo "  · node-anvil: none leaked"; fi
 
 # typecheck the RN app — catches bridge arity drift against the TS interfaces (tsc --noEmit, ~2s, no device)
 typecheck:
