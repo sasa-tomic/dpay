@@ -2452,7 +2452,11 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
               {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), fmtAssetCompact(minOut, outDecimals, record.outSymbol), venueName)}
             </Text>
           ) : null}
-          {!chainPhase1 ? (
+          {/* A legless record (chain phase 1, a Jupiter leg) has NO IC envelopes: the line
+              would show the record's CREATION time as an expiry — a fact nothing signed
+              carries. The chain's venue window sits in the block above; a Solana leg dies
+              at its own blockhash height, not at a wall clock. */}
+          {record.legs.length > 0 ? (
             <Text testID="convert-expiry" style={S.fieldBody}>
               {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
             </Text>
