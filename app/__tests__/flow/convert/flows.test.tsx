@@ -1857,10 +1857,18 @@ describe('flow 193 — the rail-local FX pair: USDC(Solana) → EURC via jupiter
       const jup0 = await jupiterStubState();
       expect(jup0).not.toBeNull();
 
-      // §1 the standing target is stable-first (USD → EUR through the FX venue).
+      // §1 the standing target: the stable TWIN (USD → CHF) — since the chain widening
+      // (2026-09-28) the twin CHF is reachable from the SOL rail (the cefi settle into ICP,
+      // then the VCHF pool), so the categorical twin rule lands there; the rail-local FX
+      // pair (USD → EUR) is one chip away and this flow's subject.
       await openConvertFor(m, 'sol-usdc');
       await m.driver.findByTestID('convert-screen', {timeoutMs: 8_000});
-      assertIncludes(m.driver.readText('convert-screen'), 'Convert USD → EUR', 'the standing pair is USD→EUR (stable-first)');
+      assertIncludes(m.driver.readText('convert-screen'), 'Convert USD → CHF', 'the standing pair is the twin CHF (now reachable)');
+      await m.driver.click('convert-target-chip-EUR', {timeoutMs: 8_000});
+      await m.driver.waitForFunction(
+        () => m!.driver.readTextSafe('convert-screen')?.includes('Convert USD → EUR') === true,
+        {timeoutMs: 8_000, label: 'the pair re-targeted to the FX venue'},
+      );
 
       // §2 Jupiter's digits for the standing FX pair, verbatim.
       await typeConvertAmount(m, '1');
@@ -1877,6 +1885,12 @@ describe('flow 193 — the rail-local FX pair: USDC(Solana) → EURC via jupiter
       await m.driver.waitForFunction(
         () => m!.driver.isPresent('convert-rate') && m!.driver.isPresent('convert-sol-impact'),
         {timeoutMs: 15_000, label: 'the census mounted behind Details'},
+      );
+      // The retarget + prefill re-quote race: wait until the RENDERED census is the typed
+      // amount's own quote (the rate line is the only out/in-derived figure), then pin it.
+      await m.driver.waitForFunction(
+        () => m!.driver.readTextSafe('convert-rate')?.includes('0.87') === true,
+        {timeoutMs: 15_000, label: 'the rate line settled on the typed amount\u2019s quote'},
       );
       assertIncludes(m.driver.readText('convert-rate'), '0.87', 'rate is the only derived figure (6→6 decimals)');
       assertIncludes(m.driver.readText('convert-pool-principal'), 'https://lite-api.jup.ag', 'the venue https endpoint is shown');
