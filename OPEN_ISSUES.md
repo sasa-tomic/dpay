@@ -87,6 +87,14 @@
 
 ## NEXT SESSION — work order
 
+**GOAL (filed 2026-09-28): 2-tap swaps between ANY two supported currencies.**
+Spec: `docs/specs/2026-09-28-any-to-any-swap-goal.md`. The two-tap sheet is live (flow 213);
+the gap is breadth: venue pairs are hand-registered, EVM-token destinations have no adapter,
+and no hub fallback exists. Work: derive pairs from catalog × venue capability, add the
+Uniswap V3 adapter (ZCHF first; seed = `scripts/evm-mainnet-zchf-buy.mjs`, D31-hardened),
+auto-compose A→hub→B with combined-fee honesty, refuse venue-less pairs honestly. One live
+funds-ledgered trip per new adapter before any "supported" claim (D31 rule).
+
 **State — not issues (recorded 2026-09-20; no action without the founder):**
 
 - **ChangeNOW verified live (2026-09-21): no ICP in the API catalog.** The partner key is
