@@ -82,7 +82,7 @@ describe('flow 137 leg 1 — endpoint refusing from boot: the solreq still signs
     await m.driver.waitForFunction(() => m.driver.isPresent('rail-unreadable-solana'),
       {timeoutMs: 15_000, label: 'the rail reported the refusal on Home'});
     await m.driver.click('tab-pay', {timeoutMs: 5000});
-    const scanUp = await m.driver.findByTestID('sol-pay-scan', {timeoutMs: 8000}).catch(() => null);
+    let scanUp = await m.driver.findByTestID('sol-pay-scan', {timeoutMs: 8000}).catch(() => null);
     if (!scanUp) {
       // With the rail unreadable the reconcile may land the Pay tab on the IC fallback — route to
       // the EURC rail explicitly; the scan surface is what the sign gate needs.
