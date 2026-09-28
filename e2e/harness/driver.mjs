@@ -103,8 +103,10 @@ export class Driver {
    *  admission lock. Returns `{browser, stop}` — tests create their own fresh incognito CONTEXT
    *  from this browser via `create(browser)`, so each gets an isolated localStorage/identity
    *  without paying a browser-launch cost per test. `stop` DISCONNECTS this connection only;
-   *  the gate owns the shell's lifecycle: it is torn down (with the pid-registry SIGKILL
-   *  backstop) when the run's LAST connection drops, and only if this run launched it. */
+   *  when the run's LAST connection drops, the gate leaves a self-launched shell ALIVE (keep-
+   *  alive: the discovery file stays, the next run adopts it in ~300ms instead of paying a
+   *  ~1.5-5s launch; `DPAY_E2E_SHELL_KEEPALIVE=0` restores kill-at-exit) and the sweep reaps it
+   *  once it has been idle past the sweep threshold. */
   static async launchBrowser(opts = {}) {
     const exe = resolveExecutablePath();
     if (!exe) {

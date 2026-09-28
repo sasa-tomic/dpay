@@ -648,6 +648,24 @@ async function openLease({ key, executablePath, extraArgs }) {
     connect: () => pp().then((p) => p.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null })),
     teardown: async () => {
       _leases.delete(key);
+      // KEEP-ALIVE (default; DPAY_E2E_SHELL_KEEPALIVE=0 restores kill-at-exit): leave the shell
+      // RUNNING for the next run to adopt through the same discovery file — the exact semantics
+      // an adopted shell's teardown already had. A cold launch costs ~1.5s per shell (4-5s under
+      // 4-way contention) and is the largest fixed cost of the frequent-run path (`just e2e` →
+      // `just e2e-visual` → the next flow's iteration); an adopt costs one 250ms /json/version
+      // probe + a CDP connect. The machine-global admission lock still serializes RUNS, and the
+      // sweep reaps a clientless shell after SWEEP_MIN_IDLE_MS, so an idle shell never
+      // accumulates: one left-alive shell per gate slot, adopted or reaped, never relaunched
+      // while alive. House kill discipline is unchanged — the shell is never SIGKILLed here; it
+      // is simply no longer ours.
+      if (process.env.DPAY_E2E_SHELL_KEEPALIVE !== '0') {
+        try { await withCloseCeiling(browser.disconnect(), 'browser.disconnect()'); } catch { /* best-effort */ }
+        untrackChild(pid); // we are leaving it alive: drop the exit-hook SIGKILL claim
+        _launchedDiscovery.delete(key); // but the discovery file STAYS — that is the hand-off
+        releaseGateLockSync();
+        console.log(`[chrome-gate] left shell pid=${pid} alive for the next run to adopt (sweep reaps after idle)`);
+        return;
+      }
       try {
         // Self-launched shell: graceful CDP close raced against the 5s ceiling, SIGKILL
         // fallback (the same semantics driver.stop() had before the gate).
