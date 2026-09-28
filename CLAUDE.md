@@ -21,7 +21,16 @@ deployed); 2, 3 and 4 are not started** — including the Revolut information ar
 3. **Funding by card, through several licensed providers, landing at the user's own address**;
    conversion, where a currency cannot be bought directly, is a transaction the **user** signs, with
    dpay taking no cut. Gated on an unresolved legal question — see the spec.
-4. **Revolut is the golden reference** for the visual system and information architecture. ~~The
+4. ~~**Revolut is the golden reference** for the visual system and information architecture.~~
+   **SUPERSEDED by the founder 2026-09-27: the Ballast pass repainted that reference instead of
+   replacing it; the result is a generic neobank skeleton with new colors. The app must now be
+   STRUCTURALLY distinctive** - its own layout grammar, composition and navigation model, grounded
+   in dpay's actual subject (multi-rail money, verbatim settlement honesty, Swiss home currency).
+   Trust comes from craft, precision and honesty, not from resembling a known neobank. Everything
+   else about the currency-first IA stands: the app opens on Home as a real overview, Pay one tap
+   away (2026-09-08 reversal intact); the uniform-IA hard rule, the balance-headline rule, the
+   Pay/Receive tab grammar and the 2-tap convert grammar are surfaces to redesign, not licenses to
+   keep. Accessibility and contrast gates still outrank aesthetics. ~~The
    scanner stays the landing screen.~~ **REVERSED by the founder 2026-09-08: the app opens on Home,
    Home is a real overview (balances, movements), and Pay is one tap from it** — greeting a new
    user with a payment-request surface is what read as a scam. Reasoning and the design:
