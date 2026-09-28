@@ -16,6 +16,22 @@ import {setPageURL} from './setupFlow';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Every live Mount this worker created, on globalThis so the harness lifecycle (afterEnv's own
+// module registry — module state here would not be visible to it) can unmount them in afterEach
+// BEFORE tearing down any private flow relays (the e2e teardown ORDER: quiesce the polls, then
+// kill the relay). Entries remove themselves on unmount.
+type MountG = {__DPAY_FLOW_ACTIVE_MOUNTS__?: Array<{unmount: () => Promise<void>}>};
+const mg = globalThis as unknown as MountG;
+function track(m: {unmount: () => Promise<void>}): void {
+  mg.__DPAY_FLOW_ACTIVE_MOUNTS__ ??= [];
+  mg.__DPAY_FLOW_ACTIVE_MOUNTS__.push(m);
+}
+function untrack(m: {unmount: () => Promise<void>}): void {
+  const all = mg.__DPAY_FLOW_ACTIVE_MOUNTS__ ?? [];
+  const i = all.indexOf(m);
+  if (i >= 0) all.splice(i, 1);
+}
+
 export type Mount = {
   driver: Driver;
   tree: renderer.ReactTestRenderer;
@@ -42,13 +58,21 @@ export async function mountApp(opts: {url?: string} = {}): Promise<Mount> {
   let tree = await create();
   driver.bindTree(tree);
 
+  let unmounted = false;
+  const doUnmount = async (): Promise<void> => {
+    if (unmounted) return;
+    unmounted = true;
+    untrack(m);
+    await act(async () => {
+      tree.unmount();
+    });
+  };
+
   const m: Mount = {
     driver,
     tree,
     async unmount() {
-      await act(async () => {
-        tree.unmount();
-      });
+      await doUnmount();
     },
     async remount(remountOpts: {url?: string} = {}) {
       await act(async () => {
@@ -60,5 +84,6 @@ export async function mountApp(opts: {url?: string} = {}): Promise<Mount> {
       (m as unknown as {tree: renderer.ReactTestRenderer}).tree = tree;
     },
   };
+  track(m);
   return m;
 }

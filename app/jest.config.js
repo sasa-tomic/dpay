@@ -67,6 +67,12 @@ module.exports = {
       ...common,
       testMatch: ['<rootDir>/__tests__/flow/**/*.test.@(ts|tsx)'],
       setupFiles: ['<rootDir>/jest.flow-setup.js', '<rootDir>/jest.setup.js'],
+      // The per-test lifecycle (AsyncStorage purge, seam resets, the fail-closed fetch
+      // assertion) — lifecycle hooks only exist AFTER the test framework is installed, so
+      // this is a setupFilesAfterEnv file. installFlowLifecycle is idempotent: batches that
+      // self-register it at collection time (the interim workaround for this file missing
+      // here) keep working, and both paths coexist.
+      setupFilesAfterEnv: ['<rootDir>/jest.flow-after-env.js'],
       globalSetup: '<rootDir>/jest.relay-setup.js',
       globalTeardown: '<rootDir>/jest.relay-teardown.js',
       // `react-native-web` → react-native: the e2e web shims (e2e/web/dpay-{core-wasm,nfc,sol-nfc}.ts,

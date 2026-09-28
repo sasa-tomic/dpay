@@ -8,12 +8,27 @@ import {mountApp, type Mount} from './mount';
 import {DpayCore as CORE} from './setupFlow';
 import {faucetAccount, getBalance, railTransfer, icpCatalog, relayGet, fmtHero} from './relayClient';
 import type {DpayCoreApi} from '../../../lib/types';
+import {setSolanaRpcUrl, RELAY_LIST_STORAGE_KEY} from '../../../config/constants';
+import {setEvmRpcUrl} from '../../../evm/endpoints';
 
 export {Driver} from './driver';
 export {faucetAccount, getBalance, railTransfer, icpCatalog, relayGet, fmtHero};
 
 /** The REAL wasm core (the same instance NativeModules.DpayCore carries). */
 export const DpayCore = CORE as DpayCoreApi;
+
+/**
+ * Clear the rail OPERATOR overrides — module-session state inside the APP'S registry
+ * (config/constants.ts `setSolanaRpcUrl`, evm/endpoints.ts `setEvmRpcUrl`: `''` clears, never an
+ * offline switch). This helper must be called from the TEST FILE's module graph (it is — lib is
+ * imported by every flow file) because the app modules here are the ones the app itself loaded;
+ * the harness lifecycle runs in a different jest module registry and cannot reach them.
+ * AsyncStorage rail keys are already covered by the lifecycle's per-test purge.
+ */
+export function resetRailOverrides(): void {
+  setSolanaRpcUrl('');
+  setEvmRpcUrl('');
+}
 
 export type {Mount};
 // --- assertions (tiny, BigInt-safe — the lib.mjs originals) -------------------------------------
@@ -468,11 +483,30 @@ function journeySeedJson(): string {
  * over it — the seeded-identity fast path. Ends exactly where the slow path ends: home currency
  * answered, wallet shell mounted, DEMO selected, Pay scanner live, ∂100.00 visible.
  */
-export async function onboardWallet(name = 'e2e', opts: {timeoutMs?: number; fund?: boolean; slow?: boolean} = {}): Promise<Mount> {
+/**
+ * Point the wallet's PERSISTED relay list (services/relayAddresses.ts, `dpay.relays.v1`) at ONE
+ * address — or restore the baked default with null. This is the jest retarget surface: the e2e
+ * twins pass `?relay=` through a vite alias of relayConfig.ts (e2e/web/relay-config.ts), which
+ * the jest module graph never loads; App.tsx's boot effect wires the walk + the SOL/EVM
+ * derivations from the persisted list IN THE SAME TICK, so a list planted before the mount is
+ * the app's entire relay world. Pair it with the per-call `__DPAY_TEST_IC_GATEWAY` seam for the
+ * /api/v2 envelope transport. Plant AFTER the lifecycle's storage purge, BEFORE the mount.
+ */
+export async function pointRelayListAt(baseURL: string | null): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const AsyncStorage = require('@react-native-async-storage/async-storage') as {
+    setItem: (k: string, v: string) => Promise<void>;
+    removeItem: (k: string) => Promise<void>;
+  };
+  if (baseURL == null) await AsyncStorage.removeItem(RELAY_LIST_STORAGE_KEY);
+  else await AsyncStorage.setItem(RELAY_LIST_STORAGE_KEY, JSON.stringify([baseURL]));
+}
+
+export async function onboardWallet(name = 'e2e', opts: {timeoutMs?: number; fund?: boolean; slow?: boolean; url?: string; relayBase?: string} = {}): Promise<Mount> {
   const timeoutMs = opts.timeoutMs ?? 15_000;
   const kp = await DpayCore.generateKeypair();
   if (opts.fund !== false) {
-    const fund = await faucetAccount(kp.publicHex);
+    const fund = await faucetAccount(kp.publicHex, undefined, {baseURL: opts.relayBase});
     assert(fund.ok, `onboardWallet: the faucet POST failed (status ${fund.status}): ${JSON.stringify(fund.body).slice(0, 200)}`);
   }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -483,7 +517,9 @@ export async function onboardWallet(name = 'e2e', opts: {timeoutMs?: number; fun
     secretHex: kp.secretHex, publicHex: kp.publicHex, username: name,
   }));
   await AsyncStorage.setItem('dpay.journey.v1', journeySeedJson());
-  const m = await mountApp();
+  // opts.url seeds the location stub BEFORE the mount — the `?relay=` cold-load surface (the
+  // e2e twins' navigate). mountApp installs it prior to the first App render.
+  const m = await mountApp({url: opts.url});
   await chooseHomeCurrencyIfPresent(m);
   await m.driver.findByTestID(WALLET_READY, {timeoutMs: 10_000});
   await selectDemoAsset(m);
@@ -497,10 +533,10 @@ export async function onboardWallet(name = 'e2e', opts: {timeoutMs?: number; fun
 }
 
 /** The seeded fast path WITHOUT the funded-DEMO contract: seed + single boot + home currency. */
-export async function onboardSeededUnfunded(name = 'e2e', opts: {timeoutMs?: number; fund?: boolean} = {}): Promise<Mount> {
+export async function onboardSeededUnfunded(name = 'e2e', opts: {timeoutMs?: number; fund?: boolean; url?: string; relayBase?: string} = {}): Promise<Mount> {
   const kp = await DpayCore.generateKeypair();
   if (opts.fund !== false) {
-    await faucetAccount(kp.publicHex);
+    await faucetAccount(kp.publicHex, undefined, {baseURL: opts.relayBase});
   }
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const AsyncStorage = require('@react-native-async-storage/async-storage') as {setItem: (k: string, v: string) => Promise<void>};
@@ -508,7 +544,8 @@ export async function onboardSeededUnfunded(name = 'e2e', opts: {timeoutMs?: num
     secretHex: kp.secretHex, publicHex: kp.publicHex, username: name,
   }));
   await AsyncStorage.setItem('dpay.journey.v1', journeySeedJson());
-  const m = await mountApp();
+  // opts.url: the `?relay=` cold-load surface (see onboardWallet).
+  const m = await mountApp({url: opts.url});
   await chooseHomeCurrencyIfPresent(m);
   await m.driver.findByTestID(WALLET_READY, {timeoutMs: 10_000});
   return m;

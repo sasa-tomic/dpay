@@ -143,6 +143,10 @@ export type FetchRecord = {url: string; origin: string; ok: boolean; status: num
 const fetchRecords: FetchRecord[] = [];
 const allowedDeadOrigins = new Set<string>();
 const realFetch = globalThis.fetch.bind(globalThis);
+// The harness's own probe channel (flowRelay.ts health polls): the shim above records everything
+// it carries, and a relay's not-yet-up health probe is not an app request — never a recordable
+// failure. Stashed here because this is the last point where the unrecorded fetch is reachable.
+(g as unknown as {__DPAY_TEST_RAW_FETCH?: typeof fetch}).__DPAY_TEST_RAW_FETCH = realFetch;
 const originOf = (url: string): string => {
   try { return new URL(url).origin; } catch { return url; }
 };
@@ -151,12 +155,16 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promis
   const target = url.startsWith(RELAY_DEFAULT_ORIGIN)
     ? relayURL + url.slice(RELAY_DEFAULT_ORIGIN.length)
     : url;
+  // The e2e driver's offline sentinels (`'stub'` — solrpc.ts's SOL sentinel) are not origins:
+  // the fetch rejects exactly as it did unfixed, but the fail-closed ledger only ever recorded
+  // REAL origins, so a non-URL is not a recordable request.
+  const recordable = /^https?:\/\//i.test(url);
   try {
     const res = await realFetch(target, init);
-    fetchRecords.push({url, origin: originOf(url), ok: res.ok, status: res.status});
+    if (recordable) fetchRecords.push({url, origin: originOf(url), ok: res.ok, status: res.status});
     return res;
   } catch (e) {
-    fetchRecords.push({url, origin: originOf(url), ok: false, status: 0, error: e instanceof Error ? e.message : String(e)});
+    if (recordable) fetchRecords.push({url, origin: originOf(url), ok: false, status: 0, error: e instanceof Error ? e.message : String(e)});
     throw e;
   }
 }) as typeof fetch;
@@ -168,12 +176,16 @@ export function fetchFailureRecords(): FetchRecord[] {
   return fetchRecords.filter((r) => !r.ok);
 }
 function assertNoUndeclaredFailures(): void {
+  // The rule is TRANSPORT-ONLY — the honest port of the e2e gate, which flags browser network
+  // errors (ERR_CONNECTION_REFUSED …) and never an HTTP status: a 4xx/5xx ANSWER (the faucet's
+  // 422 cooldown refusal, the walk's probe 404s) is the app's own handled contract. So: a record
+  // with an `error` (fetch threw — the origin never answered) is the flagged class.
   // AbortError is the app aborting its OWN in-flight poll (unmount/remount/timeout) — the e2e
   // harness ignores net::ERR_ABORTED for exactly this reason; a transport failure to a dead
   // origin is a different error class and stays flagged.
-  const undeclared = fetchRecords.filter((r) => !r.ok && !(r.error && /abort/i.test(r.error)) && !allowedDeadOrigins.has(r.origin));
+  const undeclared = fetchRecords.filter((r) => r.error !== undefined && !/abort/i.test(r.error) && !allowedDeadOrigins.has(r.origin));
   if (undeclared.length > 0) {
-    const lines = [...new Set(undeclared.map((r) => `${r.url}${r.error ? ` — ${r.error}` : ` — HTTP ${r.status}`}`))];
+    const lines = [...new Set(undeclared.map((r) => `${r.url} — ${r.error}`))];
     throw new Error(
       '[flow-harness] unexpected failed request(s) — a dead origin must be pre-declared with ' +
       `driver.allowRequestFailuresFrom(origin):\n${lines.map((l) => `  - ${l}`).join('\n')}`,
@@ -256,29 +268,90 @@ export function keydownHandlers(): Array<(e: {key: string}) => void> {
   return (eventListeners.keydown ?? []) as Array<(e: {key: string}) => void>;
 }
 
-// --- 7. per-test lifecycle (registered by jest.flow-after-env.js, a setupFilesAfterEnv file —
-// lifecycle hooks are only available AFTER the test framework is installed, never in setupFiles;
-// they are jest's injected GLOBALS there — @jest/globals' own bindings don't work from after-env)
+export function installFlowEnvironment(): void { /* all side effects above — see module doc */ }
+
+// --- 8. the per-test lifecycle -------------------------------------------------------------------
+// Registered by jest.flow-after-env.js (a setupFilesAfterEnv file — lifecycle hooks are only
+// available AFTER the test framework is installed) and, historically, self-registered by some
+// batch files at collection time as the interim workaround for the config naming no
+// setupFilesAfterEnv. Both paths coexist: this is IDEMPOTENT (the second registration no-ops),
+// and everything it touches lives on globalThis or the ONE shared AsyncStorage instance, so
+// WHICH registry invoked it does not matter.
 const clipboardKey = '__DPAY_TEST_CLIPBOARD';
 declare function beforeEach(fn: () => void | Promise<void>): void;
 declare function afterEach(fn: () => void): void;
+
+type LifecycleG = {
+  __DPAY_FLOW_LIFECYCLE_INSTALLED__?: boolean;
+  __DPAY_FLOW_ACTIVE_MOUNTS__?: Array<{unmount: () => Promise<void>}>;
+  __DPAY_JEST_ASYNC_STORAGE?: {
+    getAllKeys: () => Promise<string[]>;
+    removeItem: (k: string) => Promise<void>;
+    clear: () => Promise<void>;
+  };
+};
+const lg = globalThis as unknown as LifecycleG;
+
+/**
+ * The storage purge goes through the ONE AsyncStorage instance jest.setup.js's mock factory
+ * plants on globalThis. Jest gives setupFiles, setupFilesAfterEnv, and the test file each their
+ * OWN module registry, so a plain `require` from here resolves a different mock Map than the
+ * app's (measured: instance identity differs across all three registries) — this handoff is the
+ * fix for the keys-from-a-previous-flow's-boot-survive class. getAllKeys+removeItem AND clear():
+ * belt and braces, either bug class dies.
+ */
+async function purgeAsyncStorage(): Promise<void> {
+  const AS = lg.__DPAY_JEST_ASYNC_STORAGE;
+  if (!AS) return; // the factory never ran (no test file imported the module) — nothing to purge
+  for (const k of await AS.getAllKeys()) await AS.removeItem(k);
+  await AS.clear();
+}
+
 export function installFlowLifecycle(): void {
+  if (lg.__DPAY_FLOW_LIFECYCLE_INSTALLED__) return;
+  lg.__DPAY_FLOW_LIFECYCLE_INSTALLED__ = true;
   beforeEach(async () => {
     g[clipboardKey] = '';
     g.__DPAY_TEST_NFC_STATUS = undefined;
     g.__DPAY_QR_LAST = undefined;
+    // The NFC reader-request stash (e2e/web/dpay-nfc.ts plants it on card dispatch): a per-test
+    // reset, so a flow that read the machine code can never leak it into the next card tap's
+    // assertion. Flows 25/97/98 clear it in-file too — harmless duplication.
+    g.__DPAY_TEST_NFC_READER_REQUEST = undefined;
+    // The IC gateway seam is read PER CALL (app/services/icp.ts): reset to the ONE shared relay
+    // so a flow that pointed it at its private relay (startFlowRelay) never leaks the point.
+    g.__DPAY_TEST_IC_GATEWAY = relayURL;
+    // The SOL/EVM rail test overrides, back to the jest.setup.js offline defaults ('' = rail
+    // off). NOTE: the override values are CAPTURED at constants.ts/endpoints.ts module load per
+    // test file, so this reset matters for per-call readers and hygiene only; the rail
+    // OPERATOR overrides (setSolanaRpcUrl/setEvmRpcUrl module-session state) are app-module
+    // state in the TEST FILE's registry — files that touch them reset in-file (see
+    // flows.test.tsx) or call lib.ts's resetRailOverrides().
+    g.__DPAY_TEST_SOLANA_RPC_URL = '';
+    g.__DPAY_TEST_EVM_RPC_URL = '';
     // Fresh incognito context: identity + relay lists + journey are per-test state (the e2e
-    // fresh-context contract). The official AsyncStorage mock clears synchronously enough here.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const AsyncStorage = require('@react-native-async-storage/async-storage') as {clear: () => Promise<void>};
-    await AsyncStorage.clear();
+    // fresh-context contract) — purged through the app's OWN instance (see purgeAsyncStorage).
+    await purgeAsyncStorage();
     setPageURL('/');
   });
-  afterEach(() => {
+  afterEach(async () => {
+    // Teardown ORDER is load-bearing (the e2e flow-38 convention): quiesce the app's polls
+    // FIRST — unmounting aborts in-flight fetches (AbortError, ignored by the fail-closed rule)
+    // — THEN stop any private relays, so a dying origin is never observed by a live poll.
+    // Each unmount is BOUNDED: a wedged act-unmount (a known async-act hang class on a broken
+    // surface) must stay the failed test's own verdict, never bleed into the next suite.
+    const mounts = lg.__DPAY_FLOW_ACTIVE_MOUNTS__ ?? [];
+    for (const m of mounts.splice(0, mounts.length)) {
+      await Promise.race([
+        m.unmount().catch(() => undefined),
+        new Promise((r) => setTimeout(r, 5_000)),
+      ]);
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {teardownFlowRelays} = require('./flowRelay') as {teardownFlowRelays: () => Promise<void>};
+    await teardownFlowRelays();
     // The e2e fail-closed rule: a test that let a fetch die without declaring it is RED, even green.
     assertNoUndeclaredFailures();
     fetchRecords.length = 0;
   });
 }
-
-export function installFlowEnvironment(): void { /* all side effects above — see module doc */ }

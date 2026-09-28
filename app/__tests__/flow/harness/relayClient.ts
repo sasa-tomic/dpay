@@ -25,11 +25,11 @@ export function relayBaseURL(): string {
 async function request(
   method: 'GET' | 'POST',
   path: string,
-  opts: {body?: unknown; timeoutMs?: number; raw?: boolean} = {},
+  opts: {body?: unknown; timeoutMs?: number; raw?: boolean; baseURL?: string} = {},
 ): Promise<Response> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 8000);
-  const url = `${relayBaseURL()}${path}`;
+  const url = `${opts.baseURL ?? relayBaseURL()}${path}`;
   try {
     return await fetch(url, {
       method,
@@ -55,6 +55,20 @@ export async function relayPost(path: string, body: unknown, timeoutMs = 8000): 
   return request('POST', path, {body, timeoutMs});
 }
 
+/** POST to an EXPLICIT relay base (a private startFlowRelay spawn, not the shared one) — the
+ *  per-gateway test knobs (`/api/v1/test/*`) are global per relay process, so flows arming one
+ *  on a private relay post here. */
+export async function relayPostAt(baseURL: string, path: string, body: unknown, timeoutMs = 8000): Promise<Response> {
+  return request('POST', path, {body, timeoutMs, baseURL});
+}
+
+/** GET from an EXPLICIT relay base (the private-relay counterpart of relayGet). */
+export async function relayGetAt(baseURL: string, path: string, timeoutMs = 8000): Promise<unknown> {
+  const r = await request('GET', path, {timeoutMs, baseURL});
+  if (!r.ok) throw new Error(`GET ${baseURL}${path} → HTTP ${r.status}: ${(await r.text().catch(() => '')).slice(0, 300)}`);
+  return r.json();
+}
+
 /**
  * POST /api/v1/faucet `{account, currency?, amount?}` → credits fake-IC at the account hex's
  * PRINCIPAL (the exact POST Onboarding itself sends, → ∂100.00). Returns `{ok, status, body}`;
@@ -63,11 +77,12 @@ export async function relayPost(path: string, body: unknown, timeoutMs = 8000): 
 export async function faucetAccount(
   accountHex: string,
   amount?: number,
-  opts: {currency?: number; timeoutMs?: number} = {},
+  opts: {currency?: number; timeoutMs?: number; baseURL?: string} = {},
 ): Promise<{ok: boolean; status: number; body: unknown}> {
   const r = await request('POST', '/api/v1/faucet', {
     body: {account: accountHex, amount, ...(opts.currency != null ? {currency: opts.currency} : {})},
     timeoutMs: opts.timeoutMs ?? 6000,
+    baseURL: opts.baseURL,
   });
   const body = await r.json().catch(() => ({}));
   return {ok: r.ok, status: r.status, body};

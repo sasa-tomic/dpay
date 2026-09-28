@@ -5,9 +5,21 @@
 // async-storage v3 moved the mock: it now lives at the package subpath `.../jest` (was
 // `.../jest/async-storage-mock`) and exports a DEFAULT instance — `require(...).default` — rather
 // than the module itself being the mock.
-jest.mock('@react-native-async-storage/async-storage', () =>
-  require('@react-native-async-storage/async-storage/jest').default,
-);
+//
+// ONE INSTANCE PER JEST CONTEXT, shared across every module registry (flow-harness M3): jest
+// gives setupFiles, setupFilesAfterEnv, and the test file EACH their own module registry, so a
+// plain `require` from the flow lifecycle (setupFlow.ts) resolves a DIFFERENT mock Map than the
+// app's — the lifecycle's clear() purged the wrong instance and keys from a previous flow's boot
+// survived (observed: the SOL-rail placeholder leaking across flows). The first factory execution
+// plants the instance on globalThis (which IS shared across registries) and every later execution
+// returns that same one, so the app, the driver, and the lifecycle all read/write ONE store.
+jest.mock('@react-native-async-storage/async-storage', () => {
+  const mod = require('@react-native-async-storage/async-storage/jest');
+  if (globalThis.__DPAY_JEST_ASYNC_STORAGE === undefined) {
+    globalThis.__DPAY_JEST_ASYNC_STORAGE = mod.default;
+  }
+  return globalThis.__DPAY_JEST_ASYNC_STORAGE;
+});
 
 // MC8 U6 capstone — WalletConnect is now ENABLED in production (real projectId baked in
 // constants.ts). For the offline jest inner loop, DISABLE WC globally so no test accidentally
