@@ -975,14 +975,20 @@ function injectFreezeCss(css) {
  * this override never ships. (See flow 34-onramp-provider-resolution for the explicit seam test.)
  */
 function injectTestGlobals() {
+  // Poll cadence (2026-09-28 re-tune): 300 ms, not 150. The suite's wall time is Σ(flow time) ÷
+  // lanes, and the dominant per-lane CPU cost was the poll storm: every lane's page re-fires
+  // balance/history/deposit/receipt polls + their React re-renders 6-7×/s, and at 8 lanes that
+  // storm — not compute — inflated every flow ~3.5× over its solo floor (measured 2026-09-28:
+  // the 8 heaviest flows ran Σ230s at c8 vs Σ157s sequential). 300 ms still lands a state change
+  // within a tick or two of every DOM wait in the suite (bounds are 4-30 s), so no flow's
+  // assertions move — only the per-lane CPU drop ~2×. The IDLE cadences are overridden to the
+  // SAME value ON PURPOSE: a request BUDGET expressed in wall-clock time would be meaningless
+  // here anyway — flow 160 asserts requests PER TICK, which is the unit the cost is actually
+  // incurred in. Prod cadence is pinned by jest under fake timers
+  // (app/__tests__/usePollCadence.test.tsx); prod never sets this global.
   globalThis.__DPAY_TEST_POLL = {
-    balance: 150, history: 150, deposit: 150, receiptPay: 150, receiptRcv: 150, request: 150,
-    // The IDLE cadences are overridden to the SAME 150 ms as the active ones ON PURPOSE. The suite
-    // must not be paced by production cadence, and a request BUDGET expressed in wall-clock time
-    // would be meaningless here anyway — flow 160 asserts requests PER TICK, which is the unit the
-    // cost is actually incurred in. What the idle cadence does to a real wallet is measured under
-    // fake timers in app/__tests__/usePollCadence.test.tsx.
-    balanceIdle: 150, historyIdle: 150,
+    balance: 300, history: 300, deposit: 300, receiptPay: 300, receiptRcv: 300, request: 300,
+    balanceIdle: 300, historyIdle: 300,
   };
   // MC8 U6.7 — a non-empty test project id so WALLETCONNECT_PROJECT_ID is "configured" app-wide.
   globalThis.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = 'e2e-test-project-id';
