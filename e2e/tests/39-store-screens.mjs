@@ -9,8 +9,8 @@
 // "every screen rendered without throwing" — the screenshots are the product. The compose script
 // (`e2e/store-assets/compose.mjs`) turns these raw captures into 1080×1920 Play Store images.
 //
-// `optional: true` keeps this OFF the default `just e2e` path (~37s of render-only capture that is
-// not a behavior gate); `just e2e-store` runs it on demand (DPAY_E2E_FILTER=store-screens).
+// Runs inside `just e2e` with the other visual flows; `just e2e-store` runs it standalone
+// (DPAY_E2E_FILTER=store-screens) when compositing store assets.
 import { setup, onboardWallet, accountOf, railTransfer, assert, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 import { generateKeypair } from '../harness/wire.mjs';
 import { parsePayLink } from '../harness/paylink.mjs';
@@ -22,7 +22,6 @@ export const meta = {
   covers: ['visual-capture', 'store-screenshots'],
   verifies: 'Visual capture: 5 hero screenshots for Play Store compositing (wallet, request, balances, ledger, deposit), rail-funded.',
   timeoutMs: 90000,
-  optional: true,
 };
 
 export async function run() {

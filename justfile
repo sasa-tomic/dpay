@@ -153,24 +153,26 @@ wire-layout:
 e2e-sweep:
     node e2e/harness/sweep.mjs
 
-# radical e2e: drive the REAL app (App.tsx via react-native-web) + REAL relay (FakeLedger) + REAL
-# browser (chrome-headless-shell), offline + seconds-fast. The inner-loop UI/flow gate — it BOTH
-# drives every flow through the real app AND screenshots each state (shots land in e2e/shots/),
-# superseding the old parallel-component ui/ harness (removed). Add a flow = add `e2e/tests/NN-name.mjs`.
-# Runs the DEFAULT enumeration: every flow except `meta.optional` render-only capture harnesses
-# (flow 39 runs via `just e2e-store`; the flow catalog lives in FLOWS.md — never hardcode a count here).
+# chrome flow tier — the 9 KEEP-BROWSER visual/PWA flows and NOTHING else (FLOWS.md is the
+# canonical list): screenshot capture (35 ux-tour, 39 store-screens), pixel baselines (40
+# visual-regression, 84 visual-dark), QR scannability (78 qr-scannable), viewport/layout metrics
+# (83 mobile-viewport, 146 money-forms-fit, 158 header-fits), PWA/service-worker boot (151
+# offline-web-boot). Every behavioral flow was retired to the jest flow suite (`just flow`,
+# app/__tests__/flow/) + the real-chain proofs (`just node-anvil`). Merge-gate activity — never
+# part of the dev loop (AGENTS.md test tiers). Runs the DEFAULT enumeration (all 9; no
+# meta.optional flows remain). A new behavioral test is a jest flow file, NOT a chrome flow.
 # The sweep pre-step clears dead discovery files / idle orphaned gate shells before the run
 # (machine-global gate: e2e/harness/browser.mjs; parallel runs QUEUE on the browser lock).
 e2e:
     python3 scripts/testruns.py run e2e --sh 'node e2e/harness/sweep.mjs && cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && node run.mjs'
 
-# visual/pixel gate: the flows whose SUBJECT is pixels — screenshot capture, pixel-diff baselines,
-# QR decodeability, geometry-fits-viewport, offline boot of the shipped bytes. Nine flows:
-# 35 (UX tour captures), 39 (store screens), 40 + 84 (light/dark pixel-diff), 78 (QR scannable),
-# 83 (mobile viewport), 146 (money forms fit), 151 (offline web boot), 158 (header fits).
-# These stay chrome-bound forever (the DOM-flow net migrated to jest); this recipe is their fast
-# iteration entry. Flow 40 ALSO runs in the default `just e2e` suite (see FLOWS.md; never hardcode
-# a count here). On an intentional UI change, regenerate baselines via `just e2e-visual-seed`.
+# visual-regression gate (fast iteration on flow 40 alone): re-capture the 5 primary surfaces and
+# pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift >0.5%. Catches the
+# exact class of style/layout regression that sails through the testID+textContent net. NOTE:
+# flow 40 is one of the 9 flows in `just e2e` (merge gate), so the gate already runs the
+# pixel-diff — this standalone recipe re-runs ONLY flow 40 in isolation for fast feedback after a
+# UI tweak (no banner, no other flows). On an intentional UI change, regenerate the baselines via
+# `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
 e2e-visual:
     python3 scripts/testruns.py run e2e-visual --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=35-ux-tour,39-store-screens,40-visual-regression,78-qr-scannable,84-visual-dark,151-offline-web-boot,83-mobile-viewport,146-money-forms-fit,158-header-fits node run.mjs'
 
@@ -182,28 +184,11 @@ e2e-visual-seed:
     cd e2e && DPAY_E2E_REGEN_BASELINES=1 DPAY_E2E_FILTER=40-visual-regression node run.mjs
 
 # Play Store screenshot capture (flow 39) — an assert(true) render-only contract sweep, NOT a
-# behavior gate, so it is EXCLUDED from the default `just e2e` run (saves ~37s) via its
-# `meta.optional = true` marker. This recipe is its dedicated entry point; the raw captures feed
+# behavior gate. It runs inside `just e2e` with the other visual flows; this recipe is its
+# dedicated entry point when compositing store assets; the raw captures feed
 # `e2e/store-assets/compose.mjs` for marketing compositing.
 e2e-store:
     python3 scripts/testruns.py run e2e-store --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=store-screens node run.mjs'
-
-# watch mode (Phase 3): a LONG-RUNNING dev loop that re-runs a SUBSET of flows on every change to
-# app/, e2e/, crates/dpay-core/src/, or crates/dpay-ffi/src/. The changed file is mapped to a journey
-# (e.g. app/components/PayMode.tsx → the `pay` journey) and only that subset re-runs —
-# sub-second-to-~5s feedback while iterating instead of the full ~23s suite. The shared relay+web+
-# browser session PERSISTS across re-runs (only per-test contexts churn). Ctrl-C tears it down.
-# Shared-infra changes (App.tsx, styles.ts, services/native.ts, harness/*, crates/**) re-run ALL.
-e2e-watch:
-    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
-    cd e2e && node watch.mjs
-
-# watch mode PINNED to a filter token (journey/id/name/covers slug). The pinned filter always wins
-# — the changed-file→journey mapping is bypassed. Use this to iterate on a specific journey or flow
-# (e.g. `just e2e-watch pay` runs the 16 pay flows; `just e2e-watch 07` runs flow 07 alone).
-e2e-watch-filter filter:
-    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
-    cd e2e && DPAY_E2E_WATCH_FILTER={{filter}} node watch.mjs
 
 # production gate: same harness drives the LIVE relay + canister at DPAY_E2E_BASE. Throwaway identities,
 # throttled, read-only-ish (never sends real BTC). Honest ceiling until KYC-allowlist lands (see plan §4.3).
@@ -590,8 +575,8 @@ fonts:
 # Acceptance gate for the prod web wallet: builds the dist (`web`), serves the EXACT bytes a
 # real relay would, and drives them in headless chrome — DPAY_SELFCHECK PASS (wasm core boots),
 # onboarding against a real relay, identity persists across reload, wallet chrome renders,
-# screenshot proves pixels, zero console errors, and NO off-box origin contacted. Wired into
-# `verify` (see that recipe for why there and not `check`).
+# screenshot proves pixels, zero console errors, and NO off-box origin contacted. Opt-in: it
+# drives headless chrome, so it is merge-gate material, never the hot loop (AGENTS.md tiers).
 # acceptance gate for the SHIPPED /wallet bytes — boots, onboards, persists, renders
 web-smoke: web
     python3 scripts/testruns.py run web-smoke --sh 'cd e2e && node web-wallet-smoke.mjs'
@@ -602,8 +587,9 @@ web-smoke: web
 # bytes through the FULL pipeline: getUserMedia → <video> → rAF canvas → vendored jsQR →
 # onCodeScanned → PayMode review. Catches every layer of the 2026-08-16 scan regression class
 # (missing decoder bytes, UMD interop, codeScanner-shape mismatch) that web e2e (inject shim)
-# and web-smoke (no camera) are structurally blind to. Wired into `verify` (see that recipe for why
-# there and not `check`). Needs `ffmpeg` on PATH — the only tool in the inner loop that is not
+# and web-smoke (no camera) are structurally blind to. Opt-in for the same reason as web-smoke:
+# it drives headless chrome, so it is merge-gate material, never the hot loop. Needs `ffmpeg` on
+# PATH — the only tool in the inner loop that is not
 # in-project; gen-scan-video.mjs says so by name if it is missing.
 # decode gate for the SHIPPED /wallet camera: a real getUserMedia stream, decoded by the real jsQR
 web-scan: web
@@ -620,20 +606,15 @@ wasm:
     node scripts/check-wasm-core.mjs
     @echo "staged crates/dpay-relay/assets/dpay-core.wasm ($(stat -c%s crates/dpay-relay/assets/dpay-core.wasm) bytes)"
 
-# web-smoke + web-scan are HERE and not in `check` (2026-09-08). They were on no gate at all, and
-# both had been RED for days without anyone noticing — each carried its own private copy of the
-# first-run sequence, which the app changed three times in five weeks. Being on a gate is what
-# stops that; `verify` rather than `check` is where the cost fits, because they are the only two
-# recipes besides `e2e` that drive a headless browser (~30s each) and `check` is the hot Rust loop
-# people re-run on every edit. They add no build: `check` → `test-relay` already builds the dist
-# they serve, and `just` runs a dependency once per invocation. They come BEFORE `e2e` so a broken
-# SHIPPED bundle fails in half a minute rather than after the full flow suite.
-# (The e2e harness superseded the old ui/ parallel-component golden-shot harness — it drives the
-# REAL App.tsx and screenshots every flow state — so `ui` is gone.)
-# everything: rust loop + the two shipped-bytes web smokes + radical e2e (real app, relay, browser)
-verify: check web-smoke web-scan e2e
+# THE hot loop (AGENTS.md test tiers): cargo unit tier (core unit + property tests — the
+# dpay-fixture golden drift alarms ride along) + the smoke jest tier + typecheck. Seconds-fast,
+# fully offline, no chrome, no relay spawn. The heavier rust suites (canister/relay/live/icp) and
+# the static parity/doc gates stay on `check`; the jest flow suite (`just flow`), the real-chain
+# proofs (`just node-anvil`), and the chrome visual tier (`just e2e` / `just e2e-visual`) are
+# merge-gate activity. web-smoke / web-scan remain opt-in shipped-bytes gates (chrome).
+verify: test-core smoke typecheck
     @python3 scripts/testruns.py record verify pass
-    @echo "full inner loop green"
+    @echo "inner loop green"
 
 # cross-compile dpay-ffi to Android .so for arm64-v8a + x86_64 (NDK)
 ndk:
