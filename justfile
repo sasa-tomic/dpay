@@ -441,9 +441,14 @@ smoke-watch:
     node scripts/smoke-watch.mjs
 
 # flow suite (ported e2e, full-app jest; spawns the test relay ONCE via globalSetup). Merge-gate
-# activity — never part of the dev-loop iteration (AGENTS.md test tiers).
+# activity — never part of the dev-loop iteration (AGENTS.md test tiers). The heap ceiling is a
+# WORKER-ACCUMULATION budget, not a leak fix: the worker drawing convert/flows retains the whole
+# tier's full-app mounts and OOM-kills late in the run (default 4GB: 3/3 runs; 8GB: recurred
+# 2026-09-28 under load at 8.17GB; 16GB = current ceiling — the box has 62GB, workers take only
+# what they need). workerIdleMemoryLimit was tried and REJECTED (e381fc95): recycling workers
+# mid-run cascaded 22 suite failures.
 flow:
-    python3 scripts/testruns.py run flow --sh 'cd app && NODE_OPTIONS="--max-old-space-size=8192" npx jest --selectProjects flow --silent --maxWorkers=4 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
+    python3 scripts/testruns.py run flow --sh 'cd app && NODE_OPTIONS="--max-old-space-size=16384" npx jest --selectProjects flow --silent --maxWorkers=4 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # real-chain proofs: anvil + relay pipe, NO browser, NO DOM mount (jest project `node-anvil`).
 # ONE scratch anvil (31337, 1s blocks) + the REAL test-helpers relay are staged ONCE per run by
