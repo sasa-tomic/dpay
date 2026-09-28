@@ -699,7 +699,8 @@ assertion: it fails if the poll issues the old per-rail fan-out, if a history ti
 transaction detail, or if a backgrounded app issues anything at all.
 
 ## EVM rail — generic ERC-20 custody (filed 2026-09-26; BUILT 2026-09-26/27 on branch `evm-rail` —
-## spec `docs/specs/2026-09-26-evm-rail-spec.md` + its addenda; remaining: the live legs below)
+## spec `docs/specs/2026-09-26-evm-rail-spec.md` + its addenda; LANDED on main + LIVE-PROVEN
+## 2026-09-28: the D31 mainnet ZCHF round trip ran drip-free end to end, RESOLVED block below)
 
 - **Why**: founder directive 2026-09-26 — "we should add ERC-20 support anyway", driven by ZCHF /
   Frankencoin (the OISY-parity ask: OISY holds ZCHF, dpay cannot). dpay settles ck twins and
