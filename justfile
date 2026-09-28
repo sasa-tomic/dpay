@@ -443,7 +443,7 @@ smoke-watch:
 # flow suite (ported e2e, full-app jest; spawns the test relay ONCE via globalSetup). Merge-gate
 # activity — never part of the dev-loop iteration (AGENTS.md test tiers).
 flow:
-    python3 scripts/testruns.py run flow --sh 'cd app && npx jest --selectProjects flow --silent --maxWorkers=4 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
+    python3 scripts/testruns.py run flow --sh 'cd app && NODE_OPTIONS="--max-old-space-size=8192" npx jest --selectProjects flow --silent --maxWorkers=4 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # real-chain proofs: anvil + relay pipe, NO browser, NO DOM mount (jest project `node-anvil`).
 # ONE scratch anvil (31337, 1s blocks) + the REAL test-helpers relay are staged ONCE per run by
