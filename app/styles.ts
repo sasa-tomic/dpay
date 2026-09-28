@@ -853,7 +853,7 @@ function buildStyles(p: Palette) {
   nfcInfoLink: {flexDirection: 'row', alignItems: 'center', gap: 5},
   nfcInfoLinkText: {fontSize: 16, fontWeight: '600', color: p.bad, fontFamily: FONT.sansBold},
   nfcInfoBody: {fontSize: 16, color: p.ink, lineHeight: 22, marginBottom: 16, fontFamily: FONT.sans},
-  nfcInfoClose: {alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: p.card},
+  nfcInfoClose: {alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: p.card, borderWidth: 1, borderColor: p.line2},
   nfcInfoCloseText: {fontSize: 16, fontWeight: '600', color: p.ink, fontFamily: FONT.sansMedium},
   // Deposit instructions - a scannable card (network/asset + est. time + fee/min + non-custody line).
   instrCard: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16, marginBottom: 18},
@@ -923,7 +923,7 @@ function buildStyles(p: Palette) {
   renameInput: {flex: 1, minHeight: 44, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, color: p.ink, fontSize: 16, fontFamily: FONT.sans},
   // Amount row with the inline Max button.
   amtRow: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 8},
-  maxBtn: {paddingHorizontal: 16, minHeight: 52, borderRadius: 8, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
+  maxBtn: {paddingHorizontal: 16, minHeight: 56, borderRadius: 8, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
   maxBtnText: {fontSize: 16, fontWeight: '700', color: p.brandText, fontFamily: FONT.sansBold},
   // Review card rows: label left, value right, so amount/fee/total align down the right edge.
   reviewRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6, gap: 12},
