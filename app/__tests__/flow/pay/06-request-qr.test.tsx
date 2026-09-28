@@ -12,6 +12,7 @@ import {
   accountOf, assertEq, DpayCore, onboardSlowPath, selectDemoAsset, waitForWallet,
 } from '../harness/lib';
 import {mountApp} from '../harness/mount';
+import {scaled as budgetScaled} from '../harness/budget';
 
 const EXPIRY_WINDOW_SLACK = 1000; // EXPIRY_WINDOW=900 + a few seconds of test latency
 
@@ -111,7 +112,7 @@ describe('flow 06 — request QR: the link IS the code, Share agrees, the radio 
     let readerHex: string | null = null;
     for (let i = 0; i < 100 && !readerHex; i++) {
       readerHex = (g.__DPAY_TEST_NFC_READER_REQUEST as string | undefined) ?? null;
-      if (!readerHex) await new Promise((r) => setTimeout(r, 50));
+      if (!readerHex) await new Promise((r) => setTimeout(r, budgetScaled(50)));
     }
     expect(typeof readerHex).toBe('string');
     expect(readerHex!.length).toBeGreaterThan(0);

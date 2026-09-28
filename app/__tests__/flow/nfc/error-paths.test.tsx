@@ -14,6 +14,7 @@
  *     only a nonce/rid-bound merchant `result` resolves "Paid ✓ ∂10.00"; balances move exactly once.
  */
 import {describe, it, expect, afterEach} from '@jest/globals';
+import {scaled as budgetScaled} from '../harness/budget';
 import {
   accountOf, armNfcCard, armPayScan, assert, DpayCore, faucetAccount, generateKeypair,
   getBalance, icpCatalog, onboardWallet, openBalances, railPrincipalText, type Mount,
@@ -114,7 +115,7 @@ describe('flow 86 — receiver settles an offline-payer NFC bundle, exactly once
     let readerHex: string | null = null;
     for (let i = 0; i < 100 && !readerHex; i++) {
       readerHex = (g.__DPAY_TEST_NFC_READER_REQUEST as string | undefined) ?? null;
-      if (!readerHex) await new Promise((r) => setTimeout(r, 50));
+      if (!readerHex) await new Promise((r) => setTimeout(r, budgetScaled(50)));
     }
     assert(typeof readerHex === 'string' && readerHex.length > 0, 'the NFC reader must arm with the 132-byte wire request');
     const req = await DpayCore.decodeRequest(hexToB64url(readerHex));
@@ -144,7 +145,7 @@ describe('flow 86 — receiver settles an offline-payer NFC bundle, exactly once
     let queued: NfcResult | null = null;
     for (let i = 0; i < 200 && !queued; i++) {
       queued = (g.__DPAY_TEST_NFC_RESULT as NfcResult | null) ?? null;
-      if (!queued) await new Promise((r) => setTimeout(r, 50));
+      if (!queued) await new Promise((r) => setTimeout(r, budgetScaled(50)));
     }
     expect(queued?.status).toBe(0);
     expect(queued?.requestIdHex).toBe(signed.requestIdHex);
@@ -179,7 +180,7 @@ describe('flow 87 — offline payer signs, never submits, and resolves Paid only
     let approved: ApprovedWire | null = null;
     for (let i = 0; i < 50 && !approved; i++) {
       approved = (g.__DPAY_TEST_NFC_APPROVED_WIRE as ApprovedWire | null) ?? null;
-      if (!approved) await new Promise((r) => setTimeout(r, 100));
+      if (!approved) await new Promise((r) => setTimeout(r, budgetScaled(100)));
     }
     assert(approved?.envelopeHex != null && approved.envelopeHex.length > 128, 'offline payer must approve a real signed IC update');
     assert(approved.readStateEnvelopeHex != null && approved.readStateEnvelopeHex.length > 128, 'offline payer must also provide a signed read_state envelope');

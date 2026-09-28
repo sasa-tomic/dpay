@@ -25,6 +25,7 @@ import {
   selectCurrency, selectSolRail, setRelay,
 } from '../harness/lib';
 import {mountApp} from '../harness/mount';
+import {scaled as budgetScaled} from '../harness/budget';
 import {freshContext} from '../onboard/helpers';
 
 const g = globalThis as unknown as Record<string, unknown>;
@@ -322,7 +323,7 @@ describe('flow 80 — sol-fund-funnel', () => {
         picked = true;
       } catch (e) {
         if (i === 2) throw e;
-        await new Promise((r) => setTimeout(r, 600));
+        await new Promise((r) => setTimeout(r, budgetScaled(600)));
         await openBalances(m);
       }
     }

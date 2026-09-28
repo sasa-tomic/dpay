@@ -14,6 +14,7 @@ import {
   armPayScan, assertIncludes, DpayCore, generateKeypair, getBalance, onboardWallet,
 } from '../harness/lib';
 import {relayBaseURL} from '../harness/relayClient';
+import {scaled as budgetScaled} from '../harness/budget';
 import {freshContext} from '../onboard/helpers';
 
 const g = globalThis as unknown as Record<string, unknown> & {__DPAY_TEST_SCAN?: (qr: string) => void};
@@ -108,7 +109,7 @@ describe('flow 174 — ic-gateway-override', () => {
     for (let i = 0; i < 300 && deadHit === null; i++) {
       m.driver.collectFetchFailures();
       deadHit = m.driver.fetchFailures.find((f) => f.url.startsWith(`${dead}/api/v2/canister/`)) ?? null;
-      if (deadHit === null) await new Promise((r) => setTimeout(r, 50));
+      if (deadHit === null) await new Promise((r) => setTimeout(r, budgetScaled(50)));
     }
     expect(deadHit).not.toBeNull();
     assertIncludes(deadHit!.url, '/api/v2/canister/', 'the refused request is an /api/v2 envelope POST');

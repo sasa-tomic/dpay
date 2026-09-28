@@ -8,6 +8,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {armPayScan, onboardWallet} from '../harness/lib';
+import {scaled as budgetScaled} from '../harness/budget';
 import {freshContext} from '../onboard/helpers';
 
 const g = globalThis as unknown as Record<string, unknown>;
@@ -32,7 +33,7 @@ describe('flow 17 — scan-cleanup', () => {
     await m.driver.findByTestID('btn-request', {timeoutMs: 4000});
     let after = scanCount();
     for (let i = 0; i < 20 && after > 0; i++) {
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, budgetScaled(50)));
       after = scanCount();
     }
     expect(after).toBe(0);

@@ -12,6 +12,7 @@
  * copyToClipboard through the same fallback path.
  */
 import {describe, it, expect} from '@jest/globals';
+import {scaled as budgetScaled} from '../harness/budget';
 import {
   accountOf, assertIncludes, faucetAccount, generateKeypair, onboardWallet,
   railPrincipalText, railTransfer,
@@ -55,7 +56,7 @@ describe('flow 157 — transaction-receipt', () => {
     for (let i = 0; i < 100; i++) {
       clip = String(g.__DPAY_TEST_CLIPBOARD ?? '');
       if (clip.length > 0) break;
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, budgetScaled(50)));
     }
     assertIncludes(clip, '+∂42.00', 'the copied receipt carries the amount');
     assertIncludes(clip, payerPrincipal, 'the copied receipt carries the full payer account');

@@ -25,6 +25,7 @@ import {
   solEnv, solTxDetailFromSolpay, type NfcEvent,
 } from '../nfc/h';
 import type {Mount} from '../harness/lib';
+import {scaled as budgetScaled} from '../harness/budget';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
@@ -76,7 +77,7 @@ async function untilSeam<T>(read: () => T | null, what: string, tries = 100): Pr
   for (let i = 0; i < tries; i++) {
     const v = read();
     if (v != null) return v;
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, budgetScaled(50)));
   }
   throw new Error(`${what} never happened within ${tries * 50}ms`);
 }
@@ -352,12 +353,12 @@ describe('flow 138 — the settle gate\u2019s three verdicts, each reaching the 
     const legB = await merchantCycle(m, '0.03', null, false);
     for (let i = 0; i < 40; i++) {
       if (m.driver.bodyText().includes('Broadcasting')) break;
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, budgetScaled(250)));
     }
     console.log('LEG-B body:', m.driver.bodyText().replace(/\s+/g, ' ').slice(0, 420), '| reads:', handles.getTxReads, '| sig set:', handles.sig != null);
     expect(await m.driver.waitForText('Broadcasting', {timeoutMs: 15000})).toBe(true);
     // Let several polls land while unreadable — counted by the stub, not slept through.
-    for (let i = 0; i < 100 && handles.getTxReads < 8; i++) await new Promise((r) => setTimeout(r, 50));
+    for (let i = 0; i < 100 && handles.getTxReads < 8; i++) await new Promise((r) => setTimeout(r, budgetScaled(50)));
     let bodyB = m.driver.bodyText();
     expect(bodyB).toMatch(/Broadcasting/);
     expect(bodyB).not.toMatch(/Received/);

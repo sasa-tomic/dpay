@@ -7,6 +7,7 @@
  * port-policy artifact), the header shows the offline indicator, and the wallet still renders.
  */
 import {describe, it, expect} from '@jest/globals';
+import {scaled as budgetScaled} from '../harness/budget';
 
 import {
   goOffline, onboardWallet, openBalances, waitForWallet,
@@ -31,7 +32,7 @@ describe('flow 13 — offline', () => {
     for (let i = 0; i < 40 && failed.length === 0; i++) {
       m.driver.collectFetchFailures();
       failed = m.driver.fetchFailures.filter((f) => f.url.includes('/api/v1/balances') && f.origin === deadRelay);
-      if (failed.length === 0) await new Promise((r) => setTimeout(r, 100));
+      if (failed.length === 0) await new Promise((r) => setTimeout(r, budgetScaled(100)));
     }
     expect(failed.length > 0).toBe(true);
     const errText = failed[0].error ?? '';

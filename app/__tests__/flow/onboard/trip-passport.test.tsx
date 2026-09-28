@@ -10,6 +10,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {mountApp} from '../harness/mount';
+import {scaled as budgetScaled} from '../harness/budget';
 import {
   accountOf, armPayScan, assertIncludes, chooseHomeCurrencyIfPresent, DpayCore, faucetAccount,
   generateKeypair, getBalance, openBalances, selectDemoAsset, skipWalkthroughIfPresent,
@@ -131,7 +132,7 @@ describe('flow 94 — trip-passport', () => {
     let persisted = '';
     for (let i = 0; i < 200 && !persisted.includes('paymentTested'); i++) {
       persisted = (await AsyncStorage.getItem('dpay.journey.v1')) ?? '';
-      if (!persisted.includes('paymentTested')) await new Promise((r) => setTimeout(r, 50));
+      if (!persisted.includes('paymentTested')) await new Promise((r) => setTimeout(r, budgetScaled(50)));
     }
     expect(persisted.includes('paymentTested')).toBe(true);
     await m.driver.click('btn-settings', {timeoutMs: 5000});

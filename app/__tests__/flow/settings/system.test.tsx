@@ -23,6 +23,7 @@
 import {describe, it, expect} from '@jest/globals';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from './solStub';
+import {scaled as budgetScaled} from '../harness/budget';
 import {
   accountOf, armPayScan, assertDisabled, assertEq, assertIncludes, DpayCore, faucetAccount,
   generateKeypair, onboardWallet, openBalances, railPrincipalText, railTransfer,
@@ -137,7 +138,7 @@ describe('flow 57 — settings-seed-backup', () => {
     let wordsClip = '';
     for (let i = 0; i < 80 && wordsClip === ''; i++) {
       wordsClip = String(g.__DPAY_TEST_CLIPBOARD ?? '');
-      if (wordsClip === '') await new Promise((r) => setTimeout(r, 50));
+      if (wordsClip === '') await new Promise((r) => setTimeout(r, budgetScaled(50)));
     }
     expect(wordsClip.split(' ')).toHaveLength(24);
 
@@ -151,7 +152,7 @@ describe('flow 57 — settings-seed-backup', () => {
     let hexClip = '';
     for (let i = 0; i < 80 && hexClip === ''; i++) {
       hexClip = String(g.__DPAY_TEST_CLIPBOARD ?? '');
-      if (hexClip !== secretHex) { hexClip = ''; await new Promise((r) => setTimeout(r, 50)); }
+      if (hexClip !== secretHex) { hexClip = ''; await new Promise((r) => setTimeout(r, budgetScaled(50))); }
     }
     expect(hexClip).toBe(secretHex);
 

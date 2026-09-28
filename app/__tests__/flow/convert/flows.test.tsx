@@ -36,7 +36,7 @@ import {
 import type {Mount} from '../harness/mount';
 import {relayGet, relayPost, relayBaseURL, relayGetAt} from '../harness/relayClient';
 import {startFlowRelay, pickFreePort} from '../harness/flowRelay';
-import {deadline as budgetDeadline} from '../harness/budget';
+import {deadline as budgetDeadline, scaled as budgetScaled} from '../harness/budget';
 import {mkdtemp, readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -465,7 +465,7 @@ describe('flow 169 — a pending conversion survives an app reload; the engine d
       for (let i = 0; i < 20; i++) {
         rec = await readParked();
         if (rec?.step === 'pending_withdrawal') break;
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, budgetScaled(250)));
       }
       expect(rec).not.toBeNull();
       expect(rec!.step).toBe('pending_withdrawal');
@@ -1923,7 +1923,7 @@ describe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail intent', 
           break;
         } catch (e) {
           if (i === 2) throw e;
-          await new Promise((r) => setTimeout(r, 250));
+          await new Promise((r) => setTimeout(r, budgetScaled(250)));
         }
       }
       await m.driver.findByTestID('crossrail-crossing', {timeoutMs: 10_000});
@@ -2087,7 +2087,7 @@ describe('flow 209 — the Stop on the later legs: crossing, sol_ready, and prov
             break;
           } catch (e) {
             if (i === 2) throw e;
-            await new Promise((r) => setTimeout(r, 250));
+            await new Promise((r) => setTimeout(r, budgetScaled(250)));
           }
         }
         await m!.driver.findByTestID('crossrail-crossing', {timeoutMs: 20_000});
@@ -2293,7 +2293,7 @@ describe('flow 200 — VCHF → SOL Route C with the whole venue chain named bef
           break;
         } catch (e) {
           if (i === 2) throw e;
-          await new Promise((r) => setTimeout(r, 250));
+          await new Promise((r) => setTimeout(r, budgetScaled(250)));
         }
       }
       await m!.driver.findByTestID('crossrail-crossing', {timeoutMs: 15_000});
@@ -3340,7 +3340,7 @@ describe('flow 195 — Route C generalized: ICP → EURC via USDC as one cross-r
           break;
         } catch (e) {
           if (i === 2) throw e;
-          await new Promise((r) => setTimeout(r, 250));
+          await new Promise((r) => setTimeout(r, budgetScaled(250)));
         }
       }
       await m.driver.findByTestID('crossrail-crossing', {timeoutMs: 10_000});

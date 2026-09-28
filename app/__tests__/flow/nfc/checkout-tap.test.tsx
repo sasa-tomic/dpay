@@ -12,6 +12,7 @@
  * radio (the seam; the antenna hop is a physical-device gate).
  */
 import {describe, it, expect, afterEach} from '@jest/globals';
+import {scaled as budgetScaled} from '../harness/budget';
 import {
   accountOf, assert, assertEq, assertIncludes, DpayCore, faucetAccount, generateKeypair,
   getBalance, icpCatalog, onboardWallet, openBalances, railPrincipalText, selectCurrency,
@@ -80,7 +81,7 @@ describe('flow 117 — a tap credits the shop’s own charge (the reference is t
     let armedHex: string | null = null;
     for (let i = 0; i < 200 && !armedHex; i++) {
       armedHex = (g.__DPAY_TEST_NFC_READER_REQUEST as string | undefined) ?? null;
-      if (!armedHex) await new Promise((r) => setTimeout(r, 50));
+      if (!armedHex) await new Promise((r) => setTimeout(r, budgetScaled(50)));
     }
     assert(armedHex != null, 'reader mode arming never happened');
     const req = await DpayCore.decodeRequest(hexToB64url(armedHex));
@@ -113,7 +114,7 @@ describe('flow 117 — a tap credits the shop’s own charge (the reference is t
     let queued: NfcResult | null = null;
     for (let i = 0; i < 200 && !queued; i++) {
       queued = (g.__DPAY_TEST_NFC_RESULT as NfcResult | null) ?? null;
-      if (!queued) await new Promise((r) => setTimeout(r, 50));
+      if (!queued) await new Promise((r) => setTimeout(r, budgetScaled(50)));
     }
     assertEq(queued?.status, 0, 'the merchant must reach a settled verdict from exact ledger history');
     assertEq(queued?.requestIdHex, signed.requestIdHex, 'the returned result binds the payer’s own update');
@@ -125,7 +126,7 @@ describe('flow 117 — a tap credits the shop’s own charge (the reference is t
     let paid: {state: string; paid?: {amount_raw: string; block: number}} | null = null;
     for (let i = 0; i < 200 && paid == null; i++) {
       const s = await getJson<{state: string; paid?: {amount_raw: string; block: number}}>(`/api/v1/checkout/${open.id}`);
-      if (s.state === 'paid') paid = s; else await new Promise((r) => setTimeout(r, 50));
+      if (s.state === 'paid') paid = s; else await new Promise((r) => setTimeout(r, budgetScaled(50)));
     }
     assert(paid != null, 'the checkout never observed the transfer');
     assertEq(paid.paid?.amount_raw, String(PAY_RAW), 'the sale is credited the exact raw VCHF it was priced at');
