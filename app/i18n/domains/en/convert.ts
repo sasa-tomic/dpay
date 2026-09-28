@@ -516,7 +516,7 @@ export const convertEn: ConvertMessages = {
   counterpartySigns: 'Your phone signs; the pool pulls exactly the approved amount.',
   quoteSource: (at, venue) => `Quote from ${venue}, fetched ${at}`,
   quoteVerbatim: (venue, amt) => `${venue} quoted exactly ${amt}`,
-  rateLabel: (inSym, outSym) => `Rate for this quote (${inSym} → ${outSym})`,
+  rateLabel: () => `Rate for this quote`,
   poolFeeTier: (tier, venue) => `Pool fee: ${tier} (${venue} fee tier)`,
   inputFeeLine: fee => `Input fee: ${fee}`,
   outputFeeLine: fee => `Output fee: ${fee}`,

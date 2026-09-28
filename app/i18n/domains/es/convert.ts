@@ -20,7 +20,7 @@ export const convertEs: ConvertMessages = {
   counterpartySigns: 'Tu teléfono firma; el pool retira exactamente el importe aprobado.',
   quoteSource: (at, venue) => `Cotización de ${venue}, obtenida ${at}`,
   quoteVerbatim: (venue, amt) => `${venue} cotizó exactamente ${amt}`,
-  rateLabel: (inSym, outSym) => `Tipo de esta cotización (${inSym} → ${outSym})`,
+  rateLabel: () => `Tipo de esta cotización`,
   poolFeeTier: (tier, venue) => `Comisión del pool: ${tier} (nivel de ${venue})`,
   inputFeeLine: fee => `Comisión de entrada: ${fee}`,
   outputFeeLine: fee => `Comisión de salida: ${fee}`,

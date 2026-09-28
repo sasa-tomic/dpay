@@ -367,7 +367,7 @@ function buildStyles(p: Palette) {
   convertHeadlineAmount: {fontSize: 32, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5, marginTop: 8, fontVariant: ['tabular-nums']},
   convertRateRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: p.line2},
   convertRateLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
-  convertRateValue: {fontSize: 16, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1, textAlign: 'right'},
+  convertRateValue: {fontSize: 16, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 0, textAlign: 'right'},
   convertHeadlineMeta: {fontSize: 12, color: p.sub2, fontFamily: FONT.sans, marginTop: 8},
   convertChecklistCard: {backgroundColor: p.panel2, padding: 16, borderRadius: 12, alignSelf: 'stretch', marginTop: 12},
   // The ONE Details disclosure control on the convert decision card (10x-verbosity pass
