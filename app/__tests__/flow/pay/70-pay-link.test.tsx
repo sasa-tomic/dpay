@@ -19,7 +19,9 @@ installSolAccountsHelper();
 const lib = require('../harness/lib') as typeof import('../harness/lib');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const {mountApp} = require('../harness/mount') as typeof import('../harness/mount');
-const {assert, assertEq, assertIncludes, onboardWallet, waitForWallet} = lib;
+const {assertEq, assertIncludes, onboardWallet, waitForWallet} = lib;
+// Assertion functions need an explicitly-annotated call target (TS2775) — never destructure them.
+const assert: typeof lib.assert = lib.assert;
 
 const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address
 const SEND_AMOUNT = '0.001';

@@ -22,7 +22,7 @@ const VCHF = {currency: 7, ledger: 'ly36x-wiaaa-aaaai-aqj7q-cai', unit: 'VCHF', 
 const ICP = {currency: 8, ledger: 'ryjl3-tyaaa-aaaaa-aaaba-cai', unit: 'ICP', key: 'icp', chip: 'ICP', chipFigure: '2.1 ICP', chipAfter: '1.1 ICP', rowAfter: '1.1 ICP'};
 const SEED = '210000001'; // 2.10000001 — covers the price
 const PAY = '100000001'; // 1.00000001 — the PRICE the customer pays, exactly (8-dec odd tail)
-const FEE = '10000'; // the catalog fee — the payee's cost, netted out of the quoted wire
+// The catalog fee (10000 raw) is netted out of the quoted wire: PAY − WIRE is the fee.
 const WIRE = '99990001'; // price − fee — what the payee's link/request carries
 
 type Recorder = {calls: () => string[], restore: () => void};

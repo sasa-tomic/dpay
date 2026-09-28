@@ -16,7 +16,7 @@
 import {randomBytes} from 'node:crypto';
 import {describe, it, expect} from '@jest/globals';
 import {
-  accountOf, assert, assertIncludes, DpayCore, faucetAccount, generateKeypair, getBalance,
+  accountOf, assert, assertIncludes, faucetAccount, generateKeypair, getBalance,
   icpCatalog, onboardWallet, railPrincipalText, railTransfer,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';

@@ -11,7 +11,7 @@
 import {describe, it, expect} from '@jest/globals';
 import {
   accountOf, armPayScan, assert, assertIncludes, faucetAccount, generateKeypair, getBalance,
-  goOffline, onboardWallet, openBalances, setRelay, waitForScanner,
+  goOffline, onboardWallet, setRelay, waitForScanner,
 } from '../harness/lib';
 import {relayBaseURL} from '../harness/relayClient';
 import {DpayCore} from '../harness/lib';

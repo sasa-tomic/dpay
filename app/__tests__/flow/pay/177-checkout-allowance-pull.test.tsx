@@ -9,7 +9,7 @@
  * price less the fee it absorbs, and the customer moved by exactly the price (two fees: their
  * approve + the pull's transfer fee, charged to the approved allowance).
  */
-import {describe, it, expect} from '@jest/globals';
+import {describe, it} from '@jest/globals';
 import {
   accountOf, assert, assertEq, assertIncludes, DpayCore, faucetAccount, generateKeypair,
   getBalance, icpCatalog, onboardWallet, openBalances, railPrincipalText, selectCurrency,
@@ -87,7 +87,7 @@ describe('flow 177 — allowance pull: approve the shop, report, and the shop co
     assertEq(open.amount as string, '4.4999', 'the checkout quotes the price less the fee the shop absorbs');
 
     // --- the customer APPROVES, and tells the checkout so --------------------------------------------
-    await approveTheShop(payer, merchant.publicHex, PAY_RAW, ledger);
+    await approveTheShop(payer, merchant.publicHex, String(PAY_RAW), ledger);
     assertEq(await getBalance(merchant.publicHex, VCHF), '0', 'an approval must move no money at all');
     assertEq(await getBalance(payer.publicHex, VCHF), String(PAYER_SEED - FEE),
       'the approve costs the customer one ledger fee and nothing else');

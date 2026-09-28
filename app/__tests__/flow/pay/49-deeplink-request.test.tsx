@@ -15,7 +15,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {
-  assert, assertIncludes, faucetAccount, generateKeypair, getBalance,
+  assert, assertIncludes, generateKeypair, getBalance,
   onboardSeededUnfunded, openBalances, railPrincipalText,
 } from '../harness/lib';
 import {mountApp} from '../harness/mount';

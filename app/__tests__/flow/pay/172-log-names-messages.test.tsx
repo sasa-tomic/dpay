@@ -277,7 +277,8 @@ describe('flow 172 — device-saved notes name the transaction log, across every
     await armPayScan(m); // the card only mounts armed
     const dispatch = async (event: Record<string, unknown>): Promise<void> => {
       await armNfcCard(m, 'sol', {timeoutMs: 10_000});
-      (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SOL_NFC_SESSION(event);
+      const session = (globalThis as unknown as {__DPAY_TEST_SOL_NFC_SESSION: (e: Record<string, unknown>) => void}).__DPAY_TEST_SOL_NFC_SESSION;
+      session(event);
     };
     await dispatch({type: 'request', role: 'card', solreqUri: buildSolReqUri(ridF, SOL_NFC_NAME, SOL_NFC_MEMO)});
     assert(await m.driver.waitForText('Communicating', {timeoutMs: 8000}), '(f) the tap request auto-signs → exchanging');

@@ -25,9 +25,10 @@ const lib = require('../harness/lib') as typeof import('../harness/lib');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const {mountApp} = require('../harness/mount') as typeof import('../harness/mount');
 const {
-  accountOf, armPayScan, assert: assert_, assertEq, assertIncludes, faucetAccount,
+  accountOf, armPayScan, assertEq, assertIncludes, faucetAccount,
   generateKeypair, onboardWallet, openBalances, railPrincipalText,
 } = lib;
+// Assertion functions need an explicitly-annotated call target (TS2775) — never destructure them.
 const assert: typeof lib.assert = lib.assert;
 const {parsePayLink, scanSeam} = require('./local') as typeof import('./local');
 
