@@ -140,34 +140,53 @@ if (!relayURL || !relayURL.startsWith('http')) {
 }
 g.__DPAY_TEST_IC_GATEWAY = relayURL; // the IC boundary (app/services/icp.ts, INV-9) → fake-IC gateway
 export type FetchRecord = {url: string; origin: string; ok: boolean; status: number; error?: string};
-const fetchRecords: FetchRecord[] = [];
-const allowedDeadOrigins = new Set<string>();
-const realFetch = globalThis.fetch.bind(globalThis);
-// The harness's own probe channel (flowRelay.ts health polls): the shim above records everything
-// it carries, and a relay's not-yet-up health probe is not an app request — never a recordable
-// failure. Stashed here because this is the last point where the unrecorded fetch is reachable.
-(g as unknown as {__DPAY_TEST_RAW_FETCH?: typeof fetch}).__DPAY_TEST_RAW_FETCH = realFetch;
+
+// ONE shim, ONE ledger — on globalThis. This module loads in EVERY jest module registry
+// (setupFile, afterEnv, and every test file's import); a module-level records array would be a
+// per-registry instance, so the lifecycle (afterEnv) could assert a DIFFERENT ledger than the
+// outermost shim writes, and each registry's load would re-wrap globalThis.fetch (a triple-shim
+// stack, triple-recording every request). Guarded install + global structures make the recorder
+// identity- and registry-proof.
+type FetchG = {
+  __DPAY_FLOW_FETCH_SHIM__?: boolean;
+  __DPAY_FLOW_FETCH_RECORDS__?: FetchRecord[];
+  __DPAY_FLOW_ALLOWED_DEAD_ORIGINS__?: Set<string>;
+};
+const fg = globalThis as unknown as FetchG;
+const fetchRecords: FetchRecord[] = (fg.__DPAY_FLOW_FETCH_RECORDS__ ??= []);
+const allowedDeadOrigins: Set<string> = (fg.__DPAY_FLOW_ALLOWED_DEAD_ORIGINS__ ??= new Set<string>());
 const originOf = (url: string): string => {
   try { return new URL(url).origin; } catch { return url; }
 };
-globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-  const target = url.startsWith(RELAY_DEFAULT_ORIGIN)
-    ? relayURL + url.slice(RELAY_DEFAULT_ORIGIN.length)
-    : url;
-  // The e2e driver's offline sentinels (`'stub'` — solrpc.ts's SOL sentinel) are not origins:
-  // the fetch rejects exactly as it did unfixed, but the fail-closed ledger only ever recorded
-  // REAL origins, so a non-URL is not a recordable request.
-  const recordable = /^https?:\/\//i.test(url);
-  try {
-    const res = await realFetch(target, init);
-    if (recordable) fetchRecords.push({url, origin: originOf(url), ok: res.ok, status: res.status});
-    return res;
-  } catch (e) {
-    if (recordable) fetchRecords.push({url, origin: originOf(url), ok: false, status: 0, error: e instanceof Error ? e.message : String(e)});
-    throw e;
-  }
-}) as typeof fetch;
+if (!fg.__DPAY_FLOW_FETCH_SHIM__) {
+  fg.__DPAY_FLOW_FETCH_SHIM__ = true;
+  const realFetch = globalThis.fetch.bind(globalThis);
+  // The harness's own probe channel (flowRelay.ts health polls): the shim records everything it
+  // carries, and a relay's not-yet-up health probe is not an app request — never a recordable
+  // failure. Stashed here because this is the last point where the unrecorded fetch is reachable.
+  (g as unknown as {__DPAY_TEST_RAW_FETCH?: typeof fetch}).__DPAY_TEST_RAW_FETCH = realFetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const target = url.startsWith(RELAY_DEFAULT_ORIGIN)
+      ? relayURL + url.slice(RELAY_DEFAULT_ORIGIN.length)
+      : url;
+    // The e2e driver's offline sentinels (`'stub'` — solrpc.ts's SOL sentinel) are not origins:
+    // the fetch rejects exactly as it did unfixed, but the fail-closed ledger only ever recorded
+    // REAL origins, so a non-URL is not a recordable request.
+    const recordable = /^https?:\/\//i.test(url);
+    try {
+      const res = await realFetch(target, init);
+      if (recordable) fetchRecords.push({url, origin: originOf(url), ok: res.ok, status: res.status});
+      return res;
+    } catch (e) {
+      if (recordable) fetchRecords.push({url, origin: originOf(url), ok: false, status: 0, error: e instanceof Error ? e.message : String(e)});
+      throw e;
+    }
+  }) as typeof fetch;
+} else {
+  // A later-registry load must not downgrade the probe channel either (it is already installed).
+  (g as unknown as {__DPAY_TEST_RAW_FETCH?: typeof fetch}).__DPAY_TEST_RAW_FETCH ??= globalThis.fetch;
+}
 
 export function allowRequestFailuresFrom(url: string): void {
   allowedDeadOrigins.add(originOf(url));

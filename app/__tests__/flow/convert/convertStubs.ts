@@ -130,6 +130,16 @@ export async function enableSolRail(): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const AsyncStorage = require('@react-native-async-storage/async-storage') as {setItem: (k: string, v: string) => Promise<void>};
   await AsyncStorage.setItem(SOLANA_RPC_STORAGE_KEY, 'https://sol-stub.dpay.invalid');
+  // Arm the stub seam IMMEDIATELY but EMPTY (fail-loud): the rail wakes at this boot (the
+  // operator override above) and its first balance poll fires during the test body's boot
+  // window, BEFORE the flow installs its own richer stub. With no seam armed, the window dials
+  // the placeholder for real — a recorded transport failure the fail-closed ledger flags. An
+  // EMPTY stub object makes every window call throw the seam's own 'not implemented' instead:
+  // the app-visible outcome is exactly the pre-harness behavior (the poll fails, the row reads
+  // unreadable), minus the network event. The flow's installSolRpcStub(…) replaces the seam
+  // wholesale (it is checked per call).
+  const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub};
+  g.__DPAY_TEST_SOLANA_RPC_STUB ??= {};
 }
 
 type SolAccountsSpec = {
