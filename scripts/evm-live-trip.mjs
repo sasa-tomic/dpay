@@ -44,9 +44,8 @@ const {buildWeb, serveWeb} = await import(join(E2E, 'harness', 'web.mjs'));
 const {Driver} = await import(join(E2E, 'harness', 'driver.mjs'));
 const {
   openBalances, selectCurrency, openConvertFor, pickSwapTarget, pickSwapVenue,
-  typeConvertAmount, openOtherVenues, accountOf, armPayScan, waitForEnabled,
+  typeConvertAmount, openOtherVenues, accountOf, armPayScan, waitForEnabled, railPrincipalText,
 } = await import(join(E2E, 'harness', 'lib.mjs'));
-const {railPrincipalText} = await import(join(E2E, 'harness', 'wire.mjs'));
 
 const log = (...a) => console.log(`[trip ${new Date().toISOString().slice(11, 19)}]`, ...a);
 const runCapture = (cmd, args) => execFileSync(cmd, args, {encoding: 'utf8', cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe']});
@@ -59,7 +58,11 @@ function floatSeed() {
 }
 
 async function pubHexOf(seedHex) {
-  const ed = await import('@noble/ed25519');
+  // resolve @noble/ed25519 through the e2e package (the harness's own dep tree — scripts/ has
+  // no node_modules of its own)
+  const {createRequire} = await import('node:module');
+  const reqE2E = createRequire(join(E2E, 'package.json'));
+  const ed = reqE2E('@noble/ed25519');
   const seed = new Uint8Array(32);
   for (let i = 0; i < 32; i++) seed[i] = parseInt(seedHex.slice(i * 2, i * 2 + 2), 16);
   const pub = await ed.getPublicKeyAsync(seed);
@@ -447,8 +450,8 @@ async function cmdSendZchf(amount, to) {
   await withApp(async (driver) => {
     driver.page.on('pageerror', (e) => log(`[pageerror] ${String(e).slice(0, 300)}`));
     await openBalances(driver);
-    await driver.findByTestID('asset-evm-zchf-eth', {timeoutMs: 15_000});
-    await driver.click('asset-evm-zchf-eth-select');
+    await driver.findByTestID('asset-evm-zchf-ethereum', {timeoutMs: 15_000});
+    await driver.click('asset-evm-zchf-ethereum-select');
     await driver.click('tab-pay');
     await driver.click('btn-pay-send');
     await driver.findByTestID('evm-send-amount-input', {timeoutMs: 10_000});
@@ -482,7 +485,7 @@ async function cmdClaim(reqUri) {
     driver.page.on('pageerror', (e) => log(`[pageerror] ${String(e).slice(0, 300)}`));
     // ONLINE first: the balance poll seeds the permit-nonce cache (D22.1, every-5th-tick).
     await openBalances(driver);
-    await driver.findByTestID('asset-evm-zchf-eth', {timeoutMs: 20_000});
+    await driver.findByTestID('asset-evm-zchf-ethereum', {timeoutMs: 20_000});
     const nonceKey = `dpay.evm.nonces.v1.${RAIL.toLowerCase()}`;
     let seeded = null;
     for (let i = 0; i < 60; i++) {
@@ -500,7 +503,7 @@ async function cmdClaim(reqUri) {
     // nonce, zero RPC in the signing path).
     await driver.eval(() => { globalThis.__DPAY_TEST_EVM_CONNECTIVITY = 'offline'; });
     await openBalances(driver);
-    await driver.click('asset-evm-zchf-eth-select');
+    await driver.click('asset-evm-zchf-ethereum-select');
     await armPayScan(driver);
     await driver.eval((uri) => window.__DPAY_TEST_SCAN(uri), reqUri);
     await driver.findByTestID('evm-pay-qr', {timeoutMs: 20_000});
@@ -524,7 +527,7 @@ async function cmdCheckClaim() {
   await withApp(async (driver) => {
     // Fresh boot = back online. The pending-claim badge lives on the ZCHF·Eth Pay scanner.
     await openBalances(driver);
-    await driver.click('asset-evm-zchf-eth-select');
+    await driver.click('asset-evm-zchf-ethereum-select');
     await driver.click('tab-pay');
     await driver.findByTestID('evm-pay-scan', {timeoutMs: 15_000});
     await driver.findByTestID('evm-pay-pending', {timeoutMs: 15_000}).catch(async () => {
