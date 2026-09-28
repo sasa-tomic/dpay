@@ -33,6 +33,7 @@
 import os from 'node:os';
 import fs from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { stopSession, killTrackedChildren, _testCtx, dumpDiagnosticsFor, laneBrowser, primeBrowserShards } from './harness/lib.mjs';
 import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
 import { PROFILING, profileSnapshot, profileOpTotals, profilePhaseTotals } from './harness/profile.mjs';
@@ -329,7 +330,7 @@ async function runPool(tests, concurrency, timeoutScale, shards = 1) {
  * enough to keep the heavy convert/withdraw flows at the head). Absent history AND cap → the
  * default budget, so brand-new flows sort by size class rather than alphabetically.
  */
-const TIMING_HISTORY_PATH = join(new URL('../..', import.meta.url).pathname, '.dev', 'e2e-flow-timing.json');
+const TIMING_HISTORY_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '.dev', 'e2e-flow-timing.json');
 const TIMING_EWMA_ALPHA = 0.3;
 
 function loadTimingHistory() {
