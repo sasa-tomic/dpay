@@ -2231,7 +2231,9 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
               </Text>
             ) : null}
             <Text testID="convert-chain-phase2" style={S.fieldLegLabel}>
-              {M.convert.chain.phase2Leg(midSymbol, record.outSymbol, venueDisplayName(record.venue2Id ?? record.venueId))}
+              {/* The IC leg's OWN venue (the frozen plan's last leg) — the cefi venue at
+                  record.venueId would misattribute the phase-2 quote on a 1-leg chain. */}
+              {M.convert.chain.phase2Leg(midSymbol, record.outSymbol, venueDisplayName(chain!.icLegs[chain!.icLegs.length - 1]!.venueId))}
             </Text>
           </View>
         );
