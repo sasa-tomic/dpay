@@ -23,8 +23,8 @@ type Wrapped = {prev: typeof fetch};
 const wrappers: Wrapped[] = [];
 
 /** Wrap globalThis.fetch (ON TOP of the harness rewrite — setupFlow installed first, so this
- *  sees the app's ORIGINAL url strings). Returns a state object the closure fills in. */
-function wrapFetch(handlers: (url: URL, init: RequestInit | undefined, input: RequestInfo | URL) => Promise<Response> | undefined): void {
+ *  sees the app's ORIGINAL url strings). */
+function wrapFetch(handlers: (parsed: URL, init: RequestInit | undefined) => Promise<Response | undefined>): void {
   const prev = globalThis.fetch;
   wrappers.push({prev});
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -35,18 +35,23 @@ function wrapFetch(handlers: (url: URL, init: RequestInit | undefined, input: Re
     } catch {
       return prev(input, init);
     }
-    const handled = await handlers(parsed, init, input);
+    const handled = await handlers(parsed, init);
     return handled ?? prev(input, init);
   }) as typeof fetch;
 }
 
-/** Undo every wrapper this module installed (afterEach of every file that uses it). */
+/** Undo every wrapper this module installed (afterEach of every file that uses it), and reset
+ *  the rail OPERATOR overrides the app captured at boot — setSolanaRpcUrl/setEvmRpcUrl win over
+ *  the test overrides for the whole module session, so a rail enabled for one flow must be
+ *  cleared before the next one boots, or its placeholder endpoint pollutes every later fetch. */
 export function disposeConvertStubs(): void {
   while (wrappers.length > 0) {
     globalThis.fetch = wrappers.pop()!.prev;
   }
   delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;
   delete (globalThis as {__DPAY_TEST_EVM_SIGN?: unknown}).__DPAY_TEST_EVM_SIGN;
+  setSolanaRpcUrl('');
+  setEvmRpcUrl('');
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -110,7 +115,8 @@ export async function icpAccountIdHex(publicHex: string): Promise<string> {
 
 // --- the SOL rail: enable + the in-memory RPC simulator -------------------------------------------
 
-import {SOLANA_RPC_STORAGE_KEY} from '../../../config/constants';
+import {SOLANA_RPC_STORAGE_KEY, setSolanaRpcUrl} from '../../../config/constants';
+import {setEvmRpcUrl} from '../../../evm/endpoints';
 
 /**
  * Turn the SOL rail ON the way production configures it: the OPERATOR override (Settings ▸
@@ -138,6 +144,7 @@ type SolAccountsSpec = {
  *  port: a mint absent from `tokens`/`token` answers null, a real known-absent). */
 function solAccountsAnswer(params: unknown[], spec: SolAccountsSpec): unknown {
   const addresses = params[0] as string[];
+  void addresses;
   if (!Array.isArray(addresses)) throw new Error('solAccountsAnswer: params[0] is not an array');
   const owner = addresses[0];
   const toB64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
@@ -155,7 +162,7 @@ function solAccountsAnswer(params: unknown[], spec: SolAccountsSpec): unknown {
     return {lamports: 1461600, owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: [toB64(b), 'base64'], executable: false, rentEpoch: 0, space: 82};
   };
   const tokens = spec.tokens ?? {};
-  const value = addresses.map((addr, i) => {
+  const value = addresses.map((_addr, i) => {
     if (i === 0) {
       return spec.lamports == null ? null : {lamports: spec.lamports, owner: '11111111111111111111111111111111', data: ['', 'base64'], executable: false, rentEpoch: 0, space: 0};
     }
@@ -254,7 +261,7 @@ export function solSentTxs(): Array<{signature: string; raw: string}> {
 
 /** Install the in-memory SOL RPC simulator (the seam every SOL flow uses, checked per-call in
  *  app/solana/rpc.ts — no fetch involved, so it composes with every fetch wrapper). */
-export function installSolRpcStub(cfg: SolRpcCfg = {}): void {
+export function installSolRpcStub(cfg: SolRpcStubCfg = {}): void {
   solSent.length = 0;
   const stub: SolanaRpcStub = {
     getMultipleAccounts: ((p: unknown[]) => solAccountsAnswer(p, {lamports: 5000000000, token: {amount: '2500000', decimals: 6}})) as SolanaRpcStub['getMultipleAccounts'],
@@ -283,7 +290,6 @@ export function installSolRpcStub(cfg: SolRpcCfg = {}): void {
   } as unknown as SolanaRpcStub;
   (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = stub;
 }
-type SolCfg = SolRpcStubCfg;
 
 // --- the Jupiter test-stub upstream (RELAY-side state; configure + read back) ---------------------
 
