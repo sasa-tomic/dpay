@@ -25,14 +25,16 @@
 //   polls /api/v1/health for < READY_TIMEOUT_MS; the relay is SIGTERM'd cleanly on teardown.
 // - Picks a FREE port per run (no port collisions).
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { trackChild, untrackChild } from './procs.mjs';
+import { profSpan } from './profile.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
+const E2E_DIR = __dirname;
 // Dedicated, isolated cargo target dir for the e2e relay (gitignored under `.dev/`). Nothing else
 // in the build graph writes here, so a featureless `cargo build -p dpay-relay` (from `just check`)
 // can NEVER clobber the e2e binary. This is the root-cause fix for the always-rebuild workaround.
@@ -72,12 +74,76 @@ export async function pickFreePort() {
  * Letting cargo run every time is the true fix: the 0.3s warm cost is negligible vs the ~13s suite,
  * and a source edit is guaranteed to produce a fresh binary. `force=true` (the 404 safety net) cleans
  * the relay crate first so the rebuild is a genuine recompile, not a cargo no-op.
+ *
+ * PER-PROCESS MEMO (a faster no-op, same staleness contract): within ONE harness process —
+ * `just e2e`, where the session relay plus every flow-owned relay (40/84/151, the EVM pipe flows)
+ * spawn concurrently across lanes — the input set's newest mtime is fingerprinted before invoking
+ * cargo. Unchanged inputs since THIS PROCESS's last successful build → skip the ~0.3s invocation
+ * (and, worse, the cargo target-dir flock that serializes concurrent spawns invisibly against a
+ * lane's wall clock). Any input newer than the memo (a source edit, a `just web-prod` re-staging
+ * dist-prod which build.rs embeds) invalidates it, so watch mode — a long-lived process that sees
+ * edits mid-session — stays correct. `force` bypasses the memo.
  */
+let _builtFingerprintMs = null;
+
+/** Newest mtime across every input the relay build consumes: all crate sources (the relay links
+ *  dpay-core/ffi/…), every crate + workspace manifest, and the dist-prod tree build.rs embeds. */
+function relayBuildFingerprintMs() {
+  let newest = 0;
+  const touch = (p) => { try { const m = statSync(p).mtimeMs; if (m > newest) newest = m; } catch {} };
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const name of entries) {
+      if (name === 'target' || name === '.dev') continue;
+      const p = join(dir, name);
+      let s;
+      try { s = statSync(p); } catch { continue; }
+      if (s.isDirectory()) walk(p);
+      else if (/\.(rs|toml)$/.test(name)) touch(p);
+    }
+  };
+  walk(join(REPO_ROOT, 'crates'));
+  touch(join(REPO_ROOT, 'Cargo.toml'));
+  touch(join(REPO_ROOT, 'Cargo.lock'));
+  walk(join(E2E_DIR, 'dist-prod'));
+  // The pinned toolchain's rustc: a rustup update leaves every source mtime untouched but
+  // produces a binary cargo WOULD rebuild — include the compiler binary so the freshness skip
+  // below stays honest. (The rustup-installed toolchain bin, not PATH, is what cargoEnv uses.)
+  for (const tc of ['stable-x86_64-unknown-linux-gnu', 'stable-aarch64-unknown-linux-gnu']) {
+    touch(join(REPO_ROOT, '.dev', 'rustup', 'toolchains', tc, 'bin', 'rustc'));
+  }
+  return newest;
+}
+
+/**
+ * CROSS-PROCESS freshness skip: cargo rebuilds iff some input is newer than the OUTPUT binary, so
+ * a binary newer than every fingerprint input is exactly cargo's own no-op — invoking cargo to
+ * confirm costs a 2.4s warm no-op idle (9s under load, measured 2026-09-28: the fingerprint walk
+ * + full crate-graph validation is NOT free). This is the per-PROCESS memo made persistent; the
+ * staleness contract is identical (any source/manifest/dist-prod/toolchain edit moves an input
+ * newer than the binary → cargo runs). `force` bypasses everything.
+ */
+function relayBinaryIsFresh() {
+  try {
+    return statSync(RELAY_BIN).mtimeMs > relayBuildFingerprintMs();
+  } catch {
+    return false; // no binary (or unreadable inputs) → let cargo decide
+  }
+}
+
 export async function ensureRelayBuilt(opts = {}) {
   if (opts.force) {
     console.log('[relay] force: cleaning the dpay-relay crate before rebuild…');
     const cc = await runCargo(['clean', '-p', 'dpay-relay'], 60_000);
     if (cc !== 0) console.warn(`[relay] cargo clean -p dpay-relay exited ${cc} (continuing)`);
+  } else if (_builtFingerprintMs != null) {
+    const fp = relayBuildFingerprintMs();
+    if (fp <= _builtFingerprintMs) return; // unchanged since this process's last build — cargo would no-op
+    _builtFingerprintMs = null; // inputs moved: re-run cargo below
+  } else if (relayBinaryIsFresh()) {
+    _builtFingerprintMs = relayBuildFingerprintMs();
+    return; // binary newer than every input — cargo's own no-op, verified without invoking cargo
   }
   console.log(`[relay] cargo build dpay-relay --features test-helpers into ${E2E_TARGET_DIR} (cargo fingerprints)…`);
   const code = await runCargo(['build', '-p', 'dpay-relay', '--features', 'test-helpers'], opts.timeoutMs ?? 300_000);
@@ -85,6 +151,7 @@ export async function ensureRelayBuilt(opts = {}) {
   if (!existsSync(RELAY_BIN)) {
     throw new Error(`relay build reported success but ${RELAY_BIN} is missing — did the package/bin name change?`);
   }
+  _builtFingerprintMs = relayBuildFingerprintMs();
 }
 
 function cargoEnv() {
@@ -163,14 +230,18 @@ async function probeFaucetRoute(baseURL, timeoutMs = 3_000) {
    * the isolated dir and respawns, then re-probes. A second 404 is a hard, loud error (never silent).
    */
 export async function startRelay(opts = {}) {
+  const stopBuild = profSpan('relay.cargoBuild');
   await ensureRelayBuilt();
+  stopBuild();
   let attempt = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     attempt++;
     const { port, baseURL, stop, stdout, stderr } = await spawnOnce(opts);
     try {
+      const stopHealth = profSpan('relay.healthWait');
       await waitForHealth(baseURL, opts.readyTimeoutMs ?? READY_TIMEOUT_MS);
+      stopHealth();
       // Safety-net probe: confirm the feature-gated route is live.
       if (await probeFaucetRoute(baseURL)) {
         return { port, baseURL, stop };
@@ -254,6 +325,12 @@ async function spawnOnce(opts = {}) {
     // can never leak into the harness relay.
     DPAY_TROCADOR_API_KEY: 'e2e-stub-trocador-key',
     DPAY_TROCADOR_API_BASE: `http://127.0.0.1:${port}/api/v1/test/trocador-upstream`,
+    // The partner-agreement's 60s/trade-id upstream status window stood DOWN for the stub
+    // world (2026-09-28): the offline venue has no partner budget to protect, and the
+    // window was pacing every cefi lifecycle transition at ~55s (the app's engine honestly
+    // waits out the 429 Retry-After). The knob is test-helpers-only relay-side, so prod
+    // keeps the promise by construction. Same deliberate-per-spawn rule as the block above.
+    DPAY_TROCADOR_STATUS_SPACING_SECS: '0',
     // Flow 185/186/189 (2026-09-16): the Jupiter proxy's upstream — the relay's own
     // test-helpers stub on this same server (keyless venue, so no credential vars). Same
     // deliberate-per-spawn rule as the two blocks above: named HERE so a shell-exported

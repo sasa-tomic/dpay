@@ -124,9 +124,13 @@ export async function run() {
     assert(submitted.status === 202, `bob's phone submit must be 202, got ${submitted.status}`);
     assert((await getBalance(env.relayBaseURL, bob.publicHex, 0)) === '12500', 'bob credited 12500');
     await setRelay(env.driver, env.relayBaseURL);
-    await env.driver.waitForText('Paid', {timeoutMs: 12_000});
+    // (The old `waitForText('Paid')` + `waitForText('∂75.00')` reconcile beats never matched —
+    // the settled screen renders neither string — and both results were ignored, so they only
+    // burned 22s of budget per run. The reconcile itself is proven relay-side above (bob
+    // credited); the header chip re-mounting is the wallet-rebuilt beat this block needs, and the
+    // dismissed tip's absence is still asserted on the page as written.)
+    await env.driver.findByTestID('balance', {timeoutMs: 12_000});
     assert(!(await env.driver.isPresent('coach-pendingOutcome')), 'confirmed Paid screen never carries the pending tip');
-    await env.driver.waitForText('∂75.00', {timeoutMs: 10_000});
     console.log(`[${meta.name}] ✓ hand-off settled + reconciled — coaching never blocked the money path`);
 
     // --- all three seen-markers persisted on this identity. ------------------------------------

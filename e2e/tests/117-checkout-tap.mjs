@@ -35,6 +35,7 @@ import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, railPrincipalText, icpCatalog,
 } from '../harness/lib.mjs';
+import { scaled } from '../harness/driver.mjs';
 import {
   generateKeypair, decodeRequest, b64urlEncode, icpPrincipalBytes, icpTransferArgBytes,
   icpSignUpdate, icpSignReadState,
@@ -91,16 +92,21 @@ async function getJson(url) {
   }
 }
 
-/** Poll a value until it is non-null, or fail with what was seen. */
+/** Poll a value until it is non-null, or fail with what was seen. The deadline rides the
+ *  host-load scale (the reason driver.mjs exports `scaled`): this poll's 20s is a RAW deadline
+ *  that sits outside the driver's method-level waits, and under the machine-global gate's
+ *  one-shell-per-run policy a full pool shares its shell, so an unscaled raw deadline
+ *  false-fired RED mid-suite (117 first RED, 2026-09-27, box load 9+) while staying green solo. */
 async function until(what, read, timeoutMs = 20_000) {
-  const deadline = Date.now() + timeoutMs;
+  const budget = scaled(timeoutMs);
+  const deadline = Date.now() + budget;
   let last = null;
   while (Date.now() < deadline) {
     last = await read();
     if (last) return last;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  throw new Error(`${what} never happened within ${timeoutMs}ms (last: ${JSON.stringify(last)})`);
+  throw new Error(`${what} never happened within ${budget}ms (last: ${JSON.stringify(last)})`);
 }
 
 export async function run() {

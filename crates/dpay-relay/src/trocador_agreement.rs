@@ -51,7 +51,7 @@
 //! # 3. Upstream rate limiting (the promised organic-demand pattern)
 //!
 //! The upstream status read is the FALLBACK channel (webhooks are primary): at most ONE
-//! upstream read per trade_id per 60 s — fixed, no env (it is the promise). Within the window
+//! upstream read per trade_id per 60 s — the promise. Within the window
 //! the route answers 429 with the house `dpayRelayError` marker + `Retry-After` (the remaining
 //! seconds); webhook-served responses never count against the window. The rate and
 //! trade-creation routes are bounded per client IP — defaults 6/min and 4/min, overridable via
@@ -59,6 +59,15 @@
 //! upstream-bound calls: 400-class device errors, the unconfigured 503, webhook-served cache
 //! reads and the webhook receiver itself are exempt. Counters are in-process fixed windows (a
 //! poison-tolerant `Mutex<HashMap>`, pruned when large) — no new dependencies, no shared state.
+//!
+//! ONE deliberate seam on the 60 s spacing (2026-09-28): the OFFLINE test world has no
+//! partner budget to protect, and the e2e cefi flows were spending ~55 s per lifecycle
+//! transition waiting out the 429 Retry-After. `main.rs` therefore reads
+//! `DPAY_TROCADOR_STATUS_SPACING_SECS` under `#[cfg(feature = "test-helpers")]` ALONE —
+//! the same reasoning as the app-side engine seam (`app/config/convert.ts` stands its
+//! trocador poll floor down when `__DPAY_TEST_CONVERT_ENGINE` is present). A prod binary
+//! is built without the feature, so the promise is a compile-time property there: the env
+//! cannot stand it down, and the default stays exactly 60.
 //!
 //! # The order store
 //!
@@ -108,8 +117,9 @@ pub const WEBHOOK_PATH: &str = "/api/v1/trocador/webhook";
 pub const DEFAULT_RATE_PER_MIN: u32 = 6;
 /// The agreement's per-client trade-creation bound (`DPAY_TROCADOR_TRADE_PER_MIN` default).
 pub const DEFAULT_TRADE_PER_MIN: u32 = 4;
-/// The promised status-read spacing per trade_id: at most one UPSTREAM read per minute. Fixed —
-/// no env var on purpose (it is the promise; module doc §3).
+/// The promised status-read spacing per trade_id: at most one UPSTREAM read per minute. The
+/// DEFAULT and the prod-only value — the only code that may install a smaller window is
+/// `main.rs` under `#[cfg(feature = "test-helpers")]` (the offline stub world; module doc §3).
 pub const STATUS_SPACING_SECS: u64 = 60;
 /// House `dpayRelayError` codes for the three 429s (same marker contract as the proxy's 503/504).
 pub const RATE_LIMITED_CODE: &str = "trocador-rate-limited";
@@ -173,6 +183,16 @@ pub struct AgreementConfig {
     pub rate_per_min: u32,
     /// `DPAY_TROCADOR_TRADE_PER_MIN` — per-client per-minute trade-creation bound (default 4).
     pub trade_per_min: u32,
+    /// The upstream status-read spacing in seconds (module doc §3). Defaults to
+    /// [`STATUS_SPACING_SECS`] — the promise. The ONLY setter of a smaller value is the
+    /// offline test world: `main.rs` reads `DPAY_TROCADOR_STATUS_SPACING_SECS` under
+    /// `#[cfg(feature = "test-helpers")]` alone, so a prod binary (built without the
+    /// feature) cannot stand the promise down even with the env set — it is a
+    /// compile-time property there, not a config default. Mirrors the app-side engine
+    /// seam (`app/config/convert.ts` stands the trocador poll floor down when
+    /// `__DPAY_TEST_CONVERT_ENGINE` is present): an offline stub world has no partner
+    /// budget to protect.
+    pub status_spacing_secs: u64,
 }
 
 impl Default for AgreementConfig {
@@ -184,6 +204,7 @@ impl Default for AgreementConfig {
             trust_proxy: false,
             rate_per_min: DEFAULT_RATE_PER_MIN,
             trade_per_min: DEFAULT_TRADE_PER_MIN,
+            status_spacing_secs: STATUS_SPACING_SECS,
         }
     }
 }
@@ -250,6 +271,9 @@ pub struct Agreement {
     trust_proxy: bool,
     rate_per_min: u32,
     trade_per_min: u32,
+    /// The upstream status-read spacing this instance enforces (seconds). The promise's 60
+    /// unless the offline test world stood it down (see [`AgreementConfig::status_spacing_secs`]).
+    status_spacing_secs: u64,
     /// The record sink — both the access log and the order store ride ONE backend choice
     /// (`DPAY_TROCADOR_PG_DSN` set ⇒ PG, else JSONL), never a mix.
     store: Store,
@@ -364,6 +388,7 @@ impl Agreement {
             trust_proxy: config.trust_proxy,
             rate_per_min: config.rate_per_min,
             trade_per_min: config.trade_per_min,
+            status_spacing_secs: config.status_spacing_secs,
             store,
             orders: Mutex::new(orders),
             limiter: Mutex::new(HashMap::new()),
@@ -580,13 +605,17 @@ impl Agreement {
     /// window BEFORE the call — a failed upstream read still hit the venue's infra, and the
     /// promise bounds reads, not successes. `Err(remaining)` = 429 + `Retry-After`.
     /// Webhook-served responses never reach this gate (their call site returns first).
+    ///
+    /// The window length is `status_spacing_secs` (the promise's 60 unless the offline
+    /// test world stood it down — see [`AgreementConfig::status_spacing_secs`]); 0 never
+    /// throttles (`elapsed < 0` is never true).
     pub fn admit_status(&self, trade_id: &str) -> Result<(), u64> {
         let now = (self.now)();
         let mut map = self.spacing.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(&last) = map.get(trade_id) {
             let elapsed = now.saturating_sub(last);
-            if elapsed < STATUS_SPACING_SECS {
-                return Err(STATUS_SPACING_SECS - elapsed);
+            if elapsed < self.status_spacing_secs {
+                return Err(self.status_spacing_secs - elapsed);
             }
         }
         if map.len() > MAP_PRUNE_LEN {

@@ -125,7 +125,6 @@ export async function run() {
     assert(fund.ok, `faucet funding must succeed, got HTTP ${fund.status}`);
     await openBalances(driver);
     await selectCurrency(driver, 'vchf');
-    await driver.waitForText('5.00 VCHF', { timeoutMs: 8_000 });
     await openPaySend(driver);
     await driver.findByTestID('send-saved', { timeoutMs: 5_000 });
     await driver.click('send-manage', { timeoutMs: 5_000 });

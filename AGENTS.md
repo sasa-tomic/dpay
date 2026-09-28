@@ -107,6 +107,10 @@ and fix, never raise the budget. `node scripts/smoke-watch.mjs` is the watchdog:
 `/home/sat/projects/dpay/tmp/smoke-watch-status.json` (machine-checkable: `ok`, `verdict`,
 `wallSeconds`, `overBudget`, `slowest`), prints a one-line verdict, and exits nonzero when over.
 
+## Parallel agents / CPU
+
+Never launch chrome-headless-shell (or any chrome) directly; browser access goes only through the harness recipes (`just e2e`, `just e2e-visual`, `just web-smoke`, ...), which share ONE machine-wide shell via the cross-run gate in `e2e/harness/browser.mjs`. Browser access is serialized machine-wide by `/tmp/opencode/dpay-chrome.lock`: parallel runs may QUEUE at the browser step for minutes — that is normal, do not kill anything to "fix" it, and never pkill chrome globally (the box runs other projects' browsers and a production relay). `just e2e-sweep` reaps dead discovery files and idle clientless gate shells; run it if the box feels hot.
+
 ## E2e flow catalog
 
 **`FLOWS.md`** is the authoritative manifest of every tested user flow, organized by journey, and is GENERATED from each flow's `meta` — it is the only place the flow count lives, so do not copy the count here again (the copy that used to sit on this line had drifted to two different wrong numbers in one sentence). Read it to see what's covered and how to add a new flow. Run `just e2e` (all) or `DPAY_E2E_FILTER=NN node e2e/run.mjs` (one flow). Inner-loop e2e recipes (all offline, seconds): `just e2e` (the full default suite; the optional store capture is flow 39 via `just e2e-store`); `just e2e-visual` (pixel-diff flow 40 standalone — for fast iteration after a UI tweak; flow 40 ALSO runs in the full `e2e` suite so `just verify` already covers it); `just e2e-visual-seed` (regenerate the visual baselines after an intentional UI change — commit the new baselines); `just e2e-watch` (file→journey re-run on save — the shared relay+web+browser session persists across re-runs for sub-5s feedback); `just e2e-watch-filter <token>` (watch mode pinned to a journey/id/name/covers slug).

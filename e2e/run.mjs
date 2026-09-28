@@ -32,8 +32,11 @@
 // regenerates FLOWS.md from it.
 import os from 'node:os';
 import fs from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { stopSession, killTrackedChildren, _testCtx, dumpDiagnosticsFor, laneBrowser, primeBrowserShards } from './harness/lib.mjs';
 import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
+import { PROFILING, profileSnapshot, profileOpTotals, profilePhaseTotals } from './harness/profile.mjs';
 
 // Default concurrency: 12. The host has 16 cores; each parallel test is one chrome incognito context
 // against the shared relay + web + browser process. 12 leaves headroom for the relay/web/V8 and is
@@ -318,6 +321,54 @@ async function runPool(tests, concurrency, timeoutScale, shards = 1) {
 }
 
 /**
+ * Per-flow duration history for LONGEST-FIRST scheduling (LPT): the pool's wall time is bounded by
+ * the makespan, and the classic minimizer is to start the longest jobs first — otherwise the one
+ * 136s flow (198, pinned by the relay's 60s status-spacing agreement) starts mid-run and drags a
+ * single-lane tail minutes past the last short flow. The history is an EWMA of measured wall times
+ * persisted across runs (`.dev/e2e-flow-timing.json`, gitignored like the rest of .dev/); a flow
+ * with no history falls back to its `meta.timeoutMs` cap (corr ≈ 0.5 with actual duration — good
+ * enough to keep the heavy convert/withdraw flows at the head). Absent history AND cap → the
+ * default budget, so brand-new flows sort by size class rather than alphabetically.
+ */
+const TIMING_HISTORY_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '.dev', 'e2e-flow-timing.json');
+const TIMING_EWMA_ALPHA = 0.3;
+
+function loadTimingHistory() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(TIMING_HISTORY_PATH, 'utf8'));
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch { return {}; }
+}
+
+function recordTimingHistory(results) {
+  try {
+    const hist = loadTimingHistory();
+    for (const [file, r] of results) {
+      if (typeof r?.ms !== 'number' || r.ms <= 0) continue;
+      const prev = hist[file]?.ewmaMs;
+      hist[file] = {
+        ewmaMs: prev == null ? r.ms : Math.round(prev * (1 - TIMING_EWMA_ALPHA) + r.ms * TIMING_EWMA_ALPHA),
+        runs: (hist[file]?.runs ?? 0) + 1,
+        lastMs: Math.round(r.ms),
+      };
+    }
+    fs.mkdirSync(dirname(TIMING_HISTORY_PATH), { recursive: true });
+    fs.writeFileSync(TIMING_HISTORY_PATH, JSON.stringify(hist));
+  } catch (e) {
+    console.error(`  (timing-history write failed: ${e instanceof Error ? e.message : e})`);
+  }
+}
+
+/** Longest-first ordering (LPT scheduling): start the expensive flows while every lane is free.
+ *  PURELY a schedule — it changes NO assertion, no lane count, no timeout; it only decides the
+ *  order tests START in, so no flow's result can depend on it beyond wall-clock contention. */
+function longestFirst(tests) {
+  const hist = loadTimingHistory();
+  const estimate = (t) => hist[t.file]?.ewmaMs ?? t.meta?.timeoutMs ?? FALLBACK_TIMEOUT_MS;
+  return [...tests].sort((a, b) => estimate(b) - estimate(a));
+}
+
+/**
  * Run a SUBSET of tests through the bounded-parallel pool, print the per-test summary + coverage
  * matrix for the subset, optionally tear down the shared session, and return the verdict. This is
  * the shared runner both `main()` (the all-flows `just e2e` entry) and `e2e/watch.mjs` (the long-
@@ -344,7 +395,8 @@ async function runPool(tests, concurrency, timeoutScale, shards = 1) {
  * `keepSession` is FALSE — a watch re-run of a single journey is not the full-suite gate, so the
  * signal doesn't apply there.
  */
-export async function runTestsSubset(tests, opts = {}) {
+export async function runTestsSubset(testsIn, opts = {}) {
+  let tests = testsIn;
   const startedAt = Date.now();
   const { concurrency: explicitConcurrency, timeoutScale: explicitScale, keepSession = false } = opts;
 
@@ -352,6 +404,11 @@ export async function runTestsSubset(tests, opts = {}) {
     ? { concurrency: explicitConcurrency, auto: false, load: hostLoadFactor() }
     : resolveConcurrency();
   const timeoutScale = explicitScale ?? resolveTimeoutScale(resolved.load, resolved.concurrency);
+
+  // Longest-first start order (makespan minimization): the heavy flows claim lanes while all lanes
+  // are free, instead of surfacing as a single-lane tail at the end. Pure re-ordering — same tests,
+  // same assertions, same timeouts.
+  tests = longestFirst(tests);
 
   // Publish the scale to the driver so a flow's INNER waits stretch with the host exactly as its
   // wall-clock budget does. Two notions of "how slow is this host" is how a loaded machine produced
@@ -366,7 +423,9 @@ export async function runTestsSubset(tests, opts = {}) {
 
   // Timing seam: testruns.py points DPAY_TESTRUNS_TIMING at a file; dump per-flow wall
   // times so `just timing e2e` shows exactly where the suite's time went. Best-effort —
-  // a dump failure must never affect the run itself.
+  // a dump failure must never affect the run itself. The same measurements also feed the
+  // cross-run EWMA history the longest-first scheduler reads on the next run.
+  recordTimingHistory(results);
   const timingPath = process.env.DPAY_TESTRUNS_TIMING;
   if (timingPath) {
     try {
@@ -385,6 +444,11 @@ export async function runTestsSubset(tests, opts = {}) {
   if (!keepSession) await stopSession();
 
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(2);
+
+  // Profiler dump (DPAY_E2E_PROFILE=1): write the phase/op spans + print the "where did the
+  // seconds go" summary. Best-effort — never affects the verdict. Skipped in watch mode
+  // (keepSession), where a partial re-run would produce a misleading cumulative dump.
+  if (PROFILING && !keepSession) dumpProfile(tests, results, elapsed);
   const passed = [...results.values()].filter((r) => r.ok).length;
   const total = tests.length;
 
@@ -438,6 +502,54 @@ export async function runTestsSubset(tests, opts = {}) {
   }
 
   return { passed, total, elapsed, firstFailure, results, timeoutScale };
+}
+
+/**
+ * Profiler summary + JSON dump (DPAY_E2E_PROFILE=1). Prints three tables — suite-level op totals
+ * (which op class eats the wall clock), phase totals (where the fixed costs sit), and the slowest
+ * flows with their phase split — and writes the full span dump to `$DPAY_E2E_PROFILE` when it is a
+ * path, else `e2e/shots/profile-<ts>.json`.
+ */
+function dumpProfile(tests, results, elapsed) {
+  try {
+    const opTotals = profileOpTotals();
+    const phaseTotals = profilePhaseTotals();
+    const snap = profileSnapshot();
+
+    console.log('\n--- profile: op totals (all flows, inclusive) ---');
+    for (const t of opTotals.slice(0, 14)) {
+      console.log(`  ${t.op.padEnd(18)} ×${String(t.count).padStart(5)}  total ${(t.totalMs / 1000).toFixed(1)}s  max ${(t.maxMs / 1000).toFixed(2)}s`);
+    }
+    console.log('--- profile: phase totals ---');
+    for (const t of phaseTotals) {
+      console.log(`  ${t.name.padEnd(26)} ×${String(t.count).padStart(4)}  total ${(t.totalMs / 1000).toFixed(1)}s  max ${(t.maxMs / 1000).toFixed(2)}s`);
+    }
+    // Slowest flows with the phase split attributed to them (boot/context/teardown).
+    const byFile = new Map();
+    for (const p of snap.phases) {
+      if (!p.file) continue;
+      let e = byFile.get(p.file);
+      if (!e) { e = { file: p.file, totalMs: 0 }; byFile.set(p.file, e); }
+      e.totalMs += p.ms;
+    }
+    const slow = tests
+      .map((t) => ({ file: t.file, wall: results.get(t.file)?.ms ?? 0, phases: byFile.get(t.file)?.totalMs ?? 0 }))
+      .sort((a, b) => b.wall - a.wall)
+      .slice(0, 12);
+    console.log('--- profile: slowest flows (wall vs harness-phase time) ---');
+    for (const s of slow) {
+      console.log(`  ${s.file.padEnd(44)} wall ${(s.wall / 1000).toFixed(2)}s  harness phases ${(s.phases / 1000).toFixed(2)}s`);
+    }
+
+    const out = process.env.DPAY_E2E_PROFILE !== '1' && process.env.DPAY_E2E_PROFILE !== ''
+      ? process.env.DPAY_E2E_PROFILE
+      : new URL('./shots/profile-' + Date.now() + '.json', import.meta.url).pathname;
+    fs.mkdirSync(new URL('.', import.meta.url).pathname + '/shots', { recursive: true });
+    fs.writeFileSync(out, JSON.stringify({ elapsedSec: Number(elapsed), opTotals, phaseTotals, ...snap }, null, 2));
+    console.log(`--- profile: full dump → ${out}`);
+  } catch (e) {
+    console.error(`(profile dump failed: ${e instanceof Error ? e.message : e})`);
+  }
 }
 
 /**

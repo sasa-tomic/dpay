@@ -118,9 +118,10 @@ export async function run() {
     console.log('[95-vchf-pay] faucet 2.10000001 VCHF and wait for in-app refresh…');
     const fund = await faucetAccount(relayBaseURL, account.publicHex, SEED, { currency: CURRENCY });
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
-    // Fork #4: the header figure is the CURRENCY-unit sum ('2.1 Fr' — compact 2-decimal stables);
+    // Fork #4: the header figure is the CURRENCY-unit sum ('2.10 Fr' — compact 2-decimal stables,
+    // trailing zeros KEPT: minFractionDigits=2 — the same form the post-pay '1.10 Fr' below pins);
     // the exact raw seed is asserted flow-side via snapBalances below.
-    await driver.waitForText('2.1 Fr', { timeoutMs: 10_000 });
+    await driver.waitForText('2.10 Fr', { timeoutMs: 10_000 });
 
     const bob = await generateKeypair();
     const aliceBefore = await snapBalances(relayBaseURL, account.publicHex);

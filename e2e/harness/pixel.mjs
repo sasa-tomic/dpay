@@ -106,30 +106,17 @@ export async function comparePng(baselinePath, actualPath, opts = {}) {
   const baselineData = baselinePng.data;
   const actualData = actualPng.data;
 
-  // Build the diff-highlight PNG inline: copy the actual pixels, dim non-diff pixels (×0.25), and
-  // paint diff pixels bright red. RGBA layout, stride 4.
-  const diffPng = new PNG({ width: w, height: h });
-  const diffData = diffPng.data;
-  const dimFactor = 0.25;
+  // Pass 1 — COUNT the differing pixels only. The diff-highlight buffer is ~5.3MB at
+  // 780×1688; building it (fill + per-pixel dim math) for a surface that turns out clean
+  // was pure waste on the (common) no-drift path. Pass 2 builds it only when diff > 0.
   let diff = 0;
   for (let i = 0; i < total; i++) {
     const o = i * 4;
     const dr = Math.abs(baselineData[o] - actualData[o]);
-    const dg = Math.abs(baselineData[o + 1] - actualData[o + 1]);
-    const db = Math.abs(baselineData[o + 2] - actualData[o + 2]);
-    const isDiff = dr > perChannelDelta || dg > perChannelDelta || db > perChannelDelta;
-    if (isDiff) {
-      diffData[o] = 255;     // R
-      diffData[o + 1] = 0;   // G
-      diffData[o + 2] = 0;   // B
-      diffData[o + 3] = 255; // A
+    if (dr > perChannelDelta
+        || Math.abs(baselineData[o + 1] - actualData[o + 1]) > perChannelDelta
+        || Math.abs(baselineData[o + 2] - actualData[o + 2]) > perChannelDelta) {
       diff++;
-    } else {
-      // Dim the actual pixel so the red splotches are the visual signal.
-      diffData[o] = Math.round(actualData[o] * dimFactor);
-      diffData[o + 1] = Math.round(actualData[o + 1] * dimFactor);
-      diffData[o + 2] = Math.round(actualData[o + 2] * dimFactor);
-      diffData[o + 3] = 255;
     }
   }
 
@@ -139,6 +126,29 @@ export async function comparePng(baselinePath, actualPath, opts = {}) {
 
   let diffPath = null;
   if (diff > 0) {
+    // Pass 2 — build the highlight PNG: copy the actual pixels, dim non-diff pixels (×0.25),
+    // paint diff pixels bright red. RGBA layout, stride 4.
+    const diffPng = new PNG({ width: w, height: h });
+    const diffData = diffPng.data;
+    const dimFactor = 0.25;
+    for (let i = 0; i < total; i++) {
+      const o = i * 4;
+      const isDiff = Math.abs(baselineData[o] - actualData[o]) > perChannelDelta
+        || Math.abs(baselineData[o + 1] - actualData[o + 1]) > perChannelDelta
+        || Math.abs(baselineData[o + 2] - actualData[o + 2]) > perChannelDelta;
+      if (isDiff) {
+        diffData[o] = 255;     // R
+        diffData[o + 1] = 0;   // G
+        diffData[o + 2] = 0;   // B
+        diffData[o + 3] = 255; // A
+      } else {
+        // Dim the actual pixel so the red splotches are the visual signal.
+        diffData[o] = Math.round(actualData[o] * dimFactor);
+        diffData[o + 1] = Math.round(actualData[o + 1] * dimFactor);
+        diffData[o + 2] = Math.round(actualData[o + 2] * dimFactor);
+        diffData[o + 3] = 255;
+      }
+    }
     diffPath = await writeDiffPng(diffPng, actualPath);
   }
 

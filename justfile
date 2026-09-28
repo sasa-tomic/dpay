@@ -146,24 +146,33 @@ wire-layout:
     cargo run -p dpay-fixture --release -- wire-layout dfx/wire_layout.json
     cargo run -p dpay-fixture --release -- checkout-open dfx/checkout_open_signing.json
 
+# reap the machine-global e2e chrome gate: remove dead discovery files, kill idle clientless
+# gate shells (>10min old, scoped to this gate's /tmp/opencode/dpay-chrome-* marker — never
+# foreign browsers, never shells with live targets), drop a stale lock. Safe anytime; runs as
+# the pre-step of `just e2e`.
+e2e-sweep:
+    node e2e/harness/sweep.mjs
+
 # radical e2e: drive the REAL app (App.tsx via react-native-web) + REAL relay (FakeLedger) + REAL
 # browser (chrome-headless-shell), offline + seconds-fast. The inner-loop UI/flow gate — it BOTH
 # drives every flow through the real app AND screenshots each state (shots land in e2e/shots/),
 # superseding the old parallel-component ui/ harness (removed). Add a flow = add `e2e/tests/NN-name.mjs`.
 # Runs the DEFAULT enumeration: every flow except `meta.optional` render-only capture harnesses
 # (flow 39 runs via `just e2e-store`; the flow catalog lives in FLOWS.md — never hardcode a count here).
+# The sweep pre-step clears dead discovery files / idle orphaned gate shells before the run
+# (machine-global gate: e2e/harness/browser.mjs; parallel runs QUEUE on the browser lock).
 e2e:
-    python3 scripts/testruns.py run e2e --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && node run.mjs'
+    python3 scripts/testruns.py run e2e --sh 'node e2e/harness/sweep.mjs && cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && node run.mjs'
 
-# visual-regression gate (fast iteration on flow 40 alone): re-capture the 5 primary surfaces and
-# pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift >0.5%. Catches the
-# exact class of style/layout regression that sails through the testID+textContent e2e net. NOTE:
-# flow 40 IS part of the default suite (see FLOWS.md for the canonical count), so `just verify` → `check e2e` already runs the pixel-diff —
-# this standalone recipe re-runs ONLY flow 40 in isolation for fast feedback after a UI tweak (no
-# banner, no other flows). On an intentional UI change, regenerate the baselines via
-# `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
+# visual/pixel gate: the flows whose SUBJECT is pixels — screenshot capture, pixel-diff baselines,
+# QR decodeability, geometry-fits-viewport, offline boot of the shipped bytes. Nine flows:
+# 35 (UX tour captures), 39 (store screens), 40 + 84 (light/dark pixel-diff), 78 (QR scannable),
+# 83 (mobile viewport), 146 (money forms fit), 151 (offline web boot), 158 (header fits).
+# These stay chrome-bound forever (the DOM-flow net migrated to jest); this recipe is their fast
+# iteration entry. Flow 40 ALSO runs in the default `just e2e` suite (see FLOWS.md; never hardcode
+# a count here). On an intentional UI change, regenerate baselines via `just e2e-visual-seed`.
 e2e-visual:
-    python3 scripts/testruns.py run e2e-visual --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=40-visual-regression node run.mjs'
+    python3 scripts/testruns.py run e2e-visual --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=35-ux-tour,39-store-screens,40-visual-regression,78-qr-scannable,84-visual-dark,151-offline-web-boot,83-mobile-viewport,146-money-forms-fit,158-header-fits node run.mjs'
 
 # regenerate the visual-regression baselines from the current app surfaces (run after an intentional
 # UI/style change). Writes e2e/shots/baselines/<surface>.png for each of the 5 surfaces. COMMIT the

@@ -35,7 +35,8 @@ export async function run() {
     // 1. Onboard a funded wallet (∂100 DEMO via the onboarding faucet).
     console.log('[39-store-screens] onboarding…');
     await onboardWallet(driver, 'Alex');
-    await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
+    // (∂100.00 funding is asserted by the shared preamble on the DEMO row — no bare wait here;
+    // it never resolved on Pay after the currency-first change and only burned its timeout.)
 
     const account = await accountOf(driver);
     const hex = account.publicHex;
@@ -46,8 +47,8 @@ export async function run() {
     await faucetCurrency(relayBaseURL, hex, 1, 5_000_000); // 0.05000000 BTC
     await faucetCurrency(relayBaseURL, hex, 2, 25_000_000); // 25.00 USDC
 
-    // Wait for the balance poll to reflect funded amounts.
-    await driver.waitForText('0.05 BTC', { timeoutMs: 8_000 }).catch(() => {});
+    // (The old `waitForText('0.05 BTC')` render beat is gone — the row renders fiat, the text
+    // never appeared, and the funding is relay-side instant anyway; the shots guard themselves.)
 
     // 3. Do a payment so the Ledger has history: Alex requests ∂12.50, an in-test payer wallet
     // settles it on the rail (icrc1_transfer with memo = request nonce).
@@ -70,7 +71,10 @@ export async function run() {
     // === CAPTURE 1: Wallet home (Pay tab) — the hero shot with multi-asset balances ============
     // (∂100 onboarding + ∂12.50 received = ∂112.50 once the balance poll lands.)
     await driver.click('tab-pay', { timeoutMs: 4_000 });
-    await driver.waitForText('∂112.50', { timeoutMs: 8_000 });
+    // (The old `waitForText('∂112.50')` beat never matched — the DEMO balance renders on the
+    // accounts route, never on Pay — and the ignored result only burned its budget. The scanner
+    // mounting is the settle anchor for this shot.)
+    await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
     await driver.screenshot('39-store-wallet');
     console.log('[39-store-screens] ✓ wallet home');
 

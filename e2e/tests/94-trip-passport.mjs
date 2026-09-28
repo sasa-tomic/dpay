@@ -72,10 +72,13 @@ export async function run() {
     await driver.waitGone('practice', { timeoutMs: 8_000 });
     await chooseHomeCurrencyIfPresent(driver);
     // The wallet opens on the chosen CURRENCY; this flow is about the DEMO rail, so say so.
-    await selectDemoAsset(driver);
+    // ∂99.00, not ∂100.00: the practice payment really spent a franc of play money. Read on the
+    // DEMO ROW — the accounts route is the one surface that renders DEMO units (the Pay headline
+    // names the HOME currency, CHF here), so a page-wide wait for '∂99.00' from Pay can never
+    // match (the old statement-position wait silently timed out every run). expectFunded polls
+    // the row we are already looking at.
+    await selectDemoAsset(driver, {expectFunded: '∂99.00'});
     await waitForWallet(driver, { timeoutMs: 10_000 });
-    // ∂99.00, not ∂100.00: the practice payment really spent a franc of play money.
-    await driver.waitForText('∂99.00', { timeoutMs: 15_000 });
 
     const j1 = await readJourney(driver);
     assert(j1, 'journey store must exist after onboarding');

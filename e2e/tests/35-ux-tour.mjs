@@ -37,7 +37,9 @@ export async function run() {
     //    `onboardWallet` helper ends on the Pay tab (it selects DEMO and restores Pay).
     console.log('[35-ux-tour] onboarding…');
     await onboardWallet(driver, 'e2e-tour');
-    await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
+    // (The old bare ∂100.00 wait here was dead code: since the currency-first app change the DEMO
+    // balance renders on the accounts route, never on Pay — the shared preamble asserts funding
+    // there now, so this surface is reached already proven.)
     await driver.screenshot('35-tour-wallet-pay');
     console.log('[35-ux-tour] ✓ shot: onboarded wallet (Pay tab)');
 
@@ -83,10 +85,10 @@ export async function run() {
     // 6. Ledger tab (transaction history — empty initially for a fresh wallet).
     //    The tab is labeled "Transactions" → testID `tab-transactions` (Tab.tsx: `tab-${label.toLowerCase()}`).
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
-    // An empty wallet renders the literal "No payments yet." (Ledger.tsx); wait for it with a
-    // SHORT timeout — the fast-poll seam (150ms) lands it near-instantly, and this is a non-asserting
-    // best-effort render beat, not a correctness gate, so never pay a long timeout here.
-    await driver.waitForText('No payments yet', { timeoutMs: 3_000 }).catch(() => {});
+    // An empty wallet's empty-state copy: the old `waitForText('No payments yet')` beat never
+    // matched (the copy changed) and only burned its timeout; a 3-frame settle is the same
+    // non-asserting render beat at selector speed.
+    await driver.settleFrames(3);
     await driver.screenshot('35-tour-ledger');
     console.log('[35-ux-tour] ✓ shot: ledger');
 

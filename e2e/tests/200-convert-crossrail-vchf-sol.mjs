@@ -270,14 +270,28 @@ export async function run() {
     const sent = await driver.eval(() => globalThis.__E2E_SOL_SENT);
     assertEq(sent.length, 1, 'exactly ONE Solana transaction was ever broadcast');
     assertIncludes(done, sent[0].signature, 'the payout record IS the broadcast signature');
+    // The REVIEW estimate + the final leg both quoted USDC→wrapped-SOL through the relay.
+    // (The confirm loop may move the floor: every review re-key re-fetches the estimate, so
+    // assert SOME floor-sized quote rather than the first one's position.)
+    // The census read is EVENT-DRIVEN, not instantaneous: under pool contention the confirm
+    // leg's quote fetch can still be in flight when a single read fires (measured 2026-09-28:
+    // three full-suite REDs on exactly this assert, every solo run green). Poll the stub state
+    // until the second quote lands (or a bounded budget dies — the asserts below own the
+    // failure), then run the UNCHANGED assertions on the settled state.
+    {
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const s = await jupiterStubState(r2.baseURL);
+        const n = s.quoteCalls.filter((q) => q.inputMint === USDC_MINT && q.outputMint === WRAPPED_SOL_MINT).length;
+        if (n >= 2 || Date.now() > deadline) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
     const jup = await jupiterStubState(r2.baseURL);
     assert(jup != null, 'jupiter stub state present');
     assertEq(jup.unexpected.length, 0, 'jupiter stub saw no unexpected upstream requests');
     assert(jup.userMismatch == null, 'the swap POST carried THIS wallet\'s SOL address');
     assertEq(jup.swapCalls.length, 1, `exactly one swap POST (saw: ${JSON.stringify(jup.swapCalls)})`);
-    // The REVIEW estimate + the final leg both quoted USDC→wrapped-SOL through the relay.
-    // (The confirm loop may move the floor: every review re-key re-fetches the estimate, so
-    // assert SOME floor-sized quote rather than the first one's position.)
     const usdcSolQuotes = jup.quoteCalls.filter((q) => q.inputMint === USDC_MINT && q.outputMint === WRAPPED_SOL_MINT);
     assert(usdcSolQuotes.length >= 2, `the review estimate AND the final leg quoted USDC→wrapped-SOL (saw ${usdcSolQuotes.length})`);
     assert(usdcSolQuotes.some((q) => q.amount === fees.mintFloor.toString()),

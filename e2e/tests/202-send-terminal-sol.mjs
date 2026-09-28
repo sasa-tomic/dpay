@@ -92,6 +92,12 @@ export async function run() {
 
     console.log('[202-send-terminal-sol] Check status → the stub flips → settled…');
     await driver.click('btn-sol-send-check', { timeoutMs: 4_000 });
+    // Anchor the flip on the settled terminal's OWN headline (`sol-send-outcome` mounts ONLY on
+    // the settled panel — SendTerminal's titleTestID). The old bare `waitForText('Sent')` could
+    // resolve off a freshly-polled LEDGER ROW ("Sent") while the send panel still showed the
+    // honest unknown — the 2026-09-28 8-lane RED — leaving the negative asserts below to race
+    // a panel that had not flipped yet.
+    await driver.findByTestID('sol-send-outcome', { timeoutMs: 15_000 });
     assert(await driver.waitForText('Sent', { timeoutMs: 15_000 }),
       'the confirmed read flips the panel to the settled terminal');
     assert(await absent(driver, 'sol-send-unknown-title'), 'the pending headline is gone');

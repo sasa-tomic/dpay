@@ -1,19 +1,19 @@
-// CDP driver — launches chrome-headless-shell (the vendored binary, resolved via browser.mjs) and
-// drives the page with a tiny Puppeteer-core wrapper. Methods are test-flow-shaped: navigate, find
-// by testID (RN renders testID -> web data-testid under RNW — verified), click, type, read text,
-// wait for text, screenshot. Each call has a timeout + descriptive errors; nothing is swallowed.
+// CDP driver — acquires the machine-global chrome-headless-shell through the gate (browser.mjs:
+// discovery-before-spawn + the cross-run admission lock) and drives the page with a tiny
+// Puppeteer-core wrapper. Methods are test-flow-shaped: navigate, find by testID (RN renders
+// testID -> web data-testid under RNW — verified), click, type, read text, wait for text,
+// screenshot. Each call has a timeout + descriptive errors; nothing is swallowed.
 //
 // Per the rules: a fresh browser CONTEXT per run (blank localStorage) so tests are idempotent and
 // independent — the app's first-run key generation runs every time, with a throwaway identity.
-import puppeteer from 'puppeteer-core';
 import { mkdirSync, statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { resolveExecutablePath } from './browser.mjs';
+import { resolveExecutablePath, acquireBrowser } from './browser.mjs';
 import { _testCtx } from './lib.mjs';
 import { installSolAccountsHelper } from './solaccounts.mjs';
-import { trackChild, untrackChild } from './procs.mjs';
+import { PROFILING, profOp, profSpan } from './profile.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
@@ -98,9 +98,15 @@ export class Driver {
   appBoot = null;
   appBooted = false;
 
-  /** Launch the headless browser once (shared across tests in a run). Returns `{browser, stop}` —
-   *  tests create their own fresh incognito CONTEXT from this browser via `create(browser)`, so each
-   *  gets an isolated localStorage/identity without paying the ~1.5s browser-launch cost per test. */
+  /** Acquire the run's browser through the machine-global chrome gate (browser.mjs): reuse the
+   *  singleton shell when one is alive (puppeteer.connect), else launch it under the cross-run
+   *  admission lock. Returns `{browser, stop}` — tests create their own fresh incognito CONTEXT
+   *  from this browser via `create(browser)`, so each gets an isolated localStorage/identity
+   *  without paying a browser-launch cost per test. `stop` DISCONNECTS this connection only;
+   *  when the run's LAST connection drops, the gate leaves a self-launched shell ALIVE (keep-
+   *  alive: the discovery file stays, the next run adopts it in ~300ms instead of paying a
+   *  ~1.5-5s launch; `DPAY_E2E_SHELL_KEEPALIVE=0` restores kill-at-exit) and the sweep reaps it
+   *  once it has been idle past the sweep threshold. */
   static async launchBrowser(opts = {}) {
     const exe = resolveExecutablePath();
     if (!exe) {
@@ -110,58 +116,10 @@ export class Driver {
         '  - set DPAY_CHROMIUM to a real chrome/chromium binary.'
       );
     }
-    const browser = await puppeteer.launch({
-      executablePath: exe,
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--force-color-profile=srgb',
-        '--font-render-hinting=none',
-        '--hide-scrollbars',
-        // The web app is served on a different port than the relay (sirv + the relay's axum). CORS
-        // is a browser-only constraint the REAL phone app never has (Android fetch doesn't enforce
-        // it); rather than add CORS headers to the prod relay JUST for the browser harness, disable
-        // the check in the headless browser. Standard e2e practice; matches what the real app sees.
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
-        ...(opts.extraArgs ?? []),
-      ],
-    }).catch((e) => {
-      const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(`[driver] chromium failed to launch (${exe}):\n${msg}`);
-    });
-    // Register the shell in the child-pid registry (same sync-exit SIGKILL backstop as relay + web).
-    // chrome-headless-shell demonstrably does NOT self-exit on Node death (2026-09-27 incident:
-    // ~30 leaked shells at 50-70% CPU each, load 16+), so "puppeteer will close it" is not a
-    // guarantee — an interrupted teardown must not orphan it.
-    const proc = browser.process?.() ?? null;
-    const pid = proc?.pid ?? null;
-    if (Number.isInteger(pid) && pid > 0) trackChild(pid);
-    const stop = async () => {
-      if (!(Number.isInteger(pid) && pid > 0)) { try { await browser.close(); } catch {} return; }
-      // Graceful CDP close, raced against a hard 5s ceiling: a wedged renderer can make close()
-      // hang forever, and a silently-hanging close is exactly the leak this guards against.
-      let closed = false;
-      try {
-        const timer = new Promise((_, rej) => {
-          const t = setTimeout(() => rej(new Error('[driver] browser.close() timed out after 5s')), 5000);
-          if (typeof t.unref === 'function') t.unref(); // never delay process exit for the timer
-        });
-        await Promise.race([browser.close().then(() => { closed = true; }), timer]);
-      } catch { closed = false; }
-      if (closed) {
-        untrackChild(pid); // clean CDP close — the process is gone, drop the pid
-      } else {
-        // Hung or thrown close: SIGKILL directly. The pid stays tracked, so killTrackedChildren
-        // remains a harmless backstop for as long as this harness process lives.
-        try { proc.kill('SIGKILL'); } catch { /* already dead */ }
-        try { process.kill(pid, 'SIGKILL'); } catch { /* ESRCH — already dead */ }
-      }
-    };
-    return { browser, stop };
+    // shardId > 0 names a SECOND gate slot (its own shell + profile dir) for multi-shell runs —
+    // see browser.mjs gateKey. Same binary, same flags: rendering (and therefore the visual
+    // baselines) is identical on every shard.
+    return acquireBrowser({ executablePath: exe, extraArgs: opts.extraArgs ?? [], shardId: opts.shardId ?? 0 });
   }
 
   /** Attach page diagnostics and retain every unexpected error so teardown fails the flow. */
@@ -241,12 +199,22 @@ export class Driver {
   static async create(browserOrOpts, opts = {}) {
     const shared = browserOrOpts && typeof browserOrOpts.createBrowserContext === 'function' ? browserOrOpts : null;
     const o = shared ? opts : (browserOrOpts && typeof browserOrOpts === 'object' ? browserOrOpts : {});
-    let browser, ownsBrowser;
+    let browser, ownsBrowser, gateStop = null;
     if (shared) { browser = shared; ownsBrowser = false; }
-    else { const launched = await Driver.launchBrowser(o); browser = launched.browser; ownsBrowser = true; }
+    else {
+      const launched = await Driver.launchBrowser(o);
+      browser = launched.browser;
+      ownsBrowser = true;
+      // The gate owns the shell's lifecycle: keep its stop (disconnect + lease teardown) so
+      // close() never sends Browser.close over a connection we don't exclusively own — that
+      // would kill a shell this run only connected to, and orphan the gate's lock.
+      gateStop = launched.stop;
+    }
     // Fresh incognito context per run → fresh localStorage → fresh identity each test.
     const context = await browser.createBrowserContext();
     const page = await context.newPage();
+    // The per-page emulation set is independent protocol state — apply the pieces CONCURRENTLY
+    // (one CDP roundtrip each; serial cost ~150-250ms/flow × 208 flows was pure latency).
     await page.setViewport({ ...VIEWPORT, width: o.width ?? VIEWPORT.width, height: o.height ?? VIEWPORT.height });
     // Pin the clock and the language, always. Both were previously inherited from whatever the host
     // happened to be set to, which is a flake waiting for the first developer in a non-UTC,
@@ -254,18 +222,20 @@ export class Driver {
     // laptop would render the whole suite in German and fail 81 flows at the first assertion, and
     // every ledger timestamp shifts with the host zone. A flow that WANTS another locale asks for
     // it (`setup({locale: 'de-DE'})`); the default is the one the assertions are written against.
-    await page.emulateTimezone(o.timezone ?? 'UTC');
     // `Emulation.setLocaleOverride` is what drives `Intl` — which is exactly where the app reads
     // the device tag from (`i18n/locale.ts` deviceLocaleTag). Chrome's `--lang` flag would not do
     // it: the browser is shared across the whole run, so a per-flow launch flag is not available.
     const cdp = await page.createCDPSession();
-    await cdp.send('Emulation.setLocaleOverride', { locale: o.locale ?? 'en-US' });
     // Wave-4 dual theme: emulate an OS dark scheme (flows pass opts.dark). Applied at the PAGE
     // level so window.matchMedia('(prefers-color-scheme: dark)') — which RNW's Appearance/useColorScheme
     // and the hosts' CSS @media blocks key on — reports dark BEFORE any page script runs.
-    if (o.dark) {
-      await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
-    }
+    await Promise.all([
+      page.emulateTimezone(o.timezone ?? 'UTC'),
+      cdp.send('Emulation.setLocaleOverride', { locale: o.locale ?? 'en-US' }),
+      o.dark ? page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]) : Promise.resolve(),
+    ]);
+    // The init scripts must stay SEQUENTIAL among themselves: they run at registration order and
+    // the seam overrides (solStub/solRpcUrl/evmRpcUrl) deliberately land AFTER injectTestGlobals.
     await page.evaluateOnNewDocument(injectFreezeCss, FREEZE_CSS);
     await page.evaluateOnNewDocument(injectTestGlobals);
     // SOL stub RPC: when a flow requests it (opts.solStub), override the SOLANA_RPC_URL disable so
@@ -304,7 +274,7 @@ export class Driver {
         else globalThis.__DPAY_TEST_EVM_RPC_URL = u;
       }, o.evmRpcUrl);
     }
-    const driver = new Driver(browser, context, page, ownsBrowser);
+    const driver = new Driver(browser, context, page, ownsBrowser, gateStop);
     // The create-time CDP session (locale override lives HERE — a second session stacking another
     // locale override is a protocol error, so flows that switch locale mid-run must reuse this one).
     driver.cdp = cdp;
@@ -312,11 +282,15 @@ export class Driver {
     return driver;
   }
 
-  constructor(browser, context, page, ownsBrowser = true) {
+  constructor(browser, context, page, ownsBrowser = true, gateStop = null) {
     this.browser = browser;
     this.context = context;
     this.page = page;
     this.ownsBrowser = ownsBrowser;
+    // The chrome-gate lease teardown (browser.mjs), when this Driver launched/adopted the shell
+    // through the gate. close() routes through it instead of `browser.close()` so the shared
+    // singleton shell is never killed over a mere connection.
+    this.gateStop = gateStop;
     this.allowedRequestFailureOrigins = new Set();
     this.unexpectedDiagnostics = new Set();
     this.navigationDepth = 0;
@@ -328,6 +302,10 @@ export class Driver {
     this.timeline = [];
     this.timelineHead = 0;
     this.consoleLog = [];
+    // Profiler attribution (set by lib.mjs setup() once the owning test file is known) + the
+    // opt-in per-method timing wrapper. See harness/profile.mjs.
+    this.profileFile = null;
+    if (PROFILING) installDriverProfiler(this);
   }
 
   /** Explicitly permit transport failures to one origin. Offline flows must call this before they
@@ -465,7 +443,16 @@ export class Driver {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // Puppeteer names its wait timeout `TimeoutError`; fall back to the message shape for safety.
-      if (e?.name === 'TimeoutError' || /Waiting.*failed|timeout/i.test(msg)) return false;
+      if (e?.name === 'TimeoutError' || /Waiting.*failed|timeout/i.test(msg)) {
+        // Phantom-wait census (DPAY_E2E_PHANTOM_LOG=1): a timed-out waitForText whose budget
+        // burned in full is the suite's most expensive silent waste class when the caller
+        // ignores the boolean — the flow pays the whole budget for a state that never came.
+        // Env-gated so ordinary soft-probe runs stay quiet.
+        if (process.env.DPAY_E2E_PHANTOM_LOG === '1') {
+          console.error(`[phantom-wait] ${this.profileFile ?? '(standalone)'}: ${JSON.stringify(text)} burned its full ${timeoutMs}ms budget`);
+        }
+        return false;
+      }
       throw new Error(`[driver] waitForText(${JSON.stringify(text)}) failed: ${msg}`);
     }
   }
@@ -493,12 +480,22 @@ export class Driver {
 
   /** Type a string into the input matched by `testID`. Clears it first via native `select()` so the
    *  typed text REPLACES the current value (reliable for RN-web controlled inputs, including the
-   *  pre-filled decimal amount field — triple-click + Backspace was racy and left partial values). */
+   *  pre-filled decimal amount field — triple-click + Backspace was racy and left partial values).
+   *
+   *  The keystrokes ride ONE CDP `Input.insertText` (puppeteer's `keyboard.sendCharacter`) instead
+   *  of a per-char `keyboard.type` stream. Per-char typing cost ~1-2s per call solo (measured
+   *  2026-09-28: 6 types ≈ 26s in flow 12): every keystroke is 2 protocol calls that each queue
+   *  behind a busy main thread, and each fires its own input event the controlled input re-renders
+   *  on. `insertText` is the browser's own paste/IME text insertion: a single trusted input event
+   *  carrying the whole string, replacing the selection — for a controlled RN-web TextInput the
+   *  final state is identical (one onChange with the full value), and no flow can observe the
+   *  difference (the driver's `type` is atomic from a flow's perspective; per-keystroke
+   *  intermediate states were never assertable through it). */
   async type(testID, text, opts = {}) {
     this._recordTimeline('type', `${testID}:${text}`);
     const el = await this.findByTestID(testID, opts);
     await el.focus();
-    // Select all current text so the subsequent keystrokes replace it (standard browser behavior).
+    // Select all current text so the inserted text replaces it (standard browser behavior).
     await el.evaluate((node) => {
       if (typeof node.select === 'function') node.select();
       else if (typeof node.setSelectionRange === 'function') node.setSelectionRange(0, (node.value ?? '').length);
@@ -506,7 +503,7 @@ export class Driver {
     // An EMPTY string means CLEAR, not "do nothing". Select-all followed by no keystroke leaves the
     // field exactly as it was, so `type(id, '')` used to be a silent no-op — a test could assert an
     // empty-value behaviour and never once empty the field. Backspace deletes the selection.
-    if (text) await el.type(text, { delay: 5 });
+    if (text) await this.page.keyboard.sendCharacter(text);
     else await this.page.keyboard.press('Backspace');
   }
 
@@ -531,7 +528,8 @@ export class Driver {
     // An EMPTY string means CLEAR, not "do nothing". Select-all followed by no keystroke leaves the
     // field exactly as it was, so `type(id, '')` used to be a silent no-op — a test could assert an
     // empty-value behaviour and never once empty the field. Backspace deletes the selection.
-    if (text) await el.type(text, { delay: 5 });
+    // The text rides one `Input.insertText` (see `type` for the per-char → single-event rationale).
+    if (text) await this.page.keyboard.sendCharacter(text);
     else await this.page.keyboard.press('Backspace');
   }
 
@@ -547,11 +545,15 @@ export class Driver {
     return (await this.page.evaluate(() => document.body?.innerText ?? '')).trim();
   }
 
-  /** Take a full-page screenshot to `e2e/shots/<name>.png`. Returns the absolute path. */
+  /** Take a full-page screenshot to `e2e/shots/<name>.png`. Returns the absolute path.
+   *
+   *  `optimizeForSpeed` opts the PNG encoder into its fast path (less aggressive compression,
+   *  IDENTICAL pixel content — the visual baselines diff pixels, not bytes). ~400 captures per
+   *  full run × ~40-60% less encode time each is minutes of lane time back. */
   async screenshot(name) {
     mkdirSync(SHOTS_DIR, { recursive: true });
     const path = join(SHOTS_DIR, `${name}.png`);
-    await this.page.screenshot({ path, type: 'png', fullPage: false });
+    await this.page.screenshot({ path, type: 'png', fullPage: false, optimizeForSpeed: true });
     const size = statSync(path).size;
     if (size <= 0) throw new Error(`[driver] screenshot ${name}.png is empty`);
     console.log(`[driver] wrote shots/${name}.png (${size} bytes)`);
@@ -706,6 +708,39 @@ export class Driver {
     );
   }
 
+  /** Instant multi-probe: WHICH of `testIDs` are in the DOM right now — ONE CDP roundtrip, no
+   *  waiting. Returns the present subset in the caller's order (priority order), so the first
+   *  element is the caller's preferred answer. This is the cheap building block for decision
+   *  loops that used to pay a full `findByTestID` timeout per absent candidate (each miss burns
+   *  its whole timeout — a 1s probe that misses costs exactly 1s; five probes in a loop cost 5s). */
+  async whichPresent(testIDs) {
+    this._recordTimeline('whichPresent', testIDs);
+    const sels = testIDs.map((t) => `[data-testid="${cssEscape(t)}"]`);
+    const present = await this.page.evaluate((sels) => sels.map((s) => document.querySelector(s) != null), sels);
+    return testIDs.filter((_, i) => present[i]);
+  }
+
+  /** Wait until ANY of `testIDs` mounts; resolves with the first winner (caller's priority order
+   *  breaks ties within one evaluation). In-page rAF polling — one CDP roundtrip total, so a
+   *  five-candidate wait costs the same as a single-candidate one. This is the event-driven
+   *  replacement for "probe each candidate with a full timeout, catch, probe the next". */
+  async waitForFirstTestID(testIDs, opts = {}) {
+    this._recordTimeline('waitForFirstTestID', testIDs);
+    const timeoutMs = scaled(opts.timeoutMs ?? 5_000);
+    const sels = testIDs.map((t) => `[data-testid="${cssEscape(t)}"]`);
+    let idxHandle;
+    try {
+      idxHandle = await this.page.waitForFunction(
+        (sels) => sels.findIndex((s) => document.querySelector(s) != null),
+        { timeout: timeoutMs },
+        sels,
+      );
+    } catch (e) {
+      throw new Error(`[driver] none of [${testIDs.join(', ')}] appeared within ${timeoutMs}ms: ${e instanceof Error ? e.message : e}`);
+    }
+    return testIDs[await idxHandle.jsonValue()];
+  }
+
   /** Wipe localStorage (forces the app's first-run identity flow on the next load). */
   async clearStorage() {
     this._recordTimeline('clearStorage', null);
@@ -747,7 +782,11 @@ export class Driver {
       }
       try { await this.context.close(); } catch (e) { failures.push(e); }
       if (this.ownsBrowser) {
-        try { await this.browser.close(); } catch (e) { failures.push(e); }
+        if (this.gateStop) {
+          try { await this.gateStop(); } catch (e) { failures.push(e); }
+        } else {
+          try { await this.browser.close(); } catch (e) { failures.push(e); }
+        }
       }
     }
     try { this.assertNoUnexpectedDiagnostics(); } catch (e) { failures.push(e); }
@@ -849,6 +888,48 @@ export class Driver {
   }
 }
 
+/**
+ * Wrap the Driver's public methods with per-op timers (PROFILING builds only). Measured time is
+ * INCLUSIVE (click includes its inner findByTestID) — the summary reads `click N× total`, and the
+ * known nesting is documented here rather than reconstructed at runtime. Attribution uses
+ * `driver.profileFile` at RECORD time (lib.mjs sets it before the flow body runs, so every op a
+ * flow makes lands on the right file).
+ */
+const PROFILED_OPS = [
+  'navigate', 'waitReady', 'findByTestID', 'waitForText', 'click', 'type', 'typeByPlaceholder',
+  'readText', 'readInputValue', 'bodyText', 'screenshot', 'eval', 'pressKey', 'waitForFunction',
+  'waitAtRest', 'settleFrames', 'waitGone', 'isPresent', 'whichPresent', 'waitForFirstTestID',
+  'clearStorage', 'addInitScript', 'removeInitScript',
+];
+function installDriverProfiler(driver) {
+  for (const op of PROFILED_OPS) {
+    const orig = driver[op];
+    driver[op] = function (...args) {
+      const t0 = performance.now();
+      let out;
+      try {
+        out = orig.apply(this, args);
+      } catch (e) {
+        profOp(this.profileFile, op, performance.now() - t0);
+        throw e;
+      }
+      if (out && typeof out.then === 'function') {
+        return out.finally(() => profOp(this.profileFile, op, performance.now() - t0));
+      }
+      profOp(this.profileFile, op, performance.now() - t0);
+      return out;
+    };
+  }
+  // Teardown cost is a phase, not an op (it happens once per flow, and close() is not on the
+  // per-flow hot path the op table is for).
+  const origClose = driver.close.bind(driver);
+  driver.close = (...args) => {
+    const file = driver.profileFile;
+    const stop = profSpan('teardown.driverClose', file);
+    return origClose(...args).finally(stop);
+  };
+}
+
 /** Minimal CSS-string escaper for `data-testid` attribute selectors (handles quotes / brackets). */
 function cssEscape(s) {
   // testIDs in this app are simple (`btn-create`, `balance`, `tab-pay`); a backslash escape of any
@@ -905,14 +986,20 @@ function injectFreezeCss(css) {
  * this override never ships. (See flow 34-onramp-provider-resolution for the explicit seam test.)
  */
 function injectTestGlobals() {
+  // Poll cadence (2026-09-28 re-tune): 300 ms, not 150. The suite's wall time is Σ(flow time) ÷
+  // lanes, and the dominant per-lane CPU cost was the poll storm: every lane's page re-fires
+  // balance/history/deposit/receipt polls + their React re-renders 6-7×/s, and at 8 lanes that
+  // storm — not compute — inflated every flow ~3.5× over its solo floor (measured 2026-09-28:
+  // the 8 heaviest flows ran Σ230s at c8 vs Σ157s sequential). 300 ms still lands a state change
+  // within a tick or two of every DOM wait in the suite (bounds are 4-30 s), so no flow's
+  // assertions move — only the per-lane CPU drop ~2×. The IDLE cadences are overridden to the
+  // SAME value ON PURPOSE: a request BUDGET expressed in wall-clock time would be meaningless
+  // here anyway — flow 160 asserts requests PER TICK, which is the unit the cost is actually
+  // incurred in. Prod cadence is pinned by jest under fake timers
+  // (app/__tests__/usePollCadence.test.tsx); prod never sets this global.
   globalThis.__DPAY_TEST_POLL = {
-    balance: 150, history: 150, deposit: 150, receiptPay: 150, receiptRcv: 150, request: 150,
-    // The IDLE cadences are overridden to the SAME 150 ms as the active ones ON PURPOSE. The suite
-    // must not be paced by production cadence, and a request BUDGET expressed in wall-clock time
-    // would be meaningless here anyway — flow 160 asserts requests PER TICK, which is the unit the
-    // cost is actually incurred in. What the idle cadence does to a real wallet is measured under
-    // fake timers in app/__tests__/usePollCadence.test.tsx.
-    balanceIdle: 150, historyIdle: 150,
+    balance: 300, history: 300, deposit: 300, receiptPay: 300, receiptRcv: 300, request: 300,
+    balanceIdle: 300, historyIdle: 300,
   };
   // MC8 U6.7 — a non-empty test project id so WALLETCONNECT_PROJECT_ID is "configured" app-wide.
   globalThis.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = 'e2e-test-project-id';

@@ -13,7 +13,7 @@
 // Selector contract: `walkthrough`, `walkthrough-scene-1|2|3`, `walkthrough-body-1|2|3`,
 // `walkthrough-dots`, `btn-walkthrough-next`, `btn-walkthrough-skip`, then the existing onboarding
 // + wallet net (`username-input` by placeholder, `btn-create`, `mnemonic-backup`, `balance`).
-import { setup, assert, assertIncludes, waitForEnabled, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset, waitForWallet} from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, waitForEnabled, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset, waitForWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: 88,
@@ -99,7 +99,12 @@ export async function run() {
     // The wallet opens on the chosen CURRENCY; this flow is about the DEMO rail, so say so.
     await selectDemoAsset(driver);
     await waitForWallet(driver, { timeoutMs: 10_000 });
-    await driver.waitForText('∂100.00', { timeoutMs: 15_000 });
+    // The funded-DEMO contract, at the surface the balance actually renders on (currency-first:
+    // the DEMO row on the accounts route — the old bare Pay-surface wait never resolved).
+    await openBalances(driver);
+    const funded = await driver.waitForText('∂100.00', { timeoutMs: 12_000 });
+    assert(funded, 'wallet created through the walkthrough must be faucet-funded ∂100.00');
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
     await driver.waitForText('wlk', { timeoutMs: 5_000 });
     console.log('[88-walkthrough] ✓ wallet created + funded (Pay surface)');
 

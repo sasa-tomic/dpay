@@ -18,6 +18,7 @@ import { startRelay } from './relay.mjs';
 import { buildWeb, serveWeb, pickFreePort } from './web.mjs';
 import { generateKeypair } from './wire.mjs';
 import { killTrackedChildren } from './procs.mjs';
+import { PROFILING, profSpan } from './profile.mjs';
 
 // Re-exported so the signal/exit handlers in run.mjs + watch.mjs can reach the SYNC last-resort
 // SIGKILL of every spawned child PID (relay + web server) without a new import path. See
@@ -166,8 +167,20 @@ export async function laneBrowser(index) {
   if (index <= 0 || _browserShardsWanted <= 1) return s.browser;
   const shard = index % _browserShardsWanted;
   if (shard === 0) return s.browser;
+  // Self-heal: an outside actor on this shared box SIGTERMs gate shells mid-run (twice on
+  // 2026-09-28). A memoized DEAD shard would fail every later flow on its lane with an instant
+  // ConnectionClosed; drop it and relaunch (the gate adopts-or-launches under the same lock).
+  // Flows already in flight when the shell died still fail loudly — that is the incident, and
+  // the gate's forensics log records it; only the NOT-YET-STARTED flows are rescued here.
+  const cached = _shardBrowsers.get(shard);
+  if (cached && !cached.connected) {
+    console.log(`[lib] browser shard #${shard + 1} connection is dead (shell killed out from under us) — relaunching`);
+    _shardBrowsers.delete(shard);
+  }
   if (!_shardBrowsers.has(shard)) {
-    const { browser, stop } = await Driver.launchBrowser();
+    const stopShard = profSpan('session.shardLaunch');
+    const { browser, stop } = await Driver.launchBrowser({ shardId: shard });
+    stopShard();
     _shardBrowsers.set(shard, browser);
     s.addStop(stop);
     console.log(`[lib] headless browser shard #${shard + 1} launched (shared by its lanes; fresh context per test)`);
@@ -179,11 +192,26 @@ export async function laneBrowser(index) {
  * Launch every non-primary browser shard up front, concurrently, BEFORE the pool seeds — so a lane
  * never pays a mid-run launch and the map's check-then-set above stays single-threaded. Calling
  * this also publishes the shard count (setBrowserShards) in one step.
+ *
+ * The shard shells are session-INDEPENDENT (the chrome gate owns them; only their teardown hooks
+ * need the session), so they launch IN PARALLEL WITH the relay/web/primary-browser build instead
+ * of queued behind it: 3 extra shells ≈ 0.5s each used to serialize behind the ~3s session chain.
+ * Kicking getSession() first starts that build; each shard task awaits it only to register its
+ * stop hook (resolved by then — the launches take at least as long as the memo's await).
  */
 export async function primeBrowserShards(n) {
   setBrowserShards(n);
   if (n <= 1) return;
-  await Promise.all(Array.from({ length: n - 1 }, (_, k) => laneBrowser(k + 1)));
+  const sessionPromise = getSession(); // kick the shared build; shards overlap it
+  await Promise.all(Array.from({ length: n - 1 }, (_, k) => (async () => {
+    const shard = k + 1;
+    const stopShard = profSpan('session.shardLaunch');
+    const { browser, stop } = await Driver.launchBrowser({ shardId: shard });
+    stopShard();
+    _shardBrowsers.set(shard, browser);
+    (await sessionPromise).addStop(stop);
+    console.log(`[lib] headless browser shard #${shard + 1} launched (shared by its lanes; fresh context per test)`);
+  })()));
 }
 
 export async function getSession(opts = {}) {
@@ -197,57 +225,95 @@ export async function getSession(opts = {}) {
       console.log('[lib] rebuildWeb on live session — rebuilding web bundle in place');
       await buildWeb({ force: true });
     }
-    return _session;
+    // Self-heal (same incident as laneBrowser): the session's own browser can be killed by an
+    // outside actor between flows. A dead session browser fails every subsequent flow instantly;
+    // tear the WHOLE session down (relay + web included — their stops ride the old session) and
+    // rebuild — memoized like the first build, so concurrent setup() callers await the SAME
+    // rebuild instead of racing into a second relay+web+browser set.
+    if (_session.browser && !_session.browser.connected) {
+      console.log('[lib] session browser connection is dead (shell killed out from under us) — rebuilding the session');
+      const dead = _session;
+      _session = null;
+      _sessionPromise = (async () => {
+        try { await dead.stop(); } catch { /* already dead — best-effort */ }
+        return buildSessionFrom(opts);
+      })();
+      _sessionPromise.catch(() => { _sessionPromise = null; });
+    }
   }
+  if (_session) return _session;
   // Memoize the BUILD as a promise so concurrent callers (parallel test pool) await the SAME build
   // instead of racing to spawn a second relay/web/browser.
   if (!_sessionPromise) {
-    _sessionPromise = (async () => {
-      await ensureWireLayout();
-      const mode = resolveMode();
-      let relayBaseURL = '';
-      const stops = [];
-
-      try {
-        if (mode === 'live') {
-          const base = process.env.DPAY_E2E_BASE;
-          if (!base) throw new Error('DPAY_E2E_MODE=live requires DPAY_E2E_BASE=<url> (e.g. https://dpay.kalaj.org)');
-          relayBaseURL = base;
-          console.log(`[lib] live mode — pointing app at ${relayBaseURL} (throttle + throwaway identity)`);
-        } else if (!opts.noRelay) {
-          const relay = await startRelay();
-          relayBaseURL = relay.baseURL;
-          stops.push(relay.stop);
-          console.log(`[lib] local relay up at ${relayBaseURL} (shared across tests)`);
-        }
-
-        let webBaseURL = '';
-        if (!opts.noWeb) {
-          await buildWeb({ force: opts.rebuildWeb });
-          const web = await serveWeb();
-          webBaseURL = web.baseURL;
-          stops.push(web.stop);
-          console.log(`[lib] web app served at ${webBaseURL} (shared across tests)`);
-        }
-
-        const { browser, stop: stopBrowser } = await Driver.launchBrowser();
-        stops.push(stopBrowser);
-        console.log('[lib] headless browser launched (shared across tests; fresh context per test)');
-
-        const addStop = (fn) => { stops.push(fn); };
-        const stop = async () => { for (const s of stops.slice().reverse()) { try { await s(); } catch {} } };
-        return { mode, relayBaseURL, webBaseURL, browser, addStop, stop };
-      } catch (e) {
-        for (const s of stops.slice().reverse()) { try { await s(); } catch {} }
-        throw e;
-      }
-    })();
+    _sessionPromise = buildSessionFrom(opts);
     // If the build fails, clear the promise so a later retry can attempt it again (don't cache a
     // rejection forever — a transient relay/web failure should be retryable on the next run).
     _sessionPromise.catch(() => { _sessionPromise = null; });
   }
   _session = await _sessionPromise;
   return _session;
+}
+
+/**
+ * The session build body: relay + web + primary browser. The three pieces are INDEPENDENT (the
+ * relay needs cargo, the web needs vite/sirv, the browser needs the chrome gate) — started
+ * together so the run pays the max, not the sum. Measured 2026-09-28: relay build+spawn ~2.5s,
+ * web ~0.3s, primary browser ~0.5s → the old sequential chain charged ~3.3s of every run;
+ * overlapped it converges to the relay's ~2.5s. Failure semantics: each rejection is captured,
+ * everything that DID start is stopped in reverse, and the FIRST error rethrows.
+ */
+async function buildSessionFrom(opts) {
+  await ensureWireLayout();
+  const mode = resolveMode();
+  let relayBaseURL = '';
+  let webBaseURL = '';
+  const stops = [];
+
+  if (mode === 'live') {
+    const base = process.env.DPAY_E2E_BASE;
+    if (!base) throw new Error('DPAY_E2E_MODE=live requires DPAY_E2E_BASE=<url> (e.g. https://dpay.kalaj.org)');
+    console.log(`[lib] live mode — pointing app at ${base} (throttle + throwaway identity)`);
+  }
+  const spanned = (name, p) => {
+    const stop = profSpan(name);
+    return p.then((r) => { stop(); return r; }, (e) => { stop(); throw e; });
+  };
+  const relayTask = (mode !== 'live' && !opts.noRelay)
+    ? spanned('session.startRelay', startRelay())
+    : Promise.resolve(null);
+  const webTask = !opts.noWeb
+    ? spanned('session.buildWeb', buildWeb({ force: opts.rebuildWeb })).then((w) => spanned('session.serveWeb', serveWeb()))
+    : Promise.resolve(null);
+  const browserTask = spanned('session.browserLaunch', Driver.launchBrowser());
+
+  try {
+    const [relay, web, launched] = await Promise.all([relayTask, webTask, browserTask]);
+    if (relay) {
+      relayBaseURL = relay.baseURL;
+      stops.push(relay.stop);
+      console.log(`[lib] local relay up at ${relayBaseURL} (shared across tests)`);
+    }
+    if (web) {
+      webBaseURL = web.baseURL;
+      stops.push(web.stop);
+      console.log(`[lib] web app served at ${webBaseURL} (shared across tests)`);
+    }
+    const { browser, stop: stopBrowser } = launched;
+    stops.push(stopBrowser);
+    console.log('[lib] headless browser launched (shared across tests; fresh context per test)');
+
+    const addStop = (fn) => { stops.push(fn); };
+    const stop = async () => { for (const s of stops.slice().reverse()) { try { await s(); } catch {} } };
+    return { mode, relayBaseURL, webBaseURL, browser, addStop, stop };
+  } catch (e) {
+    for (const s of stops.slice().reverse()) { try { await s(); } catch {} }
+    // Everything still pending must not outlive the failed build: stop each piece best-effort
+    // through its own task's eventual result (the winner of the race may not be the failure).
+    for (const t of [relayTask, webTask, browserTask]) {
+      try { const r = await t; if (r?.stop) await r.stop().catch(() => {}); } catch {}
+    }
+    throw e;
+  }
 }
 
 /** Tear down the shared session (relay + web + browser). Called once at the end of the run. */
@@ -258,7 +324,9 @@ export async function stopSession() {
   _sessionPromise = null;
   _shardBrowsers.clear();
   _browserShardsWanted = 1;
+  const stop = profSpan('teardown.session');
   try { await s.stop(); } catch {}
+  stop();
 }
 
 /**
@@ -293,6 +361,7 @@ export async function setup(opts = {}) {
   const browser = ctxBrowser || mainBrowser;
 
   // Fresh incognito context per test → fresh localStorage → fresh identity (the isolation gate).
+  const stopCtx = profSpan('setup.driverCreate');
   const driver = await Driver.create(browser, {
     solStub: opts.solStub,
     // `'relay'` resolves to the driver's 'derive' mode: no pinned URL — the app derives its
@@ -306,6 +375,9 @@ export async function setup(opts = {}) {
     dark: opts.dark,
     locale: opts.locale,
   });
+  stopCtx();
+  // Profiler attribution: every driver op from here on belongs to this test file.
+  driver.profileFile = typeof store === 'string' ? store : store?.file ?? null;
 
   // Register this driver for diagnostics-on-RED lookup, keyed by the active test file (propagated
   // through `_testCtx` by `runOne`). When run under the orchestrator this lets `runPool`'s catch
@@ -423,11 +495,14 @@ export async function skipWalkthroughIfPresent(driver, opts = {}) {
   // of the two surfaces this page is on); once the answer is "the walkthrough", the press and its
   // effect get their own budget — the previous single-window version authorised a 4s press and a 4s
   // effect wait inside one 4s window, which cannot both fit.
+  // Decision polling is ONE `whichPresent` roundtrip per 100ms tick (not two `isPresent` calls) —
+  // under pool contention every CDP roundtrip stretches, and the helpers below run on EVERY flow.
   const deadline = Date.now() + timeoutMs;
   let sawSkip = false;
   while (Date.now() < deadline) {
-    if (await driver.isPresent('username-input')) return;
-    if (await driver.isPresent('btn-walkthrough-skip')) { sawSkip = true; break; }
+    const [found] = await driver.whichPresent(['username-input', 'btn-walkthrough-skip']);
+    if (found === 'username-input') return;
+    if (found === 'btn-walkthrough-skip') { sawSkip = true; break; }
     await new Promise(r => setTimeout(r, 100));
   }
   if (!sawSkip) return; // neither surface — the documented no-op (a returning-user page has neither)
@@ -473,14 +548,19 @@ export async function skipPracticeIfPresent(driver, opts = {}) {
   // "Onboarding is over" is TWO possible surfaces: the wallet itself, or the home-currency
   // question that stands in front of it on a first run (2026-09-04). Waiting only for `balance`
   // made every create-path flow fail here with the chooser plainly on screen.
-  const done = async () => (await driver.isPresent(WALLET_READY)) || (await driver.isPresent('btn-home-currency-continue'));
+  // All five candidate surfaces ride ONE `whichPresent` probe per tick (priority order: the two
+  // "onboarding is over" answers first, then practice's three exits).
+  const done = async () => {
+    const [found] = await driver.whichPresent([WALLET_READY, 'btn-home-currency-continue']);
+    return found === WALLET_READY || found === 'btn-home-currency-continue';
+  };
+  const PRACTICE_EXITS = ['btn-practice-skip', 'btn-practice-continue', 'practice-offline-check'];
   const deadline = Date.now() + scaled(timeoutMs);
   let exit = null;
   while (Date.now() < deadline) {
     if (await done()) return;
-    if (await driver.isPresent('btn-practice-skip')) { exit = 'btn-practice-skip'; break; }
-    if (await driver.isPresent('btn-practice-continue')) { exit = 'btn-practice-continue'; break; }
-    if (await driver.isPresent('practice-offline-check')) { exit = 'practice-offline-check'; break; }
+    const [found] = await driver.whichPresent(PRACTICE_EXITS);
+    if (found) { exit = found; break; }
     await new Promise(r => setTimeout(r, 100));
   }
   if (exit === null) return; // neither surface — the documented no-op (a restore path has neither)
@@ -493,11 +573,8 @@ export async function skipPracticeIfPresent(driver, opts = {}) {
   // helper immune to that, without slowing the ordinary case (the first press almost always lands).
   let pressErr = null;
   while (Date.now() < deadline) {
-    const now = (await driver.isPresent('btn-practice-skip')) ? 'btn-practice-skip'
-      : (await driver.isPresent('btn-practice-continue')) ? 'btn-practice-continue'
-      : (await driver.isPresent('practice-offline-check')) ? 'practice-offline-check'
-      : null;
-    if (now !== null) {
+    const [now] = await driver.whichPresent([...PRACTICE_EXITS]);
+    if (now) {
       try { await driver.click(now, {timeoutMs: 2_000}); }
       catch (e) { pressErr = e; }
     }
@@ -530,8 +607,9 @@ export async function chooseHomeCurrencyIfPresent(driver, currency = 'CHF', opts
   const deadline = Date.now() + timeoutMs;
   let sawChooser = false;
   while (Date.now() < deadline) {
-    if (await driver.isPresent(WALLET_READY)) return;
-    if (await driver.isPresent('btn-home-currency-continue')) { sawChooser = true; break; }
+    const [found] = await driver.whichPresent([WALLET_READY, 'btn-home-currency-continue']);
+    if (found === WALLET_READY) return;
+    if (found === 'btn-home-currency-continue') { sawChooser = true; break; }
     await new Promise(r => setTimeout(r, 100));
   }
   if (!sawChooser) return;
@@ -578,6 +656,25 @@ export async function selectDemoAsset(driver, opts = {}) {
     if (selected === true) break;
     if (Date.now() > deadline) throw new Error('selectDemoAsset: asset-demo is not selected');
     await new Promise((r) => setTimeout(r, 100));
+  }
+  // Optional funded-DEMO assertion, evaluated ON THE ROW we are already looking at (one eval —
+  // no navigation). The onboarding preamble uses this to prove the faucet credit landed. It must
+  // stay OPT-IN: mid-flow callers may legitimately select an UNFUNDED demo row (zero-balance
+  // branches). Currency-first note: since 2026-09-24 the Pay surface headlines MAIN (the home
+  // currency rail), so the DEMO balance reads HERE — on the accounts-route row — not on Pay.
+  if (opts.expectFunded) {
+    const fundedDeadline = Date.now() + timeoutMs;
+    for (;;) {
+      const rowText = await driver.eval((t) => {
+        const el = document.querySelector(`[data-testid="${t}"]`);
+        return el ? (el.textContent ?? '') : '';
+      }, 'asset-demo');
+      if (rowText.includes(opts.expectFunded)) break;
+      if (Date.now() > fundedDeadline) {
+        throw new Error(`selectDemoAsset: the DEMO row never showed "${opts.expectFunded}" (row text: ${JSON.stringify(rowText)}) — the onboarding faucet credit did not land`);
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
   }
   await driver.click('tab-pay', {timeoutMs});
   await driver.findByTestID('pay-scan', {timeoutMs});
@@ -637,13 +734,14 @@ function seedTarget(driver) {
  * environment can't support it (no relay target, or the relay serves no faucet) so the caller
  * falls back to the real create path. Throws on REAL failures after the seed was decided on —
  * a half-planted identity must never silently reroll.
- */
-async function seedAndBoot(driver, name, opts = {}) {
+ */async function seedAndBoot(driver, name, opts = {}) {
   const target = seedTarget(driver);
   if (!target) return false;
   const kp = await generateKeypair();
   if (opts.fund !== false) {
+    const stopFaucet = profSpan('boot.faucet', driver.profileFile);
     const fund = await faucetAccount(target.relay, kp.publicHex, undefined);
+    stopFaucet();
     if (!fund.ok) return false; // e.g. a relay advertising no faucet — the slow path handles it honestly
   }
   const now = Date.now();
@@ -658,11 +756,15 @@ async function seedAndBoot(driver, name, opts = {}) {
   );
   try {
     const boot = driver.appBoot;
+    const stopNav = profSpan('boot.navigate', driver.profileFile);
     await driver.navigate(target.base, target.path, {
       waitUntil: 'domcontentloaded',
       timeoutMs: boot?.navTimeoutMs,
     });
+    stopNav();
+    const stopReady = profSpan('boot.waitReady', driver.profileFile);
     await driver.waitReady({ timeoutMs: boot?.readyTimeoutMs });
+    stopReady();
     driver.appBooted = true;
     const flagged = await driver.eval(() => globalThis.__DPAY_TEST_SEEDED === true);
     assert(flagged, '[lib] the seeded boot never ran its init script (__DPAY_TEST_SEEDED unset) — this page is NOT the planted identity; refusing to continue');
@@ -706,7 +808,9 @@ async function bootPendingApp(driver) {
  * `DPAY_E2E_SLOW_ONBOARD=1` is the suite-wide slow-path switch. `DPAY_E2E_NO_LAZY_BOOT=1` restores
  * the old double-boot shape (eager prologue in `setup()` + seeded reload here) for bisecting.
  * The end state is the SAME both ways: identity + journey stamps in storage, home currency
- * answered, funded DEMO wallet, on the Pay scanner, ∂100.00 on screen.
+ * answered, funded DEMO wallet, on the Pay scanner — with the funded-DEMO contract ASSERTED on
+ * the accounts-route DEMO row (currency-first, 2026-09-24: the Pay surface headlines MAIN, so
+ * the DEMO balance no longer renders on Pay).
  *
  * D4-B: clicking btn-create now shows the mnemonic backup screen BEFORE the faucet runs. The backup
  * is dismissed (check the ack checkbox + Continue) so the faucet fires and the wallet loads. The
@@ -723,11 +827,16 @@ export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   if (opts.slow !== true && process.env.DPAY_E2E_SLOW_ONBOARD !== '1') {
     if (await seedAndBoot(driver, name)) {
       // The seeded boot landed the wallet as a returning user: settle to exactly where the slow
-      // path ends (home currency answered, Pay tab, DEMO selected, ∂100.00 visible).
+      // path ends (home currency answered, Pay tab, DEMO selected + FUNDED). The funded-DEMO
+      // contract is asserted on the DEMO row itself (`expectFunded`) — one eval on the accounts
+      // route the helper is already on. (The old trailing `waitForText('∂100.00')` on the PAY
+      // surface has been dead since the 2026-09-24 currency-first change moved the DEMO balance
+      // off Pay: every flow silently rode that soft wait out to its full — host-load-scaled —
+      // timeout, ~15s × scale per flow across the whole suite. Measured 2026-09-28: it was the
+      // single largest cost in the suite's wall clock.)
       await chooseHomeCurrencyIfPresent(driver);
       await driver.findByTestID(WALLET_READY, { timeoutMs: 10_000 });
-      await selectDemoAsset(driver);
-      await driver.waitForText('∂100.00', { timeoutMs });
+      await selectDemoAsset(driver, { expectFunded: '∂100.00' });
       return driver;
     }
     // No relay/faucet on this page → fall through to the real create path (it owns the honest
@@ -745,11 +854,11 @@ export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
   await skipPracticeIfPresent(driver);
   // The home-currency question, then back onto DEMO: the wallet now opens in the user's chosen
-  // currency, and this preamble's contract with every downstream flow is a funded DEMO wallet.
+  // currency, and this preamble's contract with every downstream flow is a funded DEMO wallet —
+  // asserted on the DEMO row (same currency-first surface as the seeded fast path above).
   await chooseHomeCurrencyIfPresent(driver);
   await driver.findByTestID(WALLET_READY, { timeoutMs: 10_000 });
-  await selectDemoAsset(driver);
-  await driver.waitForText('∂100.00', { timeoutMs });
+  await selectDemoAsset(driver, { expectFunded: '∂100.00' });
   return driver;
 }
 
@@ -978,9 +1087,10 @@ export async function pickSwapTarget(driver, code, opts = {}) {
 export async function openOtherVenues(driver, opts = {}) {
   // The toggle click can be swallowed by a re-render (quotes landing replace nodes), so
   // VERIFY the expander is open and re-press if not. Idempotent: already-open returns.
+  // The check is an instant `isPresent` (not a 1s findByTestID probe): a miss here used to cost
+  // its whole timeout, three attempts deep, before the press loop even started.
   for (let attempt = 0; attempt < 3; attempt++) {
-    const open = await driver.findByTestID('convert-venues-expanded', { timeoutMs: 1_000 }).catch(() => null);
-    if (open != null) return;
+    if (await driver.isPresent('convert-venues-expanded')) return;
     await driver.click('btn-convert-venues-other', opts);
   }
   await driver.findByTestID('convert-venues-expanded', { timeoutMs: opts.timeoutMs ?? 2_500 });
@@ -1007,8 +1117,7 @@ export async function typeConvertAmount(driver, text, opts = {}) {
  * (brief 5.2/5.3 — the 2026-09-26 intent sheet).
  */
 export async function pickSwapVenue(driver, rowId, opts = {}) {
-  const onScreen = await driver.findByTestID(`convert-venue-${rowId}`, { timeoutMs: 1_000 }).catch(() => null);
-  if (onScreen == null) {
+  if (!(await driver.isPresent(`convert-venue-${rowId}`))) {
     await openOtherVenues(driver, opts);
   }
   await driver.click(`convert-venue-${rowId}`, opts);
@@ -1040,18 +1149,32 @@ export async function openConvertFor(driver, key, opts = {}) {
   await driver.click(`btn-accounts-convert-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
   // A LIVE conversion record renders the RECORD VIEW on entry (no `convert-screen` chrome —
   // the per-record panels carry their own roots). Wait for the FORM screen or any record
-  // root, whichever this entry carries.
-  const entryDeadline = Date.now() + (opts.timeoutMs ?? 5_000) + 4_000;
+  // root, whichever this entry carries. ONE `whichPresent` probe per 100ms tick (instant — no
+  // paid timeouts, one roundtrip per tick).
+  //
+  // THE RE-PRESS: a tap can be swallowed by a re-render — the balance poll (fast-poll seam,
+  // 150ms) replaces the row node between find and press, the press lands on a node React
+  // already replaced, and NOTHING mounts with no error reported (the same silent-no-op the
+  // walkthrough/practice helpers confirm-by-effect against). Exposed 2026-09-28 when the
+  // preamble fix made flow 40 reach this step ~117s earlier: the fresh ICP credit landed
+  // mid-openBalances and re-rendered the row under the tap. One verified-effect re-press after
+  // a short grace covers it; the entry deadline and candidate set are unchanged.
+  const entryCandidates = ['convert-screen', 'convert-state', 'crossrail-crossing', 'convert-awaiting-deposit', 'convert-provider-processing', 'convert-done', 'convert-pending', 'convert-fund', 'convert-unavailable'];
+  const entryStarted = Date.now();
+  const entryDeadline = entryStarted + (opts.timeoutMs ?? 5_000) + 4_000;
+  const repressAt = entryStarted + 2_000;
+  let rePressed = false;
   for (;;) {
-    const found = await driver.eval(() => {
-      for (const t of ['convert-screen', 'convert-state', 'crossrail-crossing', 'convert-awaiting-deposit', 'convert-provider-processing', 'convert-done', 'convert-pending', 'convert-fund', 'convert-unavailable']) {
-        if (document.querySelector(`[data-testid="${t}"]`) != null) return t;
-      }
-      return null;
-    });
-    if (found != null) break;
-    if (Date.now() > entryDeadline) throw new Error(`openConvertFor: the ${currency} convert surface never rendered (no form, record, gate, or unavailable panel within ${Math.round((entryDeadline - Date.now() + (opts.timeoutMs ?? 5_000) + 4_000) / 1000)}s)`);
-    await new Promise((r) => setTimeout(r, 250));
+    if ((await driver.whichPresent(entryCandidates)).length > 0) break;
+    const now = Date.now();
+    if (!rePressed && now >= repressAt) {
+      rePressed = true;
+      try { await driver.click(`btn-accounts-convert-${currency}`, { timeoutMs: 2_000 }); } catch { /* the deadline check below reports it */ }
+    }
+    if (now > entryDeadline) {
+      throw new Error(`openConvertFor: the ${currency} convert surface never rendered (no form, record, gate, or unavailable panel within ${Math.round((opts.timeoutMs ?? 5_000) + 4_000)}s)`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
   }
   // The zero-balance FUND GATE can flash first when the entry races the wallet's first balance
   // poll (a fast two-click entry lands before the poll answers — the gate reads the poll's
@@ -1059,20 +1182,21 @@ export async function openConvertFor(driver, key, opts = {}) {
   // field; the gate flips on the first poll answer. One re-entry covers a poll that lost the
   // race entirely (the remount reads the funded map). Still gated after that = a genuine zero
   // balance — hand the gate to the caller (its fund-gate assertions take over).
-  const gated = async () => (await driver.findByTestID('convert-amount', { timeoutMs: 1_000 }).catch(() => null)) == null
-    && (await driver.findByTestID('convert-fund', { timeoutMs: 500 }).catch(() => null)) != null;
+  //
+  // Every probe below is ONE `whichPresent` roundtrip per 100ms tick (the old shape — a 1s
+  // findByTestID probe + six 300ms probes + a 500ms probe per tick — paid up to ~3.3s of
+  // pure timeout per tick when the answer was "not yet").
+  const RECORD_IDS = ['convert-state', 'crossrail-crossing', 'convert-awaiting-deposit', 'convert-provider-processing', 'convert-done', 'convert-pending'];
   for (let attempt = 0; attempt < 2; attempt++) {
     const deadline = Date.now() + (opts.formTimeoutMs ?? 6_000);
     let sawGate = false;
     for (;;) {
-      if (await driver.findByTestID('convert-amount', { timeoutMs: 1_000 }).catch(() => null) != null) return;
-      // A live-record panel is the other valid end state (no form walk happens on it).
-      for (const rec of ['convert-state', 'convert-awaiting-deposit', 'convert-provider-processing', 'convert-done', 'convert-pending', 'crossrail-crossing']) {
-        if (await driver.findByTestID(rec, { timeoutMs: 300 }).catch(() => null) != null) return;
-      }
-      sawGate = sawGate || (await driver.findByTestID('convert-fund', { timeoutMs: 500 }).catch(() => null)) != null;
+      const found = await driver.whichPresent(['convert-amount', ...RECORD_IDS, 'convert-fund']);
+      if (found[0] === 'convert-amount') return;
+      if (found.length > 0 && RECORD_IDS.includes(found[0])) return;
+      sawGate = sawGate || found.includes('convert-fund');
       if (Date.now() > deadline) break;
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 100));
     }
     if (!sawGate) return; // not the gate (a record view / unavailable) — the caller's business
     // Re-enter once: the poll has had its window; the remount reads the funded map.

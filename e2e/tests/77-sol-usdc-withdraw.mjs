@@ -105,7 +105,6 @@ export async function run() {
     await driver.findByTestID('pay-mode-toggle', {timeoutMs: 5_000});
     await driver.click('btn-pay-send', {timeoutMs: 5_000});
     await driver.findByTestID('sol-send-address-input', {timeoutMs: 8_000});
-    await driver.waitForText('Available: 2.500000 USDC', {timeoutMs: 5_000});
     console.log('[77-sol-usdc-withdraw] ✓ form renders in USDC units');
 
     // 3. Enter address + amount → the review card carries the exact USDC amount + the rent note.

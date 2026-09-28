@@ -19,16 +19,25 @@
 // NOT self-exit on a broken pipe / Node death — 2026-09-27 incident: ~30 leaked shells at 50-70%
 // CPU each, load 16+ — so it rides the same sync-exit backstop as every other child.
 
-const _childPids = new Set();
+import { readFileSync } from 'node:fs';
+
+const _childPids = new Map(); // pid -> exe fragment recorded at track time (null = unverified)
 
 /**
  * Register a spawned child PID so the sync `exit` handler can SIGKILL it as a last resort. Called by
  * relay.mjs/web.mjs at SPAWN time — the instant the child is born, before any health checks — so the
  * PID is tracked even if the child crashes during startup or a signal arrives mid-build (the window
  * where `_session` is still null and `stopSession` would be a no-op).
+ *
+ * `exeFragment` (optional) pins WHAT the child is: when given, the last-resort kill verifies
+ * /proc/<pid>/cmdline still names that program before signaling. Gate-era shells live MACHINE-WIDE
+ * for minutes across parallel agents' runs, so a pid recorded here can be recycled within seconds of
+ * the child dying; signaling a recycled pid would murder a stranger (another agent's gate shell) and
+ * read as an unexplained e2e infrastructure failure. The gate's shell registration passes
+ * 'chrome-headless-shell'; legacy callers (relay/web/anvil) pass nothing and keep the old behavior.
  */
-export function trackChild(pid) {
-  if (Number.isInteger(pid) && pid > 0) _childPids.add(pid);
+export function trackChild(pid, exeFragment = null) {
+  if (Number.isInteger(pid) && pid > 0) _childPids.set(pid, exeFragment);
 }
 
 /**
@@ -41,19 +50,37 @@ export function untrackChild(pid) {
   _childPids.delete(pid);
 }
 
+/** True iff /proc/<pid>/cmdline still names the recorded program. A vanished /proc entry means the
+ *  pid is gone (nothing to kill); a mismatched cmdline means the pid was RECYCLED — never signal. */
+function _pidStillIs(pid, exeFragment) {
+  let argv;
+  try {
+    argv = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
+  } catch {
+    return false; // gone — ESRCH-equivalent, skip
+  }
+  // Chromium's main process space-joins its argv (one trailing NUL); tokenize that form too.
+  if (argv.length === 1 && argv[0].includes(' --')) argv = argv[0].split(' ').filter(Boolean);
+  return (argv[0] ?? '').includes(exeFragment);
+}
+
 /**
  * Synchronously signal every tracked child PID. Used as the `process.on('exit')` last resort: the
  * `exit` event is synchronous (no `await` possible), so we send the signal directly via
  * `process.kill`. A child that already exited is a no-op (`process.kill` throws ESRCH → swallowed).
- * Clears the set afterward so a re-entry doesn't re-signal a recycled PID.
+ * A child whose pid was RECYCLED (cmdline no longer names the recorded program) is SKIPPED — on this
+ * shared box, signaling a stranger is worse than leaving a zombie for the sweep.
  *
  * Default signal is SIGKILL — this is the FINAL fallback after the async teardown (stopSession) has
  * already had its chance (SIGTERM + 2s grace per child). By the time the `exit` event fires, graceful
  * shutdown is no longer an option; only "ensure the child is dead" remains.
  */
 export function killTrackedChildren(signal = 'SIGKILL') {
-  for (const pid of _childPids) {
-    try { process.kill(pid, signal); } catch { /* ESRCH: already dead — expected on the happy path */ }
+  for (const [pid, exeFragment] of _childPids) {
+    try {
+      if (exeFragment && !_pidStillIs(pid, exeFragment)) continue; // recycled pid — not ours anymore
+      process.kill(pid, signal);
+    } catch { /* ESRCH: already dead — expected on the happy path */ }
   }
   _childPids.clear();
 }
