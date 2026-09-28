@@ -32,8 +32,8 @@ records wall + CPU seconds (os.times, children included); when the suite writes 
 file to $DPAY_TESTRUNS_TIMING, per-test/per-flow durations land in the `tests` table
 keyed by run — where the time went, per suite, queryable via `timing`.
 
-Unwired by design: e2e-watch / e2e-watch-filter (interactive, Ctrl-C), e2e-visual-seed
-(baseline regen, not a gate), e2e-live-testnet (opt-in, special env).
+Unwired by design: e2e-visual-seed (baseline regen, not a gate),
+e2e-live-testnet (opt-in, special env).
 """
 
 import argparse
