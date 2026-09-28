@@ -273,8 +273,9 @@ export const convertFr: ConvertMessages = {
     depositSent: (venue, depositAmt, midSym) => `${depositAmt} envoyé à ${venue} — en attente du paiement en ${midSym}`,
     phase2Note: 'La seconde jambe convertit automatiquement dès que le paiement arrive — sans second appui.',
     phase2Leg: (midSym, outSym, venue) => `Puis ${midSym} → ${outSym} via ${venue}, requoté dès que le paiement arrive`,
-    rowShape: midSym => `via ${midSym}, deux jambes, un appui`,
+    rowShape: midSym => `via ${midSym}, se convertit d’un appui`,
     phase2Failed: midSym => `La seconde jambe n\u2019a pas pu s\u2019exécuter. Tes ${midSym} sont dans ce portefeuille — convertis-les avec un Convert normal (il sera présélectionné).`,
+    depositFailed: sym => `Le dépôt n’a jamais atterri on-chain — tes ${sym} n’ont jamais quitté le portefeuille. Rien à annuler.`,
   },
 
   /** La famille cross-rail (routes B/C, 2026-09-16) : tout ce qui suit les cinq jambes IC —

@@ -273,8 +273,9 @@ export const convertEs: ConvertMessages = {
     depositSent: (venue, depositAmt, midSym) => `${depositAmt} enviado a ${venue} — esperando el pago en ${midSym}`,
     phase2Note: 'La segunda pierna convierte automáticamente cuando llega el pago — sin segundo toque.',
     phase2Leg: (midSym, outSym, venue) => `Luego ${midSym} → ${outSym} vía ${venue}, cotizado de nuevo cuando llegue el pago`,
-    rowShape: midSym => `vía ${midSym}, dos piernas, un toque`,
+    rowShape: midSym => `vía ${midSym}, convierte con un toque`,
     phase2Failed: midSym => `La segunda pierna no pudo ejecutarse. Tus ${midSym} están en esta billetera — conviértelos con un Convert normal (quedará preseleccionado).`,
+    depositFailed: sym => `El depósito nunca llegó on-chain — tus ${sym} nunca salieron de la billetera. No hay nada que revertir.`,
   },
 
   /** La familia cross-rail (rutas B/C, 2026-09-16): todo lo que sigue a las cinco piernas IC —

@@ -2369,7 +2369,11 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
       {record.step === 'failed_refunded' ? (
         <View testID="convert-failed">
           <Text style={S.fieldTitle}>{M.convert.failedTitle}</Text>
-          {record.failureCode === 'approve_refused' ? (
+          {record.chainRoute != null && record.legs.length === 0 ? (
+            // The chain's dead FIRST phase: the deposit transfer never landed on-chain —
+            // the pool bodies below would claim a return that never happened.
+            <Text style={S.fieldBody}>{M.convert.chain.depositFailed(record.inSymbol)}</Text>
+          ) : record.failureCode === 'approve_refused' ? (
             <Text style={S.fieldBody}>{M.convert.failedApproveBody(record.inSymbol)}</Text>
           ) : record.failureCode === 'swap_refused' ? (
             <Text style={S.fieldBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol, venueName)}</Text>
@@ -2441,14 +2445,16 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
           {isHub ? (
             <Text style={S.fieldBody}>{M.convert.multihop.stuckHoldsLine(hopSymbol)}</Text>
           ) : null}
-          {minOut != null ? (
+          {!chainPhase1 && minOut != null ? (
             <Text style={S.fieldBody}>
               {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), fmtAssetCompact(minOut, outDecimals, record.outSymbol), venueName)}
             </Text>
           ) : null}
-          <Text testID="convert-expiry" style={S.fieldBody}>
-            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
-          </Text>
+          {!chainPhase1 ? (
+            <Text testID="convert-expiry" style={S.fieldBody}>
+              {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+            </Text>
+          ) : null}
           <Text style={S.fieldBody}>{M.convert.stuckWatching}</Text>
           {record.acknowledgedStuckAtMs == null ? (
             <Pressable

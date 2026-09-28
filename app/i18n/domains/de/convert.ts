@@ -274,8 +274,9 @@ export const convertDe: ConvertMessages = {
     depositSent: (venue, depositAmt, midSym) => `${depositAmt} an ${venue} gesendet — wartet auf die ${midSym}-Auszahlung`,
     phase2Note: 'Das zweite Bein wandelt automatisch, sobald die Auszahlung landet — kein zweiter Tipp.',
     phase2Leg: (midSym, outSym, venue) => `Dann ${midSym} → ${outSym} über ${venue}, frisch quotiert sobald die Auszahlung landet`,
-    rowShape: midSym => `über ${midSym}, zwei Beine, ein Tipp`,
+    rowShape: midSym => `über ${midSym}, wandelt mit einem Tipp`,
     phase2Failed: midSym => `Das zweite Bein konnte nicht laufen. Deine ${midSym} sind in dieser Wallet — wandle sie mit einem normalen Umtausch (sie ist vorausgewählt).`,
+    depositFailed: sym => `Die Einzahlung ist nie on-chain gelandet — dein ${sym} hat die Wallet nie verlassen. Nichts muss rückgängig gemacht werden.`,
   },
 
   /** Die Cross-Rail-Familie (Routen B/C, 2026-09-16): alles nach den fünf IC-Beinen —

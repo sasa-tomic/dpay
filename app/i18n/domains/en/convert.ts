@@ -419,6 +419,8 @@ export type ConvertMessages = {
     rowShape: (midSym: string) => string;
     /** The failed second leg: the mid asset is in-wallet; the exit is a normal convert. */
     phase2Failed: (midSym: string) => string;
+    /** The failed FIRST phase: the deposit never landed on-chain; nothing ever left. */
+    depositFailed: (sym: string) => string;
   };
 
   // --- the cross-rail family (Routes B/C, 2026-09-16): the CCTP handoff (the USER's own
@@ -797,8 +799,9 @@ export const convertEn: ConvertMessages = {
     depositSent: (venue, depositAmt, midSym) => `${depositAmt} sent to ${venue} — waiting for the ${midSym} payout`,
     phase2Note: 'The second leg converts automatically once the payout lands — no second tap.',
     phase2Leg: (midSym, outSym, venue) => `Then ${midSym} → ${outSym} via ${venue}, quoted fresh when the payout lands`,
-    rowShape: midSym => `via ${midSym}, two legs, one tap`,
+    rowShape: midSym => `via ${midSym}, converts in one tap`,
     phase2Failed: midSym => `The second leg could not run. Your ${midSym} is in this wallet — convert it with a normal Convert (it will be pre-selected).`,
+    depositFailed: sym => `The deposit never landed on-chain — your ${sym} never left your wallet. Nothing needs reversing.`,
   },
 
   /** The cross-rail family (Routes B/C, 2026-09-16): everything past the five IC legs —
