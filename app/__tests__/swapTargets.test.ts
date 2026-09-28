@@ -98,16 +98,64 @@ describe('resolveSwapTargets — the currency-level pair walk', () => {
 
   test('SOL source: rail-local venues as solamm rows, the cross-rail CeFi rows as cefi rows', () => {
     const ts = targetsFor(SOL_ASSET);
-    expect(ts.map(t => t.currency)).toEqual(['USD', 'EUR', 'ICP']);
+    // The chain widening (2026-09-28) adds the IC targets no venue pairs directly (CHF, BTC,
+    // ETH — the cefi settle lands ICP, then IC legs); ICP stays the plain cefi rows.
+    expect(ts.map(t => t.currency)).toEqual(['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP']);
     const usd = ts.find(t => t.currency === 'USD')!;
-    expect(rowKinds(usd)).toEqual(['solamm']);
-    expect(rowIds(usd)).toEqual(['jupiter']);
+    // The chains (both cefi venues × the ICP↔ckUSDC pool paths) rank ahead of the
+    // rail-local venue in KIND order — never ranked by price anywhere.
+    expect(rowIds(usd)).toEqual([
+      'chain:sideshift:icpswap-ckusdc',
+      'chain:sideshift:hub:icpswap:7:icpswap-vchf-ckusdc',
+      'chain:trocador:icpswap-ckusdc',
+      'chain:trocador:hub:icpswap:7:icpswap-vchf-ckusdc',
+      'jupiter',
+    ]);
     const eur = ts.find(t => t.currency === 'EUR')!;
     expect(rowIds(eur)).toEqual(['jupiter-eurc']);
     const icp = ts.find(t => t.currency === 'ICP')!;
-    // Both CeFi services on the ICP landing spot, registry order — never ranked.
+    // Both CeFi services on the ICP landing spot, registry order — never ranked. The plain
+    // cefi row IS the ICP route: no chain row duplicates it (chain adds nothing there).
     expect(rowKinds(icp)).toEqual(['cefi', 'cefi']);
     expect(rowIds(icp)).toEqual(['sideshift', 'trocador']);
+  });
+
+  test('chain rows: SOL source reaches the IC targets only a mid-ledger composition serves', () => {
+    const ts = targetsFor(SOL_ASSET);
+    const chf = ts.find(t => t.currency === 'CHF')!;
+    // Every cefi venue whose settle side is ICP, then the registered ICP↔VCHF paths —
+    // direct IC leg first (registry walk order), then the hub compositions, per venue.
+    expect(rowIds(chf)).toEqual([
+      'chain:sideshift:icpswap',
+      'chain:sideshift:hub:icpswap-ckusdc:2:icpswap-vchf-ckusdc',
+      'chain:trocador:icpswap',
+      'chain:trocador:hub:icpswap-ckusdc:2:icpswap-vchf-ckusdc',
+    ]);
+    const chfRoute = chf!.rows[0]!;
+    if (chfRoute.kind !== 'chain') throw new Error('expected a chain row');
+    expect(chfRoute.route.cefiVenueId).toBe('sideshift');
+    expect(chfRoute.route.depositSymbol).toBe('SOL');
+    expect(chfRoute.route.endpoints.map(e => e.symbol)).toEqual(['ICP', 'VCHF']);
+    const btc = ts.find(t => t.currency === 'BTC')!;
+    expect(rowKinds(btc)).toEqual(['chain', 'chain', 'chain', 'chain']);
+    expect(rowIds(btc)).toEqual([
+      'chain:sideshift:icpswap-ckbtc',
+      'chain:sideshift:hub:icpswap-cketh:6:icpswap-ckbtc-cketh',
+      'chain:trocador:icpswap-ckbtc',
+      'chain:trocador:hub:icpswap-cketh:6:icpswap-ckbtc-cketh',
+    ]);
+  });
+
+  test('EURC source: the founder pair resolves — CHF via sideshift-eurc + the VCHF pool', () => {
+    const eurc = ASSETS.find(a => a.protocol === 'solana' && a.symbol === 'EURC')!;
+    const ts = targetsFor(eurc);
+    const chf = ts.find(t => t.currency === 'CHF')!;
+    expect(rowKinds(chf)).toEqual(['chain', 'chain']);
+    expect(rowIds(chf)).toEqual(['chain:sideshift-eurc:icpswap', 'chain:sideshift-eurc:hub:icpswap-ckusdc:2:icpswap-vchf-ckusdc']);
+    // ICP itself stays the plain cefi row (sideshift-eurc's own settle side) — no chain dup.
+    const icp = ts.find(t => t.currency === 'ICP')!;
+    expect(rowKinds(icp)).toEqual(['cefi']);
+    expect(rowIds(icp)).toEqual(['sideshift-eurc']);
   });
 
   test('cross-rail routes never offer the external-address cash-out (Route A is not a swap row)', () => {

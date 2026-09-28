@@ -189,10 +189,40 @@ export type ComposedConvertRoute = {
   settleDecimals: number;
 };
 
+/**
+ * The CHAIN widening (2026-09-28, the any-pair mandate): the MIRROR of a composed route —
+ * a registered cefi venue's order carries a SOLANA-rail source INTO a mid IC ledger (the
+ * venue's settle side), and REGISTERED ic_amm legs then carry it the rest of the way to
+ * the IC target. Execution order is composed reversed: the venue order is created FIRST
+ * (its locked settle figure is known at confirm), the device signs ONE Solana deposit
+ * transfer (frozen bytes, submitted immediately), the venue settles the mid asset into
+ * the wallet, and the IC legs are signed AT PHASE TIME from the record's own frozen plan
+ * — an IC envelope dies at its +300 s ingress expiry, so the phase-2 legs can never be
+ * pre-signed at confirm. dpay is never a party: the order is the user's, the deposit is
+ * the user's signature, the IC legs are the user's signatures.
+ */
+export type ChainConvertRoute = {
+  kind: 'chain';
+  routeId: string;
+  /** The cefi venue that holds the order (registry id — looked up, never assumed). */
+  cefiVenueId: string;
+  /** The source side: the Solana-rail mint the device's transfer funds the order with. */
+  depositMint: string;
+  depositSymbol: string;
+  depositDecimals: number;
+  /** The IC legs in execution order (one direct pool leg, or the two legs of a hub
+   *  route) — each names its registered venue, pool endpoint, and ordered ledger pair. */
+  legs: HubLeg[];
+  /** The IC endpoints in walk order: endpoints[i] is leg i's source (the FIRST is the
+   *  venue's settle ledger), endpoints[legs.length] the final IC ledger. */
+  endpoints: HubEndpoint[];
+};
+
 export type ConvertRouteOption =
   | {kind: 'direct'; venueId: string}
   | {kind: 'hub'; routeId: string; venue1Id: string; venue2Id: string; hubLedger: string}
-  | ComposedConvertRoute;
+  | ComposedConvertRoute
+  | ChainConvertRoute;
 
 /** One hub-reachable destination: the dest IC ledger + every route that reaches it. */
 export type ConvertDestination = {

@@ -39,7 +39,8 @@ import {
   type VenueEntry,
 } from './venues';
 import {hubRoutes, multihopRoutesFrom, type HubRoute, type MultihopRoute} from '../routes';
-import {resolveConvertDestinations, type ComposedConvertRoute} from './convert';
+import {hubEndpointOf} from '../routes';
+import {resolveConvertDestinations, type ChainConvertRoute, type ComposedConvertRoute} from './convert';
 import {ETH_NATIVE_CHAIN_ID, ETH_NATIVE_DECIMALS, ETH_NATIVE_RAIL_ID, ETH_NATIVE_SYMBOL, evmNativeVenuesForLedger} from './evmConvert';
 import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 
@@ -62,6 +63,7 @@ export type SwapRow =
   | {kind: 'direct'; rowId: string; venue: VenueEntry; inLedger: string; outLedger: string; outDesc: CurrencyDescriptor}
   | {kind: 'hub'; rowId: string; route: HubRoute}
   | {kind: 'composed'; rowId: string; route: ComposedConvertRoute}
+  | {kind: 'chain'; rowId: string; route: ChainConvertRoute}
   | {kind: 'crossrail'; rowId: string; route: MultihopRoute}
   | {kind: 'cefi'; rowId: string; venue: VenueEntry; inLedgerOrMint: string; outLedger: string | null; outMint: string | null; outSym: string; outDecimals: number;
      /** The settle side's RAIL-CANONICAL id when the venue pays NATIVE gas on an EVM chain
@@ -165,6 +167,7 @@ export function resolveSwapTargets(args: {
     const direct: SwapRow[] = [];
     const hub: SwapRow[] = [];
     const composed: SwapRow[] = [];
+    const chain: SwapRow[] = [];
     const cross: SwapRow[] = [];
     const cefi: SwapRow[] = [];
     const amm: SwapRow[] = [];
@@ -188,6 +191,58 @@ export function resolveSwapTargets(args: {
       if (mint != null) {
         for (const route of composedByMint.get(mint) ?? []) {
           composed.push({kind: 'composed', rowId: route.routeId, route});
+        }
+      }
+      // CHAIN — the composed mirror (2026-09-28): a cefi venue carries the SOL source into
+      // a mid IC ledger, and registered IC legs carry it on to THIS IC rail. The plain
+      // cefi row (venue's other side IS this ledger) is not a chain — it already stands.
+      // Every leg fails closed on a row the catalog cannot fully price, like every walk.
+      if (inMint != null && ledger != null) {
+        const destRow = catalog.find(c => c.ledger === ledger && !c.testnet);
+        if (destRow != null && destRow.fee != null && destRow.decimals != null
+          && (destRow.backing_symbol ?? destRow.symbol) != null) {
+          for (const v of cefiVenuesForLedger(inMint)) {
+            const mid = cefiOtherSide(v, inMint);
+            if (mid == null || mid === ledger) continue;
+            const midEp = hubEndpointOf(catalog, mid);
+            if (midEp == null) continue;
+            const deposit = solAssetOfMint(inMint);
+            if (deposit == null) continue;
+            for (const pool of registeredVenues()) {
+              if (pool.kind !== 'ic_amm' || pool.testnet) continue;
+              if (!pool.pair_ledgers.includes(mid) || !pool.pair_ledgers.includes(ledger)) continue;
+              chain.push({
+                kind: 'chain',
+                rowId: `chain:${v.venue_id}:${pool.venue_id}`,
+                route: {
+                  kind: 'chain',
+                  routeId: `chain:${v.venue_id}:${pool.venue_id}`,
+                  cefiVenueId: v.venue_id,
+                  depositMint: inMint,
+                  depositSymbol: deposit.symbol,
+                  depositDecimals: deposit.decimals,
+                  legs: [{venueId: pool.venue_id, pool: pool.endpoint, fromLedger: mid, toLedger: ledger}],
+                  endpoints: [midEp, {currency: destRow.currency, ledger, symbol: destRow.backing_symbol ?? destRow.symbol!, decimals: destRow.decimals, fee: destRow.fee, network: destRow.network ?? 'Internet Computer'}],
+                },
+              });
+            }
+            for (const hr of hubRoutes(catalog, mid, ledger)) {
+              chain.push({
+                kind: 'chain',
+                rowId: `chain:${v.venue_id}:${hr.routeId}`,
+                route: {
+                  kind: 'chain',
+                  routeId: `chain:${v.venue_id}:${hr.routeId}`,
+                  cefiVenueId: v.venue_id,
+                  depositMint: inMint,
+                  depositSymbol: deposit.symbol,
+                  depositDecimals: deposit.decimals,
+                  legs: hr.legs.map(l => ({...l})),
+                  endpoints: [midEp, hr.hub, hr.dest],
+                },
+              });
+            }
+          }
         }
       }
       // CROSSRAIL — a composed CCTP route whose FINAL landing is this rail's mint.
@@ -240,11 +295,11 @@ export function resolveSwapTargets(args: {
         }
       }
     }
-    // Kind order is fixed (direct, hub, composed, crossrail, cefi, solamm); inside a kind,
-    // registry walk order. A duplicate rowId cannot exist within one kind (venue/route ids
-    // are unique per walk), and one row lands in exactly one kind — the list is dedupe-free
-    // by construction.
-    const all = [...direct, ...hub, ...composed, ...cross, ...cefi, ...amm];
+    // Kind order is fixed (direct, hub, composed, chain, crossrail, cefi, solamm); inside a
+    // kind, registry walk order. A duplicate rowId cannot exist within one kind (venue/route
+    // ids are unique per walk), and one row lands in exactly one kind — the list is
+    // dedupe-free by construction.
+    const all = [...direct, ...hub, ...composed, ...chain, ...cross, ...cefi, ...amm];
     if (all.length > 0) targets.push({currency, rows: all});
   }
   return targets;
