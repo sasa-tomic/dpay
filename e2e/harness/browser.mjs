@@ -553,15 +553,22 @@ export async function acquireBrowser({ executablePath, extraArgs = [], shardId =
     leasePromise = openLease({ key, executablePath, extraArgs }).catch((e) => { _leases.delete(key); throw e; });
     _leases.set(key, leasePromise);
   }
-  const lease = await leasePromise;
+  let lease = await leasePromise;
   let browser;
   try {
     browser = await lease.connect();
+    // A shell this process ADOPTED-or-launched earlier can be killed by an outside actor while
+    // the lease sits between flows (this shared box has done so twice, SIGTERM to every gate
+    // shell mid-run). A dead connection here means the lease is stale: tear it down and
+    // reconnect ONCE — the fresh openLease re-probes discovery and launches a new shell under
+    // the same lock. Exactly one retry: a second failure is a real launch problem and throws.
+    if (!browser.connected) throw new Error('connection is dead (shell was killed?)');
   } catch (e) {
-    // Shell died between lease-open and connect: tear the lease down (releases the lock) and
-    // let the caller's next attempt start clean.
     await lease.teardown().catch(() => {});
-    throw e;
+    leasePromise = openLease({ key, executablePath, extraArgs }).catch((e2) => { _leases.delete(key); throw e2; });
+    _leases.set(key, leasePromise);
+    lease = await leasePromise;
+    browser = await lease.connect();
   }
   lease.conns += 1;
   let stopped = false;

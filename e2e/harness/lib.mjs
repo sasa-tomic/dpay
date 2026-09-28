@@ -167,6 +167,16 @@ export async function laneBrowser(index) {
   if (index <= 0 || _browserShardsWanted <= 1) return s.browser;
   const shard = index % _browserShardsWanted;
   if (shard === 0) return s.browser;
+  // Self-heal: an outside actor on this shared box SIGTERMs gate shells mid-run (twice on
+  // 2026-09-28). A memoized DEAD shard would fail every later flow on its lane with an instant
+  // ConnectionClosed; drop it and relaunch (the gate adopts-or-launches under the same lock).
+  // Flows already in flight when the shell died still fail loudly — that is the incident, and
+  // the gate's forensics log records it; only the NOT-YET-STARTED flows are rescued here.
+  const cached = _shardBrowsers.get(shard);
+  if (cached && !cached.connected) {
+    console.log(`[lib] browser shard #${shard + 1} connection is dead (shell killed out from under us) — relaunching`);
+    _shardBrowsers.delete(shard);
+  }
   if (!_shardBrowsers.has(shard)) {
     const stopShard = profSpan('session.shardLaunch');
     const { browser, stop } = await Driver.launchBrowser({ shardId: shard });
@@ -215,76 +225,95 @@ export async function getSession(opts = {}) {
       console.log('[lib] rebuildWeb on live session — rebuilding web bundle in place');
       await buildWeb({ force: true });
     }
-    return _session;
+    // Self-heal (same incident as laneBrowser): the session's own browser can be killed by an
+    // outside actor between flows. A dead session browser fails every subsequent flow instantly;
+    // tear the WHOLE session down (relay + web included — their stops ride the old session) and
+    // rebuild — memoized like the first build, so concurrent setup() callers await the SAME
+    // rebuild instead of racing into a second relay+web+browser set.
+    if (_session.browser && !_session.browser.connected) {
+      console.log('[lib] session browser connection is dead (shell killed out from under us) — rebuilding the session');
+      const dead = _session;
+      _session = null;
+      _sessionPromise = (async () => {
+        try { await dead.stop(); } catch { /* already dead — best-effort */ }
+        return buildSessionFrom(opts);
+      })();
+      _sessionPromise.catch(() => { _sessionPromise = null; });
+    }
   }
+  if (_session) return _session;
   // Memoize the BUILD as a promise so concurrent callers (parallel test pool) await the SAME build
   // instead of racing to spawn a second relay/web/browser.
   if (!_sessionPromise) {
-    _sessionPromise = (async () => {
-      await ensureWireLayout();
-      const mode = resolveMode();
-      let relayBaseURL = '';
-      let webBaseURL = '';
-      const stops = [];
-
-      // The three session pieces are INDEPENDENT (the relay needs cargo, the web needs vite/sirv,
-      // the browser needs the chrome gate) — start them together and pay the max, not the sum.
-      // Measured 2026-09-28: relay build+spawn ~2.5s, web ~0.3s, primary browser ~0.5s → the old
-      // sequential chain charged ~3.3s of every run; overlapped it converges to the relay's ~2.5s.
-      // Failure semantics preserved: each rejection is captured, everything that DID start is
-      // stopped in reverse, and the FIRST error rethrows.
-      if (mode === 'live') {
-        const base = process.env.DPAY_E2E_BASE;
-        if (!base) throw new Error('DPAY_E2E_MODE=live requires DPAY_E2E_BASE=<url> (e.g. https://dpay.kalaj.org)');
-        console.log(`[lib] live mode — pointing app at ${base} (throttle + throwaway identity)`);
-      }
-      const spanned = (name, p) => {
-        const stop = profSpan(name);
-        return p.then((r) => { stop(); return r; }, (e) => { stop(); throw e; });
-      };
-      const relayTask = (mode !== 'live' && !opts.noRelay)
-        ? spanned('session.startRelay', startRelay())
-        : Promise.resolve(null);
-      const webTask = !opts.noWeb
-        ? spanned('session.buildWeb', buildWeb({ force: opts.rebuildWeb })).then((w) => spanned('session.serveWeb', serveWeb()))
-        : Promise.resolve(null);
-      const browserTask = spanned('session.browserLaunch', Driver.launchBrowser());
-
-      try {
-        const [relay, web, launched] = await Promise.all([relayTask, webTask, browserTask]);
-        if (relay) {
-          relayBaseURL = relay.baseURL;
-          stops.push(relay.stop);
-          console.log(`[lib] local relay up at ${relayBaseURL} (shared across tests)`);
-        }
-        if (web) {
-          webBaseURL = web.baseURL;
-          stops.push(web.stop);
-          console.log(`[lib] web app served at ${webBaseURL} (shared across tests)`);
-        }
-        const { browser, stop: stopBrowser } = launched;
-        stops.push(stopBrowser);
-        console.log('[lib] headless browser launched (shared across tests; fresh context per test)');
-
-        const addStop = (fn) => { stops.push(fn); };
-        const stop = async () => { for (const s of stops.slice().reverse()) { try { await s(); } catch {} } };
-        return { mode, relayBaseURL, webBaseURL, browser, addStop, stop };
-      } catch (e) {
-        for (const s of stops.slice().reverse()) { try { await s(); } catch {} }
-        // Everything still pending must not outlive the failed build: stop each piece best-effort
-        // through its own task's eventual result (the winner of the race may not be the failure).
-        for (const t of [relayTask, webTask, browserTask]) {
-          try { const r = await t; if (r?.stop) await r.stop().catch(() => {}); } catch {}
-        }
-        throw e;
-      }
-    })();
+    _sessionPromise = buildSessionFrom(opts);
     // If the build fails, clear the promise so a later retry can attempt it again (don't cache a
     // rejection forever — a transient relay/web failure should be retryable on the next run).
     _sessionPromise.catch(() => { _sessionPromise = null; });
   }
   _session = await _sessionPromise;
   return _session;
+}
+
+/**
+ * The session build body: relay + web + primary browser. The three pieces are INDEPENDENT (the
+ * relay needs cargo, the web needs vite/sirv, the browser needs the chrome gate) — started
+ * together so the run pays the max, not the sum. Measured 2026-09-28: relay build+spawn ~2.5s,
+ * web ~0.3s, primary browser ~0.5s → the old sequential chain charged ~3.3s of every run;
+ * overlapped it converges to the relay's ~2.5s. Failure semantics: each rejection is captured,
+ * everything that DID start is stopped in reverse, and the FIRST error rethrows.
+ */
+async function buildSessionFrom(opts) {
+  await ensureWireLayout();
+  const mode = resolveMode();
+  let relayBaseURL = '';
+  let webBaseURL = '';
+  const stops = [];
+
+  if (mode === 'live') {
+    const base = process.env.DPAY_E2E_BASE;
+    if (!base) throw new Error('DPAY_E2E_MODE=live requires DPAY_E2E_BASE=<url> (e.g. https://dpay.kalaj.org)');
+    console.log(`[lib] live mode — pointing app at ${base} (throttle + throwaway identity)`);
+  }
+  const spanned = (name, p) => {
+    const stop = profSpan(name);
+    return p.then((r) => { stop(); return r; }, (e) => { stop(); throw e; });
+  };
+  const relayTask = (mode !== 'live' && !opts.noRelay)
+    ? spanned('session.startRelay', startRelay())
+    : Promise.resolve(null);
+  const webTask = !opts.noWeb
+    ? spanned('session.buildWeb', buildWeb({ force: opts.rebuildWeb })).then((w) => spanned('session.serveWeb', serveWeb()))
+    : Promise.resolve(null);
+  const browserTask = spanned('session.browserLaunch', Driver.launchBrowser());
+
+  try {
+    const [relay, web, launched] = await Promise.all([relayTask, webTask, browserTask]);
+    if (relay) {
+      relayBaseURL = relay.baseURL;
+      stops.push(relay.stop);
+      console.log(`[lib] local relay up at ${relayBaseURL} (shared across tests)`);
+    }
+    if (web) {
+      webBaseURL = web.baseURL;
+      stops.push(web.stop);
+      console.log(`[lib] web app served at ${webBaseURL} (shared across tests)`);
+    }
+    const { browser, stop: stopBrowser } = launched;
+    stops.push(stopBrowser);
+    console.log('[lib] headless browser launched (shared across tests; fresh context per test)');
+
+    const addStop = (fn) => { stops.push(fn); };
+    const stop = async () => { for (const s of stops.slice().reverse()) { try { await s(); } catch {} } };
+    return { mode, relayBaseURL, webBaseURL, browser, addStop, stop };
+  } catch (e) {
+    for (const s of stops.slice().reverse()) { try { await s(); } catch {} }
+    // Everything still pending must not outlive the failed build: stop each piece best-effort
+    // through its own task's eventual result (the winner of the race may not be the failure).
+    for (const t of [relayTask, webTask, browserTask]) {
+      try { const r = await t; if (r?.stop) await r.stop().catch(() => {}); } catch {}
+    }
+    throw e;
+  }
 }
 
 /** Tear down the shared session (relay + web + browser). Called once at the end of the run. */
