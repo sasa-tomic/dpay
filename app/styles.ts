@@ -690,7 +690,9 @@ function buildStyles(p: Palette) {
   // The label's flex:1 pushes the amount to the right edge; the check trails the amount.
   assetTitleRow: {flexDirection: 'row', alignItems: 'center'},
   assetLabel: {flex: 1, fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
-  assetAmt: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, marginLeft: 10, fontVariant: ['tabular-nums']},
+  // flexShrink 0: the amount is the money column - it wraps never (the name column flexes
+  // instead); measured '1.9998\nICP' on the Accounts ICP row, 2026-09-28.
+  assetAmt: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, marginLeft: 10, flexShrink: 0, fontVariant: ['tabular-nums']},
   assetSub: {fontSize: 12, color: p.sub2, marginTop: 4, fontFamily: FONT.sans},
   // Rail-detail panel - the chooser's inline per-rail expansion (EUR dual-rail, Stage 5). An
   // inset WELL inside the asset card (panel2 + line border, per brief §IV), so the detail reads
