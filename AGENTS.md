@@ -88,7 +88,14 @@ Dev-loop tests MUST finish in SECONDS, not minutes. That is the objective of the
   plus the ONE domain suite you touched.
 - **`just flow`** (jest full-app flow suite): full `<App/>` mounts against the real test-helpers
   relay (spawned once per run by jest's globalSetup). Screen-level behavior lives here, never in
-  smoke.
+  smoke. **Contract (2026-09-28): full `just flow` and `just e2e` must pass on the shared box
+  AS-IS, at whatever load it carries.** Positive-transition wait ceilings scale with host load
+  (`app/__tests__/flow/harness/budget.ts`: ×(1 + max(0, load1min − 3) × 0.5), clamped 1..6, env
+  override `DPAY_TEST_BUDGET_MULT`; the per-test jest timeout and hooks scale with it; refusal and
+  negative-probe windows stay TIGHT because the app must refuse fast). There is no rerun rubric
+  and no calm-window waiting: a suite that fails in a load-scaled full run but passes ALONE means
+  the budget scaling is incomplete for that wait — fix the scaling, rerun the full gate. A suite
+  that fails alone is a real bug — fix the code.
 - **`just node-anvil`**: real-chain proofs (anvil + relay pipe, no browser, no jest). EVM
   send/permit-settle/gas-refusal live here.
 - **`just e2e`** (merge gate only, chrome): the 9 kept visual/PWA flows — screenshot capture
