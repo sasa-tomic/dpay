@@ -85,14 +85,18 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   const homeBalance = homeAsset ? balances[homeAsset.id] : undefined;
   const rows = history.slice(0, ACTIVITY_ROWS);
   // The three money actions act on the MAIN RAIL — the account the headline names. No rail, no
-  // action: disabled with the same dim rule its siblings render by.
+  // action: disabled with the same dim rule its siblings render by. CALIBER: the four actions
+  // are cells of ONE panel (S.homeActionRow) — a disabled cell dims its icon+label in place
+  // (sub2 ink), it does not grow a second box inside the panel.
   const noRail = homeAsset === null;
+  const actionIcon = noRail ? C.sub2 : C.brandText;
   return (
     <View>
       {/* The headline block IS the accounts affordance (kept from 2026-09-14) — tapping the
           balance opens the currency list. Its accessible name states the ACTION ("Open accounts"),
           never a second copy of the eyebrow sentence. The `a` shortcut's badge rides the eyebrow
-          row, the affordance Home does have. */}
+          row, the affordance Home does have. Left-aligned on the gutter: one alignment axis for
+          the whole surface (typeui ui-principles §16). */}
       <Pressable
         testID="btn-home-accounts"
         style={S.homeHeadline}
@@ -117,36 +121,43 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
           that is not answering, once, with its Settings escape. It sits OUTSIDE the tappable
           headline — one Pressable must never nest another. */}
       {homeAsset !== null && railUnreadable(homeBalance) ? <RailUnreadableNote asset={homeAsset} failure={homeBalance?.failure} onOpenSettings={onOpenSettings} /> : null}
+      {/* ONE divided panel (CALIBER): the four actions are cells of a single hairline-bordered
+          container — not four floating cards. Cells 2..4 carry the divider; the container clips,
+          so no cell carries a radius of its own. */}
       <View style={S.homeActionRow}>
         {/* Add funds — on-ramp for the account the headline is showing. */}
-        <Pressable testID="btn-home-add-funds" style={[S.homeActionBtn, noRail && S.disabledFlat]} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={noRail} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addFunds} accessibilityState={{disabled: noRail}}>
-          <IconPlus size={22} color={C.brandText} />
+        <Pressable testID="btn-home-add-funds" style={S.homeActionBtn} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={noRail} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addFunds} accessibilityState={{disabled: noRail}}>
+          <IconPlus size={20} color={actionIcon} />
           <Text style={[S.homeActionLabel, noRail && S.disabledText]}>{M.wallet.home.actions.addFunds}</Text>
         </Pressable>
         {/* Convert — the swap surface, this currency as the source. */}
-        <Pressable testID="btn-home-convert" style={[S.homeActionBtn, noRail && S.disabledFlat]} onPress={onConvert} disabled={noRail} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.convert} accessibilityState={{disabled: noRail}}>
-          <IconSwap size={22} color={C.brandText} />
+        <Pressable testID="btn-home-convert" style={[S.homeActionBtn, S.homeActionCell]} onPress={onConvert} disabled={noRail} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.convert} accessibilityState={{disabled: noRail}}>
+          <IconSwap size={20} color={actionIcon} />
           <Text style={[S.homeActionLabel, noRail && S.disabledText]}>{M.wallet.home.actions.convert}</Text>
         </Pressable>
         {/* Withdraw funds — off-ramp for the main rail. */}
-        <Pressable testID="btn-home-withdraw" style={[S.homeActionBtn, noRail && S.disabledFlat]} onPress={onWithdraw} disabled={noRail} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.withdraw} accessibilityState={{disabled: noRail}}>
-          <IconArrowUpRight size={22} color={C.brandText} />
+        <Pressable testID="btn-home-withdraw" style={[S.homeActionBtn, S.homeActionCell]} onPress={onWithdraw} disabled={noRail} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.withdraw} accessibilityState={{disabled: noRail}}>
+          <IconArrowUpRight size={20} color={actionIcon} />
           <Text style={[S.homeActionLabel, noRail && S.disabledText]}>{M.wallet.home.actions.withdraw}</Text>
         </Pressable>
         {/* [...] — the overflow menu (Transaction list, Remove). */}
-        <Pressable testID="btn-home-more" style={S.homeActionBtn} onPress={onOpenMenu} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.more} accessibilityState={{disabled: false}}>
-          <IconMore size={22} color={C.brandText} />
+        <Pressable testID="btn-home-more" style={[S.homeActionBtn, S.homeActionCell]} onPress={onOpenMenu} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.more} accessibilityState={{disabled: false}}>
+          <IconMore size={20} color={C.brandText} />
           <Text style={S.homeActionLabel}>{M.wallet.home.actions.more}</Text>
         </Pressable>
       </View>
       <View style={S.homeActivity} testID="home-activity">
-        <Text style={S.histTitle}>{M.wallet.home.activity.title}</Text>
+        {/* Section header row: the label and its action share one row and one baseline — the
+            "See all" link belongs to the section, not to a dead centered row under the list. */}
+        <View style={S.homeSectionHead}>
+          <Text style={S.histTitle}>{M.wallet.home.activity.title}</Text>
+          <Pressable testID="btn-home-activity-all" style={S.homeSeeAll} onPress={onSeeAll} accessibilityRole="button" accessibilityLabel={M.wallet.home.activity.seeAll}>
+            <Text style={S.homeSeeAllText}>{M.wallet.home.activity.seeAll}</Text>
+          </Pressable>
+        </View>
         {rows.map((t, i) => (
           <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} testPrefix="home-hist" note={noteFor?.(t)} onPress={onOpenReceipt} />
         ))}
-        <Pressable testID="btn-home-activity-all" style={S.homeSeeAll} onPress={onSeeAll} accessibilityRole="button" accessibilityLabel={M.wallet.home.activity.seeAll}>
-          <Text style={S.linkText}>{M.wallet.home.activity.seeAll}</Text>
-        </Pressable>
       </View>
     </View>
   );

@@ -9,6 +9,16 @@ import type {Palette} from './config/palette';
 // Space Grotesk carries UI, amounts are the typographic heroes (700 + tabular figures); IBM Plex
 // Mono carries ONLY opaque strings: addresses, principals, hashes, seeds, calldata, relay URLs.
 //
+// CALIBER - the shape system (founder 2026-09-27: "rounded buttons ... shouting 'made by AI'").
+// Exactly FOUR radius values, each with one job, applied app-wide:
+//   0    (R_SHARP) full-bleed chrome, hairlines/rules, the nav indicator bar
+//   8    (R_CTRL)  EVERY control: buttons, inputs, chips, toggle segments, icon buttons
+//   12   (R_CARD)  cards, wells, the viewfinder, sheets, panels
+//   half (R_DISC)  TRUE circles only: dots, discs, glyph chips
+// No pills (999) except genuinely-round elements. Nested surfaces follow inner = outer - padding
+// (the mode-toggle track is 8 with 4px padding, so its active segment is 4). Off-grid spacing is
+// swept to the 4pt grid; three tiers do the grouping: 8 inside, 16 between, 24 sections.
+//
 // WHICH TEAL GOES WHERE is decided in config/palette.ts and is not a matter of taste here:
 // `p.brand` is a FILLED area (the Settlement Field, button, active tab/chip, filled dot) and only
 // `p.brandInk` may sit on it; `p.brandText` is every unfilled accent - text, icons, hairline
@@ -105,16 +115,16 @@ function buildStyles(p: Palette) {
   // their balance. `dpayGlyph` carries the glyph in ink; `dpayGlyphNote` is the surrounding line.
   dpayGlyph: {color: p.ink, fontWeight: '700', fontFamily: FONT.sansBold},
   dpayGlyphNote: {fontSize: 13, color: p.sub, marginTop: 4, textAlign: 'center', paddingHorizontal: 12, lineHeight: 18, fontFamily: FONT.sans},
-  usernameInput: {backgroundColor: p.field, borderRadius: 16, height: 58, paddingHorizontal: 18, fontSize: 20, color: p.ink, marginBottom: 8, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch', fontFamily: FONT.sansMedium},
+  usernameInput: {backgroundColor: p.field, borderRadius: 8, height: 56, paddingHorizontal: 18, fontSize: 20, color: p.ink, marginBottom: 8, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch', fontFamily: FONT.sansMedium},
   // Restore-mode recovery-seed input (64 hex chars). Like usernameInput but monospace + multiline so
   // the long seed wraps readably; minHeight instead of fixed height so it grows with content.
-  seedInput: {backgroundColor: p.field, borderRadius: 16, minHeight: 58, paddingHorizontal: 18, paddingVertical: 14, fontSize: 16, fontFamily: FONT.mono, color: p.ink, marginBottom: 8, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch'},
+  seedInput: {backgroundColor: p.field, borderRadius: 8, minHeight: 56, paddingHorizontal: 18, paddingVertical: 14, fontSize: 16, fontFamily: FONT.mono, color: p.ink, marginBottom: 8, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch'},
   // Header - borderless on the page (whitespace separates chrome from content; hairlines under
   // the header read as spreadsheet chrome). Balanced horizontal padding.
   // Paddings and gap are tight on purpose: two rows cost more vertical space than one, and this
   // is the header of a screen whose job is below it. Measured against the one-row version, the
   // trim gives back most of the difference without letting the rows touch.
-  header: {paddingTop: 14, paddingLeft: 16, paddingRight: 16, paddingBottom: 10, gap: 6},
+  header: {paddingTop: 12, paddingLeft: 16, paddingRight: 16, paddingBottom: 8, gap: 8},
   // TWO ROWS, not one (founder, 2026-09-09: "move balance below ∂pay, to give it more room").
   // Side by side, the balance and the identity were competing for one 390 px line and the balance
   // always won: `balBox` could not shrink, so an 8-decimal amount like "3.99029806 VCHF" took the
@@ -122,7 +132,7 @@ function buildStyles(p: Palette) {
   // eyebrow wrapped to A/C/C/O/U/N/T (measured on the device, 2026-09-09). Giving each its own row
   // removes the competition entirely: nothing can squeeze anything, at any name or amount length.
   headerTop: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  headerSettingsBtn: {width: 40, height: 40, borderRadius: 14, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: p.line2},
+  headerSettingsBtn: {width: 40, height: 40, borderRadius: 8, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: p.line2},
   // `marginLeft` on top of headerTop's 8px gap separates the utility buttons from the identity -
   // at 4 px the ∂ read as a third button (the "collide" half of X18).
   brand: {fontSize: 24, marginLeft: 4},
@@ -163,7 +173,7 @@ function buildStyles(p: Palette) {
   // A readiness checklist card: white card, the section row, and the 2×2 slot grid. Empty
   // positions are quiet hairline wells (a step NOT yet done); filled positions carry a
   // brandText ring and a sentence-case label. The stamp/tilt decoration grammar is retired.
-  passportCard: {alignSelf: 'stretch', marginTop: 2, backgroundColor: p.card, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 16},
+  passportCard: {alignSelf: 'stretch', marginTop: 2, backgroundColor: p.card, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 16},
   passportHead: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'},
   passportRule: {height: 1, backgroundColor: p.line, marginTop: 10},
   passportGrid: {flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: 18, rowGap: 14},
@@ -187,7 +197,7 @@ function buildStyles(p: Palette) {
   // static completed card + Done. UX hardening 2026-08-23 (M3) made the overlay full-bleed;
   // the Ballast identity finishes the move: it is a Settlement Field - full-bleed `brand`,
   // `brandInk` type, no tilt, no stamp chrome.
-  passportCapstoneInk: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 20, backgroundColor: p.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18},
+  passportCapstoneInk: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 12, backgroundColor: p.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18},
   passportCapStamps: {alignItems: 'center', gap: 4, marginBottom: 18},
   passportCapStampText: {color: p.brandInk, fontFamily: FONT.sans, fontSize: 11, fontWeight: '600', textAlign: 'center', lineHeight: 14},
   passportSlotDate: {color: p.sub2, fontFamily: FONT.sans, fontSize: 10, marginTop: 3, textAlign: 'center'},
@@ -209,7 +219,7 @@ function buildStyles(p: Palette) {
   topUpErr: {fontSize: 13, color: p.bad, marginBottom: 8, paddingHorizontal: 16, textAlign: 'center', fontFamily: FONT.sans},
   dot: {width: 8, height: 8, borderRadius: 4},
   balLabel: {fontSize: 12, color: p.sub, fontFamily: FONT.sansMedium},
-  balAmt: {fontSize: 28, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
+  balAmt: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.4, fontVariant: ['tabular-nums']},
   // The transient Android back-to-exit hint under the header balance (inline Text, not a
   // toast - no native module, matches the caption tone but with a warn tint for visibility).
   balBackHint: {fontSize: 12, color: p.warn, marginTop: 6, textAlign: 'right', fontFamily: FONT.sansMedium},
@@ -224,43 +234,61 @@ function buildStyles(p: Palette) {
   // between the header and the tabs. 4 progress dots (filled = brand) + a sans progress
   // phrase. Quiet by design (panel2 well) - it informs, never shouts; retires itself once
   // readiness is complete + seen.
-  tripStrip: {flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: p.panel2},
+  tripStrip: {flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 12, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: p.panel2},
   tripStripDots: {flexDirection: 'row', gap: 6, alignItems: 'center'},
   tripStripDot: {width: 10, height: 10, borderRadius: 5, borderWidth: 1.5, borderColor: p.line2},
   tripStripDotFilled: {borderColor: p.brand, backgroundColor: p.brand},
   tripStripText: {fontFamily: FONT.sans, fontSize: 13, fontWeight: '600', color: p.ink, flexShrink: 1},
   tripStripArrow: {marginLeft: 'auto', flexShrink: 0},
-  tab: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: p.card, minHeight: 44, borderWidth: 1, borderColor: p.line2},
+  tab: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: p.card, minHeight: 44, borderWidth: 1, borderColor: p.line2},
   tabActive: {backgroundColor: p.brand, borderColor: p.brand},
   tabText: {color: p.sub, fontWeight: '600', fontFamily: FONT.sansMedium},
   tabTextActive: {color: p.brandInk, fontFamily: FONT.sansBold},
-  // Bottom-bar tab (O4 S1) - icon over label, `flex:1` so the tabs split the bar equally on a
-  // 390px phone; minHeight 56 clears the 44pt touch floor with comfortable thumb room. Active
-  // keeps the fill language (brand + brandInk) so primary nav stays the loudest level. Labels are 11px single-line-safe: FOUR tabs share the bar since O4 slice 1 (Home +
+  // Bottom-bar tab (CALIBER shape system) - icon over label, `flex:1` so the tabs split the bar
+  // equally on a 390px phone; minHeight 56 clears the 44pt touch floor with comfortable thumb room.
+  // The active state is NO LONGER a filled pill (the rounded-everything tell): it is a 16×2 brand
+  // indicator bar (R_SHARP - a rule, not a chip) over the icon + ink label + brandText icon. The
+  // 2px spacer in the inactive state keeps the cell height identical in both states - no shift on
+  // toggle. Labels are 11px single-line-safe: FOUR tabs share the bar since O4 slice 1 (Home +
   // Pay + Receive + Transactions, ~86px each), and the longest locale label ("Transactions",
   // en/fr ≈ 73–79px at 11px) still fits without truncation, so no numberOfLines clamp is needed.
-  bottomTab: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 8, minHeight: 56, borderRadius: 12},
-  bottomTabActive: {backgroundColor: p.brand},
+  bottomTab: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, paddingTop: 4, paddingBottom: 8, minHeight: 56},
+  bottomTabIndicator: {width: 16, height: 2, borderRadius: 1, backgroundColor: p.brand},
+  bottomTabIndicatorOff: {width: 16, height: 2, borderRadius: 1, backgroundColor: 'transparent'},
   bottomTabText: {color: p.sub, fontWeight: '600', fontSize: 11, fontFamily: FONT.sansMedium},
-  bottomTabTextActive: {color: p.brandInk, fontFamily: FONT.sansBold},
+  bottomTabTextActive: {color: p.ink, fontFamily: FONT.sansBold},
   // ── The Home tab (O4) - the balance-first home surface ────────────────────────────────────
-  // Headline: ONE asset's OWN balance (never a portfolio sum), label + big number stacked and
-  // centered like the review/paid moments - and the whole block IS the accounts affordance since
-  // 2026-09-14 (the founder's balance-tap directive); the chevron beside the number carries X7's
-  // "a ⌄ beside a balance opens the account list" grammar. The action row is three EQUAL card
-  // buttons (icon over label): the oversized "Scan to pay" button died 2026-09-14 for naming a
-  // gesture the screen behind it surpasses - Pay / Receive / Add money, one grammar, no lie. The
-  // activity feed reuses the Ledger's histRow grammar (via the shared HistoryRow).
-  homeHeadline: {alignSelf: 'stretch', alignItems: 'center', marginTop: 10, marginBottom: 2},
+  // Headline: ONE currency's summed balance (never a portfolio sum), label + big number stacked,
+  // LEFT-aligned on the page gutter - the whole content column shares one alignment axis
+  // (typeui ui-principles §16: mixed center/left axes on one surface read as accidental). The
+  // block IS the accounts affordance since 2026-09-14 (the founder's balance-tap directive); the
+  // chevron beside the number carries X7's "a ⌄ beside a balance opens the account list" grammar.
+  // The action row is ONE divided panel (CALIBER): a single R_CARD container, hairline cells -
+  // the "four identical floating cards" kit is gone. The activity feed reuses the Ledger's
+  // histRow grammar (via the shared HistoryRow) under a section header row that carries
+  // "See all" on its right end (proximity: the action belongs to the section, not to the void
+  // under the list).
+  homeHeadline: {alignSelf: 'stretch', alignItems: 'flex-start', marginTop: 12, marginBottom: 4},
   homeEyebrowRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
   homeEyebrow: {fontSize: 13, color: p.sub, marginBottom: 8, fontFamily: FONT.sansMedium},
   homeAmountRow: {flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%'},
   homeAmount: {fontSize: 44, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -1, flexShrink: 1, fontVariant: ['tabular-nums']},
-  homeActionRow: {flexDirection: 'row', gap: 10, marginTop: 14},
-  homeActionBtn: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14, paddingHorizontal: 6, borderRadius: 20, backgroundColor: p.card, minHeight: 72},
-  homeActionLabel: {fontSize: 12, color: p.ink, fontFamily: FONT.sansMedium},
+  // The action PANEL: one card, R_CARD, hairline, cells divided by hairlines (the container
+  // clips, so cells carry no radius of their own - nested-radius rule). No shadows anywhere:
+  // the panel is flat on the page, elevation is reserved for the CTA + nav.
+  homeActionRow: {flexDirection: 'row', alignSelf: 'stretch', marginTop: 16, backgroundColor: p.card, borderRadius: 12, borderWidth: 1, borderColor: p.line2, overflow: 'hidden'},
+  homeActionBtn: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, paddingHorizontal: 4, minHeight: 64},
+  // Cells 2..4: one full-height hairline divider each - a border that exists the whole way
+  // (the "half-existing border" tell is a divider that stops short or doubles as a shadow).
+  homeActionCell: {borderLeftWidth: 1, borderLeftColor: p.line2},
+  homeActionLabel: {fontSize: 12, color: p.ink, fontFamily: FONT.sansMedium, textAlign: 'center'},
+  // Section header row: the label and its action share ONE row and ONE baseline; 44px keeps the
+  // See-all tap target at the touch floor. 8px binds the row to its list (tight inner) before
+  // the 24px section gap below (loose outer).
+  homeSectionHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, marginBottom: 0},
+  homeSeeAll: {minHeight: 44, justifyContent: 'center', alignItems: 'flex-end', paddingLeft: 16, flexShrink: 0},
+  homeSeeAllText: {color: p.brandText, fontWeight: '600', fontSize: 14, fontFamily: FONT.sansMedium},
   homeActivity: {alignSelf: 'stretch', marginTop: 24},
-  homeSeeAll: {minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   // ── The Accounts route (2026-09-08) - the accounts list lifted off Home ────────────────────
   // Same rows, same testIDs; a route header (back + title) instead of an inline section heading,
   // and a divider that names the practice rail in a whole sentence before its row.
@@ -330,14 +358,14 @@ function buildStyles(p: Palette) {
   // RECESSED panel2 checklist whose every spec-§5 disclosure is still present but visibly
   // secondary. Before this, the rate and the fee lines were the same 14pt ink inside one grey
   // wall, and the received amount had no headline at all.
-  convertHeadlineCard: {backgroundColor: p.card, padding: 18, borderRadius: 20, alignSelf: 'stretch', marginTop: 16},
+  convertHeadlineCard: {backgroundColor: p.card, padding: 16, borderRadius: 12, alignSelf: 'stretch', marginTop: 16},
   convertHeadlineLabel: {fontSize: 13, fontWeight: '600', color: p.sub, fontFamily: FONT.sans},
   convertHeadlineAmount: {fontSize: 34, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.6, marginTop: 6, fontVariant: ['tabular-nums']},
   convertRateRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: p.line2},
   convertRateLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
   convertRateValue: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1, textAlign: 'right'},
   convertHeadlineMeta: {fontSize: 12, color: p.sub2, fontFamily: FONT.sans, marginTop: 8},
-  convertChecklistCard: {backgroundColor: p.panel2, padding: 16, borderRadius: 20, alignSelf: 'stretch', marginTop: 12},
+  convertChecklistCard: {backgroundColor: p.panel2, padding: 16, borderRadius: 12, alignSelf: 'stretch', marginTop: 12},
   // The ONE Details disclosure control on the convert decision card (10x-verbosity pass
   // 2026-09-16): quiet meta-line styling - it opens the census, it is not a CTA.
   convertDetailsToggle: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 12, paddingVertical: 6},
@@ -351,7 +379,7 @@ function buildStyles(p: Palette) {
   // The cross-rail handoff's calldata box: a full EVM payload (~388 bytes of hex) the user
   // pastes into their OWN wallet verbatim - receipt voice, wrapped, selectable, boxed so it
   // reads as one copyable artifact rather than prose.
-  convertCalldata: {fontSize: 11, color: p.ink, lineHeight: 16, fontFamily: FONT.mono, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, borderRadius: 10, padding: 10, marginBottom: 6, flexWrap: 'wrap'},
+  convertCalldata: {fontSize: 11, color: p.ink, lineHeight: 16, fontFamily: FONT.mono, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, borderRadius: 8, padding: 10, marginBottom: 6, flexWrap: 'wrap'},
   convertSlippageLabel: {fontSize: 13, fontWeight: '600', color: p.sub, fontFamily: FONT.sans, marginBottom: 6},
   // Same section-heading shape as the slippage label, plus top spacing: the balance/Max row
   // sits directly above the DESTINATION heading and collapsed against it (2026-09-20 shot).
@@ -363,7 +391,7 @@ function buildStyles(p: Palette) {
   // The minimum is a term, but it is the term that bounds the trade - one weight above its siblings.
   convertMinOutLine: {fontSize: 14, color: p.ink, lineHeight: 20, marginBottom: 9, fontFamily: FONT.sansMedium},
   convertSlippageRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap'},
-  convertSlippageChip: {paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, minHeight: 44},
+  convertSlippageChip: {paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, minHeight: 44},
   convertSlippageChipOn: {borderColor: p.brand, backgroundColor: p.brand},
   convertSlippageChipText: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
   convertSlippageChipTextOn: {color: p.brandInk},
@@ -373,7 +401,7 @@ function buildStyles(p: Palette) {
   // same order, every render; rows are never sorted by what they quote. The row lays out
   // HORIZONTALLY (radio circle + the text column) - the flexDirection lives here, not at the
   // call site, so every venue row shares one geometry.
-  convertVenueRow: {backgroundColor: p.card, borderWidth: 1, borderColor: p.line2, borderRadius: 14, padding: 14, marginTop: 8, alignSelf: 'stretch', flexDirection: 'row', alignItems: 'flex-start'},
+  convertVenueRow: {backgroundColor: p.card, borderWidth: 1, borderColor: p.line2, borderRadius: 8, padding: 12, marginTop: 8, alignSelf: 'stretch', flexDirection: 'row', alignItems: 'flex-start'},
   convertVenueRowOn: {borderColor: p.brand},
   // The selection affordance (2026-09-11): an unchecked/checked radio circle - border colour
   // alone did not read as tappable or as chosen. Unchecked = a quiet outlined ring; checked =
@@ -399,8 +427,8 @@ function buildStyles(p: Palette) {
   // Inset well (panel2) + white active segment + ink text: the editorial segmented control,
   // deliberately quieter than the filled tabs so nav stays the loudest level.
   // `railRow` is the joined container; `railPill` is each half-width segment.
-  railRow: {flexDirection: 'row', gap: 4, marginTop: 2, marginBottom: 14, backgroundColor: p.panel2, borderRadius: 999, padding: 4, alignSelf: 'stretch', borderWidth: 1, borderColor: p.line2},
-  railPill: {flex: 1, paddingVertical: 9, paddingHorizontal: 16, borderRadius: 999, alignItems: 'center', justifyContent: 'center', minHeight: 40},
+  railRow: {flexDirection: 'row', gap: 4, marginTop: 2, marginBottom: 14, backgroundColor: p.panel2, borderRadius: 8, padding: 4, alignSelf: 'stretch', borderWidth: 1, borderColor: p.line2},
+  railPill: {flex: 1, paddingVertical: 9, paddingHorizontal: 16, borderRadius: 4, alignItems: 'center', justifyContent: 'center', minHeight: 40},
   railPillActive: {backgroundColor: p.card},
   railPillText: {color: p.sub, fontWeight: '600', fontSize: 14, fontFamily: FONT.sansMedium},
   railPillTextActive: {color: p.ink, fontFamily: FONT.sansBold},
@@ -461,7 +489,7 @@ function buildStyles(p: Palette) {
   // stays dark by nature and deliberately unthemed. The #17150F fill
   // is DELIBERATELY theme-invariant (identical in light + dark) - the campreview pixel gate
   // (just campreview) keys on it; do NOT palette-ize.
-  camBox: {alignSelf: 'stretch', aspectRatio: 1, borderRadius: 24, overflow: 'hidden', backgroundColor: '#17150F', borderWidth: 1, borderColor: p.line, ...LIFT},
+  camBox: {alignSelf: 'stretch', aspectRatio: 1, borderRadius: 12, overflow: 'hidden', backgroundColor: '#17150F', borderWidth: 1, borderColor: p.line, ...LIFT},
   // Copy that sits ON the camera box - the pre-permission prompt and the no-camera fallback.
   //
   // X17: this text used `S.reviewTo` / `S.dim2`, whose colour is `p.sub` - a secondary ink for a
@@ -482,6 +510,21 @@ function buildStyles(p: Palette) {
   // camera mounted and live but invisible; gated on-device by `just campreview`).
   scanWrap: {alignSelf: 'stretch'},
   camPlaceholder: {flex: 1, alignItems: 'center', justifyContent: 'center'},
+  // ── The Pay viewfinder instrument (CALIBER slice 1) ───────────────────────────────────────
+  // The idle scan screen is no longer a floating button in a void: it renders the EXACT box the
+  // camera will occupy - same construction as `camBox` (stretch + 1:1 + R_CARD + the same
+  // theme-invariant warm-black fill + LIFT), so arming the camera moves nothing on screen. The
+  // composition is geometry, not color: four 2px corner brackets (R_SHARP rules) + one scan icon
+  // + the instruction copy, all in the sanctioned on-warm-black inks (DARK.*) with the ONE aqua
+  // accent (DARK.brandText, ≈10:1 on this fill - contrast-gated approval) on the brackets and
+  // icon. testID is deliberately NOT `scan-cam-box`: flows 79/81 pin that the live camera waits
+  // for the Pay Now press, and `scan-cam-box` must keep meaning "the camera is live".
+  viewfinderCorner: {position: 'absolute', width: 20, height: 20, borderColor: DARK.brandText},
+  viewfinderCornerTL: {top: 12, left: 12, borderTopWidth: 2, borderLeftWidth: 2},
+  viewfinderCornerTR: {top: 12, right: 12, borderTopWidth: 2, borderRightWidth: 2},
+  viewfinderCornerBL: {bottom: 12, left: 12, borderBottomWidth: 2, borderLeftWidth: 2},
+  viewfinderCornerBR: {bottom: 12, right: 12, borderBottomWidth: 2, borderRightWidth: 2},
+  viewfinderCenter: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24},
   reviewAmount: {fontSize: 34, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.6, fontVariant: ['tabular-nums']},
   reviewTo: {fontSize: 17, color: p.sub, marginTop: 6, textAlign: 'center', fontFamily: FONT.sansMedium},
   warnNote: {fontSize: 13, color: p.warn, textAlign: 'center', marginTop: 6, marginBottom: 18, paddingHorizontal: 8, lineHeight: 18, fontFamily: FONT.sans},
@@ -493,12 +536,12 @@ function buildStyles(p: Palette) {
   // Primary action button - stretched full-width, petrol fill, the ONE LIFT shadow (brief
   // §3.3). Row layout + gap so a leading icon sits inline. `primaryWide` is the same chrome
   // (kept for the Receive Request button).
-  primary: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: p.brand, borderRadius: 18, height: 58, alignSelf: 'stretch', paddingHorizontal: 24, marginTop: 14, ...LIFT},
-  primaryWide: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: p.brand, borderRadius: 18, height: 58, alignSelf: 'stretch', marginTop: 14, ...LIFT},
+  primary: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: p.brand, borderRadius: 8, height: 56, alignSelf: 'stretch', paddingHorizontal: 24, marginTop: 14, ...LIFT},
+  primaryWide: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: p.brand, borderRadius: 8, height: 56, alignSelf: 'stretch', marginTop: 14, ...LIFT},
   primaryText: {color: p.brandInk, fontSize: 18, fontWeight: '700', fontFamily: FONT.sansBold},
-  qrCard: {backgroundColor: LIGHT.card, padding: 20, borderRadius: 20, marginBottom: 14},
+  qrCard: {backgroundColor: LIGHT.card, padding: 20, borderRadius: 12, marginBottom: 14},
   amountBig: {fontSize: 30, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
-  badgeOk: {marginTop: 10, fontSize: 13, fontWeight: '600', color: p.ok, backgroundColor: withAlpha(p.ok, p.wash), paddingVertical: 6, paddingHorizontal: 14, borderRadius: 999, overflow: 'hidden', fontFamily: FONT.sansMedium},
+  badgeOk: {marginTop: 10, fontSize: 13, fontWeight: '600', color: p.ok, backgroundColor: withAlpha(p.ok, p.wash), paddingVertical: 6, paddingHorizontal: 14, borderRadius: 8, overflow: 'hidden', fontFamily: FONT.sansMedium},
   qrHint: {marginTop: 12, fontSize: 13, color: p.sub, textAlign: 'center', fontFamily: FONT.sans},
   // Request-QR validity countdown (the signed request expires after EXPIRY_WINDOW; a stale QR scans
   // to a confusing rejection, so the merchant is told how long it's good for).
@@ -508,22 +551,22 @@ function buildStyles(p: Palette) {
   // An inline offline-status pill on the Receive-QR screen - so a merchant staring at "Waiting
   // for payment…" knows they won't see incoming payments until reconnected. Soft bad-tinted pill
   // - informational, not a hard error (the wait state is still valid; the poll reconciles).
-  qrOfflinePill: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: withAlpha(p.bad, p.wash), borderWidth: 1, borderColor: withAlpha(p.bad, 0.28)},
+  qrOfflinePill: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: withAlpha(p.bad, p.wash), borderWidth: 1, borderColor: withAlpha(p.bad, 0.28)},
   qrOfflinePillText: {fontSize: 12, fontWeight: '600', color: p.bad, fontFamily: FONT.sansMedium},
   // Wraps when a locale's label pair outgrows the row (de/es "handed to merchant" + Cancel ran
   // ~14-51px past the right edge at 390px): the Cancel button flows to a second line instead of
   // off-screen. en/fr never reach the wrap at current widths, so they render pixel-identical.
   confirmRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 12},
-  paidBtn: {backgroundColor: p.ok, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
+  paidBtn: {backgroundColor: p.ok, borderRadius: 8, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   paidBtnText: {color: p.brandInk, fontWeight: '700', fontSize: 16, fontFamily: FONT.sansBold},
-  notPaidBtn: {backgroundColor: p.card, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
+  notPaidBtn: {backgroundColor: p.card, borderRadius: 8, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   notPaidText: {color: p.sub, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   check: {width: 92, height: 92, borderRadius: 46, backgroundColor: p.ok, alignItems: 'center', justifyContent: 'center', marginBottom: 18},
   checkAlready: {backgroundColor: p.warn, shadowColor: p.warn},
   paidText: {fontSize: 30, fontWeight: '700', color: p.ok, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
   alreadyText: {color: p.warn},
   paidSub: {fontSize: 16, color: p.sub, marginTop: 6, fontFamily: FONT.sans},
-  amountRow: {flexDirection: 'row', alignItems: 'center', backgroundColor: p.field, borderRadius: 16, paddingHorizontal: 18, height: 58, alignSelf: 'stretch', borderWidth: 1, borderColor: p.line2},
+  amountRow: {flexDirection: 'row', alignItems: 'center', backgroundColor: p.field, borderRadius: 8, paddingHorizontal: 16, height: 56, alignSelf: 'stretch', borderWidth: 1, borderColor: p.line2},
   currency: {fontSize: 34, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, fontVariant: ['tabular-nums']},
   // `minWidth: 0` is a NO-OP on Yoga (RN's default) and a FIX on react-native-web: a CSS flex item
   // defaults to `min-width: auto`, so an `<input>`'s intrinsic ~20-character width (414px at 34pt)
@@ -551,20 +594,20 @@ function buildStyles(p: Palette) {
   // neutral chrome so the brand fill stays reserved for the primary CTA. `ghostBtnMuted` is the
   // quieter variant for flow-reset actions ("New request"/"New payment"/"Back") - transparent
   // bg. Same 44pt min + marginTop rhythm as linkBtn, which it replaces there.
-  ghostBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18, minHeight: 44, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 16, backgroundColor: p.card},
+  ghostBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18, minHeight: 44, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8, backgroundColor: p.card},
   ghostBtnText: {color: p.sub, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
   ghostBtnMuted: {backgroundColor: 'transparent'},
   // SendTerminal's stacked secondary actions (Check status / View receipt): full-width so every
   // action on the terminal shares ONE column and one height - the primary copy button above and
   // the Done ghost below are the anchors, these two never render at mixed widths.
-  termBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'stretch', marginTop: 10, minHeight: 44, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 16, backgroundColor: p.card},
+  termBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'stretch', marginTop: 10, minHeight: 44, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8, backgroundColor: p.card},
   termBtnText: {color: p.sub, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
-  smallBtn: {backgroundColor: p.brand, borderRadius: 12, paddingHorizontal: 16, height: 44, alignItems: 'center', justifyContent: 'center'},
+  smallBtn: {backgroundColor: p.brand, borderRadius: 8, paddingHorizontal: 16, height: 44, alignItems: 'center', justifyContent: 'center'},
   smallBtnText: {color: p.brandInk, fontWeight: '700', fontFamily: FONT.sansBold},
   // Secondary button (Cancel/secondary action parity with the primary). Card fill + 16 radius,
   // 52 tall beside a 58 input/CTA per the shape system; clearly secondary but unambiguously
   // tappable.
-  secondaryBtn: {alignSelf: 'stretch', height: 52, borderRadius: 16, marginTop: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: p.card, minHeight: 44},
+  secondaryBtn: {alignSelf: 'stretch', height: 52, borderRadius: 8, marginTop: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: p.card, minHeight: 44},
   secondaryBtnText: {color: p.sub, fontWeight: '600', fontSize: 17, fontFamily: FONT.sansMedium},
   histTitle: {fontSize: 13, fontWeight: '600', color: p.sub2, marginBottom: 6, fontFamily: FONT.sans},
   // ── The transaction RECEIPT (X6, components/HistoryRow.tsx#TxnReceipt) ───────────────────────
@@ -622,13 +665,13 @@ function buildStyles(p: Palette) {
   // Asset filter chip row - only renders when >1 currency is present in history. Active chip
   // fills with brand so the selected filter reads as the obvious current view.
   filterRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14},
-  filterChip: {paddingVertical: 6, paddingHorizontal: 14, borderRadius: 999, backgroundColor: p.card, minHeight: 44},
+  filterChip: {paddingVertical: 6, paddingHorizontal: 14, borderRadius: 8, backgroundColor: p.card, minHeight: 44},
   filterChipActive: {backgroundColor: p.brand, borderColor: p.brand},
   filterChipText: {color: p.sub, fontWeight: '600', fontSize: 13, fontFamily: FONT.sansMedium},
   filterChipTextActive: {color: p.brandInk, fontFamily: FONT.sansBold},
   // Asset card. White card, borderless (surface step separates it from the page); selection is
   // a 2px `brandText` ring (brief §IV: no left stripe), so the selected card pops.
-  assetCard: {marginTop: 12, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 20, padding: 14, borderWidth: 2, borderColor: 'transparent', borderLeftColor: 'transparent', borderLeftWidth: 2},
+  assetCard: {marginTop: 12, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 14, borderWidth: 2, borderColor: 'transparent', borderLeftColor: 'transparent', borderLeftWidth: 2},
   assetCardActive: {borderColor: p.brandText, borderLeftColor: p.brandText},
   assetRow: {flexDirection: 'row', alignItems: 'center'},
   // assetSelect - the glyph-led row inside a card: the 38px AssetGlyph chip against the text
@@ -652,7 +695,7 @@ function buildStyles(p: Palette) {
   railDetailLine: {fontSize: 12, color: p.sub2, marginTop: 2, lineHeight: 17, fontFamily: FONT.sans},
   // Chain tag pill - the settlement chain's proper noun, sentence-case sans, pill-shaped.
   // Overflow hidden keeps the pill's radius honest if a future chain name runs long.
-  railChainTag: {paddingVertical: 2, paddingHorizontal: 8, borderRadius: 999, backgroundColor: p.panel2, fontSize: 12, fontWeight: '600', color: p.sub2, fontFamily: FONT.sans, overflow: 'hidden', marginLeft: 8, alignSelf: 'center'},
+  railChainTag: {paddingVertical: 2, paddingHorizontal: 8, borderRadius: 4, backgroundColor: p.panel2, fontSize: 12, fontWeight: '600', color: p.sub2, fontFamily: FONT.sans, overflow: 'hidden', marginLeft: 8, alignSelf: 'center'},
   // Rail-health note (RailLiquidityNote warn tone) - the warnRow idiom scaled to a sub-line:
   // flex-start so the alert icon anchors the FIRST line of wrapped text, warn colour throughout.
   railHealthRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 4},
@@ -665,7 +708,7 @@ function buildStyles(p: Palette) {
   // pills (Convert plus DEMO's faucet), and a row of two pills beside the flex:1 select block
   // squeezes both off a 390px phone. Stacking is deterministic at any pill count.
   assetActions: {flexDirection: 'column', alignItems: 'flex-end', gap: 8, marginLeft: 10},
-  assetActionBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, minHeight: 44, backgroundColor: p.card},
+  assetActionBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, minHeight: 44, backgroundColor: p.card},
   assetActionText: {color: p.sub, fontWeight: '600', fontSize: 13, fontFamily: FONT.sansMedium},
   assetCardZero: {color: p.sub2},
   // AssetGlyph monogram chips (AssetGlyph.tsx) - family-hued rounded squares carrying the native
@@ -676,7 +719,7 @@ function buildStyles(p: Palette) {
   assetGlyphLg: {alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: p.glyphBorderLg},
   assetGlyphText: {fontWeight: '700', fontFamily: FONT.sansBold},
   settingsSection: {alignSelf: 'stretch', marginBottom: 28},
-  relayInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 16, minHeight: 58, paddingHorizontal: 16, fontSize: 14, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
+  relayInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 8, minHeight: 56, paddingHorizontal: 16, fontSize: 14, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
   // Advanced relay section - the relay edit is demoted below consumer settings and applied
   // EXPLICITLY via the Apply button (no live retarget on each keystroke). `advancedLabel` is the
   // sentence-case section label shared with the other section headers; `applyBtn` is the
@@ -689,24 +732,24 @@ function buildStyles(p: Palette) {
   // The caret wrapper only needs a style when COLLAPSED (rotate −90° so the chevron points
   // right; expanded = the icon's natural down).
   advancedCaretClosed: {transform: [{rotate: '-90deg'}]},
-  applyBtn: {backgroundColor: p.brand, borderRadius: 18, height: 58, minHeight: 44, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', marginTop: 16, ...LIFT},
+  applyBtn: {backgroundColor: p.brand, borderRadius: 8, height: 56, minHeight: 44, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', marginTop: 16, ...LIFT},
   applyBtnText: {color: p.brandInk, fontSize: 16, fontWeight: '700', fontFamily: FONT.sansBold},
   // `applyBtnDisabled` is GONE - it was a byte-copy of `disabledFlat` under a second name, and a
   // second name for one state is a second place for it to drift. Settings' Apply now uses the pair
   // every other disabled button uses.
-  resetConfirmBox: {alignSelf: 'stretch', backgroundColor: withAlpha(p.bad, p.wash), borderRadius: 16, padding: 16, borderWidth: 1, borderColor: withAlpha(p.bad, 0.25)},
+  resetConfirmBox: {alignSelf: 'stretch', backgroundColor: withAlpha(p.bad, p.wash), borderRadius: 12, padding: 16, borderWidth: 1, borderColor: withAlpha(p.bad, 0.25)},
   // Reset entry-point - a bordered red-outline button "Reset wallet…" with the ellipsis
   // signaling "opens a dialog". Distinct from the muted "Privacy policy" link above it, but NOT
   // a loud filled-red button (the destructive gate stays in the confirmation dialog).
-  resetEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: withAlpha(p.bad, 0.45), backgroundColor: withAlpha(p.bad, p.wash), alignItems: 'center', justifyContent: 'center'},
+  resetEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: withAlpha(p.bad, 0.45), backgroundColor: withAlpha(p.bad, p.wash), alignItems: 'center', justifyContent: 'center'},
   resetEntryText: {color: p.bad, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
   // Backup affordance (Settings → Backup). Mirrors `resetEntryBtn`'s shape but BRAND-tinted so it
   // reads as a safe, recommended action. `backupConfirmBox` is the neutral caution box;
   // `seedBox` is the revealed seed display: mono, padded, inset well so it reads as a discrete
   // selectable token block.
-  backupEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: withAlpha(p.brandText, 0.45), backgroundColor: withAlpha(p.brandText, p.wash), alignItems: 'center', justifyContent: 'center'},
+  backupEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: withAlpha(p.brandText, 0.45), backgroundColor: withAlpha(p.brandText, p.wash), alignItems: 'center', justifyContent: 'center'},
   backupEntryText: {color: p.brandText, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
-  backupConfirmBox: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: p.line2},
+  backupConfirmBox: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: p.line2},
   seedBox: {alignSelf: 'stretch', backgroundColor: p.panel2, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: p.line2, marginTop: 4},
   seedText: {color: p.ink, fontFamily: FONT.mono, fontSize: 14, lineHeight: 20},
   // Numbered BIP-39 word grid (SeedWords.tsx) - three columns, ROW-MAJOR (1-2-3 across, 4-5-6
@@ -744,7 +787,7 @@ function buildStyles(p: Palette) {
   sheet: {flex: 1, backgroundColor: p.bg},
   sheetHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 20, paddingHorizontal: 22, paddingBottom: 14},
   sheetTitle: {fontSize: 20, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.3},
-  sheetClose: {width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: p.card, borderWidth: 1, borderColor: p.line2},
+  sheetClose: {width: 44, height: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: p.card, borderWidth: 1, borderColor: p.line2},
   // A sheet's content column. `alignSelf:'stretch'` for the same reason MODE_SURFACE carries it:
   // every sheet is now rendered INLINE inside a mode surface that centers its children, so an
   // unstretched sheet body is sized to its own content and stops matching the column it sits in.
@@ -775,7 +818,7 @@ function buildStyles(p: Palette) {
   // tree). `pickCard` uses opaque `p.panel` - an alpha wash would composite with the ink veil
   // into mud; the opaque raised surface is the "panel above backdrop" idiom.
   pickBackdrop: {flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: p.veil, paddingHorizontal: 28},
-  pickCard: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 20, padding: 16, ...LIFT_SM},
+  pickCard: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 12, padding: 16, ...LIFT_SM},
   pickTitle: {fontSize: 13, fontWeight: '600', color: p.sub2, marginBottom: 8, fontFamily: FONT.sans},
   // Bounded scroller for the picker rows - the catalog grows (IC + SOL rails, testnet entries),
   // and a Modal has no scroll surface, so an unbounded list would push the bottom rows off a
@@ -803,17 +846,17 @@ function buildStyles(p: Palette) {
   nfcInfoLink: {flexDirection: 'row', alignItems: 'center', gap: 5},
   nfcInfoLinkText: {fontSize: 18, fontWeight: '600', color: p.bad, fontFamily: FONT.sansBold},
   nfcInfoBody: {fontSize: 15, color: p.ink, lineHeight: 21, marginBottom: 16, fontFamily: FONT.sans},
-  nfcInfoClose: {alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, backgroundColor: p.card},
+  nfcInfoClose: {alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: p.card},
   nfcInfoCloseText: {fontSize: 15, fontWeight: '600', color: p.ink, fontFamily: FONT.sansMedium},
   // Deposit instructions - a scannable card (network/asset + est. time + fee/min + non-custody line).
-  instrCard: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 20, padding: 16, marginBottom: 18},
+  instrCard: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16, marginBottom: 18},
   instrLine: {fontSize: 15, color: p.ink, textAlign: 'center', lineHeight: 21, marginBottom: 10, fontFamily: FONT.sans},
   instrAsset: {color: p.brandText, fontWeight: '700', fontFamily: FONT.sansBold},
   instrMeta: {fontSize: 13, color: p.sub, textAlign: 'center', fontFamily: FONT.sans, paddingVertical: 2, fontVariant: ['tabular-nums']},
   instrCustody: {fontSize: 12, color: p.sub2, textAlign: 'center', marginTop: 10, lineHeight: 17, fontFamily: FONT.sans},
   sheetAddr: {fontSize: 13, color: p.ink, fontFamily: FONT.mono, textAlign: 'center', marginTop: 4, marginBottom: 8, letterSpacing: 0.2},
   depositCopy: {alignSelf: 'stretch', marginTop: 12},
-  depositStatus: {marginTop: 22, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 20, padding: 16},
+  depositStatus: {marginTop: 22, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16},
   depositStatusTitle: {fontSize: 13, fontWeight: '600', color: p.sub2, marginBottom: 6, fontFamily: FONT.sans},
   // "Don't have any yet?" - one provider's published cost (FundingRoutes). Three stacked lines
   // rather than a row, because a name + a cost breakdown + a source domain do not fit side by side
@@ -822,7 +865,7 @@ function buildStyles(p: Palette) {
   // chip rather than a button: it names the current asset and opens the picker, and it sits under
   // the request/address toggle on BOTH rails' Receive surfaces.
   assetSwitchWrap: {alignSelf: 'stretch', alignItems: 'center', marginBottom: 10},
-  assetSwitchBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, backgroundColor: p.card},
+  assetSwitchBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: p.card},
   assetSwitchText: {fontSize: 14, color: p.ink, fontFamily: FONT.sans},
   fundingProviderRow: {alignSelf: 'stretch', marginTop: 10},
   fundingProviderName: {fontSize: 14, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
@@ -834,7 +877,7 @@ function buildStyles(p: Palette) {
   depositStatusMain: {fontSize: 16, fontWeight: '700', color: p.ink, marginBottom: 4, fontFamily: FONT.sansBold},
   depositStatusRow: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
   // Manual "Check now" - secondary (outline brand), debounced + spinner while in-flight.
-  checkBtn: {marginTop: 16, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: p.brandText, alignItems: 'center', justifyContent: 'center', height: 46, backgroundColor: p.card},
+  checkBtn: {marginTop: 16, borderRadius: 8, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: p.brandText, alignItems: 'center', justifyContent: 'center', height: 46, backgroundColor: p.card},
   checkBtnText: {color: p.brandText, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
   // Testnet show/hide toggle at the bottom of the Balances sheet - a subtle secondary affordance
   // (never the primary action). Muted text; full-width 44pt touch target.
@@ -842,24 +885,24 @@ function buildStyles(p: Palette) {
   testnetToggleText: {color: p.sub, fontWeight: '600', fontSize: 14, fontFamily: FONT.sansMedium},
   // Withdraw sheet form fields.
   inputLabel: {fontSize: 13, fontWeight: '600', color: p.sub, alignSelf: 'flex-start', marginTop: 18, marginBottom: 6, fontFamily: FONT.sansMedium},
-  withdrawAddrInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 16, height: 58, paddingHorizontal: 16, fontSize: 15, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
+  withdrawAddrInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 8, height: 56, paddingHorizontal: 16, fontSize: 15, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
   // The destination NICKNAME field: same box, sans — a person's label is prose, not an opaque string.
-  withdrawNameInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 16, height: 58, paddingHorizontal: 16, fontSize: 15, color: p.ink, fontFamily: FONT.sans, borderWidth: 1, borderColor: p.line2},
-  savedAddrChip: {alignSelf: 'flex-start', backgroundColor: p.panel2, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, minHeight: 44, justifyContent: 'center'},
+  withdrawNameInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 8, height: 56, paddingHorizontal: 16, fontSize: 15, color: p.ink, fontFamily: FONT.sans, borderWidth: 1, borderColor: p.line2},
+  savedAddrChip: {alignSelf: 'flex-start', backgroundColor: p.panel2, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, minHeight: 44, justifyContent: 'center'},
   savedAddrText: {fontSize: 13, color: p.brandText, fontFamily: FONT.mono},
   // `minWidth: 0` is load-bearing at the ONE call site that puts this field in a row - SendSheet's
   // `amtRow`, where it is given `flex: 1` beside the Max button. Without it the field's intrinsic
   // <input> width wins under CSS `min-width: auto` and pushes Max 28.7px off the right edge
   // (measured, and asserted by e2e flow 146). A no-op where the field is stacked in a column.
-  withdrawAmtInput: {alignSelf: 'stretch', minWidth: 0, backgroundColor: p.field, borderRadius: 16, height: 58, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', color: p.ink, borderWidth: 1, borderColor: p.line2, fontFamily: FONT.sansBold, fontVariant: ['tabular-nums']},
+  withdrawAmtInput: {alignSelf: 'stretch', minWidth: 0, backgroundColor: p.field, borderRadius: 8, height: 56, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', color: p.ink, borderWidth: 1, borderColor: p.line2, fontFamily: FONT.sansBold, fontVariant: ['tabular-nums']},
   // --- unified send-to-address field (AddressField + SendSheet) ---------------------------------
   // The destination input is MULTILINE and wraps: an IC principal is 63 characters and an ICRC-1
   // account with a subaccount is longer still, so a single 56pt line would hide the tail - and the
   // tail is exactly what a user checks against the wallet they copied it from. minHeight keeps an
   // empty field the same size as the amount field beside it.
   addrRow: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'stretch', gap: 8},
-  addrInput: {flex: 1, backgroundColor: p.field, borderRadius: 16, minHeight: 58, paddingHorizontal: 16, paddingVertical: 14, fontSize: 14, lineHeight: 20, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
-  addrScanBtn: {width: 58, minHeight: 58, borderRadius: 16, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
+  addrInput: {flex: 1, backgroundColor: p.field, borderRadius: 8, minHeight: 56, paddingHorizontal: 16, paddingVertical: 14, fontSize: 14, lineHeight: 20, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
+  addrScanBtn: {width: 56, minHeight: 56, borderRadius: 8, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
   // The route disclosure line - neutral/informational, distinct from warnNote (amber) and err (red).
   routeNote: {fontSize: 13, color: p.sub, alignSelf: 'flex-start', marginTop: 8, lineHeight: 18, fontFamily: FONT.sans},
   savedList: {alignSelf: 'stretch', marginTop: 14},
@@ -870,24 +913,24 @@ function buildStyles(p: Palette) {
   // sharing width with the rename/remove controls) and the inline rename input that replaces the
   // label while a rename is in flight - both reuse the saved-list visual language, no new one.
   savedAddrCol: {flex: 1, justifyContent: 'center'},
-  renameInput: {flex: 1, minHeight: 44, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, color: p.ink, fontSize: 14, fontFamily: FONT.sans},
+  renameInput: {flex: 1, minHeight: 44, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, color: p.ink, fontSize: 14, fontFamily: FONT.sans},
   // Amount row with the inline Max button.
   amtRow: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 8},
-  maxBtn: {paddingHorizontal: 16, minHeight: 52, borderRadius: 16, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
+  maxBtn: {paddingHorizontal: 16, minHeight: 52, borderRadius: 8, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
   maxBtnText: {fontSize: 14, fontWeight: '700', color: p.brandText, fontFamily: FONT.sansBold},
   // Review card rows: label left, value right, so amount/fee/total align down the right edge.
   reviewRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6, gap: 12},
   reviewRowLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
   reviewRowValue: {fontSize: 13, color: p.ink, fontFamily: FONT.sans, fontVariant: ['tabular-nums'], flexShrink: 1, textAlign: 'right'},
-  reviewCard: {alignSelf: 'stretch', marginTop: 20, backgroundColor: p.card, borderRadius: 20, padding: 16},
+  reviewCard: {alignSelf: 'stretch', marginTop: 20, backgroundColor: p.card, borderRadius: 12, padding: 16},
   reviewLabel: {fontSize: 13, fontWeight: '600', color: p.sub2, marginBottom: 8, fontFamily: FONT.sans},
   // 'Needs setup' pill on the Balances USDC (Solana) row - a warn-tinted row annotation,
   // left-aligned under the subtitle (not a centered banner).
-  assetBadge: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: withAlpha(p.warn, p.wash), borderWidth: 1, borderColor: withAlpha(p.warn, 0.35), fontSize: 11, fontWeight: '600', color: p.warn, fontFamily: FONT.sans, overflow: 'hidden'},
+  assetBadge: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 4, backgroundColor: withAlpha(p.warn, p.wash), borderWidth: 1, borderColor: withAlpha(p.warn, 0.35), fontSize: 11, fontWeight: '600', color: p.warn, fontFamily: FONT.sans, overflow: 'hidden'},
   // 'Main' pill on the Balances row that IS the home currency's rail. Same pill geometry as
   // `assetBadge`, brand-tinted rather than warn-tinted: this one marks the account the wallet opens
   // with, which is a statement of fact, not a warning about setup.
-  assetBadgeMain: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: withAlpha(p.brandText, p.wash), borderWidth: 1, borderColor: withAlpha(p.brandText, 0.35), fontSize: 11, fontWeight: '600', color: p.brandText, fontFamily: FONT.sans, overflow: 'hidden'},
+  assetBadgeMain: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 4, backgroundColor: withAlpha(p.brandText, p.wash), borderWidth: 1, borderColor: withAlpha(p.brandText, 0.35), fontSize: 11, fontWeight: '600', color: p.brandText, fontFamily: FONT.sans, overflow: 'hidden'},
   // ─── Walkthrough (Trip Ready J1, 2026-08-22) ────────────────────────────────────────────────
   // The first-run 3-scene pager + its Settings replay. A left-aligned label/title/body block
   // over a plain 20-radius illustration panel, then a footer with progress dots + the primary
@@ -914,11 +957,11 @@ function buildStyles(p: Palette) {
   walkText: {fontSize: 16, color: p.sub, lineHeight: 23, marginTop: 12, fontFamily: FONT.sans},
   // The illustration stage - a plain raised panel, fixed aspect so every scene's illustration
   // occupies the same stage (visual continuity across the pager).
-  walkStage: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 20, overflow: 'hidden', marginTop: 26, aspectRatio: 1.32},
+  walkStage: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 12, overflow: 'hidden', marginTop: 26, aspectRatio: 1.32},
   // Corner marker on the panel - a quiet scene index, top-right.
   // zIndex keeps it above the scene illustration (scene 1's breathing arcs cross the corner and,
   // as later siblings, would otherwise paint over the tag).
-  walkStageTag: {position: 'absolute', top: 12, right: 16, zIndex: 1, fontSize: 11, fontWeight: '600', color: p.brandText, fontFamily: FONT.sans, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, opacity: 0.9},
+  walkStageTag: {position: 'absolute', top: 12, right: 16, zIndex: 1, fontSize: 11, fontWeight: '600', color: p.brandText, fontFamily: FONT.sans, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 3, opacity: 0.9},
   walkFooter: {paddingHorizontal: 22, paddingBottom: 14, paddingTop: 18},
   // Dots row: relative so the Back link can sit absolutely at the left while the dots center.
   walkNavRow: {position: 'relative', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 12, minHeight: 34},
@@ -929,10 +972,10 @@ function buildStyles(p: Palette) {
   walkCampaignRule: {flex: 1, height: 1, backgroundColor: p.line},
   walkCampaignText: {fontSize: 12, fontWeight: '600', color: p.sub, fontFamily: FONT.sans},
   // Scene 3 illustration - the request card with ONE exact asset + ghost rows that stay put.
-  walkReqCard: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 16, padding: 14},
+  walkReqCard: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 14},
   walkReqEyebrow: {fontSize: 12, fontWeight: '600', color: p.sub2, fontFamily: FONT.sans},
   walkAssetRow: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7, marginTop: 6},
-  walkAssetChip: {width: 34, height: 34, borderRadius: 11, borderWidth: 1, borderColor: p.glyphBorder, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
+  walkAssetChip: {width: 34, height: 34, borderRadius: 8, borderWidth: 1, borderColor: p.glyphBorder, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
   walkAssetChipText: {fontSize: 15, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
   walkAssetName: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
   walkAssetSub: {fontSize: 11, color: p.sub2, marginTop: 2, fontFamily: FONT.sans},
@@ -946,13 +989,13 @@ function buildStyles(p: Palette) {
   // than the warning, ink (not warn-tinted): the moment reads as ownership first, risk second.
   backupRitualNote: {fontSize: 15, color: p.ink, textAlign: 'center', marginTop: 6, marginBottom: 0, paddingHorizontal: 8, lineHeight: 21, fontFamily: FONT.sansMedium},
   // The RECOVERY SAVED chip (the post-faucet beat): a quiet brandText ring, sentence-case sans.
-  stampChip: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1, borderColor: p.brandText, backgroundColor: 'transparent'},
+  stampChip: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 8, borderWidth: 1, borderColor: p.brandText, backgroundColor: 'transparent'},
   stampChipText: {color: p.brandText, fontFamily: FONT.sans, fontSize: 13, fontWeight: '600'},
   // The RECOVERY SAVED beat (UX hardening 2026-08-23 made it full-bleed; was: a tiny chip on
   // ~96% blank page, which read as a crash flash). Ballast makes it the FIRST Settlement
   // Field: full-bleed `brand`, `brandInk` type - the money-moved register from minute one.
   inkBeat: {flex: 1, backgroundColor: p.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36},
-  inkStamp: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 999, borderWidth: 1.5, borderColor: p.brandInk},
+  inkStamp: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 8, borderWidth: 1.5, borderColor: p.brandInk},
   inkStampText: {color: p.brandInk, fontFamily: FONT.sans, fontSize: 15, fontWeight: '600'},
   inkBeatLine: {color: p.brandInk, fontSize: 16, fontWeight: '600', textAlign: 'center', marginTop: 34, lineHeight: 22, fontFamily: FONT.sansMedium},
   inkBeatSub: {color: p.brandInk, fontSize: 13, textAlign: 'center', marginTop: 8, fontFamily: FONT.sans},
@@ -961,7 +1004,7 @@ function buildStyles(p: Palette) {
   // auto-advance rail died with the pager.
   walkScroll: {flex: 1},
   rehStep: {marginTop: 18},
-  rehBadge: {alignSelf: 'flex-start', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, marginBottom: 7},
+  rehBadge: {alignSelf: 'flex-start', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 3, marginBottom: 7},
   rehBadgeText: {color: p.brandText, fontSize: 12, fontWeight: '600', fontFamily: FONT.sans},
   rehStepTitle: {color: p.ink, fontSize: 17, fontWeight: '700', fontFamily: FONT.sansBold},
   rehStepBody: {color: p.sub, fontSize: 14.5, lineHeight: 21, marginTop: 4, fontFamily: FONT.sans},
@@ -969,9 +1012,9 @@ function buildStyles(p: Palette) {
   // quieter than the QR card); icon chip echoes walkAssetChip so
   // the coaching voice matches the walkthrough's. NEVER fixed/overlay - inline, so it can never
   // block the primary action.
-  coachCard: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 16, padding: 12, marginTop: 14},
+  coachCard: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 12, padding: 12, marginTop: 14},
   coachRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 10},
-  coachIcon: {width: 30, height: 30, borderRadius: 10, borderWidth: 1, borderColor: p.glyphBorder, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
+  coachIcon: {width: 30, height: 30, borderRadius: 8, borderWidth: 1, borderColor: p.glyphBorder, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
   coachText: {flex: 1, minWidth: 0},
   coachTitle: {fontSize: 13, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
   coachBody: {fontSize: 12.5, color: p.sub, lineHeight: 17.5, marginTop: 2, fontFamily: FONT.sans},
@@ -986,7 +1029,7 @@ function buildStyles(p: Palette) {
   fieldTitle: {fontSize: 34, fontWeight: '700', color: p.brandInk, fontFamily: FONT.sansBold, letterSpacing: -0.5, textAlign: 'center', fontVariant: ['tabular-nums']},
   fieldBody: {fontSize: 15, color: p.brandInk, fontFamily: FONT.sans, textAlign: 'center', lineHeight: 22, marginTop: 8},
   fieldRule: {alignSelf: 'stretch', height: 1, backgroundColor: p.brand2, marginVertical: 18},
-  fieldAction: {alignSelf: 'stretch', minHeight: 52, borderRadius: 18, borderWidth: 1, borderColor: withAlpha(p.brandInk, 0.45), alignItems: 'center', justifyContent: 'center', marginTop: 16},
+  fieldAction: {alignSelf: 'stretch', minHeight: 52, borderRadius: 8, borderWidth: 1, borderColor: withAlpha(p.brandInk, 0.45), alignItems: 'center', justifyContent: 'center', marginTop: 16},
   fieldActionText: {color: p.brandInk, fontSize: 17, fontWeight: '700', fontFamily: FONT.sansBold},
 
   // ── The convert intent sheet (brief Part V) ─────────────────────────────────────────────
@@ -1003,14 +1046,14 @@ function buildStyles(p: Palette) {
   // Sibling currency chips: small pills in one wrap row (999/h44), 6px gaps, the active
   // currency absent (it IS the line).
   chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8},
-  chip: {paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, minHeight: 44, alignItems: 'center', justifyContent: 'center'},
+  chip: {paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, minHeight: 44, alignItems: 'center', justifyContent: 'center'},
   chipOn: {borderColor: p.brand, backgroundColor: p.brand},
   chipText: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
   chipTextOn: {color: p.brandInk, fontFamily: FONT.sansBold},
   // The preset row (25% / 50% / Max) rides under the amount field: same pill grammar, 8px top.
   presetRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8},
   // The review card is the sheet's whole body: what moves, what lands, whose numbers they are.
-  intentCard: {backgroundColor: p.panel2, borderRadius: 20, padding: 16, alignSelf: 'stretch', marginTop: 16},
+  intentCard: {backgroundColor: p.panel2, borderRadius: 12, padding: 16, alignSelf: 'stretch', marginTop: 16},
   reviewPairRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, alignSelf: 'stretch'},
   reviewConvertLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
   reviewConvertAmount: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.4, textAlign: 'right', flexShrink: 1, fontVariant: ['tabular-nums']},

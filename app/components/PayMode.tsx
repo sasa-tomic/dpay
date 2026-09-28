@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {View, Text, Pressable} from 'react-native';
 import {QrCode} from './QrCode';
 import {S} from '../styles';
-import {C} from '../config/palette';
+import {C, DARK} from '../config/palette';
 import {POLL, QR_SIZE} from '../config/constants';
 import {parseRequestQR, randNonceHex} from '../lib/format';
 import {classifyScan, coinDisplayOfScheme} from '../lib/scan';
@@ -38,7 +38,7 @@ import {awardPaymentTested} from '../lib/readiness';
 import {shouldShowOfflinePeak} from '../lib/peak';
 import {CoachTip} from './CoachTip';
 import {OfflinePeak} from './OfflinePeak';
-import {IconCheck, IconClock, IconShare} from './icons';
+import {IconCheck, IconClock, IconScan, IconShare} from './icons';
 import {M} from '../i18n';
 
 // How long this rail waits for a submitted envelope to reach a terminal state: 12 read_state polls,
@@ -1284,6 +1284,26 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     );
   }
 
+  // The composed idle viewfinder (CALIBER slice 1): the EXACT box the camera will occupy — same
+  // construction as the live camBox (stretch + 1:1 + R_CARD + the theme-invariant warm-black
+  // fill + LIFT) — with corner brackets, the scan glyph and the instruction copy inside. The
+  // void is gone and arming the camera moves nothing on screen. testID is deliberately NOT
+  // `scan-cam-box`: that id means "the camera is LIVE" (flows 79/81 pin that it appears only
+  // after the Pay Now press), so the instrument carries its own.
+  const idleViewfinder = (
+    <View testID="pay-viewfinder" style={S.camBox}>
+      <View style={[S.viewfinderCorner, S.viewfinderCornerTL]} />
+      <View style={[S.viewfinderCorner, S.viewfinderCornerTR]} />
+      <View style={[S.viewfinderCorner, S.viewfinderCornerBL]} />
+      <View style={[S.viewfinderCorner, S.viewfinderCornerBR]} />
+      <View style={S.viewfinderCenter}>
+        <IconScan size={32} color={DARK.brandText} />
+        <Text style={S.camText}>{M.pay.pointCamera}</Text>
+        <Text style={S.camSubText}>{M.pay.cameraPrivacy}</Text>
+      </View>
+    </View>
+  );
+
   // Scan screen. IDLE (scanArmed false): the NFC status row stays (it explains what's available)
   // and a single primary CTA arms BOTH rails — until that tap, no camera stream and no HCE card.
   // ARMED: the card arms in the background (if NFC is ready) AND the QR scanner goes live at the
@@ -1319,9 +1339,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
         <>
           <NfcStatusRow nfcStatus={nfcStatus} testID="pay-scan" />
           {scanArmed ? (
-            <QrScanner key={scanKey} onScan={raw => onRequestString(raw)} />
+            <View style={S.scanWrap}>
+              <QrScanner key={scanKey} onScan={raw => onRequestString(raw)} />
+            </View>
           ) : (
             <>
+              {idleViewfinder}
               <Pressable
                 style={S.primary}
                 onPress={() => setScanArmed(true)}

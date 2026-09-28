@@ -245,6 +245,10 @@ describe('2. THE CLOSURE — the stylesheet cannot emit a colour outside the set
     add(withAlpha(p.brandInk, 0.45), 'key-cap ring on the brand fill');
     add(withAlpha(p.ink, 0.14), 'key-cap scrim on the brand fill');
     add(CAM_BG, 'the theme-invariant camera fill');
+    // The viewfinder instrument (idle Pay) paints on the SAME theme-invariant warm-black fill,
+    // so its accent is the DARK aqua in both themes - the same "ink that knows its surface"
+    // reasoning as the camera inks below.
+    add(DARK.brandText, 'the viewfinder accent on the theme-invariant dark box');
     // Two surfaces are pinned to one theme no matter which is applied, so their inks are too:
     // the camera viewfinder is always warm-black (DARK's inks) and the QR plate is always white
     // (LIGHT's). Approving them unconditionally is the same statement styles.ts makes by reading
@@ -301,11 +305,13 @@ describe('3. THE FILLS — every label printed on a saturated fill', () => {
     ['smallBtn', 'smallBtnText'],
     ['applyBtn', 'applyBtnText'],
     ['tabActive', 'tabTextActive'],
-    ['bottomTabActive', 'bottomTabTextActive'],
     ['filterChipActive', 'filterChipTextActive'],
     ['convertSlippageChipOn', 'convertSlippageChipTextOn'],
     ['paidBtn', 'paidBtnText'],
   ];
+  // (The bottom nav left this list with the CALIBER shape system: its active state is a brand
+  // indicator BAR, not a fill behind a label, so there is no fill/label pair to measure. The
+  // state change is gated as non-text geometry in section 5 below - brand vs card ≥3:1.)
 
   for (const [name, p] of themes) {
     test(`${name}: every fill/label pair in the stylesheet`, () => {
@@ -382,7 +388,10 @@ describe('5. NON-TEXT — the marks that carry a state (WCAG 1.4.11, 3:1)', () =
   for (const [name, p] of themes) {
     test(`${name}: state indicators are distinguishable`, () => {
       applyPalette(p);
-      // An active tab is told apart from an inactive one by its FILL, not only by its label.
+      // The active bottom-nav tab is told apart from an inactive one by its brand indicator BAR
+      // (CALIBER: no filled pill), gated as non-text geometry: brand on the nav's card surface.
+      expect(String((S.bottomTabIndicator as {backgroundColor?: string}).backgroundColor)).toBe(p.brand);
+      expect(String((S.bottomTabIndicatorOff as {backgroundColor?: string}).backgroundColor)).toBe('transparent');
       expect(contrast(p.brand, p.card)).toBeGreaterThanOrEqual(NON_TEXT);
       // The selected account row's 2px `brandText` selection ring (brief §IV: no left stripe;
       // selection is a ring around the whole card), against the card it runs down.
@@ -395,6 +404,19 @@ describe('5. NON-TEXT — the marks that carry a state (WCAG 1.4.11, 3:1)', () =
       expect(contrast(p.sub2, p.bg)).toBeGreaterThanOrEqual(NON_TEXT);
       // The PAID stamp and the passport's filled slots are rings with no fill behind them.
       expect(contrast(p.brandText, p.bg)).toBeGreaterThanOrEqual(NON_TEXT);
+      applyPalette(LIGHT);
+    });
+
+    test('the viewfinder accent is the sanctioned DARK aqua ON the theme-invariant box', () => {
+      // The idle Pay viewfinder (CALIBER slice 1) paints its corner brackets on the same
+      // theme-invariant warm-black fill the camera uses (#17150F, the camppreview-gated const).
+      // Its accent is DARK.brandText - the one saturated moment on the instrument - measured
+      // here like the camera inks above, in BOTH themes (the box is theme-invariant, so the
+      // pairing is too).
+      const bracket = String((S.viewfinderCorner as {borderColor?: string}).borderColor);
+      expect(bracket).toBe(DARK.brandText);
+      expect(contrast(DARK.brandText, CAM_BG)).toBeGreaterThanOrEqual(NON_TEXT);
+      expect(contrast(DARK.brandText, CAM_BG)).toBeGreaterThanOrEqual(AA);
       applyPalette(LIGHT);
     });
   }
