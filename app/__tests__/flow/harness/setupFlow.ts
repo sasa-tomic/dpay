@@ -332,15 +332,17 @@ export function installFlowLifecycle(): void {
   lg.__DPAY_FLOW_LIFECYCLE_INSTALLED__ = true;
   // The jest per-test ceiling must scale WITH the wait budgets or it becomes the binding bound:
   // budget-scaled inner waits (harness/budget.ts) are pointless under a fixed 30s test timeout on
-  // a starved box. jest-circus reads the timeout state when each TEST executes, so setting it
-  // here — right before the body — budgets the current test for the load the box carries NOW
-  // (same live re-read doctrine as e2e/run.mjs's per-test republish). The base MUST match
+  // a starved box. SAMPLED PER FILE here (after-env evaluation), because jest-circus seeds the
+  // per-file state from the global timeout symbol exactly once at run_start — a mid-run
+  // jest.setTimeout in a hook would write the symbol but never re-seed the state. Each test file
+  // re-samples at its own install, so a burst mid-run lifts every later file's ceiling; the
+  // factor itself is monotone within a file (budget.ts high-water). The base MUST match
   // jest.config.js's root `testTimeout: 30_000`. Hook timeouts inherit this state too
   // (jest-circus run.js: `hook.timeout || getState().testTimeout`), so beforeAll/afterAll knob
   // calls in flow files get the same relief. Keep it a pure positive-transition stretch: nothing
   // here weakens a refusal assertion, it only stops the clock from false-firing healthy code.
+  jest.setTimeout(budgetScaled(30_000));
   beforeEach(async () => {
-    jest.setTimeout(budgetScaled(30_000));
     g[clipboardKey] = '';
     g.__DPAY_TEST_NFC_STATUS = undefined;
     g.__DPAY_QR_LAST = undefined;
