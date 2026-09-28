@@ -36,6 +36,15 @@ deployed); 2, 3 and 4 are not started** — including the Revolut information ar
    user with a payment-request surface is what read as a scam. Reasoning and the design:
    [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md).
 
+**REFINEMENT (founder 2026-09-27, second verdict, overrides the structural framing above):** the
+problem is NOT that the UI is generic fintech - the familiar structure is fine and trusted. What
+shouts "made by AI" is rounded-everything buttons and UI imperfections: off-grid spacing,
+misaligned baselines, inconsistent icon weights, uneven radii, half-existing borders. The bar is
+CRAFT PERFECTION within the familiar skeleton: a disciplined shape system (restrained, consistent
+radii, sharp where precise), one spacing grid, aligned baselines, consistent iconography, ballast
+palette fully present. A pixel-flawless familiar screen beats a novel screen with one misaligned
+label. Full mandate: `tmp/uix2/design-brief-v2.md` (worktree dpay-uix2, branch uix2).
+
 Design, every founder decision, the measured venue/ramp evidence behind them, and the code cost:
 [`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
 Per-currency asset availability: `positioning.md`. Work order: `OPEN_ISSUES.md`.
