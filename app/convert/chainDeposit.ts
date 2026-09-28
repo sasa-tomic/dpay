@@ -72,7 +72,17 @@ export async function buildChainDepositLeg(args: {
   const venueName = venue != null ? venue.display_name : venueDisplayName(args.cefiVenueId);
   const amount = BigInt(args.amountRaw);
   if (amount <= 0n) throw new Error(M.convert.errors.quoteUnavailable('deposit'));
-  if (bs58.decode(args.depositAddress).length !== 32) {
+  // The venue's deposit address must BE a Solana pubkey — a non-base58 string (a venue
+  // answering in another chain's shape) refuses with the order copy, never the raw
+  // decoder error: this gate fires after the order exists, and the user-facing word is
+  // ours, not bs58's.
+  let depositBytes: Uint8Array;
+  try {
+    depositBytes = bs58.decode(args.depositAddress);
+  } catch {
+    throw new Error(M.convert.errors.quoteUnavailable('order'));
+  }
+  if (depositBytes.length !== 32) {
     throw new Error(M.convert.errors.quoteUnavailable('order'));
   }
   const rpc = await loadRpcForSend();

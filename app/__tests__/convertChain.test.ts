@@ -442,4 +442,47 @@ describe('the chain prepare (confirm path) — order first, exact deposit', () =
     })).rejects.toThrow();
     expect(loadSpy).not.toHaveBeenCalled();
   });
+
+  test('a venue answering an IC-shaped deposit address refuses with the app\u2019s word, not bs58\u2019s', async () => {
+    const {fetchCeFiQuoteResult, createCeFiOrder} = await import('../convert/quotes');
+    jest.mocked(fetchCeFiQuoteResult).mockResolvedValue({
+      settleAmount: '2.5', rate: null, fetchedAtMs: 1, quoteId: 'q1', rateId: null, provider: null,
+    });
+    // The relay fixture's own IC-shaped address — exactly what the offline world serves
+    // today and what a misconfigured venue could answer live: not base58 at all.
+    jest.mocked(createCeFiOrder).mockResolvedValue({
+      id: 'order-bad',
+      depositAddress: 'ryjl3-tyaaa-aaaaa-aaaba-cai',
+      depositAmount: '10.000000',
+      settleAmount: '2.5',
+      expiresAt: '2026-09-28T12:00:00Z',
+    } as never);
+    jest.mocked(fetchConvertQuote).mockImplementation(async (_r, from, to, amount) => ({
+      venueId: 'icpswap', pool: 'pool-principal', tokenInLedger: from, tokenOutLedger: to,
+      amountIn: amount, amountOutGross: (BigInt(amount) * 2n).toString(),
+      feeMillionths: 3000, zeroForOne: true, fetchedAtMs: 1,
+    }) as Awaited<ReturnType<typeof fetchConvertQuote>>);
+    await expect(prepareChainConvertRecord({
+      id: 'rec-3',
+      secretHex: 'aa',
+      publicHex: 'bb',
+      relayUrl: 'https://relay.test',
+      route: {
+        kind: 'chain',
+        routeId: 'chain:sideshift-eurc:icpswap',
+        cefiVenueId: 'sideshift-eurc',
+        depositMint: EURC_MINT_ADDRESS,
+        depositSymbol: 'EURC',
+        depositDecimals: 6,
+        legs: [{venueId: 'icpswap', pool: 'pool-principal', fromLedger: ICP_LEDGER, toLedger: 'vchf-ledger'}],
+        endpoints: [
+          {currency: 8, ledger: ICP_LEDGER, symbol: 'ICP', decimals: 8, fee: '10000', network: 'Internet Computer'},
+          {currency: 7, ledger: 'vchf-ledger', symbol: 'VCHF', decimals: 8, fee: '10000', network: 'Internet Computer'},
+        ],
+      },
+      amountRaw: '10000000',
+      slippageBps: 100,
+      settleAddressIc: 'account-id-text',
+    })).rejects.toThrow('A quote could not be shown');
+  });
 });
