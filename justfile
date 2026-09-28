@@ -164,7 +164,7 @@ e2e-sweep:
 # The sweep pre-step clears dead discovery files / idle orphaned gate shells before the run
 # (machine-global gate: e2e/harness/browser.mjs; parallel runs QUEUE on the browser lock).
 e2e:
-    python3 scripts/testruns.py run e2e --sh 'node e2e/harness/sweep.mjs && cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && node run.mjs'
+    ./scripts/heavy-gate.sh e2e python3 scripts/testruns.py run e2e --sh 'node e2e/harness/sweep.mjs && cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && node run.mjs'
 
 # visual-regression gate (fast iteration on flow 40 alone): re-capture the 5 primary surfaces and
 # pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift >0.5%. Catches the
@@ -174,7 +174,7 @@ e2e:
 # UI tweak (no banner, no other flows). On an intentional UI change, regenerate the baselines via
 # `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
 e2e-visual:
-    python3 scripts/testruns.py run e2e-visual --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=35-ux-tour,39-store-screens,40-visual-regression,78-qr-scannable,84-visual-dark,151-offline-web-boot,83-mobile-viewport,146-money-forms-fit,158-header-fits node run.mjs'
+    ./scripts/heavy-gate.sh e2e-visual python3 scripts/testruns.py run e2e-visual --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=35-ux-tour,39-store-screens,40-visual-regression,78-qr-scannable,84-visual-dark,151-offline-web-boot,83-mobile-viewport,146-money-forms-fit,158-header-fits node run.mjs'
 
 # regenerate the visual-regression baselines from the current app surfaces (run after an intentional
 # UI/style change). Writes e2e/shots/baselines/<surface>.png for each of the 5 surfaces. COMMIT the
@@ -448,7 +448,7 @@ smoke-watch:
 # what they need). workerIdleMemoryLimit was tried and REJECTED (e381fc95): recycling workers
 # mid-run cascaded 22 suite failures.
 flow:
-    python3 scripts/testruns.py run flow --sh 'cd app && NODE_OPTIONS="--max-old-space-size=16384" npx jest --selectProjects flow --silent --maxWorkers=4 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
+    ./scripts/heavy-gate.sh flow python3 scripts/testruns.py run flow --sh 'cd app && NODE_OPTIONS="--max-old-space-size=6144" npx jest --selectProjects flow --silent --maxWorkers=2 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # real-chain proofs: anvil + relay pipe, NO browser, NO DOM mount (jest project `node-anvil`).
 # ONE scratch anvil (31337, 1s blocks) + the REAL test-helpers relay are staged ONCE per run by

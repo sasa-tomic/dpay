@@ -93,6 +93,14 @@ Dev-loop tests MUST finish in SECONDS, not minutes. That is the objective of the
   (`app/__tests__/flow/harness/budget.ts`: ×(1 + max(0, load1min − 3) × 1.0), clamped 1..6, env
   override `DPAY_TEST_BUDGET_MULT`; the per-test jest timeout and hooks scale with it; refusal and
   negative-probe windows stay TIGHT because the app must refuse fast). There is no rerun rubric
+  anymore. **Resource guard (2026-09-29, after a full-box lockup): `just flow` / `just e2e` /
+  `just e2e-visual` route through `scripts/heavy-gate.sh`** — machine-wide exclusive (a second
+  heavy gate refuses instead of stacking) and refuses to start when 1-min load >
+  `DPAY_HEAVY_LOAD_MAX` (default 20). `DPAY_FORCE_GATE=1` overrides, deliberately. Jest flow
+  runs at `--maxWorkers=2` with a 6GB per-worker heap — worst case ~12GB jest + chrome + relay,
+  far under the box's 62GB even with the CI runner building. Never raise the heap to make a
+  leaking suite pass: a suite that grows its heap without bound is a REAL bug — fix the leak
+  (see convert/flows.test.tsx, the suite that caused the lockup).
   and no calm-window waiting: a suite that fails in a load-scaled full run but passes ALONE means
   the budget scaling is incomplete for that wait — fix the scaling, rerun the full gate. A suite
   that fails alone is a real bug — fix the code.
