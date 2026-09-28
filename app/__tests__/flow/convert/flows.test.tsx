@@ -36,6 +36,7 @@ import {
 import type {Mount} from '../harness/mount';
 import {relayGet, relayPost, relayBaseURL, relayGetAt} from '../harness/relayClient';
 import {startFlowRelay, pickFreePort} from '../harness/flowRelay';
+import {deadline as budgetDeadline} from '../harness/budget';
 import {mkdtemp, readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -398,7 +399,8 @@ describe('flow 145 — convert refuses a swap that could only fail', () => {
 
       // --- half 3: an affordable amount re-arms the confirm, headline first --------------------
       await typeConvertAmount(m, '0.1');
-      const rearmDeadline = Date.now() + 12_000;
+      // Positive transition (the confirm re-arms once the amount fits) — budget-scaled ceiling.
+      const rearmDeadline = budgetDeadline(12_000);
       while (await isDisabled(m, 'btn-convert-confirm')) {
         if (Date.now() > rearmDeadline) throw new Error('[145] the confirm never re-armed once the amount fit');
         await new Promise((r) => setTimeout(r, 100));
@@ -476,7 +478,7 @@ describe('flow 169 — a pending conversion survives an app reload; the engine d
       await swapPoolKnob({pool: POOL, fail_withdrawal: false, settle_pending: true});
 
       let resolved: {step?: string; outTx?: unknown} | null = null;
-      const deadline = Date.now() + 30_000;
+      const deadline = budgetDeadline(30_000); // positive transition (engine → done) — budget-scaled
       while (Date.now() < deadline) {
         const raw = await AsyncStorage.getItem(scopedKey);
         const all = raw == null ? {} : JSON.parse(raw) as Record<string, {step?: string; outTx?: unknown}>;
@@ -2356,7 +2358,7 @@ afterEach(() => {
 async function confirmCefi(m: Awaited<ReturnType<typeof onboardWallet>>): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt++) {
     await m.driver.click('btn-convert-confirm', {timeoutMs: 5_000});
-    const deadline = Date.now() + 8_000;
+    const deadline = budgetDeadline(8_000); // positive transition (→ awaiting panel) — budget-scaled
     for (;;) {
       if (m.driver.isPresent('convert-awaiting-deposit')) return;
       const moved = m.driver.readTextSafe('convert-moved-note') != null;
@@ -2797,7 +2799,8 @@ describe('flow 197 — EURC(Solana) → ICP via sideshift-eurc from the SOL surf
       assertIncludes(handoff, 'exactly the deposit amount', 'the handoff says what to send');
       assertIncludes(handoff, 'not a party', 'dpay party-hood denied');
       expect(m.driver.isPresent('convert-deposit-sol-fee-note')).toBe(true);
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 1_000}).catch(() => false)).toBe(false);
+      // NEGATIVE (honest-pending: the conversion must NOT complete) — window stays tight.
+      expect(await m.driver.waitForText('Converted', {timeoutMs: 1_000, unscaled: true}).catch(() => false)).toBe(false);
       expect(solSentTxs().length).toBe(0);
 
       // §4 the partner-key audit.
@@ -2892,7 +2895,7 @@ describe('flow 198 — SOL → ICP via the trocador aggregator: every venue call
       assertIncludes(handoff, '2 SOL', 'the exact deposit amount renders in the deposit asset');
       assertIncludes(handoff, 'exactly the deposit amount', 'the handoff says what to send');
       assertIncludes(handoff, 'not a party', 'dpay party-hood denied');
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 1_000}).catch(() => false)).toBe(false);
+      expect(await m.driver.waitForText('Converted', {timeoutMs: 1_000, unscaled: true}).catch(() => false)).toBe(false);
       expect(solSentTxs().length).toBe(0);
 
       // §4 the partner-key audit: EVERY venue call rode the relay, key attached.
@@ -3582,7 +3585,7 @@ async function seedComposedClone(
 
 /** Poll the store until the engine's gate has failed the seeded record. */
 async function waitForFailure(publicHex: string, id: string, timeoutMs = 45_000): Promise<ConvertRecord> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = budgetDeadline(timeoutMs); // positive transition (the gate failing) — budget-scaled
   for (;;) {
     const store = await storeRecords(publicHex);
     if (store[id]?.failureCode != null) return store[id];

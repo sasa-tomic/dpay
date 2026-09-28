@@ -19,6 +19,7 @@
 import {describe, it, expect} from '@jest/globals';
 import {evmEnv} from './env';
 import {deriveEvmKeypair} from '../../../evm/identity';
+import {deadline as budgetDeadline} from '../harness/budget';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
@@ -67,7 +68,7 @@ describe('flow 221 — the EVM pay link: grammar, slugs, prefill promise, wrong-
     await waitForWallet(m);
     // The link — delivered through the app's own link pipeline (the OS-intent seam).
     const linkUrl = payLink({origin: local, recipient: merchant.address, asset: 'ZCHF', network: CHAIN_SLUGS[42161], amount: '12.50'});
-    const deadline = Date.now() + 15000;
+    const deadline = budgetDeadline(15000); // positive transition (deep-link prefill landing) — budget-scaled
     (g.__DPAY_TEST_DEEPLINK as ((u: string) => void) | undefined)?.(linkUrl);
     await m.driver.findByTestID('evm-send-amount-input', {timeoutMs: 10000});
     for (;;) {

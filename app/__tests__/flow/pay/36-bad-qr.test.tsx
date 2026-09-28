@@ -13,6 +13,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {armPayScan, assert, onboardWallet} from '../harness/lib';
+import {deadline as budgetDeadline} from '../harness/budget';
 import {scanSeam} from './local';
 import {damageLnurl, encodeLnurl} from './lnurl';
 
@@ -54,7 +55,8 @@ describe('flow 36 — bad QR: honest errors, no review mount, the scanner genuin
       // The sign screen MUST NOT mount — nothing auto-signs a nonsensical request.
       expect(m.driver.isPresent('pay-amount')).toBe(false);
       // The refusal re-arms the camera: a NEW QrScanner mount, so the next code is READ.
-      const deadline = Date.now() + 5000;
+      // Positive transition (remount after the refusal) — budget-scaled ceiling.
+      const deadline = budgetDeadline(5000);
       let next = gen;
       while (Date.now() < deadline && next <= gen) {
         await new Promise((r) => setTimeout(r, 25));

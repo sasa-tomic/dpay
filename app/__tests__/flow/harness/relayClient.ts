@@ -11,6 +11,7 @@
  * re-litigate): the shared FakeLedger is mutex-serialized and tests use distinct random
  * identities, so there is no cross-test account state to collide.
  */
+import {scaled as budgetScaled} from './budget';
 
 export function relayBaseURL(): string {
   const u = process.env.DPAY_JEST_RELAY_URL;
@@ -28,7 +29,9 @@ async function request(
   opts: {body?: unknown; timeoutMs?: number; raw?: boolean; baseURL?: string} = {},
 ): Promise<Response> {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 8000);
+  // The default ceiling scales with the load budget: a starved worker delays the RELAY answers
+  // and this loop's own ticks alike; the local relay is healthy, only the box is slow.
+  const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? budgetScaled(8000));
   const url = `${opts.baseURL ?? relayBaseURL()}${path}`;
   try {
     return await fetch(url, {

@@ -28,6 +28,7 @@ import {
 } from '../harness/lib';
 import {relayBaseURL} from '../harness/relayClient';
 import {freshContext} from './helpers';
+import {deadline as budgetDeadline} from '../harness/budget';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {
@@ -58,7 +59,7 @@ async function onboardToPractice(m: Mount, name: string): Promise<void> {
 
 /** The seen marker rides an async store write (journey.ts markSeen) — poll the PERSISTED store. */
 async function seenEventually(marker: string, timeoutMs = 5000): Promise<string[]> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = budgetDeadline(timeoutMs); // positive transition (the persisted write) — budget-scaled
   for (;;) {
     const seen = (await readJourney())?.seen ?? [];
     if (seen.includes(marker)) return seen;

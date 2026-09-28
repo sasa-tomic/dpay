@@ -23,6 +23,7 @@
 import {spawn, type ChildProcess} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {dirname, join} from 'node:path';
+import {scaled as budgetScaled} from './budget';
 
 const here = dirname(__filename); // app/__tests__/flow/harness
 const repoRoot = join(here, '..', '..', '..', '..');
@@ -126,9 +127,12 @@ export async function startFlowRelay(opts: {port?: number; checkout?: boolean; f
     await new Promise<void>((resolve) => {
       child.once('exit', () => resolve());
       try { child.kill('SIGTERM'); } catch { resolve(); }
+      // The 2s SIGTERM→SIGKILL grace scales with the load budget too: it is a teardown bound,
+      // not an assertion — under starvation a healthy relay also dies slowly, and a wedged
+      // teardown must never bleed into the next test (the same doctrine as the unmount race).
       setTimeout(() => {
         try { child.kill('SIGKILL'); } catch { /* already gone */ }
-      }, 2_000);
+      }, budgetScaled(2_000));
     });
   };
   const relay: FlowRelay = {port, baseURL, stop};
@@ -139,7 +143,9 @@ export async function startFlowRelay(opts: {port?: number; checkout?: boolean; f
   // progress are harness probes, not app requests — recording them would trip the fail-closed
   // rule on the spawn's own startup window.
   const probe = (globalThis as unknown as {__DPAY_TEST_RAW_FETCH?: typeof fetch}).__DPAY_TEST_RAW_FETCH ?? fetch;
-  const deadline = Date.now() + (opts.readyTimeoutMs ?? READY_TIMEOUT_MS);
+  // Positive wait (the spawn coming up) — budget-scaled: a worker fighting for CPU delays BOTH
+  // the relay's first serve and this loop's ticks; the old fixed 10s expired under exactly that.
+  const deadline = Date.now() + budgetScaled(opts.readyTimeoutMs ?? READY_TIMEOUT_MS);
   let lastErr: unknown = null;
   for (;;) {
     if (child.exitCode !== null || child.signalCode) {

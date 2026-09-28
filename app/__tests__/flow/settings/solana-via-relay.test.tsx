@@ -18,6 +18,7 @@ import {describe, it, expect} from '@jest/globals';
 import './solRelayProxy';
 import {onboardSeededUnfunded, openBalances, relayGet} from '../harness/lib';
 import {pickFreePort} from '../harness/flowRelay';
+import {deadline as budgetDeadline} from '../harness/budget';
 import {freshContext} from '../onboard/helpers';
 
 /** The stub upstream's envelope counter (the relay's test route). */
@@ -85,7 +86,7 @@ describe('flow 165 — solana-via-relay', () => {
     // candidate list produces (the twin's phase-2 pin). Bounded wait: the '2 SOL' text can pass
     // off the pre-retarget render, so the evidence is the recorded dead-home dial of the NEXT
     // poll tick, not the text.
-    const walkDeadline = Date.now() + 15_000;
+    const walkDeadline = budgetDeadline(15_000); // positive transition (next poll tick) — budget-scaled
     let deadSolFails: typeof m.driver.fetchFailures = [];
     for (;;) {
       m.driver.collectFetchFailures();

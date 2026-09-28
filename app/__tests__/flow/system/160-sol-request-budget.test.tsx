@@ -40,6 +40,7 @@ import {describe, it, expect, beforeEach} from '@jest/globals';
 // import below; the per-call stub is installed afterwards (runtime seam).
 import {installSolAccountsHelper} from '../settings/solStub';
 import {onboardWallet, type Mount} from '../harness/lib';
+import {deadline as budgetDeadline} from '../harness/budget';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
@@ -114,7 +115,7 @@ function installCountingStub(): void {
 /** Wait until `getMultipleAccounts` has been called `n` more times than `from` (the counters are
  *  this module's own closure state — no mount handle needed). */
 async function waitForBalanceTicks(from: number, n: number, timeoutMs = 15_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = budgetDeadline(timeoutMs); // positive transition (poll ticks landing) — budget-scaled
   for (;;) {
     if (counts.getMultipleAccounts >= from + n) return;
     if (Date.now() > deadline) {
@@ -127,7 +128,7 @@ async function waitForBalanceTicks(from: number, n: number, timeoutMs = 15_000):
 /** Let any in-flight read land before a measurement window opens — deterministically: the
  *  counters must be stable across a painted frame (a blind sleep both guesses and wastes). */
 async function quietCounts(m: Mount): Promise<Counts> {
-  const deadline = Date.now() + 8000;
+  const deadline = budgetDeadline(8000); // positive transition (counters settling) — budget-scaled
   for (;;) {
     const before = {...counts};
     await m.driver.settleFrames(2);

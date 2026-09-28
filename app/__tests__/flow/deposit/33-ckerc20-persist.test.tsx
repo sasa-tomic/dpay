@@ -14,6 +14,7 @@ import {
   assert, assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
   waitForWallet, type Mount,
 } from '../harness/lib';
+import {deadline as budgetDeadline} from '../harness/budget';
 
 const g = globalThis as unknown as Record<string, unknown>;
 const mark = (l: string): void => { if (process.env.DPAY_FLOW_DEBUG === '1') console.log(`[m33] ${l}`); };
@@ -87,7 +88,7 @@ describe('flow 33 — ckERC20 watching persists across an app restart', () => {
     // effect — one tick after the phase render, so it is WAITED for, not read racefully).
     mark('read persisted');
     let persisted: Persisted | null = null;
-    const persistDeadline = Date.now() + 5_000;
+    const persistDeadline = budgetDeadline(5_000); // positive transition (the persist tick) — budget-scaled
     while (Date.now() < persistDeadline) {
       persisted = await readPersistedDeposit();
       if (persisted?.value.phase === 'watching') break;

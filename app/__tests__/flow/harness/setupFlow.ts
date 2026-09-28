@@ -15,6 +15,7 @@ import {readFileSync} from 'node:fs';
 import {join, dirname} from 'node:path';
 import {jest} from '@jest/globals';
 import {NativeModules, Share} from 'react-native';
+import {scaled as budgetScaled} from './budget';
 
 const here = dirname(__filename); // app/__tests__/flow/harness
 const appRoot = join(here, '..', '..', '..'); // app/
@@ -297,8 +298,8 @@ export function installFlowEnvironment(): void { /* all side effects above — s
 // and everything it touches lives on globalThis or the ONE shared AsyncStorage instance, so
 // WHICH registry invoked it does not matter.
 const clipboardKey = '__DPAY_TEST_CLIPBOARD';
-declare function beforeEach(fn: () => void | Promise<void>): void;
-declare function afterEach(fn: () => void): void;
+declare function beforeEach(fn: () => void | Promise<void>, timeoutMs?: number): void;
+declare function afterEach(fn: () => void, timeoutMs?: number): void;
 
 type LifecycleG = {
   __DPAY_FLOW_LIFECYCLE_INSTALLED__?: boolean;
@@ -329,7 +330,17 @@ async function purgeAsyncStorage(): Promise<void> {
 export function installFlowLifecycle(): void {
   if (lg.__DPAY_FLOW_LIFECYCLE_INSTALLED__) return;
   lg.__DPAY_FLOW_LIFECYCLE_INSTALLED__ = true;
+  // The jest per-test ceiling must scale WITH the wait budgets or it becomes the binding bound:
+  // budget-scaled inner waits (harness/budget.ts) are pointless under a fixed 30s test timeout on
+  // a starved box. jest-circus reads the timeout state when each TEST executes, so setting it
+  // here — right before the body — budgets the current test for the load the box carries NOW
+  // (same live re-read doctrine as e2e/run.mjs's per-test republish). The base MUST match
+  // jest.config.js's root `testTimeout: 30_000`. Hook timeouts inherit this state too
+  // (jest-circus run.js: `hook.timeout || getState().testTimeout`), so beforeAll/afterAll knob
+  // calls in flow files get the same relief. Keep it a pure positive-transition stretch: nothing
+  // here weakens a refusal assertion, it only stops the clock from false-firing healthy code.
   beforeEach(async () => {
+    jest.setTimeout(budgetScaled(30_000));
     g[clipboardKey] = '';
     g.__DPAY_TEST_NFC_STATUS = undefined;
     g.__DPAY_QR_LAST = undefined;
@@ -352,18 +363,21 @@ export function installFlowLifecycle(): void {
     // fresh-context contract) — purged through the app's OWN instance (see purgeAsyncStorage).
     await purgeAsyncStorage();
     setPageURL('/');
-  });
+  }, budgetScaled(15_000)); // the hook itself: storage purge under starvation is a positive wait
   afterEach(async () => {
     // Teardown ORDER is load-bearing (the e2e flow-38 convention): quiesce the app's polls
     // FIRST — unmounting aborts in-flight fetches (AbortError, ignored by the fail-closed rule)
     // — THEN stop any private relays, so a dying origin is never observed by a live poll.
     // Each unmount is BOUNDED: a wedged act-unmount (a known async-act hang class on a broken
-    // surface) must stay the failed test's own verdict, never bleed into the next suite.
+    // surface) must stay the failed test's own verdict, never bleed into the next suite. The
+    // bound scales with the load budget — on a starved box a HEALTHY unmount also crawls, and
+    // a false bleed-into-next-suite is exactly the expensive failure class this harness exists
+    // to prevent.
     const mounts = lg.__DPAY_FLOW_ACTIVE_MOUNTS__ ?? [];
     for (const m of mounts.splice(0, mounts.length)) {
       await Promise.race([
         m.unmount().catch(() => undefined),
-        new Promise((r) => setTimeout(r, 5_000)),
+        new Promise((r) => setTimeout(r, budgetScaled(5_000))),
       ]);
     }
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -372,5 +386,5 @@ export function installFlowLifecycle(): void {
     // The e2e fail-closed rule: a test that let a fetch die without declaring it is RED, even green.
     assertNoUndeclaredFailures();
     fetchRecords.length = 0;
-  });
+  }, budgetScaled(15_000));
 }

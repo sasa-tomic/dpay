@@ -7,6 +7,7 @@
 import {mountApp, type Mount} from './mount';
 import {DpayCore as CORE} from './setupFlow';
 import {faucetAccount, getBalance, railTransfer, icpCatalog, relayGet, fmtHero} from './relayClient';
+import {scaled as budgetScaled, deadline as budgetDeadline} from './budget';
 import type {DpayCoreApi} from '../../../lib/types';
 import {setSolanaRpcUrl, RELAY_LIST_STORAGE_KEY} from '../../../config/constants';
 import {setEvmRpcUrl} from '../../../evm/endpoints';
@@ -68,8 +69,10 @@ export async function waitForWallet(m: Mount, opts: {timeoutMs?: number} = {}): 
 /** Dismiss the first-run walkthrough if showing. No-op when absent (never throws when neither
  *  surface is up). The press is confirmed by its EFFECT (the create form), per lib.mjs. */
 export async function skipWalkthroughIfPresent(m: Mount, opts: {timeoutMs?: number} = {}): Promise<void> {
-  const timeoutMs = opts.timeoutMs ?? 4000;
-  const deadline = Date.now() + timeoutMs;
+  // Positive-transition window (dismiss → create form renders): budget-scaled HERE for this raw
+  // loop; the driver calls below re-scale their own windows at the driver boundary — never both.
+  const waitMs = budgetScaled(opts.timeoutMs ?? 4000);
+  const deadline = Date.now() + waitMs;
   let sawSkip = false;
   while (Date.now() < deadline) {
     if (m.driver.isPresent('username-input')) return;
@@ -77,20 +80,20 @@ export async function skipWalkthroughIfPresent(m: Mount, opts: {timeoutMs?: numb
     await sleep(50);
   }
   if (!sawSkip) return;
-  try { await m.driver.click('btn-walkthrough-skip', {timeoutMs}); } catch { /* press may land and unmount its own button */ }
+  try { await m.driver.click('btn-walkthrough-skip', {timeoutMs: opts.timeoutMs}); } catch { /* press may land and unmount its own button */ }
   try {
-    await m.driver.findByTestID('username-input', {timeoutMs});
+    await m.driver.findByTestID('username-input', {timeoutMs: opts.timeoutMs});
   } catch {
-    throw new Error(`[lib] walkthrough Skip pressed but the create form never appeared within ${timeoutMs}ms. ` +
+    throw new Error(`[lib] walkthrough Skip pressed but the create form never appeared within ${waitMs}ms (budget-scaled). ` +
       `On screen: ${JSON.stringify(m.driver.bodyText().slice(0, 300))}`);
   }
 }
 
 /** Leave the first-run practice payment if showing; either settled exit is accepted. */
 export async function skipPracticeIfPresent(m: Mount, opts: {timeoutMs?: number} = {}): Promise<void> {
-  const timeoutMs = opts.timeoutMs ?? 15_000;
+  const waitMs = budgetScaled(opts.timeoutMs ?? 15_000); // positive-transition ceiling (budget)
   const done = () => m.driver.isPresent(WALLET_READY) || m.driver.isPresent('btn-home-currency-continue');
-  const deadline = Date.now() + timeoutMs;
+  const deadline = Date.now() + waitMs;
   let exit: string | null = null;
   while (Date.now() < deadline) {
     if (await done()) return;
@@ -107,20 +110,20 @@ export async function skipPracticeIfPresent(m: Mount, opts: {timeoutMs?: number}
     if (now) {
       try { await m.driver.click(now, {timeoutMs: 2000}); } catch { /* re-render replaced the node */ }
     }
-    const settle = Date.now() + 2000;
+    const settle = Date.now() + budgetScaled(2000);
     while (Date.now() < settle) {
       if (await done()) return;
       await sleep(50);
     }
   }
-  throw new Error(`[lib] practice was left but the wallet never appeared within ${timeoutMs}ms. ` +
+  throw new Error(`[lib] practice was left but the wallet never appeared within ${waitMs}ms (budget-scaled). ` +
     `On screen: ${JSON.stringify(m.driver.bodyText().slice(0, 300))}`);
 }
 
 /** Answer the first-run home-currency question if showing (no-op when a currency is stored). */
 export async function chooseHomeCurrencyIfPresent(m: Mount, currency = 'CHF', opts: {timeoutMs?: number} = {}): Promise<void> {
-  const timeoutMs = opts.timeoutMs ?? 8000;
-  const deadline = Date.now() + timeoutMs;
+  const waitMs = budgetScaled(opts.timeoutMs ?? 8000); // positive-transition ceiling (budget)
+  const deadline = Date.now() + waitMs;
   let sawChooser = false;
   while (Date.now() < deadline) {
     if (m.driver.isPresent(WALLET_READY)) return;
@@ -128,24 +131,25 @@ export async function chooseHomeCurrencyIfPresent(m: Mount, currency = 'CHF', op
     await sleep(50);
   }
   if (!sawChooser) return;
-  await m.driver.click(`home-currency-${currency}`, {timeoutMs});
-  try { await m.driver.click('btn-home-currency-continue', {timeoutMs}); } catch { /* press unmounts its own button */ }
+  await m.driver.click(`home-currency-${currency}`, {timeoutMs: opts.timeoutMs});
+  try { await m.driver.click('btn-home-currency-continue', {timeoutMs: opts.timeoutMs}); } catch { /* press unmounts its own button */ }
   try {
-    await m.driver.findByTestID(WALLET_READY, {timeoutMs});
+    await m.driver.findByTestID(WALLET_READY, {timeoutMs: opts.timeoutMs});
   } catch {
-    throw new Error(`[lib] home-currency Continue pressed but the wallet never appeared within ${timeoutMs}ms. ` +
+    throw new Error(`[lib] home-currency Continue pressed but the wallet never appeared within ${waitMs}ms (budget-scaled). ` +
       `On screen: ${JSON.stringify(m.driver.bodyText().slice(0, 300))}`);
   }
 }
 
 export async function waitForEnabled(m: Mount, testID: string, opts: {timeoutMs?: number} = {}): Promise<void> {
-  const timeoutMs = opts.timeoutMs ?? 5000;
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
+  // Positive transition (the app enables the control once its form is valid) — budget-scaled.
+  const deadline = budgetDeadline(opts.timeoutMs ?? 5000);
+  const waitMs = deadline - Date.now();
+  while (Date.now() < deadline) {
     if (!(await isDisabled(m, testID))) return;
     await sleep(50);
   }
-  throw new Error(`[lib] element testID=${testID} stayed disabled past ${timeoutMs}ms`);
+  throw new Error(`[lib] element testID=${testID} stayed disabled past ${waitMs}ms (budget-scaled)`);
 }
 
 /** The persisted wallet identity (the app's own storage record), or null. */
@@ -256,7 +260,7 @@ export async function openConvertFor(m: Mount, key: string, opts: {timeoutMs?: n
   // The fund gate can flash first when entry races the first balance poll — one re-entry, then
   // hand the gate to the caller (its fund-gate assertions take over), exactly like lib.mjs.
   for (let attempt = 0; attempt < 2; attempt++) {
-    const deadline = Date.now() + (opts.formTimeoutMs ?? 6000);
+    const deadline = budgetDeadline(opts.formTimeoutMs ?? 6000); // positive transition (budget)
     let sawGate = false;
     for (;;) {
       if (m.driver.isPresent('convert-amount')) return;
@@ -364,22 +368,22 @@ async function pressScanGate(m: Mount): Promise<boolean> {
 /** Ensure the payer scan surface is ARMED (camera listening). The choke point for every
  *  __DPAY_TEST_SCAN injection against the Pay tab. */
 export async function armPayScan(m: Mount, opts: {timeoutMs?: number} = {}): Promise<void> {
-  const timeoutMs = opts.timeoutMs ?? 15_000;
-  const deadline = Date.now() + timeoutMs;
+  const waitMs = budgetScaled(opts.timeoutMs ?? 15_000); // positive transition (arming) — budget
+  const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     if (scanCount() > 0) return;
     await pressScanGate(m);
     await sleep(50);
   }
-  assert(false, `pay scan surface never armed within ${timeoutMs}ms (listeners=0 throughout, no gate button pressed)`);
+  assert(false, `pay scan surface never armed within ${waitMs}ms (budget-scaled; listeners=0 throughout, no gate button pressed)`);
 }
 
 /** Ensure the payer-side NFC CARD is armed (rail 'ic' | 'sol'). */
 export async function armNfcCard(m: Mount, rail: 'ic' | 'sol', opts: {timeoutMs?: number} = {}): Promise<void> {
   const seam = {ic: '__DPAY_TEST_NFC_COUNT', sol: '__DPAY_TEST_SOL_NFC_COUNT'}[rail];
   assert(seam, `armNfcCard: unknown rail ${String(rail)}`);
-  const timeoutMs = opts.timeoutMs ?? 15_000;
-  const deadline = Date.now() + timeoutMs;
+  const waitMs = budgetScaled(opts.timeoutMs ?? 15_000); // positive transition (arming) — budget
+  const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     const f = (globalThis as unknown as Record<string, unknown>)[seam] as (() => number) | undefined;
     const n = typeof f === 'function' ? f() : -1;
@@ -387,7 +391,7 @@ export async function armNfcCard(m: Mount, rail: 'ic' | 'sol', opts: {timeoutMs?
     await pressScanGate(m);
     await sleep(50);
   }
-  assert(false, `${rail} NFC card never mounted within ${timeoutMs}ms (listeners=0 throughout; the pay-intent gate never armed it)`);
+  assert(false, `${rail} NFC card never mounted within ${waitMs}ms (budget-scaled; listeners=0 throughout; the pay-intent gate never armed it)`);
 }
 
 export async function assertScannerMounted(m: Mount, label = 'scan screen'): Promise<void> {

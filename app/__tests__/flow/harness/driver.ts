@@ -9,11 +9,26 @@
 import renderer from 'react-test-renderer';
 import {act} from 'react-test-renderer';
 import {keydownHandlers, allowRequestFailuresFrom, type FetchRecord, fetchFailureRecords} from './setupFlow';
+import {scaled as budgetScaled} from './budget';
 
 type Node = renderer.ReactTestInstance;
-type WaitOpts = {timeoutMs?: number; label?: string};
+/**
+ * `unscaled: true` keeps the caller's window byte-exact — the NEGATIVE/refusal class (asserting an
+ * error text shows, a surface must NOT complete, a tolerated-absence probe whose happy path IS
+ * absence). The app must refuse fast; a stretched refusal bound only delays catching a real bug.
+ * Everything else — the positive transition waits — is stretched by the host-load budget
+ * (harness/budget.ts) at THIS boundary, so every flow file's literal window inherits the scaling
+ * without a per-call-site edit.
+ */
+type WaitOpts = {timeoutMs?: number; label?: string; unscaled?: boolean};
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** The effective window: budget-scaled unless the caller pins it (`unscaled`). */
+function windowOf(opts: WaitOpts, fallbackMs: number): number {
+  const base = opts.timeoutMs ?? fallbackMs;
+  return opts.unscaled === true ? base : budgetScaled(base);
+}
 
 export class Driver {
   /** Rebound by mount.tsx on every mount/remount — the driver outlives single trees. */
@@ -46,7 +61,7 @@ export class Driver {
 
   /** Find a node by RN testID, polling until it exists (the findByTestID wait semantics). */
   async findByTestID(testID: string, opts: WaitOpts = {}): Promise<Node> {
-    const timeoutMs = opts.timeoutMs ?? 5000;
+    const timeoutMs = windowOf(opts, 5_000);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const hits = this.findAllByTestID(testID);
@@ -106,7 +121,7 @@ export class Driver {
   }
 
   async typeByPlaceholder(placeholder: string, text: string, opts: WaitOpts = {}): Promise<void> {
-    const timeoutMs = opts.timeoutMs ?? 5000;
+    const timeoutMs = windowOf(opts, 5_000);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       const hits = this.findAll((n) => n.props && n.props.placeholder === placeholder);
@@ -153,7 +168,7 @@ export class Driver {
 
   /** Poll until bodyText contains `text` (substring match — the e2e waitForText contract). */
   async waitForText(text: string, opts: WaitOpts = {}): Promise<boolean> {
-    const timeoutMs = opts.timeoutMs ?? 5000;
+    const timeoutMs = windowOf(opts, 5_000);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (this.bodyText().includes(text)) return true;
@@ -165,7 +180,7 @@ export class Driver {
   /** Poll a tree predicate until truthy (the generic condition wait; `label` names the wait).
    *  A THROWING predicate is a harness bug — it surfaces immediately, never retries. */
   async waitForFunction(fn: () => unknown, opts: WaitOpts = {}): Promise<void> {
-    const timeoutMs = opts.timeoutMs ?? 5000;
+    const timeoutMs = windowOf(opts, 5_000);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (Boolean(fn())) return;
@@ -177,7 +192,7 @@ export class Driver {
   }
 
   async waitGone(testID: string, opts: WaitOpts = {}): Promise<void> {
-    const timeoutMs = opts.timeoutMs ?? 3000;
+    const timeoutMs = windowOf(opts, 3_000);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (this.findAllByTestID(testID).length === 0) return;
@@ -194,7 +209,7 @@ export class Driver {
 
   /** Two consecutive identical bodyText snapshots 50ms apart — "the surface stopped moving". */
   async waitAtRest(testID: string, opts: WaitOpts = {}): Promise<void> {
-    const timeoutMs = opts.timeoutMs ?? 8000;
+    const timeoutMs = windowOf(opts, 8_000);
     const deadline = Date.now() + timeoutMs;
     if (!this.isPresent(testID)) {
       throw new Error(`[driver] waitAtRest: testID=${testID} is not mounted`);
