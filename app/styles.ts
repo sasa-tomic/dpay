@@ -365,7 +365,11 @@ function buildStyles(p: Palette) {
   convertHeadlineCard: {backgroundColor: p.card, padding: 16, borderRadius: 12, alignSelf: 'stretch', marginTop: 16},
   convertHeadlineLabel: {fontSize: 13, fontWeight: '600', color: p.sub, fontFamily: FONT.sans},
   convertHeadlineAmount: {fontSize: 32, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5, marginTop: 8, fontVariant: ['tabular-nums']},
-  convertRateRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: p.line2},
+  // STACKED (label line, then the figure on its own line): the census's one hairline-topped
+  // row. The side-by-side layout squeezed the label into '… (ICP → / VCHF)' and the money into
+  // '1.74… / VCHF' at 390px - both halves wrapping mid-token (measured 2026-09-28). Stacked,
+  // the label and the figure each keep one whole line at every locale length.
+  convertRateRow: {alignSelf: 'stretch', marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: p.line2, gap: 4},
   convertRateLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
   convertRateValue: {fontSize: 16, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 0, textAlign: 'right'},
   convertHeadlineMeta: {fontSize: 12, color: p.sub2, fontFamily: FONT.sans, marginTop: 8},

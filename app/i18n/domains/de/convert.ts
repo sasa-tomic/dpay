@@ -21,7 +21,7 @@ export const convertDe: ConvertMessages = {
   counterpartySigns: 'Dein Handy signiert; der Pool zieht genau den freigegebenen Betrag ab.',
   quoteSource: (at, venue) => `Kurs von ${venue}, abgerufen ${at}`,
   quoteVerbatim: (venue, amt) => `${venue} hat genau ${amt} notiert`,
-  rateLabel: () => `Kurs für diesen Umtausch`,
+  rateLabel: (inSym, outSym) => `Kurs für diesen Umtausch (${inSym} → ${outSym})`,
   poolFeeTier: (tier, venue) => `Pool-Gebühr: ${tier} (${venue}-Gebührenstufe)`,
   inputFeeLine: fee => `Eingangsgebühr: ${fee}`,
   outputFeeLine: fee => `Ausgangsgebühr: ${fee}`,
