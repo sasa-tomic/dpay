@@ -79,12 +79,10 @@ afterAll(async () => {
  *  win over the test overrides until cleared) — every flow boots with them OFF unless the flow
  *  itself enables a rail (enableSolRail plants the storage key its own boot reads).
  *
- * The storage purge goes through the APP'S OWN module import because the v3 async-storage mock
- * is a per-database registry (createAsyncStorage('legacy')) and the harness's AsyncStorage.clear()
- * (installFlowLifecycle) demonstrably purges a different instance than the app reads — keys
- * written by a previous flow's boot survive it (observed: the SOL rail placeholder leaked into
- * every later flow's fetch surface). File this with the integrator: per-test isolation is
- * harness-core territory. */
+ * The belt-and-braces storage purge: since harness M3 the lifecycle and this file's require
+ * resolve the SAME factory-planted instance (jest.setup.js plants it on globalThis), so the
+ * lifecycle's per-test purge already covers this — the loop stays as cheap insurance for the
+ * rail storage keys this file's own flows plant. */
 beforeEach(async () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const AS = require('@react-native-async-storage/async-storage') as {
