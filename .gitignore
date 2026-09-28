@@ -46,6 +46,11 @@ signing.properties
 .DS_Store
 dist-prod
 
+# Agent fund leases (transient per-host claims, gitignored on purpose; the ledger stays tracked).
+# The store lives in the MAIN checkout's funds/leases/ so every worktree sees one shared record —
+# rationale in docs/AGENT-FUNDS.md.
+/funds/leases/
+
 # The trocador partner-agreement's append-only runtime files (DPAY_TROCADOR_LOG_DIR defaults
 # to the process cwd, so local runs/e2e drop them in the tree they run from — relay runtime
 # artifacts, never committed; the append-only retention lives on the deployed volume).

@@ -847,3 +847,14 @@ cleanup wipe='': stop
 #   just funds doc              re-render the GENERATED tables in docs/AGENT-FUNDS.md from funds/
 funds *args:
     node scripts/funds.mjs {{args}}
+
+# Agent fund LEASES (founder ask 2026-09-29: agents may draw on the float at any time, but no
+# funds may ever be lost silently). Declared BEFORE touching the float, closed with a
+# reconciliation; the report names every unaccounted delta as a LOSS and exits 1 on one.
+#   just funds-agents           the report: every open lease, claimed vs MEASURED vs ledger, LOSS
+#                               lines, and open-cap exposure vs the CHF 25 ceiling
+#   just funds-agents open      declare BEFORE touching float: --agent <session-id> --mandate "…"
+#                               --cap-chf N [--claim WALLET/ASSET=AMOUNT]…  (0 cap = watch-only)
+#   just funds-agents close <id>  close with final holdings + reconciliation (exit 1 on any loss)
+funds-agents *args:
+    node scripts/funds-agents.mjs {{args}}
