@@ -1,17 +1,14 @@
 /**
- * Flow 164 relay-failover — the jest twin of `e2e/tests/164-relay-failover.mjs`, phase 1 (the
- * ordered walk past a dead first address) ported faithfully over the ONE jest relay.
+ * Flow 164 relay-failover — the jest twin of `e2e/tests/164-relay-failover.mjs`, BOTH phases.
  *
- * The wallet boots with a PERSISTED relay list [dead, live] (the twin passes the same list through
- * `?relay=` — a browser-build layer; the persisted list is the app's own storage surface). Funding
- * the SAME account on the live relay out of band means ∂100.00 can only arrive by WALKING past the
- * dead primary — and the walk really tried it: connection-class failures must be on record against
- * the dead origin, for the right reasons.
+ * Phase 1: the ordered walk past a dead first address. The wallet boots with a PERSISTED relay
+ * list [dead, live] (the twin passes the same list through `?relay=` — a browser-build layer; the
+ * persisted list is the app's own storage surface). Funding the SAME account on the live relay
+ * out of band means ∂100.00 can only arrive by WALKING past the dead primary — and the walk
+ * really tried it: connection-class failures must be on record against the dead origin.
  *
- * GAP vs the browser twin, filed for the integrator: phase 2 (a 4xx is an ANSWER — no failover)
- * needs a second HTTP origin that answers 4xx on /api/v1 while staying alive; the twin uses the
- * web dev server, which jest does not spawn. No jest-side origin can produce an honest 4xx (a dead
- * port is a transport failure, where failover is CORRECT), so that half stays browser-only.
+ * Phase 2 (below): a 4xx is an ANSWER — no failover. The twin's second origin is the web dev
+ * server; the jest stand-in is a local http server that 404s every route while staying alive.
  */
 import {describe, it, expect} from '@jest/globals';
 import {
@@ -75,10 +72,58 @@ describe('flow 164 — relay-failover', () => {
     const deadFails = m.driver.fetchFailures.filter((f) => f.url.startsWith(dead));
     expect(deadFails.length > 0).toBe(true);
     for (const f of deadFails) {
-      expect(/CONNECTION|NETWORK|REFUSED|FAILED|ABORTED/i.test(f.error ?? '')).toBe(true);
+      expect(/CONNECTION|NETWORK|REFUSED|FAILED|ABORTED|ECONNREFUSED/i.test(f.error ?? '')).toBe(true);
       expect(/UNSAFE_PORT/i.test(f.error ?? '')).toBe(false);
     }
 
     await m.unmount();
+  }, 150_000);
+
+  // ── Phase 2: a 4xx is an ANSWER — the walk NEVER fails over on it ──────────────────────────────
+  // The twin retargets the list to [webOrigin, relay2] mid-session (the web dev server answers
+  // 404 on /api/v1); the jest stand-in for that origin is a local http server that answers 404
+  // on everything — a real, ALIVE origin whose every /api/v1 route is a refused request. The
+  // walk must stop there: the header flips to the offline 'approx.' eyebrow while relay2 is
+  // provably healthy. A buggy failover-on-4xx would read 200 from relay2 and show the exact
+  // online balance instead.
+  it('phase 2 — a 4xx from the first address stops the walk: offline eyebrow while the second relay is alive', async () => {
+    await freshContext();
+    const live = relayBaseURL();
+    // Ground truth: funded and exact on the healthy single-relay list.
+    const m = await onboardSeededUnfunded('e2e-failover-4xx', {fund: false});
+    const identity = await accountOf(m);
+    const fund = await faucetAccount(identity!.publicHex);
+    expect(fund.ok).toBe(true);
+    expect(await m.driver.waitForText('∂100.00', {timeoutMs: 15_000})).toBe(true);
+
+    // An ALIVE origin whose every route is a 404 (the twin's web-dev-server role — real address
+    // shape, real HTTP answers, no /api/v1).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const http = require('node:http') as typeof import('node:http');
+    const srv = http.createServer((_req, res) => { res.statusCode = 404; res.end(); });
+    await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', () => resolve()));
+    const fourohfour = `http://127.0.0.1:${(srv.address() as {port: number}).port}`;
+    m.driver.allowRequestFailuresFrom(fourohfour); // pre-declared: the 404s are the point
+
+    // relay2 must be ALIVE, or 'approx.' would prove nothing.
+    const alive = await fetch(`${live}/api/v1/health`);
+    expect(alive.ok).toBe(true);
+
+    // Retarget mid-session: [404-origin, live] — order = priority, one address per line.
+    try {
+      await m.driver.click('btn-settings', {timeoutMs: 6000});
+      await m.driver.click('btn-advanced-toggle', {timeoutMs: 4000});
+      await m.driver.type('settings-relay', `${fourohfour}\n${live}`, {timeoutMs: 4000});
+      await m.driver.click('btn-relay-apply', {timeoutMs: 4000});
+      await m.driver.click('btn-settings-close', {timeoutMs: 4000});
+
+      // A 4xx is an answer: the walk stops, `online` flips false, the header grows the offline
+      // 'approx.' eyebrow. If a buggy walk failed over on 4xx, relay2's 200 would keep the
+      // header exact (online=true) and this wait would time out.
+      expect(await m.driver.waitForText('approx.', {timeoutMs: 15_000})).toBe(true);
+    } finally {
+      await m.unmount();
+      await new Promise<void>((resolve) => srv.close(() => resolve()));
+    }
   }, 150_000);
 });

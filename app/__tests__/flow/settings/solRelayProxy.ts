@@ -1,13 +1,13 @@
-/** Sets the SOL RPC override at module load — the app captures it once (config/constants.ts).
- *  Point the rail at the ONE test relay's real Solana JSON-RPC proxy (the production derivation:
- *  `${relayBase}/api/v1/solana/rpc`), whose test-helpers upstream stub answers deterministically.
- *  IMPORT THIS MODULE FIRST in a test file, before ../harness/mount.
+/** Enables the relay-DERIVED Solana path for this test FILE — the exact production derivation
+ *  (the e2e twin's `setup({solRpcUrl: 'relay'})`). DELETING `__DPAY_TEST_SOLANA_RPC_URL` before
+ *  config/constants.ts loads (its capture point) leaves the override UNSET, so the SOL candidate
+ *  list falls through to rank 3: derived from the App-installed relay bases
+ *  (`{relayBase}/api/v1/solana/rpc`), the real multi-home walk — no single-candidate override.
+ *  IMPORT THIS MODULE FIRST in a test file, before ../harness/mount (whose App import loads
+ *  constants.ts). Requests to the baked origin ride the harness fetch rewrite to the test relay.
  *
- * NOTE: with the override set, the SOL candidate list is a SINGLE candidate — the relay-derived
- * multi-home walk (solanaRpcUrls rank 3) is bypassed. Flow 165's walk leg needs the derivation,
- * which the flow tier cannot express (jest.setup's '' capture otherwise keeps the rail off) —
- * gap filed for the integrator. */
-const relay = process.env.DPAY_JEST_RELAY_URL;
-if (relay && relay.startsWith('http')) {
-  (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SOLANA_RPC_URL = `${relay}/api/v1/solana/rpc`;
-}
+ *  This is what makes flow 165's WALK leg expressible: the derivation follows a mid-session
+ *  relay-list re-point (App installs the list and the SOL bases in one tick), so a dead-first
+ *  list is walked past exactly as in production. With a captured override the list is pinned to
+ *  ONE candidate and the derivation is bypassed — the pre-M3 limitation. */
+delete (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SOLANA_RPC_URL;
