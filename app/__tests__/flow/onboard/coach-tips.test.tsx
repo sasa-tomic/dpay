@@ -9,7 +9,6 @@
  * with the stamps intact.
  */
 import {describe, it, expect} from '@jest/globals';
-import {mountApp} from '../harness/mount';
 import {
   accountOf, assertIncludes, DpayCore, faucetAccount, generateKeypair, getBalance,
   goOffline, icpCatalog, onboardWallet, openBalances, railPrincipalText, waitForScanner,
@@ -17,7 +16,7 @@ import {
 import {relayBaseURL} from '../harness/relayClient';
 import {freshContext} from './helpers';
 
-const g = globalThis as unknown as Record<string, unknown>;
+const g = globalThis as unknown as Record<string, unknown> & {__DPAY_TEST_SCAN?: (qr: string) => void};
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {getItem: (k: string) => Promise<string | null>};
@@ -90,7 +89,7 @@ describe('flow 91 — coach-tips', () => {
     expect(await m.driver.waitForText('approx.', {timeoutMs: 8000})).toBe(true);
     const req3 = await DpayCore.encodeRequest(bob.publicHex, String(PAY_CENTS), randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob', '');
     await waitForScanner(m);
-    g.__DPAY_TEST_SCAN(req3);
+    g.__DPAY_TEST_SCAN!(req3);
     expect(await m.driver.waitForText('signed on this device ✓', {timeoutMs: 10_000})).toBe(true);
     await m.driver.findByTestID('coach-offlineQr', {timeoutMs: 6000});
     await settle(m.driver, 'offlineQr');
@@ -115,7 +114,7 @@ describe('flow 91 — coach-tips', () => {
     const submitted = await fetch(`${relayBaseURL()}/api/v2/canister/${ledger}/call`, {
       method: 'POST',
       headers: {'Content-Type': 'application/cbor'},
-      body: envelopeBytes as unknown as BodyInit,
+      body: envelopeBytes as unknown as Parameters<typeof fetch>[1] extends {body?: infer B} ? B : never,
     });
     expect(submitted.status).toBe(202);
     expect(await getBalance(bob.publicHex, 0)).toBe('12500');

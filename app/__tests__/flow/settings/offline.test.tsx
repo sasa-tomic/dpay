@@ -8,7 +8,6 @@
  */
 import {describe, it, expect} from '@jest/globals';
 
-const g = globalThis as unknown as Record<string, unknown>;
 import {
   goOffline, onboardWallet, openBalances, waitForWallet,
 } from '../harness/lib';

@@ -8,7 +8,7 @@
  * on the switch lands the funded rail's own scan screen; the chip keeps headline duty for the MAIN
  * currency.
  */
-import {describe, it, expect} from '@jest/globals';
+import {describe, it} from '@jest/globals';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from '../settings/solStub';
 import {
@@ -34,7 +34,7 @@ describe('flow 124 — fund-gate-sibling-rail', () => {
     // Fund the SIBLING rail only: 2.5 USDC on Solana (live install — no navigation follows). The
     // IC side stays untouched: a fresh wallet's ckUSDC balance is zero, which raises the gate.
     g.__DPAY_TEST_SOLANA_RPC_STUB = {
-      getMultipleAccounts: (p) => (g.__DPAY_SOL_ACCOUNTS as (p2: unknown, o: unknown) => unknown)(p, {lamports: 5000000000, token: {amount: '2500000', decimals: 6}}),
+      getMultipleAccounts: (p: unknown[]) => (g.__DPAY_SOL_ACCOUNTS as (p2: unknown, o: unknown) => unknown)(p, {lamports: 5000000000, token: {amount: '2500000', decimals: 6}}),
       getGenesisHash: () => '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
       getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
       getMinimumBalanceForRentExemption: () => 1447680,

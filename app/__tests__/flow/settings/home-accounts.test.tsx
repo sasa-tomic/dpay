@@ -21,10 +21,9 @@
  * the bottom tabs.
  */
 import {describe, it, expect} from '@jest/globals';
-import {mountApp} from '../harness/mount';
 import {
   accountOf, assertEq, assertIncludes, faucetAccount, generateKeypair, onboardWallet,
-  openBalances, openPaySend, openReceiveAddress, railTransfer, selectCurrency,
+  openBalances, openPaySend, railTransfer, selectCurrency,
 } from '../harness/lib';
 import {freshContext} from '../onboard/helpers';
 
@@ -103,7 +102,7 @@ describe('flow 135 — home-activity', () => {
 
     // Five rail payments from an ephemeral payer grow the ledger to 6 rows — one past the cap.
     for (const cents of [1200, 2300, 3400, 4500, 5600]) {
-      const pay = await railTransfer(payer.secretHex, alice!.publicHex, BigInt(cents), {});
+      const pay = await railTransfer(payer.secretHex, alice!.publicHex, cents, {});
       expect({ok: pay.ok, status: pay.status}).toEqual({ok: true, status: 202});
     }
 

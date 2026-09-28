@@ -15,7 +15,7 @@ import {describe, it, expect} from '@jest/globals';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from './solStub';
 import {
-  accountOf, assertEq, assertIncludes, faucetAccount, onboardWallet, openBalances,
+  accountOf, assertEq, faucetAccount, onboardWallet, openBalances,
   waitForWallet,
 } from '../harness/lib';
 import {freshContext} from '../onboard/helpers';
@@ -28,15 +28,6 @@ async function openAddCurrency(m: Awaited<ReturnType<typeof onboardWallet>>): Pr
   await m.driver.findByTestID('input-addcur-search', {timeoutMs: 5000});
 }
 
-/** Make `code` main, then open the Home menu whose Remove acts on it. */
-async function makeMainAndOpenMenu(m: Awaited<ReturnType<typeof onboardWallet>>, code: string): Promise<void> {
-  await openBalances(m);
-  await m.driver.click(`btn-accounts-currency-${code}`, {timeoutMs: 5000});
-  await m.driver.findByTestID('btn-home-more', {timeoutMs: 5000});
-  await m.driver.click('btn-home-more', {timeoutMs: 5000});
-  await m.driver.findByTestID('btn-home-menu-remove', {timeoutMs: 5000});
-}
-
 describe('flow 210 — add-currency-search', () => {
   it('the full set offered, in-wallet rows not re-addable, search filters live, Remove hides, re-add restores', async () => {
     await freshContext();
@@ -44,7 +35,7 @@ describe('flow 210 — add-currency-search', () => {
     const m = await onboardWallet('e2e-addcur');
     // The SOL rail must read a KNOWN balance for the Remove guard's verdict to be data.
     g.__DPAY_TEST_SOLANA_RPC_STUB = {
-      getMultipleAccounts: (p) => (g.__DPAY_SOL_ACCOUNTS as (p2: unknown, o: unknown) => unknown)(p, {lamports: 0}),
+      getMultipleAccounts: (p: unknown[]) => (g.__DPAY_SOL_ACCOUNTS as (p2: unknown, o: unknown) => unknown)(p, {lamports: 0}),
       getGenesisHash: () => '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
       getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
       getFeeForMessage: () => ({context: {slot: 250000000}, value: {lamports: 5000}}),
@@ -88,12 +79,6 @@ describe('flow 210 — add-currency-search', () => {
     await m.driver.findByTestID('btn-home-menu-remove', {timeoutMs: 5000});
     await m.driver.click('btn-home-menu-remove', {timeoutMs: 5000});
     await new Promise((r) => setTimeout(r, 500));
-    console.log('DBG-210:', JSON.stringify({
-      refusal: m.driver.isPresent('home-menu-remove-refusal'),
-      menuRemove: m.driver.isPresent('btn-home-menu-remove'),
-      menuClose: m.driver.isPresent('btn-home-menu-close'),
-      refusalText: m.driver.readTextSafe('home-menu-remove-refusal'),
-    }));
     await m.driver.pressKey('a');
     expect(m.driver.isPresent('accounts-currency-SOL')).toBe(false);
 
@@ -120,7 +105,7 @@ describe('flow 211 — remove-guard-refusals', () => {
     expect(fund.ok).toBe(true);
     // The SOL rail must read a KNOWN (nonzero) balance so its refusal is data, not a guess.
     g.__DPAY_TEST_SOLANA_RPC_STUB = {
-      getMultipleAccounts: (p) => (g.__DPAY_SOL_ACCOUNTS as (p2: unknown, o: unknown) => unknown)(p, {lamports: 5000000000}),
+      getMultipleAccounts: (p: unknown[]) => (g.__DPAY_SOL_ACCOUNTS as (p2: unknown, o: unknown) => unknown)(p, {lamports: 5000000000}),
       getGenesisHash: () => '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
       getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
       getFeeForMessage: () => ({context: {slot: 250000000}, value: {lamports: 5000}}),

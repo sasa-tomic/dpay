@@ -23,15 +23,14 @@
 import {describe, it, expect} from '@jest/globals';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from './solStub';
-import {mountApp} from '../harness/mount';
 import {
   accountOf, armPayScan, assertDisabled, assertEq, assertIncludes, DpayCore, faucetAccount,
-  generateKeypair, goOffline, onboardWallet, openBalances, railPrincipalText, railTransfer,
-  selectCurrency, selectSolRail, setRelay, waitForEnabled, waitForWallet,
+  generateKeypair, onboardWallet, openBalances, railPrincipalText, railTransfer,
+  selectCurrency, waitForEnabled, waitForWallet,
 } from '../harness/lib';
 import {freshContext} from '../onboard/helpers';
 
-const g = globalThis as unknown as Record<string, unknown>;
+const g = globalThis as unknown as Record<string, unknown> & {__DPAY_TEST_SCAN?: (qr: string) => void};
 
 describe('flow 24 — wallet-cleanup', () => {
   it('username-only header; currency-first rows; a currency-1 payment lands in history with a SHORT principal counterparty', async () => {
@@ -61,7 +60,7 @@ describe('flow 24 — wallet-cleanup', () => {
     expect(seeded.ok).toBe(true);
     const bob = await generateKeypair();
     const bobPrincipal = await railPrincipalText(bob.publicHex);
-    const pay = await railTransfer(identity!.secretHex, bob.publicHex, BigInt(50_000), {currency: 1});
+    const pay = await railTransfer(identity!.secretHex, bob.publicHex, 50_000, {currency: 1});
     expect({ok: pay.ok, status: pay.status}).toEqual({ok: true, status: 202});
 
     // H2/H3: RECENT renders the currency-1 transfer; the counterparty is a SHORT principal prefix.
@@ -249,7 +248,7 @@ describe('flow 64 — settings-restore', () => {
     await waitForWallet(m, {timeoutMs: 10_000});
     const idB = await accountOf(m);
     assertEq(idB!.secretHex, SEED_B, 'different-seed restore: secretHex equals the entered seed B');
-    expect(/^[0-9a-f]{64}$/.test(idB!.publicHex) && idB.publicHex !== pubA).toBe(true);
+    expect(/^[0-9a-f]{64}$/.test(idB!.publicHex) && idB!.publicHex !== pubA).toBe(true);
     assertEq(idB!.username, 'alice', 'different-seed restore: username STILL preserved');
     assertEq(m.driver.readText('header-who'), 'alice', 'the header shows the preserved username');
 
@@ -263,7 +262,7 @@ describe('flow 69 — sol-usdc-selection', () => {
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-usdc-x');
     g.__DPAY_TEST_SOLANA_RPC_STUB = {
-      getMultipleAccounts: (p) => (g.__DPAY_SOL_ACCOUNTS as (p2: unknown, o: unknown) => unknown)(p, {lamports: 5000000000, token: null}),
+      getMultipleAccounts: (p: unknown[]) => (g.__DPAY_SOL_ACCOUNTS as (p2: unknown, o: unknown) => unknown)(p, {lamports: 5000000000, token: null}),
       getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
       getMinimumBalanceForRentExemption: () => 1447680,
       sendTransaction: () => 'sig_unused',
@@ -320,10 +319,10 @@ describe('flow 71 — selection-lock', () => {
 
     // A merchant request for ∂200 DEMO — more than the wallet holds → the review stands, unsigned.
     const bob = await generateKeypair();
-    const nonce = [...(new Uint8Array(16))].map((x) => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('');
+    const nonce = [...new Uint8Array(16)].map((x: number) => Math.floor(x).toString(16).padStart(2, '0')).join('');
     const reqQr = await DpayCore.encodeRequest(bob.publicHex, '20000', nonce, Math.floor(Date.now() / 1000) + 600, 0, 'Bob', '');
     await armPayScan(m);
-    g.__DPAY_TEST_SCAN(reqQr);
+    g.__DPAY_TEST_SCAN!(reqQr);
 
     await m.driver.findByTestID('pay-amount', {timeoutMs: 5000});
     assertIncludes(m.driver.readText('pay-amount'), '∂200.00', 'the review shows the scanned amount');

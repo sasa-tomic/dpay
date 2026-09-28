@@ -112,10 +112,11 @@ describe('flow 94 — trip-passport', () => {
 
     // --- 3. ONE confirmed payment (real sign + real settle; one-press auto-sign). --------------
     const bob = await generateKeypair();
-    expect(await getBalance(bob.publicHex, 0)).toBe('0');
+    expect(Number(await getBalance(bob.publicHex, 0))).toBe(0);
     const requestQR = await DpayCore.encodeRequest(bob.publicHex, '2500', randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'Bob', '');
     await armPayScan(m); // pay-intent gate: arm the scan surface (no-op when already armed)
-    (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SCAN(requestQR);
+    type ScanFn = (qr: string) => void;
+    (globalThis as unknown as {__DPAY_TEST_SCAN?: ScanFn}).__DPAY_TEST_SCAN!(requestQR);
     expect(await m.driver.waitForText('Paid', {timeoutMs: 10_000})).toBe(true);
     expect(await getBalance(bob.publicHex, 0)).toBe('2500');
     // Leave the Paid screen before opening the strip.

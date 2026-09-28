@@ -34,7 +34,7 @@ type AtaState = {ataExists: boolean; createDelayMs: number; failCreate: boolean}
 
 function installAtaStub(st: AtaState): void {
   g.__DPAY_TEST_SOLANA_RPC_STUB = {
-    getMultipleAccounts: (p) => (g.__DPAY_SOL_ACCOUNTS as (p2: unknown, o: unknown) => unknown)(p,
+    getMultipleAccounts: (p: unknown[]) => (g.__DPAY_SOL_ACCOUNTS as (p2: unknown, o: unknown) => unknown)(p,
       st.ataExists ? {lamports: 5000000000, token: {amount: '2500000', decimals: 6}} : {lamports: 5000000000, token: null}),
     getGenesisHash: () => SOL,
     getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),

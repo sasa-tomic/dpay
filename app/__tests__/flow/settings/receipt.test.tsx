@@ -30,7 +30,7 @@ describe('flow 157 — transaction-receipt', () => {
     const payerPrincipal = await railPrincipalText(payer.publicHex);
     const fund = await faucetAccount(payer.publicHex, 20000);
     expect(fund.ok).toBe(true);
-    const paid = await railTransfer(payer.secretHex, me!.publicHex, 4200n, {memoHex: MEMO_HEX});
+    const paid = await railTransfer(payer.secretHex, me!.publicHex, 4200, {memoHex: MEMO_HEX});
     expect({ok: paid.ok, status: paid.status}).toEqual({ok: true, status: 202});
 
     // ---- (a) the row is pressable and the receipt states what the ledger recorded --------------

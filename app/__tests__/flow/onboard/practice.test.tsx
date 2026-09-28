@@ -32,6 +32,7 @@ import {freshContext} from './helpers';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {
   getItem: (k: string) => Promise<string | null>;
+  clear: () => Promise<void>;
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Journey = {stamps: string[]; seen?: string[]} | null;

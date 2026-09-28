@@ -11,18 +11,17 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {
-  accountOf, assertEq, assertIncludes, chooseHomeCurrencyIfPresent, skipPracticeIfPresent,
+  accountOf, assertEq, chooseHomeCurrencyIfPresent, skipPracticeIfPresent,
   skipWalkthroughIfPresent, waitForEnabled, waitForWallet,
 } from '../harness/lib';
 import {mountApp} from '../harness/mount';
 import {freshContext} from './helpers';
 
+const g = globalThis as unknown as Record<string, unknown>;
+
 const SEED = '22'.repeat(32);
 const WORDS_LIST = `${'captain baby mass dust '.repeat(5).trim()} captain baby mass fault`.replace(/\s+/g, ' ').trim();
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const AsyncStorage = require('@react-native-async-storage/async-storage') as {getItem: (k: string) => Promise<string | null>};
-const g = globalThis as unknown as Record<string, unknown>;
 
 async function readWords(m: Awaited<ReturnType<typeof mountApp>>): Promise<string[]> {
   const words: string[] = [];

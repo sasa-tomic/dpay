@@ -18,6 +18,7 @@ import {describe, it, expect} from '@jest/globals';
 import {installSolAccountsHelper} from '../settings/solStub';
 import {
   accountOf, assertEq, assertIncludes, faucetAccount, onboardWallet, openBalances,
+  waitForWallet,
 } from '../harness/lib';
 import {freshContext} from './helpers';
 
