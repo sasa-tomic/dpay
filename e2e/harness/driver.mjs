@@ -441,7 +441,16 @@ export class Driver {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // Puppeteer names its wait timeout `TimeoutError`; fall back to the message shape for safety.
-      if (e?.name === 'TimeoutError' || /Waiting.*failed|timeout/i.test(msg)) return false;
+      if (e?.name === 'TimeoutError' || /Waiting.*failed|timeout/i.test(msg)) {
+        // Phantom-wait census (DPAY_E2E_PHANTOM_LOG=1): a timed-out waitForText whose budget
+        // burned in full is the suite's most expensive silent waste class when the caller
+        // ignores the boolean — the flow pays the whole budget for a state that never came.
+        // Env-gated so ordinary soft-probe runs stay quiet.
+        if (process.env.DPAY_E2E_PHANTOM_LOG === '1') {
+          console.error(`[phantom-wait] ${this.profileFile ?? '(standalone)'}: ${JSON.stringify(text)} burned its full ${timeoutMs}ms budget`);
+        }
+        return false;
+      }
       throw new Error(`[driver] waitForText(${JSON.stringify(text)}) failed: ${msg}`);
     }
   }

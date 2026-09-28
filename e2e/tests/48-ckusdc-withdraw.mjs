@@ -89,7 +89,8 @@ export async function run() {
     //    up the faucet credit), then SELECT ckUSDC (makes it the active asset).
     console.log('[48-ckusdc-withdraw] opening the accounts route; waiting for the funded ckUSDC row…');
     await openBalances(driver);
-    await driver.waitForText('1,000.00 USDC', { timeoutMs: 8_000 });
+    // (The old `waitForText('1,000.00 USDC')` beat is gone — that text never rendered and the
+    // ignored result only burned its budget. selectCurrency below waits for the row itself.)
 
     // 4. Select ckUSDC → Pay → "Send to address" (the inline WithdrawSheet body, family-dispatched
     //    to the dual-ledger withdraw_erc20 path).

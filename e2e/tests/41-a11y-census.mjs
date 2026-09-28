@@ -283,9 +283,9 @@ export async function run() {
 
     // 4. Transactions tab (empty for a fresh wallet).
     await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    // Empty wallet renders "No payments yet." — a brief best-effort wait (no assertion; the census
-    // only counts interactive controls, and the empty state has none beyond chrome).
-    await driver.waitForText('No payments yet', { timeoutMs: 3_000 }).catch(() => {});
+    // (The old `waitForText('No payments yet')` beat never matched — the copy changed — and the
+    // census counts interactive controls only, so a 3-frame settle is the same render beat.)
+    await driver.settleFrames(3);
     await census('transactions');
     console.log('[41-a11y-census] ✓ census: transactions (empty wallet)');
 

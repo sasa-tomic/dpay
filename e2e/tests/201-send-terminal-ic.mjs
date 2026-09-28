@@ -59,7 +59,6 @@ export async function run() {
     const fund = await faucetAccount(relayBaseURL, accountHex, SEED, { currency: CURRENCY });
     assert(fund.ok, `faucet funding must succeed, got HTTP ${fund.status}`);
     await openBalances(driver);
-    await driver.waitForText('5.00 VCHF', { timeoutMs: 8_000 });
     await selectCurrency(driver, ASSET_KEY);
     await openPaySend(driver);
     await driver.type('send-address-input', recipientPrincipal, { timeoutMs: 4_000 });

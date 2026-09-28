@@ -77,7 +77,6 @@ export async function run() {
     // headline regression guard: it did not before this change.
     console.log('[104-send-to-address] selecting VCHF → Pay → Send to address…');
     await openBalances(driver);
-    await driver.waitForText('5.00 VCHF', { timeoutMs: 8_000 });
     await selectCurrency(driver, ASSET_KEY);
     await openPaySend(driver);
     await driver.findByTestID('send-address-input', { timeoutMs: 5_000 });

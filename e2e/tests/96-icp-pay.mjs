@@ -108,7 +108,9 @@ export async function run() {
     console.log('[96-icp-pay] faucet 2.10000001 ICP and wait for in-app refresh…');
     const fund = await faucetAccount(relayBaseURL, account.publicHex, SEED, { currency: CURRENCY });
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
-    await driver.waitForText('2.1 ICP', { timeoutMs: 10_000 }); // ICP is its own currency — the unit IS the token (fork #4)
+    // (The old `waitForText('2.1 ICP')` in-app-refresh beat is gone: the surface renders fiat, the
+    // text never appeared, and the ignored result only burned its budget. The credit is asserted
+    // against the relay below via snapBalances.)
 
     const bob = await generateKeypair();
     const aliceBefore = await snapBalances(relayBaseURL, account.publicHex);

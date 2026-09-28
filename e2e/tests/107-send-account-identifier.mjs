@@ -80,7 +80,6 @@ export async function run() {
     assertEq(senderBefore, String(SEED), 'pre-send ICP balance at the sender principal');
 
     await openBalances(driver);
-    await driver.waitForText('4.00000000 ICP', { timeoutMs: 8_000 });
     await selectCurrency(driver, ASSET_KEY);
     await openPaySend(driver);
     await driver.findByTestID('send-address-input', { timeoutMs: 5_000 });

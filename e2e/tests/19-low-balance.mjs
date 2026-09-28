@@ -103,8 +103,10 @@ export async function run() {
     console.log('[19-low-balance] cancelling the offline pass, going back online…');
     await driver.click('btn-notpaid', { timeoutMs: 5_000 }); // the hand-off QR's Cancel
     await setRelay(driver, relayBaseURL);
-    // Wait for the header to drop the offline indicator (online=true) before scanning.
-    await driver.waitForText('balance', { timeoutMs: 8_000 });
+    // Wait for the header (the `balance` chip) to be back before scanning — the old
+    // `waitForText('balance')` never matched (the chip renders "Balance …", capital B) and only
+    // burned its budget; the chip's presence is the same online-header beat, at selector speed.
+    await driver.findByTestID('balance', { timeoutMs: 8_000 });
 
     // Scan a ∂200 request while ONLINE + ∂100 balance. The known balance can't cover it, so the
     // app blocks the sign BEFORE any envelope exists: the balance note + Cancel, and no sign

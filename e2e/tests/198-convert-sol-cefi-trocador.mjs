@@ -169,9 +169,18 @@ export async function run() {
     assertIncludes(tradeQuery, 'fixed=True', 'the trade is the venue\'s fixed-rate kind');
 
     // --- §5 the lifecycle THROUGH the key-gated relay status route
-    await new Promise((r) => setTimeout(r, 2_500));
+    // Wait for the record's FIRST status poll (event-driven, not a fixed sleep): the convert
+    // engine polls the relay status route on its own cadence; count until one lands.
+    let statusCallsBefore = 0;
+    {
+      const deadline = Date.now() + 15_000;
+      for (;;) {
+        statusCallsBefore = (await relayHits(r2.baseURL)).statusCalls;
+        if (statusCallsBefore >= 1 || Date.now() > deadline) break; // the assert below owns the failure
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
     assert(await driver.findByTestID('convert-awaiting-deposit', {timeoutMs: 2_000}) != null, 'steady while the venue waits');
-    const statusCallsBefore = (await relayHits(r2.baseURL)).statusCalls;
     assert(statusCallsBefore >= 1, 'the record already polls the relay status route');
     await armStub(r2.baseURL, {status: 'Processing'});
     assert(await driver.findByTestID('convert-provider-processing', {timeoutMs: 90_000}) != null, 'the venue status drives processing (through the relay)');

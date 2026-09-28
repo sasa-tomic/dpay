@@ -73,7 +73,9 @@ export async function run() {
       await selectCurrency(driver, leg.testKey);
       const fund = await faucetAccount(relayBaseURL, account.publicHex, TINY_SEED, { currency: leg.currency });
       assert(fund.ok, `${leg.tag} tiny faucet credit ok (status ${fund.status})`);
-      await driver.waitForText(`0.00020000 ${leg.tag}`, { timeoutMs: 10_000 }); // funded, still insufficient
+      // (The old `waitForText('0.00020000 …')` render beat is gone: the row renders fiat now, so
+      // that text never appeared and the ignored-result wait only burned its full budget. The
+      // faucet credit is asserted above; the insufficiency is asserted on the review below.)
 
       await driver.click('tab-pay', { timeoutMs: 4_000 });
       await armPayScan(driver);
