@@ -11,8 +11,13 @@
 // which keeps the SOL rail asleep). A non-empty value wakes the rail; the per-call RPC stub below
 // then intercepts everything, so the URL itself is never fetched. Import this module FIRST in a
 // test file (before ../harness/mount), like the frozen setupFiles do.
+//
+// The value is the e2e driver's `'stub'` SENTINEL (solrpc.ts's twin), not a fake host: it must
+// stay unparseable so a boot-window poll that fires before the per-test stub install fails the
+// same way it did unfixed — the harness's fail-closed ledger records real origins only, and a
+// dial that never left the process is not a network event.
 const g0 = globalThis as unknown as Record<string, unknown>;
-g0.__DPAY_TEST_SOLANA_RPC_URL = 'http://stub.invalid';
+g0.__DPAY_TEST_SOLANA_RPC_URL = 'stub';
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
