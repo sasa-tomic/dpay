@@ -185,7 +185,7 @@ export const payFr: PayMessages = {
       'Le réseau a accepté ce paiement, mais la confirmation est encore en route. La signature ci-dessous est votre preuve — vérifiez-la avant de payer à nouveau.',
   },
 
-  scanToPay: 'Scanner pour payer',
+  scanToPay: 'Scanner',
   sendToAddress: 'Vers une adresse',
   tapOrScanToPay: 'Sans contact ou scan',
   solScanHint: 'Scannez le code de paiement du commerçant pour payer hors ligne.',

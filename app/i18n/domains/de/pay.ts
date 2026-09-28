@@ -185,7 +185,7 @@ export const payDe: PayMessages = {
   },
 
   scanToPay: 'Scannen & zahlen',
-  sendToAddress: 'An Adresse senden',
+  sendToAddress: 'Adresse senden',
   tapOrScanToPay: 'Auflegen oder scannen',
   solScanHint: 'Scanne den Zahlungscode des Händlers, um offline zu bezahlen.',
   payNow: 'Jetzt zahlen',
@@ -221,7 +221,7 @@ export const receiveDe: ReceiveMessages = {
   receiveIn: symbol => `In ${symbol} empfangen`,
   switchToRail: symbol => `Zu ${symbol} wechseln`,
 
-  requestPayment: 'Zahlung anfordern',
+  requestPayment: 'Anfordern',
   myAddress: 'Meine Adresse',
   rail: {
     feeLine: (network, fee) => `${network} · Gebühr ${fee}`,
