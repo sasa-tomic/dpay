@@ -312,10 +312,30 @@ async function sendViaSolSheet(driver, assetKey, address, amount) {
     log(`DOM fallback click: ${clicked}`);
     if (!clicked) throw e;
   }
-  const outcome = await driver.readText('sol-send-outcome', {timeoutMs: 120_000});
+  // ANY terminal phase: settled / unknown / failed (the outcome id is the settled phase only).
+  const terminalIds = ['sol-send-outcome', 'sol-send-unknown-title', 'sol-send-failed-title', 'sol-send-unknown-note'];
+  const t0 = Date.now();
+  let terminal = null;
+  for (;;) {
+    for (const id of terminalIds) {
+      if (await driver.isPresent(id)) { terminal = id; break; }
+    }
+    if (terminal != null) break;
+    if (Date.now() - t0 > 120_000) {
+      const tracer = driver.consoleLog.filter((e) => /money: sol send|error/i.test(e.text)).map((e) => e.text.slice(0, 200));
+      const body = await driver.bodyText();
+      await driver.screenshot('trip-sol-send-stall');
+      throw new Error(`sol send: no terminal phase in 120s. tracer: ${tracer.slice(-12).join(' || ') || '(none captured)'} | surface: ${body.replace(/\s+/g, ' ').slice(0, 500)}`);
+    }
+    await sleep(2_000);
+  }
+  const outcome = terminal === 'sol-send-outcome' ? await driver.readText('sol-send-outcome')
+    : `${terminal}: ${(await driver.readText(terminal)).replace(/\s+/g, ' ').slice(0, 200)}`;
   let sig = '';
   try { sig = await driver.readText('sol-send-signature', {timeoutMs: 5_000}); } catch {}
+  const tracer = driver.consoleLog.filter((e) => /money: sol send/.test(e.text)).map((e) => e.text.slice(0, 160));
   log(`DEPOSIT SENT: ${outcome} | sig ${sig}`);
+  log(`tracer: ${tracer.join(' || ')}`);
   await driver.screenshot('trip-sol-send-sent');
   return {outcome, sig};
 }
