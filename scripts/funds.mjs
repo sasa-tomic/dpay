@@ -220,7 +220,7 @@ function measure(w) {
   const script = w.status === 'abandoned-never-fund' ? [KEY, 'balance', w.address, '--json']
     : w.chain === 'icp' ? [KEY, 'balance', '--json']
     : w.chain === 'solana' ? [SOL, 'balance', w.address, '--json'] // keyless: registry address; sol-rail derives from the IC seed
-    : w.chain === 'evm' ? [EVM, 'balance', w.address, '--json']
+    : w.chain === 'evm' ? [EVM, 'balance', w.address, '--json', ...censusArgs(w)]
     : null;
   if (!script) return null;
   try {
@@ -283,11 +283,16 @@ function cmdReconcile() {
 
 function cmdOverview() { run(OVERVIEW, []); }
 
+/** A wallet may pin a non-default census mode for its chain script (agent-evm.mjs --census). */
+function censusArgs(w) {
+  return w.census ? ['--census', w.census] : [];
+}
+
 function cmdBalance() {
   const w = resolveWallet(process.argv[3]);
   if (w.chain === 'icp') run(KEY, ['balance', w.address]); // explicit principal: keyless, byte-identical
   else if (w.chain === 'solana') run(SOL, ['balance', w.address]); // keyless by address (sol-rail has no key file)
-  else if (w.chain === 'evm') run(EVM, ['balance', w.address]);
+  else if (w.chain === 'evm') run(EVM, ['balance', w.address, ...censusArgs(w)]);
   else die(`wallet ${w.id} has unknown chain "${w.chain}"`);
 }
 

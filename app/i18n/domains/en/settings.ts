@@ -165,6 +165,10 @@ export type SettingsMessages = {
     solanaLabel: string;
     solanaPlaceholder: string;
     solanaApplyA11y: string;
+    evmNote: string;
+    evmLabel: string;
+    evmPlaceholder: string;
+    evmApplyA11y: string;
     icGatewayNote: string;
     icGatewayLabel: string;
     icGatewayPlaceholder: string;
@@ -278,6 +282,10 @@ export const settingsEn: SettingsMessages = {
     solanaLabel: 'Solana endpoint',
     solanaPlaceholder: 'https://<provider>/?api-key=<key>',
     solanaApplyA11y: 'Apply Solana endpoint',
+    evmNote: 'Reads balances and settles ZCHF on Ethereum and Arbitrum One through dpay’s relay. Empty follows the server; your own endpoint serves ALL chains — it must prove the right chain before anything is sent.',
+    evmLabel: 'EVM endpoint (all chains)',
+    evmPlaceholder: 'https://<provider>',
+    evmApplyA11y: 'Apply EVM endpoint',
     // F2 — the IC gateway override. Operator-facing (demos/testing against a local replica), not a
     // user feature; the note says so honestly, mirroring the Solana endpoint row's disclosure.
     icGatewayNote: 'Operator only: the base URL this wallet sends IC transactions to. Empty uses the public gateway; set a local replica for demos and tests.',

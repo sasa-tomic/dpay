@@ -59,9 +59,11 @@
 //! codes (`ICP` on `icp`, `SOL` on `solana`). Mapping rail id → venue code is a fact
 //! about the VENUE, so it lives with the venue integration: here, next to the
 //! credentials. The route accepts a pair only if it is exactly the registered
-//! SideShift row's pair (unordered) — a device cannot spend the partner key on a pair
-//! dpay never registered, and cannot smuggle its own `affiliateId` or `commissionRate`
-//! through: both are attached HERE, from config, never read from the request.
+//! SideShift row's pair (unordered) — or the adapter-owned EVM-native pair
+//! ICP ↔ native ETH (`ETH_NATIVE_RAIL_ID`, no catalog row by design; 2026-09-27) — a
+//! device cannot spend the partner key on a pair dpay never registered, and cannot
+//! smuggle its own `affiliateId` or `commissionRate` through: both are attached HERE,
+//! from config, never read from the request.
 //!
 //! # Founder boundary (recorded in the spec amendment)
 //!
@@ -148,6 +150,18 @@ const COMMISSION_RATE: &str = "0";
 /// adapter names its rows, so attribution follows THIS list, never first-match-on-pair.
 const SIDESHIFT_VENUE_IDS: &[&str] = &["sideshift", "sideshift-usdc", "sideshift-eurc"];
 
+/// The EVM-native settle pair this adapter serves (2026-09-27): ICP → native ETH on
+/// Ethereum mainnet — the convert DESTINATION that funds the EVM rail from ICP holdings.
+/// Deliberately NOT a catalog venue row (native ETH is not a catalog asset — the EvmAsset
+/// rows are ERC-20 tokens — and a native-ETH row would touch the drift-alarmed
+/// `catalog.rs`/`catalog_truth.json` pair): the pair is owned by THIS adapter, like the
+/// coin mapping above. The rail id is the app's own constant's twin
+/// (`app/config/evmConvert.ts` `ETH_NATIVE_RAIL_ID`); the jest drift alarm
+/// (`app/__tests__/convertEvmCefi.test.ts`) pins the two strings equal. The venue id is
+/// attribution only — it names the registry-shaped row the app bundles for this pair.
+pub const SIDESHIFT_ETH_VENUE_ID: &str = "sideshift-eth";
+pub const ETH_NATIVE_RAIL_ID: &str = "evm:native-eth";
+
 /// Rail-canonical id → SideShift's own (coin, network) for every asset a registered
 /// SideShift pair names. Verified against the live `GET /coins` (keyless) 2026-09-15:
 /// ICP lives on network `icp` (hasMemo false), SOL on `solana`. The USDC(Solana) row is
@@ -155,12 +169,16 @@ const SIDESHIFT_VENUE_IDS: &[&str] = &["sideshift", "sideshift-usdc", "sideshift
 /// 503s until then — the keyless tripwire is unchanged): the coin code `usdc` on
 /// network `solana` follows the venue's documented code shape. The EURC(Solana) row IS
 /// verified: the keyless pair endpoints (2026-09-19) answer `EURC`-`solana` ↔ `ICP`-`icp`
-/// in both directions — the pair exists and those are the venue's own words.
+/// in both directions — the pair exists and those are the venue's own words. The ETH row
+/// (2026-09-27) is BEST-EFFORT like USDC until a live probe: native ETH settles on
+/// network `ethereum` (the settlement network MUST be `ethereum` — the venue lists the
+/// coin on several networks and `ETH` alone is ambiguous).
 const SIDESHIFT_ASSETS: &[(&str, &str, &str)] = &[
     (crate::catalog::ICP_LEDGER_PRINCIPAL, "ICP", "icp"),
     (crate::catalog::WRAPPED_SOL_MINT, "SOL", "solana"),
     (crate::catalog::SOLANA_USDC_MINT, "usdc", "solana"),
     (crate::catalog::SOLANA_EURC_MINT, "eurc", "solana"),
+    (ETH_NATIVE_RAIL_ID, "ETH", "ethereum"),
 ];
 
 /// The proxy's state: the two partner credentials (secrets — module header), the API
@@ -449,6 +467,22 @@ pub async fn shifts_fixed_proxy(
              deposit rail id)",
         );
     };
+    // The SETTLE rail id is OPTIONAL (2026-09-27, the EVM-native widening): every
+    // pre-ETH order body omitted it and the settle network was the deposit network's
+    // icp↔solana complement. The EVM-native pair breaks that symmetry (an ICP deposit
+    // can now settle on `ethereum`), so the device names the settle rail explicitly and
+    // the settle-address gate keys on THAT. A settleLedger that names no registered
+    // rail is refused, never guessed.
+    let settle_ledger = req.get("settleLedger").and_then(Value::as_str);
+    if let Some(sl) = settle_ledger {
+        if !SIDESHIFT_ASSETS.iter().any(|(rail_id, _, _)| *rail_id == sl) {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "`settleLedger` must name a registered SideShift pair's rail id (the same \
+                 id the quote surface accepted as `settleLedger`)",
+            );
+        }
+    };
     if quote_id.is_empty() || settle_address.is_empty() {
         return err(
             StatusCode::BAD_REQUEST,
@@ -478,31 +512,29 @@ pub async fn shifts_fixed_proxy(
              a base58 32-byte pubkey for solana",
         );
     }
-    // The settle address gets the SAME structural gate, on the SETTLE rail. Every
-    // registered cefi row pairs exactly one icp rail with one solana rail (the registry's
-    // own rule; the asset table above names only those two networks), so the settle
-    // network is the deposit network's complement. The icp settle accepts BOTH address
-    // forms for now — the 64-hex 32-byte account identifier (what the venue's payout
-    // layer requires today; the 2026-09-20 principal-text refund incident) and the
-    // principal text itself (the venue ships principal support) — while garbage that
-    // could never be paid out (malformed hex, a wrong-length blob) is refused BEFORE an
-    // order exists, so no shift can sit `settling` for hours on a dead address.
-    let settle_network = match refund_network {
-        "solana" => "icp",
-        "icp" => "solana",
-        other => {
-            return err(
-                StatusCode::BAD_REQUEST,
-                format!("unsupported deposit rail network `{other}`: no settle rail to validate against"),
-            );
-        }
+    // The settle address gets the SAME structural gate, on the SETTLE rail. The settle
+    // network is the rail the QUOTE named (the optional `settleLedger`, above); without
+    // it, every registered cefi row paired exactly one icp rail with one solana rail
+    // (the registry's own rule), so the deposit network's complement is the answer. The
+    // icp settle accepts BOTH address forms for now — the 64-hex 32-byte account
+    // identifier (what the venue's payout layer requires today; the 2026-09-20
+    // principal-text refund incident) and the principal text itself (the venue ships
+    // principal support) — while garbage that could never be paid out (malformed hex, a
+    // wrong-length blob) is refused BEFORE an order exists, so no shift can sit
+    // `settling` for hours on a dead address.
+    let Some(settle_network) = settle_network_for(deposit_ledger, settle_ledger) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "unsupported deposit rail: no settle rail to validate against",
+        );
     };
     if !crate::addrcheck::address_wellformed(settle_network, settle_address) {
         return err(
             StatusCode::BAD_REQUEST,
             "`settleAddress` must be a well-formed address on the SETTLE rail — a base58 \
              32-byte pubkey for solana; an Internet Computer principal, ICRC-1 account \
-             text, or 64-hex account identifier for icp",
+             text, or 64-hex account identifier for icp; a 0x 40-hex EVM address for \
+             ethereum",
         );
     }
     let mut upstream_body = json!({
@@ -522,10 +554,11 @@ pub async fn shifts_fixed_proxy(
 
 /// Map a (deposit, settle) rail-id pair onto SideShift's own codes — accepted only if
 /// it is EXACTLY a registered `cefi` row's pair, unordered (the registry's own rule:
-/// pair_ledgers carry no order; one row per pair, so the pair disambiguates the row).
-/// This is the whole pair allowlist for the partner key: every cefi row, both
-/// directions. Returns the matched row's venue_id first, so attribution names the row
-/// the pair actually resolved to.
+/// pair_ledgers carry no order; one row per pair, so the pair disambiguates the row),
+/// OR the adapter-owned EVM-native pair ([`SIDESHIFT_ETH_VENUE_ID`], which has no
+/// catalog row by design). This is the whole pair allowlist for the partner key: every
+/// cefi row, both directions. Returns the matched row's venue_id first, so attribution
+/// names the row the pair actually resolved to.
 fn pair_direction(
     deposit: &str,
     settle: &str,
@@ -540,7 +573,27 @@ fn pair_direction(
         v.kind == crate::catalog::VenueKind::Cefi
             && SIDESHIFT_VENUE_IDS.contains(&v.venue_id)
             && (v.pair_ledgers == [deposit, settle] || v.pair_ledgers == [settle, deposit])
-    })?;
+    });
+    if row.is_none() {
+        // The adapter-owned EVM-native pair (no catalog row — see the constant's doc):
+        // ICP ↔ native ETH on Ethereum, both directions, exactly that pair.
+        let eth_pair = deposit == crate::catalog::ICP_LEDGER_PRINCIPAL
+            && settle == ETH_NATIVE_RAIL_ID;
+        let eth_pair_rev = deposit == ETH_NATIVE_RAIL_ID
+            && settle == crate::catalog::ICP_LEDGER_PRINCIPAL;
+        if eth_pair || eth_pair_rev {
+            let lookup = |id: &str| {
+                SIDESHIFT_ASSETS
+                    .iter()
+                    .find(|(rail_id, _, _)| *rail_id == id)
+                    .map(|(_, coin, network)| (*coin, *network))
+            };
+            let ((d_coin, d_net), (s_coin, s_net)) = (lookup(deposit)?, lookup(settle)?);
+            return Some((SIDESHIFT_ETH_VENUE_ID, d_coin, d_net, s_coin, s_net));
+        }
+        return None;
+    }
+    let row = row?;
     let lookup = |id: &str| {
         SIDESHIFT_ASSETS
             .iter()
@@ -549,6 +602,29 @@ fn pair_direction(
     };
     let ((d_coin, d_net), (s_coin, s_net)) = (lookup(deposit)?, lookup(settle)?);
     Some((row.venue_id, d_coin, d_net, s_coin, s_net))
+}
+
+/// The SETTLE rail's network for an order: the network of the rail the QUOTE named as
+/// its settle side. The order surface (`shifts_fixed_proxy`) receives that rail id
+/// optionally — absent on every pre-ETH record — and falls back to the old
+/// deposit-complement rule (icp↔solana) which served every row before the EVM-native
+/// pair existed.
+fn settle_network_for(deposit_ledger: &str, settle_ledger: Option<&str>) -> Option<&'static str> {
+    if let Some(settle) = settle_ledger {
+        return SIDESHIFT_ASSETS
+            .iter()
+            .find(|(rail_id, _, _)| *rail_id == settle)
+            .map(|(_, _, network)| *network);
+    }
+    match SIDESHIFT_ASSETS
+        .iter()
+        .find(|(rail_id, _, _)| *rail_id == deposit_ledger)
+        .map(|(_, _, network)| *network)
+    {
+        Some("solana") => Some("icp"),
+        Some("icp") => Some("solana"),
+        _ => None,
+    }
 }
 
 /// A plain non-negative decimal string (the venue's amount wire format). Structural
@@ -745,11 +821,24 @@ mod tests {
             pair_direction(eurc, icp),
             Some(("sideshift-eurc", "eurc", "solana", "ICP", "icp"))
         );
+        // Both directions of the adapter-owned EVM-native pair (sideshift-eth, no
+        // catalog row — the settle network MUST be `ethereum`): attribution names the
+        // synthetic row, the deposit stays ICP/icp, the settle is native ETH.
+        assert_eq!(
+            pair_direction(icp, ETH_NATIVE_RAIL_ID),
+            Some((SIDESHIFT_ETH_VENUE_ID, "ICP", "icp", "ETH", "ethereum"))
+        );
+        assert_eq!(
+            pair_direction(ETH_NATIVE_RAIL_ID, icp),
+            Some((SIDESHIFT_ETH_VENUE_ID, "ETH", "ethereum", "ICP", "icp"))
+        );
         // Anything else — including rail ids that exist but are not a registered
         // pair — refuses. VCHF is a real IC ledger; it must not ride the partner key.
         assert!(pair_direction(crate::catalog::VCHF_LEDGER_PRINCIPAL, sol).is_none());
         assert!(pair_direction(crate::catalog::VCHF_LEDGER_PRINCIPAL, usdc).is_none());
         assert!(pair_direction(crate::catalog::VCHF_LEDGER_PRINCIPAL, eurc).is_none());
+        assert!(pair_direction(crate::catalog::VCHF_LEDGER_PRINCIPAL, ETH_NATIVE_RAIL_ID).is_none());
+        assert!(pair_direction(ETH_NATIVE_RAIL_ID, ETH_NATIVE_RAIL_ID).is_none());
         // Solana-rail pairs that EXIST (jupiter rows) are never cefi pairs: the partner
         // key must not ride the AMM rail-local surface.
         assert!(pair_direction(sol, eurc).is_none());
@@ -757,6 +846,19 @@ mod tests {
         assert!(pair_direction(sol, usdc).is_none());
         assert!(pair_direction(icp, icp).is_none());
         assert!(pair_direction("", "").is_none());
+    }
+
+    #[test]
+    fn settle_network_uses_the_named_rail_then_the_legacy_complement() {
+        let icp = crate::catalog::ICP_LEDGER_PRINCIPAL;
+        // The EVM-native widening: the named settle rail IS the answer — an ICP deposit
+        // settling on ethereum is exactly the pair this exists for.
+        assert_eq!(settle_network_for(icp, Some(ETH_NATIVE_RAIL_ID)), Some("ethereum"));
+        // The legacy bodies (no settleLedger) keep the deposit complement: icp↔solana.
+        assert_eq!(settle_network_for(icp, None), Some("solana"));
+        assert_eq!(settle_network_for(crate::catalog::WRAPPED_SOL_MINT, None), Some("icp"));
+        // An unknown deposit rail with no settle named: no network to validate against.
+        assert_eq!(settle_network_for("not-a-rail", None), None);
     }
 
     #[test]

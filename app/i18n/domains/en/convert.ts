@@ -346,6 +346,10 @@ export type ConvertMessages = {
     destRowMulti: (sym: string, network: string) => string;
     /** The derived payout address line (read-only display — never typed free-hand). */
     settleAddressLabel: string;
+    /** The EVM-native settle rail's own line (2026-09-27): names NATIVE ETH on Ethereum
+     *  mainnet as what the payout delivers — the one line that separates the SideShift
+     *  row's native-ETH payout from the IC pool's ckETH payout inside the ETH target. */
+    settleRailEthereum: string;
     depositAddressLabel: string;
     depositAmountLabel: string;
     depositMemoLabel: string;
@@ -728,6 +732,7 @@ export const convertEn: ConvertMessages = {
     destRow: (sym, network, venue) => `${sym} on ${network} — via ${venue} (exchange service)`,
     destRowMulti: (sym, network) => `${sym} on ${network}`,
     settleAddressLabel: 'Payout lands at your own address on the destination network',
+    settleRailEthereum: 'Pays out native ETH on Ethereum mainnet',
     depositAddressLabel: 'Deposit address',
     depositAmountLabel: 'Exact deposit amount',
     depositMemoLabel: 'Memo (required)',

@@ -14,9 +14,10 @@
 // imports them; they import nothing harness-internal). Putting the registry here lets both spawners
 // register their child PIDs without creating a circular import (lib.mjs ↔ relay/web). run.mjs +
 // watch.mjs reach the sync kill via lib.mjs's re-export. cargo/vite BUILD children are short-lived
-// and always awaited, so they never outlive their parent and need no tracking. The browser is
-// puppeteer-managed (closed via CDP `Browser.close`) and self-exits on a broken pipe when Node dies,
-// so it is intentionally not tracked here.
+// and always awaited, so they never outlive their parent and need no tracking. The browser IS
+// tracked here too (driver.mjs registers it at launch): chrome-headless-shell demonstrably does
+// NOT self-exit on a broken pipe / Node death — 2026-09-27 incident: ~30 leaked shells at 50-70%
+// CPU each, load 16+ — so it rides the same sync-exit backstop as every other child.
 
 const _childPids = new Set();
 

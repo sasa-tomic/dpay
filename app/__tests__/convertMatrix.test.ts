@@ -26,6 +26,7 @@ import {
   setRuntimeVenues,
   type VenueEntry,
 } from '../config/venues';
+import {EVM_NATIVE_VENUES} from '../config/evmConvert';
 import {buildSelectableAssets} from '../config/assets';
 import {resolveSwapTargets} from '../config/swap';
 import {currencyOfAsset, WALLET_CURRENCIES, type HomeCurrency} from '../config/currency';
@@ -131,7 +132,7 @@ describe('convert matrix — the generated doc is current and matches the regist
     });
   });
 
-  test('the doc venue set == the bundled non-testnet registry set', () => {
+  test('the doc venue set == the bundled non-testnet registry set + the adapter-owned EVM-native rows', () => {
     const doc = readFileSync(join(REPO_ROOT, 'docs', 'CONVERT_MATRIX.md'), 'utf8');
     const ids = doc
       .split('\n')
@@ -139,7 +140,11 @@ describe('convert matrix — the generated doc is current and matches the regist
       .map(l => l.split('|')[3]?.trim() ?? '')
       .filter(cell => cell.startsWith('`'))
       .map(cell => cell.replaceAll('`', ''));
-    expect(ids).toHaveLength(MAINNET.length);
-    expect(new Set(ids)).toEqual(new Set(MAINNET.map(v => v.venue_id)));
+    // The doc is a view over the app's own registries: the drift-alarmed bundled venue
+    // table PLUS the adapter-owned EVM-native rows (evmConvert.ts — native ETH has no
+    // catalog row, so their venue rows live outside the truth-alarmed set by design).
+    const expected = [...MAINNET, ...EVM_NATIVE_VENUES.filter(v => !v.testnet)];
+    expect(ids).toHaveLength(expected.length);
+    expect(new Set(ids)).toEqual(new Set(expected.map(v => v.venue_id)));
   });
 });

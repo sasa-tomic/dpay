@@ -89,7 +89,10 @@ export type PayIntent = {
 export type Identity = {secretHex: string; publicHex: string; username: string};
 // One row of the Transactions list, RAIL-AGNOSTIC. The list merges the IC rail
 // (`hooks/useTransactionHistory.ts`) with the Solana device-key rail (`hooks/useSolanaHistory.ts`),
-// and `AssetId` is the only asset domain that spans both — an IC currency u32 cannot name `SOL`.
+// and `AssetId` is the only asset domain that spans them — an IC currency u32 cannot name
+// `SOL`, and neither can name an EVM chain+token pair. The `evm:<chainId>:<TOKEN>` arm is the
+// EVM rail's identity (lib/evmCatalog.ts owns its parse; the config union gains the
+// SelectableAsset arm with the UI wave).
 //
 // `ts` is the SORT key and is deliberately separate from `time`: `time` is already a formatted,
 // locale-relative STRING ("Today, 1:19 PM"), which cannot be ordered, so merging two independently
@@ -272,7 +275,7 @@ export type NfcStatus = 'ready' | 'off' | 'unsupported' | 'unknown';
 // enter the relay/canister catalog, the ICRC polling, or the IC wire currency-id space (SOL is a
 // device-key rail, not an ICRC catalog asset — CLAUDE.md non-negotiable). The template arm keeps
 // the known literals as named members so every existing literal keeps its narrowed type.
-export type AssetId = `ic:${number}` | `solana:${string}` | 'solana:SOL' | 'solana:USDC';
+export type AssetId = `ic:${number}` | `solana:${string}` | 'solana:SOL' | 'solana:USDC' | `evm:${number}:${string}`;
 
 // A reference into the asset domain: either an IC currency u32 or a Solana token. This is the
 // discriminated payload a `SelectableAsset` carries alongside its display fields, so a consumer

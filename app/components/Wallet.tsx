@@ -32,11 +32,16 @@ import {useTxNotes} from '../hooks/useTxNotes';
 import {usePendingPays} from '../hooks/usePendingPays';
 import {useConvertResumeEngine} from '../hooks/useConvertResumeEngine';
 import {useSolanaHistory} from '../hooks/useSolanaHistory';
+import {useEvmBalances} from '../hooks/useEvmBalances';
+import {useEvmHistory} from '../hooks/useEvmHistory';
 import {useFundsReady} from '../hooks/useFundsReady';
 import {TripStrip} from './TripStrip';
 import {deriveSolanaAddress, createTokenAta} from '../solana';
 import {isValidSolanaAddress} from '../solana/identity';
+import {isValidEvmAddress} from '../evm';
 import {friendlySolError} from '../solana/errors';
+import {deriveEvmAddress, isEvmRailConfigured, syncEvmCatalogDeployments} from '../evm';
+import {visibleEvmKeys} from '../lib/evmCatalog';
 import {readDepositDeepLink, readPayLink, readPaymentDeeplink, parsePayLink, parseCheckoutCode, decodeDeeplink, type PayLink, type PayLinkParse} from '../lib/deepLink';
 import {WordmarkLink} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
@@ -51,6 +56,8 @@ import {AddressesTab} from './AddressesTab';
 import {ConvertMode} from './ConvertMode';
 import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
+import {EvmPayMode} from './EvmPayMode';
+import {EvmReceiveMode} from './EvmReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
 import {PassportArchive} from './TripPassport';
 import {Walkthrough} from './Walkthrough';
@@ -79,7 +86,7 @@ function balanceTickMs(): number {
   return (globalThis as {__DPAY_TEST_BALANCE_TICK_MS?: number}).__DPAY_TEST_BALANCE_TICK_MS ?? 30_000;
 }
 
-export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGateway, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; /** R1: the operator's ordered relay address list — [0] is the active address every hook below still consumes as `relayUrl`; the full list is passed through to the Settings list editor. */ relayUrls: string[]; setRelayUrls: (urls: string[]) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; /** Apply + persist the IC gateway override (App.tsx, F2 — demos/testing against a local replica). THROWS on a refusal — Settings renders it. */ setIcGateway: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
+export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmRpc, setIcGateway, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; /** R1: the operator's ordered relay address list — [0] is the active address every hook below still consumes as `relayUrl`; the full list is passed through to the Settings list editor. */ relayUrls: string[]; setRelayUrls: (urls: string[]) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; /** Apply + persist the EVM endpoint (App.tsx, D11). Same throwing contract. */ setEvmRpc: (s: string) => void; /** Apply + persist the IC gateway override (App.tsx, F2 — demos/testing against a local replica). THROWS on a refusal — Settings renders it. */ setIcGateway: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
   const relayUrl = relayUrls[0];
   // The wallet's surfaces. Four are TABS (home/pay/receive/ledger — the bottom bar switches
   // between them and each is a destination); three are ROUTES (accounts/convert/addresses —
@@ -144,6 +151,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // The Solana rail's equivalent: address + decimal amount pre-filled into the "Send to address"
   // form (SOL has no request/review engine — same tab, same toggle, per the same-surfaces rule).
   const [solPrefill, setSolPrefill] = useState<{address: string; amount: string; label?: string; memo?: string} | null>(null);
+  // The EVM rail's link prefill (the solPrefill twin — the SendSheet prefill contract).
+  const [evmPrefill, setEvmPrefill] = useState<{address: string; amount: string; label?: string; memo?: string} | null>(null);
   // A checkout-code App Link (`…/pl/?lightning=<LNURL…>`): the RAW url waits for whichever rail's Pay
   // engine is mounted, which consumes it through its prefill-scan effect — the SAME classification
   // a camera scan of the same QR takes (an honest refusal for a code that carries nothing payable;
@@ -416,7 +425,51 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // list may be short — they still exist on-chain. `failure` does the same for a FAILED poll: the
   // last known rows stay, marked stale (`sol-history-stale`) instead of rendering as current.
   const {history: solHistory, dropped: solDropped, failure: solHistoryFailure, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
-  const ledgerHistory = useMemo(() => mergeHistoryByTime(history, solHistory), [history, solHistory]);
+
+  // The EVM rail — the SOL block's twin (D16): one device-derived secp256k1 address (the SAME
+  // seed, m/44'/60'/0'/0/0), a balance poll over every VISIBLE evm row (one eth_getBalance per
+  // chain + one balanceOf per token), and the getLogs Transfer history. The rail itself is
+  // gated on an endpoint being configured (the D7/D11 flag — off under jest/e2e until a seam
+  // URL exists), and rows additionally obey the testnet toggle.
+  const evmRailOn = isEvmRailConfigured();
+  const evmAddress = useMemo(() => {
+    try { return deriveEvmAddress(identity.secretHex); }
+    catch (e) { console.warn('deriveEvmAddress failed:', e instanceof Error ? e.message : String(e)); return null; }
+  }, [identity.secretHex]);
+  // The PARSED evm sections (the catalog already carries parsed EvmAsset rows — never re-parse
+  // them through the raw-envelope helper). The keys tuple mirrors the builder's rows exactly.
+  const evmSections = useMemo(() => networks.filter(s => s.protocol === 'evm'), [networks]);
+  const evmKeys = useMemo(
+    () => (!evmRailOn || !evmAddress ? [] : visibleEvmKeys(evmSections, {showTestnet, evmEnabled: true})),
+    [evmRailOn, evmAddress, evmSections, showTestnet],
+  );
+  // Catalog-driven deployments: a relay-served ZCHF row on an unpinned dev chain (Anvil) IS the
+  // token contract — install it so requests/domains/settles resolve what the user selected (D3).
+  useEffect(() => {
+    syncEvmCatalogDeployments(evmSections.flatMap(s => s.assets));
+  }, [evmSections]);
+  const {tokens: evmTokens, gas: evmGas, freshAt: evmFreshAt, refresh: refreshEvmBalances} = useEvmBalances(identity.secretHex, evmKeys);
+  const {history: evmHistory, dropped: evmDropped, failure: evmHistoryFailure, refreshHistory: refreshEvmHistory} = useEvmHistory(evmAddress, evmKeys);
+  const ledgerHistory = useMemo(() => mergeHistoryByTime(mergeHistoryByTime(history, solHistory), evmHistory), [history, solHistory, evmHistory]);
+  const onEvmSent = useCallback(() => { refreshEvmBalances(); refreshEvmHistory(); }, [refreshEvmBalances, refreshEvmHistory]);
+  // Fire-and-forget manual re-poll for the shared InstructionPanel's "Check again" (the SOL twin).
+  const recheckEvmBalances = useCallback(() => {
+    refreshEvmBalances();
+    setRecheckBusy(true);
+    if (recheckTimer.current != null) clearTimeout(recheckTimer.current);
+    recheckTimer.current = setTimeout(() => setRecheckBusy(false), 1500);
+  }, [refreshEvmBalances]);
+  // The evm hook states re-keyed to ASSET ids (`evm:<chainId>:<TOKEN>`) — the balance map's keys.
+  const evmStatesById = useMemo(() => {
+    const next: Record<string, {amount: string | null; status: 'loading' | 'balance' | 'unavailable' | 'error'; failure: import('../evm').EvmReadFailure | null}> = {};
+    for (const [k, v] of Object.entries(evmTokens)) next[`evm:${k}`] = v;
+    return next;
+  }, [evmTokens]);
+  const evmAmountsById = useMemo(() => {
+    const next: Record<string, string | null> = {};
+    for (const [k, v] of Object.entries(evmTokens)) next[`evm:${k}`] = v.amount;
+    return next;
+  }, [evmTokens]);
 
   // ── Pending outbox: offline/unconfirmed payments as local rows + the offline deduction ─────
   // services/pendingPays (written at every offline hand-off seam: PayMode's QR fall-through,
@@ -545,12 +598,17 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     // No `solanaTokens` override: the builder resolves each token row's availability from the live
     // config (`solanaTokenAvailable(row.mint)` — fail-closed per mint), which is also exactly what
     // `visibleSolanaMints` mirrors for the balance-hook membership above.
-    () => buildSelectableAssets(catalog, {showTestnet, solanaEnabled: !!solAddress, networks}),
-    [catalog, showTestnet, solAddress, networks],
+    () => buildSelectableAssets(catalog, {showTestnet, solanaEnabled: !!solAddress, evmEnabled: evmRailOn, networks}),
+    [catalog, showTestnet, solAddress, evmRailOn, networks],
   );
   // Whether the FULL catalog carries any testnet currency (the assets list is already filtered, so
-  // it cannot answer this — the Balances sheet's reveal-toggle needs the unfiltered truth).
-  const hasTestnet = useMemo(() => catalog.some(isTestnetCurrency), [catalog]);
+  // it cannot answer this — the Balances sheet's reveal-toggle needs the unfiltered truth). The
+  // EVM rail's env-gated dev sections (Anvil / Arbitrum Sepolia) count: a dev row hidden behind
+  // the toggle needs the toggle to exist.
+  const hasTestnet = useMemo(
+    () => catalog.some(isTestnetCurrency) || evmSections.some(s => s.environment === 'testnet' && s.assets.length > 0),
+    [catalog, evmSections],
+  );
   // The reconciled selection: preserve the selected id while it remains visible; fall back to ic:0
   // (then first visible, else null) when it disappears. Computed every render so the header + chip
   // + engine dispatch read a VALID id immediately (no flash on the first paint, no stale testnet
@@ -612,6 +670,13 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // Pay/Receive engine mounts (and thus which NFC AID is armed); `selectedCurrency`/`selectedDesc`
   // resolve the IC deposit/withdraw family for the "My address"/"Send to address" sub-modes.
   const activeSol = selectedAsset?.protocol === 'solana';
+  // The selected EVM asset's own facts (the activeSolAsset twin): the token/chain the EVM
+  // engines spend and read. Null on every other rail.
+  const activeEvm = selectedAsset?.protocol === 'evm';
+  const activeEvmAsset = selectedAsset?.protocol === 'evm' ? selectedAsset : null;
+  const selectedEvmKey = activeEvmAsset != null ? `${activeEvmAsset.chainId}:${activeEvmAsset.token}` : null;
+  const selectedEvmBalance = selectedEvmKey != null ? evmTokens[selectedEvmKey]?.amount ?? null : null;
+  const selectedEvmGas = activeEvmAsset != null ? evmGas[activeEvmAsset.chainId] ?? null : null;
   // The selected SOLANA asset's own token facts + per-mint state (registry truth — every Solana
   // child surface reads THESE, never a USDC-shaped ternary). `activeSolAsset` is null on the IC
   // rail; the token state is undefined while its mint is outside the visible list (e.g. the RPC
@@ -881,6 +946,18 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
           source: 'link',
         });
         setPaySubMode('scan');
+      } else if (asset.protocol === 'evm') {
+        // The EVM rail: a 0x address, validated by the same check the send form applies. The
+        // link's label/memo ride along exactly as the SOL twin's do (the EvmWithdrawSheet
+        // renders them as the claimed payee + note, saved as a device note on send).
+        if (!isValidEvmAddress(link.recipient)) {
+          if (alive && gen === linkGenRef.current) setLinkError(M.pay.link.badAccount(prettyNetwork(link.network)));
+          return;
+        }
+        if (!alive || gen !== linkGenRef.current) return;
+        selectAsset(asset.id);
+        setEvmPrefill({address: link.recipient, amount: link.amount, label: link.label, memo: link.memo});
+        setPaySubMode('send');
       } else {
         // The Solana rail: a base58 address, validated by the same check the send form applies.
         if (!isValidSolanaAddress(link.recipient)) {
@@ -1106,12 +1183,14 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
       if (a.id.startsWith('ic:')) {
         const c = Number(a.id.slice(3));
         approx[a.id] = !online && nowTick - (atByCurrency[c] ?? 0) > balanceStaleMs();
+      } else if (a.protocol === 'evm') {
+        approx[a.id] = evmFreshAt === 0 || nowTick - evmFreshAt > balanceStaleMs();
       } else {
         approx[a.id] = solFreshAt === 0 || nowTick - solFreshAt > balanceStaleMs();
       }
     }
     return approx;
-  }, [assets, online, atByCurrency, nowTick, solFreshAt]);
+  }, [assets, online, atByCurrency, nowTick, solFreshAt, evmFreshAt]);
   const balances = useMemo(() => {
     return buildAssetBalances({
       catalog, assets,
@@ -1119,8 +1198,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
       primaryBalance: shownBalance,
       approx: approxFlags,
       solState: solShownState, tokenStates: tokenShownStates,
+      evmStates: evmStatesById,
     });
-  }, [catalog, assets, displayAssetBalances, shownBalance, approxFlags, solShownState, tokenShownStates]);
+  }, [catalog, assets, displayAssetBalances, shownBalance, approxFlags, solShownState, tokenShownStates, evmStatesById]);
   // ── Currency-first balances (forks #2 + #4) ──────────────────────────────────────────────────
   // The VISIBLE currency list, in presentation order (stables, then Other): every currency the
   // catalog can realise, minus the ones the user removed. The main currency is always computed
@@ -1149,8 +1229,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     icBalances: displayAssetBalances,
     solBalance: solShownState.balance ?? null,
     tokenAmounts: solTokenAmountsForSum,
+    evmAmounts: evmAmountsById,
     approx: approxFlags,
-  }), [sumCurrencies, assets, catalog, balances, displayAssetBalances, solShownState.balance, solTokenAmountsForSum, approxFlags]);
+  }), [sumCurrencies, assets, catalog, balances, displayAssetBalances, solShownState.balance, solTokenAmountsForSum, evmAmountsById, approxFlags]);
   // Trip Ready J5b — fundsReady: awarded ONCE at the first sight of any spendable balance
   // (DEMO counts; `—` unknowns do not). Reads the memo above; ref-guarded against poll spam.
   useFundsReady(balances);
@@ -1641,6 +1722,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
           : mode === 'pay'
           ? (activeSol && solAddress
               ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} tokenBalance={selectedTokenBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solState, selectedTokenState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} />
+              : activeEvm && activeEvmAsset != null
+              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckEvmBalances} recheckBusy={recheckBusy} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} shownBalance={shownBalance}
@@ -1696,6 +1779,23 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
                   onLockChange={setSelectionLocked}
                   homeCurrency={homeCurrency}
                   onReceiveRailChange={receiveRailSelect}
+                />
+              : activeEvm && activeEvmAsset != null
+              ? <EvmReceiveMode
+                  identity={identity}
+                  asset={activeEvmAsset}
+                  assets={assets}
+                  selectedAssetId={effectiveSelectedId}
+                  balances={balances}
+                  catalog={catalog}
+                  onSelectAsset={handleSelect}
+                  subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
+                  onLockChange={setSelectionLocked}
+                  gasWei={selectedEvmGas?.wei ?? null}
+                  gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'}
+                  homeCurrency={homeCurrency}
+                  onReceiveRailChange={receiveRailSelect}
+                  onWatchRefresh={refreshEvmBalances}
                 />
               : (
                   /* Phase 4 (2026-08-12 unified asset selection rewrite): the PHASE 3 INTERIM bridge
@@ -1766,7 +1866,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               // same strings the Balances tab shows).
               solana={{sol: solState.balance, tokens: solTokenAmounts}}
             />
-           : <Ledger history={walletHistory} catalog={catalog} assets={assets} dropped={solDropped} staleFailure={solHistoryFailure} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
+           : <Ledger history={walletHistory} catalog={catalog} assets={assets} dropped={solDropped + evmDropped} staleFailure={solHistoryFailure ?? evmHistoryFailure} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
       </ScrollView>
 
       {/* O4 S1 — persistent bottom navigation: the primary tabs moved from the top pill row
@@ -1787,6 +1887,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
           relayUrls={relayUrls}
           setRelayUrls={setRelayUrls}
           setSolanaRpc={setSolanaRpc}
+          setEvmRpc={setEvmRpc}
+          onEvmRpcApplied={recheckEvmBalances}
           onSolanaRpcApplied={recheckSolBalances}
           setIcGateway={setIcGateway}
           onIcGatewayApplied={refreshBalances}

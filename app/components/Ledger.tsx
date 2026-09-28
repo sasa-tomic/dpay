@@ -15,6 +15,7 @@ import type {SolanaReadFailure} from '../solana';
 // descriptor is absent — the same fail-closed "then render no chip" the currency-keyed version had.
 function filterTestKey(asset: SelectableAsset, catalog: CurrencyDescriptor[]): string | null {
   if (asset.protocol === 'solana') return asset.testKey;
+  if (asset.protocol === 'evm') return asset.testKey;
   const desc = catalog.find(c => c.currency === asset.currency);
   return desc ? assetTestKey(desc) : null;
 }

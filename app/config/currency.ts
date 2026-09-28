@@ -234,6 +234,10 @@ export function railFees(rail: SelectableAsset, catalog: readonly CurrencyDescri
     }
     return fee;
   }
+  // An EVM rail charges NO per-transfer fee dpay can state: gas is the payer's own native coin,
+  // priced by the chain at send time (dpay never quotes it — the send surface shows the chain's
+  // own estimate). Nothing here invents a number.
+  if (rail.protocol === 'evm') return {perTransfer: null, oneTime: null};
   const fee = catalog.find(c => c.currency === rail.currency)?.fee;
   const perTransfer = fee != null && /^\d+$/.test(fee)
     ? {raw: fee, formatted: fmtAssetCompact(fee, rail.decimals, rail.linkToken ?? rail.symbol)}

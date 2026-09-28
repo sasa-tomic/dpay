@@ -7,6 +7,8 @@ import {relayFetch} from '../services/relay';
 import {SOL_DECIMALS} from '../solana/identity';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 import {EURC_DECIMALS, EURC_MINT_ADDRESS} from '../solana/tokens';
+import {parseEvmRow, type EvmAsset} from '../lib/evmCatalog';
+import {ZCHF_TOKEN, ZCHF_DECIMALS} from '../evm/chains';
 
 // --- currency catalog (M0 + MC1 unit 5 + catalog v2 network-first) ---------------------------
 // The wallet's runtime source of truth for which assets exist + how to display/fund them. Fetched
@@ -97,7 +99,8 @@ export type SolanaAsset = {
 };
 export type NetworkSection =
   | {protocol: 'icp'; name: string; environment: 'mainnet' | 'testnet'; assets: CurrencyDescriptor[]}
-  | {protocol: 'solana'; name: string; environment: 'mainnet' | 'testnet'; assets: SolanaAsset[]};
+  | {protocol: 'solana'; name: string; environment: 'mainnet' | 'testnet'; assets: SolanaAsset[]}
+  | {protocol: 'evm'; name: string; environment: 'mainnet' | 'testnet'; assets: EvmAsset[]};
 // --- the ONE parser (wire JSON → NetworkSection[]) ---------------------------------------------
 // PURE: validates the network-first envelope, maps icp rows field-for-field exactly as the flat
 // catalog era did (IC row shape UNCHANGED), stamps each row's `testnet` from its owning section's
@@ -139,6 +142,18 @@ export function parseNetworkCatalog(j: unknown): NetworkSection[] | null {
       }
       assetCount += rows.length;
       sections.push({protocol: 'solana', name, environment, assets: rows});
+    } else if (s.protocol === 'evm') {
+      // The EVM device-key rail's rows — parsed by the same fail-closed parser the lib owns
+      // (`parseEvmRow`: a broken checksum or a missing field SKIPS the row, never renders it).
+      // EVM never enters the ICRC catalog — these rows live in their own protocol section, the
+      // `SolanaAsset` precedent (the CRITICAL INVARIANT, lib/evmCatalog.ts header).
+      const rows: EvmAsset[] = [];
+      for (const row of list) {
+        const parsed = parseEvmRow(row, environment === 'testnet');
+        if (parsed) rows.push(parsed);
+      }
+      assetCount += rows.length;
+      sections.push({protocol: 'evm', name, environment, assets: rows});
     }
   }
   return assetCount > 0 ? sections : null;
@@ -235,6 +250,16 @@ export function solanaAssetsOf(networks: NetworkSection[]): SolanaAsset[] {
   return out;
 }
 
+// The EVM rows from every evm section, in section order (the `solanaAssetsOf` mirror — the
+// relay emits Arbitrum One then Ethereum, and section order IS the wallet row order).
+export function evmAssetsOf(networks: NetworkSection[]): EvmAsset[] {
+  const out: EvmAsset[] = [];
+  for (const s of networks) {
+    if (s.protocol === 'evm') out.push(...s.assets);
+  }
+  return out;
+}
+
 // Relay-URL-scoped cache key (Phase 1 — 2026-08-12 unified asset selection rewrite). The cache is
 // keyed by the NORMALIZED relay URL (trailing slashes trimmed) so switching relays (Settings →
 // advanced) cannot reuse the prior relay's catalog (a relay that exposes a different asset set —
@@ -323,6 +348,28 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
       {token: 'EURC', symbol: 'EURC', decimals: EURC_DECIMALS, min_fraction_digits: 2, mint: EURC_MINT_ADDRESS, liquidity: 'deep', onramp: 'Unavailable', offramp: 'Unavailable'},
     ],
   },
+  // The EVM device-key rail's bundled rows (D6) — Arbitrum One FIRST (the recommended event
+  // rail; section order IS the wallet row order), then Ethereum, then the EMPTY Arbitrum
+  // Sepolia testnet section (the icp-testnet empty-section convention: clients shouldn't infer
+  // from absence). Addresses + decimals are IMPORTED from app/evm/chains.ts (the registry) —
+  // never re-typed. Dev/Anvil rows are NEVER bundled (env-gated relay-side only, D3). Ramps
+  // Unavailable on every row — no fiat rail on this chain either; liquidity null on all (no
+  // measured venue tier — do not invent one).
+  {
+    protocol: 'evm', name: 'Arbitrum One', environment: 'mainnet',
+    assets: [
+      {token: 'ZCHF', symbol: 'ZCHF', decimals: ZCHF_DECIMALS, minFractionDigits: 2, chainId: 42161,
+        address: ZCHF_TOKEN[42161]!.address, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false},
+    ],
+  },
+  {
+    protocol: 'evm', name: 'Ethereum', environment: 'mainnet',
+    assets: [
+      {token: 'ZCHF', symbol: 'ZCHF', decimals: ZCHF_DECIMALS, minFractionDigits: 2, chainId: 1,
+        address: ZCHF_TOKEN[1]!.address, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false},
+    ],
+  },
+  {protocol: 'evm', name: 'Arbitrum Sepolia', environment: 'testnet', assets: []},
 ];
 // Fetch the catalog from the relay, caching to AsyncStorage. Best-effort: on any failure (offline,
 // timeout, bad JSON, legacy/invalid envelope) returns `prior` (the cache or bundled default) so the

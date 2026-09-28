@@ -234,6 +234,7 @@ export const convertEs: ConvertMessages = {
     destRow: (sym, network, venue) => `${sym} en ${network} — vía ${venue} (servicio de intercambio)`,
     destRowMulti: (sym, network) => `${sym} en ${network}`,
     settleAddressLabel: 'El pago llega a tu propia dirección en la red de destino',
+    settleRailEthereum: 'El pago se entrega en ETH nativo en Ethereum mainnet',
     depositAddressLabel: 'Dirección de depósito',
     depositAmountLabel: 'Cantidad exacta a depositar',
     depositMemoLabel: 'Memo (obligatorio)',

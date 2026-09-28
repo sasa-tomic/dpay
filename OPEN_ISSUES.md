@@ -698,7 +698,8 @@ mint account together; it replaced the five-requests-every-2.5-seconds fan-out
 assertion: it fails if the poll issues the old per-rail fan-out, if a history tick re-reads a
 transaction detail, or if a backgrounded app issues anything at all.
 
-## EVM rail — generic ERC-20 custody (filed 2026-09-26, UNSTARTED)
+## EVM rail — generic ERC-20 custody (filed 2026-09-26; BUILT 2026-09-26/27 on branch `evm-rail` —
+## spec `docs/specs/2026-09-26-evm-rail-spec.md` + its addenda; remaining: the live legs below)
 
 - **Why**: founder directive 2026-09-26 — "we should add ERC-20 support anyway", driven by ZCHF /
   Frankencoin (the OISY-parity ask: OISY holds ZCHF, dpay cannot). dpay settles ck twins and
@@ -714,6 +715,25 @@ transaction detail, or if a backgrounded app issues anything at all.
   `DPAY_SOLANA_RPC_URL` pattern — provider endpoint in deploy config, never the app bundle);
   balance/history indexed by `eth_getLogs` Transfer-topic polling on the relay. The standing
   invariant carries over unchanged: dpay holds no EVM key, never pays and never quotes gas.
+- **"App-only" means where value custody and settlement live. It does NOT contrast with a
+  facade-settled IC rail; no such rail exists at HEAD.** Per-rail truth (`docs/CANISTERS.md` is the
+  authority; since the 2026-08-19/20 user-principal cutover): on EVERY rail the device holds the
+  key, the app builds and signs the transaction, and the ledger of record is an external one. The
+  facade canister (`ssqti`) is on no value path; its only live roles are the demo faucet `mint`,
+  display reads via the relay, and the module-hash integrity pin.
+
+  | | IC rails (ICP/VCHF, ck twins) | SOL rail | EVM rail (this) |
+  |---|---|---|---|
+  | Key custody | device ed25519 | device ed25519 | device secp256k1 |
+  | Tx build + sign | app, direct to the ledger or minter | app, device-signed | app, device-signed |
+  | Settlement | app-signed `icrc1_transfer` (native) / `icrc2_approve` + minter calls (ck) | app broadcast via relay RPC proxy | app broadcast via relay RPC proxy (planned) |
+  | Ledger of record | the external ICRC ledger canisters | Solana itself | the EVM chain itself |
+  | Facade involvement | none (faucet, display reads, integrity pin only) | none | none |
+  | Offline pay | app-signed envelope, device-clock fallback; the MERCHANT submits (flow 19) | `solreq:v2`/`solpay:v2` recent-blockhash, merchant scans + broadcasts | not designed |
+
+  Any rail table with rows like "app, then facade settles", "ledger of record: facade canister", or
+  "offline claims: facade, settle-later" describes the pre-cutover custody model retired
+  2026-08-19/20 and is wrong at HEAD.
 - **Gas**: user-side. Every payer address needs dust native ETH (mainnet / Arbitrum) alongside the
   token — the in-intent gas-fund offer (CCTP wave precedent) is the onboarding pattern; ZCHF's
   permit makes any future approval signature-cheap, but plain transfers need no approval at all.
@@ -737,6 +757,19 @@ transaction detail, or if a backgrounded app issues anything at all.
   `POLL.request` precedent) as new e2e flows; `just verify` + jest + relay catalog tests with the
   `dfx/catalog_truth.json` drift alarms; mainnet + Arbitrum rows live and ONE real on-chain ZCHF
   round trip recorded before any pilot claim.
+  **State 2026-09-27:** everything OFFLINE-buildable is DONE — e2e flows 218-222 drive the real
+  app against a local anvil through the real relay pipe; both drift alarms + wire pins are in;
+  `just verify` GREEN at `d88a69b`. The live legs are NOT done and are the reason this entry
+  stays: (a) the D29 Sepolia probe IS written and green (`just evm-probe-sepolia`, chainId
+  421614 verified; facts + the faucet dead-end log in `docs/live-testing/networks.md`) and
+  `scripts/evm-sepolia-roundtrip.mjs` is ready but UNEXECUTED — blocked on faucet gas (every
+  no-login faucet refuses a zero-mainnet-balance address; the agent EVM float is empty on-chain);
+  (b) the funded mainnet round trip (D31) — the acceptance gate for any pilot claim — needs
+  the agent EVM float registered in `funds/wallets.json` + a `docs/AGENT-FUNDS.md` derivation
+  note, dust ETH, and ZCHF on one chain (mainnet's Uniswap V3 ZCHF/WETH 0.3% pool is the one
+  liquid venue — see the networks.md EVM section). The D30 mainnet READ probe ran
+  same-day (spec addendum 1: minimal permit domain, no UIMultiplier, addresses verified);
+  `scripts/evm-probe-zchf-mainnet.mjs` pins it as a standing opt-in tripwire.
 
 ## UX swarm 2026-09-08 — three independent reviewers, live build
 

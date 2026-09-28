@@ -25,6 +25,7 @@ import {
   assetLinkToken,
   assetTestKey,
   displayName,
+  evmAssetsOf,
   familyDisplay,
   gasTokenOf,
   isPayableAsset,
@@ -36,6 +37,7 @@ import {isSolanaDevnet, PRACTICE_CURRENCY, solanaRpcUrl} from './constants';
 import {parseDecimalToUnits} from '../lib/amount';
 import {normaliseNetwork, type PayLink} from '../lib/deepLink';
 import {type AssetId} from '../lib/types';
+import {evmChainSlug, evmChipLabel, evmSelectableRow, parseEvmAssetId, type EvmSelectableAsset} from '../lib/evmCatalog';
 import {solanaTokenOfMint} from '../solana/tokens';
 import {M} from '../i18n';
 
@@ -97,7 +99,13 @@ export type SelectableAsset =
       rampPartner: string | null; // named ramp partner; null until the solana wire carries one
       visible: boolean;        // always true (appended only when the rail is enabled)
       testKey: string;         // stable ASCII testID key ('sol' | 'sol-usdc' | 'sol-eurc' | …)
-    };
+    }
+  // The EVM device-key rail's arm (D7) — shaped in lib/evmCatalog.ts (`EvmSelectableAsset`)
+  // field-for-field like the two arms above, so every selector renders it through the SAME
+  // surfaces (D13: parameterize, never fork). Id `evm:<chainId>:<TOKEN>`; `network` is the
+  // settlement chain's proper noun; no mint, no gasToken (gas is the user's own native ETH —
+  // the send surface's honesty gate reads it, never this row).
+  | EvmSelectableAsset;
 
 // Options for the list builder. `solanaTokens` is an explicit override used by tests to force every
 // non-SOL token row available/unavailable regardless of the live config; production callers omit it
@@ -109,6 +117,11 @@ export type BuildSelectableAssetsOptions = {
   showTestnet: boolean;
   solanaEnabled: boolean;
   solanaTokens?: boolean;
+  /** The EVM rail's append gate (the `solanaEnabled` precedent, D7): DEFAULT OFF, so every
+   *  existing call site (jest/e2e — where the seam URL is '') enumerates no EVM rows; the
+   *  Wallet passes the live `isEvmRailConfigured()` read. Rows are testnet-filtered by
+   *  `showTestnet` like every other rail. */
+  evmEnabled?: boolean;
   networks?: NetworkSection[];
 };
 
@@ -155,6 +168,14 @@ export function buildSelectableAssets(
       }
       const available = opts.solanaTokens ?? solanaTokenAvailable(row.mint);
       if (available) assets.push(solanaAssetRow(row));
+    }
+  }
+  if (opts.evmEnabled === true) {
+    // The EVM rows append AFTER the solana rows (D7) — the same sections the other rails read,
+    // fail-closed-parsed at the catalog layer, testnet-filtered by the same showTestnet gate.
+    for (const row of evmAssetsOf(opts.networks ?? BUNDLED_NETWORKS)) {
+      if (row.testnet && !showTestnet) continue;
+      assets.push(evmSelectableRow(row));
     }
   }
   return assets;
@@ -296,6 +317,8 @@ export function parseAssetId(v: string | null | undefined): AssetId | null {
   // selection falls back like any other stale id).
   const s = /^solana:([A-Z0-9]{2,10})$/.exec(v);
   if (s) return v as AssetId;
+  const evm = parseEvmAssetId(v);
+  if (evm) return evm;
   const m = /^ic:(\d+)$/.exec(v);
   return m ? (`ic:${Number(m[1])}` as AssetId) : null;
 }
@@ -376,9 +399,13 @@ export type PayLinkResolution = {ok: true; target: PayLinkTarget} | {ok: false; 
 /** The SETTLEMENT chain of an asset, as a payment link spells it: where the transfer actually
  *  executes. Every IC row settles on the Internet Computer — including the chain-key wrappers,
  *  whose catalog `network` names the chain they are BACKED by (ckUSDC: Ethereum) and which must
- *  therefore never be used here. Solana rows settle on Solana. */
+ *  therefore never be used here. Solana rows settle on Solana. An EVM row settles on ITS chain —
+ *  the registry's chain slug (`42161 → 'arbitrum'`, `1 → 'ethereum'`; D7), the canonical shared
+ *  spelling `?network=arbitrum` names. */
 export function linkNetworkOf(asset: SelectableAsset): string {
-  return asset.protocol === 'ic' ? 'internet-computer' : 'solana';
+  if (asset.protocol === 'ic') return 'internet-computer';
+  if (asset.protocol === 'evm') return evmChainSlug(asset.chainId) ?? String(asset.chainId);
+  return 'solana';
 }
 
 /** A settlement-chain slug as prose for an error message: `internet-computer` → "Internet
@@ -505,6 +532,9 @@ const SHORT_NETWORK_TAG: Record<string, string> = {
   Ethereum: 'Eth',
   Solana: 'Sol',
   Bitcoin: 'Btc',
+  // The EVM rows (D5's jest half): two visible ZCHF rows share the symbol, so their chips must
+  // qualify with the short chain tag ('ZCHF·Arb' / 'ZCHF·Eth').
+  'Arbitrum One': 'Arb',
 };
 function shortNetworkTag(asset: SelectableAsset): string {
   const network = asset.network ?? '';
@@ -515,6 +545,9 @@ function shortNetworkTag(asset: SelectableAsset): string {
   return network.length <= 3 ? network : network.slice(0, 3);
 }
 export function chipLabel(asset: SelectableAsset, all: SelectableAsset[]): string {
+  // The EVM rows use the lib's own collision chip (same rule, one EVM-owned home — the chain
+  // tag table lives beside the rows it qualifies).
+  if (asset.protocol === 'evm') return evmChipLabel(asset, all.filter((a): a is EvmSelectableAsset => a.protocol === 'evm'));
   const collision = all.some(a => a.id !== asset.id && a.symbol === asset.symbol);
   if (!collision) return asset.symbol;
   return `${asset.symbol}·${shortNetworkTag(asset)}`;

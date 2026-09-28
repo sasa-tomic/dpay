@@ -21,6 +21,7 @@ import {resolveSwapTargets, type SwapTarget} from '../config/swap';
 import {loadVenueRegistry, TERMINAL_CONVERT_STEPS, type ConvertRecord} from '../convert';
 import type {VenueEntry} from '../config/venues';
 import {adoptConvertRecord, convertResumeSnapshot, subscribeConvertRecords} from '../convertResume';
+import {isEvmRailConfigured} from '../evm';
 import {WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 import {M} from '../i18n';
 import {fmtAssetCompact} from '../lib/format';
@@ -78,7 +79,9 @@ export function ConvertMode({
     ? null
     : isSolSource
       ? (inMint === WRAPPED_SOL_MINT_ADDRESS ? solana?.sol ?? null : solana?.tokens[inMint ?? ''] ?? null)
-      : assetBalances[selectedAsset.currency];
+      : selectedAsset.protocol === 'ic'
+        ? assetBalances[selectedAsset.currency]
+        : null;
   const balanceN = balanceRaw != null && /^\d+$/.test(balanceRaw) ? BigInt(balanceRaw) : null;
 
   // ── The resolved pair ────────────────────────────────────────────────────────────────────
@@ -100,11 +103,17 @@ export function ConvertMode({
       cancelled = true;
     };
   }, [relayUrl]);
+  // The EVM rail's own gate (the same `isEvmRailConfigured` the asset list reads): it
+  // enables the EVM-NATIVE settle rails in the pair walk (ICP → native ETH). Off — the
+  // default under jest/e2e with the rail unseeded — the walk resolves exactly the
+  // pre-ETH pairs; a destination whose arrival the device cannot show is not offered
+  // (no silent dead ends).
+  const evmEnabled = isEvmRailConfigured();
   const targets: SwapTarget[] = useMemo(
     () => selectedAsset != null
-      ? resolveSwapTargets({catalog, source: selectedAsset, targetCurrencies: targetScope}) ?? []
+      ? resolveSwapTargets({catalog, source: selectedAsset, targetCurrencies: targetScope, evmEnabled}) ?? []
       : [],
-    [selectedAsset, catalog, targetScope, venueList],
+    [selectedAsset, catalog, targetScope, venueList, evmEnabled],
   );
 
   // ── The engine view (V6): pick the record to render, then follow it. The resume engine

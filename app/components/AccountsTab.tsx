@@ -2,7 +2,7 @@ import {ActivityIndicator, Pressable, Text, View} from 'react-native';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {M} from '../i18n';
-import {DEMO_ASSET_ID, linkNetworkOf, type SelectableAsset} from '../config/assets';
+import {DEMO_ASSET_ID, chipLabel, linkNetworkOf, type SelectableAsset} from '../config/assets';
 import {
   currencyName, currencyRails, preferredRail, railsLabel,
   type HomeCurrency,
@@ -184,6 +184,25 @@ export function AccountsTab({
             </View>
           ) : row;
         })}
+        {/* The EVM rail's rows (D13 — the same Balances list, the same select gesture): ZCHF is
+            not a wallet CURRENCY (it is not in CURRENCY_RAILS — no cross-rail sum is claimed), so
+            these render as per-RAIL rows with the per-asset select the practice row carries. Chip
+            labels qualify colliding symbols (`ZCHF·Arb` / `ZCHF·Eth` — chipLabel's evm arm). */}
+        {assets.filter(a => a.protocol === 'evm').map(a => (
+          <CurrencyRow
+            key={a.id}
+            testId={`asset-${a.testKey}`}
+            asset={a}
+            label={chipLabel(a, assets.filter((x): x is typeof a => x.protocol === 'evm'))}
+            amount={balances[a.id]?.displayText}
+            active={selectedId === a.id}
+            zero={balances[a.id] ? balances[a.id]!.status !== 'ok' : true}
+            onPress={() => onSelect(a.id)}
+            accessibilityLabel={M.wallet.balances.select(a.symbol)}
+            accessibilityHint={M.wallet.balances.selectHint}
+            variant="card"
+          />
+        ))}
         {/* The practice divider sits IMMEDIATELY above the practice row, so the sentence and the
             thing it describes cannot be separated by a scroll (anti-scam rule R3). Practice is
             not a currency: it renders after the list, never in it. */}

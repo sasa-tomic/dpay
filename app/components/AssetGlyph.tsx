@@ -105,8 +105,12 @@ function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'demo' | 'fa
   // also lands here, since its wrapper token is not a rail: the symbol branches below keep the
   // family hue for it, as the row label already says testnet.)
   if (asset.protocol === 'solana') return 'sol';
+  // EVM rows settle no wallet currency yet (the CHF table lists VCHF, and ZCHF is a different
+  // token) — but ZCHF IS a franc token: it wears the CHF family's mark, the same rule a future
+  // CURRENCY_RAILS entry would give it.
+  if (asset.protocol === 'evm') return 'chf';
   // IC: currency 0 is the DEMO unit; everything else is an ICRC ck-asset keyed by backing.
-  if (asset.currency === 0) return 'demo';
+  if (asset.protocol === 'ic' && asset.currency === 0) return 'demo';
   const s = asset.symbol.toUpperCase();
   if (s.includes('BTC')) return 'btc';
   if (s.includes('ETH')) return 'eth';

@@ -111,6 +111,10 @@ export const settingsDe: SettingsMessages = {
     solanaLabel: 'Solana-Endpunkt',
     solanaPlaceholder: 'https://<anbieter>/?api-key=<schlüssel>',
     solanaApplyA11y: 'Solana-Endpunkt übernehmen',
+    evmNote: 'Liest Guthaben und wickelt ZCHF auf Ethereum und Arbitrum One über das dpay-Relais ab. Leer folgt dem Server; ein eigener Endpunkt bedient ALLE Chains — er muss die richtige Chain nachweisen, bevor etwas gesendet wird.',
+    evmLabel: 'EVM-Endpunkt (alle Chains)',
+    evmPlaceholder: 'https://<anbieter>',
+    evmApplyA11y: 'EVM-Endpunkt übernehmen',
     // F2 — der IC-Gateway-Override. Nur für Betreiber (Demos/Tests gegen eine lokale Replica),
     // kein Nutzer-Feature; der Hinweis sagt es ehrlich, wie die Solana-Zeile darüber.
     icGatewayNote: 'Nur für Betreiber: die Basis-URL, an die diese Wallet IC-Transaktionen sendet. Leer nutzt das öffentliche Gateway; setze eine lokale Replica für Demos und Tests.',

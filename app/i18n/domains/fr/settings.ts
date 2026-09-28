@@ -113,6 +113,10 @@ export const settingsFr: SettingsMessages = {
     solanaLabel: 'Point d’accès Solana',
     solanaPlaceholder: 'https://<fournisseur>/?api-key=<clé>',
     solanaApplyA11y: 'Appliquer le point d’accès Solana',
+    evmNote: 'Lit les soldes et règle les ZCHF sur Ethereum et Arbitrum One via le relais dpay. Vide, il suit le serveur ; ton propre point d\u2019accès sert TOUTES les chaînes — il doit prouver la bonne chaîne avant tout envoi.',
+    evmLabel: 'Point d’accès EVM (toutes les chaînes)',
+    evmPlaceholder: 'https://<fournisseur>',
+    evmApplyA11y: 'Appliquer le point d’accès EVM',
     // F2 — le remplacement de la passerelle IC. Réservé aux opérateurs (démos/tests contre une
     // réplique locale), pas une fonction utilisateur ; la note le dit honnêtement, comme la
     // ligne Solana ci-dessus.

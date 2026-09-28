@@ -46,6 +46,7 @@ import type {Messages} from './keys';
 import {depositEs, withdrawEs} from './domains/es/deposit.ts';
 import {convertEs} from './domains/es/convert.ts';
 import {receiptEs} from './domains/es/receipt.ts';
+import {evmEs} from './domains/es/evm.ts';
 import {errorsEs} from './domains/es/errors.ts';
 import {payEs, receiveEs} from './domains/es/pay.ts';
 import {onboardingEs, settingsEs} from './domains/es/settings.ts';
@@ -76,6 +77,8 @@ export const es: Messages = {
   convert: convertEs,
 
   receipt: receiptEs,
+
+  evm: evmEs,
   withdraw: withdrawEs,
 
   nfc: {

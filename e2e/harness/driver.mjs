@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 import { resolveExecutablePath } from './browser.mjs';
 import { _testCtx } from './lib.mjs';
 import { installSolAccountsHelper } from './solaccounts.mjs';
+import { trackChild, untrackChild } from './procs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
@@ -132,7 +133,34 @@ export class Driver {
       const msg = e instanceof Error ? e.message : String(e);
       throw new Error(`[driver] chromium failed to launch (${exe}):\n${msg}`);
     });
-    const stop = async () => { try { await browser.close(); } catch {} };
+    // Register the shell in the child-pid registry (same sync-exit SIGKILL backstop as relay + web).
+    // chrome-headless-shell demonstrably does NOT self-exit on Node death (2026-09-27 incident:
+    // ~30 leaked shells at 50-70% CPU each, load 16+), so "puppeteer will close it" is not a
+    // guarantee — an interrupted teardown must not orphan it.
+    const proc = browser.process?.() ?? null;
+    const pid = proc?.pid ?? null;
+    if (Number.isInteger(pid) && pid > 0) trackChild(pid);
+    const stop = async () => {
+      if (!(Number.isInteger(pid) && pid > 0)) { try { await browser.close(); } catch {} return; }
+      // Graceful CDP close, raced against a hard 5s ceiling: a wedged renderer can make close()
+      // hang forever, and a silently-hanging close is exactly the leak this guards against.
+      let closed = false;
+      try {
+        const timer = new Promise((_, rej) => {
+          const t = setTimeout(() => rej(new Error('[driver] browser.close() timed out after 5s')), 5000);
+          if (typeof t.unref === 'function') t.unref(); // never delay process exit for the timer
+        });
+        await Promise.race([browser.close().then(() => { closed = true; }), timer]);
+      } catch { closed = false; }
+      if (closed) {
+        untrackChild(pid); // clean CDP close — the process is gone, drop the pid
+      } else {
+        // Hung or thrown close: SIGKILL directly. The pid stays tracked, so killTrackedChildren
+        // remains a harmless backstop for as long as this harness process lives.
+        try { proc.kill('SIGKILL'); } catch { /* already dead */ }
+        try { process.kill(pid, 'SIGKILL'); } catch { /* ESRCH — already dead */ }
+      }
+    };
     return { browser, stop };
   }
 
@@ -263,6 +291,18 @@ export class Driver {
         if (u === 'derive') delete globalThis.__DPAY_TEST_SOLANA_RPC_URL;
         else globalThis.__DPAY_TEST_SOLANA_RPC_URL = u;
       }, o.solRpcUrl);
+    }
+    // EVM seam (spec 2026-09-26 D27) — the solRpcUrl mirror, EVM-seam lines only: 'derive'
+    // DELETES the override (the relay-derived per-chain route stands — the production path);
+    // any other string is the whole candidate list (e.g. the harness relay's /api/v1/evm/rpc
+    // pipe URL, so anvil flows ride the REAL proxy). Runs after injectTestGlobals (which sets
+    // ''), and the app captures the value at module load, so it lands before the bundle
+    // evaluates on every navigation.
+    if (o.evmRpcUrl) {
+      await page.evaluateOnNewDocument((u) => {
+        if (u === 'derive') delete globalThis.__DPAY_TEST_EVM_RPC_URL;
+        else globalThis.__DPAY_TEST_EVM_RPC_URL = u;
+      }, o.evmRpcUrl);
     }
     const driver = new Driver(browser, context, page, ownsBrowser);
     // The create-time CDP session (locale override lives HERE — a second session stacking another
@@ -879,6 +919,12 @@ function injectTestGlobals() {
   // SOL rail: DISABLE so the offline e2e suite never hits real Solana devnet. An empty URL makes
   // useSolanaBalance no-op and the SOL card render with `—` (tested offline-rendered, see flow SOL).
   globalThis.__DPAY_TEST_SOLANA_RPC_URL = '';
+  // EVM rail: DISABLE identically (the SOL seam's mirror, spec 2026-09-26 D27). An empty URL
+  // makes the app/evm.ts seam no-op. A flow that wants the EVM rail re-points it per-page with
+  // the `evmRpcUrl` Driver option below (the `solRpcUrl` mirror) — usually the harness relay's
+  // /api/v1/evm/rpc URL so the app exercises the REAL pipe, or 'derive' to drop the override
+  // and let the relay-derived per-chain route stand.
+  globalThis.__DPAY_TEST_EVM_RPC_URL = '';
   // Convert engine cadences (the config/convert.ts seam): the suite proves the honest-pending /
   // resume-engine invariants at ~100 ms probe cadence instead of prod's seconds. The invariants
   // are cadence-independent — the settle watch still has to EXHAUST before a record parks on

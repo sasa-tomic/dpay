@@ -67,6 +67,33 @@
 //!                           refuses startup (EXIT_CONFIG).
 //!   DPAY_SOLANA_TIMEOUT_MS  per-call upstream timeout for the solana proxy in milliseconds
 //!                           (default 10000). `0` or non-numeric → startup refuses (EXIT_CONFIG).
+//!   DPAY_EVM_RPC_URL        the EVM JSON-RPC provider endpoint proxied at POST
+//!                           /api/v1/evm/rpc (the Solana pipe's EVM twin) — the FULL URL
+//!                           including its api key (e.g. `https://…/v3/<key>`). SECRET
+//!                           deploy config: never logged, never echoed in a response,
+//!                           never committed. Unset is legal — the route still registers
+//!                           and answers 503 naming this variable; only a SET-but-malformed
+//!                           URL refuses startup (EXIT_CONFIG). This is the DEFAULT-CHAIN
+//!                           upstream: it serves the bare route == chain 1 (Ethereum); the
+//!                           per-chain suffix route maps DPAY_EVM_RPC_URL_<CHAINID> first
+//!                           and falls back to this only for chain 1.
+//!   DPAY_EVM_RPC_URL_<CHAINID>
+//!                           the per-chain upstream for POST /api/v1/evm/rpc/<chain_id>
+//!                           (spec 2026-09-26, D12) — e.g. DPAY_EVM_RPC_URL_42161 for
+//!                           Arbitrum One. Same URL + SECRET discipline as DPAY_EVM_RPC_URL.
+//!                           Unset for a non-1 chain → that chain answers 503 naming the
+//!                           exact variable; no fallback across chains (one upstream serves
+//!                           ONE chain — routing a 42161 envelope at a chain-1 node is a
+//!                           wrong-chain send).
+//!   DPAY_EVM_SEPOLIA_TOKEN  a mock ZCHF ERC-20 contract address (0x + 40 hex) on Arbitrum
+//!                           Sepolia — set ONLY by local dev / the e2e harness. Set, it adds
+//!                           the {evm, "Arbitrum Sepolia", testnet} catalog section; unset,
+//!                           the section is absent and the served catalog is the prod shape
+//!                           (fail-closed absence). Malformed values refuse startup.
+//!   DPAY_EVM_ANVIL_TOKEN    the same for the local anvil chain (31337) — the e2e harness's
+//!                           deployed MockZCHF address. Same set/unset/malformed semantics.
+//!   DPAY_EVM_TIMEOUT_MS     per-call upstream timeout for the evm proxy in milliseconds
+//!                           (default 10000). `0` or non-numeric → startup refuses (EXIT_CONFIG).
 //!   DPAY_SIDESHIFT_SECRET   the SideShift partner ACCOUNT SECRET for the partner-key proxy
 //!                           (founder decision 3, 2026-09-14 — POST /api/v1/sideshift/*; see
 //!                           src/sideshift.rs and the feasibility spec's Partner-key
@@ -253,6 +280,16 @@ async fn main() {
         cfg.solana_rpc_url.clone(),
         cfg.solana_timeout,
     ));
+    // The EVM RPC proxy (`crate::evm`): the Solana pipe's EVM twin, same always-registered
+    // contract — an unconfigured proxy answers 503 naming the exact DPAY_EVM_RPC_URL[_<CHAINID>]
+    // variable rather than 404ing — and gets its default + per-chain upstreams + per-call
+    // timeout here. The URLs are SECRET (they embed the provider api key): never logged, never
+    // echoed in a response.
+    let mut evm_proxy = dpay_relay::evm::EvmProxy::new(cfg.evm_rpc_url.clone(), cfg.evm_timeout);
+    for (chain_id, url) in &cfg.evm_chain_urls {
+        evm_proxy = evm_proxy.with_chain(*chain_id, Some(url.clone()));
+    }
+    let state = state.with_evm(evm_proxy);
     // The SideShift partner-key proxy (founder decision 3, 2026-09-14): same
     // always-registered contract — unconfigured it answers 503 naming the missing
     // variable(s). BOTH credential halves are SECRET deploy config (the partner account
@@ -380,6 +417,48 @@ async fn main() {
              DPAY_SOLANA_RPC_URL (the provider endpoint, full URL incl. api key) is set in the \
              deploy environment."
         );
+    }
+    // Same one-line WHETHER for the EVM twin (never the values — the upstream URL embeds the
+    // provider api key, and even the docker log must not carry it). Per-chain lines name which
+    // chains have their own upstream (D12) and which fall back to the default (chain 1 only).
+    if cfg.evm_rpc_url.is_some() {
+        println!(
+            "POST /api/v1/evm/rpc: ENABLED — pure pipe + read cache against the configured \
+             default-chain (1) upstream (DPAY_EVM_RPC_URL). eth_sendRawTransaction and every \
+             unallowlisted method are passed through byte-faithfully, uncached; allowlisted \
+             reads share a per-method TTL cache; upstream failures come back with their own \
+             status, never a stale cache hit."
+        );
+    } else {
+        println!(
+            "POST /api/v1/evm/rpc: unconfigured — the route answers 503 until \
+             DPAY_EVM_RPC_URL (the provider endpoint, full URL incl. api key) is set in the \
+             deploy environment."
+        );
+    }
+    for chain_id in dpay_relay::evm::SERVED_CHAINS {
+        let configured = cfg.evm_chain_urls.iter().any(|(c, _)| c == chain_id);
+        let fallback = *chain_id == dpay_relay::evm::DEFAULT_CHAIN_ID
+            && cfg.evm_rpc_url.is_some()
+            && !configured;
+        if configured || fallback {
+            println!(
+                "POST /api/v1/evm/rpc/{chain_id}: ENABLED{}",
+                if configured {
+                    format!(
+                        " — per-chain upstream ({}).",
+                        dpay_relay::evm::chain_upstream_env_name(*chain_id)
+                    )
+                } else {
+                    " — via the DPAY_EVM_RPC_URL default (chain 1's fallback).".to_string()
+                }
+            );
+        } else {
+            println!(
+                "POST /api/v1/evm/rpc/{chain_id}: unconfigured — answers 503 until {} is set.",
+                dpay_relay::evm::chain_upstream_env_name(*chain_id)
+            );
+        }
     }
     // Same one-line WHETHER (never the values — they are the partner account's
     // credentials), naming the exact variable(s) an operator must set.
@@ -555,6 +634,16 @@ struct Config {
     solana_rpc_url: Option<String>,
     /// Per-call upstream timeout for the solana proxy (`DPAY_SOLANA_TIMEOUT_MS`).
     solana_timeout: std::time::Duration,
+    /// The evm proxy's upstream, when configured (`DPAY_EVM_RPC_URL`). Carries the
+    /// provider api key — treat as secret end to end. The DEFAULT-CHAIN (1) upstream: the
+    /// per-chain map overrides it for chain 1 when `DPAY_EVM_RPC_URL_1` is set.
+    evm_rpc_url: Option<String>,
+    /// The evm proxy's per-chain upstreams (`DPAY_EVM_RPC_URL_<CHAINID>`, spec 2026-09-26
+    /// D12) — ONLY the chains whose env is explicitly set, (chain id, provider URL). SECRET
+    /// values (api key in the query) — never logged, never echoed.
+    evm_chain_urls: Vec<(u64, String)>,
+    /// Per-call upstream timeout for the evm proxy (`DPAY_EVM_TIMEOUT_MS`).
+    evm_timeout: std::time::Duration,
     /// The SideShift partner account secret (`DPAY_SIDESHIFT_SECRET`) — one half of the
     /// FIRST relay-held partner credential (founder decision 3). SECRET: never logged,
     /// never echoed, never committed. Unset is legal (503 naming the variable).
@@ -703,6 +792,68 @@ impl Config {
             None => dpay_relay::solana::DEFAULT_TIMEOUT,
         };
 
+        // The EVM RPC proxy's upstream (`crate::evm`). Same discipline as the solana URL:
+        // UNSET is a legal state — the route still registers and answers 503 naming the
+        // variable — but a set value that isn't a URL is refused here rather than surfacing
+        // as a 504 per request with no hint why. The value embeds the provider api key, so
+        // it never appears in an error message, a log line, or a response (url::ParseError's
+        // text names the defect, not the URL — deliberately not interpolated here).
+        let evm_rpc_url = match non_empty("DPAY_EVM_RPC_URL") {
+            Some(url) => {
+                reqwest::Url::parse(&url)
+                    .map_err(|e| format!("DPAY_EVM_RPC_URL is not a valid URL: {e}"))?;
+                Some(url)
+            }
+            None => None,
+        };
+        // The per-chain upstreams (spec 2026-09-26, D12): DPAY_EVM_RPC_URL_<CHAINID> per
+        // SERVED chain (the env-name builder in crate::evm is the ONE spelling — the 503
+        // detail names the same builder's output, so error and knob can never drift). Each
+        // URL gets the same validation as the default. NO cross-chain fallback here or in
+        // the proxy: a chain without its own upstream answers 503 naming its variable, and
+        // only chain 1 falls back to DPAY_EVM_RPC_URL (the default-chain contract).
+        let mut evm_chain_urls = Vec::new();
+        for chain_id in dpay_relay::evm::SERVED_CHAINS {
+            let name = dpay_relay::evm::chain_upstream_env_name(*chain_id);
+            if let Some(url) = non_empty(&name) {
+                reqwest::Url::parse(&url)
+                    .map_err(|e| format!("{name} is not a valid URL: {e}"))?;
+                evm_chain_urls.push((*chain_id, url));
+            }
+        }
+        let evm_timeout = match non_empty("DPAY_EVM_TIMEOUT_MS") {
+            Some(raw) => {
+                let ms: u64 = raw
+                    .parse()
+                    .map_err(|e| format!("DPAY_EVM_TIMEOUT_MS={raw:?} is not a number: {e}"))?;
+                if ms == 0 {
+                    return Err(
+                        "DPAY_EVM_TIMEOUT_MS=0 — a zero timeout refuses every upstream call \
+                         before it is made"
+                            .into(),
+                    );
+                }
+                std::time::Duration::from_millis(ms)
+            }
+            None => dpay_relay::evm::DEFAULT_TIMEOUT,
+        };
+
+        // The dev EVM catalog rows' mock-token addresses (spec 2026-09-26, D3). EITHER may be
+        // unset — a legal state: the dev sections are simply absent and the served catalog is
+        // the prod shape. A SET value must be an EVM contract address (0x + 40 hex) — a typo
+        // would otherwise serve a dead token row the wallet would happily target. Not secret
+        // (a mock token's deployment address), so the error names the value like the demo
+        // override does.
+        for name in ["DPAY_EVM_SEPOLIA_TOKEN", "DPAY_EVM_ANVIL_TOKEN"] {
+            if let Some(v) = non_empty(name) {
+                if !is_evm_address(&v) {
+                    return Err(format!(
+                        "{name}={v:?} is not an EVM contract address (want 0x + 40 hex chars)"
+                    ));
+                }
+            }
+        }
+
         // The SideShift partner-key credentials (founder decision 3, 2026-09-14). EITHER may
         // be unset — that is a legal state: the routes still register and answer 503 naming
         // exactly the variable(s) missing (the venue is simply absent until the founder's
@@ -816,6 +967,9 @@ impl Config {
             checkout,
             solana_rpc_url,
             solana_timeout,
+            evm_rpc_url,
+            evm_chain_urls,
+            evm_timeout,
             sideshift_secret,
             sideshift_affiliate_id,
             sideshift_api_base,
@@ -839,6 +993,13 @@ fn non_empty(key: &str) -> Option<String> {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// The EVM-address shape check for the dev catalog rows' mock-token envs (`0x` + 40 hex) —
+/// well-formedness only, exactly what the catalog row needs; existence is the chain's business.
+fn is_evm_address(v: &str) -> bool {
+    let body = v.strip_prefix("0x").unwrap_or(v);
+    body.len() == 40 && body.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn parse_bool(key: &str, raw: &str) -> Result<bool, String> {

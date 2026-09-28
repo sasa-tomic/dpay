@@ -111,6 +111,10 @@ export const settingsEs: SettingsMessages = {
     solanaLabel: 'Endpoint de Solana',
     solanaPlaceholder: 'https://<proveedor>/?api-key=<clave>',
     solanaApplyA11y: 'Aplicar el endpoint de Solana',
+    evmNote: 'Lee saldos y liquida ZCHF en Ethereum y Arbitrum One a través del relé de dpay. Vacío sigue el servidor; tu propio endpoint sirve TODAS las cadenas — debe demostrar la cadena correcta antes de enviar nada.',
+    evmLabel: 'Endpoint EVM (todas las cadenas)',
+    evmPlaceholder: 'https://<proveedor>',
+    evmApplyA11y: 'Aplicar el endpoint EVM',
     // F2 — el override de la pasarela IC. Solo para operadores (demos/pruebas contra una réplica
     // local), no es una función de usuario; la nota lo dice con honestidad, como la línea de
     // Solana de arriba.

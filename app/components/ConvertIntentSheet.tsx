@@ -68,6 +68,8 @@ import {DpayCore} from '../services/native';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
 import {USDC_MINT_ADDRESS} from '../solana/tokens';
 import {deriveSolanaAddress} from '../solana/identity';
+import {deriveEvmAddress} from '../evm';
+import {toChecksumAddress} from '../evm/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {gasFundRoutes} from '../routes';
 import {M} from '../i18n';
@@ -487,7 +489,7 @@ export function ConvertIntentSheet({
             comps[r.rowId] = await fetchComposedQuotes(relayUrl, r.route, parsed.raw, inFee, slippageBps);
             compAmts[r.rowId] = parsed.raw;
           } else {
-            quotes[r.rowId] = await fetchCeFiConvertQuote(relayUrl, r.venue, r.inLedgerOrMint, r.outLedger ?? r.outMint ?? '', parsed.raw, {inDecimals, outDecimals: r.outDecimals});
+            quotes[r.rowId] = await fetchCeFiConvertQuote(relayUrl, r.venue, r.inLedgerOrMint, r.outLedger ?? r.outMint ?? r.outRailId ?? '', parsed.raw, {inDecimals, outDecimals: r.outDecimals});
             amts[r.rowId] = parsed.raw;
           }
         } catch (e) {
@@ -743,8 +745,20 @@ export function ConvertIntentSheet({
     () => (cefiMode ? deriveSolanaAddress(identity.secretHex) : null),
     [cefiMode, identity.secretHex],
   );
+  // The EVM-native settle rail's payout address (2026-09-27): the device's OWN EVM address
+  // — m/44'/60'/0'/0/0 over the same identity seed, EIP-55-checksummed for display. The
+  // derivation is a function of the key, NOT of the chain: the same address receives the
+  // native ETH payout on Ethereum mainnet and would receive it on any other EVM chain.
+  const cefiEthAddress = useMemo(
+    () => (cefiMode && cefiRow?.outRailId != null
+      ? toChecksumAddress(deriveEvmAddress(identity.secretHex))
+      : null),
+    [cefiMode, cefiRow?.outRailId, identity.secretHex],
+  );
   const cefiSettleAddress = cefiRow != null
-    ? (cefiRow.outLedger != null ? cefiIcAccountId : cefiSolAddress)
+    ? (cefiRow.outLedger != null ? cefiIcAccountId
+      : cefiRow.outRailId != null ? cefiEthAddress
+      : cefiSolAddress)
     : null;
   const cefiRefundAddress = cefiRow != null
     ? (cefiRow.outLedger != null ? cefiSolAddress : cefiIcAccountId)
@@ -956,17 +970,18 @@ export function ConvertIntentSheet({
         // The re-quote exists ONLY to mint a FRESH QUOTE ID (SideShift pins quoteId↔rate);
         // the ORDER is the lock and the consent point.
         const cefiRecordId = randNonceHex();
+        const cefiSettleRail = activeRow.outLedger ?? activeRow.outMint ?? activeRow.outRailId ?? '';
         let freshRes: CeFiQuoteResult;
         try {
           freshRes = await fetchCeFiQuoteResult(
-            relayUrl, activeRow.venue, activeRow.inLedgerOrMint, activeRow.outLedger ?? activeRow.outMint ?? '',
+            relayUrl, activeRow.venue, activeRow.inLedgerOrMint, cefiSettleRail,
             rawToDecimal(amountRaw, inDecimals), 20_000,
           );
         } catch (e) {
           throw ceFiServiceError(e, venueDisplayName(activeRow.venue.venue_id));
         }
         const fresh = ceFiQuoteFromResult(
-          activeRow.venue, activeRow.inLedgerOrMint, activeRow.outLedger ?? activeRow.outMint ?? '',
+          activeRow.venue, activeRow.inLedgerOrMint, cefiSettleRail,
           amountRaw, freshRes, activeRow.outDecimals,
         );
         let order;
@@ -975,7 +990,7 @@ export function ConvertIntentSheet({
             settleAddress: cefiSettleAddress,
             refundAddress: cefiRefundAddress,
             depositLedger: activeRow.inLedgerOrMint,
-            settleLedger: activeRow.outLedger ?? activeRow.outMint ?? '',
+            settleLedger: cefiSettleRail,
             depositAmountDecimal: rawToDecimal(amountRaw, inDecimals),
             clientOrderId: cefiRecordId,
           }, 20_000);
@@ -1656,6 +1671,15 @@ export function ConvertIntentSheet({
           {/* The CeFi payout target: not an input — the user's OWN derived address. */}
           {cefiMode && cefiSettleAddress != null ? (
             <View>
+              {/* The EVM-native settle rail names itself: "native ETH on Ethereum mainnet"
+                  — inside the ETH target this is the one line that separates the SideShift
+                  row's NATIVE-ETH payout from the IC pool's ckETH payout (the two rails
+                  settle the same currency on different chains). */}
+              {cefiRow?.outRailId != null ? (
+                <Text testID="convert-settle-rail" style={S.convertMetaLine}>
+                  {M.convert.cefi.settleRailEthereum}
+                </Text>
+              ) : null}
               <Text style={S.convertAmountLabel}>{M.convert.cefi.settleAddressLabel}</Text>
               <Text testID="convert-settle-address" style={S.convertMetaLine} selectable>{cefiSettleAddress}</Text>
             </View>
@@ -1743,6 +1767,11 @@ export function ConvertIntentSheet({
                           <Text style={S.convertMetaLine}>{M.convert.multihop.hubShape()}</Text>
                         ) : r.kind === 'composed' ? (
                           <Text style={S.convertMetaLine}>{M.convert.multihop.mechViaHub(r.route.endpoints[1]!.symbol)}</Text>
+                        ) : r.kind === 'cefi' && r.outRailId != null ? (
+                          // An EVM-native settle row names its payout rail while it sits
+                          // unpicked (it quotes only once picked — a spinner here would
+                          // promise a fetch the partner agreement forbids).
+                          <Text style={S.convertMetaLine}>{M.convert.cefi.settleRailEthereum}</Text>
                         ) : (/* crossrail: the label IS the mechanism line — no meta echo */
                           <View style={S.convertBtnBusyRow}>
                             <ActivityIndicator color={C.sub} />

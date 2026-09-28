@@ -19,10 +19,15 @@
 //! and principal/account texts stay accepted here until SideShift ships principal support.
 //! `solana`: base58 that decodes to exactly 32 bytes (the same check the transaction
 //! builder applies).
+//! `ethereum` (2026-09-27, the EVM-native settle widening): `0x` + exactly 40 hex chars,
+//! any case — an EVM address is case-insensitive in content (the EIP-55 mixed-case form
+//! is an integrity CHECKSUM, not identity; structural well-formedness accepts all-lower,
+//! all-upper and mixed). The venue owns reachability/ownership, as for every rail.
 
 /// Is this a well-formed address on the given venue NETWORK code (the rail an address must
 /// live on — the DEPOSIT rail for a refund, the SETTLE rail for a payout)? The venue's own
-/// network vocabulary maps onto the two rails both integrations serve (`icp`, `solana`).
+/// network vocabulary maps onto the rails this integration serves (`icp`, `solana`,
+/// `ethereum`).
 pub(crate) fn address_wellformed(network: &str, s: &str) -> bool {
     match network {
         "icp" => {
@@ -36,6 +41,10 @@ pub(crate) fn address_wellformed(network: &str, s: &str) -> bool {
                 || AccountIdentifier::from_text(s).is_ok()
         }
         "solana" => bs58_decode(s).is_some_and(|b| b.len() == 32),
+        "ethereum" => {
+            let body = s.strip_prefix("0x").unwrap_or(s);
+            body.len() == 40 && body.bytes().all(|b| b.is_ascii_hexdigit())
+        }
         // A network code this integration does not serve cannot be paid/refunded-to: refuse.
         _ => false,
     }
@@ -126,7 +135,28 @@ mod tests {
             "0OIl-not-base58-safe"
         ));
         // An unknown network code is refused structurally (cannot be paid/refunded-to).
+        assert!(!address_wellformed("ethereum-other", "0xabc"));
+        // Ethereum rail (2026-09-27): 0x + exactly 40 hex, any case (the EIP-55 mixed
+        // case is a checksum, not identity); the empty/garbage forms stay refused.
+        assert!(address_wellformed(
+            "ethereum",
+            "0x71C7656EC7ab88b098defB751B7401B5f6d8976F"
+        ));
+        assert!(address_wellformed(
+            "ethereum",
+            "0x71c7656ec7ab88b098defb751b7401b5f6d8976f"
+        ));
         assert!(!address_wellformed("ethereum", "0xabc"));
+        assert!(!address_wellformed("ethereum", "71c7656ec7ab88b098defb751b7401b5f6d8976"));
+        assert!(!address_wellformed(
+            "ethereum",
+            "0x71c7656ec7ab88b098defb751b7401b5f6d8976f0"
+        ));
+        assert!(!address_wellformed(
+            "ethereum",
+            "0x71c7656ec7ab88b098defb751b7401b5f6d897g"
+        ));
+        assert!(!address_wellformed("ethereum", ""));
     }
 
     #[test]

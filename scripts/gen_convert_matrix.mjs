@@ -21,6 +21,11 @@ import {readFileSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {SOLANA_TOKENS, WRAPPED_SOL_MINT_ADDRESS} from '../app/solana/tokens.ts';
+// The EVM-native cefi rows (2026-09-27) live OUTSIDE the truth file's venues[] — native ETH
+// has no catalog row, so their venue rows are adapter-owned (the relay's sideshift adapter +
+// the app's bundled twin). This module is dependency-free PURE by contract, so the generator
+// can import it: the doc stays a VIEW over the app's own registries.
+import {EVM_NATIVE_VENUES, ETH_NATIVE_RAIL_ID} from '../app/config/evmConvert.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TRUTH = JSON.parse(readFileSync(join(ROOT, 'dfx/catalog_truth.json'), 'utf8'));
@@ -82,6 +87,7 @@ const FAMILIES = {
  *  mint IS the registry's id for the native side). Unknown mint → generator failure. */
 function symbolOfLedger(ledger) {
   if (ledger === WRAPPED_SOL_MINT_ADDRESS) return 'SOL';
+  if (ledger === ETH_NATIVE_RAIL_ID) return 'ETH (native)';
   for (const [sym, info] of Object.entries(SOLANA_TOKENS)) {
     if (info.mint === ledger) return sym;
   }
@@ -92,8 +98,11 @@ function symbolOfLedger(ledger) {
 }
 
 function railOf(venue) {
-  const kinds = venue.pair_ledgers.map(l => (l === WRAPPED_SOL_MINT_ADDRESS || Object.values(SOLANA_TOKENS).some(t => t.mint === l)) ? 'solana' : 'ic');
+  const kinds = venue.pair_ledgers.map(l => (l === WRAPPED_SOL_MINT_ADDRESS || Object.values(SOLANA_TOKENS).some(t => t.mint === l)) ? 'solana'
+    : (l === ETH_NATIVE_RAIL_ID) ? 'evm-native'
+    : 'ic');
   const set = [...new Set(kinds)];
+  if (set.includes('evm-native')) return 'Internet Computer \u2194 Ethereum (cross-rail, native settle)';
   if (set.length === 2) return 'Internet Computer \u2194 Solana (cross-rail)';
   return set[0] === 'ic' ? 'Internet Computer' : 'Solana';
 }
@@ -116,6 +125,11 @@ function healthOf(venueId) {
 
 export function generateConvertMatrix() {
   const venues = TRUTH.venues.filter(v => !v.testnet);
+  // The adapter-owned EVM-native cefi rows join the registry rows: the doc is a view over
+  // the app's own registries, and evmConvert.ts IS one (bundled app-side, served pair-side
+  // by the relay's sideshift adapter — see that module's header for why there is no
+  // catalog row).
+  const all = [...venues, ...EVM_NATIVE_VENUES.filter(v => !v.testnet)];
   const header = [
     '# Convert coverage matrix',
     '',
@@ -133,7 +147,7 @@ export function generateConvertMatrix() {
     '| from \u2192 to | rail | venue_id | kind | rate type | min/max | live probe | health |',
     '|---|---|---|---|---|---|---|---|',
   ];
-  const rows = venues.map(v => {
+  const rows = all.map(v => {
     const [a, b] = v.pair_ledgers;
     const fam = FAMILIES[v.kind];
     if (fam == null) throw new Error(`venue kind ${v.kind} has no family facts — add them to scripts/gen_convert_matrix.mjs`);
@@ -151,10 +165,10 @@ export function generateConvertMatrix() {
     return `| ${cells.join(' | ')} |`;
   });
   const byKind = {};
-  for (const v of venues) byKind[v.kind] = (byKind[v.kind] ?? 0) + 1;
+  for (const v of all) byKind[v.kind] = (byKind[v.kind] ?? 0) + 1;
   const summary = [
     '',
-    `${venues.length} venue rows: ${Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(', ')}.`,
+    `${all.length} venue rows: ${Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(', ')}.`,
     'Testnet rows (offline fixtures) are excluded. dpay takes no cut on any row: relay-pinned',
     'markup/commission is zero, and dpay is never a party to a conversion.',
     '',

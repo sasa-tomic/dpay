@@ -71,6 +71,42 @@ This is the documented resolution of OPEN_ISSUES #10 Layer 3 (the path-filtered 
 
 **Stricter typecheck (commit `8a6ca28`).** `just typecheck` runs `tsc --noEmit --noUnusedLocals --noUnusedParameters`, so dead imports / unused locals / unused params now FAIL the gate (previously sailed through under plain `tsc --noEmit`). A green `just typecheck` is now a positive proof of no dead declarations in `app/`, not just a type-correctness check.
 
+## Test tiers: what runs where (strict)
+
+Dev-loop tests MUST finish in SECONDS, not minutes. That is the objective of the whole tier system.
+
+- **`just smoke`** (seconds, run constantly during iteration): only the files in
+  `app/__tests__/smoke/manifest.ts`. Pure node, zero network, zero chrome/anvil, deterministic,
+  <=250 ms per test, <=12 s total. Money-defining invariants ONLY: wire bytes, key derivation,
+  gas-gate ordering, permit/claim semantics, catalog parse/drift, amount parsing, settlement state
+  machines. Adding a test to smoke = adding ONE line to the manifest and meeting every criterion;
+  the drift test (`smokeManifest.test.ts`) and the budget wrapper (`budget-setup.js`) reject
+  everything else. NEVER put screen flows, fetch calls, or timing-sensitive code in smoke. If your
+  change touches a money invariant, add/extend a smoke test for it.
+- **Domain suites** (`app/__tests__/*.test.*`, run via `just test-app`): component + service tests,
+  mocked fetch/fake timers allowed. This is where most new tests belong. Iterate with `just smoke`
+  plus the ONE domain suite you touched.
+- **`just flow`** (jest full-app flow suite): full `<App/>` mounts against the real test-helpers
+  relay (spawned once per run by jest's globalSetup). Screen-level behavior lives here, never in
+  smoke.
+- **`just node-anvil`**: real-chain proofs (anvil + relay pipe, no browser, no jest). EVM
+  send/permit-settle/gas-refusal live here.
+- **`just e2e-visual`** (merge gate only, chrome): pixel baselines, QR scannability, viewport
+  layout, PWA boot. No behavioral assertions move back here.
+
+**Slow suites run EXACTLY ONCE, immediately before commits move back to main — NEVER during
+iteration. This is a HARD rule.** Slow means: full jest (`just test-app`), `just flow`,
+`just node-anvil`, `just e2e-visual`, anything minutes-long. If you are iterating, `just smoke`
+plus your one touched domain suite is the entire menu; launching chrome is a bug.
+
+**Standing perf mandate.** When anything in the quick tiers exceeds its budget, that is an ALERT:
+a fix agent must identify the slow parts, merge or flatten tests, and RADICALLY cut setup and
+teardown time and memory/CPU. Parallelization alone is not a fix. `just smoke` over budget = stop
+and fix, never raise the budget. `node scripts/smoke-watch.mjs` is the watchdog: it runs
+`just smoke` once, compares wall (12 s) and per-test (250 ms) times, writes
+`/home/sat/projects/dpay/tmp/smoke-watch-status.json` (machine-checkable: `ok`, `verdict`,
+`wallSeconds`, `overBudget`, `slowest`), prints a one-line verdict, and exits nonzero when over.
+
 ## E2e flow catalog
 
 **`FLOWS.md`** is the authoritative manifest of every tested user flow, organized by journey, and is GENERATED from each flow's `meta` — it is the only place the flow count lives, so do not copy the count here again (the copy that used to sit on this line had drifted to two different wrong numbers in one sentence). Read it to see what's covered and how to add a new flow. Run `just e2e` (all) or `DPAY_E2E_FILTER=NN node e2e/run.mjs` (one flow). Inner-loop e2e recipes (all offline, seconds): `just e2e` (the full default suite; the optional store capture is flow 39 via `just e2e-store`); `just e2e-visual` (pixel-diff flow 40 standalone — for fast iteration after a UI tweak; flow 40 ALSO runs in the full `e2e` suite so `just verify` already covers it); `just e2e-visual-seed` (regenerate the visual baselines after an intentional UI change — commit the new baselines); `just e2e-watch` (file→journey re-run on save — the shared relay+web+browser session persists across re-runs for sub-5s feedback); `just e2e-watch-filter <token>` (watch mode pinned to a journey/id/name/covers slug).

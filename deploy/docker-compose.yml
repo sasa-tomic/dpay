@@ -92,6 +92,40 @@ services:
       # exist). SECRET: the DSN embeds credentials — never logged, never echoed.
       DPAY_TROCADOR_PG_DSN: ${DPAY_TROCADOR_PG_DSN:-}
 
+      # The EVM JSON-RPC proxy (POST /api/v1/evm/rpc[/chainId]) — the Solana pipe's EVM twin
+      # (crates/dpay-relay/src/evm.rs). DPAY_EVM_RPC_URL is the DEFAULT-chain (1) provider
+      # endpoint INCLUDING its api key (SECRET — never logged, never echoed, never committed);
+      # a per-chain var configures that chain directly and wins for it (DPAY_EVM_RPC_URL_42161
+      # = Arbitrum One — the ZCHF rail; DPAY_EVM_RPC_URL_421614 = Arbitrum Sepolia). A served
+      # chain with no upstream answers 503 naming its variable; an unserved chain id 404s.
+      # Values live in sops (secrets/deploy.sops.json, key pattern DPAY_EVM_RPC_URL*) and land
+      # in the generated deploy/.env — see scripts/gen-deploy-env.sh.
+      DPAY_EVM_RPC_URL: ${DPAY_EVM_RPC_URL:-}
+      DPAY_EVM_RPC_URL_42161: ${DPAY_EVM_RPC_URL_42161:-}
+      DPAY_EVM_RPC_URL_421614: ${DPAY_EVM_RPC_URL_421614:-}
+      # Per-call upstream timeout for the proxy, ms (default 10000; 0 refused at startup).
+      DPAY_EVM_TIMEOUT_MS: ${DPAY_EVM_TIMEOUT_MS:-}
+
+      # CeFi proxy knobs (all optional; the credentials above are the gate). API base overrides
+      # (defaults are the verified live hosts; the offline loop points them at relay-internal
+      # stubs — leave unset in prod), the public origin stamped into Trocador webhook params
+      # (derived from the request when unset), whether X-Forwarded-For may name the client IP
+      # for the Trocador per-client bounds (default false; the tunnel IS the proxy), the
+      # per-client bounds themselves (defaults 6 calls / 4 trades per minute; 0 refused at
+      # startup), and the landing page's APK override (default /srv/dpay.apk, baked by
+      # deploy/build.sh; unset/missing → the download link shows "coming soon").
+      DPAY_SIDESHIFT_API_BASE: ${DPAY_SIDESHIFT_API_BASE:-}
+      DPAY_TROCADOR_API_BASE: ${DPAY_TROCADOR_API_BASE:-}
+      DPAY_PUBLIC_ORIGIN: ${DPAY_PUBLIC_ORIGIN:-}
+      DPAY_TRUST_PROXY: ${DPAY_TRUST_PROXY:-}
+      DPAY_TROCADOR_RATE_PER_MIN: ${DPAY_TROCADOR_RATE_PER_MIN:-}
+      DPAY_TROCADOR_TRADE_PER_MIN: ${DPAY_TROCADOR_TRADE_PER_MIN:-}
+      DPAY_APK_PATH: ${DPAY_APK_PATH:-}
+
+      # The Jupiter quote/swap API base override (default the live lite-api host; the offline
+      # e2e loop points it at a stub — leave unset in prod).
+      DPAY_JUPITER_API_BASE: ${DPAY_JUPITER_API_BASE:-}
+
     # Lets DPAY_IC_URL point at a dfx replica running on the host (http://host.docker.internal:4943)
     # — the pre-mainnet rehearsal: the real container, the real agent path, a replica you own.
     extra_hosts:

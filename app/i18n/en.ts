@@ -18,6 +18,7 @@ import {onboardingEn, settingsEn} from './domains/en/settings.ts';
 import {educationEn, walletEn} from './domains/en/wallet.ts';
 import {convertEn} from './domains/en/convert.ts';
 import {receiptEn} from './domains/en/receipt.ts';
+import {evmEn} from './domains/en/evm.ts';
 
 export const en: Messages = {
   common: {
@@ -46,6 +47,8 @@ export const en: Messages = {
   convert: convertEn,
 
   receipt: receiptEn,
+
+  evm: evmEn,
 
   nfc: {
     reason: {

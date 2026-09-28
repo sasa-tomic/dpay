@@ -2,6 +2,7 @@ import {useEffect, useMemo, useState} from 'react';
 import {Linking, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import {C} from '../config/palette';
 import {PRIVACY_URL, icGatewayUrl, solanaRpcUrl} from '../config/constants';
+import {evmRpcUrl as liveEvmRpcUrl} from '../evm/endpoints';
 import {S, isDark} from '../styles';
 import {validateSeed} from '../lib/format';
 import {hexToWords, stringToWords, wordsToHex, wordsToString, validateMnemonic} from '../lib/bip39';
@@ -70,7 +71,7 @@ function PrivacyLink() {
   );
 }
 
-export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRpcApplied, setIcGateway, onIcGatewayApplied, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, openAdvanced, onOpenStep, onOpenAddressBook}: {
+export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRpcApplied, setEvmRpc, onEvmRpcApplied, setIcGateway, onIcGatewayApplied, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, openAdvanced, onOpenStep, onOpenAddressBook}: {
   // R1: the operator's ordered relay address list (first = preferred). The editor below is a
   // LIST editor — one address per line — but it keeps the relay row's old draft/Apply contract:
   // nothing applies on keystroke, and an empty draft is a VALUE (it restores the addresses baked
@@ -87,6 +88,13 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
   // is read per-request, so an operator who has just fixed a dead key would otherwise stare at the
   // same dashes for half a minute and conclude the fix did not work.
   onSolanaRpcApplied: () => void;
+  // Apply + persist the EVM endpoint override (App.tsx `persistEvmRpc`, D11). The SOL contract
+  // verbatim: THROWS on a refusal (non-URL, plain http on a public host) and the row renders it;
+  // `''` clears — the wallet follows the relay-derived per-chain routes again.
+  setEvmRpc?: (s: string) => void;
+  // Fired after an ACCEPTED EVM endpoint change so the rail-visibility gate re-evaluates at once
+  // (the evm rows mount/unmount with the rail being configured) instead of at the next render.
+  onEvmRpcApplied?: () => void;
   // Apply + persist the IC gateway override (App.tsx `persistIcGateway`, F2). The operator-facing
   // escape hatch for pointing the IC /api/v2 rail at a local replica (demos/testing) instead of
   // icp-api.io — NOT a user feature. Throws on a refusal (unparseable URL, plain http on a public
@@ -295,6 +303,38 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
       onSolanaRpcApplied();
     } catch (e: unknown) {
       setSolRpcErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // The EVM endpoint row — the Solana endpoint row's twin (D11), with the same "empty is a
+  // value" contract (`setEvmRpcUrl('')` follows the relay-derived per-chain routes again). The
+  // override is PER DEVICE, ALL chains (one upstream answers every chain, and the wrong-chain
+  // guard is what keeps a one-chain endpoint honest — the note says exactly that).
+  const [draftEvmRpc, setDraftEvmRpc] = useState(liveEvmRpcUrl(1));
+  const [appliedEvmRpc, setAppliedEvmRpc] = useState(liveEvmRpcUrl(1));
+  const [evmRpcErr, setEvmRpcErr] = useState<string | null>(null);
+  const evmRpcDirty = draftEvmRpc.trim() !== appliedEvmRpc.trim();
+  const liveEvm = liveEvmRpcUrl(1);
+  useEffect(() => {
+    if (draftEvmRpc.trim() === appliedEvmRpc.trim()) {
+      setDraftEvmRpc(liveEvm);
+      setAppliedEvmRpc(liveEvm);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveEvm]);
+  const applyEvmRpc = () => {
+    if (!evmRpcDirty) return;
+    try {
+      setEvmRpc?.(draftEvmRpc);
+      setEvmRpcErr(null);
+      // Re-seed from the RESOLVED endpoint (the SOL row's rule): an empty draft resolves to the
+      // relay-derived per-chain routes, and showing that is what clearing the field did.
+      const active = liveEvmRpcUrl(1);
+      setDraftEvmRpc(active);
+      setAppliedEvmRpc(active);
+      onEvmRpcApplied?.();
+    } catch (e: unknown) {
+      setEvmRpcErr(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -824,6 +864,33 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                   accessibilityLabel={M.settings.advanced.solanaApplyA11y}
                   accessibilityState={{disabled: !solRpcDirty}}>
                   <Text style={[S.applyBtnText, !solRpcDirty && S.disabledText]}>{M.settings.advanced.apply}</Text>
+                </Pressable>
+                {/* The EVM endpoint — the Solana row's twin, one section down (D11). One endpoint
+                    serves EVERY chain on this rail (the wrong-chain guard proves each chain at
+                    spend time); empty follows the server's per-chain routes again. */}
+                <Text style={S.dim2}>{M.settings.advanced.evmNote}</Text>
+                <Text style={S.inputLabel}>{M.settings.advanced.evmLabel}</Text>
+                <TextInput
+                  testID="settings-evm-rpc"
+                  style={S.relayInput}
+                  value={draftEvmRpc}
+                  onChangeText={(t) => { setDraftEvmRpc(t); setEvmRpcErr(null); }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder={M.settings.advanced.evmPlaceholder}
+                  placeholderTextColor={C.sub2}
+                  accessibilityLabel={M.settings.advanced.evmLabel}
+                />
+                {evmRpcErr ? <Text testID="settings-evm-rpc-err" style={S.err}>{evmRpcErr}</Text> : null}
+                <Pressable
+                  testID="btn-evm-rpc-apply"
+                  style={[S.applyBtn, !evmRpcDirty && S.disabledFlat]}
+                  disabled={!evmRpcDirty}
+                  onPress={applyEvmRpc}
+                  accessibilityRole="button"
+                  accessibilityLabel={M.settings.advanced.evmApplyA11y}
+                  accessibilityState={{disabled: !evmRpcDirty}}>
+                  <Text style={[S.applyBtnText, !evmRpcDirty && S.disabledText]}>{M.settings.advanced.apply}</Text>
                 </Pressable>
                 {/* The IC gateway override — the Solana endpoint row's twin, one section down.
                     Operator-facing only: it exists so a demo/replica drive can point the IC /api/v2

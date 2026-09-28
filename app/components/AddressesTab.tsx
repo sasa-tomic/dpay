@@ -135,9 +135,9 @@ export function AddressesTab({
     // IC destinations store the CANONICAL form the resolver returned (same as the send form's
     // settle path) — a pasted-but-equivalent spelling normalises once, at save time. SOL is
     // base58 case-significant and is stored verbatim (same as the withdraw sheet).
-    const destination = asset.protocol === 'solana'
-      ? addAddressTrimmed
-      : await resolveIc(addAddressTrimmed, catalog.find(c => c.currency === asset.currency) ?? null);
+    const destination = asset.protocol === 'ic'
+      ? await resolveIc(addAddressTrimmed, catalog.find(c => c.currency === asset.currency) ?? null)
+      : addAddressTrimmed;
     if (destination === null) return;
     void rememberAddress(addAsset, destination, addName.trim(), Date.now()).then(book => {
       setBooks(prev => ({...prev, [addAsset]: book}));

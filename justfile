@@ -123,6 +123,22 @@ relay-default-check: web
 test-relay: web
     python3 scripts/testruns.py run test-relay --sh 'cargo nextest run -p dpay-relay --features test-helpers --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
+# stage the local EVM rail (D26): a SCRATCH anvil (chain 31337, offline, 1s blocks), the COMMITTED
+# MockZCHF blob (e2e/harness/evm/MockZCHF.hex) deployed with a raw signed type-2 tx — no forge/solc
+# at runtime — and the DEVICE-derived EVM key funded (gas via anvil_setBalance + ZCHF from the
+# deployer). Prints the config JSON and writes e2e/harness/evm/anvil.json for the flows; the chain
+# stays RUNNING (detached; logs → anvil.log). Idempotent: a re-run replaces the previous instance
+# on a fresh chain. Port collision (8545 held by something else): fail loud — pass another port:
+#   just evm-anvil 8645     (or DPAY_EVM_ANVIL_PORT=8645)
+evm-anvil port='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}"
+    [ -d e2e/node_modules ] || npm --prefix e2e install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    p="{{port}}"
+    [ -n "$p" ] || p="${DPAY_EVM_ANVIL_PORT:-8545}"
+    exec env DPAY_EVM_ANVIL_PORT="$p" node e2e/harness/evm/anvil.mjs
+
 # emit the committed core goldens from the real Rust core: the wire layout (single source of truth
 # for the JS ed25519 signing shim) and the checkout-open signing document (the merchant's charge-open proof,
 # read by scripts/check-wasm-core.mjs). `just test-core` fails when the checkout-open file is stale.
@@ -287,6 +303,26 @@ ic-index-probe:
 swap-venue-probe:
     DPAY_IC_MAINNET=1 cargo nextest run -p dpay-relay --features agent -E 'binary(swap_venue_mainnet)' --no-capture
 
+# OPT-IN mainnet READ probe (NEEDS NETWORK, keyless, never in check/verify): the D30
+# custody-semantics tripwire (docs/specs/2026-09-26-evm-rail-spec.md §6) — for BOTH pinned ZCHF
+# deployments (Ethereum + Arbitrum One) it asserts symbol/decimals/balanceOf(0x0) and that
+# DOMAIN_SEPARATOR() equals the locally computed MINIMAL permit domain (ERC20PermitLight). A
+# mismatch blocks permit signing until app/evm/chains.ts is fixed. Endpoints overridable via
+# DPAY_EVM_PROBE_ETH_URL / DPAY_EVM_PROBE_ARB_URL.
+evm-probe-mainnet:
+    node scripts/evm-probe-zchf-mainnet.mjs
+
+# OPT-IN Arbitrum Sepolia read-only probe (NEEDS NETWORK, keyless, never in check/verify): the
+# D29 free-path gate (docs/specs/2026-09-26-evm-rail-spec.md §6) — asserts the truth file pins
+# chain 421614 with NO ZCHF (absent by design), the official public RPC answers and the chain
+# advances, and the relay halves of the dev-token env-row mechanism (503 evm-unconfigured /
+# 404 evm-unknown-chain / the DPAY_EVM_SEPOLIA_TOKEN catalog row + pipe forward when the env
+# is engaged). With the env set it also checks the deployed token answers as MockZCHF-shaped
+# ERC-20PermitLight (symbol/decimals/MINIMAL permit domain). Endpoint overridable via
+# DPAY_EVM_PROBE_ARB_SEPOLIA_URL.
+evm-probe-sepolia:
+    node scripts/evm-probe-arbitrum-sepolia.mjs
+
 # OPT-IN LIVE Trocador partner probe (NEEDS NETWORK + DPAY_TROCADOR_API_KEY, never in check/verify
 # — it makes LIVE key-gated calls to the real venue): GET /coins (the full coin/network vocabulary,
 # printed pretty NEXT TO the adapter's pinned codes from crates/dpay-relay/src/trocador.rs
@@ -394,6 +430,55 @@ reconcile currency='all':
 # through to scripts/faucet-verify.sh (e.g. --relay https://staging.example.com --mint).
 faucet-verify *args:
     bash scripts/faucet-verify.sh {{args}}
+
+# smoke tier (spec tmp/jest-flow-migration-spec.md §3): ONLY the files in
+# app/__tests__/smoke/manifest.ts, pure node, <=250ms/test (budget wrapper), <=12s total
+# (the timeout 20s wrapper is the hard kill). THE iteration gate — seconds-fast forever.
+# `just timing smoke` reads the per-test JSON this recipe records. DPAY_SMOKE_TIMING lets
+# scripts/smoke-watch.mjs capture the same JSON testruns.py consumes (testruns owns
+# DPAY_TESTRUNS_TIMING and deletes its temp file after reading).
+smoke:
+    python3 scripts/testruns.py run smoke --sh 'cd app && timeout 20s env DPAY_SMOKE=1 npx jest --selectProjects smoke --silent --maxWorkers=4 --json --outputFile="${DPAY_SMOKE_TIMING:-${DPAY_TESTRUNS_TIMING:-/dev/null}}" $(node ../scripts/smoke-files.mjs)'
+
+# smoke budget watchdog: runs `just smoke` once, compares wall + per-test times against the
+# budgets, writes tmp/smoke-watch-status.json, exits nonzero with a one-line verdict when over.
+# THE alert condition — over budget = a fix agent flattens/merges; never raise the budget.
+smoke-watch:
+    node scripts/smoke-watch.mjs
+
+# flow suite (ported e2e, full-app jest; spawns the test relay ONCE via globalSetup). Merge-gate
+# activity — never part of the dev-loop iteration (AGENTS.md test tiers).
+flow:
+    python3 scripts/testruns.py run flow --sh 'cd app && npx jest --selectProjects flow --silent --maxWorkers=4 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
+
+# real-chain proofs: anvil + relay pipe, NO browser, NO DOM mount (jest project `node-anvil`).
+# ONE scratch anvil (31337, 1s blocks) + the REAL test-helpers relay are staged ONCE per run by
+# the jest globalSetup (app/jest.node-anvil-setup.js → app/__tests__/node-anvil/stage-child.mjs,
+# which reuses e2e/harness/evm/{anvil,pipe}.mjs verbatim and sets the DPAY_EVM_RPC_URL[_31337] /
+# DPAY_EVM_ANVIL_TOKEN env itself, so nothing leaks in from the shell). The app's own evm seam
+# drives the chain THROUGH the relay pipe (sendErc20 / settleEvmClaim / balance+history polls);
+# assertions read REAL anvil state DIRECT as the second source. Teardown is three-layered
+# (teardown group-kill → the child's SIGTERM handler → its sync exit SIGKILL backstop, the
+# e2e/harness/procs.mjs discipline) with an orphan sweep behind it.
+# Warm target < 90s; a FRESH worktree pays the one-time relay build (~70s, same as `just flow`).
+node-anvil:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{root}}"
+    if [ ! -x "$HOME/.foundry/bin/anvil" ] && [ ! -x third_party/bin/anvil ]; then
+      echo "node-anvil: anvil not found — fix (one line): curl -L https://foundry.paradigm.xyz | bash && foundryup" >&2
+      exit 1
+    fi
+    # the staging child imports @noble/* from the e2e workspace (the `just evm-anvil` precedent)
+    [ -d e2e/node_modules ] || npm --prefix e2e install --prefer-offline --no-audit --no-fund --legacy-peer-deps
+    python3 scripts/testruns.py run node-anvil --sh 'cd app && DPAY_NODE_ANVIL=1 npx jest --selectProjects node-anvil --silent --maxWorkers=1 --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
+    just node-anvil-cleanup
+
+# orphan sweep behind `just node-anvil`: the staging child's three teardown layers make a leaked
+# chain structurally rare; this is the pocketic-cleanup precedent (best-effort, never fails).
+# Scoped to the scratch 31337 chain shape both this recipe and `just evm-anvil` spawn.
+node-anvil-cleanup:
+    @if pkill -f 'anvil --host 127\.0\.0\.1 --port .* --chain-id 31337' 2>/dev/null; then echo "  ✓ leaked node-anvil chain stopped"; else echo "  · node-anvil: none leaked"; fi
 
 # typecheck the RN app — catches bridge arity drift against the TS interfaces (tsc --noEmit, ~2s, no device)
 typecheck:
@@ -629,6 +714,13 @@ stop:
 
     # relay (LAN settle service) — `just demo` or a manual `cargo run -p dpay-relay`. Frees port 8787.
     if pkill -f 'dpay-relay' 2>/dev/null; then echo "  ✓ relay stopped"; else echo "  · relay: none"; fi
+
+    # scratch EVM chain from `just evm-anvil` — frees port 8545 (or wherever it was staged).
+    if [ -f e2e/harness/evm/anvil.pid ] && kill -0 "$(cat e2e/harness/evm/anvil.pid 2>/dev/null)" 2>/dev/null; then
+      kill "$(cat e2e/harness/evm/anvil.pid)" && echo "  ✓ anvil stopped"
+    else
+      echo "  · anvil: none"
+    fi
 
     # dfx local replica and everything it manages (replica, canister_sandbox, icx-proxy, pocket-ic).
     if command -v dfx >/dev/null 2>&1; then
