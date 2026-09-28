@@ -88,10 +88,22 @@ describe('NfcStatusRow — one instruction per NFC state', () => {
     expect(said.every(s => s.length > 0)).toBe(true);
   });
 
-  test('(web) there is no radio at all, so the row states the one thing that works', () => {
+  test('(web) no radio: the honest not-ready row with the unsupported reason, never a scan title', () => {
+    // G1 (2026-09-28): the web branch used to render the scan title here, which duplicated the
+    // ModeToggle's own "Scan to pay" segment on every send-capable surface. The row now states the
+    // device fact (no NFC hardware) with the same treatment as a native phone without the radio,
+    // and the scan phase carries its own carrier outside this component.
     (Platform as {OS: string}).OS = 'web';
     const tree = mount('unknown');
-    expect(texts(tree)).toContain(M.pay.scanToPay);
-    expect(texts(tree)).not.toContain(M.pay.nfcNotAvailable); // nothing to explain: web has no NFC
+    expect(texts(tree)).toContain(M.pay.nfcNotAvailable);
+    expect(openReason(tree)).toBe(M.nfc.reason.unsupported); // web 'unknown' IS the hardware fact
+    expect(texts(tree)).not.toContain(M.pay.scanToPay);
+  });
+
+  test('(web) a probe that reports ready still renders the ready row (the seam is truth)', () => {
+    (Platform as {OS: string}).OS = 'web';
+    const tree = mount('ready');
+    expect(texts(tree)).toContain(M.pay.tapOrScanToPay);
+    expect(texts(tree)).not.toContain(M.pay.nfcNotAvailable);
   });
 });

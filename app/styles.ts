@@ -517,6 +517,10 @@ function buildStyles(p: Palette) {
   // with no resolvable width and it collapses to 0x0 (the 2026-08-14 SOL scan black-box bug -
   // camera mounted and live but invisible; gated on-device by `just campreview`).
   scanWrap: {alignSelf: 'stretch'},
+  // The IC scan-phase container (`pay-scan`): stretches to the column, then repeats the mode
+  // surface's centering for its own children - the phase lays out exactly as when they sat
+  // directly under S.center, but the carrier is now the phase itself, not the NFC row inside it.
+  scanPhase: {alignSelf: 'stretch', alignItems: 'center'},
   // The placeholder fills the box; 24px keeps wrapped copy off the rounded edge (the armed
   // pre-permission screen is the same instrument as idle - text that touches the frame is the
   // "almost-aligned" tell the caliber exists to kill).

@@ -645,11 +645,12 @@ describe('PayMode — offline-QR reconcile + re-approve guards', () => {
 // Pay-intent scan gate (founder rule 2026-08-23): the camera (QrScanner) and the HCE card (NfcTap)
 // mount ONLY after the payer's explicit "Pay Now" tap — nothing scans before the user asks.
 // reset() (a concluded attempt needs a fresh intent) and leaving the scan sub-mode disarm; the idle
-// surface keeps the NFC status row (pay-scan) + the CTA. Deeplink prefill is unaffected by design.
+// surface keeps the NFC status row (pay-nfc-row) inside the pay-scan phase + the CTA. Deeplink
+// prefill is unaffected by design.
 describe('PayMode — pay-intent scan gate', () => {
   test('idle: NEITHER rail mounts (no camera, no card); the status row + CTA render; one tap arms BOTH rails', () => {
     const tree = mountPay({nfcStatus: 'ready'});
-    expect(hasTestID(tree, 'pay-scan')).toBe(true); // idle keeps the explainer row
+    expect(hasTestID(tree, 'pay-scan')).toBe(true); // idle keeps the scan phase (its own container now)
     expect(hasTestID(tree, 'btn-start-scan')).toBe(true);
     expect(scannerNodes(tree)).toHaveLength(0); // camera rail off
     expect(cardNodes(tree)).toHaveLength(0); // HCE rail off (nfcReady, but gated)

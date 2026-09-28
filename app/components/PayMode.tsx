@@ -1333,12 +1333,16 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
         />
       ) : null}
       {!nfcActive ? (
-        <>
-          <NfcStatusRow nfcStatus={nfcStatus} testID="pay-scan" />
+        // G1 (2026-09-28): the scan phase carries `pay-scan` on its OWN container, decoupled from
+        // the NFC row (`pay-nfc-row`) — the SOL twin's precedent (sol-pay-scan vs sol-nfc-row).
+        // Same presence window as before (mounted while the NFC card is not active), so every
+        // flow anchor keeps its meaning; the row no longer borrows the scan carrier. The wrapper
+        // repeats the mode surface's centering so the phase lays out exactly as when its children
+        // sat directly under S.center.
+        <View style={S.scanPhase} testID="pay-scan">
+          <NfcStatusRow nfcStatus={nfcStatus} testID="pay-nfc-row" />
           {scanArmed ? (
-            <View style={S.scanWrap}>
-              <QrScanner key={scanKey} onScan={raw => onRequestString(raw)} />
-            </View>
+            <QrScanner key={scanKey} onScan={raw => onRequestString(raw)} />
           ) : (
             <>
               {idleViewfinder}
@@ -1360,7 +1364,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
               payer just pointed at a QR code. Say what is happening rather than freezing. */}
           {ocpBusy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingCheckout}</Text> : null}
           {err ? <Text style={S.err}>{err}</Text> : null}
-        </>
+        </View>
       ) : null}
     </View>
   );

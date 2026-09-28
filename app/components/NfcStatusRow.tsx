@@ -10,7 +10,12 @@ import {M} from '../i18n';
 
 /**
  * The NFC availability row — green "tap or scan" when the radio is ready, red with a tappable reason
- * when it is not, and a plain scan label on web where there is no radio at all.
+ * when it is not. ONE row for every state and every platform: web has no radio, so its not-ready
+ * state renders the same honest treatment as a native phone without NFC hardware (reason
+ * `unsupported`), NOT a scan title — the scan title duplicated the ModeToggle's own "Scan to pay"
+ * segment on every send-capable surface (G1, 2026-09-28). The scan phase carries its own testID
+ * (`pay-scan` / `sol-pay-scan` on the phase container, NOT on this row); the row's carrier is
+ * `pay-nfc-row` / `sol-nfc-row`.
  *
  * ONE implementation for BOTH rails and BOTH SIDES OF THE COUNTER. It lived inline in `PayMode` (the
  * IC rail) while `SolPayMode` had nothing: the SOL payer got no indication of whether tapping would
@@ -21,7 +26,8 @@ import {M} from '../i18n';
  * The row says the same thing on every surface because it is the same device fact.
  *
  * `testID` is a parameter because the two rails' scan surfaces are already distinguished by it
- * (`pay-scan` / `sol-pay-scan`) and a large number of e2e flows select on those exact strings.
+ * (`pay-nfc-row` / `sol-nfc-row`). The scan-surface carriers (`pay-scan` / `sol-pay-scan`) live on
+ * the phase containers in PayMode/SolPayMode.
  *
  * The reason popup takes the 4-state `NfcStatus`, not a boolean: "off" (radio disabled — the user
  * can fix it), "unsupported" (no hardware — they cannot) and "unknown" (the probe failed) are three
@@ -31,19 +37,24 @@ import {M} from '../i18n';
 export function NfcStatusRow({nfcStatus, testID}: {nfcStatus: NfcStatus; testID: string}) {
   const [infoOpen, setInfoOpen] = useState(false);
   useEscapeToClose(() => setInfoOpen(false));
+  const web = Platform.OS === 'web';
   const ready = nfcStatus === 'ready';
   // 'ready' can never reach the popup (it only opens from the not-ready branch); narrowing here
-  // keeps `M.nfc.reason` total over the states it actually renders.
-  const reason: Exclude<NfcStatus, 'ready'> = nfcStatus === 'ready' ? 'unknown' : nfcStatus;
+  // keeps `M.nfc.reason` total over the states it actually renders. On web the probe never runs
+  // and the browser has no radio, so an 'unknown' there IS the hardware fact: it renders as
+  // `unsupported` ("this device doesn't have NFC hardware"), never as a failed check.
+  const reason: Exclude<NfcStatus, 'ready'> = ready
+    ? 'unknown'
+    : web && nfcStatus === 'unknown' ? 'unsupported' : nfcStatus;
 
   return (
     <>
-      {Platform.OS !== 'web' && ready ? (
+      {ready ? (
         <View style={S.nfcStatusRow} testID={testID}>
           <NfcIcon color={C.brandText} size={34} />
           <Text style={S.nfcStatusLabel}>{M.pay.tapOrScanToPay}</Text>
         </View>
-      ) : Platform.OS !== 'web' ? (
+      ) : (
         <View style={S.nfcStatusRow} testID={testID}>
           <NfcIcon color={C.bad} size={34} off />
           <Pressable style={S.nfcInfoLink} onPress={() => setInfoOpen(true)} accessibilityRole="button" accessibilityLabel={M.pay.whyNfcUnavailable} accessibilityState={{disabled: false}}>
@@ -51,8 +62,6 @@ export function NfcStatusRow({nfcStatus, testID}: {nfcStatus: NfcStatus; testID:
             <IconInfo size={15} color={C.sub2}/>
           </Pressable>
         </View>
-      ) : (
-        <Text style={[S.nfcStatusLabel, {paddingTop: 16}]} testID={testID}>{M.pay.scanToPay}</Text>
       )}
 
       <Modal visible={infoOpen} transparent animationType="fade" onRequestClose={() => setInfoOpen(false)}>
