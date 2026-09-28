@@ -1,8 +1,8 @@
 <resources>
 
-    <!-- Base application theme — Traveler Paper: warm porcelain field, tangerine accent
+    <!-- Base application theme — Ballast: cold mist field, petrol teal accent
          (matches app/config/palette.ts + the marketing site CSS vars). Light status-bar
-         icons: dark ink glyphs on the porcelain field. -->
+         icons: dark ink glyphs on the mist field. -->
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
         <item name="android:windowBackground">@color/bg</item>
@@ -13,7 +13,7 @@
         <item name="colorAccent">@color/accent</item>
     </style>
 
-    <!-- Cold-start splash: the tangerine ∂ tile on porcelain until RN renders. -->
+    <!-- Cold-start splash: the petrol ∂ tile on mist until RN renders. -->
     <style name="SplashTheme" parent="AppTheme">
         <item name="android:windowBackground">@drawable/splash</item>
     </style>

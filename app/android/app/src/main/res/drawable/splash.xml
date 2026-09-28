@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Splash field: Traveler Paper porcelain (matches @color/bg the RN app renders on), soft
-     top-light gradient like the launcher tile. The centered logo bitmap is the porcelain 'd'
-     on tangerine (drawable-xxhdpi/splash_logo.png). -->
+<!-- Splash field: Ballast mist (matches @color/bg the RN app renders on), soft top-light
+     gradient like the launcher tile. The centered logo bitmap is the mist ∂ on the petrol tile
+     (drawable-xxhdpi/splash_logo.png), rendered from the app/components/Logo.tsx geometry:
+     LIGHT.brand → LIGHT.brand2 gradient, LIGHT.panel glyph. A palette change must regenerate
+     that PNG (and the launcher vectors) or startup shows a retired identity. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
