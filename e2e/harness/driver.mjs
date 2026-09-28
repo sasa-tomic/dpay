@@ -211,6 +211,8 @@ export class Driver {
     // Fresh incognito context per run → fresh localStorage → fresh identity each test.
     const context = await browser.createBrowserContext();
     const page = await context.newPage();
+    // The per-page emulation set is independent protocol state — apply the pieces CONCURRENTLY
+    // (one CDP roundtrip each; serial cost ~150-250ms/flow × 208 flows was pure latency).
     await page.setViewport({ ...VIEWPORT, width: o.width ?? VIEWPORT.width, height: o.height ?? VIEWPORT.height });
     // Pin the clock and the language, always. Both were previously inherited from whatever the host
     // happened to be set to, which is a flake waiting for the first developer in a non-UTC,
@@ -218,18 +220,20 @@ export class Driver {
     // laptop would render the whole suite in German and fail 81 flows at the first assertion, and
     // every ledger timestamp shifts with the host zone. A flow that WANTS another locale asks for
     // it (`setup({locale: 'de-DE'})`); the default is the one the assertions are written against.
-    await page.emulateTimezone(o.timezone ?? 'UTC');
     // `Emulation.setLocaleOverride` is what drives `Intl` — which is exactly where the app reads
     // the device tag from (`i18n/locale.ts` deviceLocaleTag). Chrome's `--lang` flag would not do
     // it: the browser is shared across the whole run, so a per-flow launch flag is not available.
     const cdp = await page.createCDPSession();
-    await cdp.send('Emulation.setLocaleOverride', { locale: o.locale ?? 'en-US' });
     // Wave-4 dual theme: emulate an OS dark scheme (flows pass opts.dark). Applied at the PAGE
     // level so window.matchMedia('(prefers-color-scheme: dark)') — which RNW's Appearance/useColorScheme
     // and the hosts' CSS @media blocks key on — reports dark BEFORE any page script runs.
-    if (o.dark) {
-      await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
-    }
+    await Promise.all([
+      page.emulateTimezone(o.timezone ?? 'UTC'),
+      cdp.send('Emulation.setLocaleOverride', { locale: o.locale ?? 'en-US' }),
+      o.dark ? page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]) : Promise.resolve(),
+    ]);
+    // The init scripts must stay SEQUENTIAL among themselves: they run at registration order and
+    // the seam overrides (solStub/solRpcUrl/evmRpcUrl) deliberately land AFTER injectTestGlobals.
     await page.evaluateOnNewDocument(injectFreezeCss, FREEZE_CSS);
     await page.evaluateOnNewDocument(injectTestGlobals);
     // SOL stub RPC: when a flow requests it (opts.solStub), override the SOLANA_RPC_URL disable so
@@ -550,11 +554,15 @@ export class Driver {
     return (await this.page.evaluate(() => document.body?.innerText ?? '')).trim();
   }
 
-  /** Take a full-page screenshot to `e2e/shots/<name>.png`. Returns the absolute path. */
+  /** Take a full-page screenshot to `e2e/shots/<name>.png`. Returns the absolute path.
+   *
+   *  `optimizeForSpeed` opts the PNG encoder into its fast path (less aggressive compression,
+   *  IDENTICAL pixel content — the visual baselines diff pixels, not bytes). ~400 captures per
+   *  full run × ~40-60% less encode time each is minutes of lane time back. */
   async screenshot(name) {
     mkdirSync(SHOTS_DIR, { recursive: true });
     const path = join(SHOTS_DIR, `${name}.png`);
-    await this.page.screenshot({ path, type: 'png', fullPage: false });
+    await this.page.screenshot({ path, type: 'png', fullPage: false, optimizeForSpeed: true });
     const size = statSync(path).size;
     if (size <= 0) throw new Error(`[driver] screenshot ${name}.png is empty`);
     console.log(`[driver] wrote shots/${name}.png (${size} bytes)`);

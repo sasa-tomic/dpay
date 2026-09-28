@@ -107,7 +107,29 @@ function relayBuildFingerprintMs() {
   touch(join(REPO_ROOT, 'Cargo.toml'));
   touch(join(REPO_ROOT, 'Cargo.lock'));
   walk(join(E2E_DIR, 'dist-prod'));
+  // The pinned toolchain's rustc: a rustup update leaves every source mtime untouched but
+  // produces a binary cargo WOULD rebuild — include the compiler binary so the freshness skip
+  // below stays honest. (The rustup-installed toolchain bin, not PATH, is what cargoEnv uses.)
+  for (const tc of ['stable-x86_64-unknown-linux-gnu', 'stable-aarch64-unknown-linux-gnu']) {
+    touch(join(REPO_ROOT, '.dev', 'rustup', 'toolchains', tc, 'bin', 'rustc'));
+  }
   return newest;
+}
+
+/**
+ * CROSS-PROCESS freshness skip: cargo rebuilds iff some input is newer than the OUTPUT binary, so
+ * a binary newer than every fingerprint input is exactly cargo's own no-op — invoking cargo to
+ * confirm costs a 2.4s warm no-op idle (9s under load, measured 2026-09-28: the fingerprint walk
+ * + full crate-graph validation is NOT free). This is the per-PROCESS memo made persistent; the
+ * staleness contract is identical (any source/manifest/dist-prod/toolchain edit moves an input
+ * newer than the binary → cargo runs). `force` bypasses everything.
+ */
+function relayBinaryIsFresh() {
+  try {
+    return statSync(RELAY_BIN).mtimeMs > relayBuildFingerprintMs();
+  } catch {
+    return false; // no binary (or unreadable inputs) → let cargo decide
+  }
 }
 
 export async function ensureRelayBuilt(opts = {}) {
@@ -119,6 +141,9 @@ export async function ensureRelayBuilt(opts = {}) {
     const fp = relayBuildFingerprintMs();
     if (fp <= _builtFingerprintMs) return; // unchanged since this process's last build — cargo would no-op
     _builtFingerprintMs = null; // inputs moved: re-run cargo below
+  } else if (relayBinaryIsFresh()) {
+    _builtFingerprintMs = relayBuildFingerprintMs();
+    return; // binary newer than every input — cargo's own no-op, verified without invoking cargo
   }
   console.log(`[relay] cargo build dpay-relay --features test-helpers into ${E2E_TARGET_DIR} (cargo fingerprints)…`);
   const code = await runCargo(['build', '-p', 'dpay-relay', '--features', 'test-helpers'], opts.timeoutMs ?? 300_000);
