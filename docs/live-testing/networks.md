@@ -13,9 +13,30 @@ search; otherwise at most 10 minutes, then record the outcome here.
 | Solana devnet | partial | SOL faucet; devnet USDC via Circle faucet | 2026-09-26 | EURC is not issued on devnet; Jupiter devnet is limited; dpay venues do not run devnet. Design-time knowledge. |
 | EURC (Solana) | none | receive-side exercises are free with an existing EURC balance (float holds some) | 2026-09-27 | Circle issues EURC mainnet-only. Float rail measured 9.198416 EURC 2026-09-27; app derivation re-proven (in-app derived rail shows the exact float balances). |
 | Trocador (CeFi) | none | smallest supported order (venue minimum, roughly $5-20) | 2026-09-26 | Mainnet-only; partner API terms (poll floor) apply; relay holds no DPAY_TROCADOR_API_KEY yet (routes 503). Design-time knowledge. |
-| SideShift (CeFi) | none | smallest supported order (venue minimum moves with rate: 2026-09-27 EURC→ICP 8.787025 EURC, ICP→EURC ~3.109 ICP) | 2026-09-27 | Mainnet-only; exact-amount deposit windows. Prod proxy LIVE with the deployed (docs-example) credentials: quotes AND order creation pass auth (order-creation 201 verified with one unfunded probe order, expired by design). LIVE-PROVEN 2026-09-27: ICP→EURC via the app — order 11:49:45Z, exact 4.47 ICP deposit (ICP block 38641763), payout 12.422931 EURC = the verbatim quote to the last digit (slot 450989680). EURC→ICP: venue min exceeds the float (8.698); that leg's live proof stands from 2026-09-22 (shift d61b2eec). |
-| ZCHF (ERC-20) reads | yes (keyless, free) | `just evm-probe-mainnet` — symbol/decimals/DOMAIN_SEPARATOR on publicnode + arb1 | 2026-09-27 | READ path free and proven. WRITES (a real transfer round trip) are mainnet-only: gas is dust ETH, no ZCHF faucet on either chain. |
+| SideShift (CeFi) | none | smallest supported order (venue minimum moves with rate: 2026-09-28 ICP→ETH min deposit 1.0037228 ICP, EURC→ICP ~8.698 EURC) | 2026-09-28 | Mainnet-only; exact-amount deposit windows. Prod proxy LIVE with the deployed (docs-example) credentials; the LOCAL relay proxy is live-proven too (2026-09-28: quotes AND order creation 201 through the loopback relay + xff proxy). ICP→EURC: venue min exceeds the float (8.698); that leg's live proof stands from 2026-09-22 (shift d61b2eec). ICP→ETH (sideshift-eth): quotes + orders LIVE-PROVEN in-app 2026-09-28 (3.2 ICP → 0.00354669 ETH, settle = the device's own EVM identity verbatim, payout rail named "native ETH on Ethereum mainnet") — the deposit leg is blocked on the SOL-rail ATA-rent wall, see the dead-end log. |
+| ZCHF (ERC-20) reads | yes (keyless, free) | `just evm-probe-mainnet` — symbol/decimals/DOMAIN_SEPARATOR on publicnode + arb1 | 2026-09-28 | READ path free and proven. WRITES (a real transfer round trip) are mainnet-only: gas is dust ETH, no ZCHF faucet on either chain. 2026-09-28: the app renders the ZCHF·Eth/ZCHF·Arb rows live through the relay pipe (balance poll 0 at the unfunded rail); the EVM history poll 403s on publicnode ("Archive requests…", see dead-end log) — balances poll fine, history shows the honest refusal. |
 | Arbitrum Sepolia (D29) | blocked on gas | `just evm-probe-sepolia` (keyless, GREEN); funded trip: `node scripts/evm-sepolia-roundtrip.mjs` (ready, BLOCKED ON GAS) | 2026-09-27 | Probe green: official RPC answers 421614, ~250ms blocks, ~0.03 gwei, dev-token env-row mechanism verified. Funded trip blocked: every no-login faucet refuses a zero-mainnet-balance address and the agent float is empty — dead-end log below. |
+
+## EVM rail (ZCHF-first) — live facts (2026-09-28)
+
+**2026-09-28 — the D31 mainnet round-trip attempt (blocked at leg 1, everything before the wall
+proven).** Local relay = main-HEAD binary (73c8a7bc) at 127.0.0.1:8899 behind the xff proxy
+(8898), configured exactly like prod (DPAY_LEDGER=ic, real ssqti behind icp-api.io, SideShift
+partner creds from sops, keyed Solana provider from deploy/.env) PLUS `DPAY_EVM_RPC_URL=https://
+ethereum-rpc.publicnode.com` + `DPAY_EVM_RPC_URL_42161=https://arbitrum-one-rpc.publicnode.com`
+(prod is one founder redeploy behind: no EVM routes there yet). Verified BEFORE touching the app:
+(a) `/api/v1/currencies` carries both EVM sections (chain 1 ZCHF `0xB58E…21cB` + chain 42161);
+(b) POST `/api/v1/evm/rpc` `eth_chainId` → `0x1`, `/42161` → `0xa4b1` through publicnode;
+(c) IC answers (`/api/v1/balances` 200 with the float's real balances). In the REAL app (browser,
+float seed restored, `?relay=` at the local relay, both rails' RPC derived from the relay base):
+EVM rows render (ZCHF·Eth / ZCHF·Arb), the balance poll measures the rail through the pipe, and
+the in-app ICP→ETH CeFi surface quotes LIVE (SideShift verbatim, settle address = the device's
+own EVM identity EIP-55-exact, payout rail named). Four EURC→ICP CeFi orders were created
+in-app (quotes verbatim, settle = the float's 64-hex identifier) and ALL expired unfunded: the
+deposit handoff is blocked on the SOL-rail ATA-rent wall (dead-end log) — zero value ever in
+flight. The Uniswap buy / send / offline-permit legs have ready scripts
+(`scripts/evm-mainnet-zchf-buy.mjs`, `scripts/evm-mainnet-claim-settle.mjs`,
+`scripts/evm-live-trip.mjs`) and are unexecuted pending the float unblock.
 
 ## EVM rail (ZCHF-first) — live facts (2026-09-27)
 
@@ -52,13 +73,15 @@ memory).
   ETHEREUM directly beats the Arbitrum-first sketch: there is no Arbitrum ZCHF liquidity to
   bridge into, and mainnet gas is currently the same order as Arbitrum's.
 
-## Practical routes with the current float (2026-09-27)
+## Practical routes with the current float (2026-09-28)
 
-- IC side (2026-09-27, post-flagship): ICP 0.5058 + VCHF 0.0302 + ckETH dust. Tiny IC probes
-  still possible; anything CeFi- or Ethereum-sized needs a top-up (above the <=CHF 2 line).
-- Solana app rail (2026-09-27, post-flagship): EURC 21.121347 + USDC 0.829 + SOL 0.0017. Both
-  directions of EURC<->USDC are now live-proven through Jupiter at the smallest sensible size;
-  SOL-gas headroom is ~0.0017 (roughly 300 more swaps at 5000 lamports each).
+- IC side (2026-09-28): ICP 0.5058 + VCHF 0.0302 + ckETH dust — BELOW the ICP→ETH venue minimum
+  (1.0037228 ICP), so the direct in-app funding shift is blocked until a ≥0.6 ICP top-up.
+- Solana app rail (2026-09-28): EURC 21.121347 + USDC 0.829 + **SOL 0.001702955 — below the
+  ~0.002039 SOL venue-deposit ATA rent**, which blocks every CeFi deposit handoff from this rail
+  (see the dead-end log). EURC value is ample; the wall is SOL dust only.
+- EVM rail (2026-09-28): ETH 0 / ZCHF 0 on both chains (rows render live, balances poll through
+  the relay pipe). The D31 leg scripts are ready and waiting on the float unblock above.
 - Composed VCHF->EURC (flagship): LIVE-PROVEN 2026-09-27 after the founder credential deploy.
   Leg 1 two-tap 4.5 ICP -> 11.69465451 VCHF via icpswap (quote 11.69475451 verbatim, minus the
   0.0001 output fee); the CeFi completion ran through the direct sideshift-eurc surface
@@ -67,6 +90,31 @@ memory).
   reconcile CLEAN. Full evidence in funds/ledger.jsonl rows 156-164.
 
 ## Dead-end log (do not re-search before last-checked + 24h)
+
+- **2026-09-28 — the D31 leg-1 wall: the SOL rail cannot pay a venue-deposit ATA's rent.** Every
+  EURC→ICP deposit handoff needs an SPL transfer that CREATES the venue's fresh EURC ATA
+  (~2_039_280 lamports rent, paid by the sender; the app discloses the exact figure on the
+  review: "Creating it costs about 0.00204428 SOL"), and the rail holds 1_702_955 lamports —
+  ~0.00034 SOL short. On-chain verified for all four order deposit addresses (ATA not created);
+  the app refused every send PRE-broadcast (SOL measured unchanged end to end; four unfunded
+  orders expired harmlessly at the venue). Nothing to retry — this is float arithmetic. **Unblock
+  (either):** a founder drip of ≥0.0004 SOL to `BzFNJ…MkZgX` (then the proven EURC→ICP shift runs,
+  then ICP→ETH per flow-223), or ≥0.6 ICP to the float (then the DIRECT in-app ICP→ETH single
+  shift funds the rail — no SOL needed at all; venue min 1.0037228 ICP vs float 0.5058).
+  Finding filed alongside: the send sheet's confirm press is INERT when the ATA rent is
+  unaffordable — the review shows the cost but no terminal state or next action follows the press
+  (founder rule: useful practical instructions on every step, especially the error path).
+- **2026-09-28 — the EVM history poll 403s on publicnode ("Archive requests…").** The app's
+  eth_getLogs history walk (`EVM_LOG_PAGE_SIZE` blocks back) exceeds what publicnode serves free
+  (`{"code":-32602,"message":"Archive requests re…"}`), so the ZCHF·Eth history surface shows the
+  honest refusal while balances poll fine. Not money-blocking; needs either an archive-capable
+  upstream in DPAY_EVM_RPC_URL or a smaller log page on chain 1. Recorded as a finding, no code
+  change made in this docs-only session.
+- **2026-09-28 — shared-host incident: background relays are swept by concurrent sessions.** The
+  session's OpenCode background relay + xff proxy were killed mid-trip (another session's
+  orphan-process cleanup; one unfunded order expired as a result — zero value at risk, row 173).
+  Resolution for future live trips: run the relay + proxy DETACHED (`setsid nohup` + pidfiles in
+  `~/projects/dpay/tmp/`, e.g. `tmp/run-dpay-relay-live.sh`), never as session background tasks.
 
 - **2026-09-27 — the convert settle probe parks a LIVE record on `stuck` too early under prod
   latency (finding, filed in OPEN_ISSUES).** The flagship leg-1 ICPSwap swap settled on-chain

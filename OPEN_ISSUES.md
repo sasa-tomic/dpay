@@ -770,6 +770,33 @@ transaction detail, or if a backgrounded app issues anything at all.
   liquid venue — see the networks.md EVM section). The D30 mainnet READ probe ran
   same-day (spec addendum 1: minimal permit domain, no UIMultiplier, addresses verified);
   `scripts/evm-probe-zchf-mainnet.mjs` pins it as a standing opt-in tripwire.
+  **Attempt 2026-09-28 (D31, main-HEAD local relay + EVM upstream):** the rail/census plumbing is
+  all live (`evm-rail` + `evm-rail-b` registered, relay pipe chain-verified, EVM rows render in
+  the real app, in-app ICP→ETH quotes live with the settle address verified EIP-55-exact) but the
+  trip is BLOCKED at leg 1 on float dust — the SOL rail cannot pay a venue-deposit ATA's rent and
+  the IC float is below the ICP→ETH venue minimum (both walls + unblock asks in
+  `docs/live-testing/networks.md`, dead-end log 2026-09-28). Leg scripts are committed and
+  waiting: `scripts/evm-live-trip.mjs`, `scripts/evm-mainnet-zchf-buy.mjs`,
+  `scripts/evm-mainnet-claim-settle.mjs`. Zero value moved; reconcile clean.
+
+## D31 live-trip findings (2026-09-28 — value 6/S each, no code change made in the docs-only trip)
+
+- **The SOL send sheet's confirm press is INERT when the venue-deposit ATA rent is unaffordable**
+  (value 6, effort S). The review shows the exact cost honestly ("Creating it costs about
+  0.00204428 SOL, paid by you") but pressing Confirm produces no terminal state, no error, and no
+  next action — the driver waited 120s on any of `sol-send-outcome` / `-unknown-title` /
+  `-failed-title` with zero `money: sol send` tracer lines (the submit handler never ran).
+  Violates the founder hard rule "useful practical instructions on every step, especially error
+  path": the honest refusal exists (the send is correctly NOT broadcast) but the user is stranded
+  on the form. Repro: rail SOL < ~0.00204 with any fresh venue deposit address
+  (`e2e/shots/trip-sol-send-stall.png`). Fix shape: surface the affordability gate as a disabled
+  confirm WITH the reason + the exact top-up address/amount, or a terminal refusal panel.
+- **The EVM history poll exceeds publicnode's free tier** (value 5, effort S). The ZCHF·Eth
+  history walk (`eth_getLogs` back-window, `EVM_LOG_PAGE_SIZE`) 403s on
+  `ethereum-rpc.publicnode.com` with `"Archive requests …"` — balances poll fine, history renders
+  the honest refusal. Fix shape: an archive-capable default upstream for chain 1 (deploy config,
+  like the keyed Solana provider) and/or a chain-scoped log page size. Seen live 2026-09-28
+  through the relay pipe.
 
 ## UX swarm 2026-09-08 — three independent reviewers, live build
 
