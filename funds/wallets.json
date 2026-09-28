@@ -45,6 +45,18 @@
       "purpose": "The app's OWN EVM rail — the address every in-app ZCHF action signs from on every EVM chain (derived from the IC float seed, so ONE backup recovers all three rails); balances measured BOTH chains (ETH gas + ZCHF, chain-qualified ledger labels ETH·Eth/ZCHF·Eth/ETH·Arb/ZCHF·Arb); all EVM-rail movements record under THIS id, never evm-float"
     },
     {
+      "id": "evm-rail-b",
+      "chain": "evm",
+      "address": "0xAa228406823f3816E04709DB4640009E6A0a2B56",
+      "status": "live-unfunded",
+      "census": "rail",
+      "custody": "scripts/agent-key.mjs (the IC float seed) + e2e/harness/evm/evm-core.mjs deriveSlip10Secp256k1Node at m/44'/60'/0'/0/1 (no key of its own)",
+      "secret": "secrets/agent-icp.sops.json + SLIP-10 m/44'/60'/0'/0/1",
+      "derived_from": {"wallet": "icp-float", "path": "m/44'/60'/0'/0/1", "code": "e2e/harness/evm/evm-core.mjs deriveSlip10Secp256k1Node (index 1 of the rail path; the same ladder scripts/evm-sepolia-roundtrip.mjs IDX1 uses)"},
+      "created": "2026-09-28",
+      "purpose": "The EVM-rail COUNTERPARTY (the 'B'/merchant side of the D31 mainnet round trip): receives the in-app ZCHF send leg and the offline-permit claim settlement; settles the claim itself (permit + transferFrom) from its own ETH gas. Movements record under THIS id with the same chain-qualified labels; never an ephemeral address (census rule)"
+    },
+    {
       "id": "evm-float",
       "chain": "evm",
       "address": "0x6B1C4D33832ba8B21Fa454C1F16E332D4c1183b9",
