@@ -18,7 +18,7 @@ jest.mock('../services/native', () => ({
     icpPrincipalFromPubkey: jest.fn(async () => 'principal-text'),
     icpApproveArg: jest.fn(async () => '4449444c0000'),
     icpDepositAndSwapArg: jest.fn(async () => '4449444c0001'),
-    icpSignUpdate: jest.fn(async (_secret: string, canister: string, method: string, argHex: string) => ({
+    icpSignUpdate: jest.fn(async (_secret: string, canister: string, method: string) => ({
       envelopeHex: `ee${method.length.toString(16)}${canister.slice(0, 2)}`,
       requestIdHex: `rr${canister.slice(0, 2)}`,
     })),
@@ -56,7 +56,7 @@ jest.mock('../convert/execute', () => ({
 }));
 
 import {DpayCore} from '../services/native';
-import {submitRawSolTx, getSolSignatureStatus, getSolBlockHeight} from '../solana';
+import {submitRawSolTx, getSolSignatureStatus} from '../solana';
 import {fetchConvertQuote, deriveConvertMath} from '../convert/quotes';
 import {saveConvertRecord} from '../convert/records';
 import {probeHopPayout} from '../convert/execute';
@@ -218,7 +218,7 @@ describe('phase 2 — the frozen plan signs, all-or-nothing', () => {
 
   test('a quote that echoes a DIFFERENT amount is a different trade: terminal failed_leg, no legs', async () => {
     const mockedQuote = jest.mocked(fetchConvertQuote);
-    mockedQuote.mockImplementation(async (_r, _from, _to, amount) => ({
+    mockedQuote.mockImplementation(async (_r, _from, _to, _amount) => ({
       venueId: 'icpswap',
       pool: 'pool-principal',
       tokenInLedger: _from,
