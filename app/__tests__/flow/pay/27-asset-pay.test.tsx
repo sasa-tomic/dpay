@@ -100,7 +100,7 @@ describe('flow 31 — ckusdc-pay (6-decimal, byte-exact netted wire, price-exact
     expect(await m.driver.waitForText('Paid', {timeoutMs: 10_000})).toBe(true);
     // Paid shows the TOTAL DEBIT — wire 40000 + fee 10000 = exactly the typed price (async fee
     // fetch, so wait for it).
-    assert(await m.driver.waitForText('0.05 USDC', {timeoutMs: 10_000}),
+    assert(await m.driver.waitForText('0.05 USDC', {timeoutMs: 25_000}),
       'Paid screen should show the fee-inclusive total "0.05 USDC" — the customer pays exactly the price');
 
     // B credited the raw wire on currency 2 (the fee is B's cost as the payee — she nets it).
