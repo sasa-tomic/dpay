@@ -496,7 +496,7 @@ export const payEn: PayMessages = {
 
   noCameraFound: 'No camera found on this device.',
   pointCamera: 'Point your camera at a payment code to pay',
-  cameraPrivacy: 'Only used to scan codes — never recorded or uploaded.',
+  cameraPrivacy: 'Only used to scan codes. Never recorded or uploaded.',
   allowCameraScan: 'Allow camera scan',
 };
 

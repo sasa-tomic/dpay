@@ -380,7 +380,7 @@ export const depositEn: DepositMessages = {
       {t: ', or withdraw it from an exchange that supports it.'},
     ],
     onlyAccepts: (symbol, network) =>
-      `This address receives ${symbol} sent on ${network} — anything else won't credit.`,
+      `This address receives ${symbol} sent on ${network}. Anything else won't credit.`,
     noMemo: 'No memo or reference needed.',
     feeLine: fee => `Network fee ${fee}`,
     receivedAmount: amount => `${amount} received`,

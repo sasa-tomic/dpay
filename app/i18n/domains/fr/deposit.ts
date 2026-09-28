@@ -58,7 +58,7 @@ export const depositFr: DepositMessages = {
       {t: ', ou retirez-en depuis une plateforme d’échange qui le prend en charge.'},
     ],
     onlyAccepts: (symbol, network) =>
-      `Cette adresse reçoit ${symbol} envoyé sur ${network} — rien d’autre ne sera crédité.`,
+      `Cette adresse reçoit ${symbol} envoyé sur ${network}. Rien d’autre ne sera crédité.`,
     noMemo: 'Aucun memo ni référence nécessaire.',
     feeLine: fee => `Frais de réseau ${fee}`,
     receivedAmount: amount => `${amount} reçus`,

@@ -198,7 +198,7 @@ export const payDe: PayMessages = {
 
   noCameraFound: 'Auf diesem Gerät wurde keine Kamera gefunden.',
   pointCamera: 'Richte deine Kamera auf einen Zahlungscode, um zu bezahlen',
-  cameraPrivacy: 'Nur zum Scannen von Codes — nichts wird aufgezeichnet oder hochgeladen.',
+  cameraPrivacy: 'Nur zum Scannen von Codes. Nichts wird aufgezeichnet oder hochgeladen.',
   allowCameraScan: 'Kamera erlauben',
 };
 

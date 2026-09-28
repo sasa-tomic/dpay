@@ -56,7 +56,7 @@ export const depositDe: DepositMessages = {
       {t: ' hält, oder zahle es von einer Börse aus, die das Netzwerk unterstützt.'},
     ],
     onlyAccepts: (symbol, network) =>
-      `Diese Adresse empfängt ${symbol}, das über ${network} gesendet wird — alles andere wird nicht gutgeschrieben.`,
+      `Diese Adresse empfängt ${symbol}, das über ${network} gesendet wird. Alles andere wird nicht gutgeschrieben.`,
     noMemo: 'Kein Memo und keine Referenz nötig.',
     feeLine: fee => `Netzwerkgebühr ${fee}`,
     receivedAmount: amount => `${amount} empfangen`,

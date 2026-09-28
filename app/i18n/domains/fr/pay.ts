@@ -199,7 +199,7 @@ export const payFr: PayMessages = {
 
   noCameraFound: 'Aucune caméra détectée sur cet appareil.',
   pointCamera: 'Visez un code de paiement avec votre caméra',
-  cameraPrivacy: 'Utilisée uniquement pour scanner des codes — jamais enregistrée ni envoyée.',
+  cameraPrivacy: 'Utilisée uniquement pour scanner des codes. Jamais enregistrée ni envoyée.',
   allowCameraScan: 'Autoriser la caméra',
 };
 
