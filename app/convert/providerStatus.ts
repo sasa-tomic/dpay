@@ -210,6 +210,12 @@ export async function advanceProviderRecord(
   /** The session's relay URL — the fetchProviderStatus http-exception's origin anchor
    *  (the Trocador family's status read rides the relay's key-gated proxy). */
   relayUrl?: string,
+  /** The CHAIN widening (2026-09-28): the completion hook. When the venue names the
+   *  settle on a record the caller owns the next phase of, the hook returns the record to
+   *  persist INSTEAD of the default done-block — the chain's phase 2 signs the IC legs
+   *  here, so the record NEVER lands at `done` carrying the settle asset's units in the
+   *  dest asset's fields. A thrown hook is the caller's failure: it propagates. */
+  onCompleted?: (record: ConvertRecord, settled: {amount?: string; tx?: string}) => Promise<ConvertRecord>,
 ): Promise<ConvertRecord> {
   const ref = record.providerRef;
   if (ref == null) return record; // hydrate guarantees this cannot happen; the guard is for honesty
@@ -235,6 +241,9 @@ export async function advanceProviderRecord(
       // The FIRST observed terminal word lands the record from any held state (see the
       // matrix note): a settled trade is never polled again (agreement term 4).
       if (inAwaiting || inExpired || from === 'provider_processing') {
+        if (onCompleted != null) {
+          return apply(await onCompleted(record, {amount: reading.amount, tx: reading.tx}));
+        }
         // The cefi widening (2026-09-15): SideShift speaks DECIMAL strings in the out
         // asset's own units ("settleAmount": "0.0495…"), while outAmountNet is raw units
         // like every other record money field. Normalize exactly at this boundary and

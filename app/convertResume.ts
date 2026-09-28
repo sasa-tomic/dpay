@@ -46,6 +46,7 @@ import {
   executeCrossRailConvert,
   executeCrossRailSolSwap,
   executeSolanaConvert,
+  isChainConvertRecord,
   isComposedConvertRecord,
   isTerminalConvertStep,
   loadConvertRecords,
@@ -60,6 +61,11 @@ import {
 } from './convert';
 import {advanceProviderRecord as advanceProviderRecordPersisted} from './convert/providerStatus';
 import {
+  beginChainPhase2,
+  driveChainDeposit,
+  resolveChainTerminal,
+} from './convert/executeChain';
+import {
   clearAllProviderRateLimits,
   clearProviderRateLimit,
   isTrocadorProviderRecord,
@@ -70,13 +76,16 @@ export {fetchProviderStatus} from './convert/providerStatus';
 
 /** The provider driver (the implementation lives in ./convert/providerStatus): the public
  *  signature is unchanged, and persistence stays the engine's own scoped save — the LIVE
- *  engine ctx's store (saveConvertRecordFor), exactly as when the body lived here. */
+ *  engine ctx's store (saveConvertRecordFor), exactly as when the body lived here. The
+ *  CHAIN widening (2026-09-28): the completion hook rides through (the chain's phase 2
+ *  signs on the venue's own completion, never at a falsified done). */
 export async function advanceProviderRecord(
   record: ConvertRecord,
   stillMine: () => boolean = () => true,
   relayUrl?: string,
+  onCompleted?: (record: ConvertRecord, settled: {amount?: string; tx?: string}) => Promise<ConvertRecord>,
 ): Promise<ConvertRecord> {
-  return advanceProviderRecordPersisted(record, saveConvertRecordFor, stillMine, relayUrl);
+  return advanceProviderRecordPersisted(record, saveConvertRecordFor, stillMine, relayUrl, onCompleted);
 }
 
 /** Per-record epoch ms of the engine's LAST completed provider status read — the
@@ -277,7 +286,61 @@ async function driveOne(id: string): Promise<void> {
   try {
     let next = rec;
     if (!isTerminalConvertStep(rec.step)) {
-      if (rec.crossRail != null) {
+      if (isChainConvertRecord(rec) && rec.legs.length === 0) {
+        // The CHAIN driver, PHASE 1 (2026-09-28): the cefi order exists, the Solana deposit
+        // bytes are frozen — submit + watch them, then hand the wait to the venue poll.
+        // The poll's COMPLETED reading is phase 2's trigger: the hook freezes the settle
+        // evidence onto the chain block and signs the IC legs from the frozen plan (the
+        // hook's apply persists the returned record — a phase-2 failure lands terminal).
+        const chainDeps = {
+          secretHex: ctx.secretHex,
+          publicHex: ctx.publicHex,
+          relayUrl: ctx.relayUrl,
+          onUpdate: (r: ConvertRecord) => {
+            if (!mine()) return;
+            fireOnTerminalIfEnteredListed(state.records.get(r.id)?.step, r);
+            state.records.set(r.id, r);
+            notify();
+          },
+        };
+        if (rec.step === 'awaiting_deposit' || rec.step === 'provider_processing') {
+          next = await advanceProviderRecord(rec, mine, ctx.relayUrl, async (r, settled) => {
+            const cr = r.chainRoute;
+            if (cr == null) return r;
+            const withSettle: ConvertRecord = {
+              ...r,
+              step: 'provider_processing',
+              chainRoute: {
+                ...cr,
+                ...(settled.tx != null ? {settleTx: settled.tx} : {}),
+                ...(settled.amount != null && cr.settleAmountDecimal == null ? {settleAmountDecimal: settled.amount} : {}),
+              },
+            };
+            return beginChainPhase2(withSettle, chainDeps);
+          });
+          if (!mine()) return; // stale drive — no post-run write, no re-arm
+          PROVIDER_LAST_CHECKED_MS.set(id, Date.now()); // one read completed — the panel's "last checked"
+          if (next !== rec) {
+            const before = state.records.get(id)?.step;
+            state.records.set(id, next);
+            fireOnTerminalIfEnteredListed(before, next);
+            notify();
+          }
+        } else if (rec.step === 'swapping' || rec.step === 'settling' || rec.step === 'stuck') {
+          next = await driveChainDeposit(rec, chainDeps);
+          if (!mine()) return; // stale drive — no post-run write, no re-arm
+          if (next !== rec) {
+            const before = state.records.get(id)?.step;
+            state.records.set(id, next);
+            fireOnTerminalIfEnteredListed(before, next);
+            notify();
+          }
+        }
+        // quote_expired (the venue's dead window) and provider_refunded are terminal: the
+        // outer arms own them (the late-deposit watch below covers a chain's expired
+        // order). A phase-2 record (legs signed) falls through to the generic IC-legs
+        // arm, whose post-run hook below resolves the 1-leg terminal.
+      } else if (rec.crossRail != null) {
         // Cross-rail dispatch (convert.ts, Routes B/C 2026-09-16) — keyed on the phase:
         //  - `crossing`: Circle's mint watch + the ATA credit verification (the record moves
         //    itself to done/sol_ready when Circle completes; a stall parks pending, NEVER
@@ -411,6 +474,24 @@ async function driveOne(id: string): Promise<void> {
         state.records.set(id, next);
         fireOnTerminalIfEnteredListed(before, next);
         notify();
+        // The CHAIN 1-leg terminal (2026-09-28): the planned executor's hub rule only
+        // resolves a SECOND swap's payout row; a chain's single-swap plan parks
+        // all-confirmed. Probe the swap's own payout row here and land done on the SEEN
+        // amount — or leave the record for the next re-arm.
+        if (isChainConvertRecord(next)) {
+          const resolved = await resolveChainTerminal(next, {
+            secretHex: ctx.secretHex,
+            publicHex: ctx.publicHex,
+            relayUrl: ctx.relayUrl,
+            onUpdate: () => {},
+          });
+          if (resolved != null && resolved !== next && mine()) {
+            await saveConvertRecordFor(resolved);
+            state.records.set(id, resolved);
+            fireOnTerminalIfEnteredListed(before, resolved);
+            notify();
+          }
+        }
       } else if (rec.solanaLeg != null) {
         // Solana driver (convert.ts, Jupiter 2026-09-15): the signed tx bytes are frozen in the
         // record — the drive submits identical bytes or reads the chain's own verdict, nothing
@@ -447,7 +528,7 @@ async function driveOne(id: string): Promise<void> {
     } else if (
       rec.step === 'quote_expired'
       && rec.providerRef != null
-      && ((rec.legs.length === 0 && rec.solanaLeg == null) || isComposedConvertRecord(rec))
+      && ((rec.legs.length === 0 && rec.solanaLeg == null) || isComposedConvertRecord(rec) || isChainConvertRecord(rec))
     ) {
       // The LATE-DEPOSIT watch (2026-09-24): `expired` from awaiting_deposit is the VENUE
       // giving up on its quote window, but a deposit that lands late is still refunded (or

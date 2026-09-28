@@ -53,6 +53,7 @@ import {
   gasFundNeededWei,
   isQuoteStale,
   prepareCeFiConvertRecord,
+  prepareChainConvertRecord,
   prepareComposedConvertRecord,
   prepareConvertRecord,
   prepareHubConvertRecord,
@@ -83,7 +84,9 @@ import {IconChevronDown} from './icons';
 import {
   ConvertHeader,
   DetailsToggle,
+  chainFinalNet,
   composedFloorRaw,
+  fetchChainQuotes,
   fetchComposedQuotes,
   fetchHubQuotes,
   formatBps,
@@ -91,6 +94,7 @@ import {
   nonBreakingClock,
   scaledRate,
   venueDisclosure,
+  type ChainBundle,
   type ComposedBundle,
 } from './ConvertShared';
 
@@ -134,6 +138,7 @@ function rowNetValue(
   jupQuotes: Record<string, JupiterQuote>,
   hubBundles: Record<string, HubBundle>,
   composedBundles: Record<string, ComposedBundle>,
+  chainBundles: Record<string, ChainBundle>,
 ): string | null {
   if (r.kind === 'direct') {
     const q = rowQuotes[r.rowId];
@@ -159,6 +164,10 @@ function rowNetValue(
     const b = composedBundles[r.rowId];
     return b != null ? rawToDecimal(b.cefi.amountOutGross, r.route.settleDecimals) : null;
   }
+  if (r.kind === 'chain') {
+    const b = chainBundles[r.rowId];
+    return b != null ? rawToDecimal(chainFinalNet(b), r.route.endpoints[r.route.legs.length]!.decimals) : null;
+  }
   return null;
 }
 
@@ -173,6 +182,7 @@ function computeAutoPick(
   jupQuotes: Record<string, JupiterQuote>,
   hubBundles: Record<string, HubBundle>,
   composedBundles: Record<string, ComposedBundle>,
+  chainBundles: Record<string, ChainBundle>,
 ): AutoPick {
   const cmp = (a: string, b: string) => Number(a) - Number(b);
   type Quoted = {rowId: string; v: string};
@@ -180,7 +190,7 @@ function computeAutoPick(
   if (venueRows.length > 0) {
     const quoted: Quoted[] = [];
     for (const r of venueRows) {
-      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles);
+      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles);
       if (v != null) quoted.push({rowId: r.rowId, v});
     }
     if (quoted.length === 0) return null;
@@ -194,7 +204,7 @@ function computeAutoPick(
   if (hubRows.length > 0) {
     const quoted: Quoted[] = [];
     for (const r of hubRows) {
-      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles);
+      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles);
       if (v != null) quoted.push({rowId: r.rowId, v});
     }
     if (quoted.length === 0) return null;
@@ -208,7 +218,22 @@ function computeAutoPick(
   if (composedRows.length > 0) {
     const quoted: Quoted[] = [];
     for (const r of composedRows) {
-      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles);
+      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles);
+      if (v != null) quoted.push({rowId: r.rowId, v});
+    }
+    if (quoted.length === 0) return null;
+    let best = quoted[0];
+    for (const x of quoted.slice(1)) if (cmp(x.v, best.v) > 0) best = x;
+    return {rowId: best.rowId, compared: quoted.length};
+  }
+  // The CHAIN pass (2026-09-28): the same class rule — chain rows (a SOL source's route to
+  // an IC target) rank among themselves only when nothing above them exists, registry-order
+  // tie-break. A crossrail route still never wins while any device-signable path exists.
+  const chainRows = rows.filter(r => r.kind === 'chain');
+  if (chainRows.length > 0) {
+    const quoted: Quoted[] = [];
+    for (const r of chainRows) {
+      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles);
       if (v != null) quoted.push({rowId: r.rowId, v});
     }
     if (quoted.length === 0) return null;
@@ -233,6 +258,7 @@ function provisionalRowId(rows: SwapRow[]): string | null {
     ?? first(r => r.kind === 'cefi')
     ?? first(r => r.kind === 'hub')
     ?? first(r => r.kind === 'composed')
+    ?? first(r => r.kind === 'chain')
     ?? first(r => r.kind === 'crossrail');
 }
 
@@ -264,6 +290,9 @@ function heroFigure(raw: string, decimals: number, unit: string, displayDecimals
 function kindOverhead(kind: SwapRow['kind'], hubFee: string | null, inFee: string): bigint {
   switch (kind) {
     case 'solamm': return 0n;
+    // The chain's source side is a Solana transfer (its fee is SOL's own, separate) — no
+    // IC fee rides the source balance; the IC fees come out of the venue's payout.
+    case 'chain': return 0n;
     case 'cefi': return BigInt(inFee);
     case 'hub':
     case 'composed': return 2n * BigInt(inFee) + BigInt(hubFee ?? '0'); // D21: three fees total
@@ -349,6 +378,8 @@ export function ConvertIntentSheet({
   const hubBundleAmts = useRef<Record<string, string>>({});
   const [composedBundles, setComposedBundles] = useState<Record<string, ComposedBundle>>({});
   const composedBundleAmts = useRef<Record<string, string>>({});
+  const [chainBundles, setChainBundles] = useState<Record<string, ChainBundle>>({});
+  const chainBundleAmts = useRef<Record<string, string>>({});
   // The venue's own listed-but-unquoted verdict (CeFi no-quote): a STATE, not an error.
   const [noQuoteRow, setNoQuoteRow] = useState<{rowId: string; venueName: string} | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
@@ -370,8 +401,8 @@ export function ConvertIntentSheet({
 
   // ── The picks: provisional (fetch demand) → mechanical auto pick → explicit override ─────
   const autoPick = useMemo(
-    () => computeAutoPick(rows, rowQuotes, jupQuotes, hubBundles, composedBundles),
-    [rows, rowQuotes, jupQuotes, hubBundles, composedBundles],
+    () => computeAutoPick(rows, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles),
+    [rows, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles],
   );
   const provId = useMemo(() => provisionalRowId(rows), [rows]);
   const activeRowId: string | null = selRowId ?? autoPick?.rowId ?? provId;
@@ -383,10 +414,12 @@ export function ConvertIntentSheet({
   const cefiRow = activeRow != null && activeRow.kind === 'cefi' ? activeRow : null;
   const ammRow = activeRow != null && activeRow.kind === 'solamm' ? activeRow : null;
   const composedRow = activeRow != null && activeRow.kind === 'composed' ? activeRow : null;
+  const chainRow = activeRow != null && activeRow.kind === 'chain' ? activeRow : null;
   const hubMode = hubRow != null;
   const routeMode = crossRow != null;
   const cefiMode = cefiRow != null;
   const ammMode = ammRow != null;
+  const chainMode = chainRow != null;
   const outSym: string =
     directRow != null ? directRow.outDesc.backing_symbol ?? directRow.outDesc.symbol ?? ''
     : hubRow != null ? hubRow.route.dest.symbol
@@ -394,6 +427,7 @@ export function ConvertIntentSheet({
     : cefiRow != null ? cefiRow.outSym
     : ammRow != null ? ammRow.outSym
     : composedRow != null ? composedRow.route.settleSymbol
+    : chainRow != null ? chainRow.route.endpoints[chainRow.route.legs.length]!.symbol
     : inSym;
   const outDecimals: number =
     directRow != null ? directRow.outDesc.decimals ?? inDecimals
@@ -402,6 +436,7 @@ export function ConvertIntentSheet({
     : cefiRow != null ? cefiRow.outDecimals
     : ammRow != null ? ammRow.outDecimals
     : composedRow != null ? composedRow.route.settleDecimals
+    : chainRow != null ? chainRow.route.endpoints[chainRow.route.legs.length]!.decimals
     : inDecimals;
 
   // The rows that are NOT the standing pick — the Other-venues expander's contents, verbatim
@@ -415,6 +450,7 @@ export function ConvertIntentSheet({
   const activeCefiQuote: ConvertQuote | null = cefiRow != null ? rowQuotes[cefiRow.rowId] ?? null : null;
   const activeHub: HubBundle | null = hubRow != null ? hubBundles[hubRow.rowId] ?? null : null;
   const activeComposed: ComposedBundle | null = composedRow != null ? composedBundles[composedRow.rowId] ?? null : null;
+  const activeChain: ChainBundle | null = chainRow != null ? chainBundles[chainRow.rowId] ?? null : null;
   const activeRowErr: string | null = activeRow != null ? rowQuoteErrs[activeRow.rowId] ?? null : null;
 
   // ── Quote fetch (per-kind discipline inherited verbatim) ─────────────────────────────────
@@ -435,6 +471,8 @@ export function ConvertIntentSheet({
       hubBundleAmts.current = {};
       setComposedBundles({});
       composedBundleAmts.current = {};
+      setChainBundles({});
+      chainBundleAmts.current = {};
       setNoQuoteRow(null);
       setQuoteErr(null);
       setQuoteBusy(false);
@@ -447,6 +485,7 @@ export function ConvertIntentSheet({
       if (r.kind === 'solamm') return jupQuoteAmts.current[r.rowId] !== parsed.raw;
       if (r.kind === 'hub') return hubBundleAmts.current[r.rowId] !== parsed.raw;
       if (r.kind === 'composed') return composedBundleAmts.current[r.rowId] !== parsed.raw;
+      if (r.kind === 'chain') return chainBundleAmts.current[r.rowId] !== parsed.raw;
       return rowQuoteAmts.current[r.rowId] !== parsed.raw; // cefi (effective pick only)
     };
     const plan = [...live, ...pickedWait].filter(needs);
@@ -464,6 +503,8 @@ export function ConvertIntentSheet({
       const hubAmts: Record<string, string> = {};
       const comps: Record<string, ComposedBundle> = {};
       const compAmts: Record<string, string> = {};
+      const chains: Record<string, ChainBundle> = {};
+      const chainAmts: Record<string, string> = {};
       const noQuoteRef: {v: {rowId: string; venueName: string} | null} = {v: null};
       await Promise.allSettled(plan.map(async (r) => {
         try {
@@ -488,6 +529,9 @@ export function ConvertIntentSheet({
           } else if (r.kind === 'composed') {
             comps[r.rowId] = await fetchComposedQuotes(relayUrl, r.route, parsed.raw, inFee, slippageBps);
             compAmts[r.rowId] = parsed.raw;
+          } else if (r.kind === 'chain') {
+            chains[r.rowId] = await fetchChainQuotes(relayUrl, r.route, parsed.raw, slippageBps);
+            chainAmts[r.rowId] = parsed.raw;
           } else {
             quotes[r.rowId] = await fetchCeFiConvertQuote(relayUrl, r.venue, r.inLedgerOrMint, r.outLedger ?? r.outMint ?? r.outRailId ?? '', parsed.raw, {inDecimals, outDecimals: r.outDecimals});
             amts[r.rowId] = parsed.raw;
@@ -508,6 +552,8 @@ export function ConvertIntentSheet({
       hubBundleAmts.current = {...hubBundleAmts.current, ...hubAmts};
       setComposedBundles(prev => ({...prev, ...comps}));
       composedBundleAmts.current = {...composedBundleAmts.current, ...compAmts};
+      setChainBundles(prev => ({...prev, ...chains}));
+      chainBundleAmts.current = {...chainBundleAmts.current, ...chainAmts};
       setNoQuoteRow(noQuoteRef.v);
       setQuoteBusy(false);
     })();
@@ -529,7 +575,7 @@ export function ConvertIntentSheet({
     const id = setInterval(() => {
       if (!mountedRef.current || staleRefreshing) return;
       const candidates = rows.filter(r => r.kind === 'direct' || r.kind === 'solamm' || r.rowId === activeRowId)
-        .filter(r => r.kind !== 'cefi' && r.kind !== 'composed');
+        .filter(r => r.kind !== 'cefi' && r.kind !== 'composed' && r.kind !== 'chain');
       const staleIc = candidates.filter((r): r is Extract<SwapRow, {kind: 'direct'} | {kind: 'crossrail'}> => {
         const q = rowQuotes[r.rowId];
         return (r.kind === 'direct' || r.kind === 'crossrail') && q != null && isQuoteStale(q);
@@ -720,10 +766,11 @@ export function ConvertIntentSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [crossRow?.rowId, crossFee?.floor, relayUrl]);
 
-  // ── The CeFi handoff addresses: BOTH rails' derivations, one copy. ───────────────────────
+  // ── The CeFi handoff addresses: BOTH rails' derivations, one copy. The CHAIN settle is
+  // the user's own IC account too (the venue pays the mid asset there — phase 2's input).
   const [cefiIcAccountId, setCefiIcAccountId] = useState<string | null>(null);
   useEffect(() => {
-    if (!cefiMode) {
+    if (!cefiMode && !chainMode) {
       setCefiIcAccountId(null);
       return;
     }
@@ -740,7 +787,7 @@ export function ConvertIntentSheet({
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cefiMode, cefiRow?.rowId, identity.publicHex]);
+  }, [cefiMode, chainMode, cefiRow?.rowId, chainRow?.rowId, identity.publicHex]);
   const cefiSolAddress = useMemo(
     () => (cefiMode ? deriveSolanaAddress(identity.secretHex) : null),
     [cefiMode, identity.secretHex],
@@ -882,7 +929,10 @@ export function ConvertIntentSheet({
   const ammReady = activeJup != null;
   const directReady = directRow != null && activeIcQuote != null && math != null;
   const composedReady = activeComposed != null;
-  const pickedReady = directReady || hubReady || crossReady || cefiReady || ammReady || composedReady;
+  // The chain's one extra gate: the venue pays the mid asset to the user's own IC account
+  // — its derivation must have landed before the order is created (never typed).
+  const chainReady = activeChain != null && cefiIcAccountId != null;
+  const pickedReady = directReady || hubReady || crossReady || cefiReady || ammReady || composedReady || chainReady;
   const canConfirm = activeRow != null && pickedReady && !quoteBusy && !confirmBusy && !insufficient && amountN > 0n;
 
   // ── THE CONFIRM — one gesture on the effective row. Re-quotes fresh at the gesture; a
@@ -1049,6 +1099,31 @@ export function ConvertIntentSheet({
         onPrepared(rec); // adopted in the SAME gesture; the tracker narrates the venue facts live
         return;
       }
+      if (activeRow.kind === 'chain') {
+        const b = chainBundles[activeRow.rowId];
+        if (b == null || cefiIcAccountId == null) return;
+        // THE ONE CONSENT for the whole chain (the any-pair mandate). The gesture runs the
+        // order-first prepare: the venue order is created (its locked deposit + settle
+        // figures are facts before anything signs), the Solana deposit transfer is signed
+        // and FROZEN, and the record adopts into the engine — which submits the deposit
+        // and, when the venue names the settle, signs the IC legs from the record's own
+        // frozen plan on a fresh quote. No intermediate stop, no second press. Like the
+        // plain cefi kind, the ORDER is the lock: no moved-quote gate can ever match a
+        // ticking venue rate (the review's plan figures are the disclosure, not the lock).
+        const rec = await prepareChainConvertRecord({
+          id: randNonceHex(),
+          secretHex: identity.secretHex,
+          publicHex: identity.publicHex,
+          relayUrl,
+          route: activeRow.route,
+          amountRaw: amountRaw,
+          slippageBps,
+          settleAddressIc: cefiIcAccountId,
+        });
+        if (!mountedRef.current) return;
+        onPrepared(rec); // adopted in the SAME gesture; the tracker narrates both phases live
+        return;
+      }
       // activeRow.kind === 'solamm' — the Solana venue (Jupiter).
       const q = jupQuotes[activeRow.rowId];
       if (q == null) return;
@@ -1098,6 +1173,7 @@ export function ConvertIntentSheet({
     : cefiRow != null && activeCefiQuote != null ? activeCefiQuote.amountOutGross
     : ammRow != null && activeJup != null ? activeJup.outAmount
     : composedRow != null && activeComposed != null ? activeComposed.cefi.amountOutGross
+    : chainRow != null && activeChain != null ? chainFinalNet(activeChain)
     : null;
   const outDescriptor: CurrencyDescriptor | null =
     directRow != null ? directRow.outDesc
@@ -1112,6 +1188,7 @@ export function ConvertIntentSheet({
   const outCurrency: HomeCurrency | null =
     outDescriptor != null ? currencyOfCatalogRow(outDescriptor)
     : composedRow != null ? currencyOfLinkToken(composedRow.route.settleSymbol)
+    : chainRow != null ? targetCode
     : (cefiRow != null || ammRow != null) ? currencyOfLinkToken(outSym)
     : null;
   const heroDd = heroDisplayDecimals({currency: outCurrency, registryDisplay: outDescriptor?.display_decimals ?? null, decimals: heroUnit.decimals});
@@ -1139,6 +1216,13 @@ export function ConvertIntentSheet({
     if (composedRow != null && activeComposed != null) {
       return venueAmt(composedRow.route.cefiVenueId, activeComposed.cefi.amountOutGross, composedRow.route.settleDecimals, composedRow.route.settleSymbol);
     }
+    if (chainRow != null && activeChain != null) {
+      // The chain's LAST venue quote is the figure the receive hero is floored by — the
+      // settle leg's venue number sits on its own census line below.
+      const lastLeg = chainRow.route.legs[chainRow.route.legs.length - 1]!;
+      const lastQ = activeChain.m2 != null ? activeChain.q2! : activeChain.q1;
+      return venueAmt(lastLeg.venueId, lastQ.amountOutGross, chainRow.route.endpoints[chainRow.route.legs.length]!.decimals, chainRow.route.endpoints[chainRow.route.legs.length]!.symbol);
+    }
     return null;
   })();
   // The min-out line's amount + the atLeast copy's pair, per kind. A composed row's floor is
@@ -1151,7 +1235,9 @@ export function ConvertIntentSheet({
     : ammRow != null && activeJup != null ? fmtAssetCompact(activeJup.otherAmountThreshold, outDecimals, outSym)
     : composedRow != null && activeComposed != null
       ? fmtAssetCompact(composedFloorRaw(activeComposed), composedRow.route.endpoints[composedRow.route.legs.length]!.decimals, composedRow.route.endpoints[composedRow.route.legs.length]!.symbol)
-      : null;
+    : chainRow != null && activeChain != null
+      ? fmtAssetCompact(activeChain.m2?.minOut ?? activeChain.m1.minOut, outDecimals, outSym)
+    : null;
   // Attribution: the quote's own venue once one arrives; before that the effective row's.
   const counterVenueId: string | null =
     activeIcQuote?.venueId
@@ -1159,7 +1245,8 @@ export function ConvertIntentSheet({
     ?? (crossRow != null ? crossRow.route.swapVenueId : null)
     ?? (cefiRow != null ? cefiRow.venue.venue_id : null)
     ?? (ammRow != null ? ammRow.venue.venue_id : null)
-    ?? (composedRow != null ? composedRow.route.cefiVenueId : null); // the receive figure's venue
+    ?? (composedRow != null ? composedRow.route.cefiVenueId : null) // the receive figure's venue
+    ?? (chainRow != null ? chainRow.route.legs[chainRow.route.legs.length - 1]!.venueId : null);
   // The auto-pick disclosure's venue: the effective pick's own attribution.
   const pickVenueName: string | null = (() => {
     if (autoPick == null) return null;
@@ -1168,6 +1255,7 @@ export function ConvertIntentSheet({
     if (r.kind === 'hub') return venueDisplayName(r.route.legs[0].venueId);
     if (r.kind === 'crossrail') return venueDisplayName(r.route.swapVenueId);
     if (r.kind === 'composed') return venueDisplayName(r.route.cefiVenueId);
+    if (r.kind === 'chain') return venueDisplayName(r.route.cefiVenueId); // the order's venue
     return venueDisplayName(r.venue.venue_id);
   })();
 
@@ -1362,6 +1450,30 @@ export function ConvertIntentSheet({
                   minOutStr ?? '',
                 )}
               </Text>
+            </View>
+          ) : null}
+          {/* The chain names BOTH its executors, leg by leg: the cefi venue that holds the
+              order, then the registered pool(s) that finish the route (the any-pair
+              mandate's one review — every venue's own quote sits in Details). */}
+          {chainRow != null && activeChain != null ? (
+            <View testID="convert-route-via">
+              <Text style={S.reviewMeta}>
+                {M.convert.multihop.legSwap(
+                  venueDisplayName(chainRow.route.cefiVenueId),
+                  inSym,
+                  chainRow.route.endpoints[0]!.symbol,
+                )}
+              </Text>
+              {chainRow.route.legs.map((leg, i) => (
+                <Text key={leg.venueId + String(i)} style={S.reviewMeta}>
+                  {M.convert.multihop.legSwap(
+                    venueDisplayName(leg.venueId),
+                    chainRow.route.endpoints[i]!.symbol,
+                    chainRow.route.endpoints[i + 1]!.symbol,
+                  )}
+                </Text>
+              ))}
+              <Text style={S.reviewMeta}>{M.convert.chain.phase2Note}</Text>
             </View>
           ) : null}
           {staleRefreshing ? (
@@ -1668,7 +1780,8 @@ export function ConvertIntentSheet({
             </View>
           ) : null}
 
-          {/* The CeFi payout target: not an input — the user's OWN derived address. */}
+          {/* The CeFi payout target: not an input — the user's OWN derived address. For a
+              chain it is the MID asset's landing spot (phase 2's input ledger). */}
           {cefiMode && cefiSettleAddress != null ? (
             <View>
               {/* The EVM-native settle rail names itself: "native ETH on Ethereum mainnet"
@@ -1682,6 +1795,12 @@ export function ConvertIntentSheet({
               ) : null}
               <Text style={S.convertAmountLabel}>{M.convert.cefi.settleAddressLabel}</Text>
               <Text testID="convert-settle-address" style={S.convertMetaLine} selectable>{cefiSettleAddress}</Text>
+            </View>
+          ) : null}
+          {chainMode && cefiIcAccountId != null ? (
+            <View>
+              <Text style={S.convertAmountLabel}>{M.convert.cefi.settleAddressLabel}</Text>
+              <Text testID="convert-settle-address" style={S.convertMetaLine} selectable>{cefiIcAccountId}</Text>
             </View>
           ) : null}
         </View>
@@ -1707,22 +1826,26 @@ export function ConvertIntentSheet({
                   const jq = r.kind === 'solamm' ? jupQuotes[r.rowId] ?? null : null;
                   const rq = r.kind === 'cefi' ? rowQuotes[r.rowId] ?? null : null;
                   const cb = r.kind === 'composed' ? composedBundles[r.rowId] ?? null : null;
+                  const chb = r.kind === 'chain' ? chainBundles[r.rowId] ?? null : null;
                   const err = rowQuoteErrs[r.rowId] ?? null;
                   const rOutSym = r.kind === 'direct' ? r.outDesc.backing_symbol ?? r.outDesc.symbol ?? ''
                     : r.kind === 'hub' ? r.route.dest.symbol
                     : r.kind === 'crossrail' ? (r.route.crossRail?.sol != null ? r.route.crossRail.sol.outSymbol : r.route.dest.symbol)
                     : r.kind === 'composed' ? r.route.settleSymbol
+                    : r.kind === 'chain' ? r.route.endpoints[r.route.legs.length]!.symbol
                     : r.kind === 'cefi' ? r.outSym : r.outSym;
                   const rOutDec = r.kind === 'direct' ? r.outDesc.decimals ?? 8
                     : r.kind === 'hub' ? r.route.dest.decimals
                     : r.kind === 'crossrail' ? (r.route.crossRail?.sol != null ? r.route.crossRail.sol.outDecimals : r.route.hop.decimals)
                     : r.kind === 'composed' ? r.route.settleDecimals
+                    : r.kind === 'chain' ? r.route.endpoints[r.route.legs.length]!.decimals
                     : r.kind === 'cefi' ? r.outDecimals : r.outDecimals;
                   const label =
                     r.kind === 'direct' ? r.venue.display_name
                     : r.kind === 'hub' ? M.convert.multihop.mechViaHub(r.route.hub.symbol)
                     : r.kind === 'crossrail' ? M.convert.multihop.mechViaCctp
                     : r.kind === 'composed' ? M.convert.multihop.mechViaVenue(venueDisplayName(r.route.cefiVenueId))
+                    : r.kind === 'chain' ? M.convert.multihop.mechViaVenue(venueDisplayName(r.route.cefiVenueId))
                     : M.convert.multihop.mechViaVenue(r.venue.display_name);
                   return (
                     <Pressable
@@ -1761,12 +1884,18 @@ export function ConvertIntentSheet({
                           <Text testID={`convert-venue-${r.rowId}-quote`} style={S.convertVenueAmount}>
                             {fmtAssetCompact(cb.cefi.amountOutGross, rOutDec, rOutSym)}
                           </Text>
+                        ) : chb != null ? (
+                          <Text testID={`convert-venue-${r.rowId}-quote`} style={S.convertVenueAmount}>
+                            {fmtAssetCompact(chainFinalNet(chb), rOutDec, rOutSym)}
+                          </Text>
                         ) : err != null ? (
                           <Text testID={`convert-venue-${r.rowId}-err`} style={S.err}>{err}</Text>
                         ) : r.kind === 'hub' ? (
                           <Text style={S.convertMetaLine}>{M.convert.multihop.hubShape()}</Text>
                         ) : r.kind === 'composed' ? (
                           <Text style={S.convertMetaLine}>{M.convert.multihop.mechViaHub(r.route.endpoints[1]!.symbol)}</Text>
+                        ) : r.kind === 'chain' ? (
+                          <Text style={S.convertMetaLine}>{M.convert.chain.rowShape(r.route.endpoints[0]!.symbol)}</Text>
                         ) : r.kind === 'cefi' && r.outRailId != null ? (
                           // An EVM-native settle row names its payout rail while it sits
                           // unpicked (it quotes only once picked — a spinner here would
@@ -1953,6 +2082,11 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
   const legExpiryMs = record.legs[0]?.expiresAtMs ?? record.createdAtMs;
   const legPlan = record.legPlan ?? [];
   const isHub = record.venue2Id != null;
+  // The CHAIN record (2026-09-28): phase 1 has NO legPlan (the deposit transfer is the
+  // only signed thing; the IC legs sign at phase time) — phase 2 carries the plan and
+  // renders through the same leg list below.
+  const chain = record.chainRoute ?? null;
+  const chainPhase1 = chain != null && legPlan.length === 0;
   const legStateText = (s: typeof legPlan[number]['state']) =>
     s === 'pending' ? M.convert.multihop.legStatePending
     : s === 'sent' ? M.convert.multihop.legStateSent
@@ -1982,7 +2116,8 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
     destSymbol,
   );
   const inflightTitle =
-    record.step === 'swapping' ? M.convert.swapVia(venueName)
+    chainPhase1 && record.step === 'swapping' ? M.convert.chain.depositSending(venueDisplayName(chain!.venueId))
+    : record.step === 'swapping' ? M.convert.swapVia(venueName)
     : record.step === 'settling' ? M.convert.awaitingPool
     : M.convert.signing;
   const inflightBody =
@@ -2044,6 +2179,45 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
                 {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(cd.expiresAtMs)))}
               </Text>
             ) : null}
+          </View>
+        );
+      })() : null}
+
+      {/* CHAIN phase 1: the ONE consent's live narration — the venue order (its locked
+          figures verbatim), the venue's own Solana deposit address, the exact amount the
+          signed transfer moves, and the deposit window. The venue-side wait after it is
+          the provider poll; phase 2's legs join the leg list below when they sign. */}
+      {chainPhase1
+        && (inflight || record.step === 'pending_withdrawal' || record.step === 'awaiting_deposit'
+          || record.step === 'provider_processing' || record.step === 'stuck') ? (() => {
+        const venueNm = venueDisplayName(chain!.venueId);
+        const midSymbol = record.hopSymbol ?? '';
+        return (
+          <View testID="convert-chain-live" style={S.fieldLegs}>
+            <Text testID="convert-chain-order" style={S.fieldLegLabel}>
+              {M.convert.chain.orderLine(
+                venueNm,
+                fmtAssetCompact(record.amountIn, record.inDecimals ?? 8, record.inSymbol),
+                midSymbol,
+              )}
+            </Text>
+            <Text testID="convert-chain-order-id" style={S.fieldLegLabel}>{M.convert.cefi.shiftId(chain!.orderId)}</Text>
+            <Text testID="convert-chain-order-at" style={S.fieldLegLabel}>
+              {M.convert.quoteSource(nonBreakingClock(new Date(record.createdAtMs)), venueNm)}
+            </Text>
+            <Text testID="convert-chain-deposit-amount" style={S.fieldLegLabel}>
+              {M.convert.cefi.depositAmountLabel}: {fmtAssetCompact(chain!.amountRaw, record.inDecimals ?? 8, record.inSymbol)}
+            </Text>
+            <Text testID="convert-chain-address-label" style={S.fieldLegLabel}>{M.convert.cefi.depositAddressLabel}</Text>
+            <Text testID="convert-chain-deposit-address" style={S.fieldPrincipal} selectable>{chain!.depositAddress}</Text>
+            {chain!.expiresAtMs != null ? (
+              <Text testID="convert-chain-expiry" style={S.fieldLegLabel}>
+                {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(chain!.expiresAtMs)))}
+              </Text>
+            ) : null}
+            <Text testID="convert-chain-phase2" style={S.fieldLegLabel}>
+              {M.convert.chain.phase2Leg(midSymbol, record.outSymbol, venueDisplayName(record.venue2Id ?? record.venueId))}
+            </Text>
           </View>
         );
       })() : null}
@@ -2111,6 +2285,24 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
             )}
           </Text>
           <Text style={S.fieldBody}>{M.convert.providerProcessingBody(destSymbol, venueDisplayName(record.composedDeposit.venueId))}</Text>
+          <Text style={S.fieldBody}>{M.convert.stillWatching}</Text>
+        </View>
+      ) : null}
+
+      {/* CHAIN: the deposit went out automatically; this phase is the VENUE's payout watch
+          (the provider poll), after which the second leg signs itself from the frozen plan. */}
+      {record.step === 'awaiting_deposit' && chainPhase1 ? (
+        <View testID="convert-chain-awaiting">
+          <ActivityIndicator size="large" color={C.brandInk} />
+          <Text style={S.fieldTitle}>{M.convert.pendingTitle}</Text>
+          <Text style={S.fieldBody}>
+            {M.convert.chain.depositSent(
+              venueDisplayName(chain!.venueId),
+              fmtAssetCompact(chain!.amountRaw, record.inDecimals ?? 8, record.inSymbol),
+              hopSymbol,
+            )}
+          </Text>
+          <Text style={S.fieldBody}>{M.convert.providerProcessingBody(hopSymbol, venueDisplayName(chain!.venueId))}</Text>
           <Text style={S.fieldBody}>{M.convert.stillWatching}</Text>
         </View>
       ) : null}
@@ -2183,7 +2375,16 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
       {record.step === 'failed_leg' ? (
         <View testID="convert-failed-leg">
           <Text style={S.fieldTitle}>{M.convert.failedTitle}</Text>
-          {record.failureCode === 'deposit_refused' && record.composedDeposit != null ? (
+          {record.chainRoute != null && record.hopSymbol != null ? (
+            <>
+              {/* The chain's dead-end (phase-2 quote/sign refusal, or a second-leg
+                  refusal): the venue's payout landed — the MID asset is in this wallet.
+                  The exit is a normal 2-tap convert of it, which the copy names. */}
+              <Text style={S.fieldBody}>
+                {M.convert.chain.phase2Failed(hopSymbol)}
+              </Text>
+            </>
+          ) : record.failureCode === 'deposit_refused' && record.composedDeposit != null ? (
             <>
               <Text style={S.fieldBody}>
                 {M.convert.depositRefusedBody(hopSymbol, venueDisplayName(record.composedDeposit.venueId))}

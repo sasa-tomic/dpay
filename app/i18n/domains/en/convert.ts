@@ -399,6 +399,28 @@ export type ConvertMessages = {
     noQuoteBody: (venue: string) => string;
   };
 
+  // --- the chain family (2026-09-28, the any-pair mandate): a SOL-rail source rides a cefi
+  // venue's order into a mid IC ledger, then registered pools finish the route. One review,
+  // one consent, one CTA; the second phase signs itself from the frozen plan when the venue
+  // settles. Every dead-end names where the funds sit and the exit.
+  chain: {
+    /** The deposit transfer's flight title (the tracker's spinner line): the device-signed
+     *  transfer to the venue's own address, not a swap. */
+    depositSending: (venue: string) => string;
+    /** The order line: the venue, the exact deposit, and what arrives (the mid asset). */
+    orderLine: (venue: string, depositAmt: string, midSym: string) => string;
+    /** The awaiting-payout body: the deposit went out automatically (never a manual send). */
+    depositSent: (venue: string, depositAmt: string, midSym: string) => string;
+    /** The review card's phase-2 note (the consent covers the whole chain). */
+    phase2Note: string;
+    /** The phase-2 leg line in the live narration (mid → dest via the IC venue). */
+    phase2Leg: (midSym: string, outSym: string, venue: string) => string;
+    /** The unpicked row's mechanism line (which mid the route lands on). */
+    rowShape: (midSym: string) => string;
+    /** The failed second leg: the mid asset is in-wallet; the exit is a normal convert. */
+    phase2Failed: (midSym: string) => string;
+  };
+
   // --- the cross-rail family (Routes B/C, 2026-09-16): the CCTP handoff (the USER's own
   // Ethereum wallet signs; dpay never holds an EVM key), the Circle attestation watch, and
   // Route C's final Jupiter offer. Every dead-end names where the funds sit and the exit.
@@ -501,6 +523,11 @@ export type ConvertMessages = {
     quoteUnconfigured: (venue: string) => string;
     gasUnavailable: string;
     cctpFeeUnavailable: string;
+    /** The chain deposit leg's fail-closed refusals (2026-09-28). */
+    chainDepositUnreadable: (venue: string) => string;
+    chainSenderEmpty: (sym: string) => string;
+    chainSenderShort: (sym: string) => string;
+    chainRentShort: (sym: string) => string;
   };
 };
 
@@ -762,6 +789,18 @@ export const convertEn: ConvertMessages = {
       `${venue} lists this pair but has no live market right now. Nothing was sent. Pick another venue or try again later.`,
   },
 
+  /** The chain family (2026-09-28, the any-pair mandate): one consent, two phases — the
+   *  venue order + the signed deposit first, the IC legs from the frozen plan second. */
+  chain: {
+    depositSending: venue => `Sending the deposit to ${venue}`,
+    orderLine: (venue, depositAmt, midSym) => `Order created at ${venue}: ${depositAmt} in, ${midSym} out`,
+    depositSent: (venue, depositAmt, midSym) => `${depositAmt} sent to ${venue} — waiting for the ${midSym} payout`,
+    phase2Note: 'The second leg converts automatically once the payout lands — no second tap.',
+    phase2Leg: (midSym, outSym, venue) => `Then ${midSym} → ${outSym} via ${venue}, quoted fresh when the payout lands`,
+    rowShape: midSym => `via ${midSym}, two legs, one tap`,
+    phase2Failed: midSym => `The second leg could not run. Your ${midSym} is in this wallet — convert it with a normal Convert (it will be pre-selected).`,
+  },
+
   /** The cross-rail family (Routes B/C, 2026-09-16): everything past the five IC legs —
    *  the CCTP handoff (dpay renders the exact transactions, the USER's own Ethereum wallet
    *  signs; dpay never holds an EVM key), the Circle attestation watch, and Route C's
@@ -845,5 +884,10 @@ export const convertEn: ConvertMessages = {
       `${venue} is not set up on this relay yet — no partner credential is configured, so no quote can be asked for. Nothing is wrong with your wallet.`,
     gasUnavailable: 'The cash-out minter could not be asked for its gas price — nothing was signed. Try again.',
     cctpFeeUnavailable: 'Circle\u2019s bridge fee could not be fetched — nothing was signed. Check your connection and try again.',
+    chainDepositUnreadable: venue =>
+      `${venue}\u2019s deposit address could not be verified on Solana — nothing was signed. Check your connection and try again, or send the deposit from your own wallet.`,
+    chainSenderEmpty: sym => `This wallet holds no ${sym} token account — nothing was signed. Receive ${sym} first, then convert.`,
+    chainSenderShort: sym => `The wallet\u2019s ${sym} balance does not cover this amount — nothing was signed.`,
+    chainRentShort: sym => `Creating the venue\u2019s ${sym} account needs a little SOL for rent, and the wallet is short — nothing was signed. Top up SOL and try again.`,
   },
 };

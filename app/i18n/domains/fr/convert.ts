@@ -264,6 +264,19 @@ export const convertFr: ConvertMessages = {
       `${venue} référence cette paire mais n\u2019a pas de marché en direct pour le moment. Rien n\u2019a été envoyé. Choisis une autre plateforme ou réessaie plus tard.`,
   },
 
+  /** La famille chain (2026-09-28, le mandat any-pair) : un consentement, deux phases —
+   *  d\u2019abord la commande du venue + le dépôt signé, puis les jambes IC depuis le plan
+   *  gelé quand le venue nomme le paiement. Chaque impasse nomme où sont les fonds. */
+  chain: {
+    depositSending: venue => `Envoi du dépôt à ${venue}`,
+    orderLine: (venue, depositAmt, midSym) => `Commande créée chez ${venue} : ${depositAmt} en entrée, ${midSym} en sortie`,
+    depositSent: (venue, depositAmt, midSym) => `${depositAmt} envoyé à ${venue} — en attente du paiement en ${midSym}`,
+    phase2Note: 'La seconde jambe convertit automatiquement dès que le paiement arrive — sans second appui.',
+    phase2Leg: (midSym, outSym, venue) => `Puis ${midSym} → ${outSym} via ${venue}, requoté dès que le paiement arrive`,
+    rowShape: midSym => `via ${midSym}, deux jambes, un appui`,
+    phase2Failed: midSym => `La seconde jambe n\u2019a pas pu s\u2019exécuter. Tes ${midSym} sont dans ce portefeuille — convertis-les avec un Convert normal (il sera présélectionné).`,
+  },
+
   /** La famille cross-rail (routes B/C, 2026-09-16) : tout ce qui suit les cinq jambes IC —
    *  la remise CCTP (dpay affiche les transactions exactes, c\u2019est le portefeuille Ethereum
    *  PROPRE de l\u2019utilisateur qui signe ; dpay ne détient jamais de clé EVM), l\u2019attente de
@@ -348,5 +361,10 @@ export const convertFr: ConvertMessages = {
       `${venue} n'est pas encore configuré sur ce relay — aucune identification de partenaire n'est configurée, aucun devis ne peut donc être demandé. Ton portefeuille n'a aucun problème.`,
     gasUnavailable: 'Le prix du gaz du minter de retrait n\u2019a pas pu être demandé — rien n\u2019a été signé. Réessaie.',
     cctpFeeUnavailable: 'Les frais du pont de Circle n\u2019ont pas pu être récupérés — rien n\u2019a été signé. Vérifie ta connexion et réessaie.',
+    chainDepositUnreadable: venue =>
+      `L\u2019adresse de dépôt de ${venue} n\u2019a pas pu être vérifiée sur Solana — rien n\u2019a été signé. Vérifie ta connexion et réessaie, ou envoie le dépôt depuis ton propre portefeuille.`,
+    chainSenderEmpty: sym => `Ce portefeuille n\u2019a pas de compte de jetons ${sym} — rien n\u2019a été signé. Reçois d\u2019abord des ${sym}, puis convertis.`,
+    chainSenderShort: sym => `Le solde de ${sym} du portefeuille ne couvre pas ce montant — rien n\u2019a été signé.`,
+    chainRentShort: sym => `Créer le compte ${sym} du venue demande un peu de SOL pour le loyer et le portefeuille est court — rien n\u2019a été signé. Recharge en SOL et réessaie.`,
   },
 };

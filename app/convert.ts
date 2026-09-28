@@ -51,6 +51,7 @@
  */
 
 export type {
+  ChainRouteInfo,
   ComposedDepositInfo,
   ConvertRecord,
   ConvertStep,
@@ -89,6 +90,7 @@ export {
   convertLegsExpired,
   convertRecordMinOut,
   hydrateConvertStore,
+  isChainConvertRecord,
   isComposedConvertRecord,
   isHubConvertRecord,
   loadConvertRecords,
@@ -97,7 +99,7 @@ export {
   saveConvertRecord,
 } from './convert/records';
 
-export {prepareConvertRecord, prepareCeFiConvertRecord, prepareComposedConvertRecord, ComposedQuoteChangedError} from './convert/prepare';
+export {prepareConvertRecord, prepareCeFiConvertRecord, prepareChainConvertRecord, prepareComposedConvertRecord, ComposedQuoteChangedError} from './convert/prepare';
 
 export {
   gasFundNeededWei,
@@ -127,3 +129,6 @@ export {
   executeCrossRailSolSwap,
   prepareCrossRailSolLeg,
 } from './convert/executeCrossRail';
+
+export type {ChainDriverDeps} from './convert/executeChain';
+export {beginChainPhase2, driveChainDeposit, resolveChainTerminal} from './convert/executeChain';

@@ -26,6 +26,13 @@ import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
 
+jest.mock('../services/native', () => ({
+  DpayCore: {
+    icpPrincipalFromPubkey: jest.fn(async () => 'test-principal-text'),
+    icpAccountIdFromPrincipal: jest.fn(async () => 'test-account-id-text'),
+  },
+}));
+
 jest.mock('../convert', () => ({
   isQuoteStale: () => false,
   isTerminalConvertStep: (step: string) =>
@@ -205,8 +212,11 @@ describe('SOL source target-currency picker (the intent sheet)', () => {
       outputMint: USDC_MINT_ADDRESS,
       amount: '5000000000',
     });
-    // Single-venue pair: one attributed pick line, no venue expander, tap 2 armed.
-    expect(exists(tree, 'btn-convert-venues-other')).toBe(false);
+    // The chain widening (2026-09-28) adds the IC-rail routes (via the cefi settle into
+    // ICP) behind the rail-local venue: the expander exists, the AUTO pick is still the
+    // single live venue (chain rows rank only when nothing device-signable is quoted
+    // above them), and tap 2 arms.
+    expect(exists(tree, 'btn-convert-venues-other')).toBe(true);
     expect(textOf(tree, 'convert-venue-auto')).toContain('Executed via');
     expect(present(tree, 'btn-convert-confirm')[0].props.disabled).toBe(false);
     // Typing re-quotes at the typed amount.
@@ -242,28 +252,34 @@ describe('SOL source target-currency picker (the intent sheet)', () => {
     expect(present(tree, 'convert-amount')[0].props.value).toBe('5');
   });
 
-  test('USDC input (USD on the SOL rail): the source is no chip at all, the standing target is the stable twin EUR', async () => {
+  test('USDC input (USD on the SOL rail): the stable twin CHF is now the standing line (the chain route), EUR one chip away', async () => {
     const tree = await mount(USDC_ASSET);
     await act(async () => {});
     expect(exists(tree, 'convert-unavailable')).toBe(false);
     // The source's own currency is the line's other side of the walk: never offered as a chip.
     expect(exists(tree, 'convert-target-chip-USD')).toBe(false);
-    expect(exists(tree, 'convert-target-chip-EUR')).toBe(false); // EUR IS the standing line
+    // The chain widening (2026-09-28): the twin CHF resolves (via the cefi settle into ICP,
+    // then the VCHF pool) — the founder's any-pair example opens as the standing line.
+    expect(exists(tree, 'convert-target-chip-CHF')).toBe(false); // CHF IS the standing line
+    expect(exists(tree, 'convert-target-chip-EUR')).toBe(true);
     expect(exists(tree, 'convert-target-chip-SOL')).toBe(true);
     expect(exists(tree, 'convert-target-chip-ICP')).toBe(true);
-    expect(textOf(tree, 'convert-screen')).toContain('Convert USD \u2192 EUR');
-    // An unread balance is not a zero and pre-fills nothing: typing makes the ask.
+    expect(textOf(tree, 'convert-screen')).toContain('Convert USD \u2192 CHF');
+    // An unread balance is not a zero and pre-fills nothing: typing makes the ask. The
+    // standing pair is a CHAIN row — its cefi leg quotes only on the typed demand.
     expect(jest.mocked(fetchJupiterQuote).mock.calls.length).toBe(0);
+    await pickTarget(tree, 'EUR');
     await act(async () => {
       present(tree, 'convert-amount')[0].props.onChangeText('1');
     });
-    // The standing pair quotes the stable FX venue from the USDC mint.
+    // The picked stable FX pair quotes the venue from the USDC mint.
     expect(lastQuoteCall()).toEqual({
       venueId: 'jupiter-usdc-eurc',
       inputMint: USDC_MINT_ADDRESS,
       outputMint: EURC_MINT_ADDRESS,
       amount: '1000000',
     });
+    expect(textOf(tree, 'convert-screen')).toContain('Convert USD \u2192 EUR');
     // Pick SOL: the volatile leg stays one chip away, quoted from the USDC mint.
     await pickTarget(tree, 'SOL');
     expect(lastQuoteCall()).toEqual({

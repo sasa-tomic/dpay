@@ -29,6 +29,7 @@ jest.mock('../convert', () => ({
   convertAborted: (id: string) => MOCK_ABORT_FLAGS.has(id),
   isHubConvertRecord: jest.fn(() => false),
   isComposedConvertRecord: (rec: {composedDeposit?: unknown} | null) => rec?.composedDeposit != null,
+  isChainConvertRecord: (rec: {chainRoute?: unknown} | null) => rec?.chainRoute != null,
   prepareCrossRailSolLeg: jest.fn(),
   attachCctpBurnTx: jest.fn(),
   declineCctpHandoff: jest.fn(),

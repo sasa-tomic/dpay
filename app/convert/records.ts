@@ -8,12 +8,14 @@ import {
 } from '../config/convert';
 import {icAmmVenueForPair, venueEndpointOf, venueOfId} from '../config/venues';
 import {
+  CHAIN_CONVERT_STEPS,
   COMPOSED_CONVERT_STEPS,
   CONVERT_STEPS,
   CROSSRAIL_CONVERT_STEPS,
   PROVIDER_CONVERT_STEPS,
   PROVIDER_ONLY_STEPS,
   SOLANA_CONVERT_STEPS,
+  type ChainRouteInfo,
   type ComposedDepositInfo,
   type ConvertRecord,
   type ConvertStep,
@@ -449,17 +451,99 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // confirmed when the final Jupiter leg is signed, so `solanaLeg` coexists WITH legs and
   // the plan — exactly on a crossRail-bearing record (never on Route A, whose terminal is
   // done, and never standalone). The step then lives in the cross-rail vocabulary.
+  // The CHAIN shape (2026-09-28, the any-pair mandate): the cefi order + signed Solana
+  // deposit come FIRST (phase 1: legs empty, solanaLeg set, providerRef present), the IC
+  // legs are signed at phase time (phase 2: 2 legs + the direct plan, or 4 + the hub plan)
+  // while the deposit leg and providerRef STAY on the record. The chain block is mutually
+  // exclusive with composed/cross-rail/gas-fund, its step lives in the chain vocabulary,
+  // and the providerRef's orderId MUST be the chain block's (one order, one id).
+  let chainRoute: ChainRouteInfo | undefined;
+  if (r.chainRoute != null) {
+    const c = r.chainRoute as Record<string, unknown>;
+    if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
+    for (const k of ['venueId', 'orderId', 'depositAddress', 'amountDecimal', 'amountRaw']) {
+      if (typeof c[k] !== 'string' || (c[k] as string).length === 0) return null;
+    }
+    if (!Array.isArray(c.icLegs) || c.icLegs.length < 1 || c.icLegs.length > 2) return null;
+    const icLegs: ChainRouteInfo['icLegs'] = [];
+    for (const l of c.icLegs) {
+      if (l == null || typeof l !== 'object' || Array.isArray(l)) return null;
+      const p = l as Record<string, unknown>;
+      for (const k of ['venueId', 'pool', 'fromLedger', 'toLedger']) {
+        if (typeof p[k] !== 'string' || (p[k] as string).length === 0) return null;
+      }
+      icLegs.push({
+        venueId: p.venueId as string, pool: p.pool as string,
+        fromLedger: p.fromLedger as string, toLedger: p.toLedger as string,
+      });
+    }
+    for (let i = 0; i < icLegs.length - 1; i += 1) {
+      if (icLegs[i]!.toLedger !== icLegs[i + 1]!.fromLedger) return null;
+    }
+    if (!Array.isArray(c.icFromFees) || c.icFromFees.length !== icLegs.length
+      || c.icFromFees.some(f => typeof f !== 'string' || !/^\d+$/.test(f))) return null;
+    if (c.settleAmountDecimal != null && (typeof c.settleAmountDecimal !== 'string' || (c.settleAmountDecimal as string).length === 0)) return null;
+    if (c.settleAmountRaw != null && (typeof c.settleAmountRaw !== 'string' || !/^\d+$/.test(c.settleAmountRaw as string))) return null;
+    if (c.settleTx != null && (typeof c.settleTx !== 'string' || (c.settleTx as string).length === 0)) return null;
+    if (c.depositMemo != null && typeof c.depositMemo !== 'string') return null;
+    if (c.expiresAtMs != null && (typeof c.expiresAtMs !== 'number' || !Number.isSafeInteger(c.expiresAtMs) || c.expiresAtMs <= 0)) return null;
+    chainRoute = {
+      venueId: c.venueId as string,
+      orderId: c.orderId as string,
+      depositAddress: c.depositAddress as string,
+      amountDecimal: c.amountDecimal as string,
+      amountRaw: c.amountRaw as string,
+      icLegs,
+      icFromFees: c.icFromFees as string[],
+      ...(c.depositMemo != null ? {depositMemo: c.depositMemo as string} : {}),
+      ...(c.expiresAtMs != null ? {expiresAtMs: c.expiresAtMs as number} : {}),
+      ...(c.settleAmountDecimal != null ? {settleAmountDecimal: c.settleAmountDecimal as string} : {}),
+      ...(c.settleAmountRaw != null ? {settleAmountRaw: c.settleAmountRaw as string} : {}),
+      ...(c.settleTx != null ? {settleTx: c.settleTx as string} : {}),
+    };
+    if (composedDeposit != null || crossRail != null || rec.gasPre != null) return null;
+    if (!CHAIN_CONVERT_STEPS.has(rec.step)) return null;
+    // The venue's order id is the record's correlation id — one order, one id (the
+    // composed block's own pin). The providerRef itself parses below (both phases carry
+    // it from birth, next to the deposit leg).
+    const pr = r.providerRef;
+    if (!pr || typeof pr !== 'object' || typeof (pr as Record<string, unknown>).orderId !== 'string') return null;
+    const pOrderId = (pr as Record<string, unknown>).orderId as string;
+    if (pOrderId.length === 0 || pOrderId !== chainRoute.orderId) return null;
+    const statusUrl = (pr as Record<string, unknown>).statusUrl;
+    if (statusUrl != null && (typeof statusUrl !== 'string' || (statusUrl as string).length === 0)) return null;
+    const relayOrderId = (pr as Record<string, unknown>).relayOrderId;
+    if (relayOrderId != null && (typeof relayOrderId !== 'string' || relayOrderId.length === 0)) return null;
+    rec.providerRef = {
+      orderId: pOrderId,
+      ...(statusUrl != null ? {statusUrl: String(statusUrl)} : {}),
+      ...(relayOrderId != null ? {relayOrderId: relayOrderId as string} : {}),
+    };
+    // Phase 1: legs empty + the deposit leg signed + NO plan. Phase 2: the legs mirror
+    // the frozen plan exactly (one approve+swap pair per IC leg) — anything else is a
+    // shape this build never wrote.
+    if (legs.length === 0) {
+      if (legPlan != null) return null;
+      rec.chainRoute = chainRoute;
+    } else {
+      if (legs.length !== icLegs.length * 2 || legPlan == null || legPlan.length !== legs.length) return null;
+      for (let k = 0; k < icLegs.length; k += 1) {
+        if (legPlan[k * 2]!.kind !== 'approve' || legPlan[k * 2 + 1]!.kind !== 'swap') return null;
+      }
+      rec.chainRoute = chainRoute;
+    }
+  }
   let solanaLeg: SolanaSwapLeg | undefined;
   if (r.solanaLeg != null) {
     if (legs.length > 0 || legPlan != null) {
-      if (crossRail == null) return null;
+      if (crossRail == null && chainRoute == null) return null;
     }
     const s = r.solanaLeg as Record<string, unknown>;
     if (!s || typeof s !== 'object' || s.protocol !== 'solana') return null;
     if (typeof s.signedTxHex !== 'string' || s.signedTxHex.length === 0) return null;
     if (typeof s.signature !== 'string' || s.signature.length === 0) return null;
     if (typeof s.lastValidBlockHeight !== 'number' || !Number.isSafeInteger(s.lastValidBlockHeight) || s.lastValidBlockHeight <= 0) return null;
-    if (crossRail == null && !SOLANA_CONVERT_STEPS.has(rec.step)) return null;
+    if (crossRail == null && chainRoute == null && !SOLANA_CONVERT_STEPS.has(rec.step)) return null;
     solanaLeg = {
       protocol: 'solana',
       signedTxHex: s.signedTxHex,
@@ -672,6 +756,13 @@ export function isHubConvertRecord(rec: ConvertRecord): boolean {
  *  switches to the provider poll for the venue's final phase). */
 export function isComposedConvertRecord(rec: ConvertRecord): boolean {
   return rec.composedDeposit != null;
+}
+
+/** The CHAIN record shape (2026-09-28): the cefi order + signed Solana deposit leg come
+ *  first, the IC legs are signed at phase time. Hydration enforces the shape; this
+ *  predicate is the resume engine's dispatch discriminator. */
+export function isChainConvertRecord(rec: ConvertRecord): boolean {
+  return rec.chainRoute != null;
 }
 
 export async function loadConvertRecords(publicHex: string): Promise<Record<string, ConvertRecord>> {

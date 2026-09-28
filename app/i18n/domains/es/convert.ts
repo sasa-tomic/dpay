@@ -264,6 +264,19 @@ export const convertEs: ConvertMessages = {
       `${venue} enumera este par, pero ahora mismo no tiene un mercado en vivo. No se envió nada. Elige otra sede o inténtalo más tarde.`,
   },
 
+  /** La familia chain (2026-09-28, el mandato any-pair): un consentimiento, dos fases —
+   *  primero la orden del venue + el depósito firmado, luego las piernas IC desde el plan
+   *  congelado cuando el venue nombra el pago. Cada callejón dice dónde están los fondos. */
+  chain: {
+    depositSending: venue => `Enviando el depósito a ${venue}`,
+    orderLine: (venue, depositAmt, midSym) => `Orden creada en ${venue}: ${depositAmt} entra, ${midSym} sale`,
+    depositSent: (venue, depositAmt, midSym) => `${depositAmt} enviado a ${venue} — esperando el pago en ${midSym}`,
+    phase2Note: 'La segunda pierna convierte automáticamente cuando llega el pago — sin segundo toque.',
+    phase2Leg: (midSym, outSym, venue) => `Luego ${midSym} → ${outSym} vía ${venue}, cotizado de nuevo cuando llegue el pago`,
+    rowShape: midSym => `vía ${midSym}, dos piernas, un toque`,
+    phase2Failed: midSym => `La segunda pierna no pudo ejecutarse. Tus ${midSym} están en esta billetera — conviértelos con un Convert normal (quedará preseleccionado).`,
+  },
+
   /** La familia cross-rail (rutas B/C, 2026-09-16): todo lo que sigue a las cinco piernas IC —
    *  el handoff CCTP (dpay muestra las transacciones exactas, las firma la cartera Ethereum
    *  PROPIA del usuario; dpay nunca retiene claves EVM), la espera de la atestación de Circle
@@ -348,5 +361,10 @@ export const convertEs: ConvertMessages = {
       `${venue} aún no está configurado en este relay — no hay ninguna credencial de socio configurada, así que no se puede pedir una cotización. Tu monedero no tiene ningún problema.`,
     gasUnavailable: 'No se pudo consultar el precio del gas al minter de retiro — no se firmó nada. Inténtalo de nuevo.',
     cctpFeeUnavailable: 'No se pudo consultar la comisión del puente de Circle — no se firmó nada. Revisa tu conexión y vuelve a intentarlo.',
+    chainDepositUnreadable: venue =>
+      `No se pudo verificar la dirección de depósito de ${venue} en Solana — no se firmó nada. Revisa tu conexión y vuelve a intentarlo, o envía el depósito desde tu propia billetera.`,
+    chainSenderEmpty: sym => `Esta billetera no tiene cuenta de tokens ${sym} — no se firmó nada. Recibe ${sym} primero y luego convierte.`,
+    chainSenderShort: sym => `El saldo de ${sym} de la billetera no cubre este monto — no se firmó nada.`,
+    chainRentShort: sym => `Crear la cuenta de ${sym} del venue requiere un poco de SOL para el alquiler y la billetera no alcanza — no se firmó nada. Carga SOL y vuelve a intentarlo.`,
   },
 };

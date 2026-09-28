@@ -265,6 +265,19 @@ export const convertDe: ConvertMessages = {
       `${venue} listet dieses Paar, hat aber gerade keinen Live-Markt. Nichts wurde gesendet. Wähle einen anderen Handelsplatz oder versuche es später erneut.`,
   },
 
+  /** Die Chain-Familie (2026-09-28, der Any-Pair-Auftrag): eine Einwilligung, zwei Phasen —
+   *  zuerst die Venue-Order + die signierte Einzahlung, dann die IC-Beine aus dem eingefroren
+   *  Plan, sobald das Venue die Auszahlung nennt. Jede Sackgasse nennt, wo die Mittel liegen. */
+  chain: {
+    depositSending: venue => `Einzahlung geht an ${venue}`,
+    orderLine: (venue, depositAmt, midSym) => `Order bei ${venue} erstellt: ${depositAmt} rein, ${midSym} raus`,
+    depositSent: (venue, depositAmt, midSym) => `${depositAmt} an ${venue} gesendet — wartet auf die ${midSym}-Auszahlung`,
+    phase2Note: 'Das zweite Bein wandelt automatisch, sobald die Auszahlung landet — kein zweiter Tipp.',
+    phase2Leg: (midSym, outSym, venue) => `Dann ${midSym} → ${outSym} über ${venue}, frisch quotiert sobald die Auszahlung landet`,
+    rowShape: midSym => `über ${midSym}, zwei Beine, ein Tipp`,
+    phase2Failed: midSym => `Das zweite Bein konnte nicht laufen. Deine ${midSym} sind in dieser Wallet — wandle sie mit einem normalen Umtausch (sie ist vorausgewählt).`,
+  },
+
   /** Die Cross-Rail-Familie (Routen B/C, 2026-09-16): alles nach den fünf IC-Beinen —
    *  der CCTP-Handoff (dpay zeigt die exakten Transaktionen, die EIGENE Ethereum-Wallet
    *  des Nutzers signiert; dpay hält nie einen EVM-Schlüssel), das Warten auf Circles
@@ -349,5 +362,10 @@ export const convertDe: ConvertMessages = {
       `${venue} ist auf diesem Relay noch nicht eingerichtet — es ist keine Partner-Berechtigung konfiguriert, daher kann kein Kurs angefragt werden. Mit deiner Wallet ist nichts verkehrt.`,
     gasUnavailable: 'Der Gaspreis des Auszahlungs-Minters ließ sich nicht abfragen — nichts wurde signiert. Versuche es erneut.',
     cctpFeeUnavailable: 'Circles Bridge-Gebühr ließ sich nicht abrufen — nichts wurde signiert. Prüfe deine Verbindung und versuche es erneut.',
+    chainDepositUnreadable: venue =>
+      `${venue}s Einzahlungsadresse ließ sich auf Solana nicht verifizieren — nichts wurde signiert. Prüfe deine Verbindung und versuche es erneut, oder sende die Einzahlung aus deiner eigenen Wallet.`,
+    chainSenderEmpty: sym => `Diese Wallet hat kein ${sym}-Token-Konto — nichts wurde signiert. Empfange zuerst ${sym}, dann konvertiere.`,
+    chainSenderShort: sym => `Der ${sym}-Bestand dieser Wallet deckt diesen Betrag nicht — nichts wurde signiert.`,
+    chainRentShort: sym => `Das ${sym}-Konto des Venues anzulegen kostet etwas SOL für Rent, und die Wallet ist zu kurz — nichts wurde signiert. Lade SOL auf und versuche es erneut.`,
   },
 };

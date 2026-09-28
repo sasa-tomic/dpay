@@ -8,7 +8,7 @@ import {Linking, Pressable, Text, View} from 'react-native';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
 import {BUNDLED_VENUES, venueDisplayName, venueOfId} from '../config/venues';
-import type {ComposedConvertRoute} from '../config/convert';
+import type {ChainConvertRoute, ComposedConvertRoute} from '../config/convert';
 import {deriveConvertMath, fetchCeFiConvertQuote, fetchConvertQuote, isTerminalConvertStep, type ConvertMath, type ConvertQuote, type ConvertRecord, type LegPlan} from '../convert';
 import type {HubRoute} from '../routes';
 import {SOLANA_TOKENS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
@@ -116,6 +116,64 @@ export const fetchComposedQuotes = async (
 /** The composed bundle's FINAL floor, in the deposit (hub) ledger's raw units — the exact
  *  figure the venue order prices and the deposit transfer signs. */
 export const composedFloorRaw = (b: ComposedBundle): string => (b.m2 != null ? b.m2.minOut : b.m1.minOut);
+
+/** One CHAIN row's review bundle (2026-09-28): the cefi leg's own quote on the user's
+ *  amount (the venue's estimated settle, mid units), then the IC plan legs quoted under
+ *  the chain's self-funding rule (each leg on the previous floor minus its own rails'
+ *  fees) — the review figures prepare re-derives on the venue's LOCKED settle figure at
+ *  confirm. One helper so the live fetch and the confirm-time fetch are byte-identical. */
+export type ChainBundle = {
+  /** The cefi leg's quote — deposit = the user's amount, settle = the mid ledger. */
+  cefi: ConvertQuote;
+  q1: ConvertQuote;
+  m1: ConvertMath;
+  q2: ConvertQuote | null;
+  m2: ConvertMath | null;
+};
+
+/** floor − 2×fee: the self-funding rule (the venue's payout pays every IC fee). */
+export const chainLegInput = (floor: string, fromFee: string): string | null => {
+  const net = BigInt(floor) - 2n * BigInt(fromFee);
+  return net > 0n ? net.toString() : null;
+};
+
+export const fetchChainQuotes = async (
+  relayUrl: string,
+  route: ChainConvertRoute,
+  amountIn: string,
+  slippageBps: number,
+): Promise<ChainBundle> => {
+  const midEp = route.endpoints[0]!;
+  const cefiVenue = venueOfId(route.cefiVenueId);
+  if (cefiVenue == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  const cefi = await fetchCeFiConvertQuote(
+    relayUrl, cefiVenue, route.depositMint, midEp.ledger, amountIn,
+    {inDecimals: route.depositDecimals, outDecimals: midEp.decimals},
+  );
+  // The plan legs quote on the cefi leg's own settle ESTIMATE (the review figure); the
+  // confirm-time prepare re-quotes on the venue's locked figure — the same relationship
+  // the composed flow's review has to its order.
+  const leg1In = chainLegInput(cefi.amountOutGross, midEp.fee ?? '0');
+  if (leg1In == null) throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  const leg1 = route.legs[0]!;
+  const q1 = await fetchConvertQuote(relayUrl, leg1.fromLedger, leg1.toLedger, leg1In,
+    {venue: venueOfId(leg1.venueId) ?? undefined});
+  const m1 = await deriveConvertMath(q1, midEp.fee ?? '0', route.endpoints[1]!.fee ?? '0', slippageBps);
+  if (route.legs.length === 1) {
+    return {cefi, q1, m1, q2: null, m2: null};
+  }
+  const hubEp = route.endpoints[1]!;
+  const leg2In = chainLegInput(m1.minOut, hubEp.fee ?? '0');
+  if (leg2In == null) throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  const leg2 = route.legs[1]!;
+  const q2 = await fetchConvertQuote(relayUrl, leg2.fromLedger, leg2.toLedger, leg2In,
+    {venue: venueOfId(leg2.venueId) ?? undefined});
+  const m2 = await deriveConvertMath(q2, hubEp.fee ?? '0', route.endpoints[2]!.fee ?? '0', slippageBps);
+  return {cefi, q1, m1, q2, m2};
+};
+
+/** The chain bundle's FINAL plan net, in the destination ledger's raw units. */
+export const chainFinalNet = (b: ChainBundle): string => (b.m2 != null ? b.m2.netOut : b.m1.netOut);
 
 /** A record past 'quote'/'confirming' means signed bytes or a provider order exist — the screen
  *  must show state, not a form. The terminal set is app/convert.ts's OWN export — never a

@@ -213,6 +213,49 @@ export type ComposedDepositInfo = {
   sentTx?: string;
 };
 
+/**
+ * The CHAIN widening (2026-09-28, the any-pair mandate): the record block of a cefi-FIRST
+ * chain (a SOL-rail source → a cefi venue's order → the mid IC ledger → registered IC legs
+ * → the IC target). Phase 1 is the composed flow reversed: the venue order exists BEFORE
+ * any signature (its deposit address + locked figures are facts first), then ONE device-
+ * signed Solana deposit transfer (the frozen `solanaLeg` — same leg shape every Solana
+ * record carries) funds it, and the provider poll owns the wait. Phase 2 — the IC legs —
+ * CANNOT be pre-signed (an IC envelope dies at its own +300 s ingress expiry; a venue
+ * settles on minutes): the block freezes the LEG PLAN (venues, pools, ordered pairs) at
+ * confirm and the engine signs phase 2 ONLY from that frozen plan, on a fresh quote, when
+ * the venue's completion names the settle. Every venue-issued string is carried verbatim.
+ * dpay is never a party: the order is the user's, the deposit is the user's signature,
+ * the IC legs are the user's signatures.
+ */
+export type ChainRouteInfo = {
+  /** The cefi venue that holds the order (registry id — record.venueId's twin, pinned). */
+  venueId: string;
+  /** The venue's order id — providerRef.orderId's twin (one order, one id). */
+  orderId: string;
+  /** The VENUE's own Solana deposit address, VERBATIM (base58). The transfer signs to it. */
+  depositAddress: string;
+  /** The venue's decimal deposit figure (verbatim, never reformatted). */
+  amountDecimal: string;
+  /** The SAME amount in raw mint units — what the signed transfer moves. */
+  amountRaw: string;
+  /** The venue's memo/tag when its wire requires one (rides the transfer). */
+  depositMemo?: string;
+  /** When the venue's deposit window dies (its own order expiry, parsed). */
+  expiresAtMs?: number;
+  /** The venue's own locked settle figure, decimal (verbatim) — phase 2's input amount. */
+  settleAmountDecimal?: string;
+  settleAmountRaw?: string;
+  /** The venue's settle evidence once its status names the payout (tx hash / id). */
+  settleTx?: string;
+  /** The phase-2 plan, frozen at confirm: the IC legs in execution order — leg 0's
+   *  fromLedger is the venue's settle ledger, the last leg's toLedger is the record's
+   *  outLedger. The engine quotes + signs these EXACT pairs, never others. */
+  icLegs: Array<{venueId: string; pool: string; fromLedger: string; toLedger: string}>;
+  /** Each IC leg's FROM-ledger transfer fee (a catalog fact, frozen like every other
+   *  number the plan signs with) — the self-funding rule's own inputs at phase time. */
+  icFromFees: string[];
+};
+
 export type ConvertRecord = {
   id: string;
   createdAtMs: number;
@@ -328,6 +371,11 @@ export type ConvertRecord = {
    *  a providerRef the final phase polls. Mutually exclusive with crossRail, solanaLeg and
    *  gasPre (hydration pins all three). */
   composedDeposit?: ComposedDepositInfo;
+  /** The CHAIN widening (2026-09-28): present iff the record was prepared on a CHAIN
+   *  route — the cefi order + the signed Solana deposit leg come FIRST, the IC legs are
+   *  signed at phase time from the frozen plan. Carries solanaLeg + providerRef from
+   *  birth; `legs` is empty until phase 2 signs (then 2 or 4 approve/swap legs). */
+  chainRoute?: ChainRouteInfo;
   failureCode?: 'approve_refused' | 'swap_refused' | 'refunded' | 'withdraw_refused' | 'unknown'
     // The cross-rail additions: the user declined/abandoned the external signing step
     // (funds sit as USDC at their OWN EVM address — the copy names it).
@@ -429,6 +477,18 @@ export const COMPOSED_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
   'approving', 'pending_withdrawal', 'stuck', 'failed_refunded', 'failed_leg',
   'awaiting_deposit', 'provider_processing',
   'done', 'quote_expired', 'provider_refunded',
+  'aborted',
+]);
+
+/** The steps a CHAIN record (`chainRoute`) may sit at: the Solana deposit leg's flight
+ *  states (`swapping`/`settling`), the provider vocabulary while the venue settles, the
+ *  planned executor's phase-2 states once the IC legs are signed, and the shared
+ *  terminals. Hydration pins a chainRoute-bearing record to this vocabulary. */
+export const CHAIN_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
+  'swapping', 'settling',
+  'awaiting_deposit', 'provider_processing',
+  'approving', 'pending_withdrawal',
+  'done', 'stuck', 'failed_refunded', 'failed_leg', 'quote_expired', 'provider_refunded',
   'aborted',
 ]);
 

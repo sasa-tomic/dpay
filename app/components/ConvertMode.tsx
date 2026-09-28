@@ -176,6 +176,11 @@ export function ConvertMode({
     // plain Solana record renders its own machine; the direct and hub (legPlan) kinds flood
     // to the tracker with it.
     if (record.composedDeposit != null) return <ConvertFieldTracker record={record} onBack={onBack} />;
+    // A CHAIN record (the any-pair widening, 2026-09-28) renders through the Settlement
+    // Field tracker too: its phase-1 narration is the venue order + the signed deposit
+    // (the generic provider panel's MANUAL-deposit instructions would be false — the
+    // device signed the transfer), and its phase-2 legs join the planned-leg list.
+    if (record.chainRoute != null) return <ConvertFieldTracker record={record} onBack={onBack} />;
     if (record.providerRef != null) return <StatePanel record={record} onBack={onBack} />;
     if (record.crossRail != null) {
       return <CrossRailStatePanel record={record} secretHex={identity.secretHex} relayUrl={relayUrl} solLamports={solana?.sol ?? null} onBack={onBack} />;

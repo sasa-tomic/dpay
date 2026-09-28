@@ -3,22 +3,17 @@ import {icStampExpiry} from '../services/icp';
 import {bytesToHex, randNonceHex, rawToDecimal, toUnits} from '../lib/format';
 import {utf8ToBytes} from '../lib/base64url';
 import {type CurrencyDescriptor, BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
-import {CONVERT_APPROVE_LIFETIME_S, CONVERT_CEFI_CONFIRM_TIMEOUT_MS, type ComposedConvertRoute} from '../config/convert';
+import {CONVERT_APPROVE_LIFETIME_S, CONVERT_CEFI_CONFIRM_TIMEOUT_MS, type ChainConvertRoute, type ComposedConvertRoute} from '../config/convert';
 import {DPAY_CANISTER_PRINCIPALS, cefiFamilyOf, cefiOtherSide, venueOfId} from '../config/venues';
 import {CCTP_DESTINATION_NETWORK} from '../routes';
 import {deriveSolanaAddress} from '../solana/identity';
-import {
-  sideShiftStatusUrl,
-  type SideShiftFixedShift,
-} from '../services/sideshift';
-import {
-  trocadorStatusUrl,
-  type TrocadorTrade,
-} from '../services/trocador';
+import {sideShiftStatusUrl, type SideShiftFixedShift} from '../services/sideshift';
+import {trocadorStatusUrl, type TrocadorTrade} from '../services/trocador';
 import {M} from '../i18n';
-import {type ConvertRecord, type LegPlan, type SignedLeg} from './types';
-import {type CeFiQuoteResult, type ConvertMath, type ConvertQuote, ceFiServiceError, createCeFiOrder, fetchCeFiQuoteResult} from './quotes';
+import {type ConvertRecord, type ChainRouteInfo, type LegPlan, type SignedLeg} from './types';
+import {type CeFiQuoteResult, type ConvertMath, type ConvertQuote, ceFiServiceError, createCeFiOrder, deriveConvertMath, fetchCeFiQuoteResult, fetchConvertQuote} from './quotes';
 import {sameDecimalAmount} from './records';
+import {buildChainDepositLeg} from './chainDeposit';
 // --- prepare (confirming): build + sign BOTH envelopes once — never rebuild after this --------------
 
 /** Approval = exact swap amount + input-ledger fee (spec §3), `expected_allowance` present, expiry
@@ -577,5 +572,225 @@ export async function prepareComposedConvertRecord(args: {
         : {}),
       ...(Number.isSafeInteger(orderExpiresAtMs) && orderExpiresAtMs > 0 ? {expiresAtMs: orderExpiresAtMs} : {}),
     },
+  };
+}
+
+// --- the chain prepare (2026-09-28, the any-pair mandate) -------------------------------------------
+
+/** ONE IC leg's input, under the chain's SELF-FUNDING fee rule: the venue's payout floor
+ *  pays every IC fee, so leg k trades floor − 2×(its from-ledger fee) — the approve call's
+ *  fee and the pull's on-top fee both come out of the landed mid asset, never out of a
+ *  pre-held balance (a wallet may hold ZERO of the mid asset). Null when the floor cannot
+ *  cover its own rails — a route whose legs cannot be funded is not a route. */
+function chainLegInput(floor: string, fromFee: string): string | null {
+  const net = BigInt(floor) - 2n * BigInt(fromFee);
+  return net > 0n ? net.toString() : null;
+}
+
+/**
+ * Prepare ONE CHAIN intent as a single record (the any-pair mandate, 2026-09-28): the cefi
+ * venue's order is created FIRST (its deposit address + locked settle figure are known
+ * before anything signs), the device signs ONE Solana deposit transfer funding it (frozen
+ * bytes — the engine submits them; nothing here broadcasts), and the IC legs are planned
+ * but NOT signed: an IC envelope dies at its own +300 s ingress expiry and a venue settles
+ * on minutes, so phase 2 signs later from the record's own frozen leg plan, on a fresh
+ * quote, when the venue's completion names the settle. The ONE consent at the CTA covers
+ * the whole chain: the review showed both legs' venues and the plan's floor; slippage is
+ * the consent axis phase 2 re-applies.
+ *
+ * Red lines, every leg: the venue's own locked deposit EXACTLY equals the reviewed amount
+ * (the fixed order settles only its exact figure); the settle side is fully priced; no
+ * dpay-owned canister anywhere in the plan; the deposit address is the venue's own, shape-
+ * verified on-chain before the transfer signs (chainDeposit). dpay is never a party.
+ */
+export async function prepareChainConvertRecord(args: {
+  /** The record id — minted by the CONFIRM PATH before order creation and sent to the
+   *  relay as the trade's `clientOrderId` (the cefi prepare's correlation rule). */
+  id: string;
+  secretHex: string;
+  publicHex: string;
+  relayUrl: string;
+  route: ChainConvertRoute;
+  /** The reviewed source amount, raw mint units. */
+  amountRaw: string;
+  slippageBps: number;
+  /** The user's own IC account id — the venue's settle address (never typed free-hand). */
+  settleAddressIc: string;
+}): Promise<ConvertRecord> {
+  const {route} = args;
+  if (route.legs.length !== 1 && route.legs.length !== 2) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  const midEp = route.endpoints[0]!;
+  const destEp = route.endpoints[route.legs.length]!;
+  if (midEp.fee == null || midEp.decimals == null || destEp.fee == null || destEp.decimals == null) {
+    throw new Error(M.convert.errors.quoteUnavailable('symbol'));
+  }
+  // (1) The cefi venue must be a real registered row serving exactly deposit→settle.
+  const cefiVenue = venueOfId(route.cefiVenueId);
+  if (cefiVenue == null || cefiVenue.kind !== 'cefi' || cefiVenue.testnet
+    || cefiOtherSide(cefiVenue, route.depositMint) !== midEp.ledger) {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  // (2) No dpay-owned canister anywhere in the plan (the pools are the only IC targets).
+  for (const leg of route.legs) {
+    if (DPAY_CANISTER_PRINCIPALS.includes(leg.pool)) {
+      throw new Error(M.convert.errors.quoteUnavailable('venue'));
+    }
+  }
+  const depositDecimal = rawToDecimal(args.amountRaw, route.depositDecimals);
+  // (3) THE ORDER FIRST — the venue's deposit address + locked figures exist before any
+  // byte is signed. The settle address is the user's own IC account; the refund address is
+  // the user's own account ON THE DEPOSIT RAIL (their Solana address).
+  const refundSolAddress = deriveSolanaAddress(args.secretHex);
+  let quoteRes: CeFiQuoteResult;
+  try {
+    quoteRes = await fetchCeFiQuoteResult(
+      args.relayUrl, cefiVenue, route.depositMint, midEp.ledger,
+      depositDecimal, CONVERT_CEFI_CONFIRM_TIMEOUT_MS,
+    );
+  } catch (e) {
+    throw ceFiServiceError(e, cefiVenue.display_name);
+  }
+  let order: SideShiftFixedShift | TrocadorTrade;
+  try {
+    order = await createCeFiOrder(args.relayUrl, cefiVenue, quoteRes, {
+      settleAddress: args.settleAddressIc,
+      refundAddress: refundSolAddress,
+      depositLedger: route.depositMint,
+      settleLedger: midEp.ledger,
+      depositAmountDecimal: depositDecimal,
+      clientOrderId: args.id,
+    }, CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
+  } catch (e) {
+    throw ceFiServiceError(e, cefiVenue.display_name);
+  }
+  const orderId = 'id' in order ? order.id : order.tradeId;
+  if (orderId.length === 0 || order.depositAddress.length === 0) {
+    throw new Error(M.convert.errors.quoteUnavailable('order'));
+  }
+  // (4) THE EXACT-AMOUNT GATE: the fixed order settles only its exact deposit — anything
+  // else is a different trade than the one the review showed (the standing cefi rule,
+  // decimal-value compared so a reformatting venue still adopts its own echo).
+  if (!sameDecimalAmount(order.depositAmount, depositDecimal)) {
+    throw new Error(M.convert.errors.quoteUnavailable('deposit'));
+  }
+  // (5) The venue's locked settle figure IS phase 2's input — a chain route without one
+  // cannot plan its IC legs and refuses (fail closed, never a guessed floor).
+  const settleDecimal = order.settleAmount;
+  if (settleDecimal == null || settleDecimal.length === 0) {
+    throw new Error(M.convert.errors.quoteUnavailable('order'));
+  }
+  const settleRaw = toUnits(settleDecimal, midEp.decimals);
+  if (!/^\d+$/.test(settleRaw) || BigInt(settleRaw) <= 0n) {
+    throw new Error(M.convert.errors.quoteUnavailable('order'));
+  }
+  // (6) The IC leg plan: quote each leg on the SELF-FUNDED input (the previous floor minus
+  // its own rails' fees), each quote through the plan's own registered pool.
+  const icLegs = route.legs;
+  const leg1In = chainLegInput(settleRaw, midEp.fee);
+  if (leg1In == null) throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  const leg1 = icLegs[0]!;
+  const quote1 = await fetchConvertQuote(args.relayUrl, leg1.fromLedger, leg1.toLedger, leg1In,
+    {venue: venueOfId(leg1.venueId) ?? undefined});
+  if (quote1.zeroForOne == null) throw new Error(M.convert.errors.quoteUnavailable('direction'));
+  const math1 = await deriveConvertMath(quote1, midEp.fee, route.endpoints[1]!.fee, args.slippageBps);
+  let quote2: ConvertQuote | null = null;
+  let math2: ConvertMath | null = null;
+  if (icLegs.length === 2) {
+    const leg2 = icLegs[1]!;
+    const hubEp = route.endpoints[1]!;
+    if (leg2.fromLedger !== hubEp.ledger || leg1.toLedger !== hubEp.ledger) {
+      throw new Error(M.convert.errors.quoteUnavailable('pool'));
+    }
+    const leg2In = chainLegInput(math1.minOut, hubEp.fee);
+    if (leg2In == null) throw new Error(M.convert.errors.quoteUnavailable('pool'));
+    if (leg2.toLedger !== destEp.ledger) throw new Error(M.convert.errors.quoteUnavailable('pool'));
+    quote2 = await fetchConvertQuote(args.relayUrl, leg2.fromLedger, leg2.toLedger, leg2In,
+      {venue: venueOfId(leg2.venueId) ?? undefined});
+    if (quote2.zeroForOne == null) throw new Error(M.convert.errors.quoteUnavailable('direction'));
+    math2 = await deriveConvertMath(quote2, hubEp.fee, destEp.fee, args.slippageBps);
+  }
+  // (7) THE DEPOSIT LEG — the venue's address shape is read off the chain, the transfer is
+  // built + verified + signed, and NOTHING broadcasts: the frozen bytes ride the record.
+  const depositLeg = await buildChainDepositLeg({
+    secretHex: args.secretHex,
+    cefiVenueId: route.cefiVenueId,
+    depositAddress: order.depositAddress,
+    depositMint: route.depositMint,
+    amountRaw: args.amountRaw,
+    ...(order.depositMemo != null && order.depositMemo.length > 0 ? {depositMemo: order.depositMemo} : {}),
+  });
+  const orderExpiresAtMs = order.expiresAt != null ? Date.parse(order.expiresAt) : NaN;
+  const relayOrderId = 'relayOrderId' in order && typeof order.relayOrderId === 'string'
+    && order.relayOrderId.length > 0
+    ? order.relayOrderId
+    : null;
+  const chainRoute: ChainRouteInfo = {
+    venueId: route.cefiVenueId,
+    orderId,
+    depositAddress: order.depositAddress,
+    amountDecimal: order.depositAmount,
+    amountRaw: args.amountRaw,
+    settleAmountDecimal: settleDecimal,
+    settleAmountRaw: settleRaw,
+    icLegs: icLegs.map(l => ({venueId: l.venueId, pool: l.pool, fromLedger: l.fromLedger, toLedger: l.toLedger})),
+    icFromFees: icLegs.map((_, k) => route.endpoints[k]!.fee!),
+    ...(order.depositMemo != null && order.depositMemo.length > 0 ? {depositMemo: order.depositMemo} : {}),
+    ...(Number.isSafeInteger(orderExpiresAtMs) && orderExpiresAtMs > 0 ? {expiresAtMs: orderExpiresAtMs} : {}),
+  };
+  return {
+    id: args.id,
+    createdAtMs: Date.now(),
+    step: 'swapping',
+    venueId: route.cefiVenueId,
+    ...(icLegs.length === 2 ? {venue2Id: icLegs[1]!.venueId} : {}),
+    // The IN side is the DEPOSIT (mint-keyed, the Solana record's own convention — no IC
+    // catalog currency); the OUT side is the FINAL IC target. The hop is the venue's
+    // settle ledger: the asset in-wallet once phase 1 lands, the phase-2 input.
+    inLedger: route.depositMint,
+    inSymbol: route.depositSymbol,
+    inDecimals: route.depositDecimals,
+    hopLedger: midEp.ledger,
+    hopSymbol: midEp.symbol,
+    hopCurrency: midEp.currency,
+    hopDecimals: midEp.decimals,
+    outLedger: destEp.ledger,
+    outSymbol: destEp.symbol,
+    outCurrency: destEp.currency,
+    outDecimals: destEp.decimals,
+    ...(icLegs.length === 2 ? {
+      destLedger: destEp.ledger,
+      destCurrency: destEp.currency,
+      destDecimals: destEp.decimals,
+      destFee: destEp.fee,
+    } : {}),
+    destNetwork: destEp.network,
+    amountIn: args.amountRaw,
+    expectedGross: toUnits(quoteRes.settleAmount, midEp.decimals),
+    // The end-state line is the plan's final leg net (the OUT asset's units) — the
+    // disclosure figure phase 2 re-derives on the venue's locked settle figure.
+    expectedNet: math2 != null ? math2.netOut : math1.netOut,
+    inFee: '0', // the deposit rail's fee is the transfer's own (solFeeLamports); no IC in-fee
+    outFee: destEp.fee,
+    slippageBps: args.slippageBps,
+    legs: [],
+    solanaLeg: {
+      protocol: 'solana',
+      signedTxHex: depositLeg.signedTxHex,
+      signature: depositLeg.signature,
+      lastValidBlockHeight: depositLeg.lastValidBlockHeight,
+    },
+    ...(depositLeg.feeLamports != null ? {solFeeLamports: depositLeg.feeLamports} : {}),
+    destAddress: args.settleAddressIc,
+    destSymbol: destEp.symbol,
+    providerRef: {
+      orderId,
+      statusUrl: cefiFamilyOf(cefiVenue) === 'trocador'
+        ? trocadorStatusUrl(args.relayUrl, orderId)
+        : sideShiftStatusUrl(orderId),
+      ...(relayOrderId != null ? {relayOrderId} : {}),
+    },
+    chainRoute,
   };
 }
