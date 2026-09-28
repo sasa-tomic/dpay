@@ -97,6 +97,13 @@ try {
     await sleep(300);
     await shot(`locale-${tag}-light-pay-armed`);
 
+    // The RECEIVE toggle: the third G4 wrap fix lives here (de 'Anfordern'), and only this face
+    // shows it. Same send-capable selection as the pay shots.
+    await driver.click('tab-receive', {timeoutMs: 4_000});
+    await driver.findByTestID('receive-mode-toggle', {timeoutMs: 8_000});
+    await sleep(300);
+    await shot(`locale-${tag}-light-receive`);
+
     await driver.click('tab-home', {timeoutMs: 4_000});
     await driver.click('home-hist-row-0', {timeoutMs: 4_000});
     await driver.findByTestID('txn-receipt', {timeoutMs: 4_000});

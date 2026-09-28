@@ -215,7 +215,7 @@ export const convertDe: ConvertMessages = {
     failedLegTitle: 'Der Auszahlungsschritt wurde abgelehnt',
     failedLegBody: (sym, reason) =>
       `Der Tausch ist durch — deine Mittel liegen als ${sym} in dieser Wallet, nichts verloren und nichts blockiert. Die Auszahlung wurde abgelehnt${reason ? `: ${reason}` : ''}.`,
-    failedLegExit: 'Zum Auszahlen öffne Bezahlen, wähle An Adresse senden und füge eine beliebige Ziel-Adresse ein — der Auszahlungsschritt läuft von dort.',
+    failedLegExit: 'Zum Auszahlen öffne Bezahlen, wähle Adresse senden und füge eine beliebige Ziel-Adresse ein — der Auszahlungsschritt läuft von dort.',
     stuckRouteBody: 'Ein Schritt wurde gesendet, aber sein Ergebnis ist noch unbekannt. dpay beobachtet die Ledgers weiter im Hintergrund — sobald die Auszahlung oder Rückerstattung ankommt, wechselt dieser Bildschirm von selbst.',
     failedHop2Title: 'Der zweite Tausch wurde abgelehnt',
     failedHop2Body: (hubSym, outSym, reason) =>
