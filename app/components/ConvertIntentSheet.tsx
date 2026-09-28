@@ -1579,12 +1579,19 @@ export function ConvertIntentSheet({
                         ? M.convert.sol.counterparty(venueDisplayName(ammRow.venue.venue_id))
                         : composedRow != null
                           ? M.convert.counterparty(venueDisplayName(composedRow.route.legs[0]!.venueId))
-                          : counterVenueId != null ? M.convert.counterparty(venueDisplayName(counterVenueId))
-                          : ''}
+                          : chainRow != null
+                            ? M.convert.counterparty(venueDisplayName(chainRow.route.legs[0]!.venueId))
+                            : counterVenueId != null ? M.convert.counterparty(venueDisplayName(counterVenueId))
+                            : ''}
                   </Text>
                   {composedRow != null ? (
                     <Text style={S.convertChecklistLine}>
                       {M.convert.cefi.counterparty(venueDisplayName(composedRow.route.cefiVenueId))}
+                    </Text>
+                  ) : null}
+                  {chainRow != null ? (
+                    <Text style={S.convertChecklistLine}>
+                      {M.convert.cefi.counterparty(venueDisplayName(chainRow.route.cefiVenueId))}
                     </Text>
                   ) : null}
                   {/* The pool/endpoint principal renders only when THIS venue's own number
@@ -1594,6 +1601,9 @@ export function ConvertIntentSheet({
                   ) : null}
                   {composedRow != null && activeComposed != null ? (
                     <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeComposed.q1.pool}</Text>
+                  ) : null}
+                  {chainRow != null && activeChain != null ? (
+                    <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeChain.q1.pool}</Text>
                   ) : null}
                   {!cefiMode && ammRow != null ? (
                     <Text testID="convert-pool-principal" style={S.convertPrincipal}>{ammRow.venue.endpoint}</Text>
@@ -1622,6 +1632,11 @@ export function ConvertIntentSheet({
               {composedRow != null && activeComposed != null ? (
                 <Text testID="convert-pool-fee" style={S.convertChecklistLine}>
                   {M.convert.poolFeeTier(formatMillionthsPct(activeComposed.q1.feeMillionths), venueDisplayName(activeComposed.q1.venueId))}
+                </Text>
+              ) : null}
+              {chainRow != null && activeChain != null ? (
+                <Text testID="convert-pool-fee" style={S.convertChecklistLine}>
+                  {M.convert.poolFeeTier(formatMillionthsPct(activeChain.q1.feeMillionths), venueDisplayName(activeChain.q1.venueId))}
                 </Text>
               ) : null}
               {math != null ? (
