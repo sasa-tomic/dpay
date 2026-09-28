@@ -325,6 +325,12 @@ async function spawnOnce(opts = {}) {
     // can never leak into the harness relay.
     DPAY_TROCADOR_API_KEY: 'e2e-stub-trocador-key',
     DPAY_TROCADOR_API_BASE: `http://127.0.0.1:${port}/api/v1/test/trocador-upstream`,
+    // The partner-agreement's 60s/trade-id upstream status window stood DOWN for the stub
+    // world (2026-09-28): the offline venue has no partner budget to protect, and the
+    // window was pacing every cefi lifecycle transition at ~55s (the app's engine honestly
+    // waits out the 429 Retry-After). The knob is test-helpers-only relay-side, so prod
+    // keeps the promise by construction. Same deliberate-per-spawn rule as the block above.
+    DPAY_TROCADOR_STATUS_SPACING_SECS: '0',
     // Flow 185/186/189 (2026-09-16): the Jupiter proxy's upstream — the relay's own
     // test-helpers stub on this same server (keyless venue, so no credential vars). Same
     // deliberate-per-spawn rule as the two blocks above: named HERE so a shell-exported

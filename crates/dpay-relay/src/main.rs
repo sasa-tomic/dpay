@@ -189,8 +189,12 @@
 //!                           refuses startup (EXIT_CONFIG).
 //!   DPAY_TROCADOR_TRADE_PER_MIN  the per-client per-minute bound on POST
 //!                           /api/v1/trocador/trade (default 4). Same rules as the rate
-//!                           bound above. The STATUS read has NO knob: at most one upstream
-//!                           read per trade per 60s is the signed promise itself.
+//!                           bound above.
+//!   DPAY_TROCADOR_STATUS_SPACING_SECS  the upstream status-read spacing in seconds —
+//!                           READ ONLY IN test-helpers BUILDS (the offline dev loop; the
+//!                           e2e harness sets 0). A prod binary never consults this env:
+//!                           at most one upstream read per trade per 60s is the signed
+//!                           promise itself, and there it is a compile-time property.
 
 use std::net::SocketAddr;
 use std::process;
@@ -322,6 +326,7 @@ async fn main() {
             trust_proxy: cfg.trust_proxy,
             rate_per_min: cfg.trocador_rate_per_min,
             trade_per_min: cfg.trocador_trade_per_min,
+            status_spacing_secs: cfg.trocador_status_spacing_secs,
         },
     )
     .await
@@ -680,6 +685,11 @@ struct Config {
     trocador_rate_per_min: u32,
     /// The per-client trade-creation bound (`DPAY_TROCADOR_TRADE_PER_MIN`, default 4).
     trocador_trade_per_min: u32,
+    /// The upstream status-read spacing in seconds. The promise's 60 — the ONLY smaller
+    /// value comes from `DPAY_TROCADOR_STATUS_SPACING_SECS`, read under
+    /// `#[cfg(feature = "test-helpers")]` alone (the offline stub world stands it down;
+    /// a prod binary cannot, by construction). See `src/trocador_agreement.rs` §3.
+    trocador_status_spacing_secs: u64,
 }
 
 impl Config {
@@ -959,6 +969,21 @@ impl Config {
             parse_per_min("DPAY_TROCADOR_RATE_PER_MIN", dpay_relay::trocador_agreement::DEFAULT_RATE_PER_MIN)?;
         let trocador_trade_per_min =
             parse_per_min("DPAY_TROCADOR_TRADE_PER_MIN", dpay_relay::trocador_agreement::DEFAULT_TRADE_PER_MIN)?;
+        // The upstream status-read spacing (module doc §3): the promise's 60 s, except in
+        // the offline test world — where the stub venue has no partner budget to protect
+        // and the e2e cefi flows were paying ~55 s per lifecycle transition waiting out the
+        // 429 Retry-After. Feature-gated on purpose: a prod binary (no test-helpers) never
+        // consults the env, so the promise is a compile-time property there. Zero is LEGAL
+        // here (that is the point: never throttle) — unlike the per-min bounds above.
+        #[cfg(feature = "test-helpers")]
+        let trocador_status_spacing_secs: u64 = match non_empty("DPAY_TROCADOR_STATUS_SPACING_SECS") {
+            Some(raw) => raw.parse().map_err(|_| {
+                format!("DPAY_TROCADOR_STATUS_SPACING_SECS={raw:?} is not a non-negative integer (seconds)")
+            })?,
+            None => dpay_relay::trocador_agreement::STATUS_SPACING_SECS,
+        };
+        #[cfg(not(feature = "test-helpers"))]
+        let trocador_status_spacing_secs: u64 = dpay_relay::trocador_agreement::STATUS_SPACING_SECS;
 
         Ok(Config {
             addr,
@@ -982,6 +1007,7 @@ impl Config {
             trust_proxy,
             trocador_rate_per_min,
             trocador_trade_per_min,
+            trocador_status_spacing_secs,
         })
     }
 }
