@@ -32,6 +32,7 @@
 // regenerates FLOWS.md from it.
 import os from 'node:os';
 import fs from 'node:fs';
+import { dirname, join } from 'node:path';
 import { stopSession, killTrackedChildren, _testCtx, dumpDiagnosticsFor, laneBrowser, primeBrowserShards } from './harness/lib.mjs';
 import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
 import { PROFILING, profileSnapshot, profileOpTotals, profilePhaseTotals } from './harness/profile.mjs';
@@ -319,6 +320,54 @@ async function runPool(tests, concurrency, timeoutScale, shards = 1) {
 }
 
 /**
+ * Per-flow duration history for LONGEST-FIRST scheduling (LPT): the pool's wall time is bounded by
+ * the makespan, and the classic minimizer is to start the longest jobs first — otherwise the one
+ * 136s flow (198, pinned by the relay's 60s status-spacing agreement) starts mid-run and drags a
+ * single-lane tail minutes past the last short flow. The history is an EWMA of measured wall times
+ * persisted across runs (`.dev/e2e-flow-timing.json`, gitignored like the rest of .dev/); a flow
+ * with no history falls back to its `meta.timeoutMs` cap (corr ≈ 0.5 with actual duration — good
+ * enough to keep the heavy convert/withdraw flows at the head). Absent history AND cap → the
+ * default budget, so brand-new flows sort by size class rather than alphabetically.
+ */
+const TIMING_HISTORY_PATH = join(new URL('../..', import.meta.url).pathname, '.dev', 'e2e-flow-timing.json');
+const TIMING_EWMA_ALPHA = 0.3;
+
+function loadTimingHistory() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(TIMING_HISTORY_PATH, 'utf8'));
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch { return {}; }
+}
+
+function recordTimingHistory(results) {
+  try {
+    const hist = loadTimingHistory();
+    for (const [file, r] of results) {
+      if (typeof r?.ms !== 'number' || r.ms <= 0) continue;
+      const prev = hist[file]?.ewmaMs;
+      hist[file] = {
+        ewmaMs: prev == null ? r.ms : Math.round(prev * (1 - TIMING_EWMA_ALPHA) + r.ms * TIMING_EWMA_ALPHA),
+        runs: (hist[file]?.runs ?? 0) + 1,
+        lastMs: Math.round(r.ms),
+      };
+    }
+    fs.mkdirSync(dirname(TIMING_HISTORY_PATH), { recursive: true });
+    fs.writeFileSync(TIMING_HISTORY_PATH, JSON.stringify(hist));
+  } catch (e) {
+    console.error(`  (timing-history write failed: ${e instanceof Error ? e.message : e})`);
+  }
+}
+
+/** Longest-first ordering (LPT scheduling): start the expensive flows while every lane is free.
+ *  PURELY a schedule — it changes NO assertion, no lane count, no timeout; it only decides the
+ *  order tests START in, so no flow's result can depend on it beyond wall-clock contention. */
+function longestFirst(tests) {
+  const hist = loadTimingHistory();
+  const estimate = (t) => hist[t.file]?.ewmaMs ?? t.meta?.timeoutMs ?? FALLBACK_TIMEOUT_MS;
+  return [...tests].sort((a, b) => estimate(b) - estimate(a));
+}
+
+/**
  * Run a SUBSET of tests through the bounded-parallel pool, print the per-test summary + coverage
  * matrix for the subset, optionally tear down the shared session, and return the verdict. This is
  * the shared runner both `main()` (the all-flows `just e2e` entry) and `e2e/watch.mjs` (the long-
@@ -345,7 +394,8 @@ async function runPool(tests, concurrency, timeoutScale, shards = 1) {
  * `keepSession` is FALSE — a watch re-run of a single journey is not the full-suite gate, so the
  * signal doesn't apply there.
  */
-export async function runTestsSubset(tests, opts = {}) {
+export async function runTestsSubset(testsIn, opts = {}) {
+  let tests = testsIn;
   const startedAt = Date.now();
   const { concurrency: explicitConcurrency, timeoutScale: explicitScale, keepSession = false } = opts;
 
@@ -353,6 +403,11 @@ export async function runTestsSubset(tests, opts = {}) {
     ? { concurrency: explicitConcurrency, auto: false, load: hostLoadFactor() }
     : resolveConcurrency();
   const timeoutScale = explicitScale ?? resolveTimeoutScale(resolved.load, resolved.concurrency);
+
+  // Longest-first start order (makespan minimization): the heavy flows claim lanes while all lanes
+  // are free, instead of surfacing as a single-lane tail at the end. Pure re-ordering — same tests,
+  // same assertions, same timeouts.
+  tests = longestFirst(tests);
 
   // Publish the scale to the driver so a flow's INNER waits stretch with the host exactly as its
   // wall-clock budget does. Two notions of "how slow is this host" is how a loaded machine produced
@@ -367,7 +422,9 @@ export async function runTestsSubset(tests, opts = {}) {
 
   // Timing seam: testruns.py points DPAY_TESTRUNS_TIMING at a file; dump per-flow wall
   // times so `just timing e2e` shows exactly where the suite's time went. Best-effort —
-  // a dump failure must never affect the run itself.
+  // a dump failure must never affect the run itself. The same measurements also feed the
+  // cross-run EWMA history the longest-first scheduler reads on the next run.
+  recordTimingHistory(results);
   const timingPath = process.env.DPAY_TESTRUNS_TIMING;
   if (timingPath) {
     try {

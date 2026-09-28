@@ -182,11 +182,26 @@ export async function laneBrowser(index) {
  * Launch every non-primary browser shard up front, concurrently, BEFORE the pool seeds — so a lane
  * never pays a mid-run launch and the map's check-then-set above stays single-threaded. Calling
  * this also publishes the shard count (setBrowserShards) in one step.
+ *
+ * The shard shells are session-INDEPENDENT (the chrome gate owns them; only their teardown hooks
+ * need the session), so they launch IN PARALLEL WITH the relay/web/primary-browser build instead
+ * of queued behind it: 3 extra shells ≈ 0.5s each used to serialize behind the ~3s session chain.
+ * Kicking getSession() first starts that build; each shard task awaits it only to register its
+ * stop hook (resolved by then — the launches take at least as long as the memo's await).
  */
 export async function primeBrowserShards(n) {
   setBrowserShards(n);
   if (n <= 1) return;
-  await Promise.all(Array.from({ length: n - 1 }, (_, k) => laneBrowser(k + 1)));
+  const sessionPromise = getSession(); // kick the shared build; shards overlap it
+  await Promise.all(Array.from({ length: n - 1 }, (_, k) => (async () => {
+    const shard = k + 1;
+    const stopShard = profSpan('session.shardLaunch');
+    const { browser, stop } = await Driver.launchBrowser({ shardId: shard });
+    stopShard();
+    _shardBrowsers.set(shard, browser);
+    (await sessionPromise).addStop(stop);
+    console.log(`[lib] headless browser shard #${shard + 1} launched (shared by its lanes; fresh context per test)`);
+  })()));
 }
 
 export async function getSession(opts = {}) {
@@ -209,39 +224,45 @@ export async function getSession(opts = {}) {
       await ensureWireLayout();
       const mode = resolveMode();
       let relayBaseURL = '';
+      let webBaseURL = '';
       const stops = [];
 
+      // The three session pieces are INDEPENDENT (the relay needs cargo, the web needs vite/sirv,
+      // the browser needs the chrome gate) — start them together and pay the max, not the sum.
+      // Measured 2026-09-28: relay build+spawn ~2.5s, web ~0.3s, primary browser ~0.5s → the old
+      // sequential chain charged ~3.3s of every run; overlapped it converges to the relay's ~2.5s.
+      // Failure semantics preserved: each rejection is captured, everything that DID start is
+      // stopped in reverse, and the FIRST error rethrows.
+      if (mode === 'live') {
+        const base = process.env.DPAY_E2E_BASE;
+        if (!base) throw new Error('DPAY_E2E_MODE=live requires DPAY_E2E_BASE=<url> (e.g. https://dpay.kalaj.org)');
+        console.log(`[lib] live mode — pointing app at ${base} (throttle + throwaway identity)`);
+      }
+      const spanned = (name, p) => {
+        const stop = profSpan(name);
+        return p.then((r) => { stop(); return r; }, (e) => { stop(); throw e; });
+      };
+      const relayTask = (mode !== 'live' && !opts.noRelay)
+        ? spanned('session.startRelay', startRelay())
+        : Promise.resolve(null);
+      const webTask = !opts.noWeb
+        ? spanned('session.buildWeb', buildWeb({ force: opts.rebuildWeb })).then((w) => spanned('session.serveWeb', serveWeb()))
+        : Promise.resolve(null);
+      const browserTask = spanned('session.browserLaunch', Driver.launchBrowser());
+
       try {
-        if (mode === 'live') {
-          const base = process.env.DPAY_E2E_BASE;
-          if (!base) throw new Error('DPAY_E2E_MODE=live requires DPAY_E2E_BASE=<url> (e.g. https://dpay.kalaj.org)');
-          relayBaseURL = base;
-          console.log(`[lib] live mode — pointing app at ${relayBaseURL} (throttle + throwaway identity)`);
-        } else if (!opts.noRelay) {
-          const stopRelay = profSpan('session.startRelay');
-          const relay = await startRelay();
-          stopRelay();
+        const [relay, web, launched] = await Promise.all([relayTask, webTask, browserTask]);
+        if (relay) {
           relayBaseURL = relay.baseURL;
           stops.push(relay.stop);
           console.log(`[lib] local relay up at ${relayBaseURL} (shared across tests)`);
         }
-
-        let webBaseURL = '';
-        if (!opts.noWeb) {
-          const stopBuild = profSpan('session.buildWeb');
-          await buildWeb({ force: opts.rebuildWeb });
-          stopBuild();
-          const stopServe = profSpan('session.serveWeb');
-          const web = await serveWeb();
-          stopServe();
+        if (web) {
           webBaseURL = web.baseURL;
           stops.push(web.stop);
           console.log(`[lib] web app served at ${webBaseURL} (shared across tests)`);
         }
-
-        const stopLaunch = profSpan('session.browserLaunch');
-        const { browser, stop: stopBrowser } = await Driver.launchBrowser();
-        stopLaunch();
+        const { browser, stop: stopBrowser } = launched;
         stops.push(stopBrowser);
         console.log('[lib] headless browser launched (shared across tests; fresh context per test)');
 
@@ -250,6 +271,11 @@ export async function getSession(opts = {}) {
         return { mode, relayBaseURL, webBaseURL, browser, addStop, stop };
       } catch (e) {
         for (const s of stops.slice().reverse()) { try { await s(); } catch {} }
+        // Everything still pending must not outlive the failed build: stop each piece best-effort
+        // through its own task's eventual result (the winner of the race may not be the failure).
+        for (const t of [relayTask, webTask, browserTask]) {
+          try { const r = await t; if (r?.stop) await r.stop().catch(() => {}); } catch {}
+        }
         throw e;
       }
     })();

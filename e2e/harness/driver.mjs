@@ -407,12 +407,26 @@ export class Driver {
     return this.page.url();
   }
 
-  /** Find an element by RN `testID` (RNW renders it as `data-testid`). Returns the ElementHandle. */
+  /** Find an element by RN `testID` (RNW renders it as `data-testid`). Returns the ElementHandle.
+   *
+   *  FAST PATH: `page.waitForSelector` resolves through an rAF-polled in-page predicate — on a page
+   *  whose main thread is busy (the app polls + re-renders every 150ms in this harness), the first
+   *  rAF tick can land 3-5 frames late, so the PRESENT case still cost ~70ms of wait machinery
+   *  (profiled 2026-09-28: 225 finds ≈ 28s of lane time across 7 flows). When the element is
+   *  already in the DOM, one `evaluateHandle(querySelector)` resolves it in a single roundtrip
+   *  (~10ms) — the exact same predicate `waitForSelector` polls, minus the polling. Absent → the
+   *  handle is null and we fall through to `waitForSelector` unchanged, because there the WAIT is
+   *  the point. */
   async findByTestID(testID, opts = {}) {
     this._recordTimeline('findByTestID', testID);
     const timeoutMs = scaled(opts.timeoutMs ?? 5_000);
+    const sel = `[data-testid="${cssEscape(testID)}"]`;
     try {
-      return await this.page.waitForSelector(`[data-testid="${cssEscape(testID)}"]`, { timeout: timeoutMs });
+      const probe = await this.page.evaluateHandle((s) => document.querySelector(s), sel);
+      const el = probe.asElement();
+      if (el) return el;
+      await probe.dispose().catch(() => {});
+      return await this.page.waitForSelector(sel, { timeout: timeoutMs });
     } catch (e) {
       throw new Error(`[driver] element testID=${testID} not visible within ${timeoutMs}ms: ${e instanceof Error ? e.message : e}`);
     }
@@ -427,6 +441,12 @@ export class Driver {
    *  resolves to false; every other error is rethrown loud with the waited-for text + cause. */
   async waitForText(text, opts = {}) {
     const timeoutMs = scaled(opts.timeoutMs ?? 5_000);
+    // Fast path: the text is ALREADY on the page (the common case for positive assertions) — one
+    // evaluate resolves it instead of arming the rAF-polled waitForFunction, whose first tick
+    // costs several frames on a busy page (same rationale as findByTestID's fast path).
+    try {
+      if (await this.page.evaluate((t) => (document.body?.innerText ?? '').includes(t), text)) return true;
+    } catch { /* fall through to the polled wait; its error handling is authoritative */ }
     try {
       await this.page.waitForFunction(
         (t) => (document.body?.innerText ?? '').includes(t),
@@ -465,12 +485,22 @@ export class Driver {
 
   /** Type a string into the input matched by `testID`. Clears it first via native `select()` so the
    *  typed text REPLACES the current value (reliable for RN-web controlled inputs, including the
-   *  pre-filled decimal amount field — triple-click + Backspace was racy and left partial values). */
+   *  pre-filled decimal amount field — triple-click + Backspace was racy and left partial values).
+   *
+   *  The keystrokes ride ONE CDP `Input.insertText` (puppeteer's `keyboard.sendCharacter`) instead
+   *  of a per-char `keyboard.type` stream. Per-char typing cost ~1-2s per call solo (measured
+   *  2026-09-28: 6 types ≈ 26s in flow 12): every keystroke is 2 protocol calls that each queue
+   *  behind a busy main thread, and each fires its own input event the controlled input re-renders
+   *  on. `insertText` is the browser's own paste/IME text insertion: a single trusted input event
+   *  carrying the whole string, replacing the selection — for a controlled RN-web TextInput the
+   *  final state is identical (one onChange with the full value), and no flow can observe the
+   *  difference (the driver's `type` is atomic from a flow's perspective; per-keystroke
+   *  intermediate states were never assertable through it). */
   async type(testID, text, opts = {}) {
     this._recordTimeline('type', `${testID}:${text}`);
     const el = await this.findByTestID(testID, opts);
     await el.focus();
-    // Select all current text so the subsequent keystrokes replace it (standard browser behavior).
+    // Select all current text so the inserted text replaces it (standard browser behavior).
     await el.evaluate((node) => {
       if (typeof node.select === 'function') node.select();
       else if (typeof node.setSelectionRange === 'function') node.setSelectionRange(0, (node.value ?? '').length);
@@ -478,7 +508,7 @@ export class Driver {
     // An EMPTY string means CLEAR, not "do nothing". Select-all followed by no keystroke leaves the
     // field exactly as it was, so `type(id, '')` used to be a silent no-op — a test could assert an
     // empty-value behaviour and never once empty the field. Backspace deletes the selection.
-    if (text) await el.type(text, { delay: 5 });
+    if (text) await this.page.keyboard.sendCharacter(text);
     else await this.page.keyboard.press('Backspace');
   }
 
@@ -503,7 +533,8 @@ export class Driver {
     // An EMPTY string means CLEAR, not "do nothing". Select-all followed by no keystroke leaves the
     // field exactly as it was, so `type(id, '')` used to be a silent no-op — a test could assert an
     // empty-value behaviour and never once empty the field. Backspace deletes the selection.
-    if (text) await el.type(text, { delay: 5 });
+    // The text rides one `Input.insertText` (see `type` for the per-char → single-event rationale).
+    if (text) await this.page.keyboard.sendCharacter(text);
     else await this.page.keyboard.press('Backspace');
   }
 
