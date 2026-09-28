@@ -421,9 +421,9 @@ function buildStyles(p: Palette) {
   convertVenueAmount: {fontSize: 14, color: p.sub, lineHeight: 20, marginTop: 4, fontFamily: FONT.sans, fontVariant: ['tabular-nums']},
   convertBtnBusyRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
   convertUnavailableTitle: {fontSize: 20, color: p.ink, fontFamily: FONT.sansBold, marginBottom: 8},
-  convertUnavailableBody: {fontSize: 14, color: p.sub, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},
+  convertUnavailableBody: {fontSize: 16, color: p.sub, lineHeight: 22, marginBottom: 8, fontFamily: FONT.sans},
   convertStateTitle: {fontSize: 20, color: p.ink, fontFamily: FONT.sansBold, marginBottom: 8, marginTop: 8},
-  convertStateBody: {fontSize: 14, color: p.sub, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},
+  convertStateBody: {fontSize: 16, color: p.sub, lineHeight: 22, marginBottom: 8, fontFamily: FONT.sans},
   convertStateMeta: {fontSize: 13, color: p.sub, lineHeight: 18, marginBottom: 8, fontFamily: FONT.sans},
   convertFooting: {alignItems: 'center', marginTop: 18},
   // Mode toggle - a joined two-segment pill control at the top of the Pay/Receive tab bodies:
@@ -726,7 +726,7 @@ function buildStyles(p: Palette) {
   assetGlyphLg: {alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: p.glyphBorderLg},
   assetGlyphText: {fontWeight: '700', fontFamily: FONT.sansBold},
   settingsSection: {alignSelf: 'stretch', marginBottom: 28},
-  relayInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 8, minHeight: 56, paddingHorizontal: 16, fontSize: 14, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
+  relayInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 8, minHeight: 56, paddingHorizontal: 16, fontSize: 15, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
   // Advanced relay section - the relay edit is demoted below consumer settings and applied
   // EXPLICITLY via the Apply button (no live retarget on each keystroke). `advancedLabel` is the
   // sentence-case section label shared with the other section headers; `applyBtn` is the
@@ -873,9 +873,9 @@ function buildStyles(p: Palette) {
   // the request/address toggle on BOTH rails' Receive surfaces.
   assetSwitchWrap: {alignSelf: 'stretch', alignItems: 'center', marginBottom: 10},
   assetSwitchBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: p.card},
-  assetSwitchText: {fontSize: 14, color: p.ink, fontFamily: FONT.sans},
+  assetSwitchText: {fontSize: 16, color: p.ink, fontFamily: FONT.sans},
   fundingProviderRow: {alignSelf: 'stretch', marginTop: 10},
-  fundingProviderName: {fontSize: 14, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
+  fundingProviderName: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
   fundingProviderCost: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 2, fontVariant: ['tabular-nums']},
   // The source domain: `sub` and not `sub2`, deliberately. It is the line that makes every figure
   // above it checkable, so it must clear AA like body text rather than sit in the section-label
@@ -889,7 +889,7 @@ function buildStyles(p: Palette) {
   // Testnet show/hide toggle at the bottom of the Balances sheet - a subtle secondary affordance
   // (never the primary action). Muted text; full-width 44pt touch target.
   testnetToggle: {marginTop: 18, minHeight: 44, justifyContent: 'center', alignItems: 'center', paddingVertical: 8},
-  testnetToggleText: {color: p.sub, fontWeight: '600', fontSize: 14, fontFamily: FONT.sansMedium},
+  testnetToggleText: {color: p.sub, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   // Withdraw sheet form fields.
   inputLabel: {fontSize: 13, fontWeight: '600', color: p.sub, alignSelf: 'flex-start', marginTop: 18, marginBottom: 6, fontFamily: FONT.sansMedium},
   withdrawAddrInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 8, height: 56, paddingHorizontal: 16, fontSize: 15, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
@@ -908,7 +908,7 @@ function buildStyles(p: Palette) {
   // tail is exactly what a user checks against the wallet they copied it from. minHeight keeps an
   // empty field the same size as the amount field beside it.
   addrRow: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'stretch', gap: 8},
-  addrInput: {flex: 1, backgroundColor: p.field, borderRadius: 8, minHeight: 56, paddingHorizontal: 16, paddingVertical: 14, fontSize: 14, lineHeight: 20, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
+  addrInput: {flex: 1, backgroundColor: p.field, borderRadius: 8, minHeight: 56, paddingHorizontal: 16, paddingVertical: 14, fontSize: 15, lineHeight: 21, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
   addrScanBtn: {width: 56, minHeight: 56, borderRadius: 8, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
   // The route disclosure line - neutral/informational, distinct from warnNote (amber) and err (red).
   routeNote: {fontSize: 13, color: p.sub, alignSelf: 'flex-start', marginTop: 8, lineHeight: 18, fontFamily: FONT.sans},
@@ -920,11 +920,11 @@ function buildStyles(p: Palette) {
   // sharing width with the rename/remove controls) and the inline rename input that replaces the
   // label while a rename is in flight - both reuse the saved-list visual language, no new one.
   savedAddrCol: {flex: 1, justifyContent: 'center'},
-  renameInput: {flex: 1, minHeight: 44, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, color: p.ink, fontSize: 14, fontFamily: FONT.sans},
+  renameInput: {flex: 1, minHeight: 44, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, color: p.ink, fontSize: 16, fontFamily: FONT.sans},
   // Amount row with the inline Max button.
   amtRow: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 8},
   maxBtn: {paddingHorizontal: 16, minHeight: 52, borderRadius: 8, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
-  maxBtnText: {fontSize: 14, fontWeight: '700', color: p.brandText, fontFamily: FONT.sansBold},
+  maxBtnText: {fontSize: 16, fontWeight: '700', color: p.brandText, fontFamily: FONT.sansBold},
   // Review card rows: label left, value right, so amount/fee/total align down the right edge.
   reviewRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6, gap: 12},
   reviewRowLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
@@ -983,7 +983,7 @@ function buildStyles(p: Palette) {
   walkReqEyebrow: {fontSize: 12, fontWeight: '600', color: p.sub2, fontFamily: FONT.sans},
   walkAssetRow: {flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7, marginTop: 6},
   walkAssetChip: {width: 34, height: 34, borderRadius: 8, borderWidth: 1, borderColor: p.glyphBorder, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
-  walkAssetChipText: {fontSize: 15, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
+  walkAssetChipText: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
   walkAssetName: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
   walkAssetSub: {fontSize: 11, color: p.sub2, marginTop: 2, fontFamily: FONT.sans},
   walkAssetAmt: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, marginLeft: 'auto', fontVariant: ['tabular-nums']},
@@ -994,7 +994,7 @@ function buildStyles(p: Palette) {
   // ─── Trip Ready J2B (2026-08-22): recovery ritual, rehearsal, first-use coaching ──────────
   // The backup screen's ownership line - the ritual sentence ABOVE the warning. Slightly larger
   // than the warning, ink (not warn-tinted): the moment reads as ownership first, risk second.
-  backupRitualNote: {fontSize: 15, color: p.ink, textAlign: 'center', marginTop: 6, marginBottom: 0, paddingHorizontal: 8, lineHeight: 21, fontFamily: FONT.sansMedium},
+  backupRitualNote: {fontSize: 16, color: p.ink, textAlign: 'center', marginTop: 8, marginBottom: 0, paddingHorizontal: 8, lineHeight: 22, fontFamily: FONT.sansMedium},
   // The RECOVERY SAVED chip (the post-faucet beat): a quiet brandText ring, sentence-case sans.
   stampChip: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 8, borderWidth: 1, borderColor: p.brandText, backgroundColor: 'transparent'},
   stampChipText: {color: p.brandText, fontFamily: FONT.sans, fontSize: 13, fontWeight: '600'},
@@ -1003,7 +1003,7 @@ function buildStyles(p: Palette) {
   // Field: full-bleed `brand`, `brandInk` type - the money-moved register from minute one.
   inkBeat: {flex: 1, backgroundColor: p.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36},
   inkStamp: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 8, borderWidth: 1.5, borderColor: p.brandInk},
-  inkStampText: {color: p.brandInk, fontFamily: FONT.sans, fontSize: 15, fontWeight: '600'},
+  inkStampText: {color: p.brandInk, fontFamily: FONT.sans, fontSize: 16, fontWeight: '600'},
   inkBeatLine: {color: p.brandInk, fontSize: 16, fontWeight: '600', textAlign: 'center', marginTop: 34, lineHeight: 22, fontFamily: FONT.sansMedium},
   inkBeatSub: {color: p.brandInk, fontSize: 13, textAlign: 'center', marginTop: 8, fontFamily: FONT.sans},
   // Rehearsal, re-paged to ONE screen (UX hardening 2026-08-23): scroll container + three
@@ -1013,8 +1013,8 @@ function buildStyles(p: Palette) {
   rehStep: {marginTop: 18},
   rehBadge: {alignSelf: 'flex-start', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 3, marginBottom: 7},
   rehBadgeText: {color: p.brandText, fontSize: 12, fontWeight: '600', fontFamily: FONT.sans},
-  rehStepTitle: {color: p.ink, fontSize: 17, fontWeight: '700', fontFamily: FONT.sansBold},
-  rehStepBody: {color: p.sub, fontSize: 14.5, lineHeight: 21, marginTop: 4, fontFamily: FONT.sans},
+  rehStepTitle: {color: p.ink, fontSize: 16, fontWeight: '700', fontFamily: FONT.sansBold},
+  rehStepBody: {color: p.sub, fontSize: 16, lineHeight: 22, marginTop: 4, fontFamily: FONT.sans},
   // CoachTip - the one-time contextual card. A quiet panel (not card: it sits ON the surface,
   // quieter than the QR card); icon chip echoes walkAssetChip so
   // the coaching voice matches the walkthrough's. NEVER fixed/overlay - inline, so it can never
@@ -1033,8 +1033,8 @@ function buildStyles(p: Palette) {
   // takeover. One flooded color per money event. A flat saturated instrument: no shadows, no
   // gradient, `brand2` hairline separators. Additive keys; components opt in by name.
   fieldRoot: {flexGrow: 1, backgroundColor: p.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 32},
-  fieldTitle: {fontSize: 34, fontWeight: '700', color: p.brandInk, fontFamily: FONT.sansBold, letterSpacing: -0.5, textAlign: 'center', fontVariant: ['tabular-nums']},
-  fieldBody: {fontSize: 15, color: p.brandInk, fontFamily: FONT.sans, textAlign: 'center', lineHeight: 22, marginTop: 8},
+  fieldTitle: {fontSize: 32, fontWeight: '700', color: p.brandInk, fontFamily: FONT.sansBold, letterSpacing: -0.5, textAlign: 'center', fontVariant: ['tabular-nums']},
+  fieldBody: {fontSize: 16, color: p.brandInk, fontFamily: FONT.sans, textAlign: 'center', lineHeight: 22, marginTop: 8},
   fieldRule: {alignSelf: 'stretch', height: 1, backgroundColor: p.brand2, marginVertical: 18},
   fieldAction: {alignSelf: 'stretch', minHeight: 52, borderRadius: 8, borderWidth: 1, borderColor: withAlpha(p.brandInk, 0.45), alignItems: 'center', justifyContent: 'center', marginTop: 16},
   fieldActionText: {color: p.brandInk, fontSize: 16, fontWeight: '700', fontFamily: FONT.sansBold},
@@ -1049,16 +1049,16 @@ function buildStyles(p: Palette) {
   // The target line: ONE tappable row naming the currency the conversion lands in (the
   // optional decision). A 44-tall pill row so the touch floor holds without extra chrome.
   targetLine: {flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, alignSelf: 'flex-start'},
-  targetLineName: {fontSize: 17, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1},
+  targetLineName: {fontSize: 16, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1},
   // Sibling currency chips: small pills in one wrap row (999/h44), 6px gaps, the active
   // currency absent (it IS the line).
-  chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8},
+  chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8},
   chip: {paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, minHeight: 44, alignItems: 'center', justifyContent: 'center'},
   chipOn: {borderColor: p.brand, backgroundColor: p.brand},
   chipText: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
   chipTextOn: {color: p.brandInk, fontFamily: FONT.sansBold},
   // The preset row (25% / 50% / Max) rides under the amount field: same pill grammar, 8px top.
-  presetRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8},
+  presetRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8},
   // The review card is the sheet's whole body: what moves, what lands, whose numbers they are.
   intentCard: {backgroundColor: p.panel2, borderRadius: 12, padding: 16, alignSelf: 'stretch', marginTop: 16},
   reviewPairRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, alignSelf: 'stretch'},
@@ -1066,25 +1066,25 @@ function buildStyles(p: Palette) {
   reviewConvertAmount: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.4, textAlign: 'right', flexShrink: 1, fontVariant: ['tabular-nums']},
   reviewArrow: {fontSize: 20, color: p.sub2, textAlign: 'center', marginTop: 2, fontFamily: FONT.sans},
   reviewReceiveRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, alignSelf: 'stretch', marginTop: 10},
-  reviewReceiveAmount: {fontSize: 34, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.6, textAlign: 'right', flexShrink: 1, fontVariant: ['tabular-nums']},
+  reviewReceiveAmount: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.4, textAlign: 'right', flexShrink: 1, fontVariant: ['tabular-nums']},
   // The mechanical venue-pick disclosure + attribution: quiet meta lines under the figure.
   reviewMeta: {fontSize: 12, color: p.sub2, fontFamily: FONT.sans, marginTop: 8},
   // The quote-moved note at re-arm: warn is the traffic-light for "look again", on its own line.
-  movedNote: {fontSize: 13, color: p.warn, lineHeight: 19, marginTop: 10, fontFamily: FONT.sansMedium},
+  movedNote: {fontSize: 13, color: p.warn, lineHeight: 20, marginTop: 8, fontFamily: FONT.sansMedium},
   // The Other-venues expander row: a quiet full-width disclosure control (the Details grammar).
   venuesToggle: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'stretch', minHeight: 44, marginTop: 12},
   venuesToggleText: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, flexShrink: 1},
   venuesList: {alignSelf: 'stretch', marginTop: 4},
   // Settlement Field in-flight tracker rows: brandInk text, brand2 separators, no shadows.
-  fieldLegRow: {alignSelf: 'stretch', paddingVertical: 10, borderTopWidth: 1, borderTopColor: p.brand2},
-  fieldLegLabel: {fontSize: 15, color: p.brandInk, fontFamily: FONT.sans, lineHeight: 21},
-  fieldLegState: {fontSize: 13, color: p.brandInk, fontFamily: FONT.sans, opacity: 0.85, marginTop: 2},
+  fieldLegRow: {alignSelf: 'stretch', paddingVertical: 12, borderTopWidth: 1, borderTopColor: p.brand2},
+  fieldLegLabel: {fontSize: 16, color: p.brandInk, fontFamily: FONT.sans, lineHeight: 22},
+  fieldLegState: {fontSize: 13, color: p.brandInk, fontFamily: FONT.sans, opacity: 0.85, marginTop: 4},
   fieldTx: {fontSize: 12, color: p.brandInk, fontFamily: FONT.mono, textAlign: 'center', lineHeight: 18, marginTop: 8},
   fieldHeaderTitle: {flex: 1, fontSize: 22, fontWeight: '700', color: p.brandInk, fontFamily: FONT.sansBold, letterSpacing: -0.3},
-  fieldLegs: {alignSelf: 'stretch', marginTop: 18},
-  fieldLegStateBad: {fontSize: 13, color: p.brandInk, fontFamily: FONT.sansBold, opacity: 1, marginTop: 2, fontWeight: '700'},
+  fieldLegs: {alignSelf: 'stretch', marginTop: 16},
+  fieldLegStateBad: {fontSize: 13, color: p.brandInk, fontFamily: FONT.sansBold, opacity: 1, marginTop: 4, fontWeight: '700'},
   // The composed tracker's verbatim venue deposit address (mono, brandInk, wraps left-aligned).
-  fieldPrincipal: {fontSize: 12, color: p.brandInk, fontFamily: FONT.mono, lineHeight: 18, marginTop: 2, marginBottom: 6},
+  fieldPrincipal: {fontSize: 12, color: p.brandInk, fontFamily: FONT.mono, lineHeight: 18, marginTop: 4, marginBottom: 8},
   });
 }
 
