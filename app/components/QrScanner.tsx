@@ -4,6 +4,22 @@ import {Camera, useCameraDevice, useCameraPermission, useCodeScanner} from 'reac
 import {S} from '../styles';
 import {M} from '../i18n';
 
+/** The viewfinder's corner brackets - the ONE scan-instrument mark, shared by the idle Pay
+ *  instrument (PayMode) and the live camera box (below). Absolute geometry against the camBox;
+ *  theme-invariant aqua on the theme-invariant warm-black fill (contrast-gated). Overlaying the
+ *  LIVE camera too is deliberate: the box reads as one instrument through permission, camera and
+ *  rail - idle, armed, IC and SOL are the same mark (the uniform-surfaces rule). */
+export function ViewfinderBrackets() {
+  return (
+    <>
+      <View pointerEvents="none" style={[S.viewfinderCorner, S.viewfinderCornerTL]} />
+      <View pointerEvents="none" style={[S.viewfinderCorner, S.viewfinderCornerTR]} />
+      <View pointerEvents="none" style={[S.viewfinderCorner, S.viewfinderCornerBL]} />
+      <View pointerEvents="none" style={[S.viewfinderCorner, S.viewfinderCornerBR]} />
+    </>
+  );
+}
+
 /** Reusable camera scanner (permission + focus-aware). Fires onScan once per mount. */
 export function QrScanner({onScan}: {onScan: (v: string) => void}) {
   const {hasPermission, requestPermission} = useCameraPermission();
@@ -57,6 +73,8 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
           <Pressable testID="btn-allow-camera" style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel={M.pay.allowCameraScan} accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>{M.pay.allowCameraScan}</Text></Pressable>
         </Pressable>
       )}
+      {/* LAST child: the brackets must paint OVER the absoluteFill camera feed. */}
+      <ViewfinderBrackets />
     </View>
   );
 }

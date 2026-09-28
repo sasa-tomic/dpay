@@ -48,6 +48,9 @@ jest.mock('../services/rail', () => ({
 }));
 jest.mock('../components/QrScanner', () => ({
   QrScanner: (_props: {onScan: (raw: string) => void}) => null,
+  // The idle viewfinder's corner brackets live beside the camera module; the stub carries them
+  // as geometry-less nulls like the scanner itself.
+  ViewfinderBrackets: () => null,
 }));
 jest.mock('../components/NfcTap', () => ({
   NfcTap: (_props: {role: string}) => null,

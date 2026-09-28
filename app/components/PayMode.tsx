@@ -24,7 +24,7 @@ import {shareReceipt} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {NfcStatusRow} from './NfcStatusRow';
-import {QrScanner} from './QrScanner';
+import {QrScanner, ViewfinderBrackets} from './QrScanner';
 import {InstructionPanel} from './InstructionPanel';
 import {ModeToggle} from './ModeToggle';
 import {OcpAssetChoice} from './OcpAssetChoice';
@@ -1292,10 +1292,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   // after the Pay Now press), so the instrument carries its own.
   const idleViewfinder = (
     <View testID="pay-viewfinder" style={S.camBox}>
-      <View style={[S.viewfinderCorner, S.viewfinderCornerTL]} />
-      <View style={[S.viewfinderCorner, S.viewfinderCornerTR]} />
-      <View style={[S.viewfinderCorner, S.viewfinderCornerBL]} />
-      <View style={[S.viewfinderCorner, S.viewfinderCornerBR]} />
+      <ViewfinderBrackets />
       <View style={S.viewfinderCenter}>
         <IconScan size={32} color={DARK.brandText} />
         <Text style={S.camText}>{M.pay.pointCamera}</Text>

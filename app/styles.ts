@@ -281,7 +281,7 @@ function buildStyles(p: Palette) {
   // Cells 2..4: one full-height hairline divider each - a border that exists the whole way
   // (the "half-existing border" tell is a divider that stops short or doubles as a shadow).
   homeActionCell: {borderLeftWidth: 1, borderLeftColor: p.line2},
-  homeActionLabel: {fontSize: 12, color: p.ink, fontFamily: FONT.sansMedium, textAlign: 'center'},
+  homeActionLabel: {fontSize: 12, lineHeight: 16, minHeight: 32, color: p.ink, fontFamily: FONT.sansMedium, textAlign: 'center'},
   // Section header row: the label and its action share ONE row and ONE baseline; 44px keeps the
   // See-all tap target at the touch floor. 8px binds the row to its list (tight inner) before
   // the 24px section gap below (loose outer).
@@ -509,7 +509,10 @@ function buildStyles(p: Palette) {
   // with no resolvable width and it collapses to 0x0 (the 2026-08-14 SOL scan black-box bug -
   // camera mounted and live but invisible; gated on-device by `just campreview`).
   scanWrap: {alignSelf: 'stretch'},
-  camPlaceholder: {flex: 1, alignItems: 'center', justifyContent: 'center'},
+  // The placeholder fills the box; 24px keeps wrapped copy off the rounded edge (the armed
+  // pre-permission screen is the same instrument as idle - text that touches the frame is the
+  // "almost-aligned" tell the caliber exists to kill).
+  camPlaceholder: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24},
   // ── The Pay viewfinder instrument (CALIBER slice 1) ───────────────────────────────────────
   // The idle scan screen is no longer a floating button in a void: it renders the EXACT box the
   // camera will occupy - same construction as `camBox` (stretch + 1:1 + R_CARD + the same
