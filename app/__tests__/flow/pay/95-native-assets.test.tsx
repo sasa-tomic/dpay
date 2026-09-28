@@ -177,7 +177,8 @@ describe('flow 96 — ICP pay (camera-scan entry, one-press auto-sign)', () => {
     await m.driver.settleFrames(1);
     scanSeam()(requestQR);
     assert(await m.driver.waitForText('Paid', {timeoutMs: 12_000}), 'the camera path auto-signs');
-    assertIncludes(m.driver.bodyText(), '1.00000001 ICP', 'paid screen shows the total debited');
+    // The total (wire + fee) needs the async icrc1_fee round trip — WAIT for it.
+    assert(await m.driver.waitForText('1.00000001 ICP', {timeoutMs: 15_000}), 'paid screen shows the total debited');
     rec.restore();
 
     const calls = rec.calls().filter((u) => u.endsWith('/call'));
