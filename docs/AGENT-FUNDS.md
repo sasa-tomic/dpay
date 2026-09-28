@@ -70,6 +70,38 @@ The old recipe names (`just agent-balance`, `just agent-funds --seed`, `just age
 `just funds-reconcile`, …) are DELETED (2026-09-20) — no forwarding stubs remain. `just funds
 <subcommand>` above is the one way; every driver and doc has been repointed to it.
 
+## Agent fund leases (2026-09-29)
+
+The ledger records what money DID. A **lease** records who is ALLOWED to touch it and what they
+account for afterwards (founder directive: agents may draw on the float at any time, but no funds
+may ever be lost silently — CLAUDE.md float rules). One command surface, `just funds-agents`:
+
+    just funds-agents open    # declare BEFORE touching float: --agent <session-id> --mandate "…"
+                              # --cap-chf N [--claim WALLET/ASSET=AMOUNT]…  (0 cap = watch-only;
+                              # worktree/branch auto-detected; free text with shell
+                              # metacharacters goes via FUNDS_MANDATE=… / FUNDS_NOTE=…)
+    just funds-agents         # the report: every open lease (agent, worktree, branch, mandate,
+                              # cap, claims, age), per-lease claimed vs MEASURED vs ledger math,
+                              # every unaccounted delta as a loud LOSS line (exit 1), open-cap
+                              # exposure vs the CHF 25 ceiling, closed-lease loss history
+    just funds-agents close <id> [--note "…"]   # final holdings + reconciliation; exits 1 on any
+                                                # loss, but the close always lands (a lingering
+                                                # open lease hides exposure)
+
+`open` refuses a cap that would push total open exposure past the CHF 25 ceiling, and one agent
+cannot hold two open leases. A lease file is written once at open and only ever gains `events`
+(append-only, like the ledger — the ledger itself has no write path from here; movements still go
+through `just funds add`). Balances are measured through the same chain children `just funds`
+uses, and the ledger math mirrors `just funds reconcile` exactly, so the report can never
+disagree with the ledger.
+
+**Store: `<main checkout>/funds/leases/`, gitignored — deliberately.** Leases are transient
+per-host claims (open and closed within a session), while the ledger stays tracked; tracking
+leases would put commit noise on main and split the record across worktrees. The script resolves
+the MAIN checkout via `git worktree list` no matter which worktree it runs from, so every
+worktree sees ONE shared store and "which agent in which worktree uses funds" has a single
+answer. What survives in git is what must never be lost: the ledger, the registry, this doc.
+
 `just funds` is the one command a fresh session runs first: it prints every wallet the agent
 controls (from the committed `funds/wallets.json` registry), each wallet's ADDRESS, and every live
 balance measured at that moment. `just funds balance` remains the only balance statement for the IC

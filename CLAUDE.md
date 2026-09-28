@@ -199,6 +199,10 @@ mechanism is proven and a larger size is itself the thing under test.
   session claims completion. Never hand-edit the JSONL or the GENERATED doc tables (the
   testruns.py precedent: one interface). A session that moved float funds without ledger rows is
   INCOMPLETE.
+- **No agent moves float without an open fund lease (2026-09-29).** Declare `just funds-agents
+  open` (agent session id, worktree, mandate, CHF cap, claimed assets) BEFORE touching the float;
+  close with `just funds-agents close` (final holdings + reconciliation) when done. `just
+  funds-agents` names every unaccounted delta as a LOSS — losses are never silent.
 - **The wallet census is complete or the tooling is lying — hard rule (2026-09-20).** EVERY wallet
   AND derived address that holds or receives value MUST be registered in `funds/wallets.json` in
   the same session it is created or first used. `just funds` is the complete census: an address
