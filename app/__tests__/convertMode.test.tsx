@@ -1164,6 +1164,85 @@ describe('hub destination — the two-quote composed surface under the sheet (20
   const POOL1 = '65mrh-fqaaa-aaaar-qapoa-cai';
   const POOL2 = 'angxa-baaaa-aaaag-qcvnq-cai';
 
+  /** A CHAIN record at phase 2 (the any-pair widening): the record's in and hop both name
+   *  the mid asset (the phase-2 rewrite), so the leg labels + route title must read the
+   *  frozen plan's own ordered pairs instead. */
+  const chainScreenRecord = (over: Record<string, unknown>): ConvertRecord => ({
+    id: 'chain-screen', createdAtMs: 1_700_000_000_000, step: 'pending_withdrawal',
+    venueId: 'icpswap', inCurrency: 8, outCurrency: 7,
+    inLedger: ICP_LEDGER, hopLedger: ICP_LEDGER, outLedger: VCHF_LEDGER,
+    inSymbol: 'ICP', hopSymbol: 'ICP', outSymbol: 'VCHF',
+    inDecimals: 8, outDecimals: 8,
+    amountIn: '249980000', expectedGross: '499960000', expectedNet: '490000000',
+    inFee: '10000', outFee: '10000', slippageBps: 100,
+    legs: [
+      {canister: ICP_LEDGER, method: 'icrc2_approve', argHex: 'aa', envelopeHex: 'ee', requestIdHex: 'r1', expiresAtMs: 1},
+      {canister: POOL1, method: 'depositFromAndSwap', argHex: 'aa', envelopeHex: 'ee', requestIdHex: 'r2', expiresAtMs: 1},
+    ],
+    legPlan: [
+      {kind: 'approve', canister: ICP_LEDGER, fee: '10000', state: 'confirmed'},
+      {kind: 'swap', canister: POOL1, fee: '', state: 'sent'},
+    ],
+    destAddress: 'account-id-text', destSymbol: 'VCHF', destNetwork: 'Internet Computer',
+    chainRoute: {
+      venueId: 'sideshift-usdc', orderId: 'order-1',
+      depositAddress: '11111111111111111111111111111111',
+      amountDecimal: '1', amountRaw: '1000000',
+      settleAmountDecimal: '0.495', settleAmountRaw: '49500000',
+      icLegs: [{venueId: 'icpswap', pool: POOL1, fromLedger: ICP_LEDGER, toLedger: VCHF_LEDGER}],
+      icFromFees: ['10000'],
+    },
+    ...over,
+  } as never);
+
+  test('chain phase-2: route title + swap legs read the FROZEN plan pairs (never "ICP \u2192 ICP")', async () => {
+    const live = chainScreenRecord({});
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[live.id]: live});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-route-legs')).toBe(true);
+    // The title is the plan's own route, collapsed (the mid → dest hop pair).
+    expect(textOf(tree, 'convert-state')).toContain(
+      convertEn.multihop.routeHeadingCollapsed('ICP', 'VCHF', 'Internet Computer'));
+    // The swap leg names its OWN from→to from the frozen plan.
+    expect(textOf(tree, 'convert-leg-1')).toContain(convertEn.multihop.legSwap('ICPSwap', 'ICP', 'VCHF'));
+    expect(textOf(tree, 'convert-leg-1')).not.toContain('ICP \u2192 ICP');
+  });
+
+  test('chain phase-2 hub shape: both swap legs label their own plan pairs', async () => {
+    const CKUSDC_LEDGER = CATALOG.find(c => c.currency === 2)!.ledger!;
+    const live = chainScreenRecord({
+      venue2Id: 'icpswap-ckusdc',
+      outLedger: CKUSDC_LEDGER, outSymbol: 'USD', outCurrency: 2, hopSymbol: 'ICP',
+      legs: [
+        {canister: ICP_LEDGER, method: 'icrc2_approve', argHex: 'aa', envelopeHex: 'ee', requestIdHex: 'r1', expiresAtMs: 1},
+        {canister: POOL1, method: 'depositFromAndSwap', argHex: 'aa', envelopeHex: 'ee', requestIdHex: 'r2', expiresAtMs: 1},
+        {canister: CKUSDC_LEDGER, method: 'icrc2_approve', argHex: 'ab', envelopeHex: 'ef', requestIdHex: 'r3', expiresAtMs: 1},
+        {canister: POOL2, method: 'depositFromAndSwap', argHex: 'ab', envelopeHex: 'ef', requestIdHex: 'r4', expiresAtMs: 1},
+      ],
+      legPlan: [
+        {kind: 'approve', canister: ICP_LEDGER, fee: '10000', state: 'confirmed'},
+        {kind: 'swap', canister: POOL1, fee: '', state: 'confirmed'},
+        {kind: 'approve', canister: CKUSDC_LEDGER, fee: '10000', state: 'sent'},
+        {kind: 'swap', canister: POOL2, fee: '', state: 'pending'},
+      ],
+      chainRoute: {
+        venueId: 'sideshift-usdc', orderId: 'order-2',
+        depositAddress: '11111111111111111111111111111111',
+        amountDecimal: '1', amountRaw: '1000000',
+        settleAmountDecimal: '0.495', settleAmountRaw: '49500000',
+        icLegs: [
+          {venueId: 'icpswap', pool: POOL1, fromLedger: ICP_LEDGER, toLedger: CKUSDC_LEDGER},
+          {venueId: 'icpswap-ckusdc', pool: POOL2, fromLedger: CKUSDC_LEDGER, toLedger: VCHF_LEDGER},
+        ],
+        icFromFees: ['10000', '10000'],
+      },
+    });
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[live.id]: live});
+    const tree = await mountConvert('250000000', null);
+    expect(textOf(tree, 'convert-leg-1')).toContain(convertEn.multihop.legSwap('ICPSwap', 'ICP', 'USDC'));
+    expect(textOf(tree, 'convert-leg-3')).toContain(convertEn.multihop.legSwap(venueDisplayName('icpswap-ckusdc'), 'USDC', 'VCHF'));
+  });
+
   test('in-flight: four legs fully expanded, per-hop labels, top line tracks the current leg (D14/D15)', async () => {
     const live = hubScreenRecord({
       id: 'hub-live',

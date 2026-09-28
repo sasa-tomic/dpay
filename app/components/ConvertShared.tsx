@@ -344,7 +344,31 @@ export function formatBps(bps: number): string {
  *  USDC on Ethereum" duplicated the symbol and hung a delivery network off what reads like a
  *  receipt. Say the through-route and the landing place instead. Hub records never route here:
  *  their header is the plain selection heading, decided at the call site. */
+/** An IC ledger's registry symbol — the chain phase-2 labels read the FROZEN plan's own
+ *  ordered pairs, because the record's rewritten in/hop fields both name the mid asset
+ *  (a 1-leg chain would render "Route: ICP → ICP → VCHF"). Registry-keyed, ledger fallback. */
+let CHAIN_LEDGER_SYMBOLS: Map<string, string> | null = null;
+function chainLedgerSymbol(ledger: string): string {
+  if (CHAIN_LEDGER_SYMBOLS == null) {
+    CHAIN_LEDGER_SYMBOLS = new Map();
+    for (const c of icpCatalogOf(BUNDLED_NETWORKS)) {
+      CHAIN_LEDGER_SYMBOLS.set(c.ledger, c.backing_symbol ?? c.symbol ?? c.ledger);
+    }
+  }
+  return CHAIN_LEDGER_SYMBOLS.get(ledger) ?? ledger;
+}
+
 export function routeTitleOf(record: ConvertRecord, hopSymbol: string, destSymbol: string): string {
+  if (record.chainRoute != null && record.chainRoute.icLegs.length > 0) {
+    // The chain's remaining IC route, verbatim from the frozen plan (the deposit leg has
+    // its own narration block): mid → [hub →] dest. A degenerate pair never renders.
+    const path = [record.chainRoute.icLegs[0]!.fromLedger,
+      ...record.chainRoute.icLegs.map(l => l.toLedger)].map(chainLedgerSymbol)
+      .filter((sym, i, a) => i === 0 || sym !== a[i - 1]!);
+    const network = record.destNetwork ?? '';
+    if (path.length === 2) return M.convert.multihop.routeHeadingCollapsed(path[0]!, path[1]!, network);
+    return M.convert.multihop.routeHeading(path[0]!, path[1]!, path[path.length - 1]!, network);
+  }
   return hopSymbol === destSymbol
     ? M.convert.multihop.routeHeadingCollapsed(record.inSymbol, hopSymbol, record.destNetwork ?? '')
     : M.convert.multihop.routeHeading(record.inSymbol, hopSymbol, destSymbol, record.destNetwork ?? '');
@@ -370,6 +394,15 @@ export function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister:
     return lp.state === 'pending'
       ? M.convert.depositLegPending(venueDisplayName(dep?.venueId ?? record.venueId), amt)
       : M.convert.depositLegSent(venueDisplayName(dep?.venueId ?? record.venueId), amt);
+  }
+  if (lp.kind === 'swap' && record.chainRoute != null
+    && record.chainRoute.icLegs[swapOrdinal] != null) {
+    // The chain's swap leg names ITS OWN frozen pair (a 1-leg chain's in and hop both
+    // name the mid asset — the generic read below would render "Swap ICP → ICP").
+    return M.convert.multihop.legSwap(
+      venueName,
+      chainLedgerSymbol(record.chainRoute.icLegs[swapOrdinal]!.fromLedger),
+      chainLedgerSymbol(record.chainRoute.icLegs[swapOrdinal]!.toLedger));
   }
   if (lp.kind === 'swap') {
     // Hub records run TWO swap legs (D14, same leg vocabulary parameterised per hop):
