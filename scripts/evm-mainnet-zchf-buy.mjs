@@ -47,31 +47,57 @@ function railKey() {
   return kp; // {privateKeyHex, address}
 }
 
-/** encodeExactOutputSingle(params tuple) calldata (SwapRouter02). */
+/** encodeExactOutputSingle(params tuple) calldata — SwapRouter02's IV3SwapRouter shape:
+ *  SEVEN fields, NO deadline (SwapRouter02 moved expiry to the multicall(uint256,bytes[])
+ *  overload; encoding the V3-router 8-field shape reverts in ABI decode — the first live
+ *  attempt's revert). */
 function encodeExactOutputSingle(p) {
-  // exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))
-  const head = selector('exactOutputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))');
+  // exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))
+  const head = selector('exactOutputSingle((address,address,uint24,address,uint256,uint256,uint160))');
   return head
     + addressWord(p.tokenIn).toString('hex') + addressWord(p.tokenOut).toString('hex')
     + word32BE(p.fee).toString('hex') + addressWord(p.recipient).toString('hex')
-    + word32BE(p.deadline).toString('hex') + word32BE(p.amountOut).toString('hex')
-    + word32BE(p.amountInMaximum).toString('hex') + word32BE(p.sqrtPriceLimitX96).toString('hex');
+    + word32BE(p.amountOut).toString('hex') + word32BE(p.amountInMaximum).toString('hex')
+    + word32BE(p.sqrtPriceLimitX96).toString('hex');
 }
 
-/** multicall(bytes[]) over the given subcalls (SwapRouter02). */
-function encodeMulticall(subcallsHex) {
-  const head = selector('multicall(bytes[])');
-  const data = subcallsHex.map((s) => s.replace(/^0x/, '')).join('');
-  // offset 0x20 (64 hex chars), bytes length (64), payload padded to 32
-  const offset = BigInt(32).toString(16).padStart(64, '0');
-  const lenBytes = BigInt(data.length / 2).toString(16).padStart(64, '0');
-  const padLen = Math.ceil(data.length / 64) * 64;
-  const payload = (data + '0'.repeat(padLen - data.length));
-  return '0x' + head + offset + lenBytes + payload;
+/** multicall over the given subcalls (SwapRouter02). CORRECT bytes[] ABI: each element carries
+ *  its own offset + length words — the staged encoder concatenated subcalls bare, which decodes
+ *  as a nonsense element count and reverts (every attempt's revert, incl. the first broadcast).
+ *  The deadline overload multicall(uint256,bytes[]) keeps the trade from executing stale. */
+function encodeMulticall(subcallsHex, deadline) {
+  const head = selector('multicall(uint256,bytes[])');
+  const elems = subcallsHex.map((s) => {
+    const h = s.replace(/^0x/, '');
+    const padLen = Math.ceil(h.length / 64) * 64;
+    return word32BE(BigInt(h.length / 2)).toString('hex') + (h + '0'.repeat(padLen - h.length));
+  });
+  // args: [deadline][bytes[] @0x40] → arrayLen → per-element: [offset relative to arrayLen][len][data][pad]
+  // Offsets are BYTE values relative to the arrayLen word: elem_i sits at 32*n + the full
+  // (32-byte length word + padded data) blocks of every earlier element.
+  const elemOffsets = [];
+  let acc = elems.length * 32;
+  for (const e of elems) { elemOffsets.push(word32BE(BigInt(acc)).toString('hex')); acc += e.length / 2; }
+  return head
+    + word32BE(deadline).toString('hex')
+    + word32BE(64).toString('hex')
+    + word32BE(elems.length).toString('hex')
+    + elemOffsets.join('') + elems.join('');
 }
 
-const encodeRefundEth = () => '0x' + selector('refundETH()');
-const encodeQuoteExactOutputSingle = encodeExactOutputSingle; // QuoterV2 takes the SAME tuple shape
+/** QuoterV2's quoteExactOutputSingle(QuoteExactOutputSingleParams) calldata — the QUOTER's own
+ *  5-field tuple (tokenIn, tokenOut, amountOut, fee, sqrtPriceLimitX96). The ROUTER's
+ *  exactOutputSingle tuple (8 fields, recipient/deadline/maxIn) REVERTS here — the staged
+ *  script's first live run exposed it (free eth_call, zero gas burned). */
+function encodeQuoteExactOutputSingle(p) {
+  const head = selector('quoteExactOutputSingle((address,address,uint256,uint24,uint160))');
+  return head
+    + addressWord(p.tokenIn).toString('hex') + addressWord(p.tokenOut).toString('hex')
+    + word32BE(p.amountOut).toString('hex') + word32BE(p.fee).toString('hex')
+    + word32BE(p.sqrtPriceLimitX96).toString('hex');
+}
+
+const encodeRefundEth = () => selector('refundETH()');
 
 let pipe = null;
 try {
@@ -97,8 +123,8 @@ try {
   const amountOut = BigInt(Math.round(Number(zchfOut) * 1e6)) * 10n ** 12n; // decimal → 18 raw
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
   const quoteData = encodeQuoteExactOutputSingle({
-    tokenIn: WETH, tokenOut: ZCHF_ETH, fee: POOL_FEE, recipient: rail.address,
-    deadline, amountOut, amountInMaximum: 0n, sqrtPriceLimitX96: 0n,
+    tokenIn: WETH, tokenOut: ZCHF_ETH, fee: POOL_FEE,
+    amountOut, sqrtPriceLimitX96: 0n,
   });
   const qRaw = await ethCall(pipe, QUOTER, quoteData, {timeoutMs: 30_000});
   // QuoterV2 returns (uint256 amountIn, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)
@@ -107,41 +133,63 @@ try {
   const amountInMaximum = amountIn * SLIPPAGE_NUM / 100n;
   console.log(`[buy] quote: ${zchfOut} ZCHF ← ${Number(amountIn) / 1e18} ETH (max ${Number(amountInMaximum) / 1e18}, router gas ≈ ${gasEstimate})`);
   assert(amountIn > 0n, 'quoter returned zero — no liquidity in the ZCHF/WETH pool?');
-  assert(ethWei - amountInMaximum > MIN_GAS_DUST + GAS_LIMIT * (baseFee * 2n + TIP_GWEI),
-    `buy would leave < gas dust: ETH ${ethWei}, max-in ${amountInMaximum} — shrink the size`);
+  assert(ethWei - amountInMaximum > MIN_GAS_DUST + 240_000n * (baseFee * 2n + TIP_GWEI),
+    `buy would leave < gas dust (4 rail txs): ETH ${ethWei}, max-in ${amountInMaximum} — shrink the size`);
 
-  // 4. sign + broadcast multicall(exactOutputSingle, refundETH) THROUGH the pipe
+  // 4. THE REALITY OF SwapRouter02 (source: Uniswap/swap-router-contracts V3SwapRouter.sol):
+  // exactOutputSingle carries payer: msg.sender — the router pulls WETH FROM THE USER, and
+  // wrapETH() mints to the ROUTER (the wrap-then-swap one-tx pattern belongs to the Universal
+  // Router, not this contract). So the honest mainnet flow is FOUR rail-signed txs, all through
+  // the pipe: WETH.deposit(max) → WETH.approve(router, max) → multicall(deadline,
+  // [exactOutputSingle]) → WETH.withdraw(leftover) (sweeps the unused headroom back to ETH).
+  const maxFeePerGas = baseFee * 4n + TIP_GWEI;
+  const railTxs = [];
+  let nonceSeq = nonce; // local sequential counter — every tx waits for its receipt, so exact
+  const sendTx = async (label, gasLimit, to, value, data) => {
+    const txNonce = nonceSeq++;
+    const {rawTx, txHash} = signEip1559({
+      privHex: rail.privateKeyHex, chainId: CHAIN_ID, nonce: txNonce,
+      maxFeePerGas, maxPriorityFeePerGas: TIP_GWEI, gasLimit, to, value, data,
+    });
+    const t0 = Date.now();
+    await sendRawRpc(pipe, rawTx, {timeoutMs: 30_000});
+    let receipt = null;
+    for (;;) {
+      receipt = await rpc(pipe, 'eth_getTransactionReceipt', [txHash], {timeoutMs: 20_000}).catch(() => null);
+      if (receipt != null) break;
+      if (Date.now() - t0 > 180_000) throw new Error(`${label}: receipt for ${txHash} never landed in 180s — record as unknown, DO NOT re-broadcast`);
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+    const gasUsed = BigInt(receipt.gasUsed);
+    const effectiveGasPrice = BigInt(receipt.effectiveGasPrice ?? maxFeePerGas);
+    const status = BigInt(receipt.status);
+    console.log(`[buy] ${label}: status ${status} · gas ${gasUsed} @ ${gwei(effectiveGasPrice)} · ${Date.now() - t0}ms · ${txHash}`);
+    railTxs.push({label, tx: txHash, status, gasUsed, effectiveGasPrice, blockNumber: receipt.blockNumber});
+    if (status !== 1n) {
+      console.error(JSON.stringify({stage: label, tx: txHash, status: 'REVERTED', gasBurnedWei: (gasUsed * effectiveGasPrice).toString()}, null, 2));
+      process.exit(2); // the CALLER ledgers the burned gas — never a silent retry
+    }
+    return receipt;
+  };
+
+  // 4a. wrap: WETH.deposit{value: amountInMaximum} (selector 0xd0e30db0, no args)
+  await sendTx('deposit', 80_000n, WETH, amountInMaximum, selector('deposit()'));
+  // 4b. least-authority approval: WETH.approve(router, amountInMaximum) (0x095ea7b3)
+  await sendTx('approve', 80_000n, WETH, 0n,
+    '0x' + selector('approve(address,uint256)').replace(/^0x/, '')
+    + addressWord(ROUTER).toString('hex') + word32BE(amountInMaximum).toString('hex'));
+  // 4c. the swap: multicall(deadline, [exactOutputSingle]) — msg.value 0, WETH comes from the rail
   const callData = encodeMulticall([
     encodeExactOutputSingle({
       tokenIn: WETH, tokenOut: ZCHF_ETH, fee: POOL_FEE, recipient: rail.address,
-      deadline, amountOut, amountInMaximum, sqrtPriceLimitX96: 0n,
+      amountOut, amountInMaximum, sqrtPriceLimitX96: 0n,
     }),
-    encodeRefundEth(),
-  ]);
-  const maxFeePerGas = baseFee * 4n + TIP_GWEI;
-  const {rawTx, txHash} = signEip1559({
-    privHex: rail.privateKeyHex, chainId: CHAIN_ID, nonce,
-    maxFeePerGas, maxPriorityFeePerGas: TIP_GWEI, gasLimit: GAS_LIMIT,
-    to: ROUTER, value: amountInMaximum, data: callData,
-  });
-  console.log(`[buy] broadcasting ${txHash} (msg.value ${Number(amountInMaximum) / 1e18} ETH, gasLimit ${GAS_LIMIT}, maxFee ${gwei(maxFeePerGas)})…`);
-  const t0 = Date.now();
-  await sendRawRpc(pipe, rawTx, {timeoutMs: 30_000});
-  let receipt = null;
-  for (;;) {
-    receipt = await rpc(pipe, 'eth_getTransactionReceipt', [txHash], {timeoutMs: 20_000}).catch(() => null);
-    if (receipt != null) break;
-    if (Date.now() - t0 > 180_000) throw new Error(`receipt for ${txHash} never landed in 180s — record as unknown, DO NOT re-broadcast`);
-    await new Promise((r) => setTimeout(r, 2_000));
-  }
-  const latencyMs = Date.now() - t0;
-  const gasUsed = BigInt(receipt.gasUsed);
-  const effectiveGasPrice = BigInt(receipt.effectiveGasPrice ?? maxFeePerGas);
-  const status = BigInt(receipt.status);
-  console.log(`[buy] receipt: block ${BigInt(receipt.blockNumber)} · status ${status} · gas ${gasUsed} @ ${gwei(effectiveGasPrice)} · ${latencyMs}ms`);
-  if (status !== 1n) {
-    console.error(JSON.stringify({tx: txHash, status: 'REVERTED', gasBurnedWei: (gasUsed * effectiveGasPrice).toString()}, null, 2));
-    process.exit(2); // the CALLER ledgers the burned gas — never a silent retry
+  ], deadline);
+  const receipt = await sendTx('swap', 300_000n, ROUTER, 0n, callData);
+  // 4d. sweep the unused headroom back to native ETH: WETH.withdraw(balance) (0x2e1a7d4d)
+  const wethLeft = BigInt(await ethCall(pipe, WETH, encodeErc20BalanceOf(rail.address), {timeoutMs: 30_000}));
+  if (wethLeft > 0n) {
+    await sendTx('sweep', 80_000n, WETH, 0n, '0x' + selector('withdraw(uint256)').replace(/^0x/, '') + word32BE(wethLeft).toString('hex'));
   }
 
   // 5. verify: ZCHF balance delta + the decoded Transfer log + the ETH dust left
@@ -158,11 +206,11 @@ try {
     boughtZchfRaw: amountOut.toString(),
     zchfBalanceNow: zchfWei.toString(),
     transferToRail: toRail.map((d) => ({from: d.from, value: d.value.toString()})),
-    tx: txHash, block: receipt.blockNumber.toString(),
+    txs: railTxs.map((t) => ({stage: t.label, tx: t.tx, gas: t.gasUsed.toString()})),
+    swapBlock: receipt.blockNumber.toString(),
     ethInMaxWei: amountInMaximum.toString(),
-    gasUsed: gasUsed.toString(), gasPriceGwei: gwei(effectiveGasPrice),
-    gasCostWei: (gasUsed * effectiveGasPrice).toString(),
-    latencyMs, ethDustLeftWei: ethAfter.toString(),
+    gasCostWei: railTxs.reduce((a, t) => a + t.gasUsed * t.effectiveGasPrice, 0n).toString(),
+    ethDustLeftWei: ethAfter.toString(),
   }, null, 2));
   assert(zchfWei > 0n, 'ZCHF balance still zero after a successful swap — investigate before proceeding');
   assert(ethAfter >= MIN_GAS_DUST, `ETH dust below ${MIN_GAS_DUST} after the buy: ${ethAfter} — the later legs need gas`);

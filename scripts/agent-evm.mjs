@@ -96,7 +96,7 @@ async function floatCensus(addr, json) {
     usdc = await tokenBalance(RPC_ETH, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', addr);
   } catch { usdc = undefined; }
   const usdcDec = usdc === undefined ? undefined : (() => { const s = usdc.toString().padStart(7, '0'); return `${s.slice(0, -6)}.${s.slice(-6)}`; })();
-  if (json) console.log(JSON.stringify({address: addr, rows: [{label: 'ETH', value: wei.toString()}, ...(usdcDec !== undefined ? [{label: 'USDC', value: usdcDec}] : [{label: 'USDC', unreadable: 'eth_call failed'}])]}));
+  if (json) console.log(JSON.stringify({address: addr, rows: [{label: 'ETH', value: fmt(wei)}, ...(usdcDec !== undefined ? [{label: 'USDC', value: usdcDec}] : [{label: 'USDC', unreadable: 'eth_call failed'}])]}));
   else console.log(`address   ${addr}\n  ${'ETH'.padEnd(6)} ${fmt(wei)}  (${wei} wei)` + (usdc !== undefined ? `\n  ${'USDC'.padEnd(6)} ${(Number(usdc) / 1e6).toFixed(6)}  (${usdc} subunits)` : ''));
 }
 
@@ -115,10 +115,10 @@ async function railCensus(addr, json) {
         zchfWei = await tokenBalance(c.rpc, c.token, addr);
       } catch { zchfWei = undefined; }
       return [
-        {chain: c.suffix, label: `ETH·${c.suffix}`, value: wei.toString()},
+        {chain: c.suffix, label: `ETH·${c.suffix}`, value: fmt(wei)},
         zchfWei === undefined
           ? {chain: c.suffix, label: `ZCHF·${c.suffix}`, unreadable: `balanceOf failed via ${c.url}`}
-          : {chain: c.suffix, label: `ZCHF·${c.suffix}`, value: zchfWei.toString()},
+          : {chain: c.suffix, label: `ZCHF·${c.suffix}`, value: fmt(zchfWei)},
       ];
     } catch (e) {
       const why = String(e.message).split('\n')[0];
@@ -134,8 +134,8 @@ async function railCensus(addr, json) {
   let bad = false;
   for (const r of flat) {
     if (r.unreadable !== undefined) { bad = true; console.log(`  ${r.label.padEnd(8)} UNREADABLE (${r.unreadable})`); continue; }
-    const wei = BigInt(r.value);
-    console.log(`  ${r.label.padEnd(8)} ${fmt(wei)}  (${wei} wei)`);
+    // values are DECIMAL strings now (the reconcile's unit — the ledger's unit too)
+    console.log(`  ${r.label.padEnd(8)} ${r.value}`);
   }
   if (bad) process.exit(1);
 }

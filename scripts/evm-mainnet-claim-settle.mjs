@@ -136,10 +136,21 @@ try {
     process.exit(2);
   }
 
-  // verify: ZCHF moved rail→B exactly once, the permit nonce consumed
-  const zchfAfter = BigInt(await ethCall(pipe, ZCHF_ETH, encodeErc20BalanceOf(RAIL), {timeoutMs: 20_000}));
-  const bZchfAfter = BigInt(await ethCall(pipe, ZCHF_ETH, encodeErc20BalanceOf(RAIL_B), {timeoutMs: 20_000}));
-  const nonceAfter = decodeUint256(await ethCall(pipe, ZCHF_ETH, encodeErc20Nonces(RAIL), {timeoutMs: 20_000}));
+  // verify: ZCHF moved rail→B exactly once, the permit nonce consumed. History-AWARE reads:
+  // public frontends (publicnode) serve load-balanced nodes that lag the head by a block or two —
+  // both settle runs' single-shot reads read PRE-transfer balances. Poll until the chain's own
+  // arithmetic appears (bounded), never a one-shot verdict.
+  const readState = async () => ({
+    rail: BigInt(await ethCall(pipe, ZCHF_ETH, encodeErc20BalanceOf(RAIL), {timeoutMs: 20_000})),
+    b: BigInt(await ethCall(pipe, ZCHF_ETH, encodeErc20BalanceOf(RAIL_B), {timeoutMs: 20_000})),
+    nonce: decodeUint256(await ethCall(pipe, ZCHF_ETH, encodeErc20Nonces(RAIL), {timeoutMs: 20_000})),
+  });
+  let zchfAfter = 0n, bZchfAfter = 0n, nonceAfter = 0n, verified = false;
+  for (let i = 0; i < 15 && !verified; i++) {
+    ({rail: zchfAfter, b: bZchfAfter, nonce: nonceAfter} = await readState());
+    verified = (zchfBefore - zchfAfter === amt) && (bZchfAfter - bZchfBefore === amt) && nonceAfter === nonce + 1n;
+    if (!verified) await new Promise((res) => setTimeout(res, 3_000));
+  }
   const logs = await rpc(pipe, 'eth_getLogs', [{
     fromBlock: tf.blockNumber, toBlock: 'latest',
     address: ZCHF_ETH, topics: [TRANSFER_TOPIC],
@@ -157,7 +168,7 @@ try {
     permitTx: permit.hash, transferTx: tf.hash,
     gasBurnedWei: ((permit.gasUsed * permit.effectiveGasPrice) + (tf.gasUsed * tf.effectiveGasPrice)).toString(),
   }, null, 2));
-  assert(zchfBefore - zchfAfter === amt && bZchfAfter - bZchfBefore === amt, 'balance deltas wrong — investigate before proceeding');
+  assert(verified, `balance deltas never appeared within the read window (rail ${zchfAfter}, B ${bZchfAfter}, nonce ${nonceAfter}) — the legs above carry the tx hashes; verify by those, never assume`);
   process.exitCode = 0;
 } catch (e) {
   console.error(`[settle] FAIL: ${e instanceof Error ? e.message : String(e)}`);

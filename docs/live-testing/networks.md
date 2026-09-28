@@ -19,6 +19,35 @@ search; otherwise at most 10 minutes, then record the outcome here.
 
 ## EVM rail (ZCHF-first) — live facts (2026-09-28)
 
+**2026-09-28 (second trip, D31 continued) — THE FULL MAINNET ZCHF ROUND TRIP IS PROVEN, drip-free,
+self-funded from the existing float.** Chain: EURC→SOL via the in-app convert (jupiter-eurc — a
+native-payout route exists: direct Whirlpool, Jupiter's program-owned shared WSOL account, NO taker
+ATA rent; simulated clean pre-broadcast), then 18 EURC→ICP via in-app sideshift (settled in ~1 min),
+4.0 ICP→native ETH via in-app flow-223 sideshift-eth (settle = the device EVM rail EIP-55-exact),
+the Uniswap V3 buy, the in-app ZCHF send, and the offline-permit claim loop. Per-leg record:
+
+| Leg | Route | Amounts | Fee | Tx |
+|---|---|---|---|---|
+| 0 self-fund | in-app Convert EURC→SOL (jupiter-eurc, sim-clean route) | 1.5 EURC → 0.014362347 SOL | net (realized payout) | `sol:4cSBsbpYjnEYFKFjqJKyUxhC7MKsRDR5EynND1WUFTTcS44m2LMihVbHZU3H1KjUoF51s6BpK1PH4Ah3MkS9U1Nr` |
+| 1 shift | in-app Convert EURC→ICP (sideshift-eurc, settle = icp-float) | 18 EURC → 6.69860354 ICP | venue-side | deposit `sol:2gZcVMb3s1fst7DT4TvV4rMf97LrUghqg7i6rgNjmwUnedyaXjDVoqADm9T9sB1G233wE9yncmhc7g9NKcotQTzg`, settle `icp:38660671` |
+| 2 shift | in-app Convert ICP→ETH (sideshift-eth flow-223, settle = evm-rail exact) | 4.0 ICP → 0.0044058 ETH | venue-side | `icp:38660718` in, payout `0x234d6fda00bf27e21b99b6c1d4b032576f166261bbf02a7fb994c4e4a710531f` |
+| 3 BUY | staging script, Uniswap V3 SwapRouter02 through the relay pipe | 1.5 ZCHF ← 0.000679768180797145 ETH (exact) | 4-tx staging gas 0.0005654 + a 0.0000486 reverted first attempt | swap `0x0ab8f11a0dea11fbc4ad760490957f3d39007b63cd04c66b607a91c4263c7801` |
+| 4 SEND | in-app EvmWithdrawSheet (production path) | 0.5 ZCHF rail→B | 0.0000431 ETH | `0x2168a18e268214d5801f9270e0eb200ab69b940144338bb0d71f7a77eb1f65d1` |
+| 5 CLAIM | offline sign in-app (connectivity pinned down) → B settles (permit + transferFrom) | 0.4 + 0.1 + 0.1 ZCHF rail→B across three claims | B settle gas ~0.0001/claim | permit `0x505267d9…af84ab0` / transferFrom `0x546a44b4…13afe7dd`; third claim transferFrom `0x986e7eb3…f1171a407` |
+
+Final rails: evm-rail 0.4 ZCHF + 0.001041 ETH; evm-rail-b 1.1 ZCHF + 0.001687 ETH; icp-float
+3.2043 ICP residue; sol-rail 1.621347 EURC + 0.014572 SOL. Reconcile CLEAN (26 pairs). Total
+float cost: ~CHF 1.2 of shift fees + ~CHF 1.5 gas, all inside the CHF 25 ceiling. "ZCHF held /
+sent / received offline-capable in dpay on mainnet" = **PROVEN**.
+
+**Script bugs the trip shook out (all in the never-executed staged scripts, fixed in-tree):**
+QuoterV2 takes its own 5-field tuple (not the router's 8); SwapRouter02's `exactOutputSingle` has
+NO deadline field (7 fields — expiry lives in `multicall(uint256,bytes[])`); `bytes[]` needs
+per-element offset+len words; ETH input needs wrap+approve (the router's V3 path pulls WETH from
+msg.sender — wrapETH mints to the router, so the one-tx wrap pattern belongs to the Universal
+Router); sequential nonces must be tracked locally (pending-count reads race under load); the
+settle verify must poll (publicnode serves load-balanced reads that lag the head by a block).
+
 **2026-09-28 — the D31 mainnet round-trip attempt (blocked at leg 1, everything before the wall
 proven).** Local relay = main-HEAD binary (73c8a7bc) at 127.0.0.1:8899 behind the xff proxy
 (8898), configured exactly like prod (DPAY_LEDGER=ic, real ssqti behind icp-api.io, SideShift
@@ -91,6 +120,19 @@ memory).
 
 ## Dead-end log (do not re-search before last-checked + 24h)
 
+- **2026-09-28 — the leg-1 rent wall was SELF-FUNDED AWAY the same day (resolved).** The 1.5-EURC→SOL
+  in-app convert took the rail from 0.0017 to 0.0161 SOL without needing the feared taker WSOL ATA
+  rent: Jupiter's build used a direct Whirlpool route whose WSOL handling is program-owned (the
+  simulation — quote→build→sign→simulateTransaction with sigVerify through the relay pipe — was
+  clean before any broadcast). The venue-deposit ATA rent then paid normally on the EURC→ICP
+  deposit. The dead end below stands as the float-arithmetic record; the unblock ask is VOID.
+- **2026-09-28 — the EVM history poll 403 on publicnode needs a sharper diagnosis (updated).**
+  `eth_getLogs` WITHOUT an `address` is refused outright by publicnode (`-32701 Please specify an
+  address`), and 10k-block spans 403 even with one. WITH the token address + Transfer topic,
+  5000-block spans answer fine (the trip's 4 rail movements came back exactly). So the app's
+  history walk should survive if its query carries the token address and its page stays ≤ ~5k
+  blocks; if the ZCHF·Eth history surface still renders the honest refusal at HEAD, the app-side
+  query shape (not the upstream) is the thing to fix.
 - **2026-09-28 — the D31 leg-1 wall: the SOL rail cannot pay a venue-deposit ATA's rent.** Every
   EURC→ICP deposit handoff needs an SPL transfer that CREATES the venue's fresh EURC ATA
   (~2_039_280 lamports rent, paid by the sender; the app discloses the exact figure on the
