@@ -8,26 +8,15 @@
  * in-flight amount + the honest "Deposit pending" notice, NO "Connect wallet" prompt, the
  * "Start a new deposit" escape, and an honest manual recheck. The escape clears the key, and a
  * second reload does NOT re-open the sheet.
- *
- * PORT NOTES (jest-vs-browser seams, both mirroring the twin's navigate() semantics):
- *  - The reload remounts pass `{url: '/'}`: the e2e reload navigates to a FRESH `/?relay=…` URL,
- *    which resets browser history; the location stub survives a remount, so without the reset
- *    useWalletHistory's mount-read replays the pushed `?screen=receive&sub=address` route and
- *    reopens the sheet regardless of the persisted key.
- *  - After "Deposit pending" renders, a short act-drain lets the hydrate commit's passive effects
- *    flush BEFORE the escape click — under react-test-renderer a queued watching re-save can
- *    otherwise fire after the escape's clearDeposit and resurrect the record (a flush-order
- *    artifact the browser's task queue never produces).
  */
 import {describe, it, expect} from '@jest/globals';
-import {act} from 'react-test-renderer';
 import {
   assert, assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
-  waitForWallet,
-} from './h';
-import type {Mount} from './h';
+  waitForWallet, type Mount,
+} from '../harness/lib';
 
 const g = globalThis as unknown as Record<string, unknown>;
+const mark = (l: string): void => { if (process.env.DPAY_FLOW_DEBUG === '1') console.log(`[m33] ${l}`); };
 
 type EthCall = {to?: string; data?: string};
 
@@ -64,19 +53,18 @@ async function readPersistedDeposit(): Promise<Persisted | null> {
   return null;
 }
 
-/** Let React finish the current render's passive effects (state writes the app deferred). */
-async function drainEffects(): Promise<void> {
-  await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
-}
-
 describe('flow 33 — ckERC20 watching persists across an app restart', () => {
   it('reload rehydrates watching with no wallet reconnect; escape clears the key', async () => {
     // === PHASE 1: drive the onramp to `watching` (happy path) ==================================
     g.__DPAY_TEST_ETH_CALLS = [];
     installHappyProvider();
+    mark('onboard');
     let m: Mount = await onboardWallet('jest-persist');
+    mark('balances');
     await openBalances(m);
+    mark('select ckusdc');
     await selectCurrency(m, 'ckusdc');
+    mark('receive');
     await openReceiveAddress(m);
     await m.driver.findByTestID('ckerc20-deposit', {timeoutMs: 8_000});
 
@@ -87,14 +75,17 @@ describe('flow 33 — ckERC20 watching persists across an app restart', () => {
     assertIncludes(icTxt, 'ckUSDC', 'IC-receive section names the LEDGER token (ckUSDC, not USDC-on-Ethereum)');
 
     // Connect + enter amount + approve → both txs mined (mock receipt 0x1) → watching.
+    mark('connect');
     await m.driver.click('btn-connect-wallet', {timeoutMs: 5_000});
     await m.driver.findByTestID('ckerc20-amount', {timeoutMs: 5_000});
     await m.driver.type('ckerc20-amount', '100', {timeoutMs: 5_000});
+    mark('approve');
     await m.driver.click('btn-approve', {timeoutMs: 5_000});
     expect(await m.driver.waitForText('Waiting for confirmation', {timeoutMs: 8_000})).toBe(true);
 
     // Sanity: the watching state IS persisted (AsyncStorage key written by the phase-transition
     // effect — one tick after the phase render, so it is WAITED for, not read racefully).
+    mark('read persisted');
     let persisted: Persisted | null = null;
     const persistDeadline = Date.now() + 5_000;
     while (Date.now() < persistDeadline) {
@@ -108,19 +99,21 @@ describe('flow 33 — ckERC20 watching persists across an app restart', () => {
     expect(Array.isArray(persisted!.value.txHashes) && persisted!.value.txHashes!.length === 2).toBe(true);
 
     // === PHASE 2: RELOAD — the EIP-1193 session is gone; the watching state must resume =========
-    // Remount WITHOUT clearing storage (the reload/kill semantics) at a FRESH URL (the twin's
-    // navigate). The mock provider is deleted first: it does not survive a navigation, and the
-    // resume must work without it.
+    // Remount WITHOUT clearing storage (the reload/kill semantics). The mock provider is deleted
+    // first: it does not survive a navigation, and the resume must work without it.
     delete g.ethereum;
+    mark('remount');
+    // The e2e twin navigates to a clean `/?relay=…` — a fresh URL with no screen params (the
+    // location stub would otherwise cold-load the wallet back onto the pushed receive URL).
     await m.remount({url: '/'});
 
     // The Wallet auto-open effect scans for a persisted watching deposit + opens the sheet.
+    mark('wait sheet reopen');
     await m.driver.findByTestID('ckerc20-deposit', {timeoutMs: 8_000});
-    // The resume hydrates ASYNC (mount effect → loadDeposit → setPhase('watching')); the sheet
-    // renders its default 'connect' phase until the record lands — wait for the resumed marker
-    // before the absence probes (they assert the SETTLED resume, not the pre-hydrate frame).
-    expect(await m.driver.waitForText('Deposit pending', {timeoutMs: 8_000})).toBe(true);
-    await drainEffects();
+    // The sheet's first frame is the ephemeral 'connect' phase; the persisted phase hydrates in a
+    // mount effect — the resumed notice is the honest signal the WATCHING state is live.
+    const resumed = await m.driver.waitForText('Deposit pending', {timeoutMs: 8_000});
+    assert(resumed, 'the auto-opened sheet must hydrate the persisted WATCHING phase (no resume = the restart broke the watch)');
 
     // NO "Connect wallet" prompt — the resume skipped the connect/enter/sending phases entirely.
     expect(m.driver.isPresent('btn-connect-wallet')).toBe(false);
@@ -141,24 +134,27 @@ describe('flow 33 — ckERC20 watching persists across an app restart', () => {
     // The manual recheck. Every other deposit sheet has always had one; tapping it cannot reach a
     // different verdict than waiting would (it shares the cadence poll's comparison).
     expect(m.driver.isPresent('btn-ckerc20-check')).toBe(true);
+    mark('recheck');
     await m.driver.click('btn-ckerc20-check', {timeoutMs: 5_000});
     await m.driver.findByTestID('ckerc20-status', {timeoutMs: 5_000});
     expect(m.driver.isPresent('btn-ckerc20-check')).toBe(true);
 
     // === PHASE 3: the escape clears the key + returns to 'connect' ==============================
-    // The wallet session is gone, so 'connect' is the honest reset target. Drain first so the
-    // watching phase's pending re-save flushes NOW (while the record exists), not after the clear.
+    // The wallet session is gone, so 'connect' is the honest reset target.
+    mark('escape');
     await m.driver.click('btn-ckerc20-new', {timeoutMs: 5_000});
     await m.driver.findByTestID('btn-connect-wallet', {timeoutMs: 5_000});
-    await drainEffects();
     expect(m.driver.isPresent('btn-ckerc20-new')).toBe(false);
 
     // The persisted key is GONE after the escape (clearDeposit ran). A second reload must NOT
     // re-open the sheet (it lands on the wallet main screen, not the deposit sheet).
+    mark('remount 2');
+    expect(await readPersistedDeposit()).toBeNull();
     await m.remount({url: '/'});
     await waitForWallet(m, {timeoutMs: 8_000});
     expect(m.driver.isPresent('ckerc20-deposit')).toBe(false);
 
+    mark('done');
     await m.unmount();
   }, 150_000);
 });
