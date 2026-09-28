@@ -21,10 +21,11 @@ installSolAccountsHelper();
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lib = require('../harness/lib') as typeof import('../harness/lib');
 const {
-  armPayScan, assert, assertEq, assertIncludes, onboardWallet, openBalances, selectSolRail,
+  armPayScan, assertEq, assertIncludes, onboardWallet, openBalances, selectSolRail,
   selectCurrency,
 } = lib;
-const {CHECKOUT_QR, CLAIMED_MERCHANT, PAYMENT_ID, PROVIDER_HOST, installCheckoutStub, ocpStubState, setOcpTxMode} =
+const assert: typeof lib.assert = lib.assert;
+const {CHECKOUT_QR, CLAIMED_MERCHANT, PAYMENT_ID, PROVIDER_HOST, installCheckoutStub, ocpStubState} =
   require('./ocp-stub') as typeof import('./ocp-stub');
 const {scanSeam} = require('./local') as typeof import('./local');
 
@@ -38,7 +39,7 @@ function installSolStub(): void {
   G.__E2E_SOL_STATUS = 'confirmed';
   G.__DPAY_TEST_SOLANA_RPC_STUB = baseSolStub({
     getMultipleAccounts: (p: unknown) => (G.__DPAY_SOL_ACCOUNTS as (p: unknown, s: unknown) => unknown)(p, {lamports: 5_000_000_000, token: {amount: '2500000', decimals: 6}}),
-    sendTransaction: (params: unknown) => {
+    sendTransaction: (_params: unknown) => {
       const sig = `sig_ocp_${(G.__E2E_SOL_SENT as string[]).length + 1}`;
       (G.__E2E_SOL_SENT as string[]).push(sig);
       return sig;

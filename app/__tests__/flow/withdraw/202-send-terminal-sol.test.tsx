@@ -12,7 +12,6 @@
  * LOAD-ORDER CONTRACT: the RPC override (the relay proxy URL) is set before the harness require.
  */
 import {describe, it, expect} from '@jest/globals';
-import {enableSolRpcStub} from '../pay/solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
 // The derived production path: the RELAY's Solana proxy (the stub upstream lives behind it).
@@ -20,7 +19,7 @@ G.__DPAY_TEST_SOLANA_RPC_URL = `${process.env.DPAY_JEST_RELAY_URL}/api/v1/solana
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lib = require('../harness/lib') as typeof import('../harness/lib');
-const {assert, assertEq, onboardWallet, openBalances, selectCurrency, openPaySend} = lib;
+const {assertEq, onboardWallet, openBalances, selectCurrency, openPaySend} = lib;
 const {relayPost} = require('../harness/relayClient') as typeof import('../harness/relayClient');
 
 const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address
@@ -28,7 +27,7 @@ const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base5
 /** Arm the stub upstream's getSignatureStatuses flip (relay test-helpers route). */
 async function armMode(body: Record<string, unknown>): Promise<void> {
   const r = await relayPost('/api/v1/test/solana-upstream/mode', body);
-  assert(r.ok, `stub mode armed ${JSON.stringify(body)} (status ${r.status})`);
+  expect(r.ok).toBe(true); // stub mode armed
 }
 
 const absent = async (m: Parameters<typeof openBalances>[0], testID: string): Promise<boolean> => {
@@ -45,7 +44,7 @@ describe('flow 202 — the SOL send terminal: honest unknown → Check status �
     // ── Leg A: submitting → unknown → Check status → settled ──────────────────────────────────
     await armMode({confirmAfterHits: 1});
     await openBalances(m);
-    assert(await m.driver.waitForText('2 SOL', {timeoutMs: 15_000}), 'the stub upstream funds the wallet 2 SOL');
+    expect(await m.driver.waitForText('2 SOL', {timeoutMs: 15_000})).toBe(true); // the stub upstream funds the wallet 2 SOL
     await selectCurrency(m, 'sol', {timeoutMs: 5000});
     await openPaySend(m);
     await m.driver.findByTestID('sol-send-address-input', {timeoutMs: 5000});
@@ -55,17 +54,17 @@ describe('flow 202 — the SOL send terminal: honest unknown → Check status �
 
     await lib.waitForEnabled(m, 'btn-sol-send-confirm');
     await m.driver.click('btn-sol-send-confirm', {timeoutMs: 5000});
-    assert(await m.driver.waitForText('not confirmed yet', {timeoutMs: 25_000}),
-      'the deadline over the ACCEPTED broadcast lands on the honest unknown');
+    expect(await m.driver.waitForText('not confirmed yet', {timeoutMs: 25_000})).toBe(true);
+    // the deadline over the ACCEPTED broadcast lands on the honest unknown
     expect(await absent(m, 'btn-sol-send-confirm')).toBe(true); // THE INVARIANT: no resend control
     expect(await absent(m, 'sol-send-fee-note')).toBe(true); // a pending send never claims fee-only
     expect(await absent(m, 'sol-send-nothing-sent')).toBe(true); // …and never claims nothing was sent
     const sig = m.driver.readText('sol-send-signature').trim();
-    assert(sig.length > 0, 'the signature is kept and shown as the reference');
+    expect(sig.length).toBeGreaterThan(0); // the signature is kept and shown as the reference
 
     // Check status → the stub flips → settled.
     await m.driver.click('btn-sol-send-check', {timeoutMs: 4000});
-    assert(await m.driver.waitForText('Sent', {timeoutMs: 15_000}), 'the confirmed read flips to the settled terminal');
+    expect(await m.driver.waitForText('Sent', {timeoutMs: 15_000})).toBe(true); // the confirmed read flips to the settled terminal
     expect(await absent(m, 'sol-send-unknown-title')).toBe(true);
     expect(await absent(m, 'btn-sol-send-check')).toBe(true);
     assertEq(m.driver.readText('sol-send-signature').trim(), sig, 'the SAME signature survives the flip');
@@ -84,8 +83,8 @@ describe('flow 202 — the SOL send terminal: honest unknown → Check status �
 
     // The first confirm poll answers the on-chain InstructionError: sendSol throws over the
     // ACCEPTED broadcast, and the terminal names the fee-only truth.
-    assert(await m.driver.waitForText('only the network fee', {timeoutMs: 20_000}),
-      'the fee-only note renders over an accepted-then-failed broadcast');
+    expect(await m.driver.waitForText('only the network fee', {timeoutMs: 20_000})).toBe(true);
+    // the fee-only note renders over an accepted-then-failed broadcast
     expect(await absent(m, 'sol-send-nothing-sent')).toBe(true); // the network ACCEPTED this transfer
     expect(await absent(m, 'sol-send-unknown-title')).toBe(true); // a definitive failure is not a pending
     expect(m.driver.isPresent('btn-sol-send-confirm')).toBe(true); // the form returned — a NEW send is the user's consent

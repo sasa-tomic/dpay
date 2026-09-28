@@ -10,7 +10,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {
-  accountOf, assert, assertEq, assertIncludes, DpayCore, faucetAccount, generateKeypair,
+  accountOf, assert, assertEq, assertIncludes, faucetAccount, generateKeypair,
   getBalance, onboardWallet, openBalances, railPrincipalText,
 } from '../harness/lib';
 import {b64urlEncode, hexBytes, openPayerScan, parsePayLink, scanSeam, signIcrc1Envelope} from './local';
@@ -23,7 +23,6 @@ describe('flow 08 — merchant receive → settle (fresh request, ∂30)', () =>
     const alice = await generateKeypair();
     const fund = await faucetAccount(alice.publicHex, 10_000);
     assert(fund.ok, `payer A faucet funding must succeed, got ${fund.status}`);
-    const alicePrincipal = await railPrincipalText(alice.publicHex);
 
     // --- wallet B (merchant): onboarded in the app. ---------------------------------------------
     const m = await onboardWallet('jest-merchant');
@@ -62,6 +61,7 @@ describe('flow 08 — merchant receive → settle (fresh request, ∂30)', () =>
     assertEq(await getBalance(bob.publicHex, 0), '13000', 'B ledger balance');
     assertEq(await getBalance(alice.publicHex, 0), '7000', 'A ledger balance (10000 − 3000, debited once)');
 
+    const alicePrincipal = await railPrincipalText(alice.publicHex);
     // --- B's Recent history shows the INCOMING payment as A's SHORT principal (never the full). --
     await m.driver.click('tab-transactions', {timeoutMs: 5000});
     assert(await m.driver.waitForText('Recent', {timeoutMs: 8000}), 'B history should render the incoming payment');
@@ -80,7 +80,6 @@ describe('flow 21 — receive-scan (the envelope-twin, ∂25 by placeholder)', (
     // --- Payer: a funded offline wallet (keys only — the payer's phone never talks to the relay). -
     const alice = await generateKeypair();
     await faucetAccount(alice.publicHex, 10_000);
-    const alicePrincipal = await railPrincipalText(alice.publicHex);
 
     // --- Merchant B: onboarded, with an OPEN ∂25 request. ----------------------------------------
     const m = await onboardWallet('jest-merchant21');

@@ -27,7 +27,6 @@ const PAY_RAW = 50_795_551; // the checkout's 0.50795551 ICP at 8 decimals
 const CKUSDC = 2;
 const CKUSDC_SEED = 5_000_000;
 
-const g = globalThis as unknown as Record<string, unknown>;
 const scanCheckout = async (m: Parameters<typeof armPayScan>[0]): Promise<void> => {
   await armPayScan(m);
   await m.driver.settleFrames(1);

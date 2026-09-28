@@ -41,7 +41,8 @@ G.__DPAY_TEST_SOLANA_RPC_STUB = {
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lib = require('../harness/lib') as typeof import('../harness/lib');
-const {armPayScan, assert, assertEq, assertIncludes, onboardWallet, openBalances, selectSolRail} = lib;
+const {armPayScan, assertIncludes, onboardWallet, openBalances, selectSolRail} = lib;
+const assert: typeof lib.assert = lib.assert;
 const {scanSeam} = require('./local') as typeof import('./local');
 
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';

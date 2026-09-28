@@ -18,7 +18,9 @@ installSolAccountsHelper();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lib = require('../harness/lib') as typeof import('../harness/lib');
-const {assert, assertIncludes, onboardWallet, openReceiveAddress} = lib;
+const {
+  assertIncludes, onboardWallet, openReceiveAddress} = lib;
+const assert: typeof lib.assert = lib.assert;
 
 const SIGNATURE = 'E2eSoLhIsToRy1111111111111111111111111111111';
 const PEER = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address

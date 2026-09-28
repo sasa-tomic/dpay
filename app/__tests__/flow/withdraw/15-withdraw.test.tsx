@@ -82,7 +82,7 @@ describe('flow 44 — withdraw native ckETH to a 0x address (withdraw_eth branch
   it('gas-quote + approve + burn; no ckERC20 gas note; both gateway and UI agree', async () => {
     const m = await onboardWallet('jest-cketh');
     const accountHex = (await accountOf(m))!.publicHex;
-    const fund = await faucetAccount(accountHex, String(SEED_WEI), {currency: ETH_CURRENCY});
+    const fund = await faucetAccount(accountHex, Number(SEED_WEI), {currency: ETH_CURRENCY}); // 5e18 is exactly representable
     assert(fund.ok, `faucet funding must succeed, got ${fund.status}`);
     assertEq(await getBalance(accountHex, ETH_CURRENCY), String(SEED_WEI), 'pre-withdraw native-ETH balance');
 
@@ -133,9 +133,9 @@ describe('flow 48 — withdraw ckUSDC (dual-ledger ckERC20 branch)', () => {
     const SEED_RAW = 1_000_000_000; // 1000 USDC
     const SEED_ETH_WEI = 100_000_000_000_000_000n; // 0.1 ETH for the gas leg
     const CKETH_APPROVE_FEE_WEI = 2_000_000_000_000n;
-    const fundUsdc = await faucetAccount(accountHex, String(SEED_RAW), {currency: 2});
+    const fundUsdc = await faucetAccount(accountHex, SEED_RAW, {currency: 2});
     assert(fundUsdc.ok, `ckUSDC faucet must succeed, got ${fundUsdc.status}`);
-    const fundEth = await faucetAccount(accountHex, String(SEED_ETH_WEI), {currency: ETH_CURRENCY});
+    const fundEth = await faucetAccount(accountHex, Number(SEED_ETH_WEI), {currency: ETH_CURRENCY});
     assert(fundEth.ok, `ckETH faucet must succeed, got ${fundEth.status}`);
     assertEq(await getBalance(accountHex, 2), String(SEED_RAW), 'pre-withdraw ckUSDC balance');
     assertEq(await getBalance(accountHex, ETH_CURRENCY), String(SEED_ETH_WEI), 'pre-withdraw ckETH gas leg');
@@ -177,7 +177,7 @@ describe('flow 18 — withdraw error paths (guards + an honest rail rejection)',
   it('below-min/over-balance disable confirm; wrong chain refused by name; minter refusal surfaced', async () => {
     const m = await onboardWallet('jest-werr');
     const accountHex = (await accountOf(m))!.publicHex;
-    const fund = await faucetAccount(accountHex, String(SEED_WEI), {currency: ETH_CURRENCY});
+    const fund = await faucetAccount(accountHex, Number(SEED_WEI), {currency: ETH_CURRENCY}); // 5e18 is exactly representable
     assert(fund.ok, `faucet funding must succeed, got ${fund.status}`);
     assertEq(await getBalance(accountHex, ETH_CURRENCY), String(SEED_WEI), 'pre-rejection ckETH balance');
 

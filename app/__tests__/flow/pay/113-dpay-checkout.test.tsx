@@ -116,9 +116,8 @@ describe('flow 113 — pay dpay’s own checkout (VCHF, ref as memo, ledger-pref
       expect(m.driver.isPresent('btn-approve')).toBe(false);
       seen = ocpStubState();
       assertEq(seen.txUrls.length, 2, 'a pending answer is reported once and never retried from here');
-      expect(new URL(seen.txUrls[1]).searchParams.get('tx') ?? '').toMatch(
-        new RegExp(`^${DPAY_CHECKOUT.ledger}:\\d+$`), 'the spelling rule holds on every submission',
-      );
+      // the spelling rule holds on every submission
+      expect(new URL(seen.txUrls[1]).searchParams.get('tx') ?? '').toMatch(new RegExp(`^${DPAY_CHECKOUT.ledger}:\\d+$`));
       expect(seen.unexpected).toEqual([]);
     } finally {
       uninstall();

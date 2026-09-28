@@ -23,9 +23,10 @@ installSolAccountsHelper();
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lib = require('../harness/lib') as typeof import('../harness/lib');
 const {
-  accountOf, armPayScan, assert, assertEq, assertIncludes, onboardWallet, openBalances,
+  armPayScan, assertEq, assertIncludes, onboardWallet, openBalances,
   selectCurrency, selectSolRail,
 } = lib;
+const assert: typeof lib.assert = lib.assert;
 const {scanSeam} = require('./local') as typeof import('./local');
 
 const MERCHANT = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address

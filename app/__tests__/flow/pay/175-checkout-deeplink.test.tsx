@@ -18,8 +18,9 @@ installSolAccountsHelper();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lib = require('../harness/lib') as typeof import('../harness/lib');
-const {accountOf, assert, assertEq, assertIncludes, faucetAccount, generateKeypair, getBalance,
+const {accountOf, assertEq, assertIncludes, faucetAccount, generateKeypair, getBalance,
   onboardWallet, openBalances, railPrincipalText, selectCurrency} = lib;
+const assert: typeof lib.assert = lib.assert;
 const {CHECKOUT_QR, CLAIMED_MERCHANT, PAYMENT_ID, PROVIDER_HOST, installCheckoutStub, ocpStubState} =
   require('./ocp-stub') as typeof import('./ocp-stub');
 
@@ -76,7 +77,7 @@ describe('flow 175 — a checkout App Link opens the review from idle Balances, 
       G.__E2E_SOL_SENT = [];
       G.__DPAY_TEST_SOLANA_RPC_STUB = baseSolStub({
         getMultipleAccounts: (p: unknown) => (G.__DPAY_SOL_ACCOUNTS as (p: unknown, s: unknown) => unknown)(p, {lamports: 5_000_000_000, token: {amount: '2500000', decimals: 6}}),
-        sendTransaction: (params: unknown) => {
+        sendTransaction: (_params: unknown) => {
           const sig = `sig_deeplink_${(G.__E2E_SOL_SENT as string[]).length + 1}`;
           (G.__E2E_SOL_SENT as string[]).push(sig);
           return sig;

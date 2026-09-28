@@ -22,9 +22,10 @@ installSolAccountsHelper();
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lib = require('../harness/lib') as typeof import('../harness/lib');
 const {
-  accountOf, armPayScan, assert, assertEq, assertIncludes, armNfcCard, DpayCore, faucetAccount,
+  accountOf, armPayScan, assertIncludes, armNfcCard, DpayCore, faucetAccount,
   generateKeypair, onboardWallet, openBalances, railPrincipalText, railTransfer, selectCurrency,
 } = lib;
+const assert: typeof lib.assert = lib.assert;
 const {scanSeam} = require('./local') as typeof import('./local');
 
 const SOL_MERCHANT = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';

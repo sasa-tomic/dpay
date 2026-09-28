@@ -19,7 +19,7 @@ installSolAccountsHelper();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lib = require('../harness/lib') as typeof import('../harness/lib');
-const {assert, assertDisabled, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency, selectSolRail} = lib;
+const {assertDisabled, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency, selectSolRail} = lib;
 
 const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address
 const BTC_ADDR = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq'; // a real address on the WRONG chain
@@ -57,7 +57,7 @@ describe('flow 52 — SOL withdraw (native SOL send sheet)', () => {
       const t = m.driver.readTextSafe('sol-send-status') ?? '';
       return t.includes('Bitcoin') && t.includes('Solana');
     }, {timeoutMs: 6000, label: 'a Bitcoin paste is refused by name'});
-    const refusal = m.driver.readText('sol-send-status');
+    expect(m.driver.readText('sol-send-status')).toContain('Bitcoin');
     assertDisabled(m, 'btn-sol-send-confirm', 'a refused destination must leave Confirm disabled');
 
     // 4. A valid destination has its route disclosed BEFORE the amount is typed.
@@ -76,7 +76,7 @@ describe('flow 52 — SOL withdraw (native SOL send sheet)', () => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('node:fs').writeFileSync('/home/sat/projects/dpay/tmp/diag52.txt', m.driver.bodyText());
     }
-    assert(sent !== null, 'the sheet shows "Sent ✓"');
+    expect(sent).not.toBeNull(); // the sheet shows "Sent ✓"
     assertIncludes(m.driver.readText('sol-send-outcome'), 'Sent', 'the sheet shows "Sent ✓"');
     await m.driver.findByTestID('sol-send-signature', {timeoutMs: 5000});
     expect(m.driver.readText('sol-send-signature')).toMatch(/^sig_/);
