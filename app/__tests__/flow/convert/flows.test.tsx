@@ -1521,7 +1521,7 @@ describe('flow 185 — SOL → USDC(Solana) via Jupiter, end to end, offline', (
 
       // The stub's call vectors accumulate per relay process (no reset route) — every count
       // assert below is a DELTA against this baseline (the e2e twin's own-relay isolation,
-      // re-expressed for the one shared relay; the gap is filed for the integrator).
+      // re-expressed for the one shared relay).
       const jup0 = await jupiterStubState();
       expect(jup0).not.toBeNull();
 

@@ -12,11 +12,10 @@ import type {Mount} from '../harness/lib';
 const {installFlowLifecycle} = require('../harness/setupFlow') as {installFlowLifecycle: () => void};
 
 // The per-test lifecycle (fresh AsyncStorage, seam resets, the fail-closed fetch assertion) is
-// registered by jest.flow-after-env.js — which the flow project's config does not yet wire as a
-// setupFilesAfterEnv file (harness gap, filed for the integrator). Calling the exported installer
-// here at collection time registers the SAME hooks for every batch-D flow file that imports this
-// helper; when the integrator wires the after-env file the duplicate registration is harmless
-// (the hooks are idempotent resets).
+// registered by jest.flow-after-env.js, which the flow project's config wires as a
+// setupFilesAfterEnv file (harness M3). The exported installer stays CALLABLE at collection time
+// (it is idempotent — the second registration no-ops), so this batch-D helper keeps working
+// unchanged either way.
 installFlowLifecycle();
 
 type G = Record<string, unknown>;
