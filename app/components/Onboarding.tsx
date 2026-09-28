@@ -301,12 +301,12 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
               </Pressable>
               <Pressable testID="mnemonic-backup-checkbox" style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 4, marginBottom: 10, minHeight: 44}} onPress={() => setBackupChecked(!backupChecked)}
                 accessibilityRole="checkbox" accessibilityLabel={M.onboarding.backup.ack} accessibilityState={{checked: backupChecked}}>
-                <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: backupChecked ? C.brand : C.sub2, backgroundColor: backupChecked ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
+                <View style={{width: 22, height: 22, borderRadius: 8, borderWidth: 2, borderColor: backupChecked ? C.brand : C.sub2, backgroundColor: backupChecked ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 12}}>
                   {/* P4 — the '✓' glyph Text became IconCheck (the box's checked state is also
                       conveyed by accessibilityState on the checkbox Pressable). */}
                   {backupChecked ? <IconCheck size={14} color={C.brandInk} /> : null}
                 </View>
-                <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.onboarding.backup.ack}</Text>
+                <Text style={{color: C.sub, fontSize: 16, lineHeight: 22, flex: 1}}>{M.onboarding.backup.ack}</Text>
               </Pressable>
               {/* The save can fail, and when it does the words on screen are for a wallet that
                   does not exist yet — so the reason renders here, above the button that will try

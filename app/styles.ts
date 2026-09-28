@@ -109,7 +109,7 @@ function buildStyles(p: Palette) {
   // WORDMARK makes it self-sufficient at every mount point and byte-identical where it is
   // composed, so the two settings cannot drift.
   wordmarkBig: {...WORDMARK, fontSize: 36, marginTop: 14},
-  onboardSub: {fontSize: 15, color: p.sub, textAlign: 'center', marginTop: 8, marginBottom: 28, paddingHorizontal: 12, lineHeight: 22, fontFamily: FONT.sans},
+  onboardSub: {fontSize: 16, color: p.sub, textAlign: 'center', marginTop: 8, marginBottom: 24, paddingHorizontal: 12, lineHeight: 22, fontFamily: FONT.sans},
   // ∂ is the demo-dollar symbol - unfamiliar on first glance. The onboarding one-liner explains
   // it inline next to the demo funds note so a first-time user has the mapping before they see
   // their balance. `dpayGlyph` carries the glyph in ink; `dpayGlyphNote` is the surrounding line.
@@ -149,7 +149,7 @@ function buildStyles(p: Palette) {
   nfcBadge: {width: 108, height: 108, borderRadius: 54, borderWidth: 3, borderColor: p.line, alignItems: 'center', justifyContent: 'center', marginBottom: 26},
   nfcGlyph: {fontSize: 54, fontWeight: '700', lineHeight: 62},
   nfcTitle: {fontSize: 24, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.4},
-  nfcSub: {fontSize: 15, color: p.sub, marginTop: 10, textAlign: 'center', paddingHorizontal: 20, fontFamily: FONT.sans},
+  nfcSub: {fontSize: 16, color: p.sub, marginTop: 8, textAlign: 'center', paddingHorizontal: 24, lineHeight: 22, fontFamily: FONT.sans},
   // ── Trip Ready J5 motion system (additive) ──────────────────────────────────────────────
   // The breathing ring around the listening badge (renders BEHIND S.nfcBadge; only scale +
   // opacity animate - both non-layout props, so parent layout never re-flows mid-breath).
@@ -343,9 +343,9 @@ function buildStyles(p: Palette) {
   // divider between sell and receive. The amount input rides the SELL row; the receive figure
   // is the venue's own calculated number, never editable.
   swapLegRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, alignSelf: 'stretch', marginTop: 14},
-  swapLegName: {fontSize: 17, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1},
+  swapLegName: {fontSize: 16, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1},
   swapLegAmount: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.4, textAlign: 'right', flexShrink: 1, fontVariant: ['tabular-nums']},
-  swapLegSub: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 2},
+  swapLegSub: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 4},
   // The sell leg's inline amount field - the receive leg's amount, typeable: same size and
   // alignment so the two legs read as one shape (founder sketch), no box around it.
   swapLegInput: {flex: 1, minWidth: 0, fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, textAlign: 'right', letterSpacing: -0.4, padding: 0, outlineWidth: 0, fontVariant: ['tabular-nums']},
@@ -353,7 +353,7 @@ function buildStyles(p: Palette) {
   routeHeaderRow: ROUTE_HEADER_ROW,
   routeHeaderTitle: ROUTE_HEADER_TITLE,
   routeHeaderSpacer: ROUTE_HEADER_SPACER,
-  convertAmountLabel: {fontSize: 13, color: p.sub, marginBottom: 6, fontFamily: FONT.sansMedium},
+  convertAmountLabel: {fontSize: 13, color: p.sub, marginBottom: 8, fontFamily: FONT.sansMedium},
   convertMetaLine: {fontSize: 13, color: p.sub, marginTop: 8, fontFamily: FONT.sans},
   // F4 (2026-09-18 hub UX §e): the balance line + Max affordance share one row.
   convertBalanceRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', alignSelf: 'stretch'},
@@ -367,33 +367,33 @@ function buildStyles(p: Palette) {
   convertHeadlineAmount: {fontSize: 32, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5, marginTop: 8, fontVariant: ['tabular-nums']},
   convertRateRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: p.line2},
   convertRateLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
-  convertRateValue: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1, textAlign: 'right'},
+  convertRateValue: {fontSize: 16, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1, textAlign: 'right'},
   convertHeadlineMeta: {fontSize: 12, color: p.sub2, fontFamily: FONT.sans, marginTop: 8},
   convertChecklistCard: {backgroundColor: p.panel2, padding: 16, borderRadius: 12, alignSelf: 'stretch', marginTop: 12},
   // The ONE Details disclosure control on the convert decision card (10x-verbosity pass
   // 2026-09-16): quiet meta-line styling - it opens the census, it is not a CTA.
-  convertDetailsToggle: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 12, paddingVertical: 6},
+  convertDetailsToggle: {flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', marginTop: 12, minHeight: 44, justifyContent: 'center'},
   convertDetailsToggleText: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
   convertDetailsChevronOpen: {transform: [{rotate: '180deg'}]},
-  convertChecklistLine: {fontSize: 13, color: p.sub, lineHeight: 19, marginBottom: 9, fontFamily: FONT.sans},
-  convertChecklistWarn: {fontSize: 13, color: p.bad, lineHeight: 19, marginBottom: 9, fontFamily: FONT.sansMedium},
+  convertChecklistLine: {fontSize: 13, color: p.sub, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},
+  convertChecklistWarn: {fontSize: 13, color: p.bad, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sansMedium},
   // The pool principal on its own line: 27 hyphenated characters inside a paragraph wrap
   // mid-token (browsers break at '-'), so it gets the receipt voice and a line of its own.
-  convertPrincipal: {fontSize: 12, color: p.ink, lineHeight: 18, marginBottom: 9, fontFamily: FONT.mono},
+  convertPrincipal: {fontSize: 12, color: p.ink, lineHeight: 18, marginBottom: 8, fontFamily: FONT.mono},
   // The cross-rail handoff's calldata box: a full EVM payload (~388 bytes of hex) the user
   // pastes into their OWN wallet verbatim - receipt voice, wrapped, selectable, boxed so it
   // reads as one copyable artifact rather than prose.
-  convertCalldata: {fontSize: 11, color: p.ink, lineHeight: 16, fontFamily: FONT.mono, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, borderRadius: 8, padding: 10, marginBottom: 6, flexWrap: 'wrap'},
-  convertSlippageLabel: {fontSize: 13, fontWeight: '600', color: p.sub, fontFamily: FONT.sans, marginBottom: 6},
+  convertCalldata: {fontSize: 11, color: p.ink, lineHeight: 16, fontFamily: FONT.mono, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, borderRadius: 8, padding: 12, marginBottom: 8, flexWrap: 'wrap'},
+  convertSlippageLabel: {fontSize: 13, fontWeight: '600', color: p.sub, fontFamily: FONT.sans, marginBottom: 8},
   // Same section-heading shape as the slippage label, plus top spacing: the balance/Max row
   // sits directly above the DESTINATION heading and collapsed against it (2026-09-20 shot).
-  convertDestLabel: {fontSize: 13, fontWeight: '600', color: p.sub, fontFamily: FONT.sans, marginTop: 18, marginBottom: 6},
+  convertDestLabel: {fontSize: 13, fontWeight: '600', color: p.sub, fontFamily: FONT.sans, marginTop: 16, marginBottom: 8},
   // Currency-section header inside the destination picker (groupDestSections render): a quiet
   // label naming the destination currency - a section is a label, never a total. Same voice as
   // the accounts route's group headers (13/sans/sub), so both lists read one system.
-  convertDestGroupLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 10, marginBottom: 2},
+  convertDestGroupLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 12, marginBottom: 4},
   // The minimum is a term, but it is the term that bounds the trade - one weight above its siblings.
-  convertMinOutLine: {fontSize: 14, color: p.ink, lineHeight: 20, marginBottom: 9, fontFamily: FONT.sansMedium},
+  convertMinOutLine: {fontSize: 16, color: p.ink, lineHeight: 22, marginBottom: 8, fontFamily: FONT.sansMedium},
   convertSlippageRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap'},
   convertSlippageChip: {paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, minHeight: 44},
   convertSlippageChipOn: {borderColor: p.brand, backgroundColor: p.brand},
@@ -416,15 +416,15 @@ function buildStyles(p: Palette) {
   convertVenueRadioDot: {width: 10, height: 10, borderRadius: 5, backgroundColor: p.brand},
   convertMechGroup: {marginTop: 4, marginLeft: 22, alignSelf: 'stretch'},
   convertVenueRowText: {flex: 1},
-  convertVenueName: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium},
+  convertVenueName: {fontSize: 16, color: p.ink, fontFamily: FONT.sansMedium},
   convertVenueNameOn: {fontFamily: FONT.sansBold},
   convertVenueAmount: {fontSize: 14, color: p.sub, lineHeight: 20, marginTop: 4, fontFamily: FONT.sans, fontVariant: ['tabular-nums']},
   convertBtnBusyRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
-  convertUnavailableTitle: {fontSize: 18, color: p.ink, fontFamily: FONT.sansBold, marginBottom: 8},
+  convertUnavailableTitle: {fontSize: 20, color: p.ink, fontFamily: FONT.sansBold, marginBottom: 8},
   convertUnavailableBody: {fontSize: 14, color: p.sub, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},
-  convertStateTitle: {fontSize: 20, color: p.ink, fontFamily: FONT.sansBold, marginBottom: 8, marginTop: 10},
+  convertStateTitle: {fontSize: 20, color: p.ink, fontFamily: FONT.sansBold, marginBottom: 8, marginTop: 8},
   convertStateBody: {fontSize: 14, color: p.sub, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},
-  convertStateMeta: {fontSize: 13, color: p.sub, lineHeight: 18, marginBottom: 6, fontFamily: FONT.sans},
+  convertStateMeta: {fontSize: 13, color: p.sub, lineHeight: 18, marginBottom: 8, fontFamily: FONT.sans},
   convertFooting: {alignItems: 'center', marginTop: 18},
   // Mode toggle - a joined two-segment pill control at the top of the Pay/Receive tab bodies:
   // `[ Scan to pay | Send to address ]` (Pay) and `[ Request payment | My address ]` (Receive).
@@ -434,7 +434,7 @@ function buildStyles(p: Palette) {
   railRow: {flexDirection: 'row', gap: 4, marginTop: 2, marginBottom: 14, backgroundColor: p.panel2, borderRadius: 8, padding: 4, alignSelf: 'stretch', borderWidth: 1, borderColor: p.line2},
   railPill: {flex: 1, paddingVertical: 9, paddingHorizontal: 16, borderRadius: 4, alignItems: 'center', justifyContent: 'center', minHeight: 40},
   railPillActive: {backgroundColor: p.card},
-  railPillText: {color: p.sub, fontWeight: '600', fontSize: 14, fontFamily: FONT.sansMedium},
+  railPillText: {color: p.sub, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   railPillTextActive: {color: p.ink, fontFamily: FONT.sansBold},
   // Body - content flows from the top; the asset rail follows naturally.
   body: {flexGrow: 1, paddingHorizontal: 16, paddingTop: 10, justifyContent: 'flex-start'},
@@ -451,7 +451,7 @@ function buildStyles(p: Palette) {
   // band above AND below it (measured on the ordinary Receive form: 121 px dead above, 119 below,
   // 388 px of content in a 628 px box) and moves every field the moment one line of copy wraps.
   centerTop: MODE_SURFACE,
-  label: {fontSize: 15, color: p.sub, marginBottom: 10, textAlign: 'center', fontFamily: FONT.sans},
+  label: {fontSize: 16, color: p.sub, marginBottom: 8, textAlign: 'center', fontFamily: FONT.sans},
   // The create form's username label. `label` read as a run-on tail of the trust paragraph above
   // it (`dim2` - same centered secondary ink, no gap), so this label gets the section-label
   // grammar (13px sans over `sub2`, the `histTitle` voice) plus its own top margin: the
@@ -506,7 +506,7 @@ function buildStyles(p: Palette) {
   // DARK palette's own inks ARE the on-warm-black inks by construction, so they are READ FROM
   // `DARK` rather than re-entered as literals that could drift from it. Measured against
   // `#17150F`: `DARK.ink` 15.8:1, `DARK.sub` 7.1:1 - AAA on both, in either theme.
-  camText: {fontSize: 17, color: DARK.ink, marginTop: 6, textAlign: 'center', fontFamily: FONT.sansMedium},
+  camText: {fontSize: 16, color: DARK.ink, marginTop: 8, textAlign: 'center', lineHeight: 22, fontFamily: FONT.sansMedium},
   camSubText: {fontSize: 13, color: DARK.sub, marginTop: 8, textAlign: 'center', fontFamily: FONT.sans},
   // Wrapper for a scan phase's QrScanner + hint text. MUST be alignSelf:'stretch' (full width):
   // camBox sizes itself by stretch + aspectRatio, so an unstyled/content-width wrapper leaves camBox
@@ -533,7 +533,7 @@ function buildStyles(p: Palette) {
   viewfinderCornerBR: {bottom: 12, right: 12, borderBottomWidth: 2, borderRightWidth: 2},
   viewfinderCenter: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24},
   reviewAmount: {fontSize: 32, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
-  reviewTo: {fontSize: 17, color: p.sub, marginTop: 6, textAlign: 'center', fontFamily: FONT.sansMedium},
+  reviewTo: {fontSize: 16, color: p.sub, marginTop: 8, textAlign: 'center', fontFamily: FONT.sansMedium},
   warnNote: {fontSize: 13, color: p.warn, textAlign: 'center', marginTop: 6, marginBottom: 18, paddingHorizontal: 8, lineHeight: 18, fontFamily: FONT.sans},
   // Icon-led warning row: IconAlert + text where a warning previously LED with a '⚠' text
   // glyph. Mirrors warnNote's sizing/margins in row form; the icon tops the first line so a
@@ -591,7 +591,7 @@ function buildStyles(p: Palette) {
   prefixBtn: {flexDirection: 'row', alignItems: 'center', paddingRight: 12, borderRightWidth: 1, borderRightColor: p.line2},
   linkBtn: {marginTop: 18, minHeight: 44, justifyContent: 'center'},
   linkText: {color: p.brandText, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
-  linkTextMuted: {color: p.sub, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
+  linkTextMuted: {color: p.sub, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   // Icon+label row inside a `linkBtn` Pressable (Settings' Privacy policy carries the
   // external-link glyph). The Pressable keeps the column linkBtn chrome (44pt target); this row
   // lays a small icon against the label with a hairline gap.
@@ -602,20 +602,20 @@ function buildStyles(p: Palette) {
   // quieter variant for flow-reset actions ("New request"/"New payment"/"Back") - transparent
   // bg. Same 44pt min + marginTop rhythm as linkBtn, which it replaces there.
   ghostBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18, minHeight: 44, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8, backgroundColor: p.card},
-  ghostBtnText: {color: p.sub, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
+  ghostBtnText: {color: p.sub, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   ghostBtnMuted: {backgroundColor: 'transparent'},
   // SendTerminal's stacked secondary actions (Check status / View receipt): full-width so every
   // action on the terminal shares ONE column and one height - the primary copy button above and
   // the Done ghost below are the anchors, these two never render at mixed widths.
   termBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'stretch', marginTop: 10, minHeight: 44, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8, backgroundColor: p.card},
-  termBtnText: {color: p.sub, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
+  termBtnText: {color: p.sub, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   smallBtn: {backgroundColor: p.brand, borderRadius: 8, paddingHorizontal: 16, height: 44, alignItems: 'center', justifyContent: 'center'},
   smallBtnText: {color: p.brandInk, fontWeight: '700', fontFamily: FONT.sansBold},
   // Secondary button (Cancel/secondary action parity with the primary). Card fill + 16 radius,
   // 52 tall beside a 56 input/CTA per the shape system; clearly secondary but unambiguously
   // tappable.
   secondaryBtn: {alignSelf: 'stretch', height: 52, borderRadius: 8, marginTop: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: p.card, minHeight: 44},
-  secondaryBtnText: {color: p.sub, fontWeight: '600', fontSize: 17, fontFamily: FONT.sansMedium},
+  secondaryBtnText: {color: p.sub, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   histTitle: {fontSize: 13, fontWeight: '600', color: p.sub2, marginBottom: 8, fontFamily: FONT.sans},
   // ── The transaction RECEIPT (X6, components/HistoryRow.tsx#TxnReceipt) ───────────────────────
   // The merchant-reconciliation and dispute surface, rendered in the centered-card idiom the
@@ -668,7 +668,7 @@ function buildStyles(p: Palette) {
   // Ledger page - the transaction list promoted to its own tab. `ledgerWrap` is the page-level
   // container; `ledgerEmpty` is the muted centered placeholder for a wallet with no transactions.
   ledgerWrap: {marginTop: 4},
-  ledgerEmpty: {fontSize: 15, color: p.sub, textAlign: 'center', marginTop: 40, fontFamily: FONT.sans},
+  ledgerEmpty: {fontSize: 16, color: p.sub, textAlign: 'center', marginTop: 40, fontFamily: FONT.sans},
   // Asset filter chip row - only renders when >1 currency is present in history. Active chip
   // fills with brand so the selected filter reads as the obvious current view.
   filterRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12},
@@ -749,13 +749,13 @@ function buildStyles(p: Palette) {
   // signaling "opens a dialog". Distinct from the muted "Privacy policy" link above it, but NOT
   // a loud filled-red button (the destructive gate stays in the confirmation dialog).
   resetEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: withAlpha(p.bad, 0.45), backgroundColor: withAlpha(p.bad, p.wash), alignItems: 'center', justifyContent: 'center'},
-  resetEntryText: {color: p.bad, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
+  resetEntryText: {color: p.bad, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   // Backup affordance (Settings → Backup). Mirrors `resetEntryBtn`'s shape but BRAND-tinted so it
   // reads as a safe, recommended action. `backupConfirmBox` is the neutral caution box;
   // `seedBox` is the revealed seed display: mono, padded, inset well so it reads as a discrete
   // selectable token block.
   backupEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: withAlpha(p.brandText, 0.45), backgroundColor: withAlpha(p.brandText, p.wash), alignItems: 'center', justifyContent: 'center'},
-  backupEntryText: {color: p.brandText, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
+  backupEntryText: {color: p.brandText, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   backupConfirmBox: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16, borderWidth: 1, borderColor: p.line2},
   seedBox: {alignSelf: 'stretch', backgroundColor: p.panel2, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: p.line2, marginTop: 4},
   seedText: {color: p.ink, fontFamily: FONT.mono, fontSize: 14, lineHeight: 20},
@@ -792,9 +792,9 @@ function buildStyles(p: Palette) {
   // off-viewport and invisible.
   sheetOverlay: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: p.bg, zIndex: 10, elevation: 10},
   sheet: {flex: 1, backgroundColor: p.bg},
-  sheetHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 20, paddingHorizontal: 22, paddingBottom: 14},
+  sheetHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 20, paddingHorizontal: 20, paddingBottom: 12},
   sheetTitle: {fontSize: 20, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.3},
-  sheetClose: {width: 44, height: 44, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: p.card, borderWidth: 1, borderColor: p.line2},
+  sheetClose: {width: 44, height: 44, alignItems: 'center', justifyContent: 'center'},
   // A sheet's content column. `alignSelf:'stretch'` for the same reason MODE_SURFACE carries it:
   // every sheet is now rendered INLINE inside a mode surface that centers its children, so an
   // unstretched sheet body is sized to its own content and stops matching the column it sits in.
@@ -802,7 +802,7 @@ function buildStyles(p: Palette) {
   // 424.7px at x=−17.4 (the scan button and the primary button's right radius off-screen), SOL
   // "My address" 396px at x=−3, the SOL send form 4px NARROWER than the column, and only the IC
   // deposit sheet coincidentally correct. Stretching pins all four to the column's 358px.
-  sheetBody: {flexGrow: 1, alignSelf: 'stretch', paddingHorizontal: 22, paddingTop: 22, alignItems: 'center'},
+  sheetBody: {flexGrow: 1, alignSelf: 'stretch', paddingHorizontal: 20, paddingTop: 20, alignItems: 'center'},
   // Same as sheetBody but vertically CENTERS short content so a sheet with few rows doesn't pack
   // at the top with a dead zone below. Used ONLY on sheets whose content is reliably shorter than
   // the viewport - the tall sheets (DepositSheet address flow, WithdrawSheet form) keep top-aligned
@@ -819,12 +819,12 @@ function buildStyles(p: Palette) {
   // the parent's default. So the line changes nothing on screen; it states the contract the surface
   // always had, at every mount point, instead of only where the parent happens to default to
   // stretch.
-  sheetCenter: {flexGrow: 1, alignSelf: 'stretch', justifyContent: 'center', paddingHorizontal: 22, paddingTop: 22, paddingBottom: 22, alignItems: 'center'},
+  sheetCenter: {flexGrow: 1, alignSelf: 'stretch', justifyContent: 'center', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 20, alignItems: 'center'},
   // Compact currency picker (Receive prefix tap): a centered card over a dimmed backdrop (rendered
   // inside a <Modal>, so it covers the whole screen regardless of where ReceiveMode sits in the
   // tree). `pickCard` uses opaque `p.panel` - an alpha wash would composite with the ink veil
   // into mud; the opaque raised surface is the "panel above backdrop" idiom.
-  pickBackdrop: {flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: p.veil, paddingHorizontal: 28},
+  pickBackdrop: {flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: p.veil, paddingHorizontal: 24},
   pickCard: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 12, padding: 16, ...LIFT_SM},
   pickTitle: {fontSize: 13, fontWeight: '600', color: p.sub2, marginBottom: 8, fontFamily: FONT.sans},
   // Bounded scroller for the picker rows - the catalog grows (IC + SOL rails, testnet entries),
@@ -846,24 +846,24 @@ function buildStyles(p: Palette) {
   // Pay-scan NFC status row - a large colored NFC mark + a short label, leading the scanner. Green
   // when tap-to-pay is ready, red with a tappable "NFC not available" link + reason popup otherwise.
   nfcStatusRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14},
-  nfcStatusLabel: {fontSize: 18, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
+  nfcStatusLabel: {fontSize: 20, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.3},
   // Receive QR hint - a small NFC mark leading the "or let them tap" label when the reader is armed.
   nfcHintRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 10},
-  nfcHintLabel: {fontSize: 15, color: p.sub, textAlign: 'center', fontFamily: FONT.sans},
+  nfcHintLabel: {fontSize: 16, color: p.sub, textAlign: 'center', lineHeight: 22, fontFamily: FONT.sans},
   nfcInfoLink: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  nfcInfoLinkText: {fontSize: 18, fontWeight: '600', color: p.bad, fontFamily: FONT.sansBold},
-  nfcInfoBody: {fontSize: 15, color: p.ink, lineHeight: 21, marginBottom: 16, fontFamily: FONT.sans},
+  nfcInfoLinkText: {fontSize: 16, fontWeight: '600', color: p.bad, fontFamily: FONT.sansBold},
+  nfcInfoBody: {fontSize: 16, color: p.ink, lineHeight: 22, marginBottom: 16, fontFamily: FONT.sans},
   nfcInfoClose: {alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: p.card},
-  nfcInfoCloseText: {fontSize: 15, fontWeight: '600', color: p.ink, fontFamily: FONT.sansMedium},
+  nfcInfoCloseText: {fontSize: 16, fontWeight: '600', color: p.ink, fontFamily: FONT.sansMedium},
   // Deposit instructions - a scannable card (network/asset + est. time + fee/min + non-custody line).
   instrCard: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16, marginBottom: 18},
-  instrLine: {fontSize: 15, color: p.ink, textAlign: 'center', lineHeight: 21, marginBottom: 10, fontFamily: FONT.sans},
+  instrLine: {fontSize: 16, color: p.ink, textAlign: 'center', lineHeight: 22, marginBottom: 8, fontFamily: FONT.sans},
   instrAsset: {color: p.brandText, fontWeight: '700', fontFamily: FONT.sansBold},
   instrMeta: {fontSize: 13, color: p.sub, textAlign: 'center', fontFamily: FONT.sans, paddingVertical: 2, fontVariant: ['tabular-nums']},
   instrCustody: {fontSize: 12, color: p.sub2, textAlign: 'center', marginTop: 10, lineHeight: 17, fontFamily: FONT.sans},
   sheetAddr: {fontSize: 13, color: p.ink, fontFamily: FONT.mono, textAlign: 'center', marginTop: 4, marginBottom: 8, letterSpacing: 0.2},
   depositCopy: {alignSelf: 'stretch', marginTop: 12},
-  depositStatus: {marginTop: 22, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16},
+  depositStatus: {marginTop: 24, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16},
   depositStatusTitle: {fontSize: 13, fontWeight: '600', color: p.sub2, marginBottom: 6, fontFamily: FONT.sans},
   // "Don't have any yet?" - one provider's published cost (FundingRoutes). Three stacked lines
   // rather than a row, because a name + a cost breakdown + a source domain do not fit side by side
@@ -885,7 +885,7 @@ function buildStyles(p: Palette) {
   depositStatusRow: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
   // Manual "Check now" - secondary (outline brand), debounced + spinner while in-flight.
   checkBtn: {marginTop: 16, borderRadius: 8, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: p.brandText, alignItems: 'center', justifyContent: 'center', height: 46, backgroundColor: p.card},
-  checkBtnText: {color: p.brandText, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
+  checkBtnText: {color: p.brandText, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   // Testnet show/hide toggle at the bottom of the Balances sheet - a subtle secondary affordance
   // (never the primary action). Muted text; full-width 44pt touch target.
   testnetToggle: {marginTop: 18, minHeight: 44, justifyContent: 'center', alignItems: 'center', paddingVertical: 8},
@@ -901,7 +901,7 @@ function buildStyles(p: Palette) {
   // `amtRow`, where it is given `flex: 1` beside the Max button. Without it the field's intrinsic
   // <input> width wins under CSS `min-width: auto` and pushes Max 28.7px off the right edge
   // (measured, and asserted by e2e flow 146). A no-op where the field is stacked in a column.
-  withdrawAmtInput: {alignSelf: 'stretch', minWidth: 0, backgroundColor: p.field, borderRadius: 8, height: 56, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', color: p.ink, borderWidth: 1, borderColor: p.line2, fontFamily: FONT.sansBold, fontVariant: ['tabular-nums']},
+  withdrawAmtInput: {alignSelf: 'stretch', minWidth: 0, backgroundColor: p.field, borderRadius: 8, height: 56, paddingHorizontal: 16, fontSize: 24, fontWeight: '700', color: p.ink, borderWidth: 1, borderColor: p.line2, fontFamily: FONT.sansBold, letterSpacing: -0.4, fontVariant: ['tabular-nums']},
   // --- unified send-to-address field (AddressField + SendSheet) ---------------------------------
   // The destination input is MULTILINE and wraps: an IC principal is 63 characters and an ICRC-1
   // account with a subaccount is longer still, so a single 56pt line would hide the tail - and the
@@ -944,14 +944,14 @@ function buildStyles(p: Palette) {
   // Next. Brand stays reserved for Next and the active dot (discipline unchanged).
   walkRoot: {flex: 1, backgroundColor: p.bg},
   // Chrome (founder ask 2026-08-24): the education surfaces share the app's standard sheet
-  // header - S.sheetHead + S.sheetTitle + the 44pt boxed S.sheetClose top-right - exactly the
+  // header - S.sheetHead + S.sheetTitle + the 44pt flat S.sheetClose top-right - exactly the
   // SettingsSheet grammar, instead of a bespoke wordmark/Skip bar. The boxed affordance is
   // close in the Walkthrough replay and skip/explore on first-run + Rehearsal.
   walkBackBtn: {minHeight: 44, paddingHorizontal: 12, justifyContent: 'center'},
-  walkBackText: {color: p.sub, fontSize: 15, fontWeight: '600', fontFamily: FONT.sansMedium},
+  walkBackText: {color: p.sub, fontSize: 16, fontWeight: '600', fontFamily: FONT.sansMedium},
   // Text block - LEFT-aligned (the editorial reading; centered stacks read as generic onboarding,
-  // which the spec bans). 22dp side margins = the sheet rhythm (sheetHead/sheetCenter use 22).
-  walkBody: {paddingHorizontal: 22, paddingTop: 6},
+  // which the spec bans). 20dp side margins = the sheet rhythm (sheetHead/sheetCenter use 20).
+  walkBody: {paddingHorizontal: 20, paddingTop: 8},
   // Practice request phase only: its content (title + balance + practice card) is short and
   // otherwise dies ~40% down the screen, leaving the lower half dead before the pinned footer.
   // flexGrow (NOT flex:1 - see `onboard` for why flex would disable scrolling) lets the block
@@ -969,7 +969,7 @@ function buildStyles(p: Palette) {
   // zIndex keeps it above the scene illustration (scene 1's breathing arcs cross the corner and,
   // as later siblings, would otherwise paint over the tag).
   walkStageTag: {position: 'absolute', top: 12, right: 16, zIndex: 1, fontSize: 11, fontWeight: '600', color: p.brandText, fontFamily: FONT.sans, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 3, opacity: 0.9},
-  walkFooter: {paddingHorizontal: 22, paddingBottom: 14, paddingTop: 18},
+  walkFooter: {paddingHorizontal: 20, paddingBottom: 12, paddingTop: 16},
   // Dots row: relative so the Back link can sit absolutely at the left while the dots center.
   walkNavRow: {position: 'relative', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 12, minHeight: 34},
   walkDot: {height: 6, borderRadius: 3, backgroundColor: p.line},
@@ -1037,15 +1037,15 @@ function buildStyles(p: Palette) {
   fieldBody: {fontSize: 15, color: p.brandInk, fontFamily: FONT.sans, textAlign: 'center', lineHeight: 22, marginTop: 8},
   fieldRule: {alignSelf: 'stretch', height: 1, backgroundColor: p.brand2, marginVertical: 18},
   fieldAction: {alignSelf: 'stretch', minHeight: 52, borderRadius: 8, borderWidth: 1, borderColor: withAlpha(p.brandInk, 0.45), alignItems: 'center', justifyContent: 'center', marginTop: 16},
-  fieldActionText: {color: p.brandInk, fontSize: 17, fontWeight: '700', fontFamily: FONT.sansBold},
+  fieldActionText: {color: p.brandInk, fontSize: 16, fontWeight: '700', fontFamily: FONT.sansBold},
 
   // ── The convert intent sheet (brief Part V) ─────────────────────────────────────────────
   // The sheet surface the two-tap convert renders in: the route's content column wears the
-  // sheet chrome (28-radius top corners, card surface, LIFT_SM), everything inside stays
-  // mist-quiet. Chips are the 999/h44 pill; the CTA is S.primary (18/h58) bottom-anchored.
-  sheetRoot: {flex: 1, alignSelf: 'stretch', backgroundColor: p.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 20, paddingTop: 10, ...LIFT_SM},
+  // sheet chrome (R_CARD 12 top corners, card surface, LIFT_SM), everything inside stays
+  // mist-quiet. Chips are R_CTRL wells; the CTA is S.primary bottom-anchored.
+  sheetRoot: {flex: 1, alignSelf: 'stretch', backgroundColor: p.card, borderTopLeftRadius: 12, borderTopRightRadius: 12, paddingHorizontal: 20, paddingTop: 8, ...LIFT_SM},
   sheetGrabber: {alignSelf: 'center', width: 44, height: 4, borderRadius: 2, backgroundColor: p.line, marginBottom: 12},
-  sheetSectionLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 16, marginBottom: 6},
+  sheetSectionLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 16, marginBottom: 8},
   // The target line: ONE tappable row naming the currency the conversion lands in (the
   // optional decision). A 44-tall pill row so the touch floor holds without extra chrome.
   targetLine: {flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, alignSelf: 'flex-start'},
