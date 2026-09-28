@@ -372,7 +372,7 @@ export const walletEn: WalletMessages = {
     actions: {
       addFunds: 'Add funds',
       convert: 'Convert',
-      withdraw: 'Withdraw funds',
+      withdraw: 'Withdraw',
       more: 'More actions',
     },
     balanceEyebrow: code => `Balance ${code}`,

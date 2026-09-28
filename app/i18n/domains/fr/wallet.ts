@@ -52,10 +52,10 @@ export const walletFr: WalletMessages = {
 
   home: {
     actions: {
-      addFunds: 'Ajouter des fonds',
+      addFunds: 'Ajouter',
       convert: 'Convertir',
-      withdraw: 'Retirer des fonds',
-      more: 'Plus d’actions',
+      withdraw: 'Retirer',
+      more: 'Plus',
     },
     balanceEyebrow: code => `Solde ${code}`,
     menu: {

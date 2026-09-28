@@ -50,10 +50,10 @@ export const walletDe: WalletMessages = {
 
   home: {
     actions: {
-      addFunds: 'Geld einzahlen',
+      addFunds: 'Einzahlen',
       convert: 'Tauschen',
-      withdraw: 'Geld abheben',
-      more: 'Weitere Aktionen',
+      withdraw: 'Abheben',
+      more: 'Mehr',
     },
     balanceEyebrow: code => `Guthaben ${code}`,
     menu: {

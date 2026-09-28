@@ -132,7 +132,11 @@ function buildStyles(p: Palette) {
   // eyebrow wrapped to A/C/C/O/U/N/T (measured on the device, 2026-09-09). Giving each its own row
   // removes the competition entirely: nothing can squeeze anything, at any name or amount length.
   headerTop: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  headerSettingsBtn: {width: 40, height: 40, borderRadius: 8, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: p.line2},
+  // Header utility buttons (settings, theme): 44x44 borderless targets - the instrument-quiet
+  // choice. A bordered white chip here stacked a second box language onto a header that is
+  // otherwise transparent chrome; the glyph on the page carries the affordance (sub on bg is
+  // gated ≥4.5) and the touch floor is the size. Radius is retired with the box.
+  headerSettingsBtn: {width: 44, height: 44, alignItems: 'center', justifyContent: 'center'},
   // `marginLeft` on top of headerTop's 8px gap separates the utility buttons from the identity -
   // at 4 px the ∂ read as a third button (the "collide" half of X18).
   brand: {fontSize: 24, marginLeft: 4},
@@ -360,7 +364,7 @@ function buildStyles(p: Palette) {
   // wall, and the received amount had no headline at all.
   convertHeadlineCard: {backgroundColor: p.card, padding: 16, borderRadius: 12, alignSelf: 'stretch', marginTop: 16},
   convertHeadlineLabel: {fontSize: 13, fontWeight: '600', color: p.sub, fontFamily: FONT.sans},
-  convertHeadlineAmount: {fontSize: 34, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.6, marginTop: 6, fontVariant: ['tabular-nums']},
+  convertHeadlineAmount: {fontSize: 32, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5, marginTop: 8, fontVariant: ['tabular-nums']},
   convertRateRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: p.line2},
   convertRateLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
   convertRateValue: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1, textAlign: 'right'},
@@ -528,7 +532,7 @@ function buildStyles(p: Palette) {
   viewfinderCornerBL: {bottom: 12, left: 12, borderBottomWidth: 2, borderLeftWidth: 2},
   viewfinderCornerBR: {bottom: 12, right: 12, borderBottomWidth: 2, borderRightWidth: 2},
   viewfinderCenter: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24},
-  reviewAmount: {fontSize: 34, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.6, fontVariant: ['tabular-nums']},
+  reviewAmount: {fontSize: 32, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
   reviewTo: {fontSize: 17, color: p.sub, marginTop: 6, textAlign: 'center', fontFamily: FONT.sansMedium},
   warnNote: {fontSize: 13, color: p.warn, textAlign: 'center', marginTop: 6, marginBottom: 18, paddingHorizontal: 8, lineHeight: 18, fontFamily: FONT.sans},
   // Icon-led warning row: IconAlert + text where a warning previously LED with a '⚠' text
@@ -543,7 +547,7 @@ function buildStyles(p: Palette) {
   primaryWide: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: p.brand, borderRadius: 8, height: 56, alignSelf: 'stretch', marginTop: 14, ...LIFT},
   primaryText: {color: p.brandInk, fontSize: 18, fontWeight: '700', fontFamily: FONT.sansBold},
   qrCard: {backgroundColor: LIGHT.card, padding: 20, borderRadius: 12, marginBottom: 14},
-  amountBig: {fontSize: 30, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
+  amountBig: {fontSize: 32, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
   badgeOk: {marginTop: 10, fontSize: 13, fontWeight: '600', color: p.ok, backgroundColor: withAlpha(p.ok, p.wash), paddingVertical: 6, paddingHorizontal: 14, borderRadius: 8, overflow: 'hidden', fontFamily: FONT.sansMedium},
   qrHint: {marginTop: 12, fontSize: 13, color: p.sub, textAlign: 'center', fontFamily: FONT.sans},
   // Request-QR validity countdown (the signed request expires after EXPIRY_WINDOW; a stale QR scans
@@ -566,18 +570,18 @@ function buildStyles(p: Palette) {
   notPaidText: {color: p.sub, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   check: {width: 92, height: 92, borderRadius: 46, backgroundColor: p.ok, alignItems: 'center', justifyContent: 'center', marginBottom: 18},
   checkAlready: {backgroundColor: p.warn, shadowColor: p.warn},
-  paidText: {fontSize: 30, fontWeight: '700', color: p.ok, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
+  paidText: {fontSize: 32, fontWeight: '700', color: p.ok, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
   alreadyText: {color: p.warn},
   paidSub: {fontSize: 16, color: p.sub, marginTop: 6, fontFamily: FONT.sans},
   amountRow: {flexDirection: 'row', alignItems: 'center', backgroundColor: p.field, borderRadius: 8, paddingHorizontal: 16, height: 56, alignSelf: 'stretch', borderWidth: 1, borderColor: p.line2},
-  currency: {fontSize: 34, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, fontVariant: ['tabular-nums']},
+  currency: {fontSize: 32, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
   // `minWidth: 0` is a NO-OP on Yoga (RN's default) and a FIX on react-native-web: a CSS flex item
   // defaults to `min-width: auto`, so an `<input>`'s intrinsic ~20-character width (414px at 34pt)
   // wins over `flex: 1` and pushes the whole app column 41px wider than the viewport. Invisible
   // until the field is focused - then the browser scrolls the column sideways and the money screen
   // renders with its left edge cut off (measured on Convert, 2026-09-08; every amount row shares
   // this style, so every one of them had it).
-  amountInput: {flex: 1, minWidth: 0, fontSize: 34, fontWeight: '700', color: p.ink, marginLeft: 6, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
+  amountInput: {flex: 1, minWidth: 0, fontSize: 32, fontWeight: '700', color: p.ink, marginLeft: 6, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
   // Long opaque strings (EVM addresses, tx hashes) - no display-sized font can hold 42+ hex
   // chars on one line, so these render at body size in the mono face instead. Same overflow
   // guard as amountInput (flex:1 + minWidth:0; measured clipping at 34px, 2026-09-20).
@@ -608,11 +612,11 @@ function buildStyles(p: Palette) {
   smallBtn: {backgroundColor: p.brand, borderRadius: 8, paddingHorizontal: 16, height: 44, alignItems: 'center', justifyContent: 'center'},
   smallBtnText: {color: p.brandInk, fontWeight: '700', fontFamily: FONT.sansBold},
   // Secondary button (Cancel/secondary action parity with the primary). Card fill + 16 radius,
-  // 52 tall beside a 58 input/CTA per the shape system; clearly secondary but unambiguously
+  // 52 tall beside a 56 input/CTA per the shape system; clearly secondary but unambiguously
   // tappable.
   secondaryBtn: {alignSelf: 'stretch', height: 52, borderRadius: 8, marginTop: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: p.card, minHeight: 44},
   secondaryBtnText: {color: p.sub, fontWeight: '600', fontSize: 17, fontFamily: FONT.sansMedium},
-  histTitle: {fontSize: 13, fontWeight: '600', color: p.sub2, marginBottom: 6, fontFamily: FONT.sans},
+  histTitle: {fontSize: 13, fontWeight: '600', color: p.sub2, marginBottom: 8, fontFamily: FONT.sans},
   // ── The transaction RECEIPT (X6, components/HistoryRow.tsx#TxnReceipt) ───────────────────────
   // The merchant-reconciliation and dispute surface, rendered in the centered-card idiom the
   // pay-link refusal already uses (S.pickBackdrop + S.pickCard). The headline is the EXACT amount;
@@ -620,7 +624,7 @@ function buildStyles(p: Palette) {
   // are a 63-character IC principal, a 32-byte hex reference and a base58 signature - a
   // right-aligned value column (S.reviewRow) wraps all three into a ragged block that cannot be
   // compared character by character, which is the one thing a payee does with them.
-  receiptAmount: {fontSize: 28, fontWeight: '700', fontFamily: FONT.sansBold, letterSpacing: -0.5, marginTop: 2, fontVariant: ['tabular-nums']},
+  receiptAmount: {fontSize: 24, fontWeight: '700', fontFamily: FONT.sansBold, letterSpacing: -0.4, marginTop: 4, fontVariant: ['tabular-nums']},
   receiptAsset: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 2, marginBottom: 6},
   receiptField: {alignSelf: 'stretch', marginTop: 12},
   receiptLabel: {fontSize: 13, fontWeight: '600', color: p.sub2, fontFamily: FONT.sans, marginBottom: 4},
@@ -632,12 +636,12 @@ function buildStyles(p: Palette) {
   // receipt must not let "the ledger recorded no account" look like something copied off a chain.
   receiptNote: {fontSize: 13, color: p.sub, lineHeight: 18, fontFamily: FONT.sans},
   receiptSource: {fontSize: 12, color: p.sub2, lineHeight: 17, fontFamily: FONT.sans, marginTop: 16},
-  histRow: {flexDirection: 'row', alignItems: 'baseline', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: p.line2},
+  histRow: {flexDirection: 'row', alignItems: 'baseline', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: p.line2},
   histWhoCol: {flex: 1},
-  histWho: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium},
+  histWho: {fontSize: 16, color: p.ink, fontFamily: FONT.sansMedium},
   // The row's SECOND line - the timestamp, and the memo beside it when there is one. Both live in
   // the flexible left column, which is what pins the amount: see `histAmt`.
-  histSubRow: {flexDirection: 'row', alignItems: 'baseline', marginTop: 2},
+  histSubRow: {flexDirection: 'row', alignItems: 'baseline', marginTop: 4},
   histMemo: {fontSize: 12, color: p.sub2, fontStyle: 'italic', fontFamily: FONT.sans, marginLeft: 6, flexShrink: 1},
   // The fee annotation beside the memo (founder rule 2026-09-14: fees ride the log row ONLY as
   // this line - "0.0001 VCHF fees" - never inside the headline amount). Not italic: it is a
@@ -667,14 +671,14 @@ function buildStyles(p: Palette) {
   ledgerEmpty: {fontSize: 15, color: p.sub, textAlign: 'center', marginTop: 40, fontFamily: FONT.sans},
   // Asset filter chip row - only renders when >1 currency is present in history. Active chip
   // fills with brand so the selected filter reads as the obvious current view.
-  filterRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14},
+  filterRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12},
   filterChip: {paddingVertical: 6, paddingHorizontal: 14, borderRadius: 8, backgroundColor: p.card, minHeight: 44},
   filterChipActive: {backgroundColor: p.brand, borderColor: p.brand},
   filterChipText: {color: p.sub, fontWeight: '600', fontSize: 13, fontFamily: FONT.sansMedium},
   filterChipTextActive: {color: p.brandInk, fontFamily: FONT.sansBold},
   // Asset card. White card, borderless (surface step separates it from the page); selection is
   // a 2px `brandText` ring (brief §IV: no left stripe), so the selected card pops.
-  assetCard: {marginTop: 12, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 14, borderWidth: 2, borderColor: 'transparent', borderLeftColor: 'transparent', borderLeftWidth: 2},
+  assetCard: {marginTop: 12, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16, borderWidth: 2, borderColor: 'transparent', borderLeftColor: 'transparent', borderLeftWidth: 2},
   assetCardActive: {borderColor: p.brandText, borderLeftColor: p.brandText},
   assetRow: {flexDirection: 'row', alignItems: 'center'},
   // assetSelect - the glyph-led row inside a card: the 38px AssetGlyph chip against the text
