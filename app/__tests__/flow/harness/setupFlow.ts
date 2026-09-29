@@ -97,12 +97,20 @@ g.requestAnimationFrame = ((cb: (t: number) => void): number =>
   setTimeout(() => cb(Date.now()), 0) as unknown as number) as unknown as typeof requestAnimationFrame;
 
 // --- 1. fast-poll + convert-engine seams (read at app module load — set BEFORE ../App) ----------
+// 100ms, NOT smaller: the tier floods the ONE shared relay otherwise. Each mounted app fans
+// history out per catalog currency (8+ fetches per tick) + balance + deposit polls; at 25ms that
+// was ~500 req/s per worker against a DEBUG-build relay whose fake-IC gateway serializes every
+// signed envelope — mid-run queue latency blew the app's own 8s request timeouts in bursts, and
+// whole suites red with 'Paid'/'Withdrawn'/deposit-address waits expiring (the varying-draw
+// class: first half of a 2-worker run, all suites green alone and in runInBand bands). 100ms is
+// 4× the load cut and still an order of magnitude under the e2e browser twin (300ms, driver.mjs)
+// and prod (5s); every flow asserts OUTCOMES through budget-scaled waits, never a tick count.
 g.__DPAY_TEST_POLL = {
-  balance: 25, history: 25, deposit: 25, receiptPay: 25, receiptRcv: 25, request: 25,
+  balance: 100, history: 100, deposit: 100, receiptPay: 100, receiptRcv: 100, request: 100,
   // Idle cadences collapsed onto the active ones, same intent as the e2e driver (wall-clock
   // request budgets are meaningless under test cadences; the cadence-independent invariants are
   // what flows pin).
-  balanceIdle: 25, historyIdle: 25,
+  balanceIdle: 100, historyIdle: 100,
 };
 // Convert engine shrink seams (app/convert/execute.ts) — the honest-pending/resume invariants at
 // ~100ms probe cadence instead of prod's seconds; the prod defaults stay pinned as the ?? fallbacks.

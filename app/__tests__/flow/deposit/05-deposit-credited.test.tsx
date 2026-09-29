@@ -98,8 +98,11 @@ describe('flow 05 — deposit credited: balance-delta detection + the credit sta
     await m.driver.waitGone('deposit-address', {timeoutMs: 4_000});
     await openBalances(m);
     await m.driver.findByTestID('accounts-currency-BTC', {timeoutMs: 8_000});
+    // The minted row is a poll-driven transition (the balance poll re-reads the ledger): wait for
+    // the amount itself — a single read races the poll tick (observed at the 100ms poll cadence).
+    assert(await m.driver.waitForText('0.0005 BTC', {timeoutMs: 8_000}),
+      'the wallet\'s visible BTC card should show the minted BTC after the sheet closes');
     const assetTxt = m.driver.readText('accounts-currency-BTC');
-    assertIncludes(assetTxt, '0.0005 BTC', 'the wallet\'s visible BTC card should show the minted BTC after the sheet closes');
     assertIncludes(assetTxt, 'BTC', 'the BTC card should be clearly labeled "BTC" (the deposited asset name, H1)');
 
     await m.unmount();
