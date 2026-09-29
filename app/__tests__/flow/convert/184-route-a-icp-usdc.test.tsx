@@ -11,6 +11,7 @@ import {
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, fmt,
@@ -99,5 +100,5 @@ hermeticDescribe('flow 184 — Route A: ICP → USDC(Ethereum) as one opt-in int
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 180_000);
+  }, budgetScaled(180_000));
 });

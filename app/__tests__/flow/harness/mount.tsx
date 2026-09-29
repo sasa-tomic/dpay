@@ -40,8 +40,11 @@ function resetSessionModuleState(): void {
   // Operator overrides re-apply FROM THE SEAM, never a blind clear: a file seeds its rail mode
   // at module scope (e.g. __DPAY_TEST_SOLANA_RPC_URL = 'stub' before constants load — flow 122/
   // 131/45's fail-closed SOL surfaces) and a mount is a fresh page ON THAT FILE, not a fresh
-  // file. '' clears; a seeded value rides.
-  setSolanaRpcUrl(((globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SOLANA_RPC_URL as string) ?? '');
+  // file. '' clears; a seeded value rides. EXCEPT the offline SENTINELS ('stub' — solrpc.ts's
+  // SOL sentinel): they are not URLs and the setter refuses them BY DESIGN — their rail mode
+  // lives in the module-load TEST override (constants.ts), never in the operator row.
+  const solSeam = ((globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SOLANA_RPC_URL as string | undefined) ?? '';
+  setSolanaRpcUrl(solSeam === 'stub' ? '' : solSeam);
   setEvmRpcUrl(((globalThis as unknown as Record<string, unknown>).__DPAY_TEST_EVM_RPC_URL as string) ?? '');
   setIcGatewayUrl('');                   // the stored IC-gateway override row's module mirror
 }

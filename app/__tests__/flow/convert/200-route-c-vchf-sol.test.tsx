@@ -189,5 +189,5 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 300_000);
+  }, budgetScaled(300_000));
 });

@@ -12,6 +12,7 @@ import {
 import type {Mount} from '../harness/mount';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob,
@@ -130,5 +131,5 @@ hermeticDescribe('flow 140 — the two-tap convert (sheet → oracle → engine 
     expect(await m.driver.waitForText('from ICPSwap', {timeoutMs: 12_000})).toBe(true);
 
     await m.unmount();
-  }, 180_000);
+  }, budgetScaled(180_000));
 });

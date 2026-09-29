@@ -14,6 +14,7 @@ import {
 import {
   createSideShiftFixedShift,
   fetchSideShiftQuote,
+  SideShiftMinDepositError,
   type SideShiftFixedShift,
 } from '../services/sideshift';
 import {
@@ -148,6 +149,7 @@ export async function fetchConvertQuote(
 /** A cefi venue whose relay holds no partner credential — the venue is ABSENT, not broken. */
 export function ceFiServiceError(e: unknown, venueName: string): Error {
   const code = e instanceof Error ? e.message : 'unavailable';
+  if (e instanceof SideShiftMinDepositError) return new CeFiMinDepositError(venueName, e.venueMessage, e.minDeposit);
   if (code === 'unreachable') return new Error(M.convert.errors.quoteUnreachable(venueName));
   if (code === 'unconfigured') return new Error(M.convert.errors.quoteUnconfigured(venueName));
   if (code === 'refused') return new Error(M.convert.errors.quoteRefused(venueName));
@@ -168,6 +170,26 @@ export class CeFiNoQuoteError extends Error {
     super(M.convert.cefi.noQuoteBody(venueName));
     this.name = 'CeFiNoQuoteError';
     this.venueName = venueName;
+  }
+}
+
+/** The typed below-minimum verdict (2026-09-29, the user-reported CHF→EUR dead end): the
+ *  VENUE refused the AMOUNT with its own published per-pair minimum — nothing was sent,
+ *  nothing failed. `venueMessage` is the venue's own words VERBATIM (the founder's call:
+ *  the venue's message is on the screen, not a paraphrase); `minDeposit` is the venue's
+ *  published figure, carried unrounded. The message composes the attributed frame around
+ *  the venue's sentence so a surface rendering the error plain still shows the whole
+ *  actionable fact instead of a code. */
+export class CeFiMinDepositError extends Error {
+  readonly venueName: string;
+  readonly venueMessage: string;
+  readonly minDeposit: string;
+  constructor(venueName: string, venueMessage: string, minDeposit: string) {
+    super(M.convert.cefi.minDepositBody(venueName, venueMessage, minDeposit));
+    this.name = 'CeFiMinDepositError';
+    this.venueName = venueName;
+    this.venueMessage = venueMessage;
+    this.minDeposit = minDeposit;
   }
 }
 

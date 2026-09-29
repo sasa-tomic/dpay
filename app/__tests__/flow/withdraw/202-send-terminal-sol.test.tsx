@@ -13,12 +13,15 @@
  */
 import {it, expect} from '@jest/globals';
 import {hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 
 const G = globalThis as unknown as Record<string, unknown>;
 // The derived production path: the RELAY's Solana proxy (the stub upstream lives behind it).
-// The hermetic fetch rewrite carries this module-captured URL to the FILE's private relay
-// (per-fetch rewrite — the string names the run's shared origin, the fetch lands hermetic).
-G.__DPAY_TEST_SOLANA_RPC_URL = `${process.env.DPAY_JEST_RELAY_URL}/api/v1/solana/rpc`;
+// Spelled with the BAKED default origin — the one URL the harness rewrite carries per fetch to
+// THIS file's relay — so the app's RPC reads and the armMode knob posts land on the SAME relay's
+// stub under the hermetic harness (relayBaseURL() resolves to the file's private relay there).
+// A module body cannot name the private relay synchronously: the spawn resolves after the body.
+G.__DPAY_TEST_SOLANA_RPC_URL = 'https://dpay.kalaj.org/api/v1/solana/rpc';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const lib = require('../harness/lib') as typeof import('../harness/lib');
@@ -34,7 +37,10 @@ async function armMode(body: Record<string, unknown>): Promise<void> {
 }
 
 const absent = async (m: Parameters<typeof openBalances>[0], testID: string): Promise<boolean> => {
-  await new Promise((r) => setTimeout(r, 200));
+  // The settle window before the absence read — BUDGET-SCALED: the settled re-render that
+  // unmounts the panel lags the 'Sent' text on a starved worker, and a fixed 200ms read the
+  // stale tree (observed 2026-09-29: gate red in-run, green alone).
+  await new Promise((r) => setTimeout(r, budgetScaled(200)));
   return !m.driver.isPresent(testID);
 };
 
@@ -68,6 +74,9 @@ hermeticDescribe('flow 202 — the SOL send terminal: honest unknown → Check s
     // Check status → the stub flips → settled.
     await m.driver.click('btn-sol-send-check', {timeoutMs: 4000});
     expect(await m.driver.waitForText('Sent', {timeoutMs: 15_000})).toBe(true); // the confirmed read flips to the settled terminal
+    if (!(await absent(m, 'sol-send-unknown-title'))) {
+      (process.stderr as {write: (s: string) => void}).write(`[202-DEBUG] BODY: ${m.driver.bodyText().slice(0, 600)}\n`);
+    }
     expect(await absent(m, 'sol-send-unknown-title')).toBe(true);
     expect(await absent(m, 'btn-sol-send-check')).toBe(true);
     assertEq(m.driver.readText('sol-send-signature').trim(), sig, 'the SAME signature survives the flip');

@@ -7,6 +7,7 @@
  * works offline); back online the form returns — the gate is connectivity and nothing else.
  */
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {relayBaseURL} from '../harness/relayClient';
 import {it, expect} from '@jest/globals';
 import {
   accountOf, assert, faucetAccount, goOffline, onboardWallet, openBalances, selectCurrency, setRelay,
@@ -50,7 +51,7 @@ hermeticDescribe('flow 110 — offline, Send-to-address says so up front and poi
     await m.driver.findByTestID('btn-start-scan', {timeoutMs: 10000});
 
     // Back online: the gate is connectivity alone — the form returns.
-    await setRelay(m, process.env.DPAY_JEST_RELAY_URL!);
+    await setRelay(m, relayBaseURL());
     await m.driver.click('btn-pay-send', {timeoutMs: 5000});
     await m.driver.findByTestID('send-address-input', {timeoutMs: 15000});
     expect(m.driver.isPresent('pay-send-offline')).toBe(false);

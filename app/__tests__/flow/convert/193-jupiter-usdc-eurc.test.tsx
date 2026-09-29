@@ -9,6 +9,7 @@ import {
   assertIncludes, onboardWallet, accountOf, openConvertFor, typeConvertAmount,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, installSolRpcStub, configureJupiterStub,
@@ -144,5 +145,5 @@ hermeticDescribe('flow 193 — the rail-local FX pair: USDC(Solana) → EURC via
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 240_000);
+  }, budgetScaled(240_000));
 });

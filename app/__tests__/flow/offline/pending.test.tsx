@@ -12,6 +12,7 @@
  * merchant settles the same memo, the settled row retires the pending row with no duplicate).
  */
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {relayBaseURL} from '../harness/relayClient';
 import {it, expect, afterEach} from '@jest/globals';
 import {
   accountOf, armNfcCard, armPayScan, assert, assertEq, DpayCore, faucetAccount,
@@ -221,7 +222,7 @@ hermeticDescribe('flow 182 — back online, the pending payment reconciles into 
     expect(m.driver.bodyText()).toContain('1.1 ICP');
 
     // Back online, merchant has NOT settled: the authoritative balance wins.
-    await setRelay(m, process.env.DPAY_JEST_RELAY_URL!);
+    await setRelay(m, relayBaseURL());
     expect(await m.driver.waitForText('2.10000001 ICP', {timeoutMs: 15000})).toBe(true);
     await m.driver.click('tab-home', {timeoutMs: 4000});
     await m.driver.findByTestID('home-hist-pending-0', {timeoutMs: 6000}); // the pending ROW stays

@@ -11,6 +11,7 @@ import {
 } from '../harness/lib';
 import {relayPost} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob,
@@ -92,5 +93,5 @@ hermeticDescribe('flow 143 — a stale quote refreshes itself; confirm re-quotes
       delete (globalThis as Record<string, unknown>).__DPAY_TEST_CONVERT_STALE_MS;
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 180_000);
+  }, budgetScaled(180_000));
 });

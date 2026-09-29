@@ -28,7 +28,6 @@
 import {afterAll, beforeAll, describe} from '@jest/globals';
 import {startFlowRelay, type FlowRelay} from './flowRelay';
 import {resetPageEventListeners} from './setupFlow';
-import {RELAY_LIST_STORAGE_KEY} from '../../../config/constants';
 
 export type HermeticRelayInfo = {baseURL: string; port: number};
 
@@ -128,6 +127,14 @@ export function hermeticFlow(opts: HermeticOpts = {}): HermeticFlow {
       for (const k of await AS.getAllKeys()) await AS.removeItem(k);
       await AS.clear();
     }
+    // LAZY require — never a static import: config/constants CAPTURES `__DPAY_TEST_SOLANA_RPC_URL`
+    // at its module load, and a static import here would load it at the hermetic import — BEFORE
+    // the importing file's body could set the SOL seam (the solrpc.ts load-order contract: the
+    // file sets the seam, THEN loads the app graph). Every SOL flow file died on exactly this
+    // (rail captured '', observed 2026-09-29 gate2: 34 suites red, every SOL-rail flow among
+    // them). At wire time the file body has long finished, so the capture sees the seam.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {RELAY_LIST_STORAGE_KEY} = require('../../../config/constants') as {RELAY_LIST_STORAGE_KEY: string};
     await AS?.setItem(RELAY_LIST_STORAGE_KEY, JSON.stringify([relay.baseURL]));
     resetSeams();
     return {baseURL: relay.baseURL, port: relay.port};

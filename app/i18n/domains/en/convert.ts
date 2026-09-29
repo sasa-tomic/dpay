@@ -401,6 +401,11 @@ export type ConvertMessages = {
      *  the line says so and names the way out. */
     noQuoteTitle: string;
     noQuoteBody: (venue: string) => string;
+    /** The venue's own BELOW-MINIMUM verdict (SideShift, 2026-09-29 probe: a too-small
+     *  amount answers HTTP 500 QUOTE_UNAVAILABLE with the published figure in the body).
+     *  The venue's own message rides verbatim; the frame attributes it, states nothing
+     *  moved, and names the way out. */
+    minDepositBody: (venue: string, venueMessage: string, min: string) => string;
   };
 
   // --- the chain family (2026-09-28, the any-pair mandate): a SOL-rail source rides a cefi
@@ -798,6 +803,8 @@ export const convertEn: ConvertMessages = {
     noQuoteTitle: 'No market for this pair right now',
     noQuoteBody: venue =>
       `${venue} lists this pair but has no live market right now. Nothing was sent. Pick another venue or try again later.`,
+    minDepositBody: (venue, venueMessage, min) =>
+      `${venue} declined this amount: “${venueMessage}” (minimum deposit: ${min}). Nothing was sent. Raise the amount and try again.`,
   },
 
   /** The chain family (2026-09-28, the any-pair mandate): one consent, two phases — the
@@ -888,7 +895,7 @@ export const convertEn: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: venue => `Could not reach ${venue} for a quote. Check your connection and try again.`,
+    quoteUnreachable: venue => `Could not reach ${venue} through dpay\u2019s relay. Nothing was sent. If your connection is fine, the relay or ${venue} is briefly unavailable. Try again in a moment.`,
     quoteRefused: venue => `${venue} declined to quote this pair right now.`,
     buildRefused: venue => `${venue} could not prepare this exchange just now. Nothing moved, try again in a moment.`,
     quoteUnavailable: code => `A quote could not be shown (code ${code}).`,

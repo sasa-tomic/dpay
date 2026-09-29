@@ -14,6 +14,7 @@
  *     only a nonce/rid-bound merchant `result` resolves "Paid ✓ ∂10.00"; balances move exactly once.
  */
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {relayBaseURL} from '../harness/relayClient';
 import {it, expect} from '@jest/globals';
 import {scaled as budgetScaled} from '../harness/budget';
 import {
@@ -190,7 +191,7 @@ hermeticDescribe('flow 87 — offline payer signs, never submits, and resolves P
     const catalog = await icpCatalog();
     const ledger = catalog.find((c) => c.currency === 0)?.ledger ?? '';
     const bytes = new Uint8Array(approved.envelopeHex.match(/../g)!.map((h: string) => parseInt(h, 16)));
-    const submit = await fetch(`${process.env.DPAY_JEST_RELAY_URL}/api/v2/canister/${ledger}/call`, {
+    const submit = await fetch(`${relayBaseURL()}/api/v2/canister/${ledger}/call`, {
       method: 'POST', headers: {'Content-Type': 'application/cbor'}, body: bytes,
     });
     expect(submit.ok).toBe(true);

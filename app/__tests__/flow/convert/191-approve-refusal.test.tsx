@@ -10,6 +10,7 @@ import {
   typeConvertAmount,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, approveFailKnob,
@@ -64,5 +65,5 @@ hermeticDescribe('flow 191 — the approve refusal is a terminal failed card, ne
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 180_000);
+  }, budgetScaled(180_000));
 });

@@ -11,6 +11,7 @@ import {
 } from '../harness/lib';
 import type {Mount} from '../harness/mount';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, enableSolRail,
@@ -101,5 +102,5 @@ hermeticDescribe('flow 206 — the intent sheet\'s target grammar: the standing 
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 180_000);
+  }, budgetScaled(180_000));
 });

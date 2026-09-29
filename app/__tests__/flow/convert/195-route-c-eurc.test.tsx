@@ -222,5 +222,5 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 300_000);
+  }, budgetScaled(300_000));
 });

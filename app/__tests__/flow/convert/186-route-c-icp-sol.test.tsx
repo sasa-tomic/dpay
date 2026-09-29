@@ -251,5 +251,5 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 300_000);
+  }, budgetScaled(300_000));
 });

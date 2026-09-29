@@ -265,6 +265,8 @@ export const convertEs: ConvertMessages = {
     noQuoteTitle: 'Ahora no hay mercado para este par',
     noQuoteBody: venue =>
       `${venue} enumera este par, pero ahora mismo no tiene un mercado en vivo. No se envió nada. Elige otra sede o inténtalo más tarde.`,
+    minDepositBody: (venue, venueMessage, min) =>
+      `${venue} rechazó este importe: “${venueMessage}” (depósito mínimo: ${min}). No se envió nada. Sube el importe e inténtalo de nuevo.`,
   },
 
   /** La familia chain (2026-09-28, el mandato any-pair): un consentimiento, dos fases —
@@ -357,7 +359,7 @@ export const convertEs: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: venue => `No se pudo alcanzar la cotización de ${venue} — el relay no responde. Revisa tu conexión y vuelve a intentarlo.`,
+    quoteUnreachable: venue => `No se pudo alcanzar la cotización de ${venue} a través del relay de dpay. No se envió nada. Si tu conexión funciona, el relay o ${venue} no está disponible por el momento. Vuelve a intentarlo en un momento.`,
     quoteRefused: venue => `${venue} se negó a cotizar este par ahora mismo.`,
     buildRefused: venue => `${venue} no pudo preparar este intercambio ahora mismo. No se movió nada, inténtalo de nuevo en un momento.`,
     quoteUnavailable: code => `Cotización no disponible (${code}).`,

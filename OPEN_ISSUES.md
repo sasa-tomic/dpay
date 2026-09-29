@@ -111,6 +111,23 @@ Uniswap V3 adapter (ZCHF first; seed = `scripts/evm-mainnet-zchf-buy.mjs`, D31-h
 auto-compose A→hub→B with combined-fee honesty, refuse venue-less pairs honestly. One live
 funds-ledgered trip per new adapter before any "supported" claim (D31 rule).
 
+- **"Check your connection" copy fires on RELAY failures while the phone is online
+  (founder question 2026-09-29; value 6 / effort M).** The prod relay was probed healthy
+  mid-session (version/currencies/venues ~0.2 s, swap_quote 0.39 s, sideshift proxy 0.53 s,
+  solana proxy 0.20 s), so the words the founder saw are not evidence of an outage; they are
+  a copy defect. Mechanism: every relay-dependent read maps a failed `relayFetch` walk (relay
+  down, relay slower than its deadline, DNS hiccup, or the phone genuinely offline) onto the
+  same "check your connection" family (convert quoteUnreachable, errors.feeUnavailable,
+  deposit.gasFeeErr/addressErr, evm.engineLoad, pay.couldNotSubmit, and kin). The blame split
+  ALREADY EXISTS: `classifyTransportFailure` (app/solana.ts, the R3 oracle) probes the IC
+  boundary OFF the failing path and answers 'offline' vs 'unreachable', and deposit.ts's R4
+  copy (`ataUnverifiedUnreachable`) is the honest template: "Your connection is fine; dpay's
+  relay can't reach Solana… money untouched… what still works." Work: adopt the oracle and
+  that copy shape across the remaining surfaces, all four locales, tests pinning both arms.
+  The convert quote surface is DONE (2026-09-29): quoteUnreachable names the relay and drops
+  the unconditional connection blame; the below-minimum verdict got its own typed line
+  (see the cefi minDepositBody work, same day).
+
 **State — not issues (recorded 2026-09-20; no action without the founder):**
 
 - **ChangeNOW verified live (2026-09-21): no ICP in the API catalog.** The partner key is

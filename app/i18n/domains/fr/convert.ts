@@ -265,6 +265,8 @@ export const convertFr: ConvertMessages = {
     noQuoteTitle: 'Pas de marché pour cette paire pour le moment',
     noQuoteBody: venue =>
       `${venue} référence cette paire mais n\u2019a pas de marché en direct pour le moment. Rien n\u2019a été envoyé. Choisis une autre plateforme ou réessaie plus tard.`,
+    minDepositBody: (venue, venueMessage, min) =>
+      `${venue} a refusé ce montant : « ${venueMessage} » (dépôt minimum : ${min}). Rien n\u2019a été envoyé. Augmente le montant et réessaie.`,
   },
 
   /** La famille chain (2026-09-28, le mandat any-pair) : un consentement, deux phases —
@@ -357,7 +359,7 @@ export const convertFr: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: venue => `Impossible d'obtenir le devis de ${venue} — le relay ne répond pas. Vérifie ta connexion et réessaie.`,
+    quoteUnreachable: venue => `Impossible d'obtenir le devis de ${venue} via le relay de dpay. Rien n'a été envoyé. Si ta connexion fonctionne, le relay ou ${venue} est momentanément indisponible. Réessaie dans un instant.`,
     quoteRefused: venue => `${venue} a refusé d'établir un devis pour cette paire pour l'instant.`,
     buildRefused: venue => `${venue} n'a pas pu préparer cet échange pour le moment. Rien n'a bougé, réessayez dans un instant.`,
     quoteUnavailable: code => `Devis indisponible (${code}).`,

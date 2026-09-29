@@ -189,5 +189,5 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 300_000);
+  }, budgetScaled(300_000));
 });

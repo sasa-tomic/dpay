@@ -10,6 +10,7 @@ import {
   typeConvertAmount, pickSwapTarget, openOtherVenues, isDisabled,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, installSideShiftStub, trocadorConfig,
@@ -84,5 +85,5 @@ hermeticDescribe('flow 207 — the trocador listed-but-unquoted verdict renders 
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 240_000);
+  }, budgetScaled(240_000));
 });

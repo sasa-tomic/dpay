@@ -10,6 +10,7 @@ import {
   pickSwapTarget,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, installSolRpcStub, configureJupiterStub,
@@ -130,5 +131,5 @@ hermeticDescribe('flow 189 — the out-destination picker: SOL → EURC via jupi
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 240_000);
+  }, budgetScaled(240_000));
 });
