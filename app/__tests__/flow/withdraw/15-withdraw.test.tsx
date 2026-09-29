@@ -53,13 +53,12 @@ describe('flow 15 — withdraw ckBTC to a native BTC address', () => {
     assertEq(await getBalance(accountHex, BTC_CURRENCY), String(100_000 - 50_000 - 10),
       'post-withdraw balance (burn + the pinned 10-sat ledger fee)');
 
-    // L3: the success screen's Copy affordance writes the EXACT destination. Jest has no
-    // navigator.clipboard, so stand one in (the honest web seam): the app takes its real
-    // 'clipboard' path and the harness seam receives the text.
+    // L3: the success screen's Copy affordance writes the EXACT destination. Jest's navigator is
+    // jest-environment-node's LIVE FORWARD of the worker's real Node global — a read-mutate here
+    // would pollute the WORKER for every later file (the harness beforeEach drops a grafted
+    // clipboard anyway; this assignment keeps the graft file-local by construction).
     const g = globalThis as unknown as Record<string, unknown>;
-    const nav = (g.navigator as {clipboard?: unknown} | undefined) ?? {};
-    nav.clipboard = {writeText: async (t: string) => { g.__DPAY_TEST_CLIPBOARD = t; }};
-    if (g.navigator === undefined) g.navigator = nav;
+    g.navigator = {clipboard: {writeText: async (t: string) => { g.__DPAY_TEST_CLIPBOARD = t; }}};
 
     await m.driver.findByTestID('btn-copy-destination', {timeoutMs: 4000});
     assertEq(m.driver.readText('withdraw-destination'), BTC_ADDR, 'destination rendered on the success screen');
@@ -106,11 +105,10 @@ describe('flow 44 — withdraw native ckETH to a 0x address (withdraw_eth branch
     assertEq(await getBalance(accountHex, ETH_CURRENCY), String(SEED_WEI - APPROVE_FEE_WEI - 1_000_000_000_000_000_000n),
       'post-withdraw balance (approve fee + minter burn)');
 
-    // L3: the same Copy affordance with a navigator.clipboard stand-in (see flow 15).
+    // L3: the same Copy affordance with a navigator.clipboard stand-in (see flow 15 — file-local
+    // assignment; never read-mutate the worker's real navigator).
     const g = globalThis as unknown as Record<string, unknown>;
-    const nav = (g.navigator as {clipboard?: unknown} | undefined) ?? {};
-    nav.clipboard = {writeText: async (t: string) => { g.__DPAY_TEST_CLIPBOARD = t; }};
-    if (g.navigator === undefined) g.navigator = nav;
+    g.navigator = {clipboard: {writeText: async (t: string) => { g.__DPAY_TEST_CLIPBOARD = t; }}};
     await m.driver.findByTestID('btn-copy-destination', {timeoutMs: 4000});
     assertEq(m.driver.readText('withdraw-destination'), ETH_ADDR, 'destination rendered');
     await m.driver.click('btn-copy-destination', {timeoutMs: 4000});
