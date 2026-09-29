@@ -83,6 +83,18 @@ const presetPerformance = g.performance as {now?: unknown} | undefined;
 if (presetPerformance && typeof presetPerformance.now === 'function') {
   presetPerformance.now = () => Date.now();
 }
+// Same module of the preset, second defect: its requestAnimationFrame wraps the callback in a
+// RAW setTimeout(0) whose body calls jest.now(). A frame scheduled but not flushed before THIS
+// file's environment tears down (a poll tick rendering into a wedged unmount, a settle frame
+// racing the afterEach) fires AFTER teardown, and jest.now() then throws "You are trying to
+// access a property or method of the Jest environment after it has been torn down" AT THE
+// WORKER level — outside any test — flipping an ALL-GREEN run's exit code to 1 (observed
+// 2026-09-29: trip-passport's leftover frame, 2-3× per full run and in every band; the all-green
+// band runs exited 1 with 29/29 suites passing). A plain clock keeps the exact contract (async
+// callback carrying a timestamp) with no access to the dying environment: a straggler frame
+// becomes harmless noise instead of a verdict flip.
+g.requestAnimationFrame = ((cb: (t: number) => void): number =>
+  setTimeout(() => cb(Date.now()), 0) as unknown as number) as unknown as typeof requestAnimationFrame;
 
 // --- 1. fast-poll + convert-engine seams (read at app module load — set BEFORE ../App) ----------
 g.__DPAY_TEST_POLL = {
