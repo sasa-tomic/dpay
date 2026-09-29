@@ -13,13 +13,20 @@
  * the app must refuse fast, and a stretched refusal bound would only delay catching a real bug.
  * Call sites that assert absence pass `{unscaled: true}` through the driver.
  *
- * THE FORMULA (one definition, here): factor = 1 + max(0, load1min - 3) * 1.0, clamped to [1, 6].
- * Load ≤ 3 (idle-ish box) → ×1.00, byte-identical to the old ceilings. Each unit of load past 3
- * buys one full extra budget multiple; the clamp bounds a genuine hang's worst-case wait at 6×.
- * `DPAY_TEST_BUDGET_MULT` overrides the live computation outright (deterministic experiments;
- * ≥1, sane-clamped). CALIBRATION (2026-09-28): the forced ×2 canary at ambient load 5-7 red'd
- * 7 suites, all positive-wait expiries — the box's p50/p90 load (4.3/5.8) needs ×2.3-3.8, so
- * the slope is 1.0, not the first-cut 0.5.
+ * THE FORMULA (one definition, here): the WORSE of two contention terms, clamped to [1, 6]:
+ *   load: 1 + max(0, load1min - 3) * 1.0   (the trailing view — a sustained busy box)
+ *   psi:  1 + cpuPSI.some.avg10 / 20       (the INSTANT view — burst contention)
+ * Load ≤ 3 with a quiet CPU → ×1.00, byte-identical to the old ceilings; the clamp bounds a
+ * genuine hang's worst-case wait at 6×. `DPAY_TEST_BUDGET_MULT` overrides both outright
+ * (deterministic experiments; ≥1, sane-clamped).
+ *
+ * WHY PSI (2026-09-29 night): the shared box's other agents run bursty single-file jest probes
+ * that spin up full worker pools for ~a minute; the 1-min load average reads ~4 through such a
+ * burst (factor ×2.2) while the INSTANT runqueue pressure is 40-90% — every window in the burst's
+ * path expired at ×2.2 (25 suites red) and passed at ×1 seconds later in a quiet gap (32 straight
+ * green). PSI `some` avg10 is the scheduler's own "tasks waited on CPU in the last 10s" number:
+ * it sees the burst within seconds, loadavg sees it a minute late. /20: 20% pressure → ×2,
+ * 80% → ×5 — calibrated against those observed bursts.
  *
  * MONOTONE HIGH-WATER. The factor is sampled at first use (≈ worker start) and on EVERY call; the
  * EFFECTIVE factor is the max seen so far in this worker. A burst mid-run must never under-budget
@@ -43,9 +50,28 @@ function load1(): number {
   return os.loadavg()[0] ?? 0;
 }
 
-/** factor(load) — THE formula. Exported for the run log's self-description. */
+/** CPU PSI `some` avg10 (percent 0-100) — "tasks waited on CPU in the last 10s". The instant
+ *  contention view the 1-min load average lags by a minute. 0 when PSI is absent (old kernel). */
+function cpuPsiAvg10(): number {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {readFileSync} = require('node:fs') as typeof import('node:fs');
+    const line = readFileSync('/proc/pressure/cpu', 'utf8').split('\n').find((l) => l.startsWith('some '));
+    const m = line?.match(/avg10=([\d.]+)/);
+    const v = m ? Number(m[1]) : 0;
+    return Number.isFinite(v) && v >= 0 ? v : 0;
+  } catch { return 0; }
+}
+
+/** factor(load) — the load term of THE formula (the trailing view). */
 export function factorOf(load: number): number {
   const f = 1 + Math.max(0, load - 3) * 1.0;
+  return Math.min(6, Math.max(1, f));
+}
+
+/** factorFromPsi(psiPercent) — the instant term: 20% pressure → ×2, 80% → ×5. */
+export function psiFactorOf(psi: number): number {
+  const f = 1 + psi / 20;
   return Math.min(6, Math.max(1, f));
 }
 
@@ -58,7 +84,7 @@ export function budgetMult(): number {
     const n = Number(env);
     if (Number.isFinite(n) && n >= 1) return Math.min(n, 64);
   }
-  const live = factorOf(load1());
+  const live = Math.max(factorOf(load1()), psiFactorOf(cpuPsiAvg10()));
   // On globalThis (not module state): setupFiles, setupFilesAfterEnv, and each test file get
   // SEPARATE jest module registries — module state would give every registry its own high-water
   // and let a post-burst registry under-budget. globalThis is the one shared carrier (the same
@@ -82,6 +108,8 @@ export function deadline(ms: number): number {
 /** One compact self-description per worker, for the run log: the formula's inputs and result. */
 export function describeBudget(): string {
   const env = process.env.DPAY_TEST_BUDGET_MULT;
-  const src = env !== undefined && env !== '' ? `env DPAY_TEST_BUDGET_MULT=${env}` : `load1 ${load1().toFixed(2)}`;
+  const src = env !== undefined && env !== ''
+    ? `env DPAY_TEST_BUDGET_MULT=${env}`
+    : `load1 ${load1().toFixed(2)} psi ${cpuPsiAvg10().toFixed(1)}%`;
   return `[budget] ×${budgetMult().toFixed(2)} (${src})`;
 }
