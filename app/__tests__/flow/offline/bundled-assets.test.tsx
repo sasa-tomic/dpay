@@ -6,11 +6,14 @@
  * actions anywhere in the sheet. Mirrors flow 37's dead-relay onboarding (capability discovery
  * fails closed → no speculative faucet request, wallet reaches $0 home).
  */
-import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {onboardSlowPath, openBalances, waitForWallet} from '../harness/lib';
 import {mountApp} from '../harness/mount';
 
-describe('flow 100 — a dead-relay cold start still renders the bundled native rows', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 100 — a dead-relay cold start still renders the bundled native rows', () => {
   it('cold boot on a refused relay → bundled CHF + ICP rows offline, no ramp actions', async () => {
     // A port nothing listens on = a relay that refuses every request (flow 37 pattern).
     const deadRelay = await deadOrigin();

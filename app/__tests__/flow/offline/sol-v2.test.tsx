@@ -19,7 +19,8 @@
  * The file enables the SOL module env via solEnv() (the RPC override is captured at constants
  * module load, so lib must be required lazily AFTER it is set). The RPC stub is per-test state.
  */
-import {describe, it, expect, afterEach, beforeEach} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect, afterEach, beforeEach} from '@jest/globals';
 import {
   buildSolReq, clickByAria, extractSig, MERCHANT_ADDR, makeSolStub, nfcPhaseWalk, setSolStub,
   solEnv, solTxDetailFromSolpay, type NfcEvent,
@@ -46,10 +47,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   setSolStub(null);
-  delete g.__DPAY_SOL_NFC_LAST;
-  delete g.__DPAY_SOL_REQ_LAST;
-  g.__DPAY_TEST_NFC_APPROVED_WIRE = undefined;
-  g.__DPAY_TEST_NFC_READER_REQUEST = undefined;
 });
 
 /** NFC-ready onboarding + SOL selected, ending on the SOL pay scanner. */
@@ -141,7 +138,9 @@ async function newRequest(m: Mount): Promise<void> {
   await m.driver.findByTestID('sol-req-amount-input', {timeoutMs: 5000});
 }
 
-describe('flow 46 — SOL v2 offline hand-off: scan → offline sign → honest pending', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 46 — SOL v2 offline hand-off: scan → offline sign → honest pending', () => {
   it('auto-signs against the request blockhash, shows the solpay QR with the short payee, never Paid ✓', async () => {
     const m = await onboardSolPayer('jest-sol-pay');
 
@@ -171,7 +170,7 @@ describe('flow 46 — SOL v2 offline hand-off: scan → offline sign → honest 
   }, 90_000);
 });
 
-describe('flow 51 — SOL v2 merchant broadcast (the full cycle through SolReceiveMode)', () => {
+hermeticDescribe('flow 51 — SOL v2 merchant broadcast (the full cycle through SolReceiveMode)', () => {
   it('netted solreq → real signed solpay → strict verify + broadcast + settle gate → Received + sig', async () => {
     const m = await onboardSolPayer('jest-sol-merchant');
 
@@ -220,7 +219,7 @@ describe('flow 51 — SOL v2 merchant broadcast (the full cycle through SolRecei
   }, 120_000);
 });
 
-describe('flow 53 — a rejecting broadcast surfaces FRIENDLY copy, never raw RPC, never Received', () => {
+hermeticDescribe('flow 53 — a rejecting broadcast surfaces FRIENDLY copy, never raw RPC, never Received', () => {
   it('sendTransaction throws the unfunded-account error → the rejected message on sol-req-err', async () => {
     setSolStub(makeSolStub(handles, {
       sendTransaction: () => { throw new Error('Transaction simulation failed: Attempt to debit an account but found no record of a prior credit'); },
@@ -239,7 +238,7 @@ describe('flow 53 — a rejecting broadcast surfaces FRIENDLY copy, never raw RP
   }, 120_000);
 });
 
-describe('flow 67 — SOL v2 no-setup + the expired-request decline', () => {
+hermeticDescribe('flow 67 — SOL v2 no-setup + the expired-request decline', () => {
   it('SolPayMode mounts straight in scan; a fresh req signs; an expired req is refused with "expired"', async () => {
     const m = await onboardSolPayer('jest-sol-no-setup'); // mounting in scan IS the no-setup proof
 
@@ -266,7 +265,7 @@ describe('flow 67 — SOL v2 no-setup + the expired-request decline', () => {
   }, 90_000);
 });
 
-describe('flow 74 — SOL v2 USDC full cycle (signSplPayment / TransferChecked end-to-end)', () => {
+hermeticDescribe('flow 74 — SOL v2 USDC full cycle (signSplPayment / TransferChecked end-to-end)', () => {
   it('USDC solreq (mint + toAta) → NFC auto-sign (TransferChecked) → broadcast → Received + sig', async () => {
     const {onboardWallet, openBalances, selectSolRail, waitForWallet} = lib();
     g.__DPAY_TEST_NFC_STATUS = 'ready';
@@ -318,7 +317,7 @@ describe('flow 74 — SOL v2 USDC full cycle (signSplPayment / TransferChecked e
   }, 120_000);
 });
 
-describe('flow 138 — the settle gate\u2019s three verdicts, each reaching the merchant honestly', () => {
+hermeticDescribe('flow 138 — the settle gate\u2019s three verdicts, each reaching the merchant honestly', () => {
   it('(a) mismatching body → doubt + reconcile; (b) unreadable → Broadcasting until verified; (c) on-chain error → rejected', async () => {
     const m = await onboardSolPayer('jest-sol-settle');
 
