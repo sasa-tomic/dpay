@@ -349,7 +349,16 @@ async function spawnOnce(opts = {}) {
   // even if Node dies before health checks complete (the window where _session is still null). Untrack
   // on exit so the set never holds a dead/recycled PID. See harness/procs.mjs.
   trackChild(child.pid);
-  child.on('exit', () => untrackChild(child.pid));
+  // Mid-run relay death forensics: a shared-box cleanup (or an OOM) killing the ONE per-run relay
+  // fails every remaining suite with opaque `fetch failed` transports. Name the death LOUDLY, with
+  // the killing signal, so the log shows the infrastructure incident instead of 70 fake reds
+  // (observed 2026-09-29 02:43: relay vanished ~32 files in; 73 suites red on transport alone).
+  child.on('exit', (code, sig) => {
+    untrackChild(child.pid);
+    if (child.__relayStopRequested) return; // our own stop() — normal teardown
+    console.error(`[relay] !! the test relay (pid ${child.pid}) DIED MID-RUN: signal=${sig ?? 'none'} code=${code ?? 'null'}` +
+      ` — every later suite's transport failures are THIS, not app behavior. stderr tail:\n${stderr.split('\n').slice(-15).join('\n')}`);
+  });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (b) => { const s = b.toString(); stdout += s; if (process.env.DPAY_E2E_VERBOSE) process.stdout.write(s); });
@@ -357,6 +366,7 @@ async function spawnOnce(opts = {}) {
 
   const stop = async () => {
     if (child.exitCode !== null || child.signalCode) return;
+    child.__relayStopRequested = true;
     await new Promise((resolve) => {
       child.once('exit', () => resolve());
       try { child.kill('SIGTERM'); } catch { resolve(); }
