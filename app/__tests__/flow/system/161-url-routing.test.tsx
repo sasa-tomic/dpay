@@ -13,7 +13,6 @@
  * sheet legs ride the same stub mechanics proven here.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {onboardWallet} from '../harness/lib';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 

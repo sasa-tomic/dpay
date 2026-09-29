@@ -8,11 +8,12 @@
  * principal; Solana = base58, seed-stable across a flip). The single-rail control: home=CHF on
  * VCHF renders the plain principal sheet with NO rail disclosure.
  */
-// The Solana side of the USD group must EXIST (SPL rows fail-closed when the RPC override is
-// empty — the jest default). Flip the override to the stub mode BEFORE the harness (and thus the
-// app's constants module) loads — the e2e setup({solStub:true}) semantics. Value requires ride
-// below the assignment; type-only imports are erased.
-(globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SOLANA_RPC_URL = 'stub';
+// FIRST IMPORT: the Solana side of the USD group must EXIST (SPL rows fail-closed when the RPC
+// override is empty — the jest default), and harness/hermetic imports config/constants
+// statically — the capture point of `__DPAY_TEST_SOLANA_RPC_URL` — so the override must ride an
+// IMPORT (module bodies run after all imports). settings/solStub's module body arms 'stub': the
+// e2e setup({solStub:true}) semantics.
+import '../settings/solStub';
 /* eslint-disable @typescript-eslint/no-require-imports */
 const {accountOf, assertEq, assertIncludes, onboardWallet, openBalances, railPrincipalText, selectCurrency, waitForWallet} = require('../harness/lib') as typeof import('../harness/lib');
 const {installSolRpcStub} = require('./solRpcStub') as typeof import('./solRpcStub');
@@ -31,7 +32,7 @@ async function setHomeCurrency(m: M, code: 'USD' | 'CHF'): Promise<void> {
   await waitForWallet(m, {timeoutMs: 8_000});
 }
 
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
 hermeticFlow();

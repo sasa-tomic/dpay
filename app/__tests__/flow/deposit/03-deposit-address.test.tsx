@@ -7,7 +7,7 @@
  * values from the REAL relay's deposit_info, never hardcoded), the honest watching cue, and the
  * "Already on the Internet Computer?" ICRC-1 receive section (own principal).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {
   accountOf, assertEq, assertIncludes, onboardWallet, railPrincipalText,
 } from '../harness/lib';

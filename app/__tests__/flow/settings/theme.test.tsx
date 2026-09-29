@@ -12,7 +12,6 @@
  * own accessibility labels.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {onboardWallet} from '../harness/lib';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 

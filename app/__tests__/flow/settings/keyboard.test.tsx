@@ -13,7 +13,6 @@
  * a computed-style read and stays visual.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {
   assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
 } from '../harness/lib';

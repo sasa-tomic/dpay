@@ -9,7 +9,7 @@
  * currency), and the one-tap fix re-picks the served asset so the retry opens the charge — with
  * the typed price surviving the round trip.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {assertIncludes, onboardWallet, openBalances, selectCurrency} from '../harness/lib';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 

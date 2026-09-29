@@ -10,7 +10,6 @@
  * second reload does NOT re-open the sheet.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {
   assert, assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
   waitForWallet, type Mount,

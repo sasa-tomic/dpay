@@ -9,7 +9,6 @@
  * Pay review for the SAME address. RPC stays disabled (`''`) — fully offline, no devnet.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {
   assert, assertEq, assertIncludes, armPayScan, onboardWallet, openBalances, selectCurrency, clipboardAfterCopy,
 } from '../harness/lib';

@@ -9,7 +9,7 @@
  * BITCOIN (the backing chain) and DOES send it to the address shown; (c) the Solana rail gets the
  * same send-to-address shape with no catalog descriptor behind it.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {
   assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
   waitForWallet,

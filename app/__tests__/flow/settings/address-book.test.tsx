@@ -9,7 +9,6 @@
  * empties the book and says so again.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertIncludes, faucetAccount, onboardWallet, openBalances,
   openPaySend, railPrincipalText, selectCurrency,

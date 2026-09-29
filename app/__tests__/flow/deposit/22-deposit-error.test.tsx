@@ -7,7 +7,7 @@
  * get_btc_address update dies at ECONNREFUSED — the REAL "network down" failure mode. The relay
  * dies with it (the supplementary depositInfo fetch), and the wallet surface must stay intact.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {
   assert, assertIncludes, goOffline, onboardWallet, openBalances, openReceiveAddress,
   selectCurrency, waitForWallet,

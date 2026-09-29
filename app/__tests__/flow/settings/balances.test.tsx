@@ -6,7 +6,6 @@
  * testnetDisplayNames, and hidden again on the second tap.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {onboardWallet, openBalances} from '../harness/lib';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 

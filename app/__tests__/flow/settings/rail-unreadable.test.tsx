@@ -15,7 +15,6 @@
  * the same one solana-seam.test.ts drives hermetically.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: sets the SOL RPC override the app captures at module load, then the App graph imports.
 import {installSolAccountsHelper} from './solStub';
 import {onboardWallet, openBalances} from '../harness/lib';

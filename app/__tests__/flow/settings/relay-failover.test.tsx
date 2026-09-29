@@ -11,7 +11,6 @@
  * server; the jest stand-in is a local http server that 404s every route while staying alive.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertIncludes, faucetAccount, onboardSeededUnfunded,
 } from '../harness/lib';

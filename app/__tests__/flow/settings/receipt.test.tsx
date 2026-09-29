@@ -12,7 +12,6 @@
  * copyToClipboard through the same fallback path.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
 import {
   accountOf, assertIncludes, faucetAccount, generateKeypair, onboardWallet,

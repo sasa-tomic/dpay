@@ -14,7 +14,6 @@
  * dead first home was really TRIED (connection-class failures on record against its proxy route).
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: deletes the SOL RPC test override pre-capture (the derivation), then the App graph loads.
 import './solRelayProxy';
 import {onboardSeededUnfunded, openBalances, relayGet} from '../harness/lib';
@@ -22,7 +21,7 @@ import {pickFreePort} from '../harness/flowRelay';
 import {deadline as budgetDeadline} from '../harness/budget';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-const flow = hermeticFlow();
+const hf = hermeticFlow();
 
 /** The stub upstream's envelope counter (the relay's test route). */
 async function stubHits(): Promise<number> {
@@ -58,7 +57,7 @@ hermeticDescribe('flow 165 — solana-via-relay', () => {
 
   it('phase 2 — the walk: a dead first relay home is skipped, SOL survives from the second home, and the dead proxy route was really tried', async () => {
     const dead = await deadOrigin();
-    const live = flow.relay.baseURL; // the file's OWN relay serves the stub upstream
+    const live = (await hf.ready).baseURL; // the file's OWN relay serves the stub upstream
     const m = await onboardSeededUnfunded('e2e-sol-relay-walk', {fund: false});
 
     // Ground truth through the derivation on the default (baked-origin) list.

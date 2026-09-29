@@ -20,7 +20,7 @@
  * same facts are pinned through aria-selected props, the Main badge testIDs, and the presence of
  * the bottom tabs.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {
   accountOf, assertEq, assertIncludes, faucetAccount, generateKeypair, onboardWallet,
   openBalances, openPaySend, railTransfer, selectCurrency,

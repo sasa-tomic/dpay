@@ -13,7 +13,7 @@
  * order (querySelectorAll), which has no react-test-renderer equivalent; membership, Main
  * exclusivity, and the practice divider are pinned instead.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from '../settings/solStub';
 import {

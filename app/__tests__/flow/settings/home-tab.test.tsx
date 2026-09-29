@@ -5,7 +5,7 @@
  * from Home and answers in place; the practice row's own faucet button refuses inside the cooldown
  * with the relay's verbatim retry time and credits nothing.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {
   assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency,
 } from '../harness/lib';

@@ -14,15 +14,17 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ../pay/solrpc).
  */
+// FIRST IMPORT: harness/hermetic imports config/constants statically — the capture point of
+// `__DPAY_TEST_SOLANA_RPC_URL` — so the 'stub' override must ride an IMPORT (module bodies run
+// after all imports); settings/solStub's module body arms it (the e2e solStub semantics).
+import '../settings/solStub';
 import {beforeEach, it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
-import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from '../pay/solrpc';
+import {baseSolStub, installSolAccountsHelper} from '../pay/solrpc';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
 hermeticFlow();
 
 const G = globalThis as unknown as Record<string, unknown>;
-enableSolRpcStub();
 installSolAccountsHelper();
 // The zero-balance stub answers (accounts exist, balances zero) — the exact answers the e2e twins
 // install. Re-armed per test: the lane helper's lifecycle beforeEach wipes the SOL seams, and a

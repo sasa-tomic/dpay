@@ -9,7 +9,6 @@
  * the header shows the honest "~ … approx." indicator instead of a fabricated zero.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, chooseHomeCurrencyIfPresent, skipPracticeIfPresent, skipWalkthroughIfPresent,
   waitForEnabled, waitForWallet,

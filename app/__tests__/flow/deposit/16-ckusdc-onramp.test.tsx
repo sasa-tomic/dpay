@@ -14,7 +14,6 @@
  *      default (all-zero) subaccount.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertIncludes, DpayCore, onboardWallet, openBalances,
   openReceiveAddress, selectCurrency,

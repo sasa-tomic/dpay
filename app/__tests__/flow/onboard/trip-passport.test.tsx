@@ -9,7 +9,6 @@
  * plays the TRIP READY capstone → Done; and a fresh boot keeps the record with no strip.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp} from '../harness/mount';
 import {scaled as budgetScaled} from '../harness/budget';
 import {

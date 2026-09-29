@@ -8,7 +8,6 @@
  * asset row re-renders the minted amount after the sheet closes.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertIncludes, faucetAccount, getBalance, onboardWallet,
   openBalances, openReceiveAddress, selectCurrency,

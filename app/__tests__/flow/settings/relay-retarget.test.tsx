@@ -8,7 +8,7 @@
  * ∂500.00 funded out-of-band on an independently spawned relay B (startFlowRelay), Settings
  * switch, the header follows. Proves the poll BOTH stopped hitting A AND started hitting B.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {
   accountOf, assertEq, faucetAccount, onboardWallet, openBalances, relayGet,
 } from '../harness/lib';

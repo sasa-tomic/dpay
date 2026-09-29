@@ -8,7 +8,7 @@
  * none of them; and native ICP — the one card-reachable IC asset — is a DIRECT buy, reached by
  * the ONE-TAP asset switch that keeps the address sub-mode.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {
   assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
 } from '../harness/lib';

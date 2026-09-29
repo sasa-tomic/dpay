@@ -16,7 +16,6 @@
  * server.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp} from '../harness/mount';
 import {
   assertIncludes, chooseHomeCurrencyIfPresent, skipWalkthroughIfPresent,

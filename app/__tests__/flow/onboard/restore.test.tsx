@@ -10,13 +10,14 @@
  *     backup gate, and a hex paste is normalized (uppercase accepted).
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertEq, chooseHomeCurrencyIfPresent, clipboardAfterCopy, skipPracticeIfPresent,
   skipWalkthroughIfPresent, waitForEnabled, waitForWallet,
 } from '../harness/lib';
 import {mountApp} from '../harness/mount';
-import {freshContext} from './helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown>;
 
@@ -34,7 +35,6 @@ async function readWords(m: Awaited<ReturnType<typeof mountApp>>): Promise<strin
 
 hermeticDescribe('flow 58 — restore-wallet', () => {
   it('hex-seed restore stores the entered seed and derives its keypair', async () => {
-    await freshContext();
     const m = await mountApp();
     await skipWalkthroughIfPresent(m);
     await m.driver.findByTestID('username-input', {timeoutMs: 8000});
@@ -63,7 +63,6 @@ hermeticDescribe('flow 58 — restore-wallet', () => {
 
 hermeticDescribe('flow 68 — mnemonic-backup-restore', () => {
   it('Copy words copies the pure 24 words; after a reset the words recover the EXACT keypair', async () => {
-    await freshContext();
     const m = await mountApp();
     await skipWalkthroughIfPresent(m);
     await m.driver.typeByPlaceholder('e.g. Alice', 'MnemonicTester', {timeoutMs: 8000});
@@ -122,7 +121,6 @@ hermeticDescribe('flow 68 — mnemonic-backup-restore', () => {
 
 hermeticDescribe('flow 82 — own-seed-create', () => {
   it('invalid seed rejected on the form; the words form round-trips onto the gate; a hex paste is normalized', async () => {
-    await freshContext();
     const m = await mountApp();
     await skipWalkthroughIfPresent(m);
     await m.driver.findByTestID('username-input', {timeoutMs: 8000});
@@ -154,8 +152,12 @@ hermeticDescribe('flow 82 — own-seed-create', () => {
     assertEq(identity!.username, 'ownseed', 'username persisted');
     await m.unmount();
 
-    // 3. HEX form → same contract via a 64-hex paste (uppercase → normalized).
-    await freshContext();
+    // 3. HEX form → same contract via a 64-hex paste (uppercase → normalized). A NEW device:
+    //    the mid-test storage purge is scenario setup (the old freshContext call — the harness
+    //    lifecycle only owns the BETWEEN-test purge).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const AsyncStorage = require('@react-native-async-storage/async-storage') as {clear: () => Promise<void>};
+    await AsyncStorage.clear();
     const m2 = await mountApp();
     await skipWalkthroughIfPresent(m2);
     await m2.driver.findByTestID('username-input', {timeoutMs: 8000});

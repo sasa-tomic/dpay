@@ -7,7 +7,6 @@
  * write sits in the e2e build).
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {openBalances, onboardWallet, openReceiveAddress, selectCurrency} from '../harness/lib';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 

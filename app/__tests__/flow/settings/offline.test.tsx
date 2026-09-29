@@ -6,7 +6,7 @@
  * guaranteed failure, the balance poll fails for the RIGHT reason (a connection refusal, not a
  * port-policy artifact), the header shows the offline indicator, and the wallet still renders.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {scaled as budgetScaled} from '../harness/budget';
 
 import {

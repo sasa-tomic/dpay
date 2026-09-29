@@ -7,7 +7,6 @@
  * the harness's own scan-seam registry.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {armPayScan, onboardWallet} from '../harness/lib';
 import {scaled as budgetScaled} from '../harness/budget';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';

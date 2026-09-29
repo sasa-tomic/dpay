@@ -21,7 +21,6 @@
  *   `window.fetch` stubs wrap the harness's recorder fetch; failures are pre-declared.
  */
 import {it, expect} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp, type Mount} from '../harness/mount';
 import {
   accountOf, assertIncludes, chooseHomeCurrencyIfPresent, getBalance,

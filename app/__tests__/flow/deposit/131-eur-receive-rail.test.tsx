@@ -7,10 +7,11 @@
  * line, no fee line, no two-sided toggle, and no thin-liability note anywhere. The ATA is stable
  * across a leave-and-return.
  */
-// EUR's one rail is EURC@Solana — an SPL row that is fail-closed when the RPC override is empty
-// (the jest default). Flip the override to the stub mode BEFORE the harness (and thus the app's
-// constants module) loads — the e2e setup({solStub:true}) semantics. Value requires ride below.
-(globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SOLANA_RPC_URL = 'stub';
+// FIRST IMPORT: EUR's one rail is EURC@Solana — an SPL row that is fail-closed when the RPC
+// override is empty (the jest default) — and harness/hermetic imports config/constants
+// statically (the capture point of `__DPAY_TEST_SOLANA_RPC_URL`), so the override must ride an
+// IMPORT (module bodies run after all imports). settings/solStub's module body arms 'stub'.
+import '../settings/solStub';
 /* eslint-disable @typescript-eslint/no-require-imports */
 const {assertEq, onboardWallet, openBalances, selectSolRail} = require('../harness/lib') as typeof import('../harness/lib');
 const {installSolRpcStub} = require('./solRpcStub') as typeof import('./solRpcStub');
@@ -19,7 +20,7 @@ const {installSolRpcStub} = require('./solRpcStub') as typeof import('./solRpcSt
 // base58 (Bitcoin alphabet) — the Solana address charset. 32–44 chars is the valid pubkey range.
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
 hermeticFlow();
