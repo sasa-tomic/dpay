@@ -10,11 +10,15 @@
  * price less the fee it absorbs, the customer moves by exactly the price — and "Next customer"
  * keeps the shared note.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 import {
   accountOf, assert, assertEq, assertIncludes, faucetAccount, generateKeypair, getBalance,
   onboardWallet, openBalances, railPrincipalText, railTransfer, selectCurrency,
 } from '../harness/lib';
+
+// The file's private relay — the checkout host the QR names and resolveCharge targets.
+const HF = hermeticFlow();
 
 const VCHF = 7; // the ONE asset a dpay checkout takes
 const PRICE = '10.50';
@@ -66,7 +70,7 @@ async function resolveCharge(relayBaseURL: string, id: string): Promise<{to: str
   return {to, amount, ref, displayName: details.displayName as string};
 }
 
-describe('flow 114 — checkout open: the counter sells, the relay sees the money, the screen flips', () => {
+hermeticDescribe('flow 114 — checkout open: the counter sells, the relay sees the money, the screen flips', () => {
   it('opens the charge with the signed note; the customer pays; the shop’s screen reports the sale', async () => {
     // The shop, in the app.
     const m = await onboardWallet('Bahnhof Kiosk');
@@ -121,7 +125,7 @@ describe('flow 114 — checkout open: the counter sells, the relay sees the mone
     observer.restore();
 
     // --- the customer pays it, through the checkout's own routes ---------------------------------
-    const instruction = await resolveCharge(process.env.DPAY_JEST_RELAY_URL as string, open.id);
+    const instruction = await resolveCharge(HF.relay.baseURL, open.id);
     assertEq(instruction.to, merchantPrincipal, 'the instruction names the shop’s own account');
     assertEq(instruction.amount, '10.4999', 'the checkout instructs the settlement amount, never the price');
     assertEq(instruction.displayName, 'Bahnhof Kiosk', 'the checkout carries the shop’s claimed name');

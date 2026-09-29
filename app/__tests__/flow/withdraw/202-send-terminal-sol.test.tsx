@@ -11,10 +11,13 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override (the relay proxy URL) is set before the harness require.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 
 const G = globalThis as unknown as Record<string, unknown>;
 // The derived production path: the RELAY's Solana proxy (the stub upstream lives behind it).
+// The hermetic fetch rewrite carries this module-captured URL to the FILE's private relay
+// (per-fetch rewrite — the string names the run's shared origin, the fetch lands hermetic).
 G.__DPAY_TEST_SOLANA_RPC_URL = `${process.env.DPAY_JEST_RELAY_URL}/api/v1/solana/rpc`;
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -35,7 +38,7 @@ const absent = async (m: Parameters<typeof openBalances>[0], testID: string): Pr
   return !m.driver.isPresent(testID);
 };
 
-describe('flow 202 — the SOL send terminal: honest unknown → Check status → settled; the fee-only failure', () => {
+hermeticDescribe('flow 202 — the SOL send terminal: honest unknown → Check status → settled; the fee-only failure', () => {
   it('deadline over an accepted broadcast stays honest; Check settles it; a chain failure names the fee', async () => {
     const m = await onboardWallet('jest-send-term-sol');
     // The per-call deadline seam: every confirm press reads it fresh (prod shape, only shorter).

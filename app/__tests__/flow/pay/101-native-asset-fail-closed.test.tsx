@@ -8,7 +8,8 @@
  * (99): the unsupported-asset branch, "Unsupported asset" + "(currency 99)", no fallback — dpay
  * never swaps. After all legs the wallet keeps exactly what was seeded: nothing moved.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, armPayScan, assert, assertEq, assertIncludes, DpayCore, faucetAccount, generateKeypair,
   getBalance, onboardWallet, openBalances, selectCurrency,
@@ -23,7 +24,7 @@ const TINY_SEED = 20000; // 0.00020000 — far below the request, but nonzero (f
 const PAY = '100000001'; // 1.00000001 — what the merchant asks
 const UNKNOWN_CURRENCY = '99';
 
-describe('flow 101 — native-asset fail-closed: insufficient + unsupported refuse without signing', () => {
+hermeticDescribe('flow 101 — native-asset fail-closed: insufficient + unsupported refuse without signing', () => {
   it('VCHF/ICP insufficient legs and the unknown-currency leg never sign; nothing moves', async () => {
     const m = await onboardWallet('jest-failclosed');
     const account = await accountOf(m);

@@ -9,7 +9,8 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ./solrpc).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from './solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -30,7 +31,7 @@ const ICP_SEED = 500_000_001;
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
 const SOL_PAY_DISPLAY = '0.01219752 SOL'; // the checkout's 0.01219252 SOL at 9 decimals
 
-describe('flow 175 — a checkout App Link opens the review from idle Balances, never auto-signing', () => {
+hermeticDescribe('flow 175 — a checkout App Link opens the review from idle Balances, never auto-signing', () => {
   it('IC: idle → the scan review; SOL: the twin; no money moves on either rail', async () => {
     const m = await onboardWallet('jest-checkout-link');
     const accountHex = (await accountOf(m))!.publicHex;

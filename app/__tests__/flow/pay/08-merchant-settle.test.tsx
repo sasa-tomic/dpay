@@ -8,7 +8,8 @@
  * gateway, and its read_state poll reconciles the request → "Received". Flow 08 drives it from a
  * fresh ∂30 request; flow 21 is the envelope-twin from a ∂25 request typed by placeholder.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertEq, assertIncludes, faucetAccount, generateKeypair,
   getBalance, onboardWallet, openBalances, railPrincipalText,
@@ -17,7 +18,7 @@ import {b64urlEncode, hexBytes, openPayerScan, parsePayLink, scanSeam, signIcrc1
 
 const DEMO_LEDGER = 'td2nx-oaaaa-aaaab-qhdnq-cai'; // catalog currency 0's ledger (the fake-IC gateway registers it)
 
-describe('flow 08 — merchant receive → settle (fresh request, ∂30)', () => {
+hermeticDescribe('flow 08 — merchant receive → settle (fresh request, ∂30)', () => {
   it('A signs the envelope for B’s request → B scans it → Received ∂30.00, both ledgers agree', async () => {
     // --- wallet A (payer): generated + faucet-funded in-test (the offline-style payer). ---------
     const alice = await generateKeypair();
@@ -75,7 +76,7 @@ describe('flow 08 — merchant receive → settle (fresh request, ∂30)', () =>
   }, 120_000);
 });
 
-describe('flow 21 — receive-scan (the envelope-twin, ∂25 by placeholder)', () => {
+hermeticDescribe('flow 21 — receive-scan (the envelope-twin, ∂25 by placeholder)', () => {
   it('B scans A’s base64url envelope (memo = nonce) → Received ∂25.00 + ledger truth', async () => {
     // --- Payer: a funded offline wallet (keys only — the payer's phone never talks to the relay). -
     const alice = await generateKeypair();

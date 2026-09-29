@@ -10,7 +10,8 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ../pay/solrpc).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from '../pay/solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -25,7 +26,7 @@ const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base5
 const BTC_ADDR = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq'; // a real address on the WRONG chain
 const SEND_AMOUNT = '0.001'; // 0.001 SOL = 1_000_000 lamports
 
-describe('flow 52 — SOL withdraw (native SOL send sheet)', () => {
+hermeticDescribe('flow 52 — SOL withdraw (native SOL send sheet)', () => {
   it('wrong-chain refusal by name; route disclosed; confirm broadcasts; Sent ✓ + signature', async () => {
     const m = await onboardWallet('jest-sol-send');
 
@@ -85,7 +86,7 @@ describe('flow 52 — SOL withdraw (native SOL send sheet)', () => {
   }, 180_000);
 });
 
-describe('flow 77 — Solana USDC "Send to address" (SPL transfer + rent pre-check)', () => {
+hermeticDescribe('flow 77 — Solana USDC "Send to address" (SPL transfer + rent pre-check)', () => {
   it('happy path: USDC units + rent note → Sent ✓; absent recipient ATA + low rent → honest refusal', async () => {
     const m = await onboardWallet('jest-sol-usdc-send');
 

@@ -8,7 +8,8 @@
  * balance drops to ∂75.00, B is credited ∂25.00 (read straight off the relay), and the history
  * row names the payee without dumping principals.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   armPayScan, assertIncludes, DpayCore, generateKeypair, getBalance, onboardWallet,
   openBalances, railPrincipalText,
@@ -17,7 +18,7 @@ import {
 const PAY_CENTS = '2500'; // ∂25.00, DEMO currency 0 — the wallet's practice asset
 const MERCHANT_NAME = 'Bob';
 
-describe('flow 07 — scan → auto-sign → pay (two wallets, real settlement)', () => {
+hermeticDescribe('flow 07 — scan → auto-sign → pay (two wallets, real settlement)', () => {
   it('A scans B’s request → Paid ✓ → A −∂25, B +∂25, history names Bob', async () => {
     // --- wallet B: the payee, a fresh keypair of the REAL core, starting at 0. -----------------
     const bob = await generateKeypair();
