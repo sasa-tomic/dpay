@@ -55,8 +55,10 @@ function write(level: string, parts: unknown[]): void {
   // this tail after every test to explain a failure with the app's own words. Same content as
   // `buffer`, same cap, nothing a user flow reads.
   const tail = (globalThis as {__DPAY_LOG_TAIL?: string[]}).__DPAY_LOG_TAIL ??= [];
-  tail.push(line);
-  if (tail.length > 500) tail.shift();
+  if (!line.includes('not wrapped in act')) {
+    tail.push(line);
+    if (tail.length > 500) tail.shift();
+  }
   // Fire-and-forget. NOT awaited anywhere, by design: a payment must never wait on a log write, and
   // a rejected promise here must never surface as an unhandled rejection on the money path.
   try {
