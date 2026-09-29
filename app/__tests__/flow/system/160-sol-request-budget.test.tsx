@@ -41,6 +41,9 @@ import {describe, it, expect, beforeEach} from '@jest/globals';
 import {installSolAccountsHelper} from '../settings/solStub';
 import {onboardWallet, type Mount} from '../harness/lib';
 import {deadline as budgetDeadline} from '../harness/budget';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown>;
 
@@ -141,7 +144,7 @@ beforeEach(() => {
   installCountingStub();
 });
 
-describe('flow 160 — the Solana request budget, counted in the running app', () => {
+hermeticDescribe('flow 160 — the Solana request budget, counted in the running app', () => {
   it('ONE getMultipleAccounts per balance tick (fan-out gone), one page per address per history tick, detail read once', async () => {
     const m = await onboardWallet('e2e-rpc-budget');
 

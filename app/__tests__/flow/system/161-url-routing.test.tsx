@@ -14,6 +14,9 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {onboardWallet} from '../harness/lib';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as {
   location: {search: string; href: string};
@@ -26,7 +29,7 @@ const expectOnHome = (why: string): void => {
     .toEqual({why, search: g.location.search, ok: true});
 };
 
-describe('flow 161 — the wallet is navigable, linkable, and Back stays inside', () => {
+hermeticDescribe('flow 161 — the wallet is navigable, linkable, and Back stays inside', () => {
   it('tabs write URLs, Back walks back, a cold load restores, foreign params survive', async () => {
     const m = await onboardWallet('jest-url-routing');
 

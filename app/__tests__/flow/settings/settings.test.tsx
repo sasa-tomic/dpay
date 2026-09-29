@@ -17,8 +17,10 @@ import {
   assertEq, assertIncludes, chooseHomeCurrencyIfPresent, generateKeypair, faucetAccount,
   selectDemoAsset, waitForWallet,
 } from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
 import {RELAY_DEFAULT} from '../../../relayConfig';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {
@@ -47,9 +49,8 @@ async function onboardSeeded(): Promise<Mount> {
   return m;
 }
 
-describe('flow 12 — settings', () => {
+hermeticDescribe('flow 12 — settings', () => {
   it('username-only header; relay list edits + persists; Solana endpoint refuses http and accepts empty; reset confirms', async () => {
-    await freshContext();
     const m = await onboardSeeded();
     const identity = await AsyncStorage.getItem('dpay.identity.v1');
     const accountHex = (JSON.parse(identity ?? '{}') as {publicHex?: string}).publicHex ?? '';

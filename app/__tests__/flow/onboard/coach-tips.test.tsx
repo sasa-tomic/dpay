@@ -14,7 +14,6 @@ import {
   goOffline, icpCatalog, onboardWallet, openBalances, railPrincipalText, waitForScanner,
 } from '../harness/lib';
 import {relayBaseURL} from '../harness/relayClient';
-import {freshContext} from './helpers';
 
 const g = globalThis as unknown as Record<string, unknown> & {__DPAY_TEST_SCAN?: (qr: string) => void};
 
@@ -35,14 +34,16 @@ function b64urlToBytes(s: string): Uint8Array {
 }
 
 import type {Driver} from '../harness/driver';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 /** The card's rise+fade entrance — under react-test-renderer there are no frames, so "at rest" is
  *  two identical text snapshots (the driver's waitAtRest contract). */
 const settle = (d: Driver, key: string): Promise<void> => d.waitAtRest(`coach-${key}`, {timeoutMs: 8000});
 
-describe('flow 91 — coach-tips', () => {
+hermeticDescribe('flow 91 — coach-tips', () => {
   it('receiveRequest shown once; the pay review carries no tip; the offline hand-off coached once; money settles through it all', async () => {
-    await freshContext();
     const m = await onboardWallet('coach');
     const alice = await accountOf(m);
     const bob = await generateKeypair();

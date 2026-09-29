@@ -12,8 +12,11 @@ import {describe, it, expect} from '@jest/globals';
 import {
   assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
 } from '../harness/lib';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 162 — funding routes: honest "where do I get some" with attributed figures', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 162 — funding routes: honest "where do I get some" with attributed figures', () => {
   it('VCHF routes through convert, providers keep their qualifiers, ICP is a direct buy', async () => {
     const m = await onboardWallet('jest-funding-routes');
 

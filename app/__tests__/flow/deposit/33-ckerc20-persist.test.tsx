@@ -15,6 +15,9 @@ import {
   waitForWallet, type Mount,
 } from '../harness/lib';
 import {deadline as budgetDeadline} from '../harness/budget';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown>;
 const mark = (l: string): void => { if (process.env.DPAY_FLOW_DEBUG === '1') console.log(`[m33] ${l}`); };
@@ -54,7 +57,7 @@ async function readPersistedDeposit(): Promise<Persisted | null> {
   return null;
 }
 
-describe('flow 33 — ckERC20 watching persists across an app restart', () => {
+hermeticDescribe('flow 33 — ckERC20 watching persists across an app restart', () => {
   it('reload rehydrates watching with no wallet reconnect; escape clears the key', async () => {
     // === PHASE 1: drive the onramp to `watching` (happy path) ==================================
     g.__DPAY_TEST_ETH_CALLS = [];

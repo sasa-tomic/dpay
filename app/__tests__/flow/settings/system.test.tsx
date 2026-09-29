@@ -29,13 +29,14 @@ import {
   generateKeypair, onboardWallet, openBalances, railPrincipalText, railTransfer,
   selectCurrency, waitForEnabled, waitForWallet,
 } from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown> & {__DPAY_TEST_SCAN?: (qr: string) => void};
 
-describe('flow 24 — wallet-cleanup', () => {
+hermeticDescribe('flow 24 — wallet-cleanup', () => {
   it('username-only header; currency-first rows; a currency-1 payment lands in history with a SHORT principal counterparty', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-alice');
     const identity = await accountOf(m);
     const accountHex = identity?.publicHex ?? '';
@@ -76,9 +77,8 @@ describe('flow 24 — wallet-cleanup', () => {
   }, 150_000);
 });
 
-describe('flow 55 — balances-select-asset', () => {
+hermeticDescribe('flow 55 — balances-select-asset', () => {
   it('the chip headlines the MAIN currency; row taps set main; the unfunded BTC row states its zero', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-select');
 
     // Baseline: the chip headlines the MAIN currency, never the practice rail.
@@ -102,9 +102,8 @@ describe('flow 55 — balances-select-asset', () => {
   }, 120_000);
 });
 
-describe('flow 57 — settings-seed-backup', () => {
+hermeticDescribe('flow 57 — settings-seed-backup', () => {
   it('the seed lives behind the confirm gate; words by default; hex behind the toggle; both copy paths work', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-seed');
     const identity = await accountOf(m);
     const secretHex = identity?.secretHex ?? '';
@@ -160,9 +159,8 @@ describe('flow 57 — settings-seed-backup', () => {
   }, 120_000);
 });
 
-describe('flow 63 — picker-sol-rail', () => {
+hermeticDescribe('flow 63 — picker-sol-rail', () => {
   it('the Receive picker lists SOL; picking it switches the working rail while the chip keeps main', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-picker-sol');
 
@@ -182,9 +180,8 @@ describe('flow 63 — picker-sol-rail', () => {
   }, 120_000);
 });
 
-describe('flow 64 — settings-restore', () => {
+hermeticDescribe('flow 64 — settings-restore', () => {
   it('same-seed restore is byte-identical; the backup words round-trip; a different seed replaces the key but keeps the username', async () => {
-    await freshContext();
     const SEED_B = '33'.repeat(32);
     const m = await onboardWallet('alice');
     const idA = await accountOf(m);
@@ -257,9 +254,8 @@ describe('flow 64 — settings-restore', () => {
   }, 180_000);
 });
 
-describe('flow 69 — sol-usdc-selection', () => {
+hermeticDescribe('flow 69 — sol-usdc-selection', () => {
   it('one complete picker list on both rails; crossing IC↔Solana clears the typed amount, symmetrically', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-usdc-x');
     g.__DPAY_TEST_SOLANA_RPC_STUB = {
@@ -311,9 +307,8 @@ describe('flow 69 — sol-usdc-selection', () => {
   }, 150_000);
 });
 
-describe('flow 71 — selection-lock', () => {
+hermeticDescribe('flow 71 — selection-lock', () => {
   it('a blocked-insufficient review locks the account chip; leaving the review releases the lock', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-lock');
     await m.driver.click('tab-pay', {timeoutMs: 5000});
     await m.driver.findByTestID('pay-scan', {timeoutMs: 5000});

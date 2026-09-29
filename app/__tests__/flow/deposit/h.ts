@@ -1,15 +1,8 @@
 /**
  * Batch-A (receive/deposit) flow helpers. The per-test lifecycle (fresh AsyncStorage, seam
- * resets, the fail-closed fetch assertion) is registered by jest.flow-after-env.js — which the
- * flow project's config does not yet wire as a setupFilesAfterEnv file (harness gap, filed for
- * the integrator). Calling the exported installer here at collection time registers the SAME
- * hooks for every batch-A flow file that imports this helper; when the integrator wires the
- * after-env file the duplicate registration is harmless (the hooks are idempotent resets).
+ * resets, the fail-closed fetch assertion) is harness-owned — jest.flow-after-env.js is wired as
+ * the flow project's setupFilesAfterEnv file, so no self-install here.
  */
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const {installFlowLifecycle} = require('../harness/setupFlow') as {installFlowLifecycle: () => void};
-installFlowLifecycle();
-
 export {
   accountOf, armPayScan, assert, assertEq, assertIncludes, DpayCore, faucetAccount, getBalance,
   onboardWallet, onboardSeededUnfunded, openBalances, openReceiveAddress, railPrincipalText,

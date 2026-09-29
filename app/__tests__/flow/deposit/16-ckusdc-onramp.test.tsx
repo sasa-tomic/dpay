@@ -19,6 +19,9 @@ import {
   openReceiveAddress, selectCurrency,
 } from '../harness/lib';
 import {principalToBytes32} from '../../../cketh';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const USDC_ADDR = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
 const HELPER_ADDR = '0x18901044688D3756C35Ed2b36D93e6a5B8e00E68';
@@ -44,7 +47,7 @@ function installMockProvider(chainIdHex: string, receiptStatus: string): {calls:
   return {calls};
 }
 
-describe('flow 16 — ckUSDC onramp: wrong-network guard, honest revert, byte-exact calldata', () => {
+hermeticDescribe('flow 16 — ckUSDC onramp: wrong-network guard, honest revert, byte-exact calldata', () => {
   it('connect → enter → approve → deposit against a mock Ethereum wallet', async () => {
     // === Scenario 1: WRONG-NETWORK GUARD (Polygon 0x89) ========================================
     let mock = installMockProvider('0x89', '0x1');

@@ -8,10 +8,13 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {openBalances, onboardWallet, openReceiveAddress, selectCurrency} from '../harness/lib';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown>;
 
-describe('flow 04 — deposit copy: the real address reaches the clipboard', () => {
+hermeticDescribe('flow 04 — deposit copy: the real address reaches the clipboard', () => {
   it('copy writes the deposit address; the request toggle hides the body', async () => {
     const m = await onboardWallet('jest-copy');
 

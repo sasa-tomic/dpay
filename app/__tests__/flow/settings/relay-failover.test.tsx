@@ -15,7 +15,9 @@ import {
   accountOf, assertIncludes, faucetAccount, onboardSeededUnfunded,
 } from '../harness/lib';
 import {relayBaseURL} from '../harness/relayClient';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {setItem: (k: string, v: string) => Promise<void>};
@@ -37,9 +39,8 @@ async function deadOrigin(): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-describe('flow 164 — relay-failover', () => {
+hermeticDescribe('flow 164 — relay-failover', () => {
   it('boot [dead, live]: ∂100 arrives only by walking past the dead primary, which was really tried', async () => {
-    await freshContext();
     const dead = await deadOrigin();
     const live = relayBaseURL();
     // Seed the persisted operator list BEFORE the boot — [dead, live], order = priority.
@@ -87,7 +88,6 @@ describe('flow 164 — relay-failover', () => {
   // provably healthy. A buggy failover-on-4xx would read 200 from relay2 and show the exact
   // online balance instead.
   it('phase 2 — a 4xx from the first address stops the walk: offline eyebrow while the second relay is alive', async () => {
-    await freshContext();
     const live = relayBaseURL();
     // Ground truth: funded and exact on the healthy single-relay list.
     const m = await onboardSeededUnfunded('e2e-failover-4xx', {fund: false});

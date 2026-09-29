@@ -13,11 +13,12 @@ import {
   accountOf, assertEq, faucetAccount, onboardWallet, openBalances, relayGet,
 } from '../harness/lib';
 import {startFlowRelay} from '../harness/flowRelay';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 38 — relay-retarget', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 38 — relay-retarget', () => {
   it('a Settings relay edit applies normalized, persists, and the polls follow the live switch', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-retarget');
     const identity = await accountOf(m);
     const accountHex = identity?.publicHex ?? '';
@@ -49,7 +50,6 @@ describe('flow 38 — relay-retarget', () => {
   }, 120_000);
 
   it('leg 2 — the balance CHANGE: ∂100 on relay A retargets to relay B\'s out-of-band ∂500 through the live Settings switch', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-retarget-b'); // ∂100.00 from relay A's faucet
     const identity = await accountOf(m);
     const accountHex = identity?.publicHex ?? '';

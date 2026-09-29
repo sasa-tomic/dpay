@@ -7,6 +7,9 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {onboardWallet, openBalances} from '../harness/lib';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const TESTNET_ROWS = [
   {tid: 'asset-ckbtc-testnet', name: 'BTC testnet'},
@@ -15,7 +18,7 @@ const TESTNET_ROWS = [
 ];
 const TESTNET_TIDS = TESTNET_ROWS.map((r) => r.tid);
 
-describe('flow 54 — testnet-toggle', () => {
+hermeticDescribe('flow 54 — testnet-toggle', () => {
   it('testnet rows hidden by default, revealed with testnet names, hidden again', async () => {
     const m = await onboardWallet('e2e-testnet');
 

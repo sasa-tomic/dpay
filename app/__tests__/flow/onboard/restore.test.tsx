@@ -9,7 +9,8 @@
  * 82: the own-seed field rejects garbage with error copy, the words form round-trips onto the
  *     backup gate, and a hex paste is normalized (uppercase accepted).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertEq, chooseHomeCurrencyIfPresent, clipboardAfterCopy, skipPracticeIfPresent,
   skipWalkthroughIfPresent, waitForEnabled, waitForWallet,
@@ -31,7 +32,7 @@ async function readWords(m: Awaited<ReturnType<typeof mountApp>>): Promise<strin
   return words;
 }
 
-describe('flow 58 — restore-wallet', () => {
+hermeticDescribe('flow 58 — restore-wallet', () => {
   it('hex-seed restore stores the entered seed and derives its keypair', async () => {
     await freshContext();
     const m = await mountApp();
@@ -60,7 +61,7 @@ describe('flow 58 — restore-wallet', () => {
   }, 120_000);
 });
 
-describe('flow 68 — mnemonic-backup-restore', () => {
+hermeticDescribe('flow 68 — mnemonic-backup-restore', () => {
   it('Copy words copies the pure 24 words; after a reset the words recover the EXACT keypair', async () => {
     await freshContext();
     const m = await mountApp();
@@ -119,7 +120,7 @@ describe('flow 68 — mnemonic-backup-restore', () => {
   }, 150_000);
 });
 
-describe('flow 82 — own-seed-create', () => {
+hermeticDescribe('flow 82 — own-seed-create', () => {
   it('invalid seed rejected on the form; the words form round-trips onto the gate; a hex paste is normalized', async () => {
     await freshContext();
     const m = await mountApp();

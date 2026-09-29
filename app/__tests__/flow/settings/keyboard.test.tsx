@@ -16,13 +16,14 @@ import {describe, it, expect} from '@jest/globals';
 import {
   assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
 } from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown>;
 
-describe('flow 14 — keyboard', () => {
+hermeticDescribe('flow 14 — keyboard', () => {
   it('P/R/L switch tabs; T answers in place from Pay; A lands accounts; the input guard holds; Escape closes the deposit', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-keyboard');
     // The app itself lands on Home; onboardWallet leaves it on the Pay tab. Demo balance ∂100.00.
 

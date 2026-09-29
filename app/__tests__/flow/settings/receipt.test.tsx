@@ -17,14 +17,15 @@ import {
   accountOf, assertIncludes, faucetAccount, generateKeypair, onboardWallet,
   railPrincipalText, railTransfer,
 } from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const MEMO_HEX = '9f2c00112233445566778899aabbccdd';
 const g = globalThis as unknown as Record<string, unknown>;
 
-describe('flow 157 — transaction-receipt', () => {
+hermeticDescribe('flow 157 — transaction-receipt', () => {
   it('the receipt states the ledger record; copy carries the whole proof; mints speak in sentences; Home opens the same receipt', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-receipt');
     const me = await accountOf(m);
     const payer = await generateKeypair();

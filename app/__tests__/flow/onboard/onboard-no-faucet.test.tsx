@@ -14,14 +14,15 @@ import {
   waitForEnabled, waitForWallet,
 } from '../harness/lib';
 import {mountApp} from '../harness/mount';
-import {freshContext} from './helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {setItem: (k: string, v: string) => Promise<void>};
 
-describe('flow 37 — onboard-no-faucet', () => {
+hermeticDescribe('flow 37 — onboard-no-faucet', () => {
   it('creation proceeds unfunded against a dead relay: practice fails closed, no ∂100, honest approx. indicator', async () => {
-    await freshContext();
     // A genuinely-dead relay: bind :0, close — a port nothing listens on.
     const net = require('node:net') as typeof import('node:net');
     const deadPort = await new Promise<number>((resolve, reject) => {

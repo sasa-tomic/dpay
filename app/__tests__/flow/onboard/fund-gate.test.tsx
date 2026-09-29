@@ -14,10 +14,13 @@ import {installSolAccountsHelper} from '../settings/solStub';
 import {
   assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency, waitForWallet,
 } from '../harness/lib';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown>;
 
-describe('flow 124 — fund-gate-sibling-rail', () => {
+hermeticDescribe('flow 124 — fund-gate-sibling-rail', () => {
   it('the unfunded preferred rail raises the gate; the pointer names the funded sibling in its own unit; one tap switches', async () => {
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-sibling');

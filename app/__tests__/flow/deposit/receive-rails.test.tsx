@@ -15,10 +15,12 @@
  */
 import {beforeEach, describe, it, expect} from '@jest/globals';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from '../pay/solrpc';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
 const G = globalThis as unknown as Record<string, unknown>;
 enableSolRpcStub();
 installSolAccountsHelper();
+hermeticFlow();
 // The zero-balance stub answers (accounts exist, balances zero) — the exact answers the e2e twins
 // install. Re-armed per test: the lane helper's lifecycle beforeEach wipes the SOL seams, and a
 // balance-poll tick with the URL override 'stub' but no stub object would fetch('stub') and trip
@@ -49,7 +51,7 @@ const {
 // base58 (Bitcoin alphabet) — the Solana address charset. 32–44 chars is the valid pubkey range.
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-describe('flow 122 — receive rail choice: the wallet pick, disclosed, with the sibling one toggle away', () => {
+hermeticDescribe('flow 122 — receive rail choice: the wallet pick, disclosed, with the sibling one toggle away', () => {
   it('USD defaults to ckUSDC with fee facts + own addresses; single-rail CHF has no disclosure', async () => {
     const m = await onboardWallet('jest-rails');
     // The wallet must be IN dollars: CURRENCY_RAILS.USD is ['ckUSDC', 'USDC'] — the two-rail group.
@@ -115,7 +117,7 @@ describe('flow 122 — receive rail choice: the wallet pick, disclosed, with the
   }, 150_000);
 });
 
-describe('flow 131 — EUR receive is single-rail: the plain EURC ATA, no rail machinery', () => {
+hermeticDescribe('flow 131 — EUR receive is single-rail: the plain EURC ATA, no rail machinery', () => {
   it('home=EUR lands on the EURC ATA with no disclosure, toggle, or thin note; stable on re-open', async () => {
     const m = await onboardWallet('jest-eur-rcv');
     await m.driver.click('btn-settings', {timeoutMs: 5000});

@@ -9,11 +9,12 @@ import {describe, it, expect} from '@jest/globals';
 import {
   assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency,
 } from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 134 — home-add-money', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 134 — home-add-money', () => {
   it('add-funds lands the home rail deposit; T answers on Home; the practice faucet refuses and credits nothing', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-add'); // DEMO ∂100
     await m.driver.click('tab-home', {timeoutMs: 4000});
     await m.driver.findByTestID('home-headline-amount', {timeoutMs: 5000});

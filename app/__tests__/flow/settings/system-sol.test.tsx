@@ -26,7 +26,9 @@ import {
 } from '../harness/lib';
 import {mountApp} from '../harness/mount';
 import {scaled as budgetScaled} from '../harness/budget';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown>;
 const SOL = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
@@ -57,9 +59,8 @@ function installAtaStub(st: AtaState): void {
   };
 }
 
-describe('flow 72 — sol-usdc-send', () => {
+hermeticDescribe('flow 72 — sol-usdc-send', () => {
   it('absent ATA fail-closes the send; one-tap create opens the form; a failed create surfaces and stays usable', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-sol-usdc-send');
     const st: AtaState = {ataExists: false, createDelayMs: 2500, failCreate: false};
@@ -104,9 +105,8 @@ describe('flow 72 — sol-usdc-send', () => {
   }, 150_000);
 });
 
-describe('flow 75 — seam-fail-loud', () => {
+hermeticDescribe('flow 75 — seam-fail-loud', () => {
   it('all three injection seams installed; with no Wallet mounted every count is 0 and every seam throws, naming the missing piece', async () => {
-    await freshContext();
     const m = await mountApp(); // Onboarding only — no Wallet surfaces
     expect(m.driver.isPresent('tab-home')).toBe(false);
 
@@ -139,9 +139,8 @@ describe('flow 75 — seam-fail-loud', () => {
   }, 60_000);
 });
 
-describe('flow 76 — sol-usdc-ata-gate', () => {
+hermeticDescribe('flow 76 — sol-usdc-ata-gate', () => {
   it('request + address gate on the ATA; the cost gate is honest; one-tap create flips status and unblocks Request', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-sol-usdc-ata');
     let ataExists = false;
@@ -220,9 +219,8 @@ describe('flow 76 — sol-usdc-ata-gate', () => {
   }, 180_000);
 });
 
-describe('flow 79 — sol-fund-first-pay', () => {
+hermeticDescribe('flow 79 — sol-fund-first-pay', () => {
   it('known zero gates beside a live scan; the 1-tap funnel; funding auto-releases; errors fail open; the USDC zero panel + resume', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-sol-fund');
     let ataExists = true;
@@ -293,9 +291,8 @@ describe('flow 79 — sol-fund-first-pay', () => {
   }, 180_000);
 });
 
-describe('flow 80 — sol-fund-funnel', () => {
+hermeticDescribe('flow 80 — sol-fund-funnel', () => {
   it('USDC-pay setup card with the fund hatch; create unlocks when SOL lands; post-create the surface becomes the USDC fund panel', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-fund-funnel');
     let ataExists = false;
@@ -378,9 +375,8 @@ describe('flow 80 — sol-fund-funnel', () => {
   }, 240_000);
 });
 
-describe('flow 81 — ic-fund-first-pay', () => {
+hermeticDescribe('flow 81 — ic-fund-first-pay', () => {
   it('the BTC fund panel rides below the scanner; the funnel lands the deposit; offline fails open; send parity; the resume link after funding', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-ic-fund');
 
     // Select ckBTC (a fresh wallet holds DEMO ∂100 but zero ckBTC).

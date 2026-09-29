@@ -13,7 +13,9 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {onboardWallet} from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {getItem: (k: string) => Promise<string | null>};
@@ -21,9 +23,8 @@ const AsyncStorage = require('@react-native-async-storage/async-storage') as {ge
 const themeLabel = (m: Awaited<ReturnType<typeof onboardWallet>>): string =>
   String(m.driver.propOf('btn-theme', 'accessibilityLabel') ?? '');
 
-describe('flow 85 — theme-toggle', () => {
+hermeticDescribe('flow 85 — theme-toggle', () => {
   it('header names the target and flips on one click; Dark persists across remount; Settings 3-way control + Auto', async () => {
-    await freshContext();
     // 1. Onboard to reach the Wallet (the header toggle only exists there).
     const m = await onboardWallet('e2e-theme');
     await m.driver.findByTestID('btn-theme', {timeoutMs: 5000});

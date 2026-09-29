@@ -19,7 +19,9 @@ import './solRelayProxy';
 import {onboardSeededUnfunded, openBalances, relayGet} from '../harness/lib';
 import {pickFreePort} from '../harness/flowRelay';
 import {deadline as budgetDeadline} from '../harness/budget';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+const flow = hermeticFlow();
 
 /** The stub upstream's envelope counter (the relay's test route). */
 async function stubHits(): Promise<number> {
@@ -32,9 +34,8 @@ async function deadOrigin(): Promise<string> {
   return `http://127.0.0.1:${await pickFreePort()}`;
 }
 
-describe('flow 165 — solana-via-relay', () => {
+hermeticDescribe('flow 165 — solana-via-relay', () => {
   it('phase 1 — SOL+USD render through the relay proxy derivation and the hits counter proves the path', async () => {
-    await freshContext();
     const m = await onboardSeededUnfunded('e2e-sol-relay', {fund: false});
 
     // The balances live on the ACCOUNTS route; Home never shows asset rows.
@@ -55,9 +56,8 @@ describe('flow 165 — solana-via-relay', () => {
   }, 150_000);
 
   it('phase 2 — the walk: a dead first relay home is skipped, SOL survives from the second home, and the dead proxy route was really tried', async () => {
-    await freshContext();
     const dead = await deadOrigin();
-    const live = process.env.DPAY_JEST_RELAY_URL ?? '';
+    const live = flow.relay.baseURL; // the file's OWN relay serves the stub upstream
     const m = await onboardSeededUnfunded('e2e-sol-relay-walk', {fund: false});
 
     // Ground truth through the derivation on the default (baked-origin) list.

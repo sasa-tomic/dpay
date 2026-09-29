@@ -20,11 +20,12 @@ import {
   accountOf, assertEq, assertIncludes, faucetAccount, onboardWallet, openBalances,
   waitForWallet,
 } from '../harness/lib';
-import {freshContext} from './helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 203 — accounts-currency-groups', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 203 — accounts-currency-groups', () => {
   it('every wallet currency listed once; Main on USD alone; rail subtitles; the practice row last', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-currency-groups');
     await m.driver.click('btn-settings', {timeoutMs: 5000});
@@ -58,9 +59,8 @@ describe('flow 203 — accounts-currency-groups', () => {
   }, 150_000);
 });
 
-describe('flow 204 — currency-rail-switch', () => {
+hermeticDescribe('flow 204 — currency-rail-switch', () => {
   it('funding only the IC rail, the USD row tap lands main + rail on the funded ckUSDC; receive mounts in full; no manual rail switch', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-rail-switch');
     const account = await accountOf(m);

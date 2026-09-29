@@ -32,8 +32,11 @@ async function setHomeCurrency(m: M, code: 'USD' | 'CHF'): Promise<void> {
 }
 
 import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 122 — receive rail choice: the pick is named, fees are per-rail, siblings one toggle away', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 122 — receive rail choice: the pick is named, fees are per-rail, siblings one toggle away', () => {
   it('defaults USD to ckUSDC with disclosure, flips to USDC@Solana in place, and CHF shows none', async () => {
     const m = await onboardWallet('jest-receive-rails');
     await setHomeCurrency(m, 'USD');

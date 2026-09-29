@@ -13,13 +13,14 @@ import {
   accountOf, assertIncludes, faucetAccount, onboardWallet, openBalances,
   openPaySend, railPrincipalText, selectCurrency,
 } from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const PRINCIPAL_SEED = 'b'.repeat(64);
 
-describe('flow 178 — address-book', () => {
+hermeticDescribe('flow 178 — address-book', () => {
   it('the door, the empty book, refuse-first add, save/rename, the send-form manage link, remove', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-book');
     // Cold-start landing assertions ride the reload pattern flow 133 uses.
     await m.remount({url: '/'});

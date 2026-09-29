@@ -23,7 +23,9 @@ import {
   skipPracticeIfPresent, skipWalkthroughIfPresent, waitForEnabled, waitForWallet,
   WALLET_READY,
 } from '../harness/lib';
-import {freshContext} from './helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 /** Walk a fresh context from the walkthrough to the currency question (the twins' shared preamble). */
 async function onboardToChooser(m: Mount): Promise<void> {
@@ -38,9 +40,8 @@ async function onboardToChooser(m: Mount): Promise<void> {
   await m.driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
 }
 
-describe('flow 118 — home-currency', () => {
+hermeticDescribe('flow 118 — home-currency', () => {
   it('the chooser gates the wallet; only realisable currencies with their catalogued rails; choosing lands it; Settings can change it', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await mountApp();
     await onboardToChooser(m);
@@ -93,9 +94,8 @@ describe('flow 118 — home-currency', () => {
   }, 150_000);
 });
 
-describe('flow 120 — home-currency-rails', () => {
+hermeticDescribe('flow 120 — home-currency-rails', () => {
   it('USD names both rails preferred first; EUR and CHF name exactly their one rail; Settings shows the group', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await mountApp();
     await onboardToChooser(m);
@@ -135,9 +135,8 @@ describe('flow 120 — home-currency-rails', () => {
   }, 150_000);
 });
 
-describe('flow 121 — home-currency-balance-rails', () => {
+hermeticDescribe('flow 121 — home-currency-balance-rails', () => {
   it('home=USD reads ONE currency row with both rails in its label and the Main badge; home=CHF the same grammar', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-balance-rails');
     await m.driver.click('btn-settings', {timeoutMs: 5000});
@@ -170,9 +169,8 @@ describe('flow 121 — home-currency-balance-rails', () => {
   }, 150_000);
 });
 
-describe('flow 129 — eur-single-rail', () => {
+hermeticDescribe('flow 129 — eur-single-rail', () => {
   it('EUR offered with exactly its one rail; a tap picks without expanding; Continue lands EURC@Solana', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await mountApp();
     await onboardToChooser(m);
@@ -208,9 +206,8 @@ describe('flow 129 — eur-single-rail', () => {
   }, 150_000);
 });
 
-describe('flow 130 — eur-single-rail-balances', () => {
+hermeticDescribe('flow 130 — eur-single-rail-balances', () => {
   it('one EUR row (Main + EURC rail label), no VEUR trace, no health note on any row, the row figure IS the sum', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-eur-balances');
     await m.driver.click('btn-settings', {timeoutMs: 5000});
@@ -241,9 +238,8 @@ describe('flow 130 — eur-single-rail-balances', () => {
   }, 150_000);
 });
 
-describe('flow 149 — currency-chooser-dead-tap', () => {
+hermeticDescribe('flow 149 — currency-chooser-dead-tap', () => {
   it('nothing preselected; an early Continue is answered and commits nothing; picking clears the prompt and Continue commits', async () => {
-    await freshContext();
     const m = await mountApp();
     await onboardToChooser(m);
 

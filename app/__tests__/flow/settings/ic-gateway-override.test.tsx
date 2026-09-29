@@ -13,9 +13,10 @@ import {describe, it, expect} from '@jest/globals';
 import {
   armPayScan, assertIncludes, DpayCore, generateKeypair, getBalance, onboardWallet,
 } from '../harness/lib';
-import {relayBaseURL} from '../harness/relayClient';
 import {scaled as budgetScaled} from '../harness/budget';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+const flow = hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown> & {__DPAY_TEST_SCAN?: (qr: string) => void};
 const PAY_CENTS = 2500;
@@ -49,11 +50,10 @@ async function deadOrigin(): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-describe('flow 174 — ic-gateway-override', () => {
+hermeticDescribe('flow 174 — ic-gateway-override', () => {
   it('the field mirrors the seam; a local http override applies verbatim and persists; empty restores; payments compose back; the dead override outranks', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-icgw');
-    const seamBase = relayBaseURL();
+    const seamBase = flow.relay.baseURL; // the seam base IS the file's private relay
     const dead = await deadOrigin();
 
     // ── Phase 1: the seam baseline — a scan-pay settles through the fake gateway ─────────────

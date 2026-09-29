@@ -18,7 +18,9 @@ import {
   accountOf, assertEq, faucetAccount, onboardWallet, openBalances,
   waitForWallet,
 } from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown>;
 
@@ -28,9 +30,8 @@ async function openAddCurrency(m: Awaited<ReturnType<typeof onboardWallet>>): Pr
   await m.driver.findByTestID('input-addcur-search', {timeoutMs: 5000});
 }
 
-describe('flow 210 — add-currency-search', () => {
+hermeticDescribe('flow 210 — add-currency-search', () => {
   it('the full set offered, in-wallet rows not re-addable, search filters live, Remove hides, re-add restores', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-addcur');
     // The SOL rail must read a KNOWN balance for the Remove guard's verdict to be data.
@@ -94,9 +95,8 @@ describe('flow 210 — add-currency-search', () => {
   }, 180_000);
 });
 
-describe('flow 211 — remove-guard-refusals', () => {
+hermeticDescribe('flow 211 — remove-guard-refusals', () => {
   it('a nonzero balance refuses Remove (the menu stays); zero hides; the sweep spares the funded; re-add restores', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-remove-guard');
     const account = await accountOf(m);
@@ -159,9 +159,8 @@ describe('flow 211 — remove-guard-refusals', () => {
   }, 180_000);
 });
 
-describe('flow 212 — currency-row-tap-sets-main', () => {
+hermeticDescribe('flow 212 — currency-row-tap-sets-main', () => {
   it('the ICP row tap sets main, the working rail follows, and the tap survives a reload', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-row-tap-main');
     const account = await accountOf(m);

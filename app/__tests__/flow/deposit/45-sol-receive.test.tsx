@@ -12,13 +12,16 @@ import {describe, it, expect} from '@jest/globals';
 import {
   assert, assertEq, assertIncludes, armPayScan, onboardWallet, openBalances, selectCurrency, clipboardAfterCopy,
 } from '../harness/lib';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown>;
 
 // base58 (Bitcoin alphabet) — the Solana address charset. 32–44 chars is the valid pubkey range.
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-describe('flow 45 — SOL receive: derived address, Solana Pay QR, hooks-safe toggle, read-back', () => {
+hermeticDescribe('flow 45 — SOL receive: derived address, Solana Pay QR, hooks-safe toggle, read-back', () => {
   it('derives the SOL address offline, copies it, and scans its own QR back into review', async () => {
     const m = await onboardWallet('jest-sol');
 

@@ -13,8 +13,11 @@ import {
   selectCurrency, waitForWallet,
 } from '../harness/lib';
 import {allowRequestFailuresFrom} from '../harness/setupFlow';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 22 — deposit error: dead gateway → honest error, no stuck loading', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 22 — deposit error: dead gateway → honest error, no stuck loading', () => {
   it('the deposit sheet fails fast with plain language and stays out of the loading state', async () => {
     // Onboard online (∂100 funded — proves the wallet works before we break the network).
     const m = await onboardWallet('jest-deposit-err');

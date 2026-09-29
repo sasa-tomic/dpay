@@ -15,7 +15,9 @@ import {
   accountOf, faucetAccount, onboardWallet, openBalances, openPaySend, railPrincipalText,
   selectCurrency,
 } from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const SURFACES: Record<string, string[]> = {
   chrome: ['btn-settings', 'btn-theme', 'link-home', 'tab-home', 'tab-pay', 'tab-receive', 'tab-transactions'],
@@ -42,9 +44,8 @@ const SURFACES: Record<string, string[]> = {
   paySendResolved: ['send-save-name'],
 };
 
-describe('flow 41 — a11y-census', () => {
+hermeticDescribe('flow 41 — a11y-census', () => {
   it('every interactive control on every surface carries a role and an aria-label', async () => {
-    await freshContext();
     installSolAccountsHelper();
     const m = await onboardWallet('e2e-a11y');
     const identity = await accountOf(m);

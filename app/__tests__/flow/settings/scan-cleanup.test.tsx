@@ -9,14 +9,15 @@
 import {describe, it, expect} from '@jest/globals';
 import {armPayScan, onboardWallet} from '../harness/lib';
 import {scaled as budgetScaled} from '../harness/budget';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const g = globalThis as unknown as Record<string, unknown>;
 const scanCount = (): number => (g.__DPAY_TEST_SCAN_COUNT as () => number)();
 
-describe('flow 17 — scan-cleanup', () => {
+hermeticDescribe('flow 17 — scan-cleanup', () => {
   it('idle 0 → armed 1 → tab switch cleans up → re-mount re-gates → re-arms to 1', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-scan-cleanup');
 
     // Pay tab idle: no scan listener until "Pay Now".

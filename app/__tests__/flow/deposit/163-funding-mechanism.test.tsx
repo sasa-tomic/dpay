@@ -14,8 +14,11 @@ import {
   assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
   waitForWallet,
 } from '../harness/lib';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 163 — funding mechanism: the instruction matches the deposit that runs', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 163 — funding mechanism: the instruction matches the deposit that runs', () => {
   it('ckUSDC has no address (wallet-signed); ckBTC and SOL send to the address shown', async () => {
     const m = await onboardWallet('jest-funding-mechanism');
 

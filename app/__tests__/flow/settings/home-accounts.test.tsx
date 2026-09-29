@@ -25,11 +25,12 @@ import {
   accountOf, assertEq, assertIncludes, faucetAccount, generateKeypair, onboardWallet,
   openBalances, openPaySend, railTransfer, selectCurrency,
 } from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 133 — home-surface', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 133 — home-surface', () => {
   it('cold start lands on Home; the headline owns the home currency; set-main gesture; sub-mode pin', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-home');
     // A reload is the cheapest cold start, and the landing mode is what is under test. The remount
     // also resets the location stub to '/' (a fresh page load carries no ?screen= history).
@@ -91,9 +92,8 @@ describe('flow 133 — home-surface', () => {
   }, 150_000);
 });
 
-describe('flow 135 — home-activity', () => {
+hermeticDescribe('flow 135 — home-activity', () => {
   it('newest 5 rail payments in ∂ units, the cap holds, See-all opens the full ledger', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-feed');
     const alice = await accountOf(m);
     const payer = await generateKeypair();
@@ -129,9 +129,8 @@ describe('flow 135 — home-activity', () => {
   }, 120_000);
 });
 
-describe('flow 136 — accounts-page', () => {
+hermeticDescribe('flow 136 — accounts-page', () => {
   it('zero rows stay, practice sits last under its divider, Main badge on CHF only, row press sets main, survives reload', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-accounts-page');
 
     await openBalances(m);
@@ -166,9 +165,8 @@ describe('flow 136 — accounts-page', () => {
   }, 120_000);
 });
 
-describe('flow 150 — accounts-route', () => {
+hermeticDescribe('flow 150 — accounts-route', () => {
   it('one tap from the scanner, zero-balance rows included, no modal, origin-aware Back, hotkey + Home affordance', async () => {
-    await freshContext();
     const m = await onboardWallet('e2e-accounts-route');
 
     // (a) ONE tap on the header chip from the Pay scanner.

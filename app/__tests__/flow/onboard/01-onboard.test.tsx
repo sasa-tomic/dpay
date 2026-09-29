@@ -14,12 +14,14 @@ import {
   accountOf, assertIncludes, chooseHomeCurrencyIfPresent, openBalances, selectDemoAsset,
   skipPracticeIfPresent, skipWalkthroughIfPresent, waitForEnabled, waitForWallet, onboardWallet,
 } from '../harness/lib';
-import {freshContext} from './helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 const USERNAME = 'jest-alice';
 const PLACEHOLDER = 'e.g. Alice';
 
-describe('flow 01 — onboard', () => {
+hermeticDescribe('flow 01 — onboard', () => {
   it('create → faucet ∂100.00 → wallet renders balance + empty history + honesty copy', async () => {
     const m = await mountApp();
 
@@ -68,9 +70,8 @@ describe('flow 01 — onboard', () => {
   }, 60_000);
 });
 
-describe('flow 02 — faucet', () => {
+hermeticDescribe('flow 02 — faucet', () => {
   it('funds ∂100 once; a second top-up inside the cooldown is refused verbatim and credits nothing', async () => {
-    await freshContext();
     const m = await onboardWallet('jest-faucet');
 
     // The accounts route hosts the demo faucet. Onboarding spent this account's top-up.
@@ -94,9 +95,8 @@ describe('flow 02 — faucet', () => {
   }, 60_000);
 });
 
-describe('flow 23 — username-default', () => {
+hermeticDescribe('flow 23 — username-default', () => {
   it('creates with an empty username → defaults to "me", onboards + funds ∂100', async () => {
-    await freshContext();
     const m = await mountApp();
     await skipWalkthroughIfPresent(m);
 

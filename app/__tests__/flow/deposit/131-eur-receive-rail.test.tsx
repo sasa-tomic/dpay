@@ -20,8 +20,11 @@ const {installSolRpcStub} = require('./solRpcStub') as typeof import('./solRpcSt
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 131 — EUR receive: a single-rail currency renders one plain ATA surface', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 131 — EUR receive: a single-rail currency renders one plain ATA surface', () => {
   it('the EURC ATA with no rail disclosure, toggle, or thin note — stable across leave-and-return', async () => {
     // Onboard, pin home=EUR, and land on the EURC rail's "My address" surface.
     const m = await onboardWallet('jest-eur-receive');

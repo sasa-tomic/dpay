@@ -18,7 +18,9 @@ import {
   assertIncludes, chooseHomeCurrencyIfPresent, onboardWallet,
   selectDemoAsset, skipPracticeIfPresent, waitForEnabled,
 } from '../harness/lib';
-import {freshContext} from './helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {
@@ -27,9 +29,8 @@ const AsyncStorage = require('@react-native-async-storage/async-storage') as {
 };
 const journeyOf = (): Promise<string | null> => AsyncStorage.getItem('dpay.journey.v1');
 
-describe('flow 88 — walkthrough', () => {
+hermeticDescribe('flow 88 — walkthrough', () => {
   it('cold boot gates on the walkthrough; scene copy pinned; Get started → create → funded wallet; stamp persists', async () => {
-    await freshContext();
     const m = await mountApp();
 
     // 1. Fresh boot → the walkthrough (NOT the create form).
@@ -93,9 +94,8 @@ describe('flow 88 — walkthrough', () => {
   }, 90_000);
 });
 
-describe('flow 89 — walkthrough-skip-replay', () => {
+hermeticDescribe('flow 89 — walkthrough-skip-replay', () => {
   it('skip on sight → create form + stamp; persisted stamp suppresses; Settings replay has no Skip and leaves the journey alone', async () => {
-    await freshContext();
     // ── Phase A — Skip on sight ─────────────────────────────────────────────────────────────
     {
       const m = await mountApp();

@@ -12,8 +12,11 @@ import {scaled as budgetScaled} from '../harness/budget';
 import {
   goOffline, onboardWallet, openBalances, waitForWallet,
 } from '../harness/lib';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 13 — offline', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 13 — offline', () => {
   it('a dead relay hides the top-up (fail-closed), fails for the right reason, shows the indicator, and never crashes', async () => {
     // Onboard against the GOOD relay (∂100 — the wallet works when online).
     const m = await onboardWallet('e2e-offline');

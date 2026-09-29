@@ -16,7 +16,9 @@ import {
   generateKeypair, getBalance, openBalances, selectDemoAsset, skipWalkthroughIfPresent,
   waitForEnabled, waitForWallet,
 } from '../harness/lib';
-import {freshContext} from './helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+
+hermeticFlow();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {getItem: (k: string) => Promise<string | null>};
@@ -33,9 +35,8 @@ function randNonceHex(): string {
   return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
 
-describe('flow 94 — trip-passport', () => {
+hermeticDescribe('flow 94 — trip-passport', () => {
   it('2 OF 4 after a paying first run (practice earns nothing) → real funds flip 3 OF 4 live → one payment completes it → capstone, Done, persisted', async () => {
-    await freshContext();
     const m = await mountApp();
 
     // --- 1. Onboard WITH the practice payment made: 2 of the 4 passport stamps. ---------------

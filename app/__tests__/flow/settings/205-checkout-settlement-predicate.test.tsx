@@ -11,11 +11,12 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {assertIncludes, onboardWallet, openBalances, selectCurrency} from '../harness/lib';
-import {freshContext} from '../onboard/helpers';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 
-describe('flow 205 — checkout-settlement-predicate', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 205 — checkout-settlement-predicate', () => {
   it('the picker offers only honest price units; a mismatched pick is refused whole; the one-tap fix re-picks and opens', async () => {
-    await freshContext();
     const m = await onboardWallet('Bahnhof Kiosk');
 
     // The counter, on the checkout's own row.
