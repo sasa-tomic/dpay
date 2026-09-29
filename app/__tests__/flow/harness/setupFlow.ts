@@ -313,6 +313,7 @@ export function installFlowEnvironment(): void { /* all side effects above — s
 const clipboardKey = '__DPAY_TEST_CLIPBOARD';
 declare function beforeEach(fn: () => void | Promise<void>, timeoutMs?: number): void;
 declare function afterEach(fn: () => void, timeoutMs?: number): void;
+declare const expect: {getState: () => {currentTestName?: string}};
 
 type LifecycleG = {
   __DPAY_FLOW_LIFECYCLE_INSTALLED__?: boolean;
@@ -408,5 +409,18 @@ export function installFlowLifecycle(): void {
     // The e2e fail-closed rule: a test that let a fetch die without declaring it is RED, even green.
     assertNoUndeclaredFailures();
     fetchRecords.length = 0;
+    // RESOURCE PROBE (DPAY_FLOW_RESOURCE_PROBE=1): print the event-loop's live handle classes after
+    // every test. Hunting the 2026-09-29 night class: surfaces stop mounting ~80 files into a
+    // sequential run (deposit-address missing, NFC listeners 0, clipboard writes lost) on ONE
+    // worker while the same files pass alone — the signature of a per-worker resource (timer /
+    // handle / socket) that some file leaks and every later file then fights.
+    if (process.env.DPAY_FLOW_RESOURCE_PROBE === '1') {
+      const names = (process as unknown as {getActiveResourcesInfo?: () => string[]}).getActiveResourcesInfo?.() ?? [];
+      const byType: Record<string, number> = {};
+      for (const n of names) byType[n] = (byType[n] ?? 0) + 1;
+      const name = (expect.getState().currentTestName ?? '?').slice(0, 36);
+      // Direct stderr write: jest --silent intercepts console.*, and this probe must survive it.
+      (process.stderr as {write: (s: string) => void}).write(`[RES] ${JSON.stringify(byType)} after ${name}\n`);
+    }
   }, budgetScaled(15_000));
 }
