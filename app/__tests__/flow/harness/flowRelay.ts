@@ -37,6 +37,9 @@ export type FlowRelay = {
   baseURL: string;
   /** Idempotent SIGTERM (+ SIGKILL backstop). The harness afterEach already calls it. */
   stop: () => Promise<void>;
+  /** The spawned child's captured output tails — the trap reads them at wait expiry so a relay
+   *  that died mid-test leaves its last words in the failure evidence. */
+  logs: () => {stdout: string; stderr: string};
 };
 
 type RelayG = {__DPAY_FLOW_RELAYS__?: FlowRelay[]};
@@ -140,7 +143,7 @@ export async function startFlowRelay(opts: {port?: number; checkout?: boolean; f
       }, budgetScaled(2_000));
     });
   };
-  const relay: FlowRelay = {port, baseURL, stop};
+  const relay: FlowRelay = {port, baseURL, stop, logs: () => ({stdout: stdout.slice(-2500), stderr: stderr.slice(-2500)})};
   // The per-test teardown drain list — EXCEPT a hermetic file's own relay, which lives for the
   // whole file and is stopped by the file's afterAll (hermetic.ts). Registration here would let
   // the FIRST afterEach kill the file's world out from under tests 2..n.
