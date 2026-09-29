@@ -133,11 +133,19 @@ installSolNfcSeam(g);
 // __DPAY_TEST_CLIPBOARD (same seam name as e2e/web/shims.ts). Installed unconditionally,
 // regardless of the preset's mocks.
 g.__DPAY_TEST_CLIPBOARD = '';
-(Share as unknown as {share: unknown}).share = async (opts?: {message?: string; url?: string}) => {
+const shareRecorder = async (opts?: {message?: string; url?: string}) => {
   const msg = opts && typeof opts.message === 'string' ? opts.message : (opts && opts.url) || '';
   g.__DPAY_TEST_CLIPBOARD = msg;
   return {action: 'sharedAction'};
 };
+// The state probe's identity witness: proves the recorder is still the live Share.share in a
+// later file (a leaked override — an in-file navigator.clipboard stand-in is the known class —
+// does not touch Share, but a replaced Share would lose the tag).
+(shareRecorder as unknown as {__dpayFlowRecorder?: boolean}).__dpayFlowRecorder = true;
+// GLOBAL-IDENTITY probe: the same tag read from any registry/context tells whether globalThis is
+// literally ONE object across the run (M3 premise) or re-created per file.
+(g as unknown as {__DPAY_GLOBAL_ID?: string}).__DPAY_GLOBAL_ID ??= 'g' + Math.random().toString(36).slice(2, 10);
+(Share as unknown as {share: unknown}).share = shareRecorder;
 
 // --- 5. fetch rewrite + request/failure recorder (the e2e fail-closed rule) ----------------------
 // The app targets the BAKED default origin (app/relayConfig.ts; jest has no `?relay=` override).
@@ -358,12 +366,35 @@ export function installFlowLifecycle(): void {
   jest.setTimeout(budgetScaled(30_000));
   beforeEach(async () => {
     g[clipboardKey] = '';
+    // WORKER-PERSISTENT HOST-GLOBAL HYGIENE (the sequential-run corruption class). Node ≥21 has a
+    // REAL `globalThis.navigator` on the jest WORKER process, and jest-environment-node forwards
+    // it LIVE into every fresh per-file test global (`get() { return globalThis['navigator'] }`,
+    // a module-level snapshot taken once per worker). A test's read-mutate graft —
+    // `const nav = g.navigator ?? {}; nav.clipboard = {...}` (withdraw/15's clipboard stand-in) —
+    // therefore mutates the WORKER's own navigator, and the graft outlives every later file:
+    // each later file's first navigator read snapshots the still-grafted host object, the app's
+    // copyToClipboard takes the stale 'clipboard' branch, and its writeText closure writes the
+    // DEAD previous file's global — the live test's clipboard seam never fills (observed
+    // 2026-09-29: deposit/04, restore, receipt red in-run, green alone; [STATE]/gid probe proof).
+    // Drop any grafted clipboard here: the app's copy path returns to the Share recorder, and a
+    // test that needs a clipboard stand-in re-grafts INSIDE its own test (window = one test).
+    const nav = g.navigator as {clipboard?: unknown} | undefined;
+    if (nav && Object.prototype.hasOwnProperty.call(nav, 'clipboard')) {
+      delete nav.clipboard;
+    }
     g.__DPAY_TEST_NFC_STATUS = undefined;
     g.__DPAY_QR_LAST = undefined;
     // The NFC reader-request stash (e2e/web/dpay-nfc.ts plants it on card dispatch): a per-test
     // reset, so a flow that read the machine code can never leak it into the next card tap's
     // assertion. Flows 25/97/98 clear it in-file too — harmless duplication.
     g.__DPAY_TEST_NFC_READER_REQUEST = undefined;
+    // The NFC shims' remaining assertion stashes (dpay-nfc.ts / dpay-sol-nfc.ts): same per-test
+    // reset — a stale APPROVED_WIRE/RESULT/SOL_NFC_LAST/SOL_REQ_LAST from an earlier tap must
+    // never satisfy a later flow's positive read.
+    g.__DPAY_TEST_NFC_APPROVED_WIRE = undefined;
+    g.__DPAY_TEST_NFC_RESULT = undefined;
+    g.__DPAY_SOL_NFC_LAST = undefined;
+    g.__DPAY_SOL_REQ_LAST = undefined;
     // The IC gateway seam is read PER CALL (app/services/icp.ts): reset to the ONE shared relay
     // so a flow that pointed it at its private relay (startFlowRelay) never leaks the point.
     g.__DPAY_TEST_IC_GATEWAY = relayURL;
@@ -421,6 +452,39 @@ export function installFlowLifecycle(): void {
       const name = (expect.getState().currentTestName ?? '?').slice(0, 36);
       // Direct stderr write: jest --silent intercepts console.*, and this probe must survive it.
       (process.stderr as {write: (s: string) => void}).write(`[RES] ${JSON.stringify(byType)} after ${name}\n`);
+    }
+    // STATE PROBE (DPAY_FLOW_STATE_PROBE=1): the per-worker seam/globalThis snapshot after every
+    // test. Hunting the sequential-corruption class: diffs the seam state a PASSING early suite
+    // leaves against what a FAILING late suite reads — the unreset field shows up as a key that
+    // appears mid-run and never leaves (or a recorder/native identity that changed).
+    if (process.env.DPAY_FLOW_STATE_PROBE === '1') {
+      const keys = Object.keys(g).filter((k) => k.startsWith('__DPAY_')).sort();
+      const nav = g.navigator as {clipboard?: {writeText?: unknown}} | undefined;
+      const clip = nav?.clipboard;
+      const share = (Share as unknown as {share?: {__dpayFlowRecorder?: boolean}}).share;
+      const countOf = (k: string): number | string => {
+        const f = g[k] as (() => number) | undefined;
+        return typeof f === 'function' ? f() : 'n/a';
+      };
+      const descOf = (o: Record<string, unknown>, k: string): string => {
+        const d = Object.getOwnPropertyDescriptor(o, k);
+        if (!d) return 'absent';
+        return `w=${String(d.writable)} get=${typeof d.get} set=${typeof d.set} val=${String(d.value).slice(0, 14)}`;
+      };
+      const snap = {
+        test: (expect.getState().currentTestName ?? '?').slice(0, 48),
+        gid: String((g as unknown as {__DPAY_GLOBAL_ID?: string}).__DPAY_GLOBAL_ID),
+        clipDesc: descOf(g as Record<string, unknown>, '__DPAY_TEST_CLIPBOARD'),
+        nav: nav === undefined ? 'absent' : Object.keys(nav).join('+'),
+        clipWrite: clip === undefined || clip.writeText === undefined ? 'absent' : String(clip.writeText).replace(/\s+/g, ' ').slice(0, 110),
+        shareRecorder: share?.__dpayFlowRecorder === true,
+        nfcListeners: countOf('__DPAY_TEST_NFC_COUNT'),
+        solNfcListeners: countOf('__DPAY_TEST_SOL_NFC_COUNT'),
+        scanListeners: countOf('__DPAY_TEST_SCAN_COUNT'),
+        clipboardVal: String(g.__DPAY_TEST_CLIPBOARD ?? '').slice(0, 30),
+        keys,
+      };
+      (process.stderr as {write: (s: string) => void}).write(`[STATE] ${JSON.stringify(snap)}\n`);
     }
   }, budgetScaled(15_000));
 }
