@@ -8,7 +8,8 @@
  * rebuilt from storage by the mount-time loadAddressBook effect — not carried in React state.
  * Reuses flow 15's address + amount verbatim so amount validation passes.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertEq, assertIncludes, faucetAccount, getBalance, onboardWallet,
   openBalances, selectCurrency, openPaySend,
@@ -20,7 +21,7 @@ const WITHDRAW_ADDR = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh'; // flow 15's
 const SAVED_CHIP = 'send-saved-bc1qxy2k'; // the chip testID = first 8 chars of the address
 const SHORT_ADDR = 'bc1qxy2kgdyg…fjhx0wlh'; // AddressField middle-elides a long address
 
-describe('flow 56 — saved send destinations: persisted on success, rebuilt from storage on remount', () => {
+hermeticDescribe('flow 56 — saved send destinations: persisted on success, rebuilt from storage on remount', () => {
   it('a settled send saves the destination; after the surface unmounts, the chip pre-fills on tap', async () => {
     const m = await onboardWallet('jest-saved');
     const accountHex = (await accountOf(m))!.publicHex;

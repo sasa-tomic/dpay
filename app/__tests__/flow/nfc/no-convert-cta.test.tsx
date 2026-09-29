@@ -13,14 +13,17 @@
  * checkout terminal, not a wallet surface) and the NFC 'pending' terminal (renders through the
  * same NfcTapView shell walked above).
  */
-import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {armNfcCard, assertEq, onboardWallet, openBalances, selectCurrency} from '../harness/lib';
 import {buildSolReq, clickByAria, convertCtaCount, extractSig, nfcPhase, type NfcEvent} from './h';
 
 const g = globalThis as unknown as Record<string, unknown>;
 const REQ_RID = 'c'.repeat(32);
 
-describe('flow 171 — no NFC surface ever offers a conversion (INVARIANT 8)', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 171 — no NFC surface ever offers a conversion (INVARIANT 8)', () => {
   it('every walked IC + SOL sub-surface counts ZERO convert affordances; the probe control can fail', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const m = await onboardWallet('jest-nfc-no-convert');

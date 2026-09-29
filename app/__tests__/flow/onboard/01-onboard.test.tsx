@@ -8,7 +8,8 @@
  *
  * Not ported (browser-only): the screenshot. Trimmed: none — this is the full create path.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp} from '../harness/mount';
 import {
   accountOf, assertIncludes, chooseHomeCurrencyIfPresent, openBalances, selectDemoAsset,

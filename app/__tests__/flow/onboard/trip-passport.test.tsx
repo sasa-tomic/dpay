@@ -8,7 +8,8 @@
  * paymentTested; the strip retires itself the moment readiness completes; the Settings archive
  * plays the TRIP READY capstone → Done; and a fresh boot keeps the record with no strip.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp} from '../harness/mount';
 import {scaled as budgetScaled} from '../harness/budget';
 import {

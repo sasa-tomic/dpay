@@ -11,7 +11,8 @@
  *
  * Not ported (browser-only): the screenshots.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp, type Mount} from '../harness/mount';
 import {
   assertEq, assertIncludes, chooseHomeCurrencyIfPresent, generateKeypair, faucetAccount,

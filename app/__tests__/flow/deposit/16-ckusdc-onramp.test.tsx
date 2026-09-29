@@ -13,7 +13,8 @@
  *      with the right contracts + selectors, and the deposit targets the USER principal with the
  *      default (all-zero) subaccount.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertIncludes, DpayCore, onboardWallet, openBalances,
   openReceiveAddress, selectCurrency,

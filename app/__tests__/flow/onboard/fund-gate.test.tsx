@@ -8,7 +8,8 @@
  * on the switch lands the funded rail's own scan screen; the chip keeps headline duty for the MAIN
  * currency.
  */
-import {describe, it} from '@jest/globals';
+import {it} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from '../settings/solStub';
 import {

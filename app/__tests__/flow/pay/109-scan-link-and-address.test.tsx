@@ -8,7 +8,8 @@
  * the honest "not a payment code" refusal. VCHF is the active asset — direct-ICRC, so ONE asset
  * exercises both halves of the classifier.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, armPayScan, assert, assertEq, assertIncludes, faucetAccount, onboardWallet,
   openBalances, railPrincipalText, selectCurrency,
@@ -27,7 +28,7 @@ async function scan(m: Parameters<typeof armPayScan>[0], payload: string): Promi
   scanSeam()(payload);
 }
 
-describe('flow 109 — the camera classifies links, addresses, foreign schemes, and garbage', () => {
+hermeticDescribe('flow 109 — the camera classifies links, addresses, foreign schemes, and garbage', () => {
   it('link → review (no auto-sign); address → send form + route; bitcoin: → named refusal', async () => {
     const m = await onboardWallet('jest-scan2');
     const accountHex = (await accountOf(m))!.publicHex;

@@ -5,7 +5,8 @@
  * three testnet rows are filtered out by default, revealed on tap with their exact
  * testnetDisplayNames, and hidden again on the second tap.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {onboardWallet, openBalances} from '../harness/lib';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 

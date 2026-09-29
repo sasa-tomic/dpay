@@ -8,7 +8,8 @@
  * VCHF is funded up front: the send surface censused last sits behind the fund-first gate, and a
  * zero balance would substitute the fund panel for the very controls under census.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from './solStub';
 import {

@@ -15,14 +15,17 @@
  * official vectors stay pinned in `app/__tests__/evm-identity.test.ts` + `eip55.test.ts` and are
  * cross-checked here through the app's own derivation only.
  */
-import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {evmEnv} from './env';
 import {deriveEvmKeypair} from '../../../evm/identity';
 import {toChecksumAddress} from '../../../evm/identity';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
-describe('flow 218 — the onboard identity derives the EIP-55 address the wallet renders', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 218 — the onboard identity derives the EIP-55 address the wallet renders', () => {
   it('Balances row → Receive ▸ My address: rendered == derived, bare-address QR, copy, explorer per registry', async () => {
     const {accountOf, onboardWallet, selectEvmAsset, waitForWallet} = await evmEnv();
     const m = await onboardWallet('jest-evm-218');

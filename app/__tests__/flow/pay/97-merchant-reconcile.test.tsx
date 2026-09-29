@@ -9,7 +9,8 @@
  * Each leg debits the payer exactly the price; the merchant nets BOTH wires; the Ledger headlines
  * the gross on the memo-matched row and keeps the bare wire on the unmatched row.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertEq, assertIncludes, DpayCore, faucetAccount, generateKeypair,
   getBalance, icpCatalog, onboardWallet, openBalances, railPrincipalText, selectCurrency,
@@ -114,13 +115,13 @@ async function merchantReconcileLeg(asset: typeof VCHF): Promise<void> {
   await m.unmount();
 }
 
-describe('flow 97 — VCHF merchant reconcile (wrong memo refuses, exact memo confirms)', () => {
+hermeticDescribe('flow 97 — VCHF merchant reconcile (wrong memo refuses, exact memo confirms)', () => {
   it('the memo — not the credit — binds the confirmation, with exact 8-decimal money', async () => {
     await merchantReconcileLeg(VCHF);
   }, 180_000);
 });
 
-describe('flow 98 — ICP merchant reconcile (the ICP twin)', () => {
+hermeticDescribe('flow 98 — ICP merchant reconcile (the ICP twin)', () => {
   it('same contract on currency 8', async () => {
     await merchantReconcileLeg(ICP);
   }, 180_000);

@@ -8,7 +8,8 @@
  * place; the send form's manage link opens the same route and Back returns to the form; Remove
  * empties the book and says so again.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertIncludes, faucetAccount, onboardWallet, openBalances,
   openPaySend, railPrincipalText, selectCurrency,

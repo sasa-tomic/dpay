@@ -14,7 +14,8 @@
  * The EUR row's rail (EURC@Solana) is enumerable offline through the SOL RPC stub (solStub.ts —
  * the harness's stand-in for the coherence check's Solana read).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from '../settings/solStub';
 import {mountApp, type Mount} from '../harness/mount';

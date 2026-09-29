@@ -12,7 +12,8 @@
  * disable the confirm; a wrong-chain paste is refused by name with NO offramp body; a minter
  * refusal surfaces verbatim in withdraw-err with a fee-only debit.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertDisabled, assertEq, assertIncludes, clipboardAfterCopy, faucetAccount, getBalance,
   onboardWallet, openBalances, selectCurrency, openPaySend,
@@ -26,7 +27,7 @@ const SEED_WEI = 5_000_000_000_000_000_000n; // 5 ETH
 const APPROVE_FEE_WEI = 2_000_000_000_000n; // the ckETH ledger's icrc1_fee
 const GAS_FEE_WEI = 78_000_000_000_000n; // the minter's fixed eip_1559 quote on this fake
 
-describe('flow 15 — withdraw ckBTC to a native BTC address', () => {
+hermeticDescribe('flow 15 — withdraw ckBTC to a native BTC address', () => {
   it('approve + retrieve burn at the principal; Withdrawn ✓; clipboard + UI row agree', async () => {
     const m = await onboardWallet('jest-withdraw');
     const accountHex = (await accountOf(m))!.publicHex;
@@ -77,7 +78,7 @@ describe('flow 15 — withdraw ckBTC to a native BTC address', () => {
   }, 180_000);
 });
 
-describe('flow 44 — withdraw native ckETH to a 0x address (withdraw_eth branch)', () => {
+hermeticDescribe('flow 44 — withdraw native ckETH to a 0x address (withdraw_eth branch)', () => {
   it('gas-quote + approve + burn; no ckERC20 gas note; both gateway and UI agree', async () => {
     const m = await onboardWallet('jest-cketh');
     const accountHex = (await accountOf(m))!.publicHex;
@@ -124,7 +125,7 @@ describe('flow 44 — withdraw native ckETH to a 0x address (withdraw_eth branch
   }, 180_000);
 });
 
-describe('flow 48 — withdraw ckUSDC (dual-ledger ckERC20 branch)', () => {
+hermeticDescribe('flow 48 — withdraw ckUSDC (dual-ledger ckERC20 branch)', () => {
   it('the gas note renders; three envelopes; BOTH ledgers burn; the UI row agrees', async () => {
     const m = await onboardWallet('jest-ckusdc-w');
     const accountHex = (await accountOf(m))!.publicHex;
@@ -171,7 +172,7 @@ describe('flow 48 — withdraw ckUSDC (dual-ledger ckERC20 branch)', () => {
   }, 180_000);
 });
 
-describe('flow 18 — withdraw error paths (guards + an honest rail rejection)', () => {
+hermeticDescribe('flow 18 — withdraw error paths (guards + an honest rail rejection)', () => {
   it('below-min/over-balance disable confirm; wrong chain refused by name; minter refusal surfaced', async () => {
     const m = await onboardWallet('jest-werr');
     const accountHex = (await accountOf(m))!.publicHex;

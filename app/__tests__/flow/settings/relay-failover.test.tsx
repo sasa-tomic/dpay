@@ -10,7 +10,8 @@
  * Phase 2 (below): a 4xx is an ANSWER — no failover. The twin's second origin is the web dev
  * server; the jest stand-in is a local http server that 404s every route while staying alive.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertIncludes, faucetAccount, onboardSeededUnfunded,
 } from '../harness/lib';

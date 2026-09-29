@@ -34,7 +34,8 @@
  * Not ported (browser-only): the `document.visibilityState` event — AppState is the ONE code
  * path on RN (`hooks/useAppActive.ts`); the driver replays 'background'/'active' through it.
  */
-import {describe, it, expect, beforeEach} from '@jest/globals';
+import {it, expect, beforeEach} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: settings/solStub.ts sets `__DPAY_TEST_SOLANA_RPC_URL = 'stub'` in its module body —
 // config/constants.ts captures the URL at module load and the App graph loads with the harness
 // import below; the per-call stub is installed afterwards (runtime seam).

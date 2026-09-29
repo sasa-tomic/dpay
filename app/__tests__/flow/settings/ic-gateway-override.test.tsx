@@ -9,7 +9,8 @@
  * after; with the dead override live, the envelope POST dies AT the override's /api/v2 route
  * (connection-class) while the seam gateway underneath stays alive — nothing settles.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   armPayScan, assertIncludes, DpayCore, generateKeypair, getBalance, onboardWallet,
 } from '../harness/lib';

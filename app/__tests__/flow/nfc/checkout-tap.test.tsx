@@ -11,7 +11,8 @@
  * reader request (DpayCore.buildRequestHex), the signed transfer, the ledger. WHAT IS NOT: the
  * radio (the seam; the antenna hop is a physical-device gate).
  */
-import {describe, it, expect, afterEach} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect, afterEach} from '@jest/globals';
 import {scaled as budgetScaled} from '../harness/budget';
 import {
   accountOf, assert, assertEq, assertIncludes, DpayCore, faucetAccount, generateKeypair,
@@ -32,14 +33,16 @@ type CheckoutOpen = {merchant?: string; reference?: string; id?: string};
 type NfcResult = {status: number; nonceHex: string; requestIdHex: string};
 
 let restoreFetch: (() => void) | null = null;
+// The fetch wrapper is this file's own probe — restored here. The NFC stashes are the harness's
+// (the lifecycle + the hermetic hook reset them per test).
 afterEach(() => {
-  g.__DPAY_TEST_NFC_RESULT = undefined;
-  g.__DPAY_TEST_NFC_READER_REQUEST = undefined;
   restoreFetch?.();
   restoreFetch = null;
 });
 
-describe('flow 117 — a tap credits the shop’s own charge (the reference is the missing link)', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 117 — a tap credits the shop’s own charge (the reference is the missing link)', () => {
   it('reader armed from the charge → offline bundle → memo=reference transfer → checkout flips paid', async () => {
     // The counter must believe it has a radio, or the reader never mounts.
     g.__DPAY_TEST_NFC_STATUS = 'ready';

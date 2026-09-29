@@ -9,7 +9,8 @@
  * Rail semantics: the offline branch never POSTs (nothing to dedup on A's side); the envelope QR
  * IS the payment; reconciliation is by request_id via read_state.
  */
-import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {
   accountOf, armPayScan, assert, DpayCore, faucetAccount, generateKeypair, getBalance,
   goOffline, icpCatalog, onboardWallet, openBalances, setRelay,
@@ -18,7 +19,9 @@ import {
 const g = globalThis as unknown as Record<string, unknown>;
 const PAY_CENTS = '2500';
 
-describe('flow 20 — offline envelope hand-off + reconcile-by-request_id', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 20 — offline envelope hand-off + reconcile-by-request_id', () => {
   it('offline scan → signed envelope QR → counterparty submits → back online → Paid, balances move', async () => {
     // Payee bob (keypair only — the "merchant phone" is this test acting on his behalf).
     const bob = await generateKeypair();

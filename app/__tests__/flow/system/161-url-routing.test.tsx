@@ -12,7 +12,8 @@
  * Trimmed for M1 (M2 batch E owns full parity): (c) the ckbtc sub-mode leg and (e) the Settings
  * sheet legs ride the same stub mechanics proven here.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {onboardWallet} from '../harness/lib';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 

@@ -9,11 +9,15 @@
  * price less the fee it absorbs, and the customer moved by exactly the price (two fees: their
  * approve + the pull's transfer fee, charged to the approved allowance).
  */
-import {describe, it} from '@jest/globals';
+import {it} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 import {
   accountOf, assert, assertEq, assertIncludes, DpayCore, faucetAccount, generateKeypair,
   getBalance, icpCatalog, onboardWallet, openBalances, railPrincipalText, selectCurrency,
 } from '../harness/lib';
+
+// The file's private relay — the origin every direct gateway/checkout fetch below targets.
+const HF = hermeticFlow();
 
 const VCHF = 7;
 const FEE = 10_000; // the VCHF catalog fee, charged by the ledger to the SENDER
@@ -51,13 +55,13 @@ async function approveTheShop(payer: {secretHex: string}, merchantPubHex: string
   const expiry = (BigInt(Date.now()) * 1_000_000n + 300_000n * 1_000_000n).toString();
   const signed = await DpayCore.icpSignUpdate(payer.secretHex, ledger, 'icrc2_approve', argHex, expiry);
   const bytes = new Uint8Array(signed.envelopeHex.match(/../g)!.map((h) => parseInt(h, 16)));
-  const r = await fetch(`${process.env.DPAY_JEST_RELAY_URL}/api/v2/canister/${ledger}/call`, {
+  const r = await fetch(`${HF.baseURL}/api/v2/canister/${ledger}/call`, {
     method: 'POST', headers: {'Content-Type': 'application/cbor'}, body: bytes,
   });
   assert(r.ok, `the approve must be accepted by the gateway, got HTTP ${r.status}`);
 }
 
-describe('flow 177 — allowance pull: approve the shop, report, and the shop collects the sale', () => {
+hermeticDescribe('flow 177 — allowance pull: approve the shop, report, and the shop collects the sale', () => {
   it('an approval moves no money; the pull settles it; the counter reports the sale', async () => {
     const m = await onboardWallet('Bahnhof Kiosk');
     const merchant = (await accountOf(m))!;
@@ -97,10 +101,10 @@ describe('flow 177 — allowance pull: approve the shop, report, and the shop co
       if (!r.ok) throw new Error(`GET ${url} → HTTP ${r.status}`);
       return JSON.parse(await r.text()) as Record<string, unknown>;
     };
-    const details = await fetchJson(`${process.env.DPAY_JEST_RELAY_URL}/v1/lnurlp/${open.id as string}?timeout=0`);
+    const details = await fetchJson(`${HF.baseURL}/v1/lnurlp/${open.id as string}?timeout=0`);
     const quote = (details?.quote as {id?: string} | undefined)?.id;
     assert(typeof quote === 'string', 'the checkout must mint a quote');
-    const report = `${process.env.DPAY_JEST_RELAY_URL}/v1/lnurlp/tx/${open.id as string}?quote=${encodeURIComponent(quote)}` +
+    const report = `${HF.baseURL}/v1/lnurlp/tx/${open.id as string}?quote=${encodeURIComponent(quote)}` +
       `&method=InternetComputer&asset=VCHF&sender=${encodeURIComponent(payerPrincipal)}`;
     const reported = await fetch(report);
     assertEq(reported.status, 202, 'the standard’s retryable PENDING is what an allowance wallet gets');

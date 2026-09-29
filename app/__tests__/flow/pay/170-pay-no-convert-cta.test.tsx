@@ -4,7 +4,8 @@
  *
  * The probe counts every `convert-`-prefixed testID plus any element labelled exactly "Convert".
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {onboardWallet, openBalances, selectCurrency} from '../harness/lib';
 
 /** Zero tolerance count of every convert-surfaced testID + any pressable labelled 'Convert'. */
@@ -25,7 +26,7 @@ function convertCtaCount(m: Parameters<typeof openBalances>[0]): number {
   return ids + prefixed + ctaText;
 }
 
-describe('flow 170 — the pay surfaces carry zero conversion entry points', () => {
+hermeticDescribe('flow 170 — the pay surfaces carry zero conversion entry points', () => {
   it('IC pay: 0; SOL pay: 0; control: the Accounts list carries the per-currency Convert entries', async () => {
     const m = await onboardWallet('jest-pay-no-convert');
 

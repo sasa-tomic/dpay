@@ -11,7 +11,8 @@
  * with the visual tier; here the same facts are pinned through the persisted store + the control's
  * own accessibility labels.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {onboardWallet} from '../harness/lib';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 

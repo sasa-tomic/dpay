@@ -12,7 +12,8 @@
  * Not ported (browser-only): the screenshots. The `localStorage` eval reads go through AsyncStorage
  * (its RNW backing store — the same record the browser read).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp} from '../harness/mount';
 import {
   assertIncludes, chooseHomeCurrencyIfPresent, onboardWallet,

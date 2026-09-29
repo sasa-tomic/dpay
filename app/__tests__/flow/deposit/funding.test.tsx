@@ -14,7 +14,8 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ../pay/solrpc).
  */
-import {beforeEach, describe, it, expect} from '@jest/globals';
+import {beforeEach, it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from '../pay/solrpc';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 

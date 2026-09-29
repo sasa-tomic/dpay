@@ -8,7 +8,8 @@
  * the clipboard seam, and the read-back: scanning the receive QR in the Pay tab opens the Solana
  * Pay review for the SAME address. RPC stays disabled (`''`) — fully offline, no devnet.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   assert, assertEq, assertIncludes, armPayScan, onboardWallet, openBalances, selectCurrency, clipboardAfterCopy,
 } from '../harness/lib';

@@ -8,7 +8,8 @@
  * LOAD-ORDER CONTRACT (see ./solrpc): constants.ts captures the SOL RPC override at module load,
  * so this file sets it and installs the accounts helper BEFORE the harness require loads App.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from './solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -27,7 +28,7 @@ const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base5
 const SEND_AMOUNT = '0.001';
 const PRINCIPAL = 'ryjl3-tyaaa-aaaaa-aaaba-cai'; // a real, CRC-valid IC principal
 
-describe('flow 70 — an IC link routes to the IC engine while SOL is idle-selected', () => {
+hermeticDescribe('flow 70 — an IC link routes to the IC engine while SOL is idle-selected', () => {
   it('SOL selected + IC link → PayMode review mounts, SolPayMode unmounts, selection untouched', async () => {
     const m = await onboardWallet('jest-ic-route');
 
@@ -59,7 +60,7 @@ describe('flow 70 — an IC link routes to the IC engine while SOL is idle-selec
   }, 120_000);
 });
 
-describe('flow 102 — a SOL link pre-fills the Send-to-address form (rail parity with flow 49)', () => {
+hermeticDescribe('flow 102 — a SOL link pre-fills the Send-to-address form (rail parity with flow 49)', () => {
   it('the link selects SOL, pre-fills address + amount, never auto-sends; Confirm broadcasts', async () => {
     const m = await onboardWallet('jest-sol-link');
 
@@ -105,7 +106,7 @@ describe('flow 102 — a SOL link pre-fills the Send-to-address form (rail parit
   }, 150_000);
 });
 
-describe('flow 103 — a link the wallet cannot pay is refused with a usable instruction', () => {
+hermeticDescribe('flow 103 — a link the wallet cannot pay is refused with a usable instruction', () => {
   it('wrong chain / unknown asset / malformed each name the problem + the next step', async () => {
     const m0 = await onboardWallet('jest-link-refused');
     await m0.unmount();
@@ -152,7 +153,7 @@ describe('flow 103 — a link the wallet cannot pay is refused with a usable ins
   }, 150_000);
 });
 
-describe('flow 123 — a link that NAMES the sibling rail pays exactly that rail (never-override)', () => {
+hermeticDescribe('flow 123 — a link that NAMES the sibling rail pays exactly that rail (never-override)', () => {
   it('home=USD + preferred ckUSDC selected; the USDC@Solana link pins the Solana form + pays it', async () => {
     const m = await onboardWallet('jest-named-rail');
 

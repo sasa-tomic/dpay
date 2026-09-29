@@ -9,7 +9,8 @@
  *   4. SETTLE: the u128 fake-IC ledger credits/debits exact decimal strings on both sides.
  * `Number("9007199254740993") === 9007199254740992` — impossible via number.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertEq, DpayCore, generateKeypair, getBalance, icpCatalog,
   onboardWallet, railTransfer,
@@ -19,7 +20,7 @@ import {relayBaseURL, relayGet} from '../harness/relayClient';
 const BIG_RAW = '9007199254740993'; // 2^53 + 1
 const FUTURE_EXPIRY = 4_102_444_800; // 2100-01-01Z
 
-describe('flow 29 — exact amount transport (>2^53) on the IC rail', () => {
+hermeticDescribe('flow 29 — exact amount transport (>2^53) on the IC rail', () => {
   it('2^53+1 round-trips byte-exact through faucet / request wire / signed envelope / rail settle', async () => {
     // --- 1. FAUCET: the balance answer is the EXACT decimal string. ------------------------------
     // (The amount crosses as a DECIMAL STRING — the relay's U64String parses it without the

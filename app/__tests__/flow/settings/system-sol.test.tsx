@@ -17,7 +17,8 @@
  * 81: the IC rail's fund panel rides below the scanner; offline fails open; the send sub-mode
  *     states the SEND instruction; the resume link appears only after the balance goes positive.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from './solStub';
 import {

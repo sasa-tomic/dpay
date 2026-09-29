@@ -12,7 +12,8 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ./solrpc).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from './solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -120,7 +121,7 @@ function installHistorySolStub(): void {
   });
 }
 
-describe('flow 172 — device-saved notes name the transaction log, across every payment shape', () => {
+hermeticDescribe('flow 172 — device-saved notes name the transaction log, across every payment shape', () => {
   it('(a/b/c/e/f/d) named rows + receipts keep ledger truth checkable beside the notes', async () => {
     // NFC must read 'ready' BEFORE the Wallet mounts (read once at mount + on AppState changes).
     (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_NFC_STATUS = 'ready';

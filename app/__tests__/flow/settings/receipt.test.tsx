@@ -11,7 +11,8 @@
  * the seam the browser twin's writeText wrapper feeds) — Platform.OS='web' routes the app's
  * copyToClipboard through the same fallback path.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
 import {
   accountOf, assertIncludes, faucetAccount, generateKeypair, onboardWallet,

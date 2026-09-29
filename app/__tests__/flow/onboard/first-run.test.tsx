@@ -15,7 +15,8 @@
  * no-faucet branch comes from the app's real capability logic over a genuinely faucet-less
  * server.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp} from '../harness/mount';
 import {
   assertIncludes, chooseHomeCurrencyIfPresent, skipWalkthroughIfPresent,

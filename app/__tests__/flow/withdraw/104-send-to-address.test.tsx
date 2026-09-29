@@ -12,7 +12,8 @@
  * dies on the CRC before anything is signed. 105-fold: every refusal leaves the send button
  * disabled, never pressable.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertDisabled, assertEq, assertIncludes, faucetAccount, getBalance,
   onboardWallet, openBalances, railPrincipalText, selectCurrency, openPaySend,
@@ -35,7 +36,7 @@ async function routeLine(m: Parameters<typeof openBalances>[0], needle: string):
   return m.driver.readText('send-status');
 }
 
-describe('flow 104 — send VCHF to an external IC account (direct icrc1_transfer)', () => {
+hermeticDescribe('flow 104 — send VCHF to an external IC account (direct icrc1_transfer)', () => {
   it('route + fee disclosed first; one transfer settles; both sides move; the UI follows', async () => {
     const m = await onboardWallet('jest-send');
     const accountHex = (await accountOf(m))!.publicHex;
@@ -86,7 +87,7 @@ describe('flow 104 — send VCHF to an external IC account (direct icrc1_transfe
   }, 180_000);
 });
 
-describe('flow 106 — send-auto-route: one destination field routes ckBTC by what is pasted', () => {
+hermeticDescribe('flow 106 — send-auto-route: one destination field routes ckBTC by what is pasted', () => {
   it('Bitcoin paste → the burn body; IC principal → the direct body; the direct send settles', async () => {
     const m = await onboardWallet('jest-autoroute');
     const accountHex = (await accountOf(m))!.publicHex;
@@ -133,7 +134,7 @@ describe('flow 106 — send-auto-route: one destination field routes ckBTC by wh
   }, 180_000);
 });
 
-describe('flow 107 — send ICP to a 64-hex account identifier (legacy transfer, CRC-validated)', () => {
+hermeticDescribe('flow 107 — send ICP to a 64-hex account identifier (legacy transfer, CRC-validated)', () => {
   it('a corrupted identifier dies on the CRC; the real one settles at the owning principal', async () => {
     const m = await onboardWallet('jest-acctid');
     const accountHex = (await accountOf(m))!.publicHex;
@@ -183,7 +184,7 @@ describe('flow 107 — send ICP to a 64-hex account identifier (legacy transfer,
   }, 180_000);
 });
 
-describe('flow 105 (fold) — refusals leave the send button disabled, never pressable', () => {
+hermeticDescribe('flow 105 (fold) — refusals leave the send button disabled, never pressable', () => {
   it('every wrong-destination paste names the problem + the next step with Confirm disabled', async () => {
     const m = await onboardWallet('jest-refuse');
     const accountHex = (await accountOf(m))!.publicHex;

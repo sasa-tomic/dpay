@@ -12,7 +12,8 @@
  * which is exactly the state the browser's focused input produces. The :focus-visible ring leg is
  * a computed-style read and stays visual.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
 } from '../harness/lib';

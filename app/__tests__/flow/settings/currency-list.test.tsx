@@ -11,7 +11,8 @@
  * 212: tapping the ICP currency row sets ICP main, the working rail follows, and the tap survives
  *      a reload (persisted main).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from './solStub';
 import {

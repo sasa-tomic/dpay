@@ -9,7 +9,8 @@
  * "Start a new deposit" escape, and an honest manual recheck. The escape clears the key, and a
  * second reload does NOT re-open the sheet.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   assert, assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
   waitForWallet, type Mount,

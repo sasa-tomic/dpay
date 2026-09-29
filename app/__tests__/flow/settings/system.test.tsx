@@ -20,7 +20,8 @@
  * 71: a blocked-insufficient review LOCKS the selection — the account chip is disabled and a
  *     no-op; leaving the review unmounts the engine and releases the lock.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from './solStub';
 import {scaled as budgetScaled} from '../harness/budget';

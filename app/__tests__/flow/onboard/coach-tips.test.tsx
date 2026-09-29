@@ -8,7 +8,8 @@
  * settles + reconciles right through the coaching. All three seen-markers persist on the identity
  * with the stamps intact.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertIncludes, DpayCore, faucetAccount, generateKeypair, getBalance,
   goOffline, icpCatalog, onboardWallet, openBalances, railPrincipalText, waitForScanner,

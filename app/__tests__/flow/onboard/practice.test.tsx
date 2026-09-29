@@ -20,7 +20,8 @@
  * - The `localStorage` journey reads go through AsyncStorage (its RNW backing store); the
  *   `window.fetch` stubs wrap the harness's recorder fetch; failures are pre-declared.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp, type Mount} from '../harness/mount';
 import {
   accountOf, assertIncludes, chooseHomeCurrencyIfPresent, getBalance,

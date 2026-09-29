@@ -9,7 +9,8 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ./solrpc).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from './solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -29,7 +30,7 @@ const START_LAMPORTS = 5_000_000_000; // 5 SOL before
 const SENT_LAMPORTS = 2_000_000_000; // 2 SOL transferred out
 const FEE_LAMPORTS = 5_000; // the fee this wallet paid, included in its net delta
 
-describe('flow 108 — a Solana transaction lands in the Transactions tab beside the IC rail', () => {
+hermeticDescribe('flow 108 — a Solana transaction lands in the Transactions tab beside the IC rail', () => {
   it('SOL row in SOL units + short counterparty, the ∂ faucet row coexists, per-rail filters', async () => {
     const m = await onboardWallet('jest-sol-history'); // also mints the ∂100 DEMO faucet row
 

@@ -80,7 +80,7 @@ export async function pickFreePort(): Promise<number> {
  *   faucet:false   → DPAY_ENABLE_FAUCET=false
  *   env            → extra deployment knobs verbatim (DPAY_PUBLIC_ORIGIN, DPAY_TROCADOR_LOG_DIR)
  */
-export async function startFlowRelay(opts: {port?: number; checkout?: boolean; faucet?: boolean; env?: Record<string, string>; readyTimeoutMs?: number} = {}): Promise<FlowRelay> {
+export async function startFlowRelay(opts: {port?: number; checkout?: boolean; faucet?: boolean; env?: Record<string, string>; readyTimeoutMs?: number; ownLifecycle?: boolean} = {}): Promise<FlowRelay> {
   if (!existsSync(RELAY_BIN)) {
     throw new Error(
       '[flow-relay] the test-helpers relay binary is missing: ' + RELAY_BIN +
@@ -141,7 +141,10 @@ export async function startFlowRelay(opts: {port?: number; checkout?: boolean; f
     });
   };
   const relay: FlowRelay = {port, baseURL, stop};
-  relays().push(relay);
+  // The per-test teardown drain list — EXCEPT a hermetic file's own relay, which lives for the
+  // whole file and is stopped by the file's afterAll (hermetic.ts). Registration here would let
+  // the FIRST afterEach kill the file's world out from under tests 2..n.
+  if (!opts.ownLifecycle) relays().push(relay);
 
   // Health probe: GET /api/v1/health → 200 {status:"ok"} (relay.mjs's contract), bounded. Uses
   // the UNRECORDED fetch (setupFlow's __DPAY_TEST_RAW_FETCH): the not-yet-up polls of a spawn in
