@@ -6,6 +6,14 @@
  * globalThis objects — same seam NAMES (`__DPAY_TEST_SOLANA_RPC_STUB`, `__DPAY_TEST_EVM_SIGN`),
  * same fail-closed rule (an unexpected origin is recorded and thrown, never papered over).
  *
+ * HERMETIC MODEL (the per-file split): every test file that imports this module calls
+ * hermeticFlow() at module scope, which spawns the file's OWN private relay and re-points
+ * DPAY_JEST_RELAY_URL at it — so every knob/config/hits helper below (plain HTTP against
+ * `/api/v1/test/*`) targets the file's private relay BY CONSTRUCTION. The stub upstreams and
+ * the fake-IC pool knobs are per-spawn state of that relay, never shared-relay globals: a
+ * file's counter audits read ABSOLUTE counts (each private relay starts at zero) — the old
+ * delta-baseline captures existed only because one relay served the whole consolidated file.
+ *
  * What is NOT re-expressed: the venue/quote CLIENTS (app/services/{sideshift,jupiter}.ts run
  * for real against the relay's test-stub upstreams — configure/hits below are plain HTTP calls)
  * and the wallet identity mirrors (the app's own pure modules derive them: solana/identity,
@@ -57,7 +65,8 @@ export function disposeConvertStubs(): void {
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {status, headers: {'content-type': 'application/json'}});
 
-// --- relay test knobs (the same routes e2e posts to) ---------------------------------------------
+// --- relay test knobs (the same routes e2e posts to; each lands on the FILE's private relay —
+// --- the hermetic harness re-pointed DPAY_JEST_RELAY_URL at it before any hook ran) --------------
 
 export async function swapPoolKnob(body: Record<string, unknown>): Promise<void> {
   const r = await relayPost('/api/v1/test/swap_pool', body);
@@ -79,7 +88,8 @@ export async function icDelayKnob(method: string, ms: number): Promise<void> {
   if (!r.ok) throw new Error(`ic_delay knob ${r.status}: ${await r.text()}`);
 }
 
-/** The relay sideshift upstream's audit counters (credentialed vs bare calls, per kind). */
+/** The relay sideshift upstream's audit counters (credentialed vs bare calls, per kind).
+ *  ABSOLUTE per file: the file's private relay starts at zero, so audits pin exact counts. */
 export async function sideshiftRelayHits(): Promise<{bareCalls: number; shiftCalls: number; quoteCalls: number}> {
   return await relayGet('/api/v1/test/sideshift-upstream/hits') as {bareCalls: number; shiftCalls: number; quoteCalls: number};
 }
