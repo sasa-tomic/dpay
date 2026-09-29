@@ -125,7 +125,7 @@ hermeticDescribe('flow 114 — checkout open: the counter sells, the relay sees 
     observer.restore();
 
     // --- the customer pays it, through the checkout's own routes ---------------------------------
-    const instruction = await resolveCharge(HF.relay.baseURL, open.id);
+    const instruction = await resolveCharge(HF.baseURL, open.id);
     assertEq(instruction.to, merchantPrincipal, 'the instruction names the shop’s own account');
     assertEq(instruction.amount, '10.4999', 'the checkout instructs the settlement amount, never the price');
     assertEq(instruction.displayName, 'Bahnhof Kiosk', 'the checkout carries the shop’s claimed name');

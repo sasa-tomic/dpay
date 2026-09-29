@@ -37,6 +37,8 @@ export type HermeticFlow = {
   ready: Promise<HermeticRelayInfo>;
   /** The private relay handle (present after `ready`; the afterAll stops it). */
   relay: Promise<FlowRelay>;
+  /** The private relay's base URL — '' until `ready` resolves; every test context runs after. */
+  get baseURL(): string;
   /** Idempotent wiring — hermeticDescribe calls this in beforeAll; files may too. */
   ensureWired: () => Promise<HermeticRelayInfo>;
 };
@@ -101,7 +103,13 @@ function resetSeams(): void {
 export function hermeticFlow(opts: HermeticOpts = {}): HermeticFlow {
   if (g.__DPAY_FLOW_HERMETIC_STOP__) {
     // Already spawned for this file (module scope + hermeticDescribe both call this).
-    return {ready: g.__DPAY_FLOW_HERMETIC_READY__!, relay: g.__DPAY_FLOW_HERMETIC_RELAY_HANDLE__!, ensureWired: wire};
+    const relay = g.__DPAY_FLOW_HERMETIC_RELAY_HANDLE__!;
+    return {
+      ready: g.__DPAY_FLOW_HERMETIC_READY__!,
+      relay,
+      get baseURL() { return g.__DPAY_FLOW_HERMETIC_RELAY__ ?? ''; },
+      ensureWired: wire,
+    };
   }
   const relayP: Promise<FlowRelay> = startFlowRelay({
     ownLifecycle: true, // the file's own afterAll stops it — NOT the per-test teardown list
@@ -147,7 +155,12 @@ export function hermeticFlow(opts: HermeticOpts = {}): HermeticFlow {
     }
     await stop();
   });
-  return {ready: readyP, relay: relayP, ensureWired: wire};
+  return {
+    ready: readyP,
+    relay: relayP,
+    get baseURL() { return g.__DPAY_FLOW_HERMETIC_RELAY__ ?? ''; },
+    ensureWired: wire,
+  };
 }
 
 async function wire(): Promise<HermeticRelayInfo> {

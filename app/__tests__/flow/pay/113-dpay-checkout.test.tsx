@@ -53,7 +53,7 @@ hermeticDescribe('flow 113 — pay dpay’s own checkout (VCHF, ref as memo, led
     assert(fund.ok, `faucet funding of VCHF must succeed, got ${fund.status}`);
 
     // Served from the host the wallet talks to — which is precisely what makes it payable.
-    const checkout = dpayCheckoutAt(HF.relay.baseURL, merchantPrincipal);
+    const checkout = dpayCheckoutAt(HF.baseURL, merchantPrincipal);
     const uninstall = installCheckoutStub(checkout.cfg);
 
     try {

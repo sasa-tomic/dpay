@@ -55,7 +55,7 @@ async function approveTheShop(payer: {secretHex: string}, merchantPubHex: string
   const expiry = (BigInt(Date.now()) * 1_000_000n + 300_000n * 1_000_000n).toString();
   const signed = await DpayCore.icpSignUpdate(payer.secretHex, ledger, 'icrc2_approve', argHex, expiry);
   const bytes = new Uint8Array(signed.envelopeHex.match(/../g)!.map((h) => parseInt(h, 16)));
-  const r = await fetch(`${HF.relay.baseURL}/api/v2/canister/${ledger}/call`, {
+  const r = await fetch(`${HF.baseURL}/api/v2/canister/${ledger}/call`, {
     method: 'POST', headers: {'Content-Type': 'application/cbor'}, body: bytes,
   });
   assert(r.ok, `the approve must be accepted by the gateway, got HTTP ${r.status}`);
@@ -101,10 +101,10 @@ hermeticDescribe('flow 177 — allowance pull: approve the shop, report, and the
       if (!r.ok) throw new Error(`GET ${url} → HTTP ${r.status}`);
       return JSON.parse(await r.text()) as Record<string, unknown>;
     };
-    const details = await fetchJson(`${HF.relay.baseURL}/v1/lnurlp/${open.id as string}?timeout=0`);
+    const details = await fetchJson(`${HF.baseURL}/v1/lnurlp/${open.id as string}?timeout=0`);
     const quote = (details?.quote as {id?: string} | undefined)?.id;
     assert(typeof quote === 'string', 'the checkout must mint a quote');
-    const report = `${HF.relay.baseURL}/v1/lnurlp/tx/${open.id as string}?quote=${encodeURIComponent(quote)}` +
+    const report = `${HF.baseURL}/v1/lnurlp/tx/${open.id as string}?quote=${encodeURIComponent(quote)}` +
       `&method=InternetComputer&asset=VCHF&sender=${encodeURIComponent(payerPrincipal)}`;
     const reported = await fetch(report);
     assertEq(reported.status, 202, 'the standard’s retryable PENDING is what an allowance wallet gets');

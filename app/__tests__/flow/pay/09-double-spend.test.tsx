@@ -39,7 +39,7 @@ hermeticDescribe('flow 09 — double-spend: request_id dedup on identical-byte r
     const envelopeBytes = hexBytes(signed.envelopeHex);
 
     // --- POST the SAME bytes twice — both accepted (202), executed once. -------------------------
-    const post = () => fetch(`${HF.relay.baseURL}/api/v2/canister/${desc.ledger}/call`, {
+    const post = () => fetch(`${HF.baseURL}/api/v2/canister/${desc.ledger}/call`, {
       method: 'POST',
       headers: {'Content-Type': 'application/cbor'},
       body: envelopeBytes,

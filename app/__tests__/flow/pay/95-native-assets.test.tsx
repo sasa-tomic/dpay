@@ -116,7 +116,7 @@ hermeticDescribe('flow 95 — VCHF pay (deeplink entry, explicit approve, exact 
     // URLs — carries the file's PRIVATE relay origin under hermetic.
     const calls = rec.calls().filter((u) => u.endsWith('/call'));
     expect(calls.length).toBeGreaterThanOrEqual(1);
-    const prefix = `${HF.relay.baseURL}/api/v2/canister/`;
+    const prefix = `${HF.baseURL}/api/v2/canister/`;
     for (const u of calls) {
       expect(u.startsWith(prefix)).toBe(true);
       expect(u.slice(prefix.length).replace(/\/call$/, '')).toBe(VCHF.ledger);
@@ -187,7 +187,7 @@ hermeticDescribe('flow 96 — ICP pay (camera-scan entry, one-press auto-sign)',
 
     const calls = rec.calls().filter((u) => u.endsWith('/call'));
     expect(calls.length).toBeGreaterThanOrEqual(1);
-    const prefix = `${HF.relay.baseURL}/api/v2/canister/`;
+    const prefix = `${HF.baseURL}/api/v2/canister/`;
     for (const u of calls) {
       expect(u.startsWith(prefix)).toBe(true);
       expect(u.slice(prefix.length).replace(/\/call$/, '')).toBe(ICP.ledger);
