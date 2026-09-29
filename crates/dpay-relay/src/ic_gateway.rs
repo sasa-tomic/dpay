@@ -1690,16 +1690,26 @@ fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
 
 /// Fold the per-request subtrees into ONE balanced fork so the certified tree's depth stays
 /// ~log2(n) over the entries (the real boundary node's shape). See the submit_read_state note.
+///
+/// The odd leftover of each round MUST ride to the next round. The first cut consumed it via
+/// `while let (Some(a), Some(b)) = (it.next(), it.next())`: the tuple's second `next()` already
+/// took the element out of the iterator when the `(Some, Some)` pattern failed, so the leftover
+/// was silently DROPPED from the certificate whenever a round held an odd count (n=3, 5, 6, …).
+/// The relay's `requests` map kept the outcome — but every `read_state` cert omitted that
+/// request_status entry, and the app polled a 202-accepted, ledger-executed call into a permanent
+/// honest "unknown" (`Couldn't confirm the approval`): the sequential withdraw-file red where
+/// tests 1-2 passed and 3-4 starved (2026-09-29, fake-IC cert dump + unit repro).
 fn balanced_status_fork(req_trees: Vec<Tree>) -> Tree {
     let mut level = req_trees;
     while level.len() > 1 {
         let mut paired: Vec<Tree> = Vec::with_capacity((level.len() + 1) / 2);
         let mut it = level.into_iter();
-        while let (Some(a), Some(b)) = (it.next(), it.next()) {
-            paired.push(Tree::Fork(Box::new(a), Box::new(b)));
-        }
-        if let Some(last) = it.next() {
-            paired.push(last);
+        while let Some(a) = it.next() {
+            if let Some(b) = it.next() {
+                paired.push(Tree::Fork(Box::new(a), Box::new(b)));
+            } else {
+                paired.push(a);
+            }
         }
         level = paired;
     }
@@ -1790,6 +1800,52 @@ mod certified_tree_shape {
         match dpay_icp::reply::request_status(&decoded, &rid).expect("known rid resolves") {
             dpay_icp::reply::RequestStatus::Replied(arg) => assert_eq!(arg, vec![1, 2, 3]),
             other => panic!("expected Replied, got {other:?}"),
+        }
+    }
+
+    /// THE SECOND REGRESSION (the first cut of the balanced fold): every request's status must
+    /// be IN the certified tree for every entry count. The tuple-pattern fold consumed the odd
+    /// leftover of a round (`(it.next(), it.next())` takes the element even when the match
+    /// fails), so at n=3, 5, 6, … the LAST request's status was silently OMITTED from every
+    /// cert: the app polled a 202-accepted, ledger-executed call into a permanent honest
+    /// "unknown" and the withdraw file starved on tests 2+ while test 1 stayed green
+    /// (2026-09-29, fake-IC cert dump + the unit repro this test replaces).
+    #[test]
+    fn certified_tree_carries_every_request_status_at_every_count() {
+        for n in 1..=9usize {
+            let mut rids = Vec::new();
+            let entries: Vec<Tree> = (0u64..n as u64)
+                .map(|i| {
+                    let mut rid = [0u8; 32];
+                    rid[..8].copy_from_slice(&i.to_be_bytes());
+                    rids.push(rid);
+                    replied_entry(rid)
+                })
+                .collect();
+            let status = balanced_status_fork(entries);
+            let tree = Tree::Fork(
+                Box::new(Tree::Labeled(b"request_status".to_vec(), Box::new(status))),
+                Box::new(Tree::Labeled(b"time".to_vec(), Box::new(Tree::Leaf(uleb_bytes(1_700_000_000_000_000_000u128))))),
+            );
+            let mut body = Vec::new();
+            cbor_encode(
+                &Cbor::Map(vec![(
+                    Cbor::Text("certificate".into()),
+                    Cbor::Bytes({
+                        let mut cert = Vec::new();
+                        cbor_encode(&Cbor::Map(vec![(Cbor::Text("tree".into()), tree_to_cbor(&tree))]), &mut cert);
+                        cert
+                    }),
+                )]),
+                &mut body,
+            );
+            let decoded = dpay_icp::reply::decode_read_state_tree(&body).expect("cert must decode");
+            for rid in &rids {
+                match dpay_icp::reply::request_status(&decoded, rid).expect("known rid resolves") {
+                    dpay_icp::reply::RequestStatus::Replied(_) => {}
+                    other => panic!("n={n}: a certified request's status was dropped from the cert (got {other:?})"),
+                }
+            }
         }
     }
 }

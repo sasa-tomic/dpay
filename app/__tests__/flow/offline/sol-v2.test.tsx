@@ -16,9 +16,13 @@
  * 138: the settle-gate's three verdicts — mismatching confirmed body → honest doubt + reconcile
  *     card; unreadable body → stays "Broadcasting…" until verified; on-chain error → rejected.
  *
- * The file enables the SOL module env via solEnv() (the RPC override is captured at constants
- * module load, so lib must be required lazily AFTER it is set). The RPC stub is per-test state.
+ * The file arms the SOL module env by IMPORT SIDE EFFECT (`../settings/solStub` sets
+ * `__DPAY_TEST_SOLANA_RPC_URL = 'stub'` in its module body): constants captures the override at
+ * module load, and the hermetic wire (hermeticDescribe's beforeAll) loads constants BEFORE any
+ * test body runs — so the lazy `solEnv()`-first-idiom alone captures the offline `''` default and
+ * every SOL surface renders fail-closed ("Solana is offline"). The RPC stub is per-test state.
  */
+import '../settings/solStub';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 import {it, expect, afterEach, beforeEach} from '@jest/globals';
 import {

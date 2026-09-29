@@ -121,6 +121,8 @@ export function hermeticFlow(opts: HermeticOpts = {}): HermeticFlow {
     // list (storage) — then a clean world: storage purge, seam reset. Boot (per mount) re-reads
     // the planted list; resetSessionModuleState re-derives module state per mount.
     g.__DPAY_FLOW_HERMETIC_RELAY__ = relay.baseURL;
+    // The resolved handle, for SYNC readers (the driver's stall trap can't await a Promise).
+    (g as unknown as {__DPAY_FLOW_HERMETIC_RELAY_OBJ__?: FlowRelay}).__DPAY_FLOW_HERMETIC_RELAY_OBJ__ = relay;
     g.__DPAY_TEST_IC_GATEWAY = relay.baseURL;
     const AS = g.__DPAY_JEST_ASYNC_STORAGE;
     if (AS) {
@@ -141,6 +143,7 @@ export function hermeticFlow(opts: HermeticOpts = {}): HermeticFlow {
   });
   const stop = async (): Promise<void> => {
     g.__DPAY_FLOW_HERMETIC_RELAY__ = undefined;
+    (g as unknown as {__DPAY_FLOW_HERMETIC_RELAY_OBJ__?: FlowRelay}).__DPAY_FLOW_HERMETIC_RELAY_OBJ__ = undefined;
     g.__DPAY_FLOW_HERMETIC_STOP__ = null;
     try {
       const r = await relayP;

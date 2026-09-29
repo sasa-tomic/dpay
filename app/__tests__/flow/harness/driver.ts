@@ -56,11 +56,50 @@ function trapOnExpiry(treeRef: {current: renderer.ReactTestRenderer | null}, wha
   const res = RESOURCES?.() ?? [];
   const byRes: Record<string, number> = {};
   for (const r of res) byRes[r] = (byRes[r] ?? 0) + 1;
-  (process.stderr as {write: (s: string) => void}).write(
+  const logTail = ((globalThis as unknown as {__DPAY_LOG_TAIL?: string[]}).__DPAY_LOG_TAIL ?? []).slice(-30);
+  // The hermetic relay's liveness at expiry: a suite stuck "waiting" while its relay died is a
+  // different failure than an app-side stall, and only a socket answer tells them apart. Sync
+  // trap → the probe is fire-and-read-next-tick; a dead/unanswerable relay prints that fact.
+  const relayObj = (globalThis as unknown as {__DPAY_FLOW_HERMETIC_RELAY_OBJ__?: {baseURL: string; logs: () => {stdout: string; stderr: string}}}).__DPAY_FLOW_HERMETIC_RELAY_OBJ__;
+  const err = (s: string): void => (process.stderr as {write: (s: string) => void}).write(s);
+  // The app's relay state at expiry: the RUNTIME walk list and the PERSISTED list. A runtime list
+  // that names a dead origin the test never set (after a verified setRelay) is a remount reading a
+  // stale/persisted list — this line separates that from an app-side fetch break.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {relayAddresses} = require('../../../services/relayAddresses') as {relayAddresses: () => readonly string[]};
+    err(`[TRAP-STATE] walk list: ${JSON.stringify(relayAddresses())}\n`);
+  } catch { /* files that never loaded the app graph */ }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const AS = (globalThis as unknown as {__DPAY_JEST_ASYNC_STORAGE?: {getItem: (k: string) => Promise<string | null>}}).__DPAY_JEST_ASYNC_STORAGE;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {RELAY_LIST_STORAGE_KEY} = require('../../../config/constants') as {RELAY_LIST_STORAGE_KEY: string};
+    void AS?.getItem(RELAY_LIST_STORAGE_KEY)?.then?.((v: string | null) => err(`[TRAP-STATE] persisted relay list: ${v ?? '<none>'}\n`));
+  } catch { /* storage or constants absent */ }
+  if (relayObj) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 1500);
+    const print = (line: string): void => err(`${line}\n`);
+    // The UNRECORDED fetch: the trap's own probe must never land in the fail-closed ledger (a
+    // dead relay at expiry is the DIAGNOSIS, not a new transport failure to assert about).
+    const raw = (globalThis as unknown as {__DPAY_TEST_RAW_FETCH?: typeof fetch}).__DPAY_TEST_RAW_FETCH ?? fetch;
+    raw(`${relayObj.baseURL}/api/v1/health`, {signal: ctl.signal})
+      .then((r) => print(`[TRAP-RELAY] ${relayObj.baseURL} health: HTTP ${r.status} (ALIVE)`))
+      .catch((e: unknown) => print(`[TRAP-RELAY] ${relayObj.baseURL} health: ${(e instanceof Error ? e.message : String(e))} (DEAD or unroutable)`))
+      .finally(() => clearTimeout(timer));
+    const logs = relayObj.logs();
+    if (logs.stderr.trim()) print(`[TRAP-RELAY-STDERR] ${logs.stderr.slice(-1200).replace(/\n/g, '\n[TRAP-RELAY-STDERR] ')}`);
+    if (logs.stdout.trim()) print(`[TRAP-RELAY-STDOUT] ${logs.stdout.slice(-1200).replace(/\n/g, '\n[TRAP-RELAY-STDOUT] ')}`);
+  } else {
+    err('[TRAP-RELAY] no hermetic relay handle on this global\n');
+  }
+  err(
     `[TRAP] ${what} — bodyChanged=${bodyAfter !== bodyBefore} mounts=${mounts} ` +
     `inflight=${inflight.reduce((a, [, c]) => a + c, 0)} ` +
     `(${inflight.slice(0, 5).map(([u, c]) => `${u}:${c}`).join(' ') || '-'}) res=${JSON.stringify(byRes)}\n` +
     `[TRAP] body(head 300): ${JSON.stringify(bodyAfter.slice(0, 300))}\n` +
+    logTail.map((l) => `[TRAP-LOG] ${l}\n`).join('') +
     lines.map((l) => `[TRAP-TREE]${l}\n`).join(''),
   );
 }

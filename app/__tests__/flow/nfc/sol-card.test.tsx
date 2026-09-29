@@ -13,10 +13,14 @@
  * 139: receipt code 3 (settle-verify MISMATCH) → the payer lands on honest pending, NEVER a
  *     decline, and never bounced back to the scan surface.
  *
- * The file enables the SOL module env via solEnv() — the RPC override is captured at module load,
- * so lib (and the whole app graph) must be required lazily AFTER the override is set. The RPC stub
- * is per-test state, cleared in afterEach.
+ * The file arms the SOL module env by IMPORT SIDE EFFECT (`../settings/solStub` sets
+ * `__DPAY_TEST_SOLANA_RPC_URL = 'stub'` in its module body): constants captures the override at
+ * module load, and the hermetic wire (hermeticDescribe's beforeAll) loads constants BEFORE any
+ * test body runs — so the lazy `solEnv()`-first-idiom alone captures the offline `''` default and
+ * every SOL surface renders fail-closed ("Solana is offline"). The RPC stub is per-test state,
+ * cleared in afterEach.
  */
+import '../settings/solStub';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 import {it, expect, afterEach, beforeEach} from '@jest/globals';
 import {buildSolReq, clickByAria, extractSig, makeSolStub, nfcPhase, nfcPhaseWalk, setSolStub, solEnv, type NfcEvent} from './h';

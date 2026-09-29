@@ -432,6 +432,16 @@ export async function setRelay(m: Mount, url: string, opts: {timeoutMs?: number}
   await m.driver.click('btn-relay-apply', {timeoutMs: t});
   await m.driver.click('btn-settings-close', {timeoutMs: t});
   (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_IC_GATEWAY = url;
+  // VERIFY the re-point in the app's own walk module (same registry — the app graph is loaded by
+  // the time any flow mounts). A silently-no-op apply (disabled button, stale sheet state) used to
+  // surface only as a much-later offline-branch stall one leg away from the setRelay that caused
+  // it; naming the mismatch HERE puts the cause in the failure's own log tail.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const {relayAddresses} = require('../../../services/relayAddresses') as {relayAddresses: () => readonly string[]};
+  const head = relayAddresses()[0] ?? '';
+  if (head !== url) {
+    console.warn(`[setRelay] the app's walk list did not take ${url} — it still walks ${head}`);
+  }
 }
 
 export async function goOffline(m: Mount, opts: {timeoutMs?: number; keepGateway?: boolean} = {}): Promise<{deadRelay: string; deadGateway: string}> {
