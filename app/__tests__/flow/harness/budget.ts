@@ -34,9 +34,6 @@
  * needs. Over-stretching only costs wall time on a genuinely hung surface; under-stretching costs
  * false reds — the expensive failure (e2e/run.mjs's doctrine, same bias).
  */
-type BudgetG = {__DPAY_FLOW_BUDGET_BASE_FACTOR__?: number};
-const g = globalThis as unknown as BudgetG;
-
 /** The 1-min load average, /proc first (exact), os.loadavg() as the portable fallback. */
 function load1(): number {
   try {
@@ -84,15 +81,13 @@ export function budgetMult(): number {
     const n = Number(env);
     if (Number.isFinite(n) && n >= 1) return Math.min(n, 64);
   }
-  const live = Math.max(factorOf(load1()), psiFactorOf(cpuPsiAvg10()));
-  // On globalThis (not module state): setupFiles, setupFilesAfterEnv, and each test file get
-  // SEPARATE jest module registries — module state would give every registry its own high-water
-  // and let a post-burst registry under-budget. globalThis is the one shared carrier (the same
-  // trick the fetch recorder uses, see setupFlow.ts §5).
-  const seen = g.__DPAY_FLOW_BUDGET_BASE_FACTOR__ ?? 0;
-  const hw = Math.max(seen, live);
-  g.__DPAY_FLOW_BUDGET_BASE_FACTOR__ = hw;
-  return hw;
+  // HERMETIC MODE: 1. The tier no longer shares a relay or a worker's world across files, so
+  // there is no cross-file load wave to absorb — the machine-level stretch (load/PSI) measured
+  // nothing the waits actually needed (a hermetic file's only contention is its own relay) and
+  // stretching waits only multiplied wall time while masking real stalls. A burst on the shared
+  // box now surfaces as a REAL red (the app's own timeouts fire) instead of a masked green.
+  // DPAY_TEST_BUDGET_MULT still overrides outright for deliberate experiments.
+  return 1;
 }
 
 /** Stretch a wait window by the budget multiplier (positive-transition ceilings only). */

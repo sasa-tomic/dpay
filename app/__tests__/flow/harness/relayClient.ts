@@ -14,6 +14,10 @@
 import {scaled as budgetScaled} from './budget';
 
 export function relayBaseURL(): string {
+  // A hermetic file's OWN relay (planted at file start by hermetic.ts) — faucet, balance and
+  // knob helpers must hit the file's world, never the shared globalSetup relay.
+  const hermetic = (globalThis as {__DPAY_FLOW_HERMETIC_RELAY__?: string}).__DPAY_FLOW_HERMETIC_RELAY__;
+  if (hermetic) return hermetic;
   const u = process.env.DPAY_JEST_RELAY_URL;
   if (!u || !u.startsWith('http')) {
     throw new Error(

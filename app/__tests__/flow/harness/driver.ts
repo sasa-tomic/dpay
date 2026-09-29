@@ -66,7 +66,7 @@ function trapOnExpiry(treeRef: {current: renderer.ReactTestRenderer | null}, wha
 }
 
 function dumpTree(node: Node, out: string[], depth: number, cap: {n: number}): void {
-  if (depth > 14 || out.length >= cap.n) return;
+  if (depth > 24 || out.length >= cap.n) return;
   const props = (node.props ?? {}) as Record<string, unknown>;
   const type = typeof node.type === 'string' ? node.type : ((node.type as {name?: string} | null)?.name ?? 'anon');
   const bits: string[] = [];

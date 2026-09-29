@@ -72,6 +72,11 @@ module.exports = {
       displayName: 'flow',
       ...common,
       testMatch: ['<rootDir>/__tests__/flow/**/*.test.@(ts|tsx)'],
+      // HERMETIC EXECUTION MODEL: files are self-contained (one private relay + fresh seams per
+      // file, harness/hermetic.ts) — high worker counts are safe, and a worker recycle (the
+      // workerIdleMemoryLimit below) cannot break a file, because nothing crosses files.
+      maxWorkers: '50%',
+      workerIdleMemoryLimit: '2GB',
       // Jest's mocks record every call for the mock's lifetime — the whole FILE. Full-app flow
       // files mount 34 describes into ONE registry, and per-test render churn then accumulates
       // unboundedly in mock.call records (the convert lane's measured OOM class, 2026-09-29).

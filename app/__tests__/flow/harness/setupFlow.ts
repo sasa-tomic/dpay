@@ -194,6 +194,7 @@ type FetchG = {
   __DPAY_FLOW_FETCH_RECORDS__?: FetchRecord[];
   __DPAY_FLOW_ALLOWED_DEAD_ORIGINS__?: Set<string>;
   __DPAY_FLOW_INFLIGHT__?: Map<string, number>;
+  __DPAY_FLOW_HERMETIC_RELAY__?: string;
 };
 const fg = globalThis as unknown as FetchG;
 const fetchRecords: FetchRecord[] = (fg.__DPAY_FLOW_FETCH_RECORDS__ ??= []);
@@ -210,8 +211,11 @@ if (!fg.__DPAY_FLOW_FETCH_SHIM__) {
   (g as unknown as {__DPAY_TEST_RAW_FETCH?: typeof fetch}).__DPAY_TEST_RAW_FETCH = realFetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    // Per-request target: a hermetic file's private relay (planted by hermetic.ts) or the
+    // shared globalSetup relay. Read per call — hermetic.ts plants the marker at file start.
+    const targetRelay = fg.__DPAY_FLOW_HERMETIC_RELAY__ ?? relayURL;
     const target = url.startsWith(RELAY_DEFAULT_ORIGIN)
-      ? relayURL + url.slice(RELAY_DEFAULT_ORIGIN.length)
+      ? targetRelay + url.slice(RELAY_DEFAULT_ORIGIN.length)
       : url;
     // The e2e driver's offline sentinels (`'stub'` — solrpc.ts's SOL sentinel) are not origins:
     // the fetch rejects exactly as it did unfixed, but the fail-closed ledger only ever recorded
@@ -437,9 +441,9 @@ export function installFlowLifecycle(): void {
     g.__DPAY_TEST_NFC_RESULT = undefined;
     g.__DPAY_SOL_NFC_LAST = undefined;
     g.__DPAY_SOL_REQ_LAST = undefined;
-    // The IC gateway seam is read PER CALL (app/services/icp.ts): reset to the ONE shared relay
-    // so a flow that pointed it at its private relay (startFlowRelay) never leaks the point.
-    g.__DPAY_TEST_IC_GATEWAY = relayURL;
+    // The IC gateway seam is read PER CALL (app/services/icp.ts): reset to the file's relay —
+    // a hermetic file's private relay (planted by hermetic.ts) or the shared globalSetup relay.
+    g.__DPAY_TEST_IC_GATEWAY = g.__DPAY_FLOW_HERMETIC_RELAY__ ?? relayURL;
     // The SOL/EVM rail test overrides, back to the jest.setup.js offline defaults ('' = rail
     // off). NOTE: the override values are CAPTURED at constants.ts/endpoints.ts module load per
     // test file, so this reset matters for per-call readers and hygiene only; the rail
