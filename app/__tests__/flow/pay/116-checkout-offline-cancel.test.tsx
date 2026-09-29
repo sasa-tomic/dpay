@@ -8,11 +8,12 @@
  * what happened ("Charge cancelled", "Nothing is owed") with no payable code, and the counter
  * reopens from the panel itself.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {assert, assertIncludes, goOffline, onboardWallet, openBalances, selectCurrency, setRelay} from '../harness/lib';
 import {relayBaseURL} from '../harness/relayClient';
 
-describe('flow 116 — checkout offline + cancel: out of contact is not unpaid, and a charge can be taken back', () => {
+hermeticDescribe('flow 116 — checkout offline + cancel: out of contact is not unpaid, and a charge can be taken back', () => {
   it('unreachable says so honestly, recovers on reconnection, and cancels cleanly', async () => {
     const m = await onboardWallet('jest-checkout-offline');
 

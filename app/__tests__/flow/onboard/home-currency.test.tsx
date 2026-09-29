@@ -14,7 +14,8 @@
  * The EUR row's rail (EURC@Solana) is enumerable offline through the SOL RPC stub (solStub.ts —
  * the harness's stand-in for the coherence check's Solana read).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from '../settings/solStub';
 import {mountApp, type Mount} from '../harness/mount';
@@ -38,7 +39,7 @@ async function onboardToChooser(m: Mount): Promise<void> {
   await m.driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
 }
 
-describe('flow 118 — home-currency', () => {
+hermeticDescribe('flow 118 — home-currency', () => {
   it('the chooser gates the wallet; only realisable currencies with their catalogued rails; choosing lands it; Settings can change it', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -93,7 +94,7 @@ describe('flow 118 — home-currency', () => {
   }, 150_000);
 });
 
-describe('flow 120 — home-currency-rails', () => {
+hermeticDescribe('flow 120 — home-currency-rails', () => {
   it('USD names both rails preferred first; EUR and CHF name exactly their one rail; Settings shows the group', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -135,7 +136,7 @@ describe('flow 120 — home-currency-rails', () => {
   }, 150_000);
 });
 
-describe('flow 121 — home-currency-balance-rails', () => {
+hermeticDescribe('flow 121 — home-currency-balance-rails', () => {
   it('home=USD reads ONE currency row with both rails in its label and the Main badge; home=CHF the same grammar', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -170,7 +171,7 @@ describe('flow 121 — home-currency-balance-rails', () => {
   }, 150_000);
 });
 
-describe('flow 129 — eur-single-rail', () => {
+hermeticDescribe('flow 129 — eur-single-rail', () => {
   it('EUR offered with exactly its one rail; a tap picks without expanding; Continue lands EURC@Solana', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -208,7 +209,7 @@ describe('flow 129 — eur-single-rail', () => {
   }, 150_000);
 });
 
-describe('flow 130 — eur-single-rail-balances', () => {
+hermeticDescribe('flow 130 — eur-single-rail-balances', () => {
   it('one EUR row (Main + EURC rail label), no VEUR trace, no health note on any row, the row figure IS the sum', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -241,7 +242,7 @@ describe('flow 130 — eur-single-rail-balances', () => {
   }, 150_000);
 });
 
-describe('flow 149 — currency-chooser-dead-tap', () => {
+hermeticDescribe('flow 149 — currency-chooser-dead-tap', () => {
   it('nothing preselected; an early Continue is answered and commits nothing; picking clears the prompt and Continue commits', async () => {
     await freshContext();
     const m = await mountApp();

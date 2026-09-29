@@ -13,7 +13,8 @@
  * order (querySelectorAll), which has no react-test-renderer equivalent; membership, Main
  * exclusivity, and the practice divider are pinned instead.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from '../settings/solStub';
 import {
@@ -22,7 +23,7 @@ import {
 } from '../harness/lib';
 import {freshContext} from './helpers';
 
-describe('flow 203 — accounts-currency-groups', () => {
+hermeticDescribe('flow 203 — accounts-currency-groups', () => {
   it('every wallet currency listed once; Main on USD alone; rail subtitles; the practice row last', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -58,7 +59,7 @@ describe('flow 203 — accounts-currency-groups', () => {
   }, 150_000);
 });
 
-describe('flow 204 — currency-rail-switch', () => {
+hermeticDescribe('flow 204 — currency-rail-switch', () => {
   it('funding only the IC rail, the USD row tap lands main + rail on the funded ckUSDC; receive mounts in full; no manual rail switch', async () => {
     await freshContext();
     installSolAccountsHelper();

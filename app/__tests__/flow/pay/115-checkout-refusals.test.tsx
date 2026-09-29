@@ -9,10 +9,11 @@
  * naming SOL on Solana — and the message box there is the ONE box both code forms share. A price
  * finer than a rappen is refused on the device with the correction spelled out, nothing signed.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency} from '../harness/lib';
 
-describe('flow 115 — checkout refusals: named, actionable, fail-closed, on both rails', () => {
+hermeticDescribe('flow 115 — checkout refusals: named, actionable, fail-closed, on both rails', () => {
   it('ckBTC/SOL refuse by name with the switch offered; the shared box survives; sub-rappen refused', async () => {
     const m = await onboardWallet('jest-checkout-refusals');
 

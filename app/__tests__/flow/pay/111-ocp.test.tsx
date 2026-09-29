@@ -8,7 +8,8 @@
  * never answers renders UNRESOLVED with the ledger block index and no retry; a checkout that does
  * not take the selected asset is refused by name — and offering the menu costs exactly one read.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, armPayScan, assert, assertEq, assertIncludes, faucetAccount, generateKeypair,
   getBalance, onboardWallet, openBalances, railPrincipalText, selectCurrency,
@@ -33,7 +34,7 @@ const scanCheckout = async (m: Parameters<typeof armPayScan>[0]): Promise<void> 
   scanSeam()(CHECKOUT_QR);
 };
 
-describe('flow 111 — OpenCryptoPay checkout (IC rail): explicit review, one-shot proof, honest loss path', () => {
+hermeticDescribe('flow 111 — OpenCryptoPay checkout (IC rail): explicit review, one-shot proof, honest loss path', () => {
   it('menu on one read; picking pays the picked asset; Approve settles once; indefinite is unresolved', async () => {
     const m = await onboardWallet('jest-ocp');
     const accountHex = (await accountOf(m))!.publicHex;

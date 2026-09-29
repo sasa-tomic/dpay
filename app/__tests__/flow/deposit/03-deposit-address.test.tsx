@@ -7,12 +7,13 @@
  * values from the REAL relay's deposit_info, never hardcoded), the honest watching cue, and the
  * "Already on the Internet Computer?" ICRC-1 receive section (own principal).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertEq, assertIncludes, onboardWallet, railPrincipalText,
 } from '../harness/lib';
 
-describe('flow 03 — deposit address: address + complete instructions + ICRC-1 receive route', () => {
+hermeticDescribe('flow 03 — deposit address: address + complete instructions + ICRC-1 receive route', () => {
   it('?screen=deposit lands a returning user on the ckBTC deposit sheet', async () => {
     // 1. Onboard once so an identity is persisted (the deep link only seeds the Receive
     //    "My address" sub-mode for a RETURNING user — Onboarding never mounts the Wallet).

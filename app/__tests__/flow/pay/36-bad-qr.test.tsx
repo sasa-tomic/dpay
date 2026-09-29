@@ -11,7 +11,8 @@
  * After every refusal the <QrScanner> MOUNT counter advances (the remount is proven, not assumed);
  * the sign screen never mounts; and exactly one scan listener remains at the end.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {armPayScan, assert, onboardWallet} from '../harness/lib';
 import {deadline as budgetDeadline} from '../harness/budget';
 import {scanSeam} from './local';
@@ -35,7 +36,7 @@ const scanGen = (): number => {
   return typeof f === 'function' ? f() : -1;
 };
 
-describe('flow 36 — bad QR: honest errors, no review mount, the scanner genuinely re-arms', () => {
+hermeticDescribe('flow 36 — bad QR: honest errors, no review mount, the scanner genuinely re-arms', () => {
   it('three codes each surface their OWN refusal and the mount counter advances every time', async () => {
     const m = await onboardWallet('jest-badqr');
     let previous: string | null = null;

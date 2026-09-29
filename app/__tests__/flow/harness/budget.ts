@@ -34,10 +34,10 @@
  * needs. Over-stretching only costs wall time on a genuinely hung surface; under-stretching costs
  * false reds — the expensive failure (e2e/run.mjs's doctrine, same bias).
  */
+/** The 1-min load average, /proc first (exact), os.loadavg() as the portable fallback. */
 type BudgetG = {__DPAY_FLOW_BUDGET_BASE_FACTOR__?: number};
 const g = globalThis as unknown as BudgetG;
 
-/** The 1-min load average, /proc first (exact), os.loadavg() as the portable fallback. */
 function load1(): number {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -84,13 +84,14 @@ export function budgetMult(): number {
     const n = Number(env);
     if (Number.isFinite(n) && n >= 1) return Math.min(n, 64);
   }
+  // HERMETIC MODEL: the stretch is BACK, load/PSI-scaled as before. Hermeticity fixed the STATE
+  // (one relay + fresh world per file — no cross-file wave), but at high worker counts the box
+  // still runs hot (N full-app jest workers + N relays + everything else the shared box runs),
+  // and a 16-worker ×1 run failed 26 suites on pure scheduling starvation (bodyChanged both
+  // ways, healthy relays, zero transport failures). The load/PSI term measures exactly that.
+  // The hermetic fix and the stretch are ORTHOGONAL: state by construction, time by measurement.
   const live = Math.max(factorOf(load1()), psiFactorOf(cpuPsiAvg10()));
-  // On globalThis (not module state): setupFiles, setupFilesAfterEnv, and each test file get
-  // SEPARATE jest module registries — module state would give every registry its own high-water
-  // and let a post-burst registry under-budget. globalThis is the one shared carrier (the same
-  // trick the fetch recorder uses, see setupFlow.ts §5).
-  const seen = g.__DPAY_FLOW_BUDGET_BASE_FACTOR__ ?? 0;
-  const hw = Math.max(seen, live);
+  const hw = Math.max(g.__DPAY_FLOW_BUDGET_BASE_FACTOR__ ?? 0, live);
   g.__DPAY_FLOW_BUDGET_BASE_FACTOR__ = hw;
   return hw;
 }

@@ -7,16 +7,20 @@
  * double-pay — the hazard the flow pins on the request_id derivation. No app mount needed: this is
  * the relay's own money-safety contract, signed here with the SAME wasm core the app signs with.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 import {
   DpayCore, faucetAccount, generateKeypair, getBalance, icpCatalog, relayGet,
 } from '../harness/lib';
+
+// The file's private relay — the origin every shared-relay reference below means.
+const HF = hermeticFlow();
 import {hexBytes} from './local';
 
 const PAY_CENTS = '2500';
 const NONCE_HEX = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
 
-describe('flow 09 — double-spend: request_id dedup on identical-byte resubmit', () => {
+hermeticDescribe('flow 09 — double-spend: request_id dedup on identical-byte resubmit', () => {
   it('both POSTs 202, the transfer executes once, and re-signing is a NEW request', async () => {
     // --- Payer + payee, both funded so balances are unambiguous. ---------------------------------
     const alice = await generateKeypair();
@@ -35,7 +39,7 @@ describe('flow 09 — double-spend: request_id dedup on identical-byte resubmit'
     const envelopeBytes = hexBytes(signed.envelopeHex);
 
     // --- POST the SAME bytes twice — both accepted (202), executed once. -------------------------
-    const post = () => fetch(`${process.env.DPAY_JEST_RELAY_URL}/api/v2/canister/${desc.ledger}/call`, {
+    const post = () => fetch(`${HF.baseURL}/api/v2/canister/${desc.ledger}/call`, {
       method: 'POST',
       headers: {'Content-Type': 'application/cbor'},
       body: envelopeBytes,

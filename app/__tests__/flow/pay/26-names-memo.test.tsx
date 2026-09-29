@@ -8,7 +8,8 @@
  * (direct relay query) shows the name-less rail truth with memo == the request nonce — the
  * reconciliation key B reconciles its open request by.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   armPayScan, assert, assertEq, assertIncludes, generateKeypair, getBalance, onboardWallet,
   openBalances, railPrincipalText,
@@ -23,7 +24,7 @@ const PAYER_NAME = 'Alice';
 const MEMO = 'coffee';
 const NONCE = '11'.repeat(16);
 
-describe('flow 26 — names + memo ride the signed bytes', () => {
+hermeticDescribe('flow 26 — names + memo ride the signed bytes', () => {
   it('Alice pays Bob with memo coffee → both histories are self-describing (the rail honestly is not)', async () => {
     // --- wallet B "Bob" (payee/merchant): generated in-test, starts at 0. ------------------------
     const bob = await generateKeypair();

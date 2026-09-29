@@ -8,7 +8,8 @@
  * add-money action — the wallet mounts with the identity persisted, no ∂100.00 ever appears, and
  * the header shows the honest "~ … approx." indicator instead of a fabricated zero.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, chooseHomeCurrencyIfPresent, skipPracticeIfPresent, skipWalkthroughIfPresent,
   waitForEnabled, waitForWallet,
@@ -19,7 +20,7 @@ import {freshContext} from './helpers';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const AsyncStorage = require('@react-native-async-storage/async-storage') as {setItem: (k: string, v: string) => Promise<void>};
 
-describe('flow 37 — onboard-no-faucet', () => {
+hermeticDescribe('flow 37 — onboard-no-faucet', () => {
   it('creation proceeds unfunded against a dead relay: practice fails closed, no ∂100, honest approx. indicator', async () => {
     await freshContext();
     // A genuinely-dead relay: bind :0, close — a port nothing listens on.

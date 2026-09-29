@@ -6,14 +6,15 @@
  * guaranteed failure, the balance poll fails for the RIGHT reason (a connection refusal, not a
  * port-policy artifact), the header shows the offline indicator, and the wallet still renders.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
 
 import {
   goOffline, onboardWallet, openBalances, waitForWallet,
 } from '../harness/lib';
 
-describe('flow 13 — offline', () => {
+hermeticDescribe('flow 13 — offline', () => {
   it('a dead relay hides the top-up (fail-closed), fails for the right reason, shows the indicator, and never crashes', async () => {
     // Onboard against the GOOD relay (∂100 — the wallet works when online).
     const m = await onboardWallet('e2e-offline');

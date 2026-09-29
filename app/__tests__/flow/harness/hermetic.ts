@@ -1,150 +1,186 @@
 /**
- * hermetic.ts — the per-FILE hermetic execution model for the jest flow tier. LOCAL shim for the
- * convert-lane migration (branch flow-hermetic-convert); when the core lead lands the real
- * harness/hermetic.ts on main, integration keeps MAIN's version and this file is dropped — the
- * test-file contract is only the two exported calls:
+ * hermetic.ts — the flow tier's per-file execution model. One file = ONE PRIVATE test relay +
+ * zero cross-file globalThis contracts. A recycled worker cannot break a file, because the file
+ * re-derives its entire world (relay, storage, seams) from this module.
  *
- *   hermeticFlow(opts?: { relay?: { checkout?: boolean; faucet?: boolean; env?: Record<string,string> } }): HermeticFlow
- *   hermeticDescribe(name: string, fn: () => void): void
+ * WHAT IS ACTUALLY SHARED ACROSS FILES (and therefore what this module neutralizes):
+ *   - the globalSetup relay (the OLD shared world) — a hermetic file never talks to it: the IC
+ *     gateway seam, the fetch rewrite and the walk all point at THIS file's relay before the
+ *     first mount, and the app's persisted relay list is planted to match;
+ *   - `globalThis.__DPAY_JEST_ASYNC_STORAGE` (the ONE AsyncStorage instance) — purged here and
+ *     per-test by the lifecycle (belt and braces; the instance itself is per-file anyway);
+ *   - NOTHING ELSE: every other seam stash is per-file globalThis and dies with the file — the
+ *     explicit resets below are belt-and-suspenders against future shared instances.
  *
- * WHAT hermeticFlow() DOES (module-scope call, one per test file): spawns a PRIVATE test-helpers
- * relay (startFlowRelay, a free port, per-spawn knobs — checkout/faucet/env), points every
- * app-facing seam at it (the per-call `__DPAY_TEST_IC_GATEWAY` seam for /api/v2; a fetch rewrite
- * wrapper for the app's baked-origin /api/v1 traffic), re-points the test-side relay client
- * (DPAY_JEST_RELAY_URL — knobs, faucet, oracles, balances ride the SAME private relay), purges
- * AsyncStorage, resets the rail operator overrides + transport module state, and takes OWNERSHIP
- * of the relay's lifecycle (afterAll stop — the per-test afterEach drain deliberately does NOT
- * kill it: every test in the file rides the same private relay). `opts.relay.env` values may
- * carry the `{{base}}` token — substituted with the spawned relay's own base URL (flow 199's
- * DPAY_PUBLIC_ORIGIN needs its own address at spawn time, before any port is knowable).
+ * USAGE (module scope of a flow file, before any describe):
+ *   import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+ *   const hf = hermeticFlow();                    // spawns THIS file's relay (async, pipelined)
+ *   hermeticDescribe('flow N — …', () => {        // beforeAll awaits readiness; body unchanged
+ *     it('…', async () => {
+ *       const {baseURL} = await hf.ready;         // for /api/v1/test/* knobs
+ *       …
+ *     });
+ *   });
  *
- * WHAT hermeticDescribe(name, fn) ADDS: per-test isolation on top of the root lifecycle's
- * per-test purge + seam resets — the IC gateway seam re-pointed at the private relay every test
- * (the root lifecycle resets it to the shared relay first), rail overrides off, seam stashes
- * cleared — and `await flow.ready` before the file's own beforeAll hooks (fixture knobs arm on a
- * LIVE relay). ZERO cross-file globalThis contracts: every test file spawns its own relay, jest
- * gives each file its own module registry + globalThis, and worker recycling re-runs both.
+ * The per-test lifecycle (storage purge, seam resets, fail-closed fetch assertion) stays exactly
+ * as it was — hermetic files keep it for free.
  */
-import {afterAll, beforeAll, beforeEach, afterEach, describe} from '@jest/globals';
-import {pickFreePort, startFlowRelay, type FlowRelay} from './flowRelay';
-import {setSolanaRpcUrl} from '../../../config/constants';
-import {setEvmRpcUrl} from '../../../evm/endpoints';
+import {afterAll, beforeAll, describe} from '@jest/globals';
+import {startFlowRelay, type FlowRelay} from './flowRelay';
+import {resetPageEventListeners} from './setupFlow';
+import {RELAY_LIST_STORAGE_KEY} from '../../../config/constants';
 
-/** app/relayConfig.ts RELAY_DEFAULT — the baked origin the app's /api/v1 fetches target. */
-const RELAY_DEFAULT_ORIGIN = 'https://dpay.kalaj.org';
-/** Substituted with the spawned relay's own base URL in opts.relay.env values. */
-const BASE_TOKEN = '{{base}}';
+export type HermeticRelayInfo = {baseURL: string; port: number};
 
-export type HermeticRelay = {base: string; port: number};
-export type HermeticFlow = {ready: Promise<HermeticRelay>};
-export type HermeticFlowOpts = {relay?: {checkout?: boolean; faucet?: boolean; env?: Record<string, string>}};
+export type HermeticFlow = {
+  /** Resolves once THIS file's relay is spawned and /api/v1/health answered. */
+  ready: Promise<HermeticRelayInfo>;
+  /** The private relay handle (present after `ready`; the afterAll stops it). */
+  relay: Promise<FlowRelay>;
+  /** The private relay's base URL — '' until `ready` resolves; every test context runs after. */
+  get baseURL(): string;
+  /** Idempotent wiring — hermeticDescribe calls this in beforeAll; files may too. */
+  ensureWired: () => Promise<HermeticRelayInfo>;
+};
 
-type Seams = Record<string, unknown>;
-const g = globalThis as unknown as Seams;
-/** The seam stashes a convert-style file plants and must never leak across tests (the rail
- *  OPERATOR overrides live in app modules — resetRailOverrides below reaches those). */
-const SEAM_STASHES = ['__DPAY_TEST_SOLANA_RPC_STUB', '__DPAY_TEST_EVM_SIGN'];
+type HermeticOpts = {
+  relay?: {checkout?: boolean; faucet?: boolean; env?: Record<string, string>};
+};
 
-function resetRailOverrides(): void {
-  setSolanaRpcUrl('');
-  setEvmRpcUrl('');
-}
+type G = {
+  __DPAY_FLOW_HERMETIC_RELAY__?: string;
+  __DPAY_FLOW_HERMETIC_READY__?: Promise<HermeticRelayInfo>;
+  __DPAY_FLOW_HERMETIC_RELAY_HANDLE__?: Promise<FlowRelay>;
+  __DPAY_FLOW_HERMETIC_STOP__?: (() => Promise<void>) | null;
+  __DPAY_JEST_ASYNC_STORAGE?: {getAllKeys: () => Promise<string[]>; removeItem: (k: string) => Promise<void>; clear: () => Promise<void>; setItem: (k: string, v: string) => Promise<void>};
+  __DPAY_TEST_SCAN_RESET?: () => void;
+  __DPAY_QR_LAST?: unknown;
+  __DPAY_TEST_NFC_READER_REQUEST?: unknown;
+  __DPAY_TEST_NFC_STATUS?: unknown;
+  __DPAY_TEST_NFC_APPROVED_WIRE?: unknown;
+  __DPAY_TEST_NFC_RESULT?: unknown;
+  __DPAY_SOL_NFC_LAST?: unknown;
+  __DPAY_SOL_REQ_LAST?: unknown;
+  __DPAY_TEST_CLIPBOARD?: string;
+  __DPAY_FLOW_ALLOWED_DEAD_ORIGINS__?: Set<string>;
+  __DPAY_FLOW_FETCH_RECORDS__?: unknown[];
+  __DPAY_LOG_TAIL?: string[];
+  __DPAY_TEST_IC_GATEWAY?: string;
+};
 
-async function purgeAsyncStorage(): Promise<void> {
-  const AS = g.__DPAY_JEST_ASYNC_STORAGE as {getAllKeys: () => Promise<string[]>; removeItem: (k: string) => Promise<void>; clear: () => Promise<void>} | undefined;
+const g = globalThis as unknown as G;
+
+async function purgeStorage(): Promise<void> {
+  const AS = g.__DPAY_JEST_ASYNC_STORAGE;
   if (!AS) return;
   for (const k of await AS.getAllKeys()) await AS.removeItem(k);
   await AS.clear();
 }
 
-type FlowImpl = {
-  ready: Promise<HermeticRelay>;
-  info: HermeticRelay | null;
-  relay: FlowRelay | null;
-};
-
-/** The most recent hermeticFlow() in THIS test-file registry — hermeticDescribe binds to it.
- *  Module state, not globalThis: jest gives every test file its own registry, so this cannot
- *  leak across files (the zero-contract rule). */
-let current: FlowImpl | null = null;
-
-export function hermeticFlow(opts: HermeticFlowOpts = {}): HermeticFlow {
-  const flow: FlowImpl = {ready: null as unknown as Promise<HermeticRelay>, info: null, relay: null};
-
-  // The fetch rewrite: baked-origin /api/v1 app traffic → the private relay, ON TOP of the
-  // harness's own recording rewrite (setupFlow installed first, so this wrapper sees the app's
-  // ORIGINAL url strings and the recording ledger still sees the private origin). Installed once
-  // per file registry; it dies with the file's environment.
-  const prevFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (flow.info != null && url.startsWith(RELAY_DEFAULT_ORIGIN)) {
-      return prevFetch(flow.info.base + url.slice(RELAY_DEFAULT_ORIGIN.length), init);
-    }
-    return prevFetch(input as RequestInfo, init);
-  }) as typeof fetch;
-
-  // Owning teardown: the private relay stops ONCE, at file end (idempotent), regardless of how
-  // many hermeticDescribe calls or failures ran. Registered at the file root so even a file that
-  // never calls hermeticDescribe cannot leak its relay into the worker.
-  afterAll(async () => {
-    try { await flow.relay?.stop(); } catch { /* the file's own verdicts already name a dead relay */ }
-  });
-
-  flow.ready = (async (): Promise<HermeticRelay> => {
-    // {{base}} substitution needs the port BEFORE the spawn — pick it here, pass it through.
-    const port = await pickFreePort();
-    const base = `http://127.0.0.1:${port}`;
-    const env: Record<string, string> = {};
-    for (const [k, v] of Object.entries(opts.relay?.env ?? {})) env[k] = v.split(BASE_TOKEN).join(base);
-    const relay = await startFlowRelay({port, checkout: opts.relay?.checkout, faucet: opts.relay?.faucet, env});
-    // Take OWNERSHIP: startFlowRelay registered the relay on the harness's per-test afterEach
-    // drain list — a hermetic relay must survive every test in its file, so splice it off. The
-    // list is harness-owned globalThis state within THIS file's environment (never a cross-file
-    // contract); the real main-side hermetic owns its relay without this detach.
-    const drain = g.__DPAY_FLOW_RELAYS__ as FlowRelay[] | undefined;
-    if (Array.isArray(drain)) {
-      const i = drain.indexOf(relay);
-      if (i >= 0) drain.splice(i, 1);
-    }
-    flow.relay = relay;
-    flow.info = {base: relay.baseURL, port: relay.port};
-    // Every seam the app and the test side read now points at THIS file's relay:
-    process.env.DPAY_JEST_RELAY_URL = relay.baseURL; // relayClient: knobs, faucet, oracles, balances
-    g.__DPAY_TEST_IC_GATEWAY = relay.baseURL; // app /api/v2 boundary (INV-9)
-    await purgeAsyncStorage();
-    resetRailOverrides();
-    return flow.info;
-  })();
-
-  current = flow;
-  return flow;
+/** Belt-and-suspenders seam reset — everything that could conceivably cross a boundary. */
+function resetSeams(): void {
+  g.__DPAY_QR_LAST = undefined;
+  g.__DPAY_TEST_NFC_READER_REQUEST = undefined;
+  g.__DPAY_TEST_NFC_STATUS = undefined;
+  g.__DPAY_TEST_NFC_APPROVED_WIRE = undefined;
+  g.__DPAY_TEST_NFC_RESULT = undefined;
+  g.__DPAY_SOL_NFC_LAST = undefined;
+  g.__DPAY_SOL_REQ_LAST = undefined;
+  g.__DPAY_TEST_CLIPBOARD = '';
+  (g.__DPAY_TEST_SCAN_RESET as (() => void) | undefined)?.();
+  resetPageEventListeners();
+  g.__DPAY_FLOW_ALLOWED_DEAD_ORIGINS__?.clear();
+  if (g.__DPAY_FLOW_FETCH_RECORDS__) (g.__DPAY_FLOW_FETCH_RECORDS__ as unknown[]).length = 0;
+  if (g.__DPAY_LOG_TAIL) (g.__DPAY_LOG_TAIL as string[]).length = 0;
 }
 
+/**
+ * Spawn THIS file's relay now (module scope) and return the handle. One relay per file — the
+ * spawn is pipelined (no await at module scope); `hermeticDescribe`'s beforeAll awaits
+ * readiness before the first test runs, and the wiring (gateway seam, persisted relay list,
+ * storage purge, seam reset) happens there, in order, before any mount.
+ */
+export function hermeticFlow(opts: HermeticOpts = {}): HermeticFlow {
+  if (g.__DPAY_FLOW_HERMETIC_STOP__) {
+    // Already spawned for this file (module scope + hermeticDescribe both call this).
+    const relay = g.__DPAY_FLOW_HERMETIC_RELAY_HANDLE__!;
+    return {
+      ready: g.__DPAY_FLOW_HERMETIC_READY__!,
+      relay,
+      get baseURL() { return g.__DPAY_FLOW_HERMETIC_RELAY__ ?? ''; },
+      ensureWired: wire,
+    };
+  }
+  const relayP: Promise<FlowRelay> = startFlowRelay({
+    ownLifecycle: true, // the file's own afterAll stops it — NOT the per-test teardown list
+    checkout: opts.relay?.checkout,
+    faucet: opts.relay?.faucet,
+    env: opts.relay?.env,
+  });
+  const readyP = relayP.then(async (relay) => {
+    // The ONE wiring point: gateway seam + fetch-rewrite target + the app's persisted relay
+    // list (storage) — then a clean world: storage purge, seam reset. Boot (per mount) re-reads
+    // the planted list; resetSessionModuleState re-derives module state per mount.
+    g.__DPAY_FLOW_HERMETIC_RELAY__ = relay.baseURL;
+    g.__DPAY_TEST_IC_GATEWAY = relay.baseURL;
+    const AS = g.__DPAY_JEST_ASYNC_STORAGE;
+    if (AS) {
+      for (const k of await AS.getAllKeys()) await AS.removeItem(k);
+      await AS.clear();
+    }
+    await AS?.setItem(RELAY_LIST_STORAGE_KEY, JSON.stringify([relay.baseURL]));
+    resetSeams();
+    return {baseURL: relay.baseURL, port: relay.port};
+  });
+  const stop = async (): Promise<void> => {
+    g.__DPAY_FLOW_HERMETIC_RELAY__ = undefined;
+    g.__DPAY_FLOW_HERMETIC_STOP__ = null;
+    try {
+      const r = await relayP;
+      await r.stop();
+    } catch { /* a spawn that never came up has nothing to stop */ }
+  };
+  g.__DPAY_FLOW_HERMETIC_READY__ = readyP;
+  g.__DPAY_FLOW_HERMETIC_RELAY_HANDLE__ = relayP;
+  g.__DPAY_FLOW_HERMETIC_STOP__ = stop;
+  // File-level cleanup: the relay dies AFTER the file's last test (never per-test — it is the
+  // file's world), and the storage drain barrier closes the late-writer window one last time.
+  afterAll(async () => {
+    await purgeStorage();
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r) => setImmediate(r));
+      const keys = await g.__DPAY_JEST_ASYNC_STORAGE?.getAllKeys() ?? [];
+      if (keys.length === 0) break;
+      await purgeStorage();
+    }
+    await stop();
+  });
+  return {
+    ready: readyP,
+    relay: relayP,
+    get baseURL() { return g.__DPAY_FLOW_HERMETIC_RELAY__ ?? ''; },
+    ensureWired: wire,
+  };
+}
+
+async function wire(): Promise<HermeticRelayInfo> {
+  // Idempotent re-wiring for files that call ensureWired() manually (e.g. a beforeAll that
+  // re-planted storage and needs the seams re-pointed).
+  const info = await (g.__DPAY_FLOW_HERMETIC_READY__ as Promise<HermeticRelayInfo>);
+  g.__DPAY_FLOW_HERMETIC_RELAY__ = info.baseURL;
+  g.__DPAY_TEST_IC_GATEWAY = info.baseURL;
+  return info;
+}
+
+/**
+ * The describe wrapper: guarantees the file's hermetic world is wired before the first test
+ * (awaiting relay readiness in beforeAll) and registers the file cleanup. The body is the
+ * plain describe body — its its/inner-describes run unchanged under the existing lifecycle.
+ */
 export function hermeticDescribe(name: string, fn: () => void): void {
-  const flow = current;
-  if (flow == null) throw new Error('[hermetic] hermeticDescribe called before hermeticFlow()');
+  hermeticFlow();
   describe(name, () => {
-    // FIRST hook of the file's describe: the private relay is healthy (and every seam pointed)
-    // before the file's own beforeAll arms its knobs. Hook timeout inherits the budget-scaled
-    // per-test ceiling (the spawn probes health on its own budget-scaled deadline).
-    beforeAll(async () => {
-      await flow.ready;
-    });
-    beforeEach(async () => {
-      if (flow.info == null) await flow.ready;
-      // The root lifecycle's beforeEach just reset the IC gateway seam to the SHARED relay and
-      // purged storage — re-point the seam at THIS file's relay (the app boots after this).
-      g.__DPAY_TEST_IC_GATEWAY = flow.info!.base;
-      resetRailOverrides();
-      for (const k of SEAM_STASHES) delete g[k];
-    });
-    afterEach(async () => {
-      // Inner-first relative to the root lifecycle's afterEach: stub wrappers unwind and the
-      // rail overrides close BEFORE the lifecycle drains mounts and asserts the fetch ledger.
-      resetRailOverrides();
-      for (const k of SEAM_STASHES) delete g[k];
-    });
+    beforeAll(() => wire());
     fn();
   });
 }

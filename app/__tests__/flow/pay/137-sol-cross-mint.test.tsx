@@ -14,7 +14,8 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ./solrpc).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from './solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -64,7 +65,7 @@ function solreqUri(ridSeed: string, mint: string, cur: string): string {
   return 'solreq:v2?' + Buffer.from(JSON.stringify(req), 'utf8').toString('base64url');
 }
 
-describe('flow 137 leg 1 — endpoint refusing from boot: the solreq still signs, with the honest caveat', () => {
+hermeticDescribe('flow 137 leg 1 — endpoint refusing from boot: the solreq still signs, with the honest caveat', () => {
   it('a fresh wallet onboards with the rail down; the EURC request signs; the caveat names the unknown', async () => {
     // A truly fresh wallet (no persisted facts) with the endpoint ALREADY refusing: the module
     // registry above IS the fresh page load the e2e twin creates with clearStorage + navigate.
@@ -108,7 +109,7 @@ describe('flow 137 leg 1 — endpoint refusing from boot: the solreq still signs
   }, 240_000);
 });
 
-describe('flow 137 legs 2-3 — absent account refuses the sign; the funded mint signs on the same surface', () => {
+hermeticDescribe('flow 137 legs 2-3 — absent account refuses the sign; the funded mint signs on the same surface', () => {
   it('USDC against an absent account: named refusal, no signed QR; EURC: signed right after', async () => {
     const m = await onboardWallet('jest-cross-mint');
 

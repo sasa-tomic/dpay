@@ -10,7 +10,8 @@
  * the request carries the byte-exact NETTED wire 40000 (0.05 price − 0.01 fee); the Paid total
  * debit is exactly the typed price ("0.05 USDC"); B nets the wire (40000 credited).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, armPayScan, assert, assertEq, assertIncludes, faucetAccount, generateKeypair,
   getBalance, onboardWallet, openBalances,
@@ -29,7 +30,7 @@ function nonce(): string {
   return Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0').repeat(4);
 }
 
-describe('flow 27 — asset-pay (ckBTC, per-asset balance gate, ledger units)', () => {
+hermeticDescribe('flow 27 — asset-pay (ckBTC, per-asset balance gate, ledger units)', () => {
   it('60000 sats ≥ 50000 sats → Paid on currency 1; the Ledger row shows the exact ckBTC units', async () => {
     const m = await onboardWallet('jest-asset-pay');
     const accountHex = (await accountOf(m))!.publicHex;
@@ -69,7 +70,7 @@ describe('flow 27 — asset-pay (ckBTC, per-asset balance gate, ledger units)', 
   }, 150_000);
 });
 
-describe('flow 31 — ckusdc-pay (6-decimal, byte-exact netted wire, price-exact total)', () => {
+hermeticDescribe('flow 31 — ckusdc-pay (6-decimal, byte-exact netted wire, price-exact total)', () => {
   it('wire 40000 raw is byte-exact; Paid totals exactly the price; B nets the wire', async () => {
     const m = await onboardWallet('jest-ckusdc-pay');
     const accountHex = (await accountOf(m))!.publicHex;

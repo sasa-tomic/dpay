@@ -7,14 +7,15 @@
  * get_btc_address update dies at ECONNREFUSED — the REAL "network down" failure mode. The relay
  * dies with it (the supplementary depositInfo fetch), and the wallet surface must stay intact.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   assert, assertIncludes, goOffline, onboardWallet, openBalances, openReceiveAddress,
   selectCurrency, waitForWallet,
 } from '../harness/lib';
 import {allowRequestFailuresFrom} from '../harness/setupFlow';
 
-describe('flow 22 — deposit error: dead gateway → honest error, no stuck loading', () => {
+hermeticDescribe('flow 22 — deposit error: dead gateway → honest error, no stuck loading', () => {
   it('the deposit sheet fails fast with plain language and stays out of the loading state', async () => {
     // Onboard online (∂100 funded — proves the wallet works before we break the network).
     const m = await onboardWallet('jest-deposit-err');

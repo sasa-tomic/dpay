@@ -11,7 +11,8 @@
  * survives); 182 the RECONCILE (authoritative poll replaces the optimistic deduction, the
  * merchant settles the same memo, the settled row retires the pending row with no duplicate).
  */
-import {describe, it, expect, afterEach} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect, afterEach} from '@jest/globals';
 import {
   accountOf, armNfcCard, armPayScan, assert, assertEq, DpayCore, faucetAccount,
   generateKeypair, getBalance, goOffline, onboardWallet, openBalances, railTransfer,
@@ -27,12 +28,9 @@ const PAY = 100000001;   // the PRICE (wire + fee)
 const FEE = 10000;       // ICP catalog fee — knowable OFFLINE via the ledger-fee fallback
 const WIRE = PAY - FEE;  // 99990001 — what the request carries and the rail moves
 
-// The e2e gives every flow a fresh page; jest's file-level globalThis persists across tests, so
-// the seams the offline tests flip must be restored or the next test inherits a dead IC gateway
-// (the hand-off sign refuses to stamp against an unreachable clock) or shrunk staleness ticks.
-const RELAY_URL = () => process.env.DPAY_JEST_RELAY_URL ?? '';
+// The shrunk staleness seams are this file's own fixture hygiene; the IC gateway seam is the
+// harness's now (the hermetic hook re-points it per test).
 afterEach(() => {
-  g.__DPAY_TEST_IC_GATEWAY = RELAY_URL();
   delete g.__DPAY_TEST_BALANCE_STALE_MS;
   delete g.__DPAY_TEST_BALANCE_TICK_MS;
 });
@@ -71,7 +69,9 @@ async function openHistory(m: Mount): Promise<void> {
   expect(await m.driver.waitForText('Recent', {timeoutMs: 8000})).toBe(true);
 }
 
-describe('flow 179 — an unconfirmed offline NFC tap renders the pending gross and deducts it', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 179 — an unconfirmed offline NFC tap renders the pending gross and deducts it', () => {
   it('tap → auto-sign → error terminal → pending row (gross) on Home + Ledger, ICP deducted, DEMO untouched', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const {m} = await fundedIcpWallet('jest-offline-nfc');
@@ -123,9 +123,8 @@ describe('flow 179 — an unconfirmed offline NFC tap renders the pending gross 
   }, 150_000);
 });
 
-describe('flow 180 — the offline QR hand-off renders the payment exactly like the tap does', () => {
+hermeticDescribe('flow 180 — the offline QR hand-off renders the payment exactly like the tap does', () => {
   it('offline scan → signed envelope QR → Paid press → pending row (gross + merchant name), balance deducted', async () => {
-    console.log('PROBE gw seam =', JSON.stringify(g.__DPAY_TEST_IC_GATEWAY), 'relay env =', process.env.DPAY_JEST_RELAY_URL);
     const {m} = await fundedIcpWallet('jest-offline-qr');
     const merchant = await generateKeypair();
 
@@ -154,7 +153,7 @@ describe('flow 180 — the offline QR hand-off renders the payment exactly like 
   }, 150_000);
 });
 
-describe('flow 181 — the restarted offline wallet shows its cached real balance (approx-marked)', () => {
+hermeticDescribe('flow 181 — the restarted offline wallet shows its cached real balance (approx-marked)', () => {
   it('offline hand-off → plain figure while fresh → marked once stale → restart hydrates cache + pending row', async () => {
     const {m} = await fundedIcpWallet('jest-offline-restart');
     const merchant = await generateKeypair();
@@ -199,7 +198,7 @@ describe('flow 181 — the restarted offline wallet shows its cached real balanc
   }, 180_000);
 });
 
-describe('flow 182 — back online, the pending payment reconciles into a settled history row', () => {
+hermeticDescribe('flow 182 — back online, the pending payment reconciles into a settled history row', () => {
   it('authoritative poll replaces the deduction → merchant settles the memo → pending retires, exactly one row', async () => {
     const {m, payer} = await fundedIcpWallet('jest-offline-reconcile');
     const merchant = await generateKeypair();

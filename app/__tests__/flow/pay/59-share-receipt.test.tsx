@@ -9,7 +9,8 @@
  * settle, the share payload is a `/wallet?pay=` URL with a base64url blob, the label flips to
  * "Link copied ✓", and the blob decodes to the rail proof {ledger, block_index, request_id}.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   armPayScan, assert, DpayCore, generateKeypair, icpCatalog, onboardWallet,
 } from '../harness/lib';
@@ -18,7 +19,7 @@ import {scanSeam} from './local';
 const PAY_CENTS = '2500'; // ∂25.00 (DEMO = currency 0)
 const MERCHANT_NAME = 'Bob';
 
-describe('flow 59 — share receipt: the online settle’s proof is handed to Share', () => {
+hermeticDescribe('flow 59 — share receipt: the online settle’s proof is handed to Share', () => {
   it('btn-share-receipt shares a /wallet?pay= URL whose blob is the rail proof', async () => {
     const bob = await generateKeypair();
     const m = await onboardWallet('jest-alice');
@@ -39,7 +40,6 @@ describe('flow 59 — share receipt: the online settle’s proof is handed to Sh
     await m.driver.findByTestID('btn-share-receipt', {timeoutMs: 5000});
 
     // Tap → the recorder captures Share.share's message; the label flips to "Link copied ✓" (U-F1).
-    (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_CLIPBOARD = '';
     await m.driver.click('btn-share-receipt', {timeoutMs: 5000});
     assert(await m.driver.waitForText('Link copied ✓', {timeoutMs: 4000}),
       'btn-share-receipt should flip its label to "Link copied ✓"');

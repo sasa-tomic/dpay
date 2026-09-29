@@ -13,7 +13,8 @@
  * with it (one tick, App.tsx); the row still serves exactly 2 SOL from the second home, and the
  * dead first home was really TRIED (connection-class failures on record against its proxy route).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: deletes the SOL RPC test override pre-capture (the derivation), then the App graph loads.
 import './solRelayProxy';
 import {onboardSeededUnfunded, openBalances, relayGet} from '../harness/lib';
@@ -32,7 +33,7 @@ async function deadOrigin(): Promise<string> {
   return `http://127.0.0.1:${await pickFreePort()}`;
 }
 
-describe('flow 165 — solana-via-relay', () => {
+hermeticDescribe('flow 165 — solana-via-relay', () => {
   it('phase 1 — SOL+USD render through the relay proxy derivation and the hits counter proves the path', async () => {
     await freshContext();
     const m = await onboardSeededUnfunded('e2e-sol-relay', {fund: false});

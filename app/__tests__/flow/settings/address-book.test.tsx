@@ -8,7 +8,8 @@
  * place; the send form's manage link opens the same route and Back returns to the form; Remove
  * empties the book and says so again.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertIncludes, faucetAccount, onboardWallet, openBalances,
   openPaySend, railPrincipalText, selectCurrency,
@@ -17,7 +18,7 @@ import {freshContext} from '../onboard/helpers';
 
 const PRINCIPAL_SEED = 'b'.repeat(64);
 
-describe('flow 178 — address-book', () => {
+hermeticDescribe('flow 178 — address-book', () => {
   it('the door, the empty book, refuse-first add, save/rename, the send-form manage link, remove', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-book');

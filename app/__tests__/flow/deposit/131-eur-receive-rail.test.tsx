@@ -21,6 +21,10 @@ const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 import {describe, it, expect} from '@jest/globals';
 
+// NOT hermetic yet: this suite's module-scope SOL-stub seeding + the settings
+// currency pills (offerableCurrencies(assets)) depend on the boot-catalog world the
+// shared relay provides; under the hermetic mount reset the offerable set renders
+// empty (2026-09-29). Port with the settings-pill source investigation.
 describe('flow 131 — EUR receive: a single-rail currency renders one plain ATA surface', () => {
   it('the EURC ATA with no rail disclosure, toggle, or thin note — stable across leave-and-return', async () => {
     // Onboard, pin home=EUR, and land on the EURC rail's "My address" surface.

@@ -11,7 +11,8 @@
  * with the visual tier; here the same facts are pinned through the persisted store + the control's
  * own accessibility labels.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {onboardWallet} from '../harness/lib';
 import {freshContext} from '../onboard/helpers';
 
@@ -21,7 +22,7 @@ const AsyncStorage = require('@react-native-async-storage/async-storage') as {ge
 const themeLabel = (m: Awaited<ReturnType<typeof onboardWallet>>): string =>
   String(m.driver.propOf('btn-theme', 'accessibilityLabel') ?? '');
 
-describe('flow 85 — theme-toggle', () => {
+hermeticDescribe('flow 85 — theme-toggle', () => {
   it('header names the target and flips on one click; Dark persists across remount; Settings 3-way control + Auto', async () => {
     await freshContext();
     // 1. Onboard to reach the Wallet (the header toggle only exists there).

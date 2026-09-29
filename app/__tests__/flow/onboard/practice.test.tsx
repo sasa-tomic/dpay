@@ -20,7 +20,8 @@
  * - The `localStorage` journey reads go through AsyncStorage (its RNW backing store); the
  *   `window.fetch` stubs wrap the harness's recorder fetch; failures are pre-declared.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp, type Mount} from '../harness/mount';
 import {
   accountOf, assertIncludes, chooseHomeCurrencyIfPresent, getBalance,
@@ -68,7 +69,7 @@ async function seenEventually(marker: string, timeoutMs = 5000): Promise<string[
   }
 }
 
-describe('flow 152 — practice-payment', () => {
+hermeticDescribe('flow 152 — practice-payment', () => {
   it('shop request ∂1.00 → the real review → settles → ∂99.00 on the ledger; flowUnderstood stamped, paymentTested not', async () => {
     await freshContext();
     const m = await mountApp();
@@ -120,7 +121,7 @@ describe('flow 152 — practice-payment', () => {
   }, 90_000);
 });
 
-describe('flow 153 — practice-not-settled', () => {
+hermeticDescribe('flow 153 — practice-not-settled', () => {
   it('UNKNOWN: money moved, screen claims nothing, no stamp — REJECTED: the ledger\'s own reason over an unmoved balance', async () => {
     await freshContext();
     const harnessFetch = g.fetch as typeof fetch;
@@ -211,7 +212,7 @@ describe('flow 153 — practice-not-settled', () => {
     g.fetch = harnessFetch;
   }, 120_000);});
 
-describe('flow 156 — restore-skips-practice', () => {
+hermeticDescribe('flow 156 — restore-skips-practice', () => {
   it('a restored wallet is never shown the practice payment; the seen marker persists across launches', async () => {
     await freshContext();
     // Mint a real seed the honest way: create a wallet and read its own 24 words off the gate.

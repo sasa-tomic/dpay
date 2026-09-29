@@ -20,7 +20,8 @@
  * (The 118px 'dpay' circle stamp inside the peak was dropped by founder directive 2026-08-24;
  * the pinned testIDs are unchanged.)
  */
-import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {
   accountOf, armPayScan, assert, DpayCore, faucetAccount, generateKeypair, getBalance,
   goOffline, icpCatalog, onboardWallet, openBalances, selectCurrency, setRelay, type Mount,
@@ -57,7 +58,9 @@ async function submitEnvelope(envelope: Uint8Array, ledger: string): Promise<voi
   expect(submitted.status).toBe(202);
 }
 
-describe('flow 92 — the one-shot offline peak: earned once, settled to the stamp, never again', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 92 — the one-shot offline peak: earned once, settled to the stamp, never again', () => {
   it('first offline payment peaks (relay still dead) + settles to the stamp; a second offline and an online payment stay quiet; the award survives a remount', async () => {
     // --- Payee bob (keypair only — this test is his phone). ------------------------------------
     const bob = await generateKeypair();

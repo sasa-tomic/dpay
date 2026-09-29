@@ -8,7 +8,8 @@
  * paymentTested; the strip retires itself the moment readiness completes; the Settings archive
  * plays the TRIP READY capstone → Done; and a fresh boot keeps the record with no strip.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp} from '../harness/mount';
 import {scaled as budgetScaled} from '../harness/budget';
 import {
@@ -33,7 +34,7 @@ function randNonceHex(): string {
   return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 }
 
-describe('flow 94 — trip-passport', () => {
+hermeticDescribe('flow 94 — trip-passport', () => {
   it('2 OF 4 after a paying first run (practice earns nothing) → real funds flip 3 OF 4 live → one payment completes it → capstone, Done, persisted', async () => {
     await freshContext();
     const m = await mountApp();

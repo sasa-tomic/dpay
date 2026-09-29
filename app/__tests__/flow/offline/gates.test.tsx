@@ -6,7 +6,8 @@
  * REPLACED by an instruction naming the constraint and routing to Scan to pay (the rail that
  * works offline); back online the form returns — the gate is connectivity and nothing else.
  */
-import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {
   accountOf, assert, faucetAccount, goOffline, onboardWallet, openBalances, selectCurrency, setRelay,
 } from '../harness/lib';
@@ -14,7 +15,9 @@ import {
 const CURRENCY = 7;       // VCHF — a send-capable direct-ICRC row
 const SEED = 500_000_000; // 5.00000000 VCHF: funded, so the zero-balance fund-first gate cannot mask this one
 
-describe('flow 110 — offline, Send-to-address says so up front and points at Scan to pay', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 110 — offline, Send-to-address says so up front and points at Scan to pay', () => {
   it('online form → offline instruction (no fields) → primary lands on scan → online restores', async () => {
     const m = await onboardWallet('jest-offsend');
     const identity = await accountOf(m);

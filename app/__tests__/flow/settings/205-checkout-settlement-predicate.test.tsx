@@ -9,11 +9,12 @@
  * currency), and the one-tap fix re-picks the served asset so the retry opens the charge — with
  * the typed price surviving the round trip.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {assertIncludes, onboardWallet, openBalances, selectCurrency} from '../harness/lib';
 import {freshContext} from '../onboard/helpers';
 
-describe('flow 205 — checkout-settlement-predicate', () => {
+hermeticDescribe('flow 205 — checkout-settlement-predicate', () => {
   it('the picker offers only honest price units; a mismatched pick is refused whole; the one-tap fix re-picks and opens', async () => {
     await freshContext();
     const m = await onboardWallet('Bahnhof Kiosk');

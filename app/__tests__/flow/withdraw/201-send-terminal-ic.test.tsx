@@ -9,7 +9,8 @@
  * Leg 2 (below, own relay): the deadline-forced UNKNOWN terminal via the per-gateway `ic_delay`
  * knob — harness capability `startFlowRelay` (flow/harness/flowRelay.ts).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertEq, assertIncludes, faucetAccount, onboardWallet, openBalances,
   railPrincipalText, selectCurrency, openPaySend, pointRelayListAt,
@@ -24,7 +25,7 @@ const VCHF = 7;
 const SEED = 500_000_000; // 5.00000000 VCHF
 const RECIPIENT_PUBKEY = 'c'.repeat(64); // a second wallet's pubkey — a REAL external destination
 
-describe('flow 201 — the settled IC send terminal: block-index reference + TxnReceipt proof', () => {
+hermeticDescribe('flow 201 — the settled IC send terminal: block-index reference + TxnReceipt proof', () => {
   it('Sent → the block index as a copyable reference → the receipt carries it as the proof', async () => {
     const m = await onboardWallet('jest-send-term');
     const accountHex = (await accountOf(m))!.publicHex;
@@ -67,7 +68,7 @@ describe('flow 201 — the settled IC send terminal: block-index reference + Txn
 // honest pending: clock glyph, the may-still-land body, the FRESH MEMO HEX as the reference, the
 // pending receipt (a "not confirmed yet" status, NO proof) — and THE INVARIANT: no resend invite
 // and no Check status, because IC cannot re-read a pending transfer. The form never returns.
-describe('flow 201 leg 2 — the deadline-forced unknown terminal (private relay, ic_delay 12s vs the 6s poll budget)', () => {
+hermeticDescribe('flow 201 leg 2 — the deadline-forced unknown terminal (private relay, ic_delay 12s vs the 6s poll budget)', () => {
   it('renders the honest pending — memo-hex reference, pending receipt, no resend control — never a failure, never a spinner', async () => {
     const r2 = await startFlowRelay();
     g.__DPAY_TEST_IC_GATEWAY = r2.baseURL;

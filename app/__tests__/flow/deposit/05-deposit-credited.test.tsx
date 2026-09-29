@@ -7,7 +7,8 @@
  * "Deposited ✓" + the minted delta. Then the credited BTC stays VISIBLE in the wallet: the BTC
  * asset row re-renders the minted amount after the sheet closes.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertIncludes, faucetAccount, getBalance, onboardWallet,
   openBalances, openReceiveAddress, selectCurrency,
@@ -16,7 +17,7 @@ import {
 const DEPOSIT_CURRENCY = 1; // ckBTC — the Balances row selected for the deposit flow
 const SEED_SATS = 50_000;   // 0.0005 BTC
 
-describe('flow 05 — deposit credited: balance-delta detection + the credit stays visible', () => {
+hermeticDescribe('flow 05 — deposit credited: balance-delta detection + the credit stays visible', () => {
   it('faucet-at-principal → "Deposited ✓" + minted delta + a visible BTC row', async () => {
     const m = await onboardWallet('jest-deposit');
     const identity = await accountOf(m);

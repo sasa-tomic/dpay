@@ -8,14 +8,15 @@
  * ∂500.00 funded out-of-band on an independently spawned relay B (startFlowRelay), Settings
  * switch, the header follows. Proves the poll BOTH stopped hitting A AND started hitting B.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertEq, faucetAccount, onboardWallet, openBalances, relayGet,
 } from '../harness/lib';
 import {startFlowRelay} from '../harness/flowRelay';
 import {freshContext} from '../onboard/helpers';
 
-describe('flow 38 — relay-retarget', () => {
+hermeticDescribe('flow 38 — relay-retarget', () => {
   it('a Settings relay edit applies normalized, persists, and the polls follow the live switch', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-retarget');

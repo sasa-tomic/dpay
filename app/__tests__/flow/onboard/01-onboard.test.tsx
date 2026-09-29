@@ -8,7 +8,8 @@
  *
  * Not ported (browser-only): the screenshot. Trimmed: none — this is the full create path.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp} from '../harness/mount';
 import {
   accountOf, assertIncludes, chooseHomeCurrencyIfPresent, openBalances, selectDemoAsset,
@@ -19,7 +20,7 @@ import {freshContext} from './helpers';
 const USERNAME = 'jest-alice';
 const PLACEHOLDER = 'e.g. Alice';
 
-describe('flow 01 — onboard', () => {
+hermeticDescribe('flow 01 — onboard', () => {
   it('create → faucet ∂100.00 → wallet renders balance + empty history + honesty copy', async () => {
     const m = await mountApp();
 
@@ -68,7 +69,7 @@ describe('flow 01 — onboard', () => {
   }, 60_000);
 });
 
-describe('flow 02 — faucet', () => {
+hermeticDescribe('flow 02 — faucet', () => {
   it('funds ∂100 once; a second top-up inside the cooldown is refused verbatim and credits nothing', async () => {
     await freshContext();
     const m = await onboardWallet('jest-faucet');
@@ -94,7 +95,7 @@ describe('flow 02 — faucet', () => {
   }, 60_000);
 });
 
-describe('flow 23 — username-default', () => {
+hermeticDescribe('flow 23 — username-default', () => {
   it('creates with an empty username → defaults to "me", onboards + funds ∂100', async () => {
     await freshContext();
     const m = await mountApp();

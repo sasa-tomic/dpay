@@ -14,7 +14,8 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ../pay/solrpc).
  */
-import {beforeEach, describe, it, expect} from '@jest/globals';
+import {beforeEach, it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from '../pay/solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -40,7 +41,7 @@ const {
   waitForWallet,
 } = h;
 
-describe('flow 162 — funding routes: honest instructions, attributed figures, one-tap asset switch', () => {
+hermeticDescribe('flow 162 — funding routes: honest instructions, attributed figures, one-tap asset switch', () => {
   it('VCHF names buy-ICP-then-convert; provider ceilings keep their qualifiers; ICP is a direct buy', async () => {
     const m = await onboardWallet('jest-funding');
 
@@ -98,7 +99,7 @@ describe('flow 162 — funding routes: honest instructions, attributed figures, 
   }, 150_000);
 });
 
-describe('flow 163 — funding mechanism: the instruction matches the deposit that actually runs', () => {
+hermeticDescribe('flow 163 — funding mechanism: the instruction matches the deposit that actually runs', () => {
   it('ckUSDC never offers an address; ckBTC and Solana do, naming the backing chain', async () => {
     const m = await onboardWallet('jest-fund-mech');
 

@@ -10,7 +10,8 @@
  * annotation line. 95 enters through the deeplink review (explicit Approve); 96 through the camera
  * scan (one-press auto-sign).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 import {
   accountOf, armPayScan, assert, assertEq, assertIncludes, DpayCore, faucetAccount, generateKeypair,
   getBalance, onboardWallet, openBalances, railPrincipalText, selectCurrency,
@@ -19,6 +20,8 @@ import {mountApp} from '../harness/mount';
 import {scanSeam} from './local';
 
 const VCHF = {currency: 7, ledger: 'ly36x-wiaaa-aaaai-aqj7q-cai', unit: 'VCHF', key: 'vchf', chip: 'CHF', chipFigure: '2.10 Fr', chipAfter: '1.10 Fr', rowAfter: '1.10 Fr'};
+// The file's private relay — the gateway seam (and therefore every recorded canister URL) points here.
+const HF = hermeticFlow();
 const ICP = {currency: 8, ledger: 'ryjl3-tyaaa-aaaaa-aaaba-cai', unit: 'ICP', key: 'icp', chip: 'ICP', chipFigure: '2.1 ICP', chipAfter: '1.1 ICP', rowAfter: '1.1 ICP'};
 const SEED = '210000001'; // 2.10000001 — covers the price
 const PAY = '100000001'; // 1.00000001 — the PRICE the customer pays, exactly (8-dec odd tail)
@@ -74,7 +77,7 @@ async function selectorAndFundPanel(m: Awaited<ReturnType<typeof onboardWallet>>
   await m.driver.click('tab-pay', {timeoutMs: 4000});
 }
 
-describe('flow 95 — VCHF pay (deeplink entry, explicit approve, exact ledger target)', () => {
+hermeticDescribe('flow 95 — VCHF pay (deeplink entry, explicit approve, exact ledger target)', () => {
   it('netted-price link reviews at the typed price, signs only the VCHF ledger, settles exactly', async () => {
     const m = await onboardWallet('jest-vchf-payer');
     const account = (await accountOf(m))!.publicHex;
@@ -109,10 +112,11 @@ describe('flow 95 — VCHF pay (deeplink entry, explicit approve, exact ledger t
     assertIncludes(m2.driver.bodyText(), '1.00000001 VCHF', 'paid screen shows the total debited');
     rec.restore();
 
-    // Every canister call targets VCHF's exact ledger.
+    // Every canister call targets VCHF's exact ledger. The gateway seam — and thus the recorded
+    // URLs — carries the file's PRIVATE relay origin under hermetic.
     const calls = rec.calls().filter((u) => u.endsWith('/call'));
     expect(calls.length).toBeGreaterThanOrEqual(1);
-    const prefix = `${process.env.DPAY_JEST_RELAY_URL}/api/v2/canister/`;
+    const prefix = `${HF.baseURL}/api/v2/canister/`;
     for (const u of calls) {
       expect(u.startsWith(prefix)).toBe(true);
       expect(u.slice(prefix.length).replace(/\/call$/, '')).toBe(VCHF.ledger);
@@ -148,7 +152,7 @@ describe('flow 95 — VCHF pay (deeplink entry, explicit approve, exact ledger t
   }, 180_000);
 });
 
-describe('flow 96 — ICP pay (camera-scan entry, one-press auto-sign)', () => {
+hermeticDescribe('flow 96 — ICP pay (camera-scan entry, one-press auto-sign)', () => {
   it('a scanned netted request signs only the ICP ledger and settles exactly', async () => {
     const m = await onboardWallet('jest-icp-payer');
     const account = (await accountOf(m))!.publicHex;
@@ -183,7 +187,7 @@ describe('flow 96 — ICP pay (camera-scan entry, one-press auto-sign)', () => {
 
     const calls = rec.calls().filter((u) => u.endsWith('/call'));
     expect(calls.length).toBeGreaterThanOrEqual(1);
-    const prefix = `${process.env.DPAY_JEST_RELAY_URL}/api/v2/canister/`;
+    const prefix = `${HF.baseURL}/api/v2/canister/`;
     for (const u of calls) {
       expect(u.startsWith(prefix)).toBe(true);
       expect(u.slice(prefix.length).replace(/\/call$/, '')).toBe(ICP.ledger);

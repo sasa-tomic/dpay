@@ -20,7 +20,8 @@
  * 71: a blocked-insufficient review LOCKS the selection — the account chip is disabled and a
  *     no-op; leaving the review unmounts the engine and releases the lock.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from './solStub';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -33,7 +34,7 @@ import {freshContext} from '../onboard/helpers';
 
 const g = globalThis as unknown as Record<string, unknown> & {__DPAY_TEST_SCAN?: (qr: string) => void};
 
-describe('flow 24 — wallet-cleanup', () => {
+hermeticDescribe('flow 24 — wallet-cleanup', () => {
   it('username-only header; currency-first rows; a currency-1 payment lands in history with a SHORT principal counterparty', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-alice');
@@ -76,7 +77,7 @@ describe('flow 24 — wallet-cleanup', () => {
   }, 150_000);
 });
 
-describe('flow 55 — balances-select-asset', () => {
+hermeticDescribe('flow 55 — balances-select-asset', () => {
   it('the chip headlines the MAIN currency; row taps set main; the unfunded BTC row states its zero', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-select');
@@ -102,7 +103,7 @@ describe('flow 55 — balances-select-asset', () => {
   }, 120_000);
 });
 
-describe('flow 57 — settings-seed-backup', () => {
+hermeticDescribe('flow 57 — settings-seed-backup', () => {
   it('the seed lives behind the confirm gate; words by default; hex behind the toggle; both copy paths work', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-seed');
@@ -160,7 +161,7 @@ describe('flow 57 — settings-seed-backup', () => {
   }, 120_000);
 });
 
-describe('flow 63 — picker-sol-rail', () => {
+hermeticDescribe('flow 63 — picker-sol-rail', () => {
   it('the Receive picker lists SOL; picking it switches the working rail while the chip keeps main', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -182,7 +183,7 @@ describe('flow 63 — picker-sol-rail', () => {
   }, 120_000);
 });
 
-describe('flow 64 — settings-restore', () => {
+hermeticDescribe('flow 64 — settings-restore', () => {
   it('same-seed restore is byte-identical; the backup words round-trip; a different seed replaces the key but keeps the username', async () => {
     await freshContext();
     const SEED_B = '33'.repeat(32);
@@ -257,7 +258,7 @@ describe('flow 64 — settings-restore', () => {
   }, 180_000);
 });
 
-describe('flow 69 — sol-usdc-selection', () => {
+hermeticDescribe('flow 69 — sol-usdc-selection', () => {
   it('one complete picker list on both rails; crossing IC↔Solana clears the typed amount, symmetrically', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -311,7 +312,7 @@ describe('flow 69 — sol-usdc-selection', () => {
   }, 150_000);
 });
 
-describe('flow 71 — selection-lock', () => {
+hermeticDescribe('flow 71 — selection-lock', () => {
   it('a blocked-insufficient review locks the account chip; leaving the review releases the lock', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-lock');

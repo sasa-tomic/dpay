@@ -6,12 +6,13 @@
  * address to the captured clipboard (the recorder sits where the browser's navigator.clipboard
  * write sits in the e2e build).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {openBalances, onboardWallet, openReceiveAddress, selectCurrency} from '../harness/lib';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
-describe('flow 04 — deposit copy: the real address reaches the clipboard', () => {
+hermeticDescribe('flow 04 — deposit copy: the real address reaches the clipboard', () => {
   it('copy writes the deposit address; the request toggle hides the body', async () => {
     const m = await onboardWallet('jest-copy');
 

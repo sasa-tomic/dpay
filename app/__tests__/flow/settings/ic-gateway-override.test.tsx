@@ -9,7 +9,8 @@
  * after; with the dead override live, the envelope POST dies AT the override's /api/v2 route
  * (connection-class) while the seam gateway underneath stays alive — nothing settles.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   armPayScan, assertIncludes, DpayCore, generateKeypair, getBalance, onboardWallet,
 } from '../harness/lib';
@@ -49,7 +50,7 @@ async function deadOrigin(): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-describe('flow 174 — ic-gateway-override', () => {
+hermeticDescribe('flow 174 — ic-gateway-override', () => {
   it('the field mirrors the seam; a local http override applies verbatim and persists; empty restores; payments compose back; the dead override outranks', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-icgw');

@@ -5,13 +5,14 @@
  * from Home and answers in place; the practice row's own faucet button refuses inside the cooldown
  * with the relay's verbatim retry time and credits nothing.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency,
 } from '../harness/lib';
 import {freshContext} from '../onboard/helpers';
 
-describe('flow 134 — home-add-money', () => {
+hermeticDescribe('flow 134 — home-add-money', () => {
   it('add-funds lands the home rail deposit; T answers on Home; the practice faucet refuses and credits nothing', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-add'); // DEMO ∂100

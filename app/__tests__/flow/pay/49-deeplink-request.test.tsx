@@ -13,7 +13,8 @@
  * the FULL destination account is on screen; the amount is converted at the asset's own decimals;
  * Approve settles (payer ∂100 → ∂75, payee ∂25).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   assert, assertIncludes, generateKeypair, getBalance,
   onboardSeededUnfunded, openBalances, railPrincipalText,
@@ -25,7 +26,7 @@ const PAY_CENTS = '2500'; // the same amount in raw units (DEMO has 2 decimals)
 const MERCHANT_NAME = 'Bob';
 const REF = 'ab'.repeat(16);
 
-describe('flow 49 — a /wallet/pay link opens the review pre-filled and settles on Approve', () => {
+hermeticDescribe('flow 49 — a /wallet/pay link opens the review pre-filled and settles on Approve', () => {
   it('cold-loads the link → review (no auto-pay) → Approve settles ∂25 to B', async () => {
     // --- wallet B: a fresh keypair generated in-test (the payee). -----------------------------
     const bob = await generateKeypair();

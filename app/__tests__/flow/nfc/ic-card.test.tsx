@@ -11,7 +11,8 @@
  *       legs (the aria-label flip the terminal view offers).
  * The radio hop stays a physical-device gate; only the JS event plumbing is faked (the seam).
  */
-import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {armNfcCard, assert, onboardWallet, type Mount} from '../harness/lib';
 import {clickByAria, type NfcEvent} from './h';
 
@@ -22,7 +23,9 @@ const dispatchFor = async (m: Mount, event: NfcEvent): Promise<void> => {
   (g.__DPAY_TEST_NFC_SESSION as (e: NfcEvent) => void)(event);
 };
 
-describe('flow 32 — NFC auto-sign exchanging status discloses the honest ckBTC gross', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 32 — NFC auto-sign exchanging status discloses the honest ckBTC gross', () => {
   it('a ckBTC request signs on arrival and shows "Paying 0.0005001 BTC on Bitcoin"', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const m = await onboardWallet('jest-nfc-disc');
@@ -60,7 +63,7 @@ describe('flow 32 — NFC auto-sign exchanging status discloses the honest ckBTC
   }, 90_000);
 });
 
-describe('flow 99 — NFC disclosure for the native assets (VCHF + ICP legs in one session)', () => {
+hermeticDescribe('flow 99 — NFC disclosure for the native assets (VCHF + ICP legs in one session)', () => {
   it('each leg discloses the fee-inclusive total debit and stashes a real envelope; Done escapes', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const m = await onboardWallet('jest-nfc-native');

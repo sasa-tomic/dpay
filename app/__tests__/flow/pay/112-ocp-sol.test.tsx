@@ -11,7 +11,8 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ./solrpc).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from './solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -72,7 +73,7 @@ async function selectAndScan(m: Parameters<typeof armPayScan>[0], assetKey: stri
   scanSeam()(CHECKOUT_QR);
 }
 
-describe('flow 112 — OpenCryptoPay checkout (Solana rail): explicit review, one-shot proof, recoverable unknown', () => {
+hermeticDescribe('flow 112 — OpenCryptoPay checkout (Solana rail): explicit review, one-shot proof, recoverable unknown', () => {
   it('USDC refused by name; SOL pays once; an unreadable verdict stays honest and recovers itself', async () => {
     const m = await onboardWallet('jest-ocp-sol');
     installSolStub();
