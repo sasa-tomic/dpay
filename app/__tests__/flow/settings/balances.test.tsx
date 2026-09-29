@@ -5,7 +5,8 @@
  * three testnet rows are filtered out by default, revealed on tap with their exact
  * testnetDisplayNames, and hidden again on the second tap.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {onboardWallet, openBalances} from '../harness/lib';
 
 const TESTNET_ROWS = [
@@ -15,7 +16,7 @@ const TESTNET_ROWS = [
 ];
 const TESTNET_TIDS = TESTNET_ROWS.map((r) => r.tid);
 
-describe('flow 54 — testnet-toggle', () => {
+hermeticDescribe('flow 54 — testnet-toggle', () => {
   it('testnet rows hidden by default, revealed with testnet names, hidden again', async () => {
     const m = await onboardWallet('e2e-testnet');
 

@@ -6,7 +6,8 @@
  * re-mount re-gates (fresh intent required) and re-arms to exactly one. Listener counts come off
  * the harness's own scan-seam registry.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {armPayScan, onboardWallet} from '../harness/lib';
 import {scaled as budgetScaled} from '../harness/budget';
 import {freshContext} from '../onboard/helpers';
@@ -14,7 +15,7 @@ import {freshContext} from '../onboard/helpers';
 const g = globalThis as unknown as Record<string, unknown>;
 const scanCount = (): number => (g.__DPAY_TEST_SCAN_COUNT as () => number)();
 
-describe('flow 17 — scan-cleanup', () => {
+hermeticDescribe('flow 17 — scan-cleanup', () => {
   it('idle 0 → armed 1 → tab switch cleans up → re-mount re-gates → re-arms to 1', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-scan-cleanup');

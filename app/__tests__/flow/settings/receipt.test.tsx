@@ -11,7 +11,8 @@
  * the seam the browser twin's writeText wrapper feeds) — Platform.OS='web' routes the app's
  * copyToClipboard through the same fallback path.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
 import {
   accountOf, assertIncludes, faucetAccount, generateKeypair, onboardWallet,
@@ -22,7 +23,7 @@ import {freshContext} from '../onboard/helpers';
 const MEMO_HEX = '9f2c00112233445566778899aabbccdd';
 const g = globalThis as unknown as Record<string, unknown>;
 
-describe('flow 157 — transaction-receipt', () => {
+hermeticDescribe('flow 157 — transaction-receipt', () => {
   it('the receipt states the ledger record; copy carries the whole proof; mints speak in sentences; Home opens the same receipt', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-receipt');

@@ -15,7 +15,8 @@
  * reproduces it over the ONE relay by failing the faucet POST and answering /api/v1/capabilities
  * with demo_faucet:false — the no-faucet branch then comes from the app's real capability logic.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp} from '../harness/mount';
 import {
   assertIncludes, chooseHomeCurrencyIfPresent, skipWalkthroughIfPresent,
@@ -50,7 +51,7 @@ async function readWords(m: {readText: (id: string) => string}): Promise<string[
   return words;
 }
 
-describe('flow 154 — first-run-no-solicitation', () => {
+hermeticDescribe('flow 154 — first-run-no-solicitation', () => {
   it('five first-run surfaces solicit nothing; the wallet lands on no panel; Add funds stays one deliberate tap away', async () => {
     // The faucet-less relay, reproduced over the ONE jest relay (see header).
     await freshContext();
@@ -117,7 +118,7 @@ describe('flow 154 — first-run-no-solicitation', () => {
   }, 90_000);
 });
 
-describe('flow 155 — first-run-backup-resume', () => {
+hermeticDescribe('flow 155 — first-run-backup-resume', () => {
   it('no identity while the words are unacknowledged; a kill re-lands on the SAME 24 words; only the acknowledgement writes', async () => {
     await freshContext();
     // eslint-disable-next-line @typescript-eslint/no-require-imports

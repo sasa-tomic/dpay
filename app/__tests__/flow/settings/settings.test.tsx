@@ -11,7 +11,8 @@
  *
  * Not ported (browser-only): the screenshots.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp, type Mount} from '../harness/mount';
 import {
   assertEq, assertIncludes, chooseHomeCurrencyIfPresent, generateKeypair, faucetAccount,
@@ -47,7 +48,7 @@ async function onboardSeeded(): Promise<Mount> {
   return m;
 }
 
-describe('flow 12 — settings', () => {
+hermeticDescribe('flow 12 — settings', () => {
   it('username-only header; relay list edits + persists; Solana endpoint refuses http and accepts empty; reset confirms', async () => {
     await freshContext();
     const m = await onboardSeeded();

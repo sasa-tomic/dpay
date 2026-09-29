@@ -11,7 +11,8 @@
  * 212: tapping the ICP currency row sets ICP main, the working rail follows, and the tap survives
  *      a reload (persisted main).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from './solStub';
 import {
@@ -28,7 +29,7 @@ async function openAddCurrency(m: Awaited<ReturnType<typeof onboardWallet>>): Pr
   await m.driver.findByTestID('input-addcur-search', {timeoutMs: 5000});
 }
 
-describe('flow 210 — add-currency-search', () => {
+hermeticDescribe('flow 210 — add-currency-search', () => {
   it('the full set offered, in-wallet rows not re-addable, search filters live, Remove hides, re-add restores', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -94,7 +95,7 @@ describe('flow 210 — add-currency-search', () => {
   }, 180_000);
 });
 
-describe('flow 211 — remove-guard-refusals', () => {
+hermeticDescribe('flow 211 — remove-guard-refusals', () => {
   it('a nonzero balance refuses Remove (the menu stays); zero hides; the sweep spares the funded; re-add restores', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -159,7 +160,7 @@ describe('flow 211 — remove-guard-refusals', () => {
   }, 180_000);
 });
 
-describe('flow 212 — currency-row-tap-sets-main', () => {
+hermeticDescribe('flow 212 — currency-row-tap-sets-main', () => {
   it('the ICP row tap sets main, the working rail follows, and the tap survives a reload', async () => {
     await freshContext();
     installSolAccountsHelper();

@@ -14,7 +14,8 @@
  * The connectivity override (`__DPAY_TEST_SOLANA_CONNECTIVITY`) is the app's own oracle seam —
  * the same one solana-seam.test.ts drives hermetically.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: sets the SOL RPC override the app captures at module load, then the App graph imports.
 import {installSolAccountsHelper} from './solStub';
 import {onboardWallet, openBalances} from '../harness/lib';
@@ -30,7 +31,7 @@ const g = globalThis as unknown as G;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-describe('flow 147 — rail-unreadable', () => {
+hermeticDescribe('flow 147 — rail-unreadable', () => {
   it('answer → no banner; 429 → one explaining banner; transport+online → the relay is blamed with an escape; offline → no cause, no escape', async () => {
     await freshContext();
     installSolAccountsHelper();

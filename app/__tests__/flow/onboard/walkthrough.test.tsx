@@ -12,7 +12,8 @@
  * Not ported (browser-only): the screenshots. The `localStorage` eval reads go through AsyncStorage
  * (its RNW backing store — the same record the browser read).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {mountApp} from '../harness/mount';
 import {
   assertIncludes, chooseHomeCurrencyIfPresent, onboardWallet,
@@ -27,7 +28,7 @@ const AsyncStorage = require('@react-native-async-storage/async-storage') as {
 };
 const journeyOf = (): Promise<string | null> => AsyncStorage.getItem('dpay.journey.v1');
 
-describe('flow 88 — walkthrough', () => {
+hermeticDescribe('flow 88 — walkthrough', () => {
   it('cold boot gates on the walkthrough; scene copy pinned; Get started → create → funded wallet; stamp persists', async () => {
     await freshContext();
     const m = await mountApp();
@@ -93,7 +94,7 @@ describe('flow 88 — walkthrough', () => {
   }, 90_000);
 });
 
-describe('flow 89 — walkthrough-skip-replay', () => {
+hermeticDescribe('flow 89 — walkthrough-skip-replay', () => {
   it('skip on sight → create form + stamp; persisted stamp suppresses; Settings replay has no Skip and leaves the journey alone', async () => {
     await freshContext();
     // ── Phase A — Skip on sight ─────────────────────────────────────────────────────────────

@@ -12,7 +12,8 @@
  * Trimmed for M1 (M2 batch E owns full parity): (c) the ckbtc sub-mode leg and (e) the Settings
  * sheet legs ride the same stub mechanics proven here.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {onboardWallet} from '../harness/lib';
 
 const g = globalThis as unknown as {
@@ -26,7 +27,7 @@ const expectOnHome = (why: string): void => {
     .toEqual({why, search: g.location.search, ok: true});
 };
 
-describe('flow 161 — the wallet is navigable, linkable, and Back stays inside', () => {
+hermeticDescribe('flow 161 — the wallet is navigable, linkable, and Back stays inside', () => {
   it('tabs write URLs, Back walks back, a cold load restores, foreign params survive', async () => {
     const m = await onboardWallet('jest-url-routing');
 

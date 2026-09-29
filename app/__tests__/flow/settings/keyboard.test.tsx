@@ -12,7 +12,8 @@
  * which is exactly the state the browser's focused input produces. The :focus-visible ring leg is
  * a computed-style read and stays visual.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
 } from '../harness/lib';
@@ -20,7 +21,7 @@ import {freshContext} from '../onboard/helpers';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
-describe('flow 14 — keyboard', () => {
+hermeticDescribe('flow 14 — keyboard', () => {
   it('P/R/L switch tabs; T answers in place from Pay; A lands accounts; the input guard holds; Escape closes the deposit', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-keyboard');

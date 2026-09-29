@@ -17,7 +17,8 @@
  * 81: the IC rail's fund panel rides below the scanner; offline fails open; the send sub-mode
  *     states the SEND instruction; the resume link appears only after the balance goes positive.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 // FIRST: the SOL RPC override + stub helper (the app captures the URL at module load).
 import {installSolAccountsHelper} from './solStub';
 import {
@@ -57,7 +58,7 @@ function installAtaStub(st: AtaState): void {
   };
 }
 
-describe('flow 72 — sol-usdc-send', () => {
+hermeticDescribe('flow 72 — sol-usdc-send', () => {
   it('absent ATA fail-closes the send; one-tap create opens the form; a failed create surfaces and stays usable', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -104,7 +105,7 @@ describe('flow 72 — sol-usdc-send', () => {
   }, 150_000);
 });
 
-describe('flow 75 — seam-fail-loud', () => {
+hermeticDescribe('flow 75 — seam-fail-loud', () => {
   it('all three injection seams installed; with no Wallet mounted every count is 0 and every seam throws, naming the missing piece', async () => {
     await freshContext();
     const m = await mountApp(); // Onboarding only — no Wallet surfaces
@@ -139,7 +140,7 @@ describe('flow 75 — seam-fail-loud', () => {
   }, 60_000);
 });
 
-describe('flow 76 — sol-usdc-ata-gate', () => {
+hermeticDescribe('flow 76 — sol-usdc-ata-gate', () => {
   it('request + address gate on the ATA; the cost gate is honest; one-tap create flips status and unblocks Request', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -220,7 +221,7 @@ describe('flow 76 — sol-usdc-ata-gate', () => {
   }, 180_000);
 });
 
-describe('flow 79 — sol-fund-first-pay', () => {
+hermeticDescribe('flow 79 — sol-fund-first-pay', () => {
   it('known zero gates beside a live scan; the 1-tap funnel; funding auto-releases; errors fail open; the USDC zero panel + resume', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -293,7 +294,7 @@ describe('flow 79 — sol-fund-first-pay', () => {
   }, 180_000);
 });
 
-describe('flow 80 — sol-fund-funnel', () => {
+hermeticDescribe('flow 80 — sol-fund-funnel', () => {
   it('USDC-pay setup card with the fund hatch; create unlocks when SOL lands; post-create the surface becomes the USDC fund panel', async () => {
     await freshContext();
     installSolAccountsHelper();
@@ -378,7 +379,7 @@ describe('flow 80 — sol-fund-funnel', () => {
   }, 240_000);
 });
 
-describe('flow 81 — ic-fund-first-pay', () => {
+hermeticDescribe('flow 81 — ic-fund-first-pay', () => {
   it('the BTC fund panel rides below the scanner; the funnel lands the deposit; offline fails open; send parity; the resume link after funding', async () => {
     await freshContext();
     const m = await onboardWallet('e2e-ic-fund');

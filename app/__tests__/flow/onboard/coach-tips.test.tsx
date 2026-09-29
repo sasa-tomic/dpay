@@ -8,7 +8,8 @@
  * settles + reconciles right through the coaching. All three seen-markers persist on the identity
  * with the stamps intact.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertIncludes, DpayCore, faucetAccount, generateKeypair, getBalance,
   goOffline, icpCatalog, onboardWallet, openBalances, railPrincipalText, waitForScanner,
@@ -40,7 +41,7 @@ import type {Driver} from '../harness/driver';
  *  two identical text snapshots (the driver's waitAtRest contract). */
 const settle = (d: Driver, key: string): Promise<void> => d.waitAtRest(`coach-${key}`, {timeoutMs: 8000});
 
-describe('flow 91 — coach-tips', () => {
+hermeticDescribe('flow 91 — coach-tips', () => {
   it('receiveRequest shown once; the pay review carries no tip; the offline hand-off coached once; money settles through it all', async () => {
     await freshContext();
     const m = await onboardWallet('coach');
