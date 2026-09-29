@@ -11,10 +11,36 @@
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import App from '../../../App';
+import {resetRelayAddressesForTest} from '../../../services/relayAddresses';
+import {resetRelayBuildStateForTest} from '../../../services/relay';
+import {WALLET_ORIGIN, setRelayBaseForSolana, setSolanaRpcUrl, setIcGatewayUrl} from '../../../config/constants';
+import {setRelayBaseForEvm, setEvmRpcUrl} from '../../../evm/endpoints';
 import {Driver} from './driver';
 import {setPageURL} from './setupFlow';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Fresh-page semantics for the module-session transport state. One module registry per FILE
+ * means a retargeting test (Settings apply / pointRelayListAt / goOffline / enableSolRail /
+ * flow-199's private relay) leaves the walk list, the derivation bases and the operator
+ * overrides pointing at ITS relay for every later mount in this file: the next boot reads the
+ * PURGED storage, `if (relayListV.length > 0)` skips the setter, and the wallet keeps walking
+ * the previous test's port (observed 2026-09-29: relay-failover phase 2 walked phase 1's
+ * [dead, live] — 44 failed fetches to phase 1's dead port, probe-proven). A mount IS a fresh
+ * page load: reset to the pre-wiring defaults here, BEFORE renderer.create — the boot effect
+ * re-applies any planted storage row right after, so pre-mount setups still win, and mid-test
+ * retargets are unaffected (the reset precedes the mount, never runs mid-test).
+ */
+function resetSessionModuleState(): void {
+  resetRelayAddressesForTest();          // the walk list + its revision
+  resetRelayBuildStateForTest();         // walk fingerprints / baseline / drift / cooldowns
+  setRelayBaseForSolana(WALLET_ORIGIN);  // SOL derivation bases → the pre-wiring default
+  setRelayBaseForEvm(WALLET_ORIGIN);     // EVM derivation bases → the pre-wiring default
+  setSolanaRpcUrl('');                   // operator overrides ('' clears, never an offline switch)
+  setEvmRpcUrl('');
+  setIcGatewayUrl('');                   // the stored IC-gateway override row's module mirror
+}
 
 // Every live Mount this worker created, on globalThis so the harness lifecycle (afterEnv's own
 // module registry — module state here would not be visible to it) can unmount them in afterEach
@@ -41,6 +67,7 @@ export type Mount = {
 };
 
 async function create(): Promise<renderer.ReactTestRenderer> {
+  resetSessionModuleState();
   let tree!: renderer.ReactTestRenderer;
   // SYNC act for the create itself; the boot chain settles via bounded real sleeps (async act
   // would await the wallet's perpetual poll chains — measured multi-second hangs).

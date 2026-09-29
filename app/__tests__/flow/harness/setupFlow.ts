@@ -330,6 +330,13 @@ export function setPageURL(pathWithSearch: string): void {
   historyIndex = 0;
   syncLocation();
 }
+
+/** Post-drain containment: drop every keydown/popstate handler the file's apps registered —
+ *  a mount the bounded drain abandoned must not answer a later test's pressKey or rewind a
+ *  later test's history. Resetting an empty map is a no-op, so healthy paths never change. */
+export function resetPageEventListeners(): void {
+  for (const k of Object.keys(eventListeners)) delete eventListeners[k];
+}
 export function keydownHandlers(): Array<(e: {key: string}) => void> {
   return (eventListeners.keydown ?? []) as Array<(e: {key: string}) => void>;
 }
@@ -450,14 +457,44 @@ export function installFlowLifecycle(): void {
     const mounts = lg.__DPAY_FLOW_ACTIVE_MOUNTS__ ?? [];
     for (const m of mounts.splice(0, mounts.length)) {
       let raceTimer: ReturnType<typeof setTimeout> | undefined;
+      let abandoned = false;
       try {
         await Promise.race([
           m.unmount().catch(() => undefined),
-          new Promise<void>((r) => { raceTimer = setTimeout(r, budgetScaled(5_000)); }),
+          new Promise<void>((r) => { raceTimer = setTimeout(() => { abandoned = true; r(); }, budgetScaled(5_000)); }),
         ]);
       } finally {
         if (raceTimer !== undefined) clearTimeout(raceTimer);
       }
+      if (abandoned) {
+        // Never silent: a LIVE abandoned mount keeps polling, answering hotkeys and consuming
+        // scan injections into the NEXT test, and its import-after-teardown stragglers flip an
+        // all-green run's exit code (reproduced 2026-09-29). Name the abandonment here.
+        (process.stderr as {write: (s: string) => void}).write(
+          `[flow-harness] unmount exceeded ${budgetScaled(5_000)}ms — mount left LIVE: its polls, ` +
+          `hotkeys and scheduler will fight the rest of this file\n`,
+        );
+      }
+    }
+    // Post-drain seam containment (never invoked in jest before — the mock's own
+    // between-scenarios contract): a zombie's QrScanner listener must never consume a later
+    // test's __DPAY_TEST_SCAN injection, and ghost keydown/popstate handlers must never answer
+    // a later test's pressKey/historyBack. No-ops after every healthy test.
+    (g.__DPAY_TEST_SCAN_RESET as (() => void) | undefined)?.();
+    resetPageEventListeners();
+    // Storage drain barrier (the flow-33 class): the purge in beforeEach can be defeated by a
+    // late write chain from a just-unmounted app (journey award, balance-cache persist, a
+    // watching re-save racing clearDeposit) or by a zombie poller. Purge now and require the
+    // store to STAY empty across a macrotask boundary, naming a persistent writer.
+    await purgeAsyncStorage();
+    for (let i = 0; i < 10; i++) {
+      await new Promise((r2) => setImmediate(r2));
+      const keys = await lg.__DPAY_JEST_ASYNC_STORAGE?.getAllKeys() ?? [];
+      if (keys.length === 0) break;
+      (process.stderr as {write: (s: string) => void}).write(
+        `[flow-harness] storage refilled after unmount by a late writer: ${keys.join(', ')} — purging again\n`,
+      );
+      await purgeAsyncStorage();
     }
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const {teardownFlowRelays} = require('./flowRelay') as {teardownFlowRelays: () => Promise<void>};
