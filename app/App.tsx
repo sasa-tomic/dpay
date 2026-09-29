@@ -33,7 +33,7 @@ import {SafeAreaView, ActivityIndicator, View, useColorScheme} from 'react-nativ
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 import {C, DARK, LIGHT} from './config/palette';
-import {STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY, HOME_CURRENCY_STORAGE_KEY, SOLANA_RPC_STORAGE_KEY, IC_GATEWAY_STORAGE_KEY, setRelayBaseForSolana, setSolanaRpcUrl, setIcGatewayUrl} from './config/constants';
+import {STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY, HOME_CURRENCY_STORAGE_KEY, SOLANA_RPC_STORAGE_KEY, IC_GATEWAY_STORAGE_KEY, WALLET_ORIGIN, setRelayBaseForSolana, setSolanaRpcUrl, setIcGatewayUrl} from './config/constants';
 import {EVM_RPC_STORAGE_KEY, setEvmRpcUrl, setRelayBaseForEvm} from './evm/endpoints';
 import {loadPersistedRelayAddresses, parseRelayAddress, persistRelayAddresses, setRelayAddresses, splitRelayListParam} from './services/relayAddresses';
 import {parseTheme, resolveTheme, themePersistValue, type ThemeOverride} from './config/theme';
@@ -170,14 +170,22 @@ export default function App() {
           }
         }
         setIdentity(idV ? JSON.parse(idV) : null);
-        // R1: a non-empty persisted list (dpay.relays.v1, or the migrated legacy dpay.relay.v1)
-        // replaces the default list — both the walk module and the UI state. An EMPTY result is
-        // "no persisted choice", not "no relays": the defaults stay. R2: the Solana derivation
-        // follows in the same tick, before the setRelayUrls re-render's child effects can poll.
+        // R1: the persisted list (dpay.relays.v1, or the migrated legacy dpay.relay.v1) REPLACES
+        // the walk module's list — EMPTY INCLUDED, because the boot must MIRROR storage: a module
+        // list left over from an earlier session (set while its storage row still existed) must
+        // never outlive the row it came from, or every later boot walks a relay that no longer
+        // exists (observed in-run: a retargeting suite's private relay port kept serving
+        // "all relay addresses failed" to the next suites' wallets after the lifecycle purge).
+        // An EMPTY result is "no persisted choice": the walk degrades to the caller's single
+        // address (the documented pre-wiring default) and the SOL derivation falls back to the
+        // wallet origin. R2: the Solana derivation follows in the same tick, before the
+        // setRelayUrls re-render's child effects can poll.
+        setRelayAddresses(relayListV);
         if (relayListV.length > 0) {
-          setRelayAddresses(relayListV);
           setRelayBaseForSolana(relayListV);
           setRelayUrls(relayListV);
+        } else {
+          setRelayBaseForSolana([WALLET_ORIGIN]); // the module's own boot default (constants.ts)
         }
         setThemeChoice(parseTheme(themeV)); // null (incl. legacy 'auto') → keep following the OS scheme
         setLocaleChoice(parseLocale(localeV)); // null (incl. 'system' or a dropped locale) → follow the device
