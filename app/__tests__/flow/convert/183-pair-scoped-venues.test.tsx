@@ -11,6 +11,7 @@ import {
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, fmt,
@@ -157,5 +158,5 @@ hermeticDescribe('flow 183 — the pair-scoped ICPSwap venues (ckUSDC, ckETH) ar
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 240_000);
+  }, budgetScaled(240_000));
 });

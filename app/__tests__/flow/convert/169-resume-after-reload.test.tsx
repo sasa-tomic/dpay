@@ -131,5 +131,5 @@ hermeticDescribe('flow 169 — a pending conversion survives an app reload; the 
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 240_000);
+  }, budgetScaled(240_000));
 });

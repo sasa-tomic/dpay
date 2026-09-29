@@ -62,7 +62,7 @@ hermeticDescribe('flow 199 — the trocador partner agreement (webhook registrat
       // DPAY_PUBLIC_ORIGIN ({{base}} → its own address) and this file's trocador log dir.
       const r2 = await H.ready;
       const logDir = LOG_DIR;
-      const webhookURL = `${r2.base}/api/v1/trocador/webhook`;
+      const webhookURL = `${r2.baseURL}/api/v1/trocador/webhook`;
       const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
       const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
       const hitsAt = async (): Promise<{bareCalls: number; tradeCalls: number; rateCalls: number; statusCalls: number; lastTradeQuery?: string}> =>
@@ -148,7 +148,7 @@ hermeticDescribe('flow 199 — the trocador partner agreement (webhook registrat
         const statusCallsBeforePush = (await hitsAt()).statusCalls;
 
         // The status route serves the delivery VERBATIM — the zero-upstream cache.
-        const cached = await fetch(`${r2.base}/api/v1/trocador/trade?id=${encodeURIComponent(tradeId)}`);
+        const cached = await fetch(`${r2.baseURL}/api/v1/trocador/trade?id=${encodeURIComponent(tradeId)}`);
         expect(cached.status).toBe(200);
         expect(await cached.text()).toBe(midPayload);
         expect((await hitsAt()).statusCalls).toBe(statusCallsBeforePush);
@@ -174,7 +174,7 @@ hermeticDescribe('flow 199 — the trocador partner agreement (webhook registrat
         // §5 the device-facing correlation: a protocol-level creation names the order id at
         // X-Dpay-Order-Id — the value the webhook_key echoes; each trade mints its OWN id. (The
         // app's own record is already terminal; this second order cannot disturb it.)
-        const probeTrade = await fetch(`${r2.base}/api/v1/trocador/trade`, {
+        const probeTrade = await fetch(`${r2.baseURL}/api/v1/trocador/trade`, {
           method: 'POST',
           headers: {'content-type': 'application/json'},
           body: JSON.stringify({

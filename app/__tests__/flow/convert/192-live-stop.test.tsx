@@ -10,6 +10,7 @@ import {
   typeConvertAmount,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, icDelayKnob,
@@ -60,5 +61,5 @@ hermeticDescribe('flow 192 — the Stop during a LIVE swap aborts honestly', () 
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 180_000);
+  }, budgetScaled(180_000));
 });

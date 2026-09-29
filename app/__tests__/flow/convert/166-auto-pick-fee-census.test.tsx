@@ -12,6 +12,7 @@ import {
 import type {Mount} from '../harness/mount';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, swapPoolKnob, venueKnob, fmt,
@@ -174,5 +175,5 @@ hermeticDescribe('flow 166 — the disclosed auto pick + the one-tap override + 
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 240_000);
+  }, budgetScaled(240_000));
 });

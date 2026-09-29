@@ -10,6 +10,7 @@ import {
   pickSwapTarget, openOtherVenues,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, installSolRpcStub, deriveSolanaKeypair,
@@ -121,5 +122,5 @@ hermeticDescribe('flow 198 — SOL → ICP via the trocador aggregator: every ve
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 300_000);
+  }, budgetScaled(300_000));
 });

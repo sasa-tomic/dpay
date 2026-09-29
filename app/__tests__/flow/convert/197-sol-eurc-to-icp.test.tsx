@@ -10,6 +10,7 @@ import {
   pickSwapTarget,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, installSolRpcStub, deriveSolanaKeypair,
@@ -128,5 +129,5 @@ hermeticDescribe('flow 197 — EURC(Solana) → ICP via sideshift-eurc from the 
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 300_000);
+  }, budgetScaled(300_000));
 });

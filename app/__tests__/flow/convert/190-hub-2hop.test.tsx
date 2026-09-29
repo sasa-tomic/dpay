@@ -11,6 +11,7 @@ import {
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, swapPoolKnob, venueKnob, fmt,
@@ -184,6 +185,12 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
         refused = await m.driver.findByTestID('convert-failed-leg', {timeoutMs: 300}).then(() => true).catch(() => false);
       }
       expect(refused).toBe(true);
+      // The failed-leg card mounts one tick before the leg list flips its label — wait for the
+      // label itself (a positive transition) instead of snapshot-reading the racing first render.
+      await m.driver.waitForFunction(
+        () => m!.driver.readTextSafe('convert-leg-3-state')?.includes('Refused') === true,
+        {timeoutMs: 15_000, label: 'the refused leg names itself'},
+      );
       assertIncludes(m.driver.readText('convert-leg-3-state'), 'Refused', 'the refused leg names itself');
       const failed = m.driver.readText('convert-failed-leg');
       assertIncludes(failed, 'ICP', 'the failure names the HUB asset as the in-wallet position');
@@ -196,5 +203,5 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 300_000);
+  }, budgetScaled(300_000));
 });

@@ -11,6 +11,7 @@ import {
 } from '../harness/lib';
 import type {Mount} from '../harness/mount';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, swapPoolKnob, venueKnob,
@@ -113,5 +114,5 @@ hermeticDescribe('flow 167 — the auto pick follows the quotes; the expander ho
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 240_000);
+  }, budgetScaled(240_000));
 });

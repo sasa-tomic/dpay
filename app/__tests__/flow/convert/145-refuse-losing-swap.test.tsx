@@ -11,6 +11,7 @@ import {
 } from '../harness/lib';
 import {deadline as budgetDeadline} from '../harness/budget';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob,
@@ -86,5 +87,5 @@ hermeticDescribe('flow 145 — convert refuses a swap that could only fail', () 
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 180_000);
+  }, budgetScaled(180_000));
 });

@@ -10,6 +10,7 @@ import {
   selectCurrency,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob,
@@ -55,5 +56,5 @@ hermeticDescribe('flow 142 — venue-less fails closed; a venue subject opens th
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 120_000);
+  }, budgetScaled(120_000));
 });

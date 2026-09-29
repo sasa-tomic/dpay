@@ -11,6 +11,7 @@ import {
 } from '../harness/lib';
 import type {Mount} from '../harness/mount';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, swapPoolKnob, venueKnob,
@@ -69,6 +70,10 @@ hermeticDescribe('flow 173 — the auto-pick invariants in the REVERSE direction
       await typeConvertAmount(m, '1');
       await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
       await openOtherVenues(m);
+      // The fixture's reverse quote lands a beat after the auto line first renders (the async
+      // registry quote) — wait for the settled two-venue world before reading the expander
+      // order, or the read races the pre-arrival pick (observed 2026-09-29).
+      await awaitVenueComparison(m);
       const before = venueRowOrder(m);
       expect(before.length).toBe(1);
       expect(before[0]).toBe('convert-venue-icpswap');
@@ -118,5 +123,5 @@ hermeticDescribe('flow 173 — the auto-pick invariants in the REVERSE direction
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 240_000);
+  }, budgetScaled(240_000));
 });

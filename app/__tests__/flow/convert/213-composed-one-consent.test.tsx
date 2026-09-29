@@ -12,6 +12,7 @@ import {
 import {relayGet} from '../harness/relayClient';
 import {deadline as budgetDeadline} from '../harness/budget';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, enableSolRail, installSideShiftStub,
@@ -228,5 +229,5 @@ hermeticDescribe('flow 213 — the composed IC+CeFi conversion at the ONE consen
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 300_000);
+  }, budgetScaled(300_000));
 });

@@ -11,6 +11,7 @@ import {
 } from '../harness/lib';
 import {deadline as budgetDeadline} from '../harness/budget';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, deriveSolanaKeypair, installSideShiftStub,
@@ -184,5 +185,5 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
-  }, 300_000);
+  }, budgetScaled(300_000));
 });
