@@ -26,8 +26,13 @@
  * as it was — hermetic files keep it for free.
  */
 import {afterAll, beforeAll, describe} from '@jest/globals';
-import {startFlowRelay, type FlowRelay} from './flowRelay';
+import {pickFreePort, startFlowRelay, type FlowRelay} from './flowRelay';
 import {resetPageEventListeners} from './setupFlow';
+
+/** Substituted with the spawned relay's own base URL in `opts.relay.env` values — flow 199's
+ *  DPAY_PUBLIC_ORIGIN needs the relay's OWN address at spawn time (the webhook registration is
+ *  built from it before any port is otherwise knowable to the file). */
+const BASE_TOKEN = '{{base}}';
 
 export type HermeticRelayInfo = {baseURL: string; port: number};
 
@@ -110,12 +115,15 @@ export function hermeticFlow(opts: HermeticOpts = {}): HermeticFlow {
       ensureWired: wire,
     };
   }
-  const relayP: Promise<FlowRelay> = startFlowRelay({
+  const relayP: Promise<FlowRelay> = pickFreePort().then((port) => startFlowRelay({
+    port,
     ownLifecycle: true, // the file's own afterAll stops it — NOT the per-test teardown list
     checkout: opts.relay?.checkout,
     faucet: opts.relay?.faucet,
-    env: opts.relay?.env,
-  });
+    env: opts.relay?.env == null
+      ? undefined
+      : Object.fromEntries(Object.entries(opts.relay.env).map(([k, v]) => [k, v.split(BASE_TOKEN).join(`http://127.0.0.1:${port}`)])),
+  }));
   const readyP = relayP.then(async (relay) => {
     // The ONE wiring point: gateway seam + fetch-rewrite target + the app's persisted relay
     // list (storage) — then a clean world: storage purge, seam reset. Boot (per mount) re-reads
