@@ -216,12 +216,17 @@ if (!fg.__DPAY_FLOW_FETCH_SHIM__) {
     // the fetch rejects exactly as it did unfixed, but the fail-closed ledger only ever recorded
     // REAL origins, so a non-URL is not a recordable request.
     const recordable = /^https?:\/\//i.test(url);
+    const trace = process.env.DPAY_FLOW_FETCH_TRACE === '1';
+    const t0 = trace ? Date.now() : 0;
+    const w = trace ? (process.stderr as {write: (s: string) => void}).write.bind(process.stderr) : null;
     try {
       const res = await realFetch(target, init);
       if (recordable) fetchRecords.push({url, origin: originOf(url), ok: res.ok, status: res.status});
+      if (w) w(`[FETCH ${Date.now() - t0}ms ${res.status} ${url.slice(0, 140)}]\n`);
       return res;
     } catch (e) {
       if (recordable) fetchRecords.push({url, origin: originOf(url), ok: false, status: 0, error: e instanceof Error ? e.message : String(e)});
+      if (w) w(`[FETCH ${Date.now() - t0}ms THROW ${String(e instanceof Error ? e.message : e).slice(0, 60)} ${url.slice(0, 120)}]\n`);
       throw e;
     }
   }) as typeof fetch;
