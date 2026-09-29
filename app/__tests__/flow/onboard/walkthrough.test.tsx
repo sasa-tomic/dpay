@@ -19,6 +19,7 @@ import {
   selectDemoAsset, skipPracticeIfPresent, waitForEnabled,
 } from '../harness/lib';
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {scaled as budgetScaled} from '../harness/budget';
 
 hermeticFlow();
 
@@ -91,7 +92,10 @@ hermeticDescribe('flow 88 — walkthrough', () => {
     assertIncludes(journey ?? '', 'walkthroughDone', 'walkthroughDone stamp awarded on Get started');
 
     await m.unmount();
-  }, 90_000);
+    // The ceiling scales with the load budget (the 412486bc doctrine — an unscaled 90s here
+    // jest-killed this test mid-final-leg under a 4-worker ×6 run while every INNER wait still
+    // had headroom; the post-teardown zombie then fired the misleading mounts=0 trap).
+  }, budgetScaled(90_000));
 });
 
 hermeticDescribe('flow 89 — walkthrough-skip-replay', () => {
@@ -137,5 +141,5 @@ hermeticDescribe('flow 89 — walkthrough-skip-replay', () => {
       expect(await journeyOf()).toBe(before);
       await m.unmount();
     }
-  }, 90_000);
+  }, budgetScaled(90_000));
 });
