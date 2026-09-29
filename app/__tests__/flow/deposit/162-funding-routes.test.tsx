@@ -8,12 +8,13 @@
  * none of them; and native ICP — the one card-reachable IC asset — is a DIRECT buy, reached by
  * the ONE-TAP asset switch that keeps the address sub-mode.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
 } from '../harness/lib';
 
-describe('flow 162 — funding routes: honest "where do I get some" with attributed figures', () => {
+hermeticDescribe('flow 162 — funding routes: honest "where do I get some" with attributed figures', () => {
   it('VCHF routes through convert, providers keep their qualifiers, ICP is a direct buy', async () => {
     const m = await onboardWallet('jest-funding-routes');
 

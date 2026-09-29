@@ -9,7 +9,8 @@
  * "Start a new deposit" escape, and an honest manual recheck. The escape clears the key, and a
  * second reload does NOT re-open the sheet.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   assert, assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
   waitForWallet, type Mount,
@@ -54,7 +55,7 @@ async function readPersistedDeposit(): Promise<Persisted | null> {
   return null;
 }
 
-describe('flow 33 — ckERC20 watching persists across an app restart', () => {
+hermeticDescribe('flow 33 — ckERC20 watching persists across an app restart', () => {
   it('reload rehydrates watching with no wallet reconnect; escape clears the key', async () => {
     // === PHASE 1: drive the onramp to `watching` (happy path) ==================================
     g.__DPAY_TEST_ETH_CALLS = [];

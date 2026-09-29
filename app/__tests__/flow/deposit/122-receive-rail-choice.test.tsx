@@ -33,6 +33,10 @@ async function setHomeCurrency(m: M, code: 'USD' | 'CHF'): Promise<void> {
 
 import {describe, it, expect} from '@jest/globals';
 
+// NOT hermetic yet: this suite's module-scope SOL-stub seeding + the settings
+// currency pills (offerableCurrencies(assets)) depend on the boot-catalog world the
+// shared relay provides; under the hermetic mount reset the offerable set renders
+// empty (2026-09-29). Port with the settings-pill source investigation.
 describe('flow 122 — receive rail choice: the pick is named, fees are per-rail, siblings one toggle away', () => {
   it('defaults USD to ckUSDC with disclosure, flips to USDC@Solana in place, and CHF shows none', async () => {
     const m = await onboardWallet('jest-receive-rails');

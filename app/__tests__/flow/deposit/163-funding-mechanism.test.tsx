@@ -9,13 +9,14 @@
  * BITCOIN (the backing chain) and DOES send it to the address shown; (c) the Solana rail gets the
  * same send-to-address shape with no catalog descriptor behind it.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   assertIncludes, onboardWallet, openBalances, openReceiveAddress, selectCurrency,
   waitForWallet,
 } from '../harness/lib';
 
-describe('flow 163 — funding mechanism: the instruction matches the deposit that runs', () => {
+hermeticDescribe('flow 163 — funding mechanism: the instruction matches the deposit that runs', () => {
   it('ckUSDC has no address (wallet-signed); ckBTC and SOL send to the address shown', async () => {
     const m = await onboardWallet('jest-funding-mechanism');
 

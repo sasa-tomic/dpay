@@ -13,7 +13,7 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ../pay/solrpc).
  */
-import {beforeEach, describe, it, expect} from '@jest/globals';
+import {describe, beforeEach, it, expect} from '@jest/globals';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from '../pay/solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -49,6 +49,10 @@ const {
 // base58 (Bitcoin alphabet) — the Solana address charset. 32–44 chars is the valid pubkey range.
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
+// NOT hermetic yet: this suite's module-scope SOL-stub seeding + the settings
+// currency pills (offerableCurrencies(assets)) depend on the boot-catalog world the
+// shared relay provides; under the hermetic mount reset the offerable set renders
+// empty (2026-09-29). Port with the settings-pill source investigation.
 describe('flow 122 — receive rail choice: the wallet pick, disclosed, with the sibling one toggle away', () => {
   it('USD defaults to ckUSDC with fee facts + own addresses; single-rail CHF has no disclosure', async () => {
     const m = await onboardWallet('jest-rails');

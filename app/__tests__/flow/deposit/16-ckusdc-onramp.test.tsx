@@ -13,7 +13,8 @@
  *      with the right contracts + selectors, and the deposit targets the USER principal with the
  *      default (all-zero) subaccount.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertIncludes, DpayCore, onboardWallet, openBalances,
   openReceiveAddress, selectCurrency,
@@ -44,7 +45,7 @@ function installMockProvider(chainIdHex: string, receiptStatus: string): {calls:
   return {calls};
 }
 
-describe('flow 16 — ckUSDC onramp: wrong-network guard, honest revert, byte-exact calldata', () => {
+hermeticDescribe('flow 16 — ckUSDC onramp: wrong-network guard, honest revert, byte-exact calldata', () => {
   it('connect → enter → approve → deposit against a mock Ethereum wallet', async () => {
     // === Scenario 1: WRONG-NETWORK GUARD (Polygon 0x89) ========================================
     let mock = installMockProvider('0x89', '0x1');
