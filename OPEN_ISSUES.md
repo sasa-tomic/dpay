@@ -87,6 +87,19 @@
 
 ## NEXT SESSION — work order
 
+- **CHAIN route: the deposit broadcast never reaches Solana (filed 2026-09-29, value 9, effort M).**
+  The any-pair chain row (`chain:sideshift-eurc:icpswap`, EURC→VCHF via ICP) freezes order +
+  verbatim locked settle correctly and signs the SPL deposit, but TWO consecutive live attempts
+  (prod relay, real float) left NO signature on chain (`getSignatureStatuses` null with history
+  search; rail EURC measured unchanged through every attempt; orders expired unfunded, zero
+  value at risk — ledger row 205, dead-end log in `docs/live-testing/networks.md`). The record
+  flips to `stuck` ~2 min post-CTA with the POOL's copy on a legs=[] chain phase-1 record
+  (mislabeled line). The relay's solana pipe answered 200 from curl in the same window, so the
+  suspect is between the chain executor's submit and the wire (silent pre-broadcast failure,
+  e.g. a rejected/refused sendTransaction swallowed by the executor's unknown-outcome path).
+  Drivers: `e2e/live-d32-p2.mjs` reproduces; `e2e/live-d32.mjs` (phase 1, ICP→EURC) is the
+  working control. Fix + one live funds-ledgered trip before any "supported" claim (D31 rule).
+
 **GOAL (filed 2026-09-28): 2-tap swaps between ANY two supported currencies.**
 Spec: `docs/specs/2026-09-28-any-to-any-swap-goal.md`. The two-tap sheet is live (flow 213);
 the gap is breadth: venue pairs are hand-registered, EVM-token destinations have no adapter,

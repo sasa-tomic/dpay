@@ -102,23 +102,40 @@ memory).
   ETHEREUM directly beats the Arbitrum-first sketch: there is no Arbitrum ZCHF liquidity to
   bridge into, and mainnet gas is currently the same order as Arbitrum's.
 
-## Practical routes with the current float (2026-09-28)
+## Practical routes with the current float (2026-09-29, D32)
 
-- IC side (2026-09-28): ICP 0.5058 + VCHF 0.0302 + ckETH dust — BELOW the ICP→ETH venue minimum
-  (1.0037228 ICP), so the direct in-app funding shift is blocked until a ≥0.6 ICP top-up.
-- Solana app rail (2026-09-28): EURC 21.121347 + USDC 0.829 + **SOL 0.001702955 — below the
-  ~0.002039 SOL venue-deposit ATA rent**, which blocks every CeFi deposit handoff from this rail
-  (see the dead-end log). EURC value is ample; the wall is SOL dust only.
-- EVM rail (2026-09-28): ETH 0 / ZCHF 0 on both chains (rows render live, balances poll through
-  the relay pipe). The D31 leg scripts are ready and waiting on the float unblock above.
-- Composed VCHF->EURC (flagship): LIVE-PROVEN 2026-09-27 after the founder credential deploy.
-  Leg 1 two-tap 4.5 ICP -> 11.69465451 VCHF via icpswap (quote 11.69475451 verbatim, minus the
-  0.0001 output fee); the CeFi completion ran through the direct sideshift-eurc surface
-  (in-app order -> exact deposit -> payout watch) after the driver's browser context died
-  mid-flow: 12.422931 EURC = the verbatim quote to the last digit, EURC float 8.698 -> 21.121,
-  reconcile CLEAN. Full evidence in funds/ledger.jsonl rows 156-164.
+- **D32 (2026-09-29) — the SELF-FUNDED round trip, founder-authorized ("use the existing float").**
+  Phase 1 ICP→EURC: DONE + verified end to end. In-app Convert on the ICP row (cross-rail cefi
+  `sideshift-eurc`), Max-net prefill 3.20421219 ICP, review verbatim ("Quote from SideShift,
+  fetched 7:11 AM", ≈9.23 EURC, payout = the float SOL rail shown on-screen), ONE consent, then
+  the honest CeFi handoff: the deposit is the user's own IC send (block 38678542, exact amount,
+  fee 0.0001). Venue settled in ~2 min: shift `293f9f3d562dd23e943e`, 9.273976 EURC = the locked
+  settleAmount to the last digit (payout `FgBxRYpF…cDx`), rail 1.621347 → 10.895323, record done,
+  reconcile CLEAN. Ledger rows 202-206.
+  Phase 2 EURC→ICP→VCHF (the NEW chain row `chain:sideshift-eurc:icpswap`): BLOCKED by a real
+  defect — see the dead-end log + OPEN_ISSUES. Two consecutive attempts: order created (verbatim
+  locked settle 2.98010364 / 2.96580455 ICP, settle = float IC account verified on-screen), the
+  SPL deposit signed — and the broadcast NEVER reaches Solana (getSignatureStatuses null with
+  history search for both sigs; rail EURC measured 10.895323 unchanged through every attempt;
+  the relay's solana pipe answers 200 from curl). Orders expired unfunded; ZERO value at risk.
+- Venue minimums FLOAT with the rate (EURC→ICP: 8.789539 at plan time → 8.807226 ~70 min later);
+  an "exact minimum" deposit is un-hittable — size min + ~2% headroom.
+- IC side (2026-09-29 after D32 phase 1): ICP 0 + VCHF 0.0302 + ckETH dust. Solana rail:
+  EURC 10.895323 + USDC 0.829 + SOL 0.0146 (covers the ~0.00204 ATA rent).
 
 ## Dead-end log (do not re-search before last-checked + 24h)
+
+- **2026-09-29 — the CHAIN route's deposit broadcast never reaches Solana (OPEN, filed in
+  OPEN_ISSUES).** Two consecutive in-app attempts on `chain:sideshift-eurc:icpswap` (EURC→VCHF
+  via ICP, prod relay, real float): the record freezes correctly (order first, verbatim locked
+  settle, settle = the user's own IC account verified on-screen), signs the SPL deposit — and
+  nothing lands: `getSignatureStatuses` null (history-searched) for sigs `5YbxaMGz…kpQS` and
+  `2voWTQ6Y…GNux`, rail EURC measured unchanged (10.895323) through every attempt, ICP/VCHF
+  unchanged, orders expired unfunded at the venue (refund address = the user's own rail; nothing
+  to refund). The relay's own solana pipe answers 200 from curl in the same window. The record
+  flips to `stuck` ~2 min post-CTA with the POOL's copy ("the pool's answer did not arrive") on
+  a legs=[] chain phase-1 record — mislabeled state line (cosmetic twin of the defect). Drivers:
+  `e2e/live-d32.mjs` (phase 1, works) / `e2e/live-d32-p2.mjs` (phase 2, reproduces).
 
 - **2026-09-28 — the leg-1 rent wall was SELF-FUNDED AWAY the same day (resolved).** The 1.5-EURC→SOL
   in-app convert took the rail from 0.0017 to 0.0161 SOL without needing the feared taker WSOL ATA
