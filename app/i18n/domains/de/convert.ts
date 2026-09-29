@@ -268,6 +268,8 @@ export const convertDe: ConvertMessages = {
     noQuoteTitle: 'Gerade kein Markt für dieses Paar',
     noQuoteBody: venue =>
       `${venue} listet dieses Paar, hat aber gerade keinen Live-Markt. Nichts wurde gesendet. Wähle einen anderen Handelsplatz oder versuche es später erneut.`,
+    minDepositBody: (venue, venueMessage, min) =>
+      `${venue} hat diesen Betrag abgelehnt: „${venueMessage}“ (Mindesteinzahlung: ${min}). Nichts wurde gesendet. Erhöhe den Betrag und versuche es erneut.`,
   },
 
   /** Die Chain-Familie (2026-09-28, der Any-Pair-Auftrag): eine Einwilligung, zwei Phasen —
@@ -360,7 +362,7 @@ export const convertDe: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: venue => `Der Kurs von ${venue} war nicht abrufbar — das Relay antwortet nicht. Prüfe deine Verbindung und versuche es erneut.`,
+    quoteUnreachable: venue => `Der Kurs von ${venue} war über dpays Relay nicht abrufbar. Nichts wurde gesendet. Wenn deine Verbindung steht, ist das Relay oder ${venue} kurz nicht verfügbar. Versuche es gleich erneut.`,
     quoteRefused: venue => `${venue} hat abgelehnt, für dieses Paar gerade einen Kurs zu liefern.`,
     buildRefused: venue => `${venue} konnte den Tausch gerade nicht vorbereiten. Nichts wurde bewegt. Erneut versuchen.`,
     quoteUnavailable: code => `Kurs nicht verfügbar (${code}).`,
