@@ -376,6 +376,15 @@ export function ConvertIntentSheet({
   const jupQuoteAmts = useRef<Record<string, string>>({});
   const [hubBundles, setHubBundles] = useState<Record<string, HubBundle>>({});
   const hubBundleAmts = useRef<Record<string, string>>({});
+  // The live typed text's raw amount (normalization identical to the amt refs). The refresh tick
+  // reads it to skip quotes whose amount the user already superseded: the typed effect replaces
+  // those anyway, and refreshing the captured one wastes venue traffic on a result the
+  // late-echo guard always drops.
+  const liveAmtRef = useRef('');
+  useEffect(() => {
+    const parsed = parseUserAmount(amountText, inDecimals);
+    liveAmtRef.current = parsed.ok ? parsed.raw : '';
+  }, [amountText, inDecimals]);
   const [composedBundles, setComposedBundles] = useState<Record<string, ComposedBundle>>({});
   const composedBundleAmts = useRef<Record<string, string>>({});
   const [chainBundles, setChainBundles] = useState<Record<string, ChainBundle>>({});
@@ -595,10 +604,16 @@ export function ConvertIntentSheet({
           for (const r of staleIc) {
             const q = rowQuotes[r.rowId];
             if (q == null) continue;
+            // The user may have re-typed while this cycle ran: the store now holds a NEWER
+            // amount's quote — refreshing the CAPTURED one would overwrite it (the classic
+            // late-echo). Skip; the next tick re-reads the live map.
+            if (rowQuoteAmts.current[r.rowId] !== q.amountIn) continue;
+            if (liveAmtRef.current !== q.amountIn) continue; // superseded amount — the typed effect owns it
             const fresh = r.kind === 'crossrail'
               ? await fetchConvertQuote(relayUrl, r.route.from.ledger, r.route.hop.ledger, q.amountIn, {venue: venueOfId(r.route.swapVenueId) ?? undefined})
               : await fetchConvertQuote(relayUrl, r.inLedger, r.outLedger, q.amountIn, {venue: r.venue});
             if (!mountedRef.current) return;
+            if (rowQuoteAmts.current[r.rowId] !== q.amountIn) continue; // re-typed mid-refresh
             setRowQuotes(prev => ({...prev, [r.rowId]: fresh}));
             if (activeRowId === r.rowId && fresh.amountOutGross !== q.amountOutGross) {
               setMoved({oldAmt: q.amountOutGross, newAmt: fresh.amountOutGross});
@@ -607,9 +622,12 @@ export function ConvertIntentSheet({
           for (const r of staleJup) {
             const q = jupQuotes[r.rowId];
             if (q == null) continue;
+            if (jupQuoteAmts.current[r.rowId] !== q.inAmount) continue; // re-typed before this cycle
+            if (liveAmtRef.current !== q.inAmount) continue; // superseded amount — the typed effect owns it
             const res = await fetchJupiterQuote(relayUrl, r.venue, r.inMint, r.outMint, q.inAmount, slippageBps);
             if (!mountedRef.current) return;
             if (res.ok) {
+              if (jupQuoteAmts.current[r.rowId] !== q.inAmount) continue; // re-typed mid-refresh
               setJupQuotes(prev => ({...prev, [r.rowId]: res.quote}));
               if (activeRowId === r.rowId && res.quote.outAmount !== q.outAmount) {
                 setMoved({oldAmt: q.outAmount, newAmt: res.quote.outAmount});
@@ -619,8 +637,11 @@ export function ConvertIntentSheet({
           for (const r of staleHub) {
             const b = hubBundles[r.rowId];
             if (b == null) continue;
+            if (hubBundleAmts.current[r.rowId] !== b.q1.amountIn) continue; // re-typed before this cycle
+            if (liveAmtRef.current !== b.q1.amountIn) continue; // superseded amount — the typed effect owns it
             const got = await fetchHubQuotes(relayUrl, r.route, b.q1.amountIn, inFee, slippageBps);
             if (!mountedRef.current) return;
+            if (hubBundleAmts.current[r.rowId] !== b.q1.amountIn) continue; // re-typed mid-refresh
             setHubBundles(prev => ({...prev, [r.rowId]: got}));
             if (activeRowId === r.rowId
               && (got.q1.amountOutGross !== b.q1.amountOutGross || got.q2.amountOutGross !== b.q2.amountOutGross)) {

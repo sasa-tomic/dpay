@@ -131,6 +131,9 @@ hermeticDescribe('flow 183 — the pair-scoped ICPSwap venues (ckUSDC, ckETH) ar
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
       expect(m.driver.isPresent('convert-venue-none')).toBe(false);
       await m.driver.click('convert-details', {timeoutMs: 5_000});
+      // The ckETH pool venue resolves async over the relay (seconds under lane load); until it
+      // commits, venue-none is ALSO absent — absence proves nothing. Poll for the pool line.
+      expect(await m.driver.waitForText(CKETH_POOL, {timeoutMs: 15_000})).toBe(true);
       expect(m.driver.readText('convert-pool-principal').trim()).toBe(CKETH_POOL);
       assertIncludes(m.driver.readText('convert-counterparty'), 'ICPSwap', 'the ckETH counterparty is attributed to ICPSwap');
       const oracleEth = await relayQuote(CKETH_POOL, CKETH_LEDGER, ICP_LEDGER, 2000000000000000n);
