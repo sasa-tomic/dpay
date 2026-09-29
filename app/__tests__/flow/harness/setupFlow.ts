@@ -193,6 +193,7 @@ type FetchG = {
   __DPAY_FLOW_FETCH_SHIM__?: boolean;
   __DPAY_FLOW_FETCH_RECORDS__?: FetchRecord[];
   __DPAY_FLOW_ALLOWED_DEAD_ORIGINS__?: Set<string>;
+  __DPAY_FLOW_INFLIGHT__?: Map<string, number>;
 };
 const fg = globalThis as unknown as FetchG;
 const fetchRecords: FetchRecord[] = (fg.__DPAY_FLOW_FETCH_RECORDS__ ??= []);
@@ -219,16 +220,25 @@ if (!fg.__DPAY_FLOW_FETCH_SHIM__) {
     const trace = process.env.DPAY_FLOW_FETCH_TRACE === '1';
     const t0 = trace ? Date.now() : 0;
     const w = trace ? (process.stderr as {write: (s: string) => void}).write.bind(process.stderr) : null;
+    // In-flight census: the stall trap reads this at wait expiry — "the app is waiting on the
+    // relay" (entries present) vs "the app is idle" (empty) splits the diagnosis in half.
+    const inflight = (fg.__DPAY_FLOW_INFLIGHT__ ??= new Map<string, number>());
+    inflight.set(url, (inflight.get(url) ?? 0) + 1);
+    let res: Response;
     try {
-      const res = await realFetch(target, init);
+      res = await realFetch(target, init);
       if (recordable) fetchRecords.push({url, origin: originOf(url), ok: res.ok, status: res.status});
       if (w) w(`[FETCH ${Date.now() - t0}ms ${res.status} ${url.slice(0, 140)}]\n`);
-      return res;
     } catch (e) {
       if (recordable) fetchRecords.push({url, origin: originOf(url), ok: false, status: 0, error: e instanceof Error ? e.message : String(e)});
       if (w) w(`[FETCH ${Date.now() - t0}ms THROW ${String(e instanceof Error ? e.message : e).slice(0, 60)} ${url.slice(0, 120)}]\n`);
+      const leftE = (inflight.get(url) ?? 1) - 1;
+      if (leftE <= 0) inflight.delete(url); else inflight.set(url, leftE);
       throw e;
     }
+    const left = (inflight.get(url) ?? 1) - 1;
+    if (left <= 0) inflight.delete(url); else inflight.set(url, left);
+    return res;
   }) as typeof fetch;
 } else {
   // A later-registry load must not downgrade the probe channel either (it is already installed).

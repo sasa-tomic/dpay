@@ -30,6 +30,62 @@ function windowOf(opts: WaitOpts, fallbackMs: number): number {
   return opts.unscaled === true ? base : budgetScaled(base);
 }
 
+// --- the stall trap: render-level evidence at wait expiry ---------------------------------------
+// A failing full-run wait used to be diagnosed blind: the app was SILENT (no warns, no transport
+// failures, relay healthy) and the only datum was the expired window. This trap fires exactly at
+// expiry (never on a green path) and dumps the evidence the next diagnostic needs:
+//   [TRAP]      the predicate, whether the body text changed AT ALL during the wait, the live
+//               mount count, in-flight fetches (the app waiting on the relay vs idle) and the
+//               event-loop resource census;
+//   [TRAP-TREE] the rendered structure — component type, testID, disabled/aria flags and inline
+//               text — i.e. WHICH surface/phase the app is actually showing (loading spinner?
+//               error line? previous screen?).
+type InflightG = {__DPAY_FLOW_INFLIGHT__?: Map<string, number>; __DPAY_FLOW_ACTIVE_MOUNTS__?: unknown[]};
+const RESOURCES = (process as unknown as {getActiveResourcesInfo?: () => string[]}).getActiveResourcesInfo;
+
+function trapOnExpiry(treeRef: {current: renderer.ReactTestRenderer | null}, what: string, bodyBefore: string): void {
+  let lines: string[] = [];
+  try {
+    const t = treeRef.current;
+    if (t) dumpTree(t.root, lines, 0, {n: 160});
+  } catch { /* unmounted mid-read */ }
+  const g = globalThis as unknown as InflightG;
+  const inflight = [...(g.__DPAY_FLOW_INFLIGHT__?.entries() ?? [])];
+  const bodyAfter = (() => { try { const t = treeRef.current; if (!t) return '<no tree>'; const found: string[] = []; const walk = (n: Node): void => { for (const c of n.children) { if (typeof c === 'string') found.push(c); else walk(c); } }; walk(t.root); return found.join(''); } catch { return '<no tree>'; } })();
+  const mounts = g.__DPAY_FLOW_ACTIVE_MOUNTS__?.length ?? 0;
+  const res = RESOURCES?.() ?? [];
+  const byRes: Record<string, number> = {};
+  for (const r of res) byRes[r] = (byRes[r] ?? 0) + 1;
+  (process.stderr as {write: (s: string) => void}).write(
+    `[TRAP] ${what} — bodyChanged=${bodyAfter !== bodyBefore} mounts=${mounts} ` +
+    `inflight=${inflight.reduce((a, [, c]) => a + c, 0)} ` +
+    `(${inflight.slice(0, 5).map(([u, c]) => `${u}:${c}`).join(' ') || '-'}) res=${JSON.stringify(byRes)}\n` +
+    `[TRAP] body(head 300): ${JSON.stringify(bodyAfter.slice(0, 300))}\n` +
+    lines.map((l) => `[TRAP-TREE]${l}\n`).join(''),
+  );
+}
+
+function dumpTree(node: Node, out: string[], depth: number, cap: {n: number}): void {
+  if (depth > 14 || out.length >= cap.n) return;
+  const props = (node.props ?? {}) as Record<string, unknown>;
+  const type = typeof node.type === 'string' ? node.type : ((node.type as {name?: string} | null)?.name ?? 'anon');
+  const bits: string[] = [];
+  if (props.testID) bits.push(`testID=${String(props.testID)}`);
+  if (props.placeholder) bits.push(`ph=${String(props.placeholder)}`);
+  if (props.value != null && props.onChangeText) bits.push(`value=${String(props.value).slice(0, 30)}`);
+  if (props['aria-disabled'] === true) bits.push('aria-disabled');
+  if (props.disabled === true) bits.push('disabled');
+  if (props.accessibilityState && typeof props.accessibilityState === 'object') {
+    const st = props.accessibilityState as Record<string, unknown>;
+    for (const k of ['disabled', 'checked', 'selected']) if (st[k] === true) bits.push(k);
+  }
+  let text = '';
+  for (const c of node.children) if (typeof c === 'string') text += c;
+  if (text) bits.push(JSON.stringify(text.slice(0, 80)));
+  out.push(`${'  '.repeat(depth)}<${type}${bits.length ? ' ' + bits.join(' ') : ''}>`);
+  for (const c of node.children) if (typeof c !== 'string') dumpTree(c, out, depth + 1, cap);
+}
+
 export class Driver {
   /** Rebound by mount.tsx on every mount/remount — the driver outlives single trees. */
   private treeRef: {current: renderer.ReactTestRenderer | null} = {current: null};
@@ -63,10 +119,12 @@ export class Driver {
   async findByTestID(testID: string, opts: WaitOpts = {}): Promise<Node> {
     const timeoutMs = windowOf(opts, 5_000);
     const deadline = Date.now() + timeoutMs;
+    const bodyBefore = this.bodyText();
     for (;;) {
       const hits = this.findAllByTestID(testID);
       if (hits.length > 0) return hits[0];
       if (Date.now() > deadline) {
+        trapOnExpiry(this.treeRef, `findByTestID(${testID}) expired after ${timeoutMs}ms`, bodyBefore);
         throw new Error(`[driver] element testID=${testID} not found within ${timeoutMs}ms`);
       }
       await sleep(10);
@@ -170,9 +228,13 @@ export class Driver {
   async waitForText(text: string, opts: WaitOpts = {}): Promise<boolean> {
     const timeoutMs = windowOf(opts, 5_000);
     const deadline = Date.now() + timeoutMs;
+    const bodyBefore = this.bodyText();
     for (;;) {
       if (this.bodyText().includes(text)) return true;
-      if (Date.now() > deadline) return false;
+      if (Date.now() > deadline) {
+        trapOnExpiry(this.treeRef, `waitForText(${JSON.stringify(text.slice(0, 60))}) expired after ${timeoutMs}ms`, bodyBefore);
+        return false;
+      }
       await sleep(10);
     }
   }
@@ -182,9 +244,11 @@ export class Driver {
   async waitForFunction(fn: () => unknown, opts: WaitOpts = {}): Promise<void> {
     const timeoutMs = windowOf(opts, 5_000);
     const deadline = Date.now() + timeoutMs;
+    const bodyBefore = this.bodyText();
     for (;;) {
       if (Boolean(fn())) return;
       if (Date.now() > deadline) {
+        trapOnExpiry(this.treeRef, `waitForFunction(${opts.label ?? '(unlabelled)'}) expired after ${timeoutMs}ms`, bodyBefore);
         throw new Error(`[driver] condition never held within ${timeoutMs}ms: ${opts.label ?? '(unlabelled)'}`);
       }
       await sleep(10);
@@ -194,9 +258,11 @@ export class Driver {
   async waitGone(testID: string, opts: WaitOpts = {}): Promise<void> {
     const timeoutMs = windowOf(opts, 3_000);
     const deadline = Date.now() + timeoutMs;
+    const bodyBefore = this.bodyText();
     for (;;) {
       if (this.findAllByTestID(testID).length === 0) return;
       if (Date.now() > deadline) {
+        trapOnExpiry(this.treeRef, `waitGone(${testID}) expired after ${timeoutMs}ms`, bodyBefore);
         throw new Error(`[driver] testID=${testID} still present after ${timeoutMs}ms`);
       }
       await sleep(10);
