@@ -13,7 +13,8 @@ payment code reads this first and updates it with findings in the SAME session.
    24h old. Found: document it, then use it. Not found: mainnet at the smallest allowed amount,
    and append the dead end to the log with the date.
 3. **Real money.** The agent float is REAL money: float policy lives in `CLAUDE.md` (CHF 25
-   ceiling, <=CHF 2 auto-spend, smallest amount the platform allows, never retry failed or
+   ceiling, no per-operation spend limit — the <=CHF 2 auto-spend line was dropped 2026-09-29;
+   report any loss URGENTLY; smallest amount the platform allows; never retry failed or
    abnormally-slow transfers). Measure, never assume: `just funds`. AI agents MUST USE `just funds`
    to record ANY MOVEMENTS THEY MAKE (HARD HARD RULE) — `just funds add` appends to
    `funds/ledger.jsonl`, `just funds doc` re-renders.

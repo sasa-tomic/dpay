@@ -179,13 +179,20 @@ mechanism is proven and a larger size is itself the thing under test.
   evidence. `UNREADABLE` is not zero.
 - **Ceiling: CHF 25 equivalent.** Claude never asks for or accepts more than this in the float, and
   never tops it up itself. Everything below is affordable *because* of the cap.
-- **Spend without asking only when ALL hold:** ≤ CHF 2 equivalent in one operation; the destination
-  was validated by the core (`icp_validate_principal` / `icp_validate_icrc_account`); the purpose is
-  a stated verification that cannot be done offline; and the spend is recorded through the funds
-  tooling (`just funds add …` — the hard rule below).
-- **Ask the founder first for:** anything above CHF 2, the first payment to any new counterparty
-  (each new merchant/checkout counts), anything that would empty the float, and any spend whose outcome
-  Claude cannot check afterwards.
+- **Spend without asking only when ALL hold:** the destination was validated by the core
+  (`icp_validate_principal` / `icp_validate_icrc_account`); the purpose is a stated verification that
+  cannot be done offline; and the spend is recorded through the funds tooling (`just funds add …` —
+  the hard rule below). (2026-09-29, founder: "Drop the CHF 2 limit. Not a requirement as long as
+  funds are NOT LOST." — there is NO per-operation amount limit anymore; the CHF 25 float ceiling and
+  the other conditions still bind.)
+- **Report any LOSS URGENTLY (2026-09-29).** The moment float value becomes unrecoverable — a
+  transfer that cannot be traced or recovered, a venue that took funds without paying out, a lost
+  key, any unreconciled delta — tell the founder IMMEDIATELY, mid-session, before attempting further
+  recovery or writing it up. Never wait for the final report; never fix quietly first. A near-miss
+  where every unit was traced or recovered is documented in the ledger, not escalated as a loss.
+- **Ask the founder first for:** the first payment to any new counterparty (each new merchant/checkout
+  counts), anything that would empty the float, and any spend whose outcome Claude cannot check
+  afterwards.
 - **Never:** sign anything Claude cannot explain in full; send to an address that failed core
   validation; reuse this seed as any other identity; put it in an APK, a screenshot, a test fixture,
   or a subagent prompt; or print the seed except immediately before an approved spend.
@@ -242,9 +249,11 @@ happens in the final report after a documented skip, never as a mid-session stal
   `DPAY_LIVE_CAP_CHF`) that uses the agent float, refuses to run without a cap set, and ledgers
   every movement through the funds tooling. The opt-in mode is never part of `just verify` /
   `just check` (`test-live` remains read-only API testing; it moves nothing).
-- **All float rules apply unchanged**: CHF 25 ceiling, ≤CHF 2 auto-spend, no retries of failed or
-  abnormally-slow transfers, ledger every movement. Adversarial = stale quotes, expired venue
-  windows, refused/too-small amounts, wrong-namespace addresses, interrupted-and-resumed flows —
+- **All float rules apply unchanged**: CHF 25 ceiling, no per-operation spend limit (the ≤CHF 2
+  auto-spend line was dropped 2026-09-29; losses are reported to the founder URGENTLY instead), no
+  retries of failed or abnormally-slow transfers, ledger every movement. Adversarial = stale quotes,
+  expired venue windows, refused/too-small amounts, wrong-namespace addresses,
+  interrupted-and-resumed flows —
   proven live only where the venue or chain itself produces the refusal; never by spamming orders
   or retrying failures.
 - **The attempt is delegated, with a mandate to unblock.** The main loop spawns a dedicated
