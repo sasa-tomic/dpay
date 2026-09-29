@@ -14,7 +14,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {
-  accountOf, assert, assertDisabled, assertEq, assertIncludes, faucetAccount, getBalance,
+  accountOf, assert, assertDisabled, assertEq, assertIncludes, clipboardAfterCopy, faucetAccount, getBalance,
   onboardWallet, openBalances, selectCurrency, openPaySend,
 } from '../harness/lib';
 
@@ -66,7 +66,7 @@ describe('flow 15 — withdraw ckBTC to a native BTC address', () => {
     expect(g.__DPAY_TEST_CLIPBOARD as string).toBe('');
     await m.driver.click('btn-copy-destination', {timeoutMs: 4000});
     assert(await m.driver.waitForText('Copied', {timeoutMs: 4000}), 'Copied ✓');
-    expect(g.__DPAY_TEST_CLIPBOARD as string).toBe(BTC_ADDR);
+    expect(await clipboardAfterCopy()).toBe(BTC_ADDR);
 
     // UI balance delta: flip back to scan, re-open the accounts hub — 0.0004999 BTC remains.
     await m.driver.click('btn-pay-scan', {timeoutMs: 5000});
@@ -115,7 +115,7 @@ describe('flow 44 — withdraw native ckETH to a 0x address (withdraw_eth branch
     assertEq(m.driver.readText('withdraw-destination'), ETH_ADDR, 'destination rendered');
     await m.driver.click('btn-copy-destination', {timeoutMs: 4000});
     assert(await m.driver.waitForText('Copied', {timeoutMs: 4000}), 'Copied ✓');
-    expect(g.__DPAY_TEST_CLIPBOARD as string).toBe(ETH_ADDR);
+    expect(await clipboardAfterCopy()).toBe(ETH_ADDR);
 
     await m.driver.click('btn-pay-scan', {timeoutMs: 5000});
     await openBalances(m);

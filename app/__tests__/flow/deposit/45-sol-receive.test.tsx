@@ -10,7 +10,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {
-  assert, assertEq, assertIncludes, armPayScan, onboardWallet, openBalances, selectCurrency,
+  assert, assertEq, assertIncludes, armPayScan, onboardWallet, openBalances, selectCurrency, clipboardAfterCopy,
 } from '../harness/lib';
 
 const g = globalThis as unknown as Record<string, unknown>;
@@ -75,7 +75,7 @@ describe('flow 45 — SOL receive: derived address, Solana Pay QR, hooks-safe to
     assertEq(g.__DPAY_TEST_CLIPBOARD, '', 'clipboard seam should be empty before SOL copy');
     await m.driver.click('btn-sol-receive-copy', {timeoutMs: 5_000});
     await m.driver.waitForText('Copied', {timeoutMs: 4_000});
-    assertEq(g.__DPAY_TEST_CLIPBOARD, address, 'clipboard seam after SOL copy should equal the derived address');
+    assertEq(await clipboardAfterCopy(), address, 'clipboard seam after SOL copy should equal the derived address');
 
     // 6. Pay tab parity: the SOL "Send to address" toggle exists (uniform with IC).
     await m.driver.click('tab-pay', {timeoutMs: 5_000});

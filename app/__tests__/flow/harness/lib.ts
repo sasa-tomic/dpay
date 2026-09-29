@@ -400,6 +400,23 @@ export async function assertScannerMounted(m: Mount, label = 'scan screen'): Pro
   assert(count > 0, `QrScanner must be mounted on ${label} (listeners=${count}); the scanner component failed to render.`);
 }
 
+/**
+ * The clipboard seam AFTER pressing a copy affordance. The app's copy handler is async (an
+ * un-awaited `copyToClipboard` whose recorder write lands a microtask late), so an IMMEDIATE
+ * read races it and loses on a starved worker (observed 2026-09-29: five suites red in-run,
+ * every one green alone, all with `''` at the read). Positive transition → budget-scaled window.
+ */
+export async function clipboardAfterCopy(opts: {timeoutMs?: number} = {}): Promise<string> {
+  const gg = globalThis as unknown as Record<string, unknown>;
+  const end = budgetDeadline(opts.timeoutMs ?? 5000);
+  for (;;) {
+    const v = String(gg.__DPAY_TEST_CLIPBOARD ?? '');
+    if (v.length > 0) return v;
+    if (Date.now() > end) return v;
+    await sleep(50);
+  }
+}
+
 export async function waitForScanner(m: Mount, opts: {timeoutMs?: number} = {}): Promise<void> {
   await armPayScan(m, opts);
 }

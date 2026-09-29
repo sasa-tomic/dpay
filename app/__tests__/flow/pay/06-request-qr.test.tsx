@@ -9,7 +9,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {
-  accountOf, assertEq, DpayCore, onboardSlowPath, selectDemoAsset, waitForWallet,
+  accountOf, assertEq, clipboardAfterCopy, DpayCore, onboardSlowPath, selectDemoAsset, waitForWallet,
 } from '../harness/lib';
 import {mountApp} from '../harness/mount';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -103,7 +103,7 @@ describe('flow 06 — request QR: the link IS the code, Share agrees, the radio 
     // harness's Share recorder (__DPAY_TEST_CLIPBOARD, the seam spec 1.2 names).
     g.__DPAY_TEST_CLIPBOARD = '';
     await m.driver.click('btn-share-request', {timeoutMs: 5000});
-    const shared = g.__DPAY_TEST_CLIPBOARD as string;
+    const shared = await clipboardAfterCopy();
     expect(shared.length).toBeGreaterThan(0);
     assertEq(shared, qrValue, 'Share must carry the SAME string the QR renders');
 

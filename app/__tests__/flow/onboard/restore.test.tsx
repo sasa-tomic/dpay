@@ -11,7 +11,7 @@
  */
 import {describe, it, expect} from '@jest/globals';
 import {
-  accountOf, assertEq, chooseHomeCurrencyIfPresent, skipPracticeIfPresent,
+  accountOf, assertEq, chooseHomeCurrencyIfPresent, clipboardAfterCopy, skipPracticeIfPresent,
   skipWalkthroughIfPresent, waitForEnabled, waitForWallet,
 } from '../harness/lib';
 import {mountApp} from '../harness/mount';
@@ -76,7 +76,7 @@ describe('flow 68 — mnemonic-backup-restore', () => {
     // 2b. Copy-words puts the PURE space-joined words on the clipboard — no position numbers.
     g.__DPAY_TEST_CLIPBOARD = '';
     await m.driver.click('btn-mnemonic-copy', {timeoutMs: 4000});
-    expect(String(g.__DPAY_TEST_CLIPBOARD)).toBe(words.join(' '));
+    expect(await clipboardAfterCopy()).toBe(words.join(' '));
 
     // Dismiss the backup → the wallet loads; capture the original publicHex.
     await m.driver.click('mnemonic-backup-checkbox', {timeoutMs: 4000});
