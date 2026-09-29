@@ -50,6 +50,13 @@ function write(level: string, parts: unknown[]): void {
   const line = `${stamp()} ${level} ${parts.map(p => (p instanceof Error ? `${p.message}` : typeof p === 'string' ? p : safeJson(p))).join(' ')}`;
   buffer.push(line);
   if (buffer.length > BUFFER_MAX) buffer.shift();
+  // A bounded GLOBAL tail beside the per-registry buffer: the jest flow harness's lifecycle and
+  // the app live in different module registries, so only globalThis is shared — the probe reads
+  // this tail after every test to explain a failure with the app's own words. Same content as
+  // `buffer`, same cap, nothing a user flow reads.
+  const tail = (globalThis as {__DPAY_LOG_TAIL?: string[]}).__DPAY_LOG_TAIL ??= [];
+  tail.push(line);
+  if (tail.length > 500) tail.shift();
   // Fire-and-forget. NOT awaited anywhere, by design: a payment must never wait on a log write, and
   // a rejected promise here must never surface as an unhandled rejection on the money path.
   try {

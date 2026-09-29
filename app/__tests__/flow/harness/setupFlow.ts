@@ -557,6 +557,7 @@ export function installFlowLifecycle(): void {
         healthMs,
         fetchFails: undeclaredNow.length,
         firstFail: undeclaredNow.length > 0 ? `${undeclaredNow[0].url} — ${undeclaredNow[0].error}` : '',
+        logTail: (g as unknown as {__DPAY_LOG_TAIL?: string[]}).__DPAY_LOG_TAIL?.slice(-12).map((l) => l.slice(0, 150)) ?? [],
         clipWrite: clip === undefined || clip.writeText === undefined ? 'absent' : String(clip.writeText).replace(/\s+/g, ' ').slice(0, 110),
         shareRecorder: share?.__dpayFlowRecorder === true,
         nfcListeners: countOf('__DPAY_TEST_NFC_COUNT'),
