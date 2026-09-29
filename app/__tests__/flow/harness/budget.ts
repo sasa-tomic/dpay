@@ -35,6 +35,9 @@
  * false reds — the expensive failure (e2e/run.mjs's doctrine, same bias).
  */
 /** The 1-min load average, /proc first (exact), os.loadavg() as the portable fallback. */
+type BudgetG = {__DPAY_FLOW_BUDGET_BASE_FACTOR__?: number};
+const g = globalThis as unknown as BudgetG;
+
 function load1(): number {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -81,13 +84,16 @@ export function budgetMult(): number {
     const n = Number(env);
     if (Number.isFinite(n) && n >= 1) return Math.min(n, 64);
   }
-  // HERMETIC MODE: 1. The tier no longer shares a relay or a worker's world across files, so
-  // there is no cross-file load wave to absorb — the machine-level stretch (load/PSI) measured
-  // nothing the waits actually needed (a hermetic file's only contention is its own relay) and
-  // stretching waits only multiplied wall time while masking real stalls. A burst on the shared
-  // box now surfaces as a REAL red (the app's own timeouts fire) instead of a masked green.
-  // DPAY_TEST_BUDGET_MULT still overrides outright for deliberate experiments.
-  return 1;
+  // HERMETIC MODEL: the stretch is BACK, load/PSI-scaled as before. Hermeticity fixed the STATE
+  // (one relay + fresh world per file — no cross-file wave), but at high worker counts the box
+  // still runs hot (N full-app jest workers + N relays + everything else the shared box runs),
+  // and a 16-worker ×1 run failed 26 suites on pure scheduling starvation (bodyChanged both
+  // ways, healthy relays, zero transport failures). The load/PSI term measures exactly that.
+  // The hermetic fix and the stretch are ORTHOGONAL: state by construction, time by measurement.
+  const live = Math.max(factorOf(load1()), psiFactorOf(cpuPsiAvg10()));
+  const hw = Math.max(g.__DPAY_FLOW_BUDGET_BASE_FACTOR__ ?? 0, live);
+  g.__DPAY_FLOW_BUDGET_BASE_FACTOR__ = hw;
+  return hw;
 }
 
 /** Stretch a wait window by the budget multiplier (positive-transition ceilings only). */

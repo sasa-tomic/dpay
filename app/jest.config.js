@@ -75,7 +75,7 @@ module.exports = {
       // HERMETIC EXECUTION MODEL: files are self-contained (one private relay + fresh seams per
       // file, harness/hermetic.ts) — high worker counts are safe, and a worker recycle (the
       // workerIdleMemoryLimit below) cannot break a file, because nothing crosses files.
-      maxWorkers: '50%',
+      maxWorkers: '25%',
       workerIdleMemoryLimit: '2GB',
       // Jest's mocks record every call for the mock's lifetime — the whole FILE. Full-app flow
       // files mount 34 describes into ONE registry, and per-test render churn then accumulates
