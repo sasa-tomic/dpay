@@ -457,6 +457,22 @@ export function installFlowLifecycle(): void {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const {teardownFlowRelays} = require('./flowRelay') as {teardownFlowRelays: () => Promise<void>};
     await teardownFlowRelays();
+    // Undeclared transport failures are captured BEFORE the fail-closed assert so the STATE
+    // probe (below) can correlate them with the test's verdict — a failing assert otherwise
+    // masks exactly the record that would explain it.
+    const undeclaredNow = fetchRecords.filter((r) => r.error !== undefined && !/abort/i.test(r.error) && !allowedDeadOrigins.has(r.origin));
+    // Relay health latency: two raw round-trips. A degrading shared relay shows up here before
+    // it shows up as app-side timeouts.
+    let healthMs = -1;
+    if (process.env.DPAY_FLOW_STATE_PROBE === '1') {
+      const probe = (g as unknown as {__DPAY_TEST_RAW_FETCH?: typeof fetch}).__DPAY_TEST_RAW_FETCH;
+      if (probe) {
+        const t0 = Date.now();
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 2_000);
+        try { await probe(`${relayURL}/api/v1/health`, {signal: ctrl.signal}); healthMs = Date.now() - t0; } catch { healthMs = -1; } finally { clearTimeout(t); }
+      }
+    }
     // The e2e fail-closed rule: a test that let a fetch die without declaring it is RED, even green.
     assertNoUndeclaredFailures();
     fetchRecords.length = 0;
@@ -496,6 +512,9 @@ export function installFlowLifecycle(): void {
         gid: String((g as unknown as {__DPAY_GLOBAL_ID?: string}).__DPAY_GLOBAL_ID),
         clipDesc: descOf(g as Record<string, unknown>, '__DPAY_TEST_CLIPBOARD'),
         nav: nav === undefined ? 'absent' : Object.keys(nav).join('+'),
+        healthMs,
+        fetchFails: undeclaredNow.length,
+        firstFail: undeclaredNow.length > 0 ? `${undeclaredNow[0].url} — ${undeclaredNow[0].error}` : '',
         clipWrite: clip === undefined || clip.writeText === undefined ? 'absent' : String(clip.writeText).replace(/\s+/g, ' ').slice(0, 110),
         shareRecorder: share?.__dpayFlowRecorder === true,
         nfcListeners: countOf('__DPAY_TEST_NFC_COUNT'),
