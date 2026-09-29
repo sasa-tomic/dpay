@@ -791,7 +791,13 @@ pub extern "C" fn w_icp_decode_read_state(
     rids_ptr: u32, n_rids: u32,
     out_ptr: u32, cap: u32,
 ) -> u32 {
-    if !in_bounds(body_ptr, body_len) || body_len > 16384 {
+    // 64 KiB: real boundary-node certificates grow with canister state (delegations, big
+    // hashtrees) and are routinely tens of KB; 16 KiB rejected exactly the certificates a
+    // long-lived wallet sees, killing the certified clock (and with it every icStampExpiry
+    // consumer) from that point on (observed 2026-09-29: the flow tier's shared test relay
+    // crosses 16 KiB of accumulated request_status mid-run — every later read_state decoded
+    // as "this build cannot decode", one-shot consumers died, suites went red in waves).
+    if !in_bounds(body_ptr, body_len) || body_len > 65536 {
         return BAD_LEN;
     }
     if n_rids > 8 || !in_bounds(rids_ptr, n_rids * 32) {

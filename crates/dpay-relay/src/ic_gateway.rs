@@ -1654,10 +1654,16 @@ fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
             };
             req_trees.push(Tree::Labeled(rid.to_vec(), Box::new(inner)));
         }
-        let mut status_branch = req_trees.pop().unwrap_or(Tree::Empty);
-        while let Some(t) = req_trees.pop() {
-            status_branch = Tree::Fork(Box::new(t), Box::new(status_branch));
-        }
+        // BALANCED, not a chain: fold the per-request subtrees pairwise so the hashtree's DEPTH
+        // stays ~log2(n) over the entries — exactly how a real boundary node certifies state.
+        // The old right-leaning fold (`Fork(t, acc)` per entry) made depth = the number of
+        // requests this fake has EVER certified, and the shared flow relay's state only grows
+        // within a run: past a few hundred entries the app's recursive `icp_decode_read_state`
+        // overflowed its wasm stack ("wasm error code 1"), the certified clock died, and every
+        // `icStampExpiry` consumer (get_btc_address, transfers, approves) failed one-shot —
+        // the sequential mid-run red that hit whole families of suites while the relay itself
+        // stayed healthy (2026-09-29, full-run fetch-trace + console evidence).
+        let status_branch = balanced_status_fork(req_trees);
         let rs = Tree::Labeled(b"request_status".to_vec(), Box::new(status_branch));
         let time_leaf = Tree::Labeled(
             b"time".to_vec(),
@@ -1682,6 +1688,24 @@ fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
     cbor_response(StatusCode::OK, body)
 }
 
+/// Fold the per-request subtrees into ONE balanced fork so the certified tree's depth stays
+/// ~log2(n) over the entries (the real boundary node's shape). See the submit_read_state note.
+fn balanced_status_fork(req_trees: Vec<Tree>) -> Tree {
+    let mut level = req_trees;
+    while level.len() > 1 {
+        let mut paired: Vec<Tree> = Vec::with_capacity((level.len() + 1) / 2);
+        let mut it = level.into_iter();
+        while let (Some(a), Some(b)) = (it.next(), it.next()) {
+            paired.push(Tree::Fork(Box::new(a), Box::new(b)));
+        }
+        if let Some(last) = it.next() {
+            paired.push(last);
+        }
+        level = paired;
+    }
+    level.into_iter().next().unwrap_or(Tree::Empty)
+}
+
 /// GET `/api/v2/status` — minimal healthy response (the app only needs 200; ic:time comes
 /// from read_state, measured on the real boundary node too).
 pub async fn status() -> Response {
@@ -1697,4 +1721,75 @@ pub async fn status() -> Response {
         v
     };
     cbor_response(StatusCode::OK, body)
+}
+
+#[cfg(test)]
+mod certified_tree_shape {
+    use super::*;
+
+    fn tree_depth(t: &Tree) -> usize {
+        match t {
+            Tree::Empty | Tree::Leaf(_) => 1,
+            Tree::Labeled(_, inner) => 1 + tree_depth(inner),
+            Tree::Fork(a, b) => 1 + tree_depth(a).max(tree_depth(b)),
+            Tree::Pruned(_) => 1,
+        }
+    }
+
+    /// One request_status subtree, the same shape submit_read_state builds for a Replied call.
+    fn replied_entry(rid: [u8; 32]) -> Tree {
+        let reply_leaf = Cbor::Map(vec![(Cbor::Text("arg".into()), Cbor::Bytes(vec![1, 2, 3]))]);
+        let mut enc = Vec::new();
+        cbor_encode(&reply_leaf, &mut enc);
+        let inner = Tree::Fork(
+            Box::new(Tree::Labeled(b"status".to_vec(), Box::new(Tree::Leaf(b"replied".to_vec())))),
+            Box::new(Tree::Labeled(b"reply".to_vec(), Box::new(Tree::Leaf(enc)))),
+        );
+        Tree::Labeled(rid.to_vec(), Box::new(inner))
+    }
+
+    /// THE REGRESSION: the certified tree's depth must stay ~log2(n) as the fake's request
+    /// state grows over a run. The old right-leaning fork chain made depth = n; the app's
+    /// recursive `icp_decode_read_state` then overflowed its wasm stack mid-run and the
+    /// certified clock died for every later suite (2026-09-29 full-run red).
+    #[test]
+    fn certified_tree_stays_balanced_over_many_requests() {
+        let n = 600;
+        let entries: Vec<Tree> = (0u64..n)
+            .map(|i| {
+                let mut rid = [0u8; 32];
+                rid[..8].copy_from_slice(&i.to_be_bytes());
+                replied_entry(rid)
+            })
+            .collect();
+        let status = balanced_status_fork(entries);
+        // log2(600) ≈ 9.2 fork levels + the ≤4-level per-request subtree.
+        assert!(tree_depth(&status) <= 20, "certified tree depth {} for {n} requests — the app-side decoder traps on deep trees", tree_depth(&status));
+
+        // And the client side still reads it: the same body the fake serves must decode (the
+        // app runs this through the wasm twin) and answer both a known rid and the time leaf.
+        let tree = Tree::Fork(
+            Box::new(Tree::Labeled(b"request_status".to_vec(), Box::new(status))),
+            Box::new(Tree::Labeled(b"time".to_vec(), Box::new(Tree::Leaf(uleb_bytes(1_700_000_000_000_000_000u128))))),
+        );
+        let mut body = Vec::new();
+        cbor_encode(
+            &Cbor::Map(vec![(
+                Cbor::Text("certificate".into()),
+                Cbor::Bytes({
+                    let mut cert = Vec::new();
+                    cbor_encode(&Cbor::Map(vec![(Cbor::Text("tree".into()), tree_to_cbor(&tree))]), &mut cert);
+                    cert
+                }),
+            )]),
+            &mut body,
+        );
+        let decoded = dpay_icp::reply::decode_read_state_tree(&body).expect("a 600-request certified tree must decode");
+        let mut rid = [0u8; 32];
+        rid[..8].copy_from_slice(&123u64.to_be_bytes());
+        match dpay_icp::reply::request_status(&decoded, &rid).expect("known rid resolves") {
+            dpay_icp::reply::RequestStatus::Replied(arg) => assert_eq!(arg, vec![1, 2, 3]),
+            other => panic!("expected Replied, got {other:?}"),
+        }
+    }
 }
