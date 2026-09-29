@@ -69,6 +69,7 @@ function dumpTree(node: Node, out: string[], depth: number, cap: {n: number}): v
   if (depth > 24 || out.length >= cap.n) return;
   const props = (node.props ?? {}) as Record<string, unknown>;
   const type = typeof node.type === 'string' ? node.type : ((node.type as {name?: string} | null)?.name ?? 'anon');
+  if (type.startsWith('RNSVG') || type === 'Svg' || type === 'PressabilityDebugView') return; // icon internals drown the signal
   const bits: string[] = [];
   if (props.testID) bits.push(`testID=${String(props.testID)}`);
   if (props.placeholder) bits.push(`ph=${String(props.placeholder)}`);

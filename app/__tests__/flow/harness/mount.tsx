@@ -37,8 +37,12 @@ function resetSessionModuleState(): void {
   resetRelayBuildStateForTest();         // walk fingerprints / baseline / drift / cooldowns
   setRelayBaseForSolana(WALLET_ORIGIN);  // SOL derivation bases → the pre-wiring default
   setRelayBaseForEvm(WALLET_ORIGIN);     // EVM derivation bases → the pre-wiring default
-  setSolanaRpcUrl('');                   // operator overrides ('' clears, never an offline switch)
-  setEvmRpcUrl('');
+  // Operator overrides re-apply FROM THE SEAM, never a blind clear: a file seeds its rail mode
+  // at module scope (e.g. __DPAY_TEST_SOLANA_RPC_URL = 'stub' before constants load — flow 122/
+  // 131/45's fail-closed SOL surfaces) and a mount is a fresh page ON THAT FILE, not a fresh
+  // file. '' clears; a seeded value rides.
+  setSolanaRpcUrl(((globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SOLANA_RPC_URL as string) ?? '');
+  setEvmRpcUrl(((globalThis as unknown as Record<string, unknown>).__DPAY_TEST_EVM_RPC_URL as string) ?? '');
   setIcGatewayUrl('');                   // the stored IC-gateway override row's module mirror
 }
 
