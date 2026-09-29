@@ -98,6 +98,15 @@ function trapOnExpiry(treeRef: {current: renderer.ReactTestRenderer | null}, wha
     `[TRAP] ${what} — bodyChanged=${bodyAfter !== bodyBefore} mounts=${mounts} ` +
     `inflight=${inflight.reduce((a, [, c]) => a + c, 0)} ` +
     `(${inflight.slice(0, 5).map(([u, c]) => `${u}:${c}`).join(' ') || '-'}) res=${JSON.stringify(byRes)}\n` +
+    // A still-running wait can OUTLIVE its test (the jest per-test ceiling fires first; the
+    // abandoned body keeps polling). After the hooks' teardown — mounts drained, tree
+    // unmounted, hermetic relay stopped — every signal here is POST-MORTEM: bodyChanged and
+    // `<no tree>` describe the teardown, not an app-side stall. Name it, or the dump sends the
+    // next diagnostic hunting a phantom unmount (observed 2026-09-29, flow 88: an unscaled
+    // 90s it-ceiling produced exactly this zombie and its mounts=0 trap).
+    (bodyAfter === '<no tree>'
+      ? '[TRAP] NOTE: no live tree at expiry — this dump is POST-TEARDOWN (the wait outlived its test; the jest per-test ceiling likely fired first). The real stall, if any, is EARLIER in this test.\n'
+      : '') +
     `[TRAP] body(head 300): ${JSON.stringify(bodyAfter.slice(0, 300))}\n` +
     logTail.map((l) => `[TRAP-LOG] ${l}\n`).join('') +
     lines.map((l) => `[TRAP-TREE]${l}\n`).join(''),
