@@ -71,6 +71,7 @@ export {TERMINAL_CONVERT_STEPS, isTerminalConvertStep} from './convert/types';
 
 export type {CeFiQuoteResult, ConvertMath, ConvertQuote, SwapQuoteBody} from './convert/quotes';
 export {
+  CeFiMinDepositError,
   CeFiNoQuoteError,
   ceFiQuoteFromResult,
   ceFiServiceError,

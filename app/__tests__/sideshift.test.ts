@@ -35,6 +35,7 @@ import {
   sideShiftStatusUrl,
 } from '../services/sideshift';
 import {
+  CeFiMinDepositError,
   ceFiQuoteFromResult,
   ceFiServiceError,
   fetchCeFiConvertQuote,
@@ -43,6 +44,7 @@ import {
   prepareCeFiConvertRecord,
   type ConvertQuote,
 } from '../convert';
+import {SideShiftMinDepositError} from '../services/sideshift';
 import {BUNDLED_VENUES, cefiOtherSide, cefiVenuesForLedger, venueOfId} from '../config/venues';
 import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 import {convertEn} from '../i18n/domains/en/convert';
@@ -107,6 +109,43 @@ describe('services/sideshift — the relay-proxied client', () => {
         fetchSideShiftQuote(RELAY, VENUE, ICP_LEDGER, WRAPPED_SOL_MINT_ADDRESS, '2'),
       ).rejects.toThrow(code);
     }
+  });
+
+  test('the venue\u2019s own BELOW-MINIMUM verdict (a 500 carrying its published figure) is typed, not generic', async () => {
+    // Live-measured 2026-09-29 on the prod relay (ICP→EURC, depositAmount 1.0): SideShift
+    // answers 500 — NOT 4xx — with its per-pair minimum in the body. The client carries both
+    // venue facts (message verbatim, figure unrounded); the generic 'unavailable' would have
+    // buried the actionable fact behind "Kurs nicht verfügbar (unavailable)." — the exact
+    // user-reported CHF→EUR dead end.
+    const body = {
+      error: {
+        message: 'Amount too low. Minimum deposit amount: 2.97962608.',
+        depositRangeMin: '2.97962608',
+        depositRangeMax: '8865.79546248396',
+        code: 'QUOTE_UNAVAILABLE',
+      },
+    };
+    jest.mocked(relayFetch).mockResolvedValueOnce(res(body, 500) as never);
+    await expect(
+      fetchSideShiftQuote(RELAY, VENUE, ICP_LEDGER, EURC_MINT_ADDRESS, '1.0'),
+    ).rejects.toMatchObject({name: 'SideShiftMinDepositError', venueMessage: 'Amount too low. Minimum deposit amount: 2.97962608.', minDeposit: '2.97962608'});
+    // order creation can hit the same verdict (the minimum moved under a live quote)
+    jest.mocked(relayFetch).mockResolvedValueOnce(res(body, 500) as never);
+    await expect(
+      createSideShiftFixedShift(RELAY, VENUE, {
+        quoteId: 'q', settleAddress: 's', refundAddress: 'r', depositLedger: ICP_LEDGER,
+      }),
+    ).rejects.toMatchObject({name: 'SideShiftMinDepositError', minDeposit: '2.97962608'});
+    // a 500 WITHOUT the shape stays the generic 'unavailable' — fail-closed, nothing invented
+    jest.mocked(relayFetch).mockResolvedValueOnce(res({error: {message: 'boom'}}, 500) as never);
+    await expect(
+      fetchSideShiftQuote(RELAY, VENUE, ICP_LEDGER, EURC_MINT_ADDRESS, '1.0'),
+    ).rejects.toThrow('unavailable');
+    // a non-numeric or non-positive figure is not a venue-published minimum either
+    jest.mocked(relayFetch).mockResolvedValueOnce(res({error: {depositRangeMin: 'soon'}}, 500) as never);
+    await expect(
+      fetchSideShiftQuote(RELAY, VENUE, ICP_LEDGER, EURC_MINT_ADDRESS, '1.0'),
+    ).rejects.toThrow('unavailable');
   });
 
   test('attribution is pinned to the ROW quoted: the family\'s other rows answer their own calls', async () => {
@@ -223,6 +262,17 @@ describe('convert.ts — the cefi mapping helpers', () => {
       .toBe(convertEn.errors.quoteUnavailable('shape'));
     expect(ceFiServiceError('not an error', name).message)
       .toBe(convertEn.errors.quoteUnavailable('unavailable'));
+    // the typed below-minimum verdict maps to the attributed min-deposit line — the venue's
+    // own message verbatim, the figure unrounded, the name attributed
+    const minErr = ceFiServiceError(
+      new SideShiftMinDepositError('Amount too low. Minimum deposit amount: 2.97962608.', '2.97962608'),
+      name,
+    );
+    expect(minErr).toBeInstanceOf(CeFiMinDepositError);
+    expect(minErr.message).toBe(convertEn.cefi.minDepositBody(
+      name, 'Amount too low. Minimum deposit amount: 2.97962608.', '2.97962608',
+    ));
+    expect((minErr as CeFiMinDepositError).minDeposit).toBe('2.97962608');
   });
 
   test('fetchCeFiConvertQuote: the deposit goes out as a DECIMAL string, the settle comes back raw', async () => {

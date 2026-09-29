@@ -86,6 +86,44 @@ export type SideShiftFixedShift = {
   readonly expiresAt: string | null;
 };
 
+/** The venue's own structured verdict that the amount is BELOW ITS PUBLISHED MINIMUM for this
+ *  pair (live-measured 2026-09-29: a below-minimum quote POST answers HTTP 500, NOT 4xx, with
+ *  {"error":{"message":"Amount too low. Minimum deposit amount: 2.97962608.",
+ *  "depositRangeMin":"2.97962608",...,"code":"QUOTE_UNAVAILABLE"}}). Both venue facts ride
+ *  along: `venueMessage` verbatim (the founder's call — the venue's own words on the screen)
+ *  and `minDeposit` as the parsed minimum (venue digits, never rounded). Any 500 WITHOUT this
+ *  shape stays the generic 'unavailable' — fail-closed vocabulary unchanged. */
+export class SideShiftMinDepositError extends Error {
+  readonly venueMessage: string;
+  readonly minDeposit: string;
+  constructor(venueMessage: string, minDeposit: string) {
+    super('belowmin');
+    this.name = 'SideShiftMinDepositError';
+    this.venueMessage = venueMessage;
+    this.minDeposit = minDeposit;
+  }
+}
+
+/** Classify a non-ok RELAY answer. The relay passes the venue's error body through VERBATIM
+ *  (crates/dpay-relay/src/sideshift.rs), so a below-minimum verdict carries its shape intact;
+ *  anything else is the generic transport-grade 'unavailable'. */
+async function throwNonOk(r: Response): Promise<never> {
+  const j = await r.json().catch(() => null) as
+    | {error?: {message?: unknown; depositRangeMin?: unknown} | string}
+    | null;
+  const err = j != null && typeof j.error === 'object' && j.error !== null ? j.error : null;
+  if (err != null) {
+    const min = err.depositRangeMin;
+    if (typeof min === 'string' && min.length > 0 && Number.isFinite(Number(min)) && Number(min) > 0) {
+      const msg = typeof err.message === 'string' && err.message.length > 0
+        ? err.message
+        : `Minimum deposit amount: ${min}.`; // the venue's own phrasing, from its published figure
+      throw new SideShiftMinDepositError(msg, min);
+    }
+  }
+  throw new Error('unavailable');
+}
+
 /** Fetch one SideShift quote THROUGH THE RELAY (the partner key lives there). The device
  *  sends rail ids; the relay maps them to the venue's coin/network codes, attaches the
  *  credentials, pins commissionRate "0", and wraps the venue's answer with attribution.
@@ -93,8 +131,9 @@ export type SideShiftFixedShift = {
  *  (sideshift, sideshift-usdc, sideshift-eurc, …) — so the check pins it to the exact row
  *  this call quoted; a foreign or cross-row attribution is a shape failure. Fail-closed
  *  vocabulary mirrors the IC quote path: 'unconfigured' (relay has no partner credential —
- *  the venue is absent, 503), 'unreachable', 'refused', 'unavailable', 'shape'. NO result
- *  is ever defaulted. */
+ *  the venue is absent, 503), 'unreachable', 'refused', 'unavailable', 'shape' — plus the
+ *  venue's own typed BELOW-MINIMUM verdict (SideShiftMinDepositError, the one 500 the venue
+ *  sends with its published figure inside). NO result is ever defaulted. */
 export async function fetchSideShiftQuote(
   relayUrl: string,
   venue: VenueEntry,
@@ -120,7 +159,7 @@ export async function fetchSideShiftQuote(
   }
   if (r.status === 503) throw new Error('unconfigured');
   if (r.status === 422 || r.status === 400) throw new Error('refused');
-  if (!r.ok) throw new Error('unavailable');
+  if (!r.ok) await throwNonOk(r);
   const j = await r.json().catch(() => null) as
     | {venue_id?: unknown; quote?: Record<string, unknown> | null; fetched_at?: unknown}
     | null;
@@ -180,7 +219,7 @@ export async function createSideShiftFixedShift(
   }
   if (r.status === 503) throw new Error('unconfigured');
   if (r.status === 400 || r.status === 422) throw new Error('refused');
-  if (!r.ok) throw new Error('unavailable');
+  if (!r.ok) await throwNonOk(r);
   const j = await r.json().catch(() => null) as Record<string, unknown> | null;
   if (j == null || typeof j.id !== 'string' || j.id.length === 0
     || typeof j.depositAddress !== 'string' || j.depositAddress.length === 0
