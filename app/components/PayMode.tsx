@@ -248,7 +248,13 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
       if (alive && fee != null) setFeeRaw(fee);
     });
     return () => { alive = false; };
-  }, [intent, catalog, identity.secretHex, reviewBlocked]);
+    // `reviewBlocked` is deliberately NOT a dep (it IS read, at every run): the settle flips it
+    // within one balance-poll tick, and a re-run here would cancel the IN-FLIGHT fee delivery —
+    // the paid screen's total then falls back to the wire-only amount forever (observed in-run:
+    // flow 31's "0.05 USDC" total never rendered; the wire is 0.04 and the poll beat the fee).
+    // The flip only ever needs to STOP a new query from starting, which the guard above does at
+    // every run this effect actually gets.
+  }, [intent, catalog, identity.secretHex]);
   // The total debit a payer-facing amount on this journey renders: amount + fee when the fee is
   // known, the amount alone when it is not. The signed envelope is NEVER built from this — it stays
   // display-side only (`intent.amount` remains the wire amount everywhere money moves).

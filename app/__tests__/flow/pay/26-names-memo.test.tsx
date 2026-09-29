@@ -55,8 +55,12 @@ describe('flow 26 — names + memo ride the signed bytes', () => {
     const bobPrincipal = await railPrincipalText(bob.publicHex);
     await m.driver.click('tab-transactions', {timeoutMs: 5000});
     assert(await m.driver.waitForText('Recent', {timeoutMs: 8000}), 'the Recent card should render');
+    // The row's arrival is a positive transition (mount → history fetch → rows render): wait for
+    // the NAME itself instead of reading the first snapshot — a single read races the fetch and
+    // loses whenever the tick lands between the mount and the response (observed in-run).
+    assert(await m.driver.waitForText(`to ${PAYEE_NAME}`, {timeoutMs: 8000}),
+      'A history row should show the payee NAME');
     const histBody = m.driver.bodyText();
-    assertIncludes(histBody, `to ${PAYEE_NAME}`, 'A history row should show the payee NAME');
     assertIncludes(histBody, MEMO, 'A history row should show the human memo');
     expect(histBody).not.toContain(NONCE.slice(0, 8)); // the note's message replaced the hex nonce
     expect(histBody).not.toContain(bobPrincipal);
