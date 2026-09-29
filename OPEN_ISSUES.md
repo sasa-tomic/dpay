@@ -984,6 +984,16 @@ the one-shot path uses).
 - **Doc-rot**: living docs verified clean 2026-09-15 (the 2026-09-06 pass + the
   offline-payments/outbox session landing, docs updated in the same change);
   `docs/specs/` session reports remain historical records, not re-audited.
+- **Trocador chain routes disabled (founder call 2026-09-29) — value 7/M.** Chain-kind rows
+  currently only render on venues that publish a locked settle figure (SideShift); Trocador
+  chain rows fail closed at prepare because its trade payload carries no locked payout, so the
+  exact-deposit gate has nothing to compare against. Founder: "we can leave trocador aside for
+  now but please add an open issue to add it back (re-enable) and support variable (non-fixed)
+  amounts. Many users are used to that anyway, and likely don't care much as long as we're
+  transparent about it." Unblocking path: teach the chain prepare a variable-settle mode that
+  quotes/polls the venue's live payout instead of gating on a locked figure, and surface it
+  honestly on the review card ("you receive ≈" rather than "exactly"); re-enable Trocador
+  chain rows behind it.
 
 ## Documented decisions / tripwires
 
