@@ -131,6 +131,9 @@ export const convertFr: ConvertMessages = {
   refundedBody: sym =>
     `L'échange a échoué et le pool t'a rendu ton ${sym} — ton solde est de nouveau intact.`,
   stuckTitle: 'Issue inconnue',
+  chainStuckTitle: 'Sort du dépôt inconnu',
+  chainStuckBody: venue =>
+    `Le dépôt pour ${venue} a été signé et envoyé, mais sa diffusion n'a pas été confirmée. Il aboutit de lui-même ou expire sans rien déplacer — ne l'envoyez jamais une seconde fois. dpay continue de surveiller et cet écran se met à jour tout seul.`,
   stop: 'Arrêter',
   stopWatching: 'Arrêter le suivi',
   stopProvider: 'Arrêter le suivi',

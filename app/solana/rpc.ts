@@ -90,7 +90,7 @@ import {SOL_PAYMENT_COMMITMENT} from '../config/constants';
 // seam and the sign gates branch on them and neither may statically import this network module.
 // `isSolBlockhashNotFound` is the attempt-#6 walk's classifier — the SAME predicate the seam's
 // refresh branches on, so walk and seam can never disagree about what the state is.
-import {SolanaEndpointRefused, SolanaRateLimited, SolanaRelayPathDown, isSolBlockhashNotFound} from './errors';
+import {SolanaEndpointRefused, SolanaRateLimited, SolanaRelayPathDown, isSolBlockhashNotFound, isSolPreflightRefusal} from './errors';
 
 /** A fetched recent blockhash + its validity window + the context slot it was observed at. The v2
  *  payment rail threads `contextSlot` as the `minContextSlot` for every downstream freshness call
@@ -346,8 +346,9 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
         // A 4xx body naming the blockhash state is the send-preflight exception (module header,
         // "The send-preflight exception"): an HTTP-wrapped refusal of the SAME preflight state
         // the 2xx JSON-RPC `error` shape carries — walk-worthy for sendTransaction, in place
-        // for everything else.
-        if (walkBlockhash && isSolBlockhashNotFound(body)) {
+        // for everything else. A preflight SIMULATION refusal walks for the same reason (the
+        // D32 finding: the provider's layer refuses valid bytes; the next home fronts another).
+        if (walkBlockhash && (isSolBlockhashNotFound(body) || isSolPreflightRefusal(body))) {
           if (blockhashRefusal === null) blockhashRefusal = {url: candidate, message: body.slice(0, 200)};
           failover('blockhash-not-found');
           continue;
@@ -376,14 +377,16 @@ async function rpcFetch(url: string | readonly string[], method: string, params:
         // THE ATTEMPT-#6 WALK (sendTransaction only): a Blockhash-not-found JSON-RPC error is
         // the answering node's send-preflight STATE, not a verdict on the bytes — proven live
         // by the byte-exact replay of the refused signed tx to the next endpoint (accepted +
-        // finalized). The signature is valid on any endpoint, so the SAME bytes walk to the
-        // next candidate; NO re-sign anywhere in the walk, and the seam above it re-signs
-        // nothing either (the payment seam's refresh-and-resign is retired — skipPreflight
-        // posture; see the sendTransaction doc). Every OTHER JSON-RPC error (an instruction
-        // error, insufficient funds, …) is a verdict on the transaction itself: refused in
-        // place, never walked.
+        // finalized). The D32 widening adds the rest of the preflight family: a SIMULATION
+        // refusal is likewise a statement about the answering layer (its proof is the same
+        // byte-exact replay), so it walks too. The signature is valid on any endpoint, so the
+        // SAME bytes walk to the next candidate; NO re-sign anywhere in the walk, and the seam
+        // above it re-signs nothing either (the payment seam's refresh-and-resign is retired —
+        // skipPreflight posture; see the sendTransaction doc). Every OTHER JSON-RPC error (an
+        // instruction error, insufficient funds, …) is a verdict on the transaction itself:
+        // refused in place, never walked.
         const rawMsg = typeof j.error.message === 'string' ? j.error.message : String(j.error.message ?? 'error');
-        if (walkBlockhash && isSolBlockhashNotFound(rawMsg)) {
+        if (walkBlockhash && (isSolBlockhashNotFound(rawMsg) || isSolPreflightRefusal(rawMsg))) {
           if (blockhashRefusal === null) blockhashRefusal = {url: candidate, message: rawMsg};
           failover('blockhash-not-found');
           continue;

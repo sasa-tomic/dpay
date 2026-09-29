@@ -58,7 +58,9 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
   const venueName = venueDisplayName(record.venueId);
   const venuePool = venueEndpointOf(record.venueId);
   // Both legs share the prepare-time expiry (the authority death the countdown shows).
-  const legExpiryMs = record.legs[0]?.expiresAtMs ?? record.createdAtMs;
+  // The signed envelope's expiry: a pool leg carries its own; a CHAIN phase-1 record's only
+  // signed thing is the deposit, whose window is the venue order's (chainRoute.expiresAtMs).
+  const legExpiryMs = record.legs[0]?.expiresAtMs ?? record.chainRoute?.expiresAtMs ?? record.createdAtMs;
   return (
     <View testID="convert-state" style={S.convertWrap}>
       <ConvertHeader title={M.convert.heading(inSymbol, outSymbol)} onBack={onBack} />
@@ -168,8 +170,20 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
       ) : null}
       {record.step === 'stuck' ? (
         <View testID="convert-stuck">
-          <Text style={S.convertStateTitle}>{M.convert.stuckTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.stuckBody}</Text>
+          {/* The CHAIN record's phase 1 (chainRoute, no legs yet) has NO pool in flight — the
+              unknown outcome is the venue DEPOSIT transfer's. The pool's copy ("do not start a
+              second swap") would name a swap that never ran (D32 finding). */}
+          {record.chainRoute != null && record.legs.length === 0 ? (
+            <>
+              <Text style={S.convertStateTitle}>{M.convert.chainStuckTitle}</Text>
+              <Text style={S.convertStateBody}>{M.convert.chainStuckBody(venueName)}</Text>
+            </>
+          ) : (
+            <>
+              <Text style={S.convertStateTitle}>{M.convert.stuckTitle}</Text>
+              <Text style={S.convertStateBody}>{M.convert.stuckBody}</Text>
+            </>
+          )}
           {minOut != null ? (
             <Text style={S.convertStateMeta}>
               {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, inSymbol), fmtAssetCompact(minOut, outDecimals, outSymbol), venueName)}

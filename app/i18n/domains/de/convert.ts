@@ -132,6 +132,11 @@ export const convertDe: ConvertMessages = {
   refundedBody: sym =>
     `Der Tausch ist gescheitert und der Pool hat dir dein ${sym} zurückgegeben — dein Guthaben ist wieder vollständig.`,
   stuckTitle: 'Unbekannter Ausgang',
+  // Die Stuck-Phase 1 einer Chain-Order (D32): die Pool-Kopie würde einen Tausch nennen, der
+  // nie lief — hier ist nur der Ausgang der venue-Einzahlung offen.
+  chainStuckTitle: 'Eingang der Einzahlung unklar',
+  chainStuckBody: venue =>
+    `Die ${venue}-Einzahlung wurde signiert und gesendet, aber ihre Übertragung ist nicht bestätigt. Sie geht entweder von selbst durch oder verfällt, ohne dass sich etwas bewegt — schicke sie niemals ein zweites Mal. dpay beobachtet weiter, und dieser Bildschirm aktualisiert sich von selbst.`,
   stop: 'Stoppen',
   stopWatching: 'Nicht mehr beobachten',
   stopProvider: 'Nicht mehr beobachten',

@@ -171,6 +171,20 @@ export function isSolBlockhashNotFound(msg: string): boolean {
   return /blockhash\s*not\s*found|blockhashnotfound/i.test(msg);
 }
 
+/** Did a candidate refuse this send at its own send-PREFLIGHT simulation layer (as opposed to
+ *  accepting it into the buffer)? The canonical node shape is "Transaction simulation failed: …"
+ *  (Anza/Agave RPCs answer preflight refusals in exactly these words); the D32 provider added a
+ *  quieter variant that refused a valid signed deposit with no blockhash language at all.
+ *
+ *  It exists because the attempt-#6 walk's byte-exact-replay proof generalizes: the signature is
+ *  valid on any endpoint, so a preflight refusal is a statement about THE ANSWERING NODE'S
+ *  simulation layer, not a verdict on the bytes — the same bytes walk to the next candidate (no
+ *  re-sign anywhere, dedup by signature), and a tx that is genuinely bad is refused by every home
+ *  and lands in the caller's existing post-broadcast vocabulary. Classification only. */
+export function isSolPreflightRefusal(msg: string): boolean {
+  return /transaction simulation failed|simulation failed/i.test(msg);
+}
+
 /** Did the network INCLUDE this transaction and then fail it? `confirmTransaction` (`solana/rpc.ts`)
  *  throws `transaction failed: <err>` for exactly that case — a `getSignatureStatuses` entry with a
  *  non-null `err` — and nothing else in this app throws that prefix.

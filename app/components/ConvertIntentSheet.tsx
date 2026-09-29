@@ -2094,7 +2094,7 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
   const destSymbol = record.destSymbol ?? record.outSymbol;
   const venueName = venueDisplayName(record.venueId);
   const venuePool = venueEndpointOf(record.venueId);
-  const legExpiryMs = record.legs[0]?.expiresAtMs ?? record.createdAtMs;
+  const legExpiryMs = record.legs[0]?.expiresAtMs ?? record.chainRoute?.expiresAtMs ?? record.createdAtMs;
   const legPlan = record.legPlan ?? [];
   const isHub = record.venue2Id != null;
   // The CHAIN record (2026-09-28): phase 1 has NO legPlan (the deposit transfer is the

@@ -170,6 +170,10 @@ export type ConvertMessages = {
   failedSwapBody: (reason: string, sym: string, venue: string) => string;
   refundedBody: (sym: string) => string;
   stuckTitle: string;
+  /** The CHAIN record's phase-1 stuck state (D32): the pool's copy would name a swap that
+   *  never ran — the unknown outcome is the venue DEPOSIT transfer's own. */
+  chainStuckTitle: string;
+  chainStuckBody: (venue: string) => string;
   stop: string;
   stopWatching: string;
   /** The provider-held stop (2026-09-24): the venue order keeps its own life at the venue —
@@ -658,6 +662,11 @@ export const convertEn: ConvertMessages = {
   refundedBody: sym =>
     `The swap failed and the pool returned your ${sym} — your balance is whole again.`,
   stuckTitle: 'Unknown outcome',
+  // The CHAIN record's phase-1 stuck state (D32): the pool's copy would name a swap that
+  // never ran — at this point only the venue DEPOSIT transfer's outcome is unknown.
+  chainStuckTitle: 'Deposit outcome unknown',
+  chainStuckBody: venue =>
+    `The ${venue} deposit transfer was signed and submitted, but its broadcast was not confirmed. It either lands on its own or expires without moving anything — never send it a second time. dpay keeps watching and this screen updates on its own.`,
   // The user's Stop (2026-09-19): the button and the frozen-record panel. Short on purpose.
   stop: 'Stop',
   stopWatching: 'Stop watching',

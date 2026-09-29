@@ -603,7 +603,20 @@ export async function submitRawSolTx(raw: Uint8Array, signal?: AbortSignal): Pro
   const {sendTransaction} = await loadRpcForSend();
   let step = 'broadcast';
   try {
-    const sig = await sendTransaction(solanaBroadcastRpcUrls(), raw, {signal});
+    // THE SEND SURFACE'S OWN POSTURE (D32, 2026-09-29): skipPreflight + maxRetries 0. Two live
+    // chain deposits died with their signatures provably absent on chain while the byte-exact
+    // rebuild simulated CLEAN on mainnet (app/__tests__/repro-chain-tx.test.ts): with preflight
+    // ON, the relay pipe's provider ran its own broken/lagging simulation layer and REFUSED the
+    // deposit in place — an attempt-#6-shaped refusal that is not blockhash-shaped, so the
+    // candidate walk never fired and the public failover tail was never tried. The frozen-bytes
+    // discipline means the chain deposit never leaned on preflight for safety: the bytes are
+    // signed once at prepare, identical resubmission dedups by signature, and the chain's own
+    // verdict (watchDepositTx: confirmed / failed / blockhash-dead) owns the outcome. Same
+    // posture broadcastSignedWithFreshBlockhash has used for every send-surface payment.
+    const sig = await sendTransaction(solanaBroadcastRpcUrls(), raw, {
+      signal,
+      config: {skipPreflight: true, maxRetries: 0},
+    });
     traceSend(`raw submit (convert) BROADCAST accepted sig=${sig}`);
     return sig;
   } catch (e: unknown) {

@@ -131,6 +131,9 @@ export const convertEs: ConvertMessages = {
   refundedBody: sym =>
     `El intercambio falló y el pool te devolvió tu ${sym} — tu saldo vuelve a estar completo.`,
   stuckTitle: 'Desenlace desconocido',
+  chainStuckTitle: 'Resultado del depósito sin confirmar',
+  chainStuckBody: venue =>
+    `El depósito para ${venue} fue firmado y enviado, pero su emisión no quedó confirmada. O se confirma por sí solo o caduca sin mover nada — nunca lo envíes una segunda vez. dpay sigue vigilando y esta pantalla se actualiza sola.`,
   stop: 'Detener',
   stopWatching: 'Dejar de vigilar',
   stopProvider: 'Dejar de vigilar',
