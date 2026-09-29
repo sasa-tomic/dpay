@@ -104,6 +104,22 @@ memory).
 
 ## Practical routes with the current float (2026-09-29, D32)
 
+- **D33 (2026-09-29) — THE CHAIN ROUTE IS LIVE: the founder's pair EURC→ICP→VCHF completed in
+  ONE consent, drip-free, on the broadcast fix.** In-app chain row `chain:sideshift-eurc:icpswap`
+  (the standing twin-CHF review), Max-net prefill 10.895323 EURC, verbatim attributed quote
+  ("Executed via SideShift / Swap EURC → ICP on SideShift / Swap ICP → VCHF on ICPSwap",
+  ≥9.76419582 VCHF at 1% slippage), ONE CTA press:
+  order `ebda94c3edeacc757eeb` FIRST (locked settle 3.62188403 ICP, settle = float IC account
+  verified on-screen, expires 8:34Z) → frozen deposit broadcast **FINALIZED** (sig
+  `4PdWhqaX…1hJiZ`, slot 451585937, err null — the D32 fix working) → venue **settled**
+  3.62188403 ICP → float block **38680561** → phase 2 signed from the frozen plan → pool deposit
+  block **38680566** → **VCHF 9.92442112** = 0.03015628 + 9.89426484 (the record's expectedNet
+  floor) to the last digit. UI narration == chain == ledger on every leg (rows 207–212,
+  reconcile CLEAN). The record UI parked `stuck` mid-legs under prod latency while the chain
+  completed (the 2026-09-27 honest-unknown class — the legs landed anyway). Driver:
+  `e2e/live-d33.mjs`. SOL cost: 0.00149344 (tx fee + venue ATA rent). ICP cost: 0.0002 (approve
+  + transfer fees). End state: IC wallet 9.92442112 VCHF + dust; Solana rail 0 EURC.
+
 - **D32 (2026-09-29) — the SELF-FUNDED round trip, founder-authorized ("use the existing float").**
   Phase 1 ICP→EURC: DONE + verified end to end. In-app Convert on the ICP row (cross-rail cefi
   `sideshift-eurc`), Max-net prefill 3.20421219 ICP, review verbatim ("Quote from SideShift,
@@ -125,8 +141,8 @@ memory).
 
 ## Dead-end log (do not re-search before last-checked + 24h)
 
-- **2026-09-29 — the CHAIN route's deposit broadcast never reaches Solana (OPEN, filed in
-  OPEN_ISSUES).** Two consecutive in-app attempts on `chain:sideshift-eurc:icpswap` (EURC→VCHF
+- **2026-09-29 — the CHAIN route's deposit broadcast never reaches Solana (RESOLVED same day).**
+  Two consecutive in-app attempts on `chain:sideshift-eurc:icpswap` (EURC→VCHF
   via ICP, prod relay, real float): the record freezes correctly (order first, verbatim locked
   settle, settle = the user's own IC account verified on-screen), signs the SPL deposit — and
   nothing lands: `getSignatureStatuses` null (history-searched) for sigs `5YbxaMGz…kpQS` and
@@ -136,6 +152,12 @@ memory).
   flips to `stuck` ~2 min post-CTA with the POOL's copy ("the pool's answer did not arrive") on
   a legs=[] chain phase-1 record — mislabeled state line (cosmetic twin of the defect). Drivers:
   `e2e/live-d32.mjs` (phase 1, works) / `e2e/live-d32-p2.mjs` (phase 2, reproduces).
+  **RESOLUTION (dfde0468):** the bytes were proven valid (byte-exact rebuild simulated clean on
+  mainnet); `submitRawSolTx` ran preflight ON and the provider's simulation layer refused in
+  place — not blockhash-shaped, so the walk never fired. Fix: skipPreflight posture + the walk
+  widens to preflight-shaped refusals. Pin: `chain-deposit-submit.test.ts`. Live-proven the same
+  day by D33 (see the routes section): deposit finalized, venue settled, pool leg executed,
+  VCHF 9.92442112 = the floor to the digit.
 
 - **2026-09-28 — the leg-1 rent wall was SELF-FUNDED AWAY the same day (resolved).** The 1.5-EURC→SOL
   in-app convert took the rail from 0.0017 to 0.0161 SOL without needing the feared taker WSOL ATA

@@ -87,18 +87,21 @@
 
 ## NEXT SESSION — work order
 
-- **CHAIN route: the deposit broadcast never reaches Solana (filed 2026-09-29, value 9, effort M).**
-  The any-pair chain row (`chain:sideshift-eurc:icpswap`, EURC→VCHF via ICP) freezes order +
-  verbatim locked settle correctly and signs the SPL deposit, but TWO consecutive live attempts
-  (prod relay, real float) left NO signature on chain (`getSignatureStatuses` null with history
-  search; rail EURC measured unchanged through every attempt; orders expired unfunded, zero
-  value at risk — ledger row 205, dead-end log in `docs/live-testing/networks.md`). The record
-  flips to `stuck` ~2 min post-CTA with the POOL's copy on a legs=[] chain phase-1 record
-  (mislabeled line). The relay's solana pipe answered 200 from curl in the same window, so the
-  suspect is between the chain executor's submit and the wire (silent pre-broadcast failure,
-  e.g. a rejected/refused sendTransaction swallowed by the executor's unknown-outcome path).
-  Drivers: `e2e/live-d32-p2.mjs` reproduces; `e2e/live-d32.mjs` (phase 1, ICP→EURC) is the
-  working control. Fix + one live funds-ledgered trip before any "supported" claim (D31 rule).
+- ~~**CHAIN route: the deposit broadcast never reaches Solana**~~ **RESOLVED 2026-09-29 (same day,
+  dfde0468 + live-proven D33).** Root cause: `submitRawSolTx` ran with preflight ON, the relay
+  pipe's provider answered a SIMULATION refusal (its preflight layer — the attempt-#6 finding),
+  and rpcFetch's walk only fired for blockhash-shaped errors: "refused in place, never walked",
+  so the public failover tail was never tried. The D32 bytes were proven valid by a byte-exact
+  rebuild simulated clean on mainnet (ATA-create + SPL transfer, all programs succeed). Fix:
+  `submitRawSolTx` adopts the send surface's posture (`skipPreflight: true, maxRetries: 0`) and
+  the walk widens to preflight-shaped refusals (same bytes, no re-sign, dedup by signature).
+  Pin: `app/__tests__/chain-deposit-submit.test.ts` (4 cases; FAILS on pre-fix code). Live proof
+  (D33): in-app chain row EURC→VCHF via ICPSwap, Max-net 10.895323 EURC, order `ebda94c3edeacc757eeb`
+  created first, deposit **finalized** (slot 451585937, err null), venue settled 3.62188403 ICP,
+  phase-2 signed + executed on-chain, **VCHF 9.92442112** = the 1% floor to the last digit.
+  Ledger rows 207–212, reconcile CLEAN. The stuck-under-prod-latency park (legs signed while the
+  chain completes) remains the known 2026-09-27 class; the phase-1 stuck copy now names the
+  deposit (`chainStuckTitle/Body`), not the pool's.
 
 **GOAL (filed 2026-09-28): 2-tap swaps between ANY two supported currencies.**
 Spec: `docs/specs/2026-09-28-any-to-any-swap-goal.md`. The two-tap sheet is live (flow 213);
