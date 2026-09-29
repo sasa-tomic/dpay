@@ -16,7 +16,8 @@
  * balance-verification of the link's promise through the relay pipe, and the anvil-network
  * prefill leg (the mainnet Arbitrum row stands in here — the resolution mechanics are identical).
  */
-import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {evmEnv} from './env';
 import {deriveEvmKeypair} from '../../../evm/identity';
 import {deadline as budgetDeadline} from '../harness/budget';
@@ -35,7 +36,9 @@ function payLink(opts: {origin: string; recipient: string; asset: string; networ
   return u.toString();
 }
 
-describe('flow 221 — the EVM pay link: grammar, slugs, prefill promise, wrong-network refusal', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 221 — the EVM pay link: grammar, slugs, prefill promise, wrong-network refusal', () => {
   it('pins the canonical shape + slugs, prefills the send form (route disclosed, never signs), refuses ZCHF×Solana', async () => {
     // ---- 1+2. the canonical link shapes — one per settlement chain, slugs from the registry. --
     const merchant = deriveEvmKeypair('11'.repeat(32));

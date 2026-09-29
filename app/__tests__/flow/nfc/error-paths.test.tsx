@@ -13,7 +13,8 @@
  * 87: the PAYER contract — the request auto-signs offline (update + read_state, never submits);
  *     only a nonce/rid-bound merchant `result` resolves "Paid ✓ ∂10.00"; balances move exactly once.
  */
-import {describe, it, expect, afterEach} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {scaled as budgetScaled} from '../harness/budget';
 import {
   accountOf, armNfcCard, armPayScan, assert, DpayCore, faucetAccount, generateKeypair,
@@ -33,13 +34,9 @@ const dispatchFor = async (m: Mount, event: NfcEvent): Promise<void> => {
   (g.__DPAY_TEST_NFC_SESSION as (e: NfcEvent) => void)(event);
 };
 
-afterEach(() => {
-  g.__DPAY_TEST_NFC_APPROVED_WIRE = undefined;
-  g.__DPAY_TEST_NFC_RESULT = undefined;
-  g.__DPAY_TEST_NFC_READER_REQUEST = undefined;
-});
+hermeticFlow();
 
-describe('flow 60 — NFC failure modes: honest terminals, no debit, no false success', () => {
+hermeticDescribe('flow 60 — NFC failure modes: honest terminals, no debit, no false success', () => {
   it('transport error → Tap failed; unsupported asset auto-declines; late error after settling ignored', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const m = await onboardWallet('jest-nfc-err');
@@ -94,7 +91,7 @@ describe('flow 60 — NFC failure modes: honest terminals, no debit, no false su
   }, 120_000);
 });
 
-describe('flow 86 — receiver settles an offline-payer NFC bundle, exactly once', () => {
+hermeticDescribe('flow 86 — receiver settles an offline-payer NFC bundle, exactly once', () => {
   it('update + signed read_state from A; B alone submits/polls; exact match → Received ✓ ∂10.00', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     // The payer: generated + faucet-funded OUTSIDE the app (their "phone" is this test).
@@ -160,7 +157,7 @@ describe('flow 86 — receiver settles an offline-payer NFC bundle, exactly once
   }, 120_000);
 });
 
-describe('flow 87 — offline payer signs, never submits, and resolves Paid only on the returned result', () => {
+hermeticDescribe('flow 87 — offline payer signs, never submits, and resolves Paid only on the returned result', () => {
   it('auto-sign provides update+read_state; card done moves nothing; the merchant submits; result → Paid ✓ ∂10.00', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const m = await onboardWallet('jest-nfc-payer');

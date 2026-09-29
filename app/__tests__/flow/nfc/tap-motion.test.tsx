@@ -9,13 +9,16 @@
  *
  * Not ported (browser-only): the screenshot beats — pixel capture stays in the e2e visual tier.
  */
-import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {armNfcCard, onboardWallet, openBalances, selectCurrency, waitForWallet, type Mount} from '../harness/lib';
 import {clickByAria, has, nfcPhase, type NfcEvent} from './h';
 
 const g = globalThis as unknown as Record<string, unknown>;
 
-describe('flow 93 — every NFC phase renders its pinned text + its own motion beat (IC + SOL)', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 93 — every NFC phase renders its pinned text + its own motion beat (IC + SOL)', () => {
   it('IC: linking/exchanging/awaitingApproval/settling/success/pending/declined; SOL: parity + no peak', async () => {
     // ============================== IC rail (nfc-status) ======================================
     g.__DPAY_TEST_NFC_STATUS = 'ready';

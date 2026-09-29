@@ -12,7 +12,8 @@
  * Not ported (browser-only): the screenshots; the Done-dismiss + re-arm phase walk IS ported here
  * (batch D's full-parity leg — clickByAria + the pure-phase walk over the re-armed session).
  */
-import {describe, it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect} from '@jest/globals';
 import {armNfcCard, assert, onboardWallet} from '../harness/lib';
 import type {Mount} from '../harness/lib';
 import {clickByAria, nfcPhaseWalk} from './h';
@@ -27,7 +28,9 @@ const dispatch = async (m: Mount, event: NfcEvent): Promise<void> => {
 /** The walker-facing closure: the mount is closed over, the walker passes only the event. */
 const dispatchFrom = (m: Mount) => async (event: NfcEvent): Promise<void> => dispatch(m, event);
 
-describe('flow 11 — NFC tap phases through the real event bus', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 11 — NFC tap phases through the real event bus', () => {
   it('linking → request AUTO-SIGNS → exchanging; an error surfaces the honest terminal', async () => {
     // The device NFC status flips to 'ready' BEFORE the wallet mounts so Pay arms the card.
     g.__DPAY_TEST_NFC_STATUS = 'ready';

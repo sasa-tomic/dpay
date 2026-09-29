@@ -17,7 +17,8 @@
  * so lib (and the whole app graph) must be required lazily AFTER the override is set. The RPC stub
  * is per-test state, cleared in afterEach.
  */
-import {describe, it, expect, afterEach, beforeEach} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {it, expect, afterEach, beforeEach} from '@jest/globals';
 import {buildSolReq, clickByAria, extractSig, makeSolStub, nfcPhase, nfcPhaseWalk, setSolStub, solEnv, type NfcEvent} from './h';
 import type {Mount} from '../harness/lib';
 
@@ -38,13 +39,10 @@ const makeDispatch = (m: Mount) => async (event: NfcEvent): Promise<void> => {
   (g.__DPAY_TEST_SOL_NFC_SESSION as (e: NfcEvent) => void)(event);
 };
 
+// The SOL RPC stub is per-test state (this file's own fixture); the NFC stashes are the
+// harness's now (the lifecycle + the hermetic hook reset them per test).
 afterEach(() => {
   setSolStub(null);
-  // The page stashes survive across tests in one file (the e2e gets a fresh page per flow);
-  // reset what the shim writes so a later test's absence-assertions stay honest.
-  delete g.__DPAY_SOL_NFC_LAST;
-  g.__DPAY_TEST_NFC_APPROVED_WIRE = undefined;
-  g.__DPAY_TEST_NFC_READER_REQUEST = undefined;
 });
 
 // The stub answers the balance polls too — with the override 'stub' but no stub object, fetch
@@ -52,7 +50,9 @@ afterEach(() => {
 const stubHandles = {sig: null, txDetail: null, getTxReads: 0};
 beforeEach(() => { setSolStub(makeSolStub(stubHandles)); });
 
-describe('flow 47 — SOL v2 NFC tap: netted request auto-signs, receipt binds, honest pending', () => {
+hermeticFlow();
+
+hermeticDescribe('flow 47 — SOL v2 NFC tap: netted request auto-signs, receipt binds, honest pending', () => {
   it('arm → request auto-sign → "Paying 0.001 SOL" → receipt (rid+sig) → "Sent · awaiting"', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const {onboardWallet, openBalances, selectCurrency, waitForWallet} = lib();
@@ -94,7 +94,7 @@ describe('flow 47 — SOL v2 NFC tap: netted request auto-signs, receipt binds, 
   }, 90_000);
 });
 
-describe('flow 66 — SOL v2 NFC failure modes', () => {
+hermeticDescribe('flow 66 — SOL v2 NFC failure modes', () => {
   it('expired auto-declines at sign; transport error → Tap failed; late error after settling ignored; reader sees the decline', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const {onboardWallet, openBalances, selectCurrency, waitForWallet} = lib();
@@ -168,7 +168,7 @@ function makeOnlineStub() {
   };
 }
 
-describe('flow 139 — SOL NFC receipt code 3 (settle-verify mismatch) is NEVER a decline', () => {
+hermeticDescribe('flow 139 — SOL NFC receipt code 3 (settle-verify mismatch) is NEVER a decline', () => {
   it('receipt(status=3, rid+sig match) → the honest pending, no rejection, no scan bounce', async () => {
     g.__DPAY_TEST_NFC_STATUS = 'ready';
     const {onboardWallet, openBalances, selectCurrency, waitForWallet} = lib();
