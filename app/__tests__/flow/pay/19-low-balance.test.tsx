@@ -8,7 +8,8 @@
  * mid-review clears the note and surfaces a DELIBERATE `btn-approve` (never a silent re-sign),
  * and the press pays the payee exactly.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, armPayScan, assert, assertIncludes, faucetAccount, generateKeypair, getBalance,
   goOffline, onboardWallet, setRelay, waitForScanner,
@@ -26,7 +27,7 @@ function buildOverRequest(payeeHex: string): Promise<string> {
   return DpayCore.encodeRequest(payeeHex, OVER_CENTS, nonce, expiry, 0, 'merchant', '');
 }
 
-describe('flow 19 — low balance: offline signs with the hand-off, online blocks the sign', () => {
+hermeticDescribe('flow 19 — low balance: offline signs with the hand-off, online blocks the sign', () => {
   it('offline ∂200 > ∂100 signs to the hand-off QR; online ∂200 shows the honest block', async () => {
     const bob = await generateKeypair();
 
@@ -72,7 +73,7 @@ describe('flow 19 — low balance: offline signs with the hand-off, online block
   }, 150_000);
 });
 
-describe('flow 159 — lowbal-recovers: the refusal clears when the poll reads enough', () => {
+hermeticDescribe('flow 159 — lowbal-recovers: the refusal clears when the poll reads enough', () => {
   it('∂200 arrives mid-review → the note clears, Approve appears, the press pays exactly', async () => {
     const bob = await generateKeypair();
     expect(await getBalance(bob.publicHex, 0)).toBe('0');

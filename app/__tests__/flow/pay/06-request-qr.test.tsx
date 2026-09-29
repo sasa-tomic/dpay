@@ -7,7 +7,8 @@
  * NFC radio forced ready, the reader arms with the REAL 132-byte request — decoded here
  * field-for-field by the app's own wasm core (DpayCore.decodeRequest).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assertEq, clipboardAfterCopy, DpayCore, onboardSlowPath, selectDemoAsset, waitForWallet,
 } from '../harness/lib';
@@ -54,7 +55,7 @@ function hexToB64url(hex: string): string {
   return btoa(out).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-describe('flow 06 — request QR: the link IS the code, Share agrees, the radio carries the wire', () => {
+hermeticDescribe('flow 06 — request QR: the link IS the code, Share agrees, the radio carries the wire', () => {
   it('renders the payment link QR, Share-matches it, and arms the reader with the real request', async () => {
     // Force the radio ready BEFORE the wallet mounts so the request also builds the NFC machine
     // code and arms reader mode (the wire's only exit from the screen now).
@@ -100,8 +101,8 @@ describe('flow 06 — request QR: the link IS the code, Share agrees, the radio 
     expect(reqBody).toMatch(/Valid for ~1[0-9] min/);
 
     // Share carries the SAME string the QR renders (one payment, one code) — captured through the
-    // harness's Share recorder (__DPAY_TEST_CLIPBOARD, the seam spec 1.2 names).
-    g.__DPAY_TEST_CLIPBOARD = '';
+    // harness's Share recorder (__DPAY_TEST_CLIPBOARD, the seam spec 1.2 names); hermetic per-test
+    // isolation guarantees the empty start, no in-file pre-clear needed.
     await m.driver.click('btn-share-request', {timeoutMs: 5000});
     const shared = await clipboardAfterCopy();
     expect(shared.length).toBeGreaterThan(0);

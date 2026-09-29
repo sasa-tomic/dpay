@@ -8,7 +8,8 @@
  * updates balance + history but does NOT flip the merchant's "Received" (that flip is
  * merchant-app-submission only — flows 08/21).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertIncludes, faucetAccount, generateKeypair, getBalance, onboardWallet,
   railPrincipalText, railTransfer,
@@ -17,7 +18,7 @@ import {parsePayLink} from './local';
 
 const PAY_CENTS = '2500'; // ∂25.00
 
-describe('flow 61 — the rail renders short principals + the memo (names are gone)', () => {
+hermeticDescribe('flow 61 — the rail renders short principals + the memo (names are gone)', () => {
   it('history shows the payer’s short principal + the nonce memo, never names/full principals', async () => {
     // --- wallet A (merchant): onboarded. ----------------------------------------------------------
     const m = await onboardWallet('Alice');

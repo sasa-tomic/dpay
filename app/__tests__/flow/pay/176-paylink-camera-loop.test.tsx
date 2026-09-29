@@ -13,7 +13,8 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ./solrpc).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from './solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -36,7 +37,7 @@ const IC_AMOUNT = '3.50';
 const SOL_AMOUNT = '0.02'; // the typed PRICE
 const SOL_NETTED = '0.019995'; // 0.02 price − 5000-lamport fee — the netted wire
 
-describe('flow 176 — the two-phone paylink loop: merchant QR → payer camera → both rails settle', () => {
+hermeticDescribe('flow 176 — the two-phone paylink loop: merchant QR → payer camera → both rails settle', () => {
   it('IC: scan → review → Approve → Received from the memo; SOL: netted link → pre-filled send → Sent', async () => {
     // ── The MERCHANT phone: onboarded, parked on its request screen. ────────────────────────────
     const m1 = await onboardWallet('jest-link-merchant');

@@ -8,7 +8,8 @@
  * alongside) — the format assert runs against that stable surface. Cancel resets PayMode between
  * cases; each case re-enters via a fresh scan.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {armPayScan, assert, assertIncludes, generateKeypair, onboardWallet} from '../harness/lib';
 import {DpayCore} from '../harness/lib';
 import {clickByA11yLabel, scanSeam} from './local';
@@ -32,7 +33,7 @@ const CASES = [
   {label: 'ckETH pad (1000000000000000000 wei)', currency: CKETH_CURRENCY, raw: '1000000000000000000', expected: '1 ETH'},
 ];
 
-describe('flow 43 — decimal edges on the sign surface (8-dec, 6-dec, 18-dec-truncated)', () => {
+hermeticDescribe('flow 43 — decimal edges on the sign surface (8-dec, 6-dec, 18-dec-truncated)', () => {
   it('every case renders the exact compact decimal string, no rounding and no sci-notation', async () => {
     const bob = await generateKeypair();
     const m = await onboardWallet('jest-decimal');

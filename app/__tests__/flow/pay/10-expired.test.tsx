@@ -8,7 +8,8 @@
  * scan. Nothing is signed, nothing is POSTed, the balance is UNCHANGED, and the raw request nonce
  * never leaks onto the screen (L5).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   armPayScan, assert, assertIncludes, generateKeypair, onboardWallet, openBalances,
 } from '../harness/lib';
@@ -17,7 +18,7 @@ import {scanSeam} from './local';
 
 const PAY_CENTS = '2500'; // ∂25.00 (DEMO = currency 0)
 
-describe('flow 10 — expired request refused client-side, no debit', () => {
+hermeticDescribe('flow 10 — expired request refused client-side, no debit', () => {
   it('an already-expired request surfaces the honest refusal and never signs', async () => {
     const bob = await generateKeypair();
     const m = await onboardWallet('jest-expired');

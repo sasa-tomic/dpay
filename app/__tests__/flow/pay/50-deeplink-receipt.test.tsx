@@ -14,7 +14,8 @@
  * routes to the Pay review.
  */
 import {randomBytes} from 'node:crypto';
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertIncludes, faucetAccount, generateKeypair, getBalance,
   icpCatalog, onboardWallet, railPrincipalText, railTransfer,
@@ -24,7 +25,7 @@ import {parsePayLink} from './local';
 
 const PAY_UNITS = '2500'; // ∂25.00 (DEMO = currency 0)
 
-describe('flow 50 — dpay:pay receipt hand-back (forgery refused, ledger-bound Received)', () => {
+hermeticDescribe('flow 50 — dpay:pay receipt hand-back (forgery refused, ledger-bound Received)', () => {
   it('a forged proof exhausts the history budget; the real nonce-bound proof flips Received', async () => {
     // --- wallet A: onboarded (the MERCHANT). ------------------------------------------------------
     const m = await onboardWallet('jest-receipt');

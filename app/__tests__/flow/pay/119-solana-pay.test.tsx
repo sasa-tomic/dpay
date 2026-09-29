@@ -13,7 +13,8 @@
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ./solrpc).
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {baseSolStub, enableSolRpcStub, installSolAccountsHelper} from './solrpc';
 
 const G = globalThis as unknown as Record<string, unknown>;
@@ -43,7 +44,7 @@ function installSolStub(): void {
   });
 }
 
-describe('flow 119 — Solana Pay scan: named refusals, the explicit review, and the payment', () => {
+hermeticDescribe('flow 119 — Solana Pay scan: named refusals, the explicit review, and the payment', () => {
   it('IC refuses by name; SOL names params/mints; the review pays SOL and spl-token USDC', async () => {
     const m = await onboardWallet('jest-spay');
     installSolStub();
@@ -111,7 +112,7 @@ describe('flow 119 — Solana Pay scan: named refusals, the explicit review, and
   }, 180_000);
 });
 
-describe('flow 132 — EURC Solana Pay (home=EUR): the review names the token it will move', () => {
+hermeticDescribe('flow 132 — EURC Solana Pay (home=EUR): the review names the token it will move', () => {
   it('a non-catalog mint is refused with its pubkey; the EURC request reviews and pays in EURC', async () => {
     const m = await onboardWallet('jest-eurc-spay');
     // home=EUR pins the EURC rail as the preferred one.

@@ -9,7 +9,8 @@
  * currency 2 + '40000' raw 6-dec (0.05 − 0.01). The readout names the asset's own units, never a
  * dollar amount.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe} from '../harness/hermetic';
 import {
   accountOf, assert, assertEq, DpayCore, onboardWallet, railPrincipalText,
 } from '../harness/lib';
@@ -28,7 +29,7 @@ function qrLast(): string {
   return v;
 }
 
-describe('flow 25 — asset-request (ckBTC, currency 1, netted wire)', () => {
+hermeticDescribe('flow 25 — asset-request (ckBTC, currency 1, netted wire)', () => {
   it('ckBTC chip + 0.0004 → link names ckBTC/IC + netted sats; the wire carries currency 1', async () => {
     nfcReady();
     const m = await onboardWallet('jest-merchant25');
@@ -64,7 +65,7 @@ describe('flow 25 — asset-request (ckBTC, currency 1, netted wire)', () => {
   }, 120_000);
 });
 
-describe('flow 28 — ckusdc-request (currency 2, 6-decimal, netted wire)', () => {
+hermeticDescribe('flow 28 — ckusdc-request (currency 2, 6-decimal, netted wire)', () => {
   it('ckUSDC chip + 0.05 → link names ckUSDC/IC + netted 0.04; the wire is a byte-exact integer', async () => {
     nfcReady();
     const m = await onboardWallet('jest-merchant28');

@@ -10,7 +10,8 @@
  * answer renders as sent-and-waiting with the ledger reference — never as paid, never as failed,
  * never with a second submission.
  */
-import {describe, it, expect} from '@jest/globals';
+import {it, expect} from '@jest/globals';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 import {
   accountOf, armPayScan, assert, assertEq, assertIncludes, faucetAccount, generateKeypair,
   getBalance, onboardWallet, openBalances, railPrincipalText, selectCurrency,
@@ -34,7 +35,10 @@ const scanCheckout = async (m: Parameters<typeof armPayScan>[0], qr: string): Pr
   scanSeam()(qr);
 };
 
-describe('flow 113 — pay dpay’s own checkout (VCHF, ref as memo, ledger-prefixed proof)', () => {
+// The file's private relay — the host the checkout QR names ("our relay is not exempt").
+const HF = hermeticFlow();
+
+hermeticDescribe('flow 113 — pay dpay’s own checkout (VCHF, ref as memo, ledger-prefixed proof)', () => {
   it('Approve moves the exact VCHF to the merchant with the checkout’s ref; PENDING is not paid', async () => {
     const m = await onboardWallet('jest-dpay-checkout');
     const accountHex = (await accountOf(m))!.publicHex;
@@ -49,7 +53,7 @@ describe('flow 113 — pay dpay’s own checkout (VCHF, ref as memo, ledger-pref
     assert(fund.ok, `faucet funding of VCHF must succeed, got ${fund.status}`);
 
     // Served from the host the wallet talks to — which is precisely what makes it payable.
-    const checkout = dpayCheckoutAt(process.env.DPAY_JEST_RELAY_URL as string, merchantPrincipal);
+    const checkout = dpayCheckoutAt(HF.relay.baseURL, merchantPrincipal);
     const uninstall = installCheckoutStub(checkout.cfg);
 
     try {
