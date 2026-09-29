@@ -99,11 +99,99 @@ afterEach(() => {
   disposeConvertStubs();
 });
 
+// Heap probe (DPAY_FLOW_HEAP_PROBE=1), kept from the 2026-09-29 unbounded-growth investigation:
+// a per-test RSS/heap line (jest's --logHeapUsage only reports once per FILE). gc() is forced
+// (--expose-gc) so heapUsed is the RETAINED set, not churn; getActiveResources() counts
+// event-loop-rooted handles (a leaked poll chain would root its whole tree, invisible to GC).
+// DPAY_FLOW_HEAP_SAMPLE=1 prints the top allocation stacks per test (programmatic inspector
+// session); DPAY_FLOW_SNAPSHOT_AT="3,7" writes v8 heap snapshots after those tests.
+if (process.env.DPAY_FLOW_HEAP_PROBE === '1') {
+  const snapAt = (process.env.DPAY_FLOW_SNAPSHOT_AT ?? '').split(',').map((s) => s.trim()).filter(Boolean).map(Number);
+  let testIndex = 0;
+  let session: import('node:inspector').Session | null = null;
+  type SampleNode = {callFrame: {functionName: string; url: string; lineNumber: number}; selfSize: number; children?: SampleNode[]};
+  type SampledProfile = {head: SampleNode};
+  afterEach(async () => {
+    const gg = globalThis as unknown as {gc?: () => void};
+    gg.gc?.();
+    gg.gc?.();
+    const mu = process.memoryUsage();
+    const mb = (n: number): string => (n / 1048576).toFixed(0);
+    const mounts = ((globalThis as unknown as {__DPAY_FLOW_ACTIVE_MOUNTS__?: unknown[]}).__DPAY_FLOW_ACTIVE_MOUNTS__ ?? []).length;
+    const name = (expect.getState().currentTestName ?? '?').replace(/^.*?flow /, 'flow ').slice(0, 40);
+    const byType: Record<string, number> = {};
+    const resources: Array<{constructor?: {name?: string}; _idleTimeout?: unknown}> =
+      ((process as unknown as {getActiveResources?: () => unknown[]}).getActiveResources?.() ?? []) as Array<{constructor?: {name?: string}; _idleTimeout?: unknown}>;
+    for (const r of resources) {
+      const k = r.constructor?.name ?? 'unknown';
+      byType[k] = (byType[k] ?? 0) + 1;
+    }
+    console.log(`[HEAP] ${name.padEnd(42)} rss=${mb(mu.rss)}MB heap=${mb(mu.heapUsed)}MB ext=${mb(mu.external)}MB ab=${mb(mu.arrayBuffers ?? 0)}MB liveMounts=${mounts} handles=${JSON.stringify(byType)}`);
+    // Allocation-site sampling (programmatic inspector session — no --inspect needed): the top
+    // allocation stacks per test window name exactly WHAT grows, without GB-scale snapshots.
+    if (process.env.DPAY_FLOW_HEAP_SAMPLE === '1') {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const inspector = require('node:inspector') as typeof import('node:inspector');
+      const post = (m: string, p?: Record<string, unknown>): Promise<any> =>
+        new Promise((res, rej) => session!.post(m as never, p as never, (e: Error | null, r?: unknown) => (e ? rej(e) : res(r))));
+      if (session === null) {
+        session = new inspector.Session();
+        session.connect();
+        await post('HeapProfiler.enable');
+      } else {
+        try {
+          const {profile} = await post('HeapProfiler.stopSampling') as {profile: SampledProfile};
+          const flat: Array<{path: string; self: number}> = [];
+          const walk = (n: SampleNode, trail: string[]): void => {
+            const cf = n.callFrame;
+            const frame = `${cf.functionName || '(anon)'}@${(cf.url || '').replace(/^.*\/(app|node_modules)\//, '$1/')}:${cf.lineNumber}`;
+            const next = [...trail.slice(-7), frame];
+            if (n.selfSize > 0) flat.push({path: next.join(' ← '), self: n.selfSize});
+            for (const c of n.children ?? []) walk(c, next);
+          };
+          walk(profile.head, []);
+          flat.sort((a, b) => b.self - a.self);
+          const top = flat.slice(0, 8).map((f) => `      ${(f.self / 1048576).toFixed(1)}MB  ${f.path}`);
+          console.log(`[ALLOC] after ${name.trim().slice(0, 44)} — top allocation stacks this test:\n${top.join('\n') || '      (no samples)'}`);
+        } catch (e) {
+          console.log(`[ALLOC] sampler stop failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      await post('HeapProfiler.startSampling', {samplingInterval: 262144});
+      /* eslint-enable @typescript-eslint/no-require-imports */
+    }
+    testIndex += 1;
+    if (snapAt.includes(testIndex)) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const v8 = require('node:v8') as typeof import('node:v8');
+      const file = `/home/sat/projects/dpay/tmp/heap-${String(testIndex).padStart(2, '0')}.heapsnapshot`;
+      console.log(`[HEAP] writing snapshot ${file}`);
+      v8.writeHeapSnapshot(file);
+    }
+  });
+  // The inspector session is an open handle — left connected it keeps the jest worker alive
+  // past the suite ("worker failed to exit gracefully"). Close it with the file.
+  afterAll(async () => {
+    try { session?.disconnect(); } catch { /* already gone */ }
+    session = null;
+  });
+}
 
 // ═══ ====================================================================================================
 // 140-convert-happy-path.test.tsx (M1's reference port, absorbed: its single-venue pin is
 // adapted to the fixture-armed world — the disclosure now states the comparison count)
 // ═══ ====================================================================================================
+/** The venue world's comparison disclosure lands ASYNC after the auto line first renders (the
+ *  registry quote of the second venue resolves a beat later) — wait for the disclosed count
+ *  instead of snapshot-reading the racing first render (low host load flips these constantly). */
+async function awaitVenueComparison(m: Mount): Promise<string> {
+  await m.driver.waitForFunction(
+    () => (m.driver.readTextSafe('convert-venue-auto') ?? '').includes('of 2 venues'),
+    {timeoutMs: 10_000, label: 'the auto pick discloses the venue comparison count'},
+  );
+  return m.driver.readText('convert-venue-auto');
+}
+
 (() => {
 const ICP_FEE = 10000n; // raw e8s — the catalog fee field the deposit sheets also show
 const VCHF_FEE = 10000n;
@@ -139,7 +227,7 @@ describe('flow 140 — the two-tap convert (sheet → oracle → engine → exac
 
     await m.driver.findByTestID('convert-sheet', {timeoutMs: 8000});
     await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
-    const autoLine = m.driver.readText('convert-venue-auto');
+    const autoLine = await awaitVenueComparison(m);
     assertIncludes(autoLine, 'Executed via ICPSwap', 'the venue pick is disclosed mechanically (attribution, no "best" claim)');
     expect(autoLine.toLowerCase()).not.toContain('best');
     // The consolidated suite runs in the fixture-armed venue world (see the file header): the
@@ -260,8 +348,16 @@ describe('flow 141 — pool #ok with a held withdrawal is an honest pending_with
       let pending = false;
       for (let round = 0; round < 5 && !pending; round++) {
         await m.driver.click('btn-convert-confirm', {timeoutMs: 6_000});
-        // The settle watch exhausts (the harness seam: ~10 probes × 100 ms) → pending, NOT done.
-        pending = await m.driver.findByTestID('convert-pending', {timeoutMs: 20_000}).then(() => true).catch(() => false);
+        // EITHER outcome can land first, and the moved interrupt can CLEAR itself once the
+        // refresh settles (the sheet re-quotes and re-arms the confirm) — so poll both states
+        // in ONE window; a sequential wait-for-pending-then-read-the-note loses that race at
+        // low host load (observed 2026-09-29: 5 empty rounds, note read null after the fact).
+        const outcomeDeadline = budgetDeadline(20_000);
+        for (;;) {
+          if (m.driver.isPresent('convert-pending')) { pending = true; break; }
+          if (m.driver.isPresent('convert-moved-note') || Date.now() > outcomeDeadline) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
         if (!pending) {
           const changed = m.driver.readTextSafe('convert-moved-note');
           if (changed != null) {
@@ -273,7 +369,8 @@ describe('flow 141 — pool #ok with a held withdrawal is an honest pending_with
         }
       }
       expect(pending).toBe(true);
-      const pendingBody = m.driver.readText('convert-pending');
+      const pendingBody = m.driver.readTextSafe('convert-pending')
+        ?? `(no convert-pending after 5 confirm rounds — on screen: ${m.driver.bodyText().slice(0, 400)})`;
       assertIncludes(pendingBody, 'Payout pending', 'pending title');
       assertIncludes(pendingBody, 'VCHF', 'pending names the asset owed');
       assertIncludes(pendingBody, winPool, 'pending names the pool principal (support line)');
@@ -443,7 +540,15 @@ describe('flow 169 — a pending conversion survives an app reload; the engine d
       let parked = false;
       for (let round = 0; round < 5 && !parked; round++) {
         await m.driver.click('btn-convert-confirm', {timeoutMs: 6_000});
-        parked = await m.driver.findByTestID('convert-pending', {timeoutMs: 20_000}).then(() => true).catch(() => false);
+        // Same concurrent-poll as flow 141: the moved interrupt can clear itself once the
+        // refresh settles, so watch BOTH outcomes in one window (low host load observed
+        // 2026-09-29 losing the sequential wait's race here too).
+        const outcomeDeadline = budgetDeadline(20_000);
+        for (;;) {
+          if (m.driver.isPresent('convert-pending')) { parked = true; break; }
+          if (m.driver.isPresent('convert-moved-note') || Date.now() > outcomeDeadline) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
         if (!parked && m.driver.readTextSafe('convert-moved-note') == null) break;
       }
       expect(parked).toBe(true);
@@ -641,7 +746,7 @@ describe('flow 166 — the disclosed auto pick + the one-tap override + the INV-
         ? {id: FIXTURE_VENUE, name: 'ICPSwap (offline fixture)', net: netB}
         : {id: 'icpswap', name: 'ICPSwap', net: netA};
 
-      const autoLine = m.driver.readText('convert-venue-auto');
+      const autoLine = await awaitVenueComparison(m);
       assertIncludes(autoLine, 'Executed via', 'the pick line names its executor');
       assertIncludes(autoLine, 'highest quoted rate of 2 venues', 'the pick states the comparison count as a fact');
       expect(autoLine.toLowerCase()).not.toContain('best');
@@ -750,7 +855,7 @@ describe('flow 167 — the auto pick follows the quotes; the expander holds exac
         () => m!.driver.readTextSafe('convert-venue-auto')?.includes('offline fixture') === true,
         {timeoutMs: 15_000, label: 'the pick flipped to the fixture venue'},
       );
-      const autoLine1 = m.driver.readText('convert-venue-auto');
+      const autoLine1 = await awaitVenueComparison(m);
       assertIncludes(autoLine1, 'Executed via ICPSwap (offline fixture)', 'the disclosed pick followed the strictly-better fixture venue');
       assertIncludes(autoLine1, 'highest quoted rate of 2 venues', 'the pick states the comparison count');
       const after1 = venueRowOrder(m);
@@ -813,6 +918,15 @@ describe('flow 168 — picking fixture venue B executes through pool B, end-to-e
 
       // Pick venue B → the decision surfaces quote B, attributed to B, on B's pool.
       await m.driver.click(`convert-venue-${FIXTURE_VENUE}`, {timeoutMs: 6_000});
+      // The pick re-quotes ASYNC: the headline exists immediately still carrying the previous
+      // (auto-pick) quote — wait for the TRANSITION to B's net output, never snapshot-read a
+      // racing re-quote (observed 2026-09-29 at low host load).
+      const headlineB = `≈ ${fmtHero(net.toString(), 8, 'VCHF', {stable: true})}`;
+      const drv = m.driver;
+      await drv.waitForFunction(
+        () => (drv.readTextSafe('convert-headline') ?? '').includes(headlineB),
+        {timeoutMs: 10_000, label: "the headline flips to venue B's net output"},
+      );
       await m.driver.findByTestID('convert-headline', {timeoutMs: 10_000});
       expect(m.driver.isPresent('convert-venue-none')).toBe(false);
       await m.driver.click('convert-details', {timeoutMs: 5_000});
@@ -869,7 +983,7 @@ describe('flow 173 — the auto-pick invariants in the REVERSE direction (VCHF �
         () => m!.driver.readTextSafe('convert-venue-auto')?.includes('offline fixture') === true,
         {timeoutMs: 15_000, label: 'the pick flipped to the fixture venue (reverse)'},
       );
-      const autoLine1 = m.driver.readText('convert-venue-auto');
+      const autoLine1 = await awaitVenueComparison(m);
       assertIncludes(autoLine1, 'Executed via ICPSwap (offline fixture)', 'the pick followed the strictly-better fixture venue');
       assertIncludes(autoLine1, 'highest quoted rate of 2 venues', 'the pick states the comparison count');
       const after1 = venueRowOrder(m);

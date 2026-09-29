@@ -71,6 +71,19 @@ jest.mock('react-native/Libraries/Utilities/Platform', () => {
   return {__esModule: true, default: mocked};
 });
 
+// --- 0b. defuse the RN preset's RECORDING clock (the unbounded-heap root) -------------------------
+// @react-native/jest-preset installs `performance.now` as a jest.fn — and jest-mock records
+// every call for the mock's lifetime, the whole jest FILE. React's scheduler reads the clock on
+// every render-loop tick, so one load-stretched convert test allocated 460MB of pure call
+// records into arrays nothing ever reads (measured 2026-09-29; the class that OOM'd the convert
+// lane at 4GB, 8GB and again at the 6GB cap). No flow file reads the clock's call history, so
+// record nothing: a plain clock, identical semantics. The project also runs `clearMocks`
+// (jest.config.js) so every OTHER mock's records stay per-test-bounded.
+const presetPerformance = g.performance as {now?: unknown} | undefined;
+if (presetPerformance && typeof presetPerformance.now === 'function') {
+  presetPerformance.now = () => Date.now();
+}
+
 // --- 1. fast-poll + convert-engine seams (read at app module load — set BEFORE ../App) ----------
 g.__DPAY_TEST_POLL = {
   balance: 25, history: 25, deposit: 25, receiptPay: 25, receiptRcv: 25, request: 25,

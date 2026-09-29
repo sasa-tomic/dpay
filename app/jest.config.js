@@ -72,6 +72,12 @@ module.exports = {
       displayName: 'flow',
       ...common,
       testMatch: ['<rootDir>/__tests__/flow/**/*.test.@(ts|tsx)'],
+      // Jest's mocks record every call for the mock's lifetime — the whole FILE. Full-app flow
+      // files mount 34 describes into ONE registry, and per-test render churn then accumulates
+      // unboundedly in mock.call records (the convert lane's measured OOM class, 2026-09-29).
+      // Clear per test: records stay per-test-bounded, implementations survive (mockClear
+      // semantics — the AsyncStorage mock's backing store and every impl keep working).
+      clearMocks: true,
       setupFiles: ['<rootDir>/jest.flow-setup.js', '<rootDir>/jest.setup.js'],
       // The per-test lifecycle (AsyncStorage purge, seam resets, the fail-closed fetch
       // assertion) — lifecycle hooks only exist AFTER the test framework is installed, so

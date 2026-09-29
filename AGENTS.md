@@ -100,7 +100,9 @@ Dev-loop tests MUST finish in SECONDS, not minutes. That is the objective of the
   runs at `--maxWorkers=2` with a 6GB per-worker heap — worst case ~12GB jest + chrome + relay,
   far under the box's 62GB even with the CI runner building. Never raise the heap to make a
   leaking suite pass: a suite that grows its heap without bound is a REAL bug — fix the leak
-  (see convert/flows.test.tsx, the suite that caused the lockup).
+  (see convert/flows.test.tsx, the suite that caused the lockup; fixed 2026-09-29: the RN
+  preset's jest.fn clock recorded every scheduler tick forever — flow now runs `clearMocks`,
+  so jest-mock call records never cross a test; never assert another test's mock.calls there).
   and no calm-window waiting: a suite that fails in a load-scaled full run but passes ALONE means
   the budget scaling is incomplete for that wait — fix the scaling, rerun the full gate. A suite
   that fails alone is a real bug — fix the code.
