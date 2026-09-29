@@ -21,6 +21,7 @@
  * the pinned testIDs are unchanged.)
  */
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {relayBaseURL} from '../harness/relayClient';
 import {it, expect} from '@jest/globals';
 import {
   accountOf, armPayScan, assert, DpayCore, faucetAccount, generateKeypair, getBalance,
@@ -28,7 +29,8 @@ import {
 } from '../harness/lib';
 
 const g = globalThis as unknown as Record<string, unknown>;
-const RELAY = () => process.env.DPAY_JEST_RELAY_URL ?? '';
+// The file's own hermetic relay (the harness marker resolves it — never the shared one).
+const RELAY = () => relayBaseURL();
 
 /** Absence probe: a direct tree query — deterministic, no wait race (the e2e `absent` helper). */
 function absent(m: Mount, testID: string): void {

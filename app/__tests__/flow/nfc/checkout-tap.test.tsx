@@ -12,6 +12,7 @@
  * radio (the seam; the antenna hop is a physical-device gate).
  */
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {relayBaseURL} from '../harness/relayClient';
 import {it, expect, afterEach} from '@jest/globals';
 import {scaled as budgetScaled} from '../harness/budget';
 import {
@@ -171,7 +172,7 @@ function observeCheckoutOpens(): CheckoutOpen[] {
 
 /** GET a relay route and parse it, failing loudly on anything but 200. */
 async function getJson<T>(path: string): Promise<T> {
-  const r = await fetch(`${process.env.DPAY_JEST_RELAY_URL}${path}`);
+  const r = await fetch(`${relayBaseURL()}${path}`);
   const text = await r.text();
   if (!r.ok) throw new Error(`GET ${path} → HTTP ${r.status}: ${text.slice(0, 300)}`);
   return JSON.parse(text) as T;

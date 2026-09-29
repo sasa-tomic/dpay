@@ -28,7 +28,13 @@
 import {afterAll, beforeAll, describe} from '@jest/globals';
 import {startFlowRelay, type FlowRelay} from './flowRelay';
 import {resetPageEventListeners} from './setupFlow';
-import {RELAY_LIST_STORAGE_KEY} from '../../../config/constants';
+// `dpay.relays.v1` = RELAY_LIST_STORAGE_KEY (app/config/constants.ts) as a LITERAL: a static
+// import of config/constants here would load the app graph the moment a file imports this
+// module — and constants.ts/endpoints.ts capture `__DPAY_TEST_SOLANA_RPC_URL` /
+// `__DPAY_TEST_EVM_RPC_URL` at MODULE LOAD, so the lazy solEnv()/evmEnv() files (which seed
+// those seams only inside their first test body) would silently capture '' and their rail
+// would render offline (observed 2026-09-29: flow 47/66 'Solana is offline' across the
+// sol-card/sol-v2 lanes).
 
 export type HermeticRelayInfo = {baseURL: string; port: number};
 
@@ -128,7 +134,7 @@ export function hermeticFlow(opts: HermeticOpts = {}): HermeticFlow {
       for (const k of await AS.getAllKeys()) await AS.removeItem(k);
       await AS.clear();
     }
-    await AS?.setItem(RELAY_LIST_STORAGE_KEY, JSON.stringify([relay.baseURL]));
+    await AS?.setItem('dpay.relays.v1', JSON.stringify([relay.baseURL]));
     resetSeams();
     return {baseURL: relay.baseURL, port: relay.port};
   });

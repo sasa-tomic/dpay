@@ -10,6 +10,7 @@
  * IS the payment; reconciliation is by request_id via read_state.
  */
 import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
+import {relayBaseURL} from '../harness/relayClient';
 import {it, expect} from '@jest/globals';
 import {
   accountOf, armPayScan, assert, DpayCore, faucetAccount, generateKeypair, getBalance,
@@ -54,7 +55,7 @@ hermeticDescribe('flow 20 — offline envelope hand-off + reconcile-by-request_i
     // "bob's phone" submits the envelope to the IC gateway.
     const catalog = await icpCatalog();
     const ledger = catalog.find((c) => c.currency === 0)?.ledger ?? '';
-    const submitted = await fetch(`${process.env.DPAY_JEST_RELAY_URL}/api/v2/canister/${ledger}/call`, {
+    const submitted = await fetch(`${relayBaseURL()}/api/v2/canister/${ledger}/call`, {
       method: 'POST', headers: {'Content-Type': 'application/cbor'}, body: envelopeBytes,
     });
     expect(submitted.status).toBe(202);
@@ -63,7 +64,7 @@ hermeticDescribe('flow 20 — offline envelope hand-off + reconcile-by-request_i
     expect(await getBalance(bob.publicHex, 0)).toBe('12500');
 
     // A comes back online → reconcile-by-request_id flips the screen to Paid.
-    await setRelay(m, process.env.DPAY_JEST_RELAY_URL!);
+    await setRelay(m, relayBaseURL());
     expect(await m.driver.waitForText('Paid', {timeoutMs: 12000})).toBe(true);
     expect(m.driver.bodyText()).toContain('∂25.00');
 
