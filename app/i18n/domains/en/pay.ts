@@ -579,6 +579,8 @@ export type ReceiveMessages = {
   receiptUnreadable: string;
   couldNotConfirmYet: string;
   unknownLedger: string;
+  /** A thrown submit is a LOCAL failure AFTER the envelope POST (icSubmit never throws) — the
+   *  outcome is unknown, and the old copy blamed a connection this path never touched. */
   couldNotSubmit: string;
   noOpenRequest: string;
   paymentRejected: string;
@@ -747,7 +749,7 @@ export const receiveEn: ReceiveMessages = {
   receiptUnreadable: "Couldn't read this receipt link.",
   couldNotConfirmYet: 'Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh.',
   unknownLedger: 'Unknown ledger for this asset — couldn’t submit',
-  couldNotSubmit: "Couldn't submit the payment — check the connection",
+  couldNotSubmit: 'Couldn’t submit that payment. Scan it again. If it already went through, it shows in your balance.',
   noOpenRequest: 'No open request.',
   paymentRejected: 'Payment rejected.',
   paymentRejectedDetail: 'Payment rejected — the payer may lack balance, or the blockhash expired.',

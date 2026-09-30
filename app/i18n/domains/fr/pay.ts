@@ -259,7 +259,7 @@ export const receiveFr: ReceiveMessages = {
   receiptUnreadable: 'Impossible de lire ce lien de reçu.',
   couldNotConfirmYet: 'Impossible de confirmer ce paiement pour l’instant — si le payeur a payé, il apparaîtra à la prochaine actualisation du solde.',
   unknownLedger: 'Registre inconnu pour cet actif — envoi impossible',
-  couldNotSubmit: 'Impossible d’envoyer le paiement — vérifiez la connexion',
+  couldNotSubmit: 'Impossible d’envoyer ce paiement. Scannez-le à nouveau. S’il est déjà passé, il apparaîtra dans votre solde.',
   noOpenRequest: 'Aucune demande en cours.',
   paymentRejected: 'Paiement refusé.',
     paymentRejectedDetail:

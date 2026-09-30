@@ -258,7 +258,7 @@ export const receiveEs: ReceiveMessages = {
   receiptUnreadable: 'No se pudo leer este enlace de recibo.',
   couldNotConfirmYet: 'Aún no se pudo confirmar este pago: si quien paga lo hizo, aparecerá en la próxima actualización del saldo.',
   unknownLedger: 'Red desconocida para este activo: no se pudo enviar',
-  couldNotSubmit: 'No se pudo enviar el pago: revisa la conexión',
+  couldNotSubmit: 'No se pudo enviar ese pago. Escanéalo de nuevo. Si ya se procesó, aparecerá en tu saldo.',
   noOpenRequest: 'No hay ninguna solicitud abierta.',
   paymentRejected: 'Pago rechazado.',
   paymentRejectedDetail: 'Pago rechazado: puede que a quien paga le falte saldo, o que el blockhash haya caducado.',

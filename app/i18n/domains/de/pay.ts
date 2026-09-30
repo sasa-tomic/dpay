@@ -260,7 +260,7 @@ export const receiveDe: ReceiveMessages = {
   couldNotConfirmYet:
     'Diese Zahlung konnte noch nicht bestätigt werden — falls der Zahler bezahlt hat, erscheint sie bei der nächsten Guthabenaktualisierung.',
   unknownLedger: 'Unbekanntes Ledger für dieses Asset — Einreichen nicht möglich',
-  couldNotSubmit: 'Die Zahlung konnte nicht eingereicht werden — prüfe die Verbindung',
+  couldNotSubmit: 'Die Zahlung konnte nicht eingereicht werden. Scanne sie erneut. Ist sie schon durchgegangen, erscheint sie in deinem Guthaben.',
   noOpenRequest: 'Keine offene Anfrage.',
   paymentRejected: 'Zahlung abgelehnt.',
   paymentRejectedDetail:
