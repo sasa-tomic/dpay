@@ -12,7 +12,8 @@ export const errorsFr: ErrorMessages = {
     clockUnreachable: 'Horloge IC inaccessible',
     clockSkew: 'Décalage d’horloge IC trop important',
     noLedgerForCurrency: 'Actif non pris en charge',
-    feeUnavailable: 'Impossible de récupérer les frais du registre. Vérifiez votre connexion.',
+    feeUnavailableOffline: 'Vous semblez hors ligne, donc les frais du registre n’ont pas pu être lus. Rien n’a été envoyé. Réessayez une fois de nouveau en ligne.',
+    feeUnavailableUnreachable: 'Votre connexion est bonne, mais Internet Computer ne répond pas, donc les frais du registre n’ont pas pu être lus. Votre argent est intact. Réessayez dans un instant.',
   },
 
   solana: {

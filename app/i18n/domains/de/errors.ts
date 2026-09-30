@@ -11,7 +11,8 @@ export const errorsDe: ErrorMessages = {
     clockUnreachable: 'IC-Uhr nicht erreichbar',
     clockSkew: 'IC-Zeitabweichung zu groß',
     noLedgerForCurrency: 'Asset nicht unterstützt',
-    feeUnavailable: 'Ledger-Gebühr konnte nicht geladen werden. Prüfe die Verbindung.',
+    feeUnavailableOffline: 'Du scheinst offline zu sein, daher konnte die Ledger-Gebühr nicht gelesen werden. Nichts wurde gesendet. Versuche es erneut, sobald du wieder online bist.',
+    feeUnavailableUnreachable: 'Deine Verbindung ist in Ordnung, aber der Internet Computer antwortet nicht, daher konnte die Ledger-Gebühr nicht gelesen werden. Dein Geld ist unangetastet. Versuche es gleich noch einmal.',
   },
 
   solana: {

@@ -20,6 +20,7 @@ import {hexToBytes, bytesToHex, base, short} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import {readBodyWithin, relayFetch} from './relay';
+import {classifyIcReadFailure} from '../transportFailure';
 import {HISTORY_TIMEOUT_MS} from '../config/constants';
 import type {PayIntent, Req, TransactionsRow} from '../lib/types';
 import {M} from '../i18n';
@@ -454,9 +455,21 @@ const EMPTY_DIDL_ARG_HEX = '4449444c0000';
  * an offline payer's gross readout can still quote the fee the ledger itself last gave (founder
  * rule 2026-09-14). The cache is display-only: signing paths use THIS return only — a cached or
  * catalog fee must never flow into a signature. */
+/** The ledger fee read produced no fact. The BLAME is classified here at the seam — the shared
+ *  oracle (`classifyIcReadFailure` in `app/transportFailure.ts`, probing the SOL rail's head,
+ *  deliberately off the IC path) — and the thrown message is the matching honest sentence: the
+ *  offline arm blames nobody, the unreachable arm says the connection is fine and names the
+ *  Internet Computer as the side that isn't answering. "Check your connection" fired on this
+ *  surface while the phone was online (founder finding 2026-09-29); never again. */
+async function feeUnavailableCopy(): Promise<string> {
+  return (await classifyIcReadFailure()) === 'offline'
+    ? M.errors.ic.feeUnavailableOffline
+    : M.errors.ic.feeUnavailableUnreachable;
+}
+
 export async function fetchLedgerFee(secretHex: string, ledger: string): Promise<string> {
   const reply = await icQuery(secretHex, ledger, 'icrc1_fee', EMPTY_DIDL_ARG_HEX);
-  if (reply == null) throw new Error(M.errors.ic.feeUnavailable);
+  if (reply == null) throw new Error(await feeUnavailableCopy());
   const fee = await DpayCore.icpDecodeInt(reply);
   void rememberLedgerFee(ledger, fee); // display-cache write-through; never throws, never awaited
   return fee;

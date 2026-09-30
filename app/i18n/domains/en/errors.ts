@@ -28,8 +28,12 @@ export type ErrorMessages = {
     clockSkew: string;
     /** The requested currency has no ledger in the catalog — nothing payable, so nothing is signed. */
     noLedgerForCurrency: string;
-    /** `icrc1_fee` is unreadable, so an ICRC-2 approve cannot carry the fee the ledger demands. */
-    feeUnavailable: string;
+    /** `icrc1_fee` produced no fact. The blame is CLASSIFIED (app/transportFailure.ts
+     *  `classifyIcReadFailure`): offline blames nobody; unreachable says the connection is fine
+     *  and names the Internet Computer as the side that isn't answering (the old single
+     *  `feeUnavailable` read "Check connection." to online phones — founder finding 2026-09-29). */
+    feeUnavailableOffline: string;
+    feeUnavailableUnreachable: string;
   };
 
   /** Solana rail — the device-key send path and the one-time token account (ATA) setup. Every
@@ -203,7 +207,8 @@ export const errorsEn: ErrorMessages = {
     clockUnreachable: 'IC clock unreachable',
     clockSkew: 'IC clock skew too large',
     noLedgerForCurrency: 'Unsupported asset',
-    feeUnavailable: 'Couldn’t fetch the ledger fee. Check connection.',
+    feeUnavailableOffline: 'You seem offline, so the ledger fee couldn’t be read. Nothing was sent. Try again once you’re back online.',
+    feeUnavailableUnreachable: 'Your connection is fine, but the Internet Computer isn’t answering, so the ledger fee couldn’t be read. Your money is untouched. Try again in a moment.',
   },
 
   solana: {

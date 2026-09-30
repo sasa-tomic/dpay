@@ -11,7 +11,8 @@ export const errorsEs: ErrorMessages = {
     clockUnreachable: 'Reloj de IC inaccesible',
     clockSkew: 'Desfase de reloj de IC demasiado grande',
     noLedgerForCurrency: 'Activo no admitido',
-    feeUnavailable: 'No se pudo obtener la comisión de la red. Revisa tu conexión.',
+    feeUnavailableOffline: 'Pareces estar sin conexión, así que no se pudo leer la comisión de la red. No se envió nada. Inténtalo de nuevo cuando vuelvas a estar en línea.',
+    feeUnavailableUnreachable: 'Tu conexión está bien, pero Internet Computer no responde, así que no se pudo leer la comisión de la red. Tu dinero está intacto. Inténtalo de nuevo en un momento.',
   },
 
   solana: {
