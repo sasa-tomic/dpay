@@ -111,7 +111,7 @@ describe('executeEvmConvert — the honest edges', () => {
         inRailId: `evm:1:${ZCHF}`, outRailId: OUT_RAIL, tokenIn: ZCHF, tokenOut: '',
         inSymbol: 'ZCHF', outSymbol: 'ETH', inDecimals: 18, outDecimals: 18,
         amountIn: quote.amountIn, minOut: quote.amountOut, feeTier: 3000,
-        deadlineSecs: 9n ** 9n as unknown as number, slippageBps: 100,
+        deadlineSecs: 387420489, slippageBps: 100,
       },
     };
     const updates: ConvertRecord[] = [];
