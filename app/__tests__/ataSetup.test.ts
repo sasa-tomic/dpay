@@ -18,7 +18,7 @@
 import {describe, test, expect} from '@jest/globals';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS} from '../solana/tokens';
-import {planAtaSetup, sizeAtaFundPlan, type AtaSetupTokenInput} from '../lib/ataSetup';
+import {planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
 
 const EURC = EURC_MINT_ADDRESS;
 const USDC = USDC_MINT_ADDRESS;
@@ -127,6 +127,171 @@ describe('planAtaSetup — the honest refusal', () => {
   test('SOL unknown and nothing funded → refuse too (an unknown balance is not a funded one)', () => {
     const plan = planAtaSetup({targets: [absent()], solBalance: null, sources: []});
     expect(plan).toEqual({kind: 'refuse'});
+  });
+});
+
+// ── The fund-ic branch (founder override 2026-09-30): a wallet holding ONLY IC-side money ──────
+// (ckUSDC@ICP, VCHF@ICP, ICP) used to land in refuse. The founder: "complete that setup as soon
+// as user adds some funds to ANY currency, by swapping + completing the setup". The IC candidates
+// are pure data (the executor resolves the convert-engine route); the SPL fund branch keeps its
+// precedence (a same-rail venue swap is cheaper than a cross-rail one).
+const icSource = (over: Partial<AtaIcFundSource> = {}): AtaIcFundSource => ({
+  currencyKey: 'ic:7', symbol: 'VCHF', decimals: 8, rawAmount: '2000000000', ...over,
+});
+
+describe('planAtaSetup — the fund-ic branch (no SPL source, IC-side money funds the swap)', () => {
+  test('SOL short, no usable SPL source, a funded IC asset → fund-ic naming the candidate', () => {
+    const plan = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [icSource()]});
+    expect(plan.kind).toBe('fund-ic');
+    if (plan.kind === 'fund-ic') {
+      expect(plan.candidates).toEqual([icSource()]);
+      // The same wallet-level target convention as the fund branch: the plan states the TOTAL
+      // SOL the wallet must hold afterwards; the sizer subtracts the SOL already held.
+      expect(BigInt(plan.targetLamports)).toBe(SOL_ATA_SETUP_MIN_LAMPORTS + 2n * SOL_FEE_LAMPORTS);
+      expect(BigInt(plan.costLamports)).toBe(SOL_ATA_SETUP_MIN_LAMPORTS);
+      expect(plan.mints).toEqual([EURC]);
+    }
+  });
+
+  test('IC candidates keep the caller\'s registry/matrix order (first-listed first)', () => {
+    const plan = planAtaSetup({
+      targets: [absent()], solBalance: '0', sources: [],
+      icSources: [icSource(), icSource({currencyKey: 'ic:2', symbol: 'ckUSDC', rawAmount: '1000000'})],
+    });
+    if (plan.kind !== 'fund-ic') throw new Error('expected fund-ic');
+    expect(plan.candidates.map(c => c.currencyKey)).toEqual(['ic:7', 'ic:2']);
+  });
+
+  test('a zero or unmeasured IC balance is not a candidate (only a measured positive one is)', () => {
+    const plan = planAtaSetup({
+      targets: [absent()], solBalance: '0', sources: [],
+      icSources: [icSource({rawAmount: '0'}), icSource({currencyKey: 'ic:2', symbol: 'ckUSDC', rawAmount: ''})],
+    });
+    expect(plan.kind).toBe('refuse');
+  });
+
+  test('a funded SPL token still wins: fund, never fund-ic (same-rail swap before a cross-rail one)', () => {
+    const plan = planAtaSetup({
+      targets: [absent()], solBalance: '0', sources: [funded()], icSources: [icSource()],
+    });
+    expect(plan.kind).toBe('fund');
+  });
+
+  test('SOL covers → create, even with IC sources sitting there (no swap at all)', () => {
+    const plan = planAtaSetup({
+      targets: [absent()], solBalance: SOL_ATA_SETUP_MIN_LAMPORTS.toString(), sources: [], icSources: [icSource()],
+    });
+    expect(plan.kind).toBe('create');
+  });
+
+  test('nothing funded anywhere → refuse is unchanged (the honest dead end stays)', () => {
+    const plan = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: []});
+    expect(plan).toEqual({kind: 'refuse'});
+  });
+});
+
+describe('sizeAtaIcFundPlan — the injected-quote sizing walk over the IC candidates', () => {
+  // The target for one absent account, SOL 0.
+  const plan = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [icSource()]});
+  if (plan.kind !== 'fund-ic') throw new Error('fixture: expected a fund-ic plan');
+  const target = BigInt(plan.targetLamports);
+
+  test('the full balance more than covers → shrink toward the shortfall, never below the venue minimum', async () => {
+    // Price: 1 raw VCHF unit → 16 lamports. 2 VCHF → 0.032 SOL, far above the ~0.00205 target.
+    const calls: string[] = [];
+    const sized = await sizeAtaIcFundPlan({
+      plan,
+      solKnown: '0',
+      quote: async (_source, inRaw) => {
+        calls.push(inRaw);
+        return {kind: 'quote', outLamports: (BigInt(inRaw) * 16n).toString()};
+      },
+    });
+    expect(sized).not.toBeNull();
+    if (sized == null) return;
+    expect(BigInt(sized.inAmount)).toBeLessThan(2_000_000_000n); // shrunk below the full balance
+    expect(BigInt(sized.outFloor)).toBeGreaterThanOrEqual(target);
+    expect(calls[calls.length - 1]).toBe(sized.inAmount); // the sized input was quoted fresh
+    expect(calls.length).toBeLessThanOrEqual(6);
+  });
+
+  test('the venue minimum is discovered from the below-min refusal and used as the input when it covers', async () => {
+    // Venue minimum: 1 VCHF (100000000 raw). At the full 2 VCHF the venue would quote fine, so
+    // force the walk onto the refusal path directly: quote refuses everything with the minimum.
+    const sized = await sizeAtaIcFundPlan({
+      plan,
+      solKnown: '0',
+      quote: async (_source, inRaw) => {
+        // Refuse below the minimum; at/above it quote 16 lamports per raw unit.
+        if (BigInt(inRaw) < 100_000_000n) return {kind: 'belowMin', minInRaw: '100000000'};
+        return {kind: 'quote', outLamports: (BigInt(inRaw) * 16n).toString()};
+      },
+    });
+    expect(sized).not.toBeNull();
+    if (sized == null) return;
+    expect(BigInt(sized.inAmount)).toBeGreaterThanOrEqual(100_000_000n); // never below the venue minimum
+    expect(BigInt(sized.outFloor)).toBeGreaterThanOrEqual(target);
+  });
+
+  test('the wallet cannot reach the venue minimum → the candidate is skipped (never a forced swap)', async () => {
+    const second: AtaIcFundSource = icSource({currencyKey: 'ic:2', symbol: 'ckUSDC', decimals: 6, rawAmount: '1000000'});
+    const plan2 = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [icSource({rawAmount: '50000000'}), second]});
+    if (plan2.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
+    // Candidate 1 holds 0.5 VCHF, venue minimum 1 VCHF → skipped. Candidate 2 (1 USDC at 16
+    // lamports per raw unit) covers easily.
+    const sized = await sizeAtaIcFundPlan({
+      plan: plan2,
+      solKnown: '0',
+      quote: async (source, inRaw) => {
+        if (source.currencyKey === 'ic:7' && BigInt(inRaw) < 100_000_000n) {
+          return {kind: 'belowMin', minInRaw: '100000000'};
+        }
+        return {kind: 'quote', outLamports: (BigInt(inRaw) * 16n).toString()};
+      },
+    });
+    expect(sized).not.toBeNull();
+    if (sized == null) return;
+    expect(sized.source.currencyKey).toBe('ic:2');
+  });
+
+  test('no candidate can reach the target → null (the honest fall-through to refuse)', async () => {
+    const sized = await sizeAtaIcFundPlan({
+      plan,
+      solKnown: '0',
+      quote: async () => ({kind: 'quote', outLamports: '1'}), // a dust venue rate
+    });
+    expect(sized).toBeNull();
+  });
+
+  test('the venue minimum itself cannot reach the target → null', async () => {
+    const sized = await sizeAtaIcFundPlan({
+      plan,
+      solKnown: '0',
+      quote: async (_source, inRaw) => {
+        if (BigInt(inRaw) < 100_000_000n) return {kind: 'belowMin', minInRaw: '100000000'};
+        // Even at the venue minimum the rate is dust: ~0.0016 SOL at 1 VCHF, under the target.
+        return {kind: 'quote', outLamports: (BigInt(inRaw) / 625_000_000n).toString()};
+      },
+    });
+    expect(sized).toBeNull();
+  });
+
+  test('an unquotable candidate (venue refused / no market) is skipped, not a crash', async () => {
+    const sized = await sizeAtaIcFundPlan({plan, solKnown: '0', quote: async () => null});
+    expect(sized).toBeNull();
+  });
+
+  test('existing SOL counts toward the target: the swap only covers the shortfall', async () => {
+    const shortSol = (SOL_ATA_SETUP_MIN_LAMPORTS - 1n).toString();
+    const sized = await sizeAtaIcFundPlan({
+      plan,
+      solKnown: shortSol,
+      quote: async (_source, inRaw) => ({kind: 'quote', outLamports: (BigInt(inRaw) * 16n).toString()}),
+    });
+    expect(sized).not.toBeNull();
+    if (sized == null) return;
+    expect(BigInt(sized.outFloor) + BigInt(shortSol)).toBeGreaterThanOrEqual(target);
+    expect(BigInt(sized.inAmount)).toBeLessThan(1_000_000n); // a tiny swap only
   });
 });
 
