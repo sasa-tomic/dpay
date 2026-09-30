@@ -112,6 +112,8 @@ export type ConvertMessages = {
   /** No executable route from this currency: what exists today, plus the one way forward. */
   noPathTitle: (inSym: string) => string;
   noPathBody: (pairs: string) => string;
+  /** HONEST UNAVAILABILITY (2026-09-28): the named target refuses with its reason — visible, never hidden. */
+  noVenueBody: (inSym: string, outSym: string) => string;
   /** The no-path panel's one action: the deposit surface for the currency the user holds. */
   noPathAction: string;
   /** The CCTP exception, disclosed at tap 1: one step is signed in the user's OWN wallet. */
@@ -237,6 +239,20 @@ export type ConvertMessages = {
     /** Submitted-and-watching: the chain is the ledger; the screen resolves itself. */
     pendingBody: string;
     failedBody: (sym: string, venue: string, detail: string) => string;
+  };
+
+  // --- the EVM rail's Uniswap V3 venue (2026-09-28, the any-pair mandate) ------------------------
+  evm: {
+    heading: (inSym: string, outSym: string, chain: string) => string;
+    /** The chain's own arithmetic over the planned legs (estimate attribution, D15.2). */
+    feeLabel: (unit: string) => string;
+    /** Broadcast-and-watching: the receipts are the ledger; the screen resolves itself. */
+    pendingBody: string;
+    /** The failure body: names what still sits in the wallet, per failure class (the detail
+     *  is the executor's own classification, never provider prose). */
+    failedBody: (inSym: string, detail: string) => string;
+    /** A receipt never landed: the honest unknown, the hashes stay watchable. */
+    stuckBody: (outSym: string) => string;
   };
 
   // --- multi-hop routes (docs/specs/2026-09-14-multihop-conversion-spec.md §5–§7) ----------------
@@ -605,6 +621,7 @@ export const convertEn: ConvertMessages = {
   smallerAmount: 'Convert a smaller amount',
   noPathTitle: inSym => `No route from ${inSym}`,
   noPathBody: pairs => `Routes today: ${pairs}`,
+  noVenueBody: (inSym, outSym) => `No venue converts ${inSym} to ${outSym} yet. The pair stays listed here; new venues appear as they are added.`,
   noPathAction: 'Add money',
   externalSignTitle: 'One step needs your own Ethereum wallet',
   externalSignBody: 'You sign the crossing in your own wallet; dpay never holds its keys. Everything else stays in this sheet.',
@@ -697,6 +714,15 @@ export const convertEn: ConvertMessages = {
   stuckAcknowledge: 'Understood \u2014 stop watching',
   stuckAcknowledged: 'Watch stopped \u2014 funds moving later still land at this wallet\u2019s address.',
 
+  evm: {
+    heading: (inSym, outSym, chain) => `Convert ${inSym} to ${outSym} (${chain})`,
+    feeLabel: unit => `Network fee (${unit}, estimate)`,
+    pendingBody: 'The swap is on-chain and confirmed. Waiting for your balance to show it.',
+    failedBody: (inSym, detail) => String(detail).includes('approve landed')
+      ? `The swap failed after the approval. Your ${inSym} is still in your wallet; the unused approval is for the exact swap amount only.`
+      : `Nothing was sent. Your ${inSym} is still in your wallet.`,
+    stuckBody: outSym => `The swap may or may not have landed. Your ${outSym} balance will resolve on its own; do not start a second swap.`,
+  },
   multihop: {
     destLabel: 'Destination',
     destDirect: sym => `${sym} — in this wallet`,

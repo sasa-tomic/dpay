@@ -18,6 +18,7 @@ import type {CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
 import {currencyOfAsset, type HomeCurrency} from '../config/currency';
 import {resolveSwapTargets, type SwapTarget} from '../config/swap';
+import type {EvmAsset} from '../lib/evmCatalog';
 import {loadVenueRegistry, TERMINAL_CONVERT_STEPS, type ConvertRecord} from '../convert';
 import type {VenueEntry} from '../config/venues';
 import {adoptConvertRecord, convertResumeSnapshot, subscribeConvertRecords} from '../convertResume';
@@ -34,6 +35,7 @@ import {ConvertFieldTracker, ConvertIntentSheet} from './ConvertIntentSheet';
 import {StatePanel} from './ConvertStatePanel';
 import {CrossRailStatePanel} from './ConvertCrossRailStatePanel';
 import {SolStatePanel} from './SolStatePanel';
+import {EvmStatePanel} from './EvmStatePanel';
 
 type Props = {
   identity: Identity;
@@ -60,11 +62,16 @@ type Props = {
   /** Solana-rail balances: raw-unit spendable SOL (lamports) + per-mint token amounts. The
    *  fund gate + insufficient check read these; absent/empty means "unknown" (fail soft). */
   solana?: {sol: string | null; tokens: Record<string, string | null>};
+  /** The catalog's EVM token rows (the evm-token settle rails) + the selected EVM asset's
+   *  raw token balance (the fund gate + Max prefill for an EVM source; null = unknown). */
+  evmAssets?: readonly EvmAsset[];
+  evmBalance?: string | null;
 };
 
 export function ConvertMode({
   identity, relayUrl, catalog, selectedAsset, assetBalances, visibleCurrencies,
   currencyBalances, homeCurrency, onBack, onShowDepositAddress, onSwitchAsset, solana,
+  evmAssets = [], evmBalance = null,
 }: Props) {
   const sourceCurrency: HomeCurrency | null = selectedAsset != null ? currencyOfAsset(selectedAsset) : null;
   const isSolSource = selectedAsset?.protocol === 'solana';
@@ -81,7 +88,9 @@ export function ConvertMode({
       ? (inMint === WRAPPED_SOL_MINT_ADDRESS ? solana?.sol ?? null : solana?.tokens[inMint ?? ''] ?? null)
       : selectedAsset.protocol === 'ic'
         ? assetBalances[selectedAsset.currency]
-        : null;
+        : selectedAsset.protocol === 'evm'
+          ? evmBalance
+          : null;
   const balanceN = balanceRaw != null && /^\d+$/.test(balanceRaw) ? BigInt(balanceRaw) : null;
 
   // ── The resolved pair ────────────────────────────────────────────────────────────────────
@@ -111,7 +120,7 @@ export function ConvertMode({
   const evmEnabled = isEvmRailConfigured();
   const targets: SwapTarget[] = useMemo(
     () => selectedAsset != null
-      ? resolveSwapTargets({catalog, source: selectedAsset, targetCurrencies: targetScope, evmEnabled}) ?? []
+      ? resolveSwapTargets({catalog, source: selectedAsset, targetCurrencies: targetScope, evmEnabled, evmAssets}) ?? []
       : [],
     [selectedAsset, catalog, targetScope, venueList, evmEnabled],
   );
@@ -159,7 +168,7 @@ export function ConvertMode({
   };
 
   // ── Early returns (AFTER every hook — the 196 rule). ─────────────────────────────────────
-  if (selectedAsset == null || targets.length === 0) {
+  if (selectedAsset == null || targets.every(t => t.rows.length === 0)) {
     return <UnavailablePanel
       selectedAsset={selectedAsset}
       onBack={onBack}
@@ -185,6 +194,7 @@ export function ConvertMode({
     if (record.crossRail != null) {
       return <CrossRailStatePanel record={record} secretHex={identity.secretHex} relayUrl={relayUrl} solLamports={solana?.sol ?? null} onBack={onBack} />;
     }
+    if (record.evmSwap != null) return <EvmStatePanel record={record} onBack={onBack} />;
     if (record.solanaLeg != null) return <SolStatePanel record={record} onBack={onBack} />;
     return <ConvertFieldTracker record={record} onBack={onBack} />;
   }

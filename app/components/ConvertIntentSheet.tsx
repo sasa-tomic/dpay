@@ -56,6 +56,7 @@ import {
   prepareChainConvertRecord,
   prepareComposedConvertRecord,
   prepareConvertRecord,
+  prepareEvmConvertRecord,
   prepareHubConvertRecord,
   prepareMultihopConvertRecord,
   prepareSolanaConvertRecord,
@@ -69,7 +70,7 @@ import {DpayCore} from '../services/native';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
 import {USDC_MINT_ADDRESS} from '../solana/tokens';
 import {deriveSolanaAddress} from '../solana/identity';
-import {deriveEvmAddress} from '../evm';
+import {deriveEvmAddress, estimateUniswapSequenceFee, quoteUniswapSwap, type UniswapQuote} from '../evm';
 import {toChecksumAddress} from '../evm/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {gasFundRoutes} from '../routes';
@@ -124,6 +125,10 @@ type Props = {
 /** One hub row's two-quote bundle (quote1 from→hub, quote2 hub→dest sized on m1.minOut). */
 type HubBundle = {q1: ConvertQuote; m1: ConvertMath; q2: ConvertQuote; m2: ConvertMath};
 
+/** One evmamm row's quote bundle: the venue's own quote (best fee tier) + the slippage floor
+ *  derived off it (the number the swap leg signs) — both frozen facts the confirm re-quotes. */
+type EvmBundle = {quote: UniswapQuote; minOut: string};
+
 /** The mechanical venue pick: the row + how many live quotes the pick compared. */
 type AutoPick = {rowId: string; compared: number} | null;
 
@@ -139,6 +144,7 @@ function rowNetValue(
   hubBundles: Record<string, HubBundle>,
   composedBundles: Record<string, ComposedBundle>,
   chainBundles: Record<string, ChainBundle>,
+  evmQuotes: Record<string, EvmBundle>,
 ): string | null {
   if (r.kind === 'direct') {
     const q = rowQuotes[r.rowId];
@@ -168,6 +174,10 @@ function rowNetValue(
     const b = chainBundles[r.rowId];
     return b != null ? rawToDecimal(chainFinalNet(b), r.route.endpoints[r.route.legs.length]!.decimals) : null;
   }
+  if (r.kind === 'evmamm') {
+    const q = evmQuotes[r.rowId];
+    return q != null ? rawToDecimal(q.quote.amountOut, r.out.decimals) : null;
+  }
   return null;
 }
 
@@ -183,14 +193,15 @@ function computeAutoPick(
   hubBundles: Record<string, HubBundle>,
   composedBundles: Record<string, ComposedBundle>,
   chainBundles: Record<string, ChainBundle>,
+  evmQuotes: Record<string, EvmBundle>,
 ): AutoPick {
   const cmp = (a: string, b: string) => Number(a) - Number(b);
   type Quoted = {rowId: string; v: string};
-  const venueRows = rows.filter(r => r.kind === 'direct' || r.kind === 'solamm' || r.kind === 'cefi');
+  const venueRows = rows.filter(r => r.kind === 'direct' || r.kind === 'solamm' || r.kind === 'cefi' || r.kind === 'evmamm');
   if (venueRows.length > 0) {
     const quoted: Quoted[] = [];
     for (const r of venueRows) {
-      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles);
+      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles, evmQuotes);
       if (v != null) quoted.push({rowId: r.rowId, v});
     }
     if (quoted.length === 0) return null;
@@ -204,7 +215,7 @@ function computeAutoPick(
   if (hubRows.length > 0) {
     const quoted: Quoted[] = [];
     for (const r of hubRows) {
-      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles);
+      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles, evmQuotes);
       if (v != null) quoted.push({rowId: r.rowId, v});
     }
     if (quoted.length === 0) return null;
@@ -218,7 +229,7 @@ function computeAutoPick(
   if (composedRows.length > 0) {
     const quoted: Quoted[] = [];
     for (const r of composedRows) {
-      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles);
+      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles, evmQuotes);
       if (v != null) quoted.push({rowId: r.rowId, v});
     }
     if (quoted.length === 0) return null;
@@ -233,7 +244,7 @@ function computeAutoPick(
   if (chainRows.length > 0) {
     const quoted: Quoted[] = [];
     for (const r of chainRows) {
-      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles);
+      const v = rowNetValue(r, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles, evmQuotes);
       if (v != null) quoted.push({rowId: r.rowId, v});
     }
     if (quoted.length === 0) return null;
@@ -255,6 +266,7 @@ function provisionalRowId(rows: SwapRow[]): string | null {
   const first = (pred: (r: SwapRow) => boolean) => rows.find(pred)?.rowId ?? null;
   return first(r => r.kind === 'direct')
     ?? first(r => r.kind === 'solamm')
+    ?? first(r => r.kind === 'evmamm')
     ?? first(r => r.kind === 'cefi')
     ?? first(r => r.kind === 'hub')
     ?? first(r => r.kind === 'composed')
@@ -389,6 +401,12 @@ export function ConvertIntentSheet({
   const composedBundleAmts = useRef<Record<string, string>>({});
   const [chainBundles, setChainBundles] = useState<Record<string, ChainBundle>>({});
   const chainBundleAmts = useRef<Record<string, string>>({});
+  // The evmamm rows' quote bundles (the venue's own best-tier quote + the floor it derives).
+  const [evmQuotes, setEvmQuotes] = useState<Record<string, EvmBundle>>({});
+  const evmQuoteAmts = useRef<Record<string, string>>({});
+  // The active evmamm row's aggregate fee estimate (the chain's own arithmetic; the review's
+  // network-fee line and prepare's dry gate both read it — the executor re-probes live).
+  const [evmFeeWei, setEvmFeeWei] = useState<string | null>(null);
   // The venue's own listed-but-unquoted verdict (CeFi no-quote): a STATE, not an error.
   const [noQuoteRow, setNoQuoteRow] = useState<{rowId: string; venueName: string} | null>(null);
   const [quoteBusy, setQuoteBusy] = useState(false);
@@ -410,8 +428,8 @@ export function ConvertIntentSheet({
 
   // ── The picks: provisional (fetch demand) → mechanical auto pick → explicit override ─────
   const autoPick = useMemo(
-    () => computeAutoPick(rows, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles),
-    [rows, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles],
+    () => computeAutoPick(rows, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles, evmQuotes),
+    [rows, rowQuotes, jupQuotes, hubBundles, composedBundles, chainBundles, evmQuotes],
   );
   const provId = useMemo(() => provisionalRowId(rows), [rows]);
   const activeRowId: string | null = selRowId ?? autoPick?.rowId ?? provId;
@@ -424,11 +442,13 @@ export function ConvertIntentSheet({
   const ammRow = activeRow != null && activeRow.kind === 'solamm' ? activeRow : null;
   const composedRow = activeRow != null && activeRow.kind === 'composed' ? activeRow : null;
   const chainRow = activeRow != null && activeRow.kind === 'chain' ? activeRow : null;
+  const evmRow = activeRow != null && activeRow.kind === 'evmamm' ? activeRow : null;
   const hubMode = hubRow != null;
   const routeMode = crossRow != null;
   const cefiMode = cefiRow != null;
   const ammMode = ammRow != null;
   const chainMode = chainRow != null;
+  const evmMode = evmRow != null;
   const outSym: string =
     directRow != null ? directRow.outDesc.backing_symbol ?? directRow.outDesc.symbol ?? ''
     : hubRow != null ? hubRow.route.dest.symbol
@@ -437,6 +457,7 @@ export function ConvertIntentSheet({
     : ammRow != null ? ammRow.outSym
     : composedRow != null ? composedRow.route.settleSymbol
     : chainRow != null ? chainRow.route.endpoints[chainRow.route.legs.length]!.symbol
+    : evmRow != null ? evmRow.out.symbol
     : inSym;
   const outDecimals: number =
     directRow != null ? directRow.outDesc.decimals ?? inDecimals
@@ -446,6 +467,7 @@ export function ConvertIntentSheet({
     : ammRow != null ? ammRow.outDecimals
     : composedRow != null ? composedRow.route.settleDecimals
     : chainRow != null ? chainRow.route.endpoints[chainRow.route.legs.length]!.decimals
+    : evmRow != null ? evmRow.out.decimals
     : inDecimals;
 
   // The rows that are NOT the standing pick — the Other-venues expander's contents, verbatim
@@ -460,6 +482,7 @@ export function ConvertIntentSheet({
   const activeHub: HubBundle | null = hubRow != null ? hubBundles[hubRow.rowId] ?? null : null;
   const activeComposed: ComposedBundle | null = composedRow != null ? composedBundles[composedRow.rowId] ?? null : null;
   const activeChain: ChainBundle | null = chainRow != null ? chainBundles[chainRow.rowId] ?? null : null;
+  const activeEvm: EvmBundle | null = evmRow != null ? evmQuotes[evmRow.rowId] ?? null : null;
   const activeRowErr: string | null = activeRow != null ? rowQuoteErrs[activeRow.rowId] ?? null : null;
 
   // ── Quote fetch (per-kind discipline inherited verbatim) ─────────────────────────────────
@@ -482,16 +505,20 @@ export function ConvertIntentSheet({
       composedBundleAmts.current = {};
       setChainBundles({});
       chainBundleAmts.current = {};
+      setEvmQuotes({});
+      evmQuoteAmts.current = {};
+      setEvmFeeWei(null);
       setNoQuoteRow(null);
       setQuoteErr(null);
       setQuoteBusy(false);
       return;
     }
-    const live = rows.filter(r => r.kind === 'direct' || r.kind === 'solamm');
+    const live = rows.filter(r => r.kind === 'direct' || r.kind === 'solamm' || r.kind === 'evmamm');
     const pickedWait = activeRow != null && !live.some(r => r.rowId === activeRow.rowId) ? [activeRow] : [];
     const needs = (r: typeof rows[number]): boolean => {
       if (r.kind === 'direct' || r.kind === 'crossrail') return rowQuoteAmts.current[r.rowId] !== parsed.raw;
       if (r.kind === 'solamm') return jupQuoteAmts.current[r.rowId] !== parsed.raw;
+      if (r.kind === 'evmamm') return evmQuoteAmts.current[r.rowId] !== parsed.raw;
       if (r.kind === 'hub') return hubBundleAmts.current[r.rowId] !== parsed.raw;
       if (r.kind === 'composed') return composedBundleAmts.current[r.rowId] !== parsed.raw;
       if (r.kind === 'chain') return chainBundleAmts.current[r.rowId] !== parsed.raw;
@@ -514,6 +541,8 @@ export function ConvertIntentSheet({
       const compAmts: Record<string, string> = {};
       const chains: Record<string, ChainBundle> = {};
       const chainAmts: Record<string, string> = {};
+      const evms: Record<string, EvmBundle> = {};
+      const evmAmts: Record<string, string> = {};
       const noQuoteRef: {v: {rowId: string; venueName: string} | null} = {v: null};
       await Promise.allSettled(plan.map(async (r) => {
         try {
@@ -541,6 +570,13 @@ export function ConvertIntentSheet({
           } else if (r.kind === 'chain') {
             chains[r.rowId] = await fetchChainQuotes(relayUrl, r.route, parsed.raw, slippageBps);
             chainAmts[r.rowId] = parsed.raw;
+          } else if (r.kind === 'evmamm') {
+            const q = r.out.kind === 'native'
+              ? await quoteUniswapSwap({kind: 'exact-input', chainId: r.chainId, tokenIn: r.inAddress, tokenOut: '', amountIn: BigInt(parsed.raw)})
+              : await quoteUniswapSwap({kind: 'exact-input', chainId: r.chainId, tokenIn: r.inAddress, tokenOut: r.out.address, amountIn: BigInt(parsed.raw)});
+            const minOut = await DpayCore.icpSwapMinOut(q.amountOut, slippageBps);
+            evms[r.rowId] = {quote: q, minOut};
+            evmAmts[r.rowId] = parsed.raw;
           } else {
             quotes[r.rowId] = await fetchCeFiConvertQuote(relayUrl, r.venue, r.inLedgerOrMint, r.outLedger ?? r.outMint ?? r.outRailId ?? '', parsed.raw, {inDecimals, outDecimals: r.outDecimals});
             amts[r.rowId] = parsed.raw;
@@ -563,6 +599,8 @@ export function ConvertIntentSheet({
       composedBundleAmts.current = {...composedBundleAmts.current, ...compAmts};
       setChainBundles(prev => ({...prev, ...chains}));
       chainBundleAmts.current = {...chainBundleAmts.current, ...chainAmts};
+      setEvmQuotes(prev => ({...prev, ...evms}));
+      evmQuoteAmts.current = {...evmQuoteAmts.current, ...evmAmts};
       setNoQuoteRow(noQuoteRef.v);
       setQuoteBusy(false);
     })();
@@ -583,7 +621,7 @@ export function ConvertIntentSheet({
   useEffect(() => {
     const id = setInterval(() => {
       if (!mountedRef.current || staleRefreshing) return;
-      const candidates = rows.filter(r => r.kind === 'direct' || r.kind === 'solamm' || r.rowId === activeRowId)
+      const candidates = rows.filter(r => r.kind === 'direct' || r.kind === 'solamm' || r.kind === 'evmamm' || r.rowId === activeRowId)
         .filter(r => r.kind !== 'cefi' && r.kind !== 'composed' && r.kind !== 'chain');
       const staleIc = candidates.filter((r): r is Extract<SwapRow, {kind: 'direct'} | {kind: 'crossrail'}> => {
         const q = rowQuotes[r.rowId];
@@ -597,7 +635,11 @@ export function ConvertIntentSheet({
         const b = hubBundles[r.rowId];
         return r.kind === 'hub' && b != null && (isQuoteStale(b.q1) || isQuoteStale(b.q2));
       });
-      if (staleIc.length === 0 && staleJup.length === 0 && staleHub.length === 0) return;
+      const staleEvm = candidates.filter((r): r is Extract<SwapRow, {kind: 'evmamm'}> => {
+        const b = evmQuotes[r.rowId];
+        return r.kind === 'evmamm' && b != null && isQuoteStale(b.quote);
+      });
+      if (staleIc.length === 0 && staleJup.length === 0 && staleHub.length === 0 && staleEvm.length === 0) return;
       setStaleRefreshing(true);
       void (async () => {
         try {
@@ -617,6 +659,21 @@ export function ConvertIntentSheet({
             setRowQuotes(prev => ({...prev, [r.rowId]: fresh}));
             if (activeRowId === r.rowId && fresh.amountOutGross !== q.amountOutGross) {
               setMoved({oldAmt: q.amountOutGross, newAmt: fresh.amountOutGross});
+            }
+          }
+          for (const r of staleEvm) {
+            const b = evmQuotes[r.rowId];
+            if (b == null) continue;
+            const amt = evmQuoteAmts.current[r.rowId];
+            if (amt == null || liveAmtRef.current !== amt) continue; // superseded amount
+            const tokenOut = r.out.kind === 'native' ? '' : r.out.address;
+            const fresh = await quoteUniswapSwap({kind: 'exact-input', chainId: r.chainId, tokenIn: r.inAddress, tokenOut, amountIn: BigInt(amt)});
+            if (!mountedRef.current) return;
+            if (evmQuoteAmts.current[r.rowId] !== amt) continue; // re-typed mid-refresh
+            const minOut = await DpayCore.icpSwapMinOut(fresh.amountOut, slippageBps);
+            setEvmQuotes(prev => ({...prev, [r.rowId]: {quote: fresh, minOut}}));
+            if (activeRowId === r.rowId && fresh.amountOut !== b.quote.amountOut) {
+              setMoved({oldAmt: b.quote.amountOut, newAmt: fresh.amountOut});
             }
           }
           for (const r of staleJup) {
@@ -943,6 +1000,35 @@ export function ConvertIntentSheet({
     setConfirmErr(null);
   };
 
+  // The evmamm row's aggregate network-fee estimate (the chain's own arithmetic over the
+  // planned legs — the review's fee line and prepare's dry gate; the executor re-probes at
+  // drive time, so this figure never gates alone). Cleared when the row or amount changes.
+  useEffect(() => {
+    if (evmRow == null || amountRaw == null || amountRaw === '0') {
+      setEvmFeeWei(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const tokenOut = evmRow.out.kind === 'native' ? '' : evmRow.out.address;
+        const {planTokenToNative, planTokenToToken} = await import('../evm/uniswapPlan');
+        const {evmAmmChainOf} = await import('../config/evmAmm');
+        const chain = evmAmmChainOf(evmRow.venue.venue_id);
+        if (chain == null) throw new Error('chain');
+        const plan = tokenOut === ''
+          ? planTokenToNative({chain, tokenIn: evmRow.inAddress, amountIn: BigInt(amountRaw!), minOut: 1n, feeTier: 3000, deadlineSecs: 1n})
+          : planTokenToToken({chain, tokenIn: evmRow.inAddress, tokenOut, amountIn: BigInt(amountRaw!), minOut: 1n, feeTier: 3000, deadlineSecs: 1n});
+        const fee = await estimateUniswapSequenceFee(identity.secretHex, {chainId: evmRow.chainId, plan});
+        if (!cancelled) setEvmFeeWei(fee.maxFeeWei);
+      } catch {
+        if (!cancelled) setEvmFeeWei(null); // the line renders '—'; the executor still gates
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evmRow?.rowId, amountRaw]);
+
   // The decision bundle each kind must have on the table before the CTA arms.
   const hubReady = activeHub != null;
   const crossReady = math != null && destValid && routeGas != null && routeGasErr == null && !gasShort && crossFee != null;
@@ -953,7 +1039,8 @@ export function ConvertIntentSheet({
   // The chain's one extra gate: the venue pays the mid asset to the user's own IC account
   // — its derivation must have landed before the order is created (never typed).
   const chainReady = activeChain != null && cefiIcAccountId != null;
-  const pickedReady = directReady || hubReady || crossReady || cefiReady || ammReady || composedReady || chainReady;
+  const evmReady = activeEvm != null;
+  const pickedReady = directReady || hubReady || crossReady || cefiReady || ammReady || composedReady || chainReady || evmReady;
   const canConfirm = activeRow != null && pickedReady && !quoteBusy && !confirmBusy && !insufficient && amountN > 0n;
 
   // ── THE CONFIRM — one gesture on the effective row. Re-quotes fresh at the gesture; a
@@ -1145,6 +1232,45 @@ export function ConvertIntentSheet({
         onPrepared(rec); // adopted in the SAME gesture; the tracker narrates both phases live
         return;
       }
+      if (activeRow.kind === 'evmamm') {
+        const b = evmQuotes[activeRow.rowId];
+        if (b == null) return;
+        // The gesture re-quotes fresh (the red line): a moved gross re-arms the same button
+        // with old/new inline, nothing signed, nothing created. A held market prepares the
+        // record (the dry gas gate runs inside prepare) and adopts it — the executor signs.
+        const tokenOut = activeRow.out.kind === 'native' ? '' : activeRow.out.address;
+        const fresh = await quoteUniswapSwap({kind: 'exact-input', chainId: activeRow.chainId, tokenIn: activeRow.inAddress, tokenOut, amountIn: BigInt(amountRaw)});
+        if (fresh.amountOut !== b.quote.amountOut) {
+          if (mountedRef.current) {
+            const minOut = await DpayCore.icpSwapMinOut(fresh.amountOut, slippageBps);
+            setEvmQuotes(prev => ({...prev, [activeRow.rowId]: {quote: fresh, minOut}}));
+            evmQuoteAmts.current[activeRow.rowId] = amountRaw;
+            setMoved({oldAmt: b.quote.amountOut, newAmt: fresh.amountOut});
+          }
+          return;
+        }
+        const {record} = await prepareEvmConvertRecord({
+          secretHex: identity.secretHex,
+          quote: {
+            venueId: activeRow.venue.venue_id,
+            feeTier: fresh.feeTier,
+            amountIn: fresh.amountIn,
+            amountOut: fresh.amountOut,
+            tokenIn: activeRow.inAddress,
+            tokenOut,
+            outRailId: activeRow.out.railId,
+            ...(b.quote.hub != null ? {hub: b.quote.hub} : {}),
+          },
+          inSymbol: activeRow.inSymbol,
+          outSymbol: activeRow.out.symbol,
+          inDecimals: activeRow.inDecimals,
+          outDecimals: activeRow.out.decimals,
+          slippageBps,
+        });
+        if (!mountedRef.current) return;
+        onPrepared(record);
+        return;
+      }
       // activeRow.kind === 'solamm' — the Solana venue (Jupiter).
       const q = jupQuotes[activeRow.rowId];
       if (q == null) return;
@@ -1195,6 +1321,7 @@ export function ConvertIntentSheet({
     : ammRow != null && activeJup != null ? activeJup.outAmount
     : composedRow != null && activeComposed != null ? activeComposed.cefi.amountOutGross
     : chainRow != null && activeChain != null ? chainFinalNet(activeChain)
+    : evmRow != null && activeEvm != null ? activeEvm.quote.amountOut
     : null;
   const outDescriptor: CurrencyDescriptor | null =
     directRow != null ? directRow.outDesc
@@ -1244,6 +1371,9 @@ export function ConvertIntentSheet({
       const lastQ = activeChain.m2 != null ? activeChain.q2! : activeChain.q1;
       return venueAmt(lastLeg.venueId, lastQ.amountOutGross, chainRow.route.endpoints[chainRow.route.legs.length]!.decimals, chainRow.route.endpoints[chainRow.route.legs.length]!.symbol);
     }
+    if (evmRow != null && activeEvm != null) {
+      return venueAmt(evmRow.venue.venue_id, activeEvm.quote.amountOut, evmRow.out.decimals, evmRow.out.symbol);
+    }
     return null;
   })();
   // The min-out line's amount + the atLeast copy's pair, per kind. A composed row's floor is
@@ -1258,6 +1388,7 @@ export function ConvertIntentSheet({
       ? fmtAssetCompact(composedFloorRaw(activeComposed), composedRow.route.endpoints[composedRow.route.legs.length]!.decimals, composedRow.route.endpoints[composedRow.route.legs.length]!.symbol)
     : chainRow != null && activeChain != null
       ? fmtAssetCompact(activeChain.m2?.minOut ?? activeChain.m1.minOut, outDecimals, outSym)
+    : evmRow != null && activeEvm != null ? fmtAssetCompact(activeEvm.minOut, outDecimals, outSym)
     : null;
   // Attribution: the quote's own venue once one arrives; before that the effective row's.
   const counterVenueId: string | null =
@@ -1267,7 +1398,8 @@ export function ConvertIntentSheet({
     ?? (cefiRow != null ? cefiRow.venue.venue_id : null)
     ?? (ammRow != null ? ammRow.venue.venue_id : null)
     ?? (composedRow != null ? composedRow.route.cefiVenueId : null) // the receive figure's venue
-    ?? (chainRow != null ? chainRow.route.legs[chainRow.route.legs.length - 1]!.venueId : null);
+    ?? (chainRow != null ? chainRow.route.legs[chainRow.route.legs.length - 1]!.venueId : null)
+    ?? (evmRow != null ? evmRow.venue.venue_id : null);
   // The target chips: every OTHER reachable currency (the source is not a target; the
   // standing target IS the line).
   const chipTargets = targets.filter(t => t.currency !== targetCode);
@@ -1276,6 +1408,23 @@ export function ConvertIntentSheet({
   // The host's fail-closed panels render instead of the sheet when the pair resolves
   // to nothing; the sheet only renders over a live pair.
   if (target == null) return null;
+  // HONEST UNAVAILABILITY (the any-pair mandate): the named target stays VISIBLE and refuses
+  // with its reason — a screen of its own (the pair was chosen, the answer is no market yet),
+  // never a silently-hidden chip and never a dead CTA.
+  if (target.rows.length === 0) {
+    return (
+      <View testID="convert-screen" style={S.convertWrap}>
+        <ConvertHeader title={M.convert.heading(inSym, target.currency)} onBack={onBack} />
+        <View testID="convert-sheet" style={S.sheetRoot}>
+          <View style={S.sheetGrabber} />
+          <View testID="convert-no-venue" style={S.intentCard}>
+            <Text testID="convert-no-venue-title" style={S.reviewReceiveAmount}>{M.convert.heading(inSym, currencyName(target.currency))}</Text>
+            <Text testID="convert-no-venue-body" style={S.dim2}>{M.convert.noVenueBody(inSym, currencyName(target.currency))}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View testID="convert-screen" style={S.convertWrap}>
@@ -1413,6 +1562,7 @@ export function ConvertIntentSheet({
               ?? activeCefiQuote?.fetchedAtMs
               ?? activeComposed?.cefi.fetchedAtMs
               ?? activeJup?.fetchedAtMs
+              ?? activeEvm?.quote.fetchedAtMs
               ?? Date.now(),
             ));
             return (
@@ -1561,6 +1711,12 @@ export function ConvertIntentSheet({
                 <View testID="convert-rate" style={S.convertRateRow}>
                   <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, ammRow.outSym)}</Text>
                   <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeJup.outAmount, activeJup.inAmount, inDecimals), ammRow.outDecimals, ammRow.outSym)}</Text>
+                </View>
+              ) : null}
+              {evmMode && evmRow != null ? (
+                <View testID="convert-evm-fee" style={S.convertRateRow}>
+                  <Text style={S.convertRateLabel}>{M.convert.evm.feeLabel(evmRow.out.kind === 'native' ? evmRow.out.symbol : 'ETH')}</Text>
+                  <Text style={S.convertRateValue}>{evmFeeWei != null ? fromBaseUnitsWei(evmFeeWei) + ' ETH' : '—'}</Text>
                 </View>
               ) : null}
               {/* Composed: the combined rate across the IC chain INTO the settle leg's own
@@ -1844,6 +2000,7 @@ export function ConvertIntentSheet({
                   const icq = r.kind === 'direct' || r.kind === 'crossrail' ? rowQuotes[r.rowId] ?? null : null;
                   const jq = r.kind === 'solamm' ? jupQuotes[r.rowId] ?? null : null;
                   const rq = r.kind === 'cefi' ? rowQuotes[r.rowId] ?? null : null;
+                  const eq = r.kind === 'evmamm' ? evmQuotes[r.rowId] ?? null : null;
                   const cb = r.kind === 'composed' ? composedBundles[r.rowId] ?? null : null;
                   const chb = r.kind === 'chain' ? chainBundles[r.rowId] ?? null : null;
                   const err = rowQuoteErrs[r.rowId] ?? null;
@@ -1852,12 +2009,14 @@ export function ConvertIntentSheet({
                     : r.kind === 'crossrail' ? (r.route.crossRail?.sol != null ? r.route.crossRail.sol.outSymbol : r.route.dest.symbol)
                     : r.kind === 'composed' ? r.route.settleSymbol
                     : r.kind === 'chain' ? r.route.endpoints[r.route.legs.length]!.symbol
+                    : r.kind === 'evmamm' ? r.out.symbol
                     : r.kind === 'cefi' ? r.outSym : r.outSym;
                   const rOutDec = r.kind === 'direct' ? r.outDesc.decimals ?? 8
                     : r.kind === 'hub' ? r.route.dest.decimals
                     : r.kind === 'crossrail' ? (r.route.crossRail?.sol != null ? r.route.crossRail.sol.outDecimals : r.route.hop.decimals)
                     : r.kind === 'composed' ? r.route.settleDecimals
                     : r.kind === 'chain' ? r.route.endpoints[r.route.legs.length]!.decimals
+                    : r.kind === 'evmamm' ? r.out.decimals
                     : r.kind === 'cefi' ? r.outDecimals : r.outDecimals;
                   const label =
                     r.kind === 'direct' ? r.venue.display_name
@@ -1894,6 +2053,10 @@ export function ConvertIntentSheet({
                         ) : jq != null ? (
                           <Text testID={`convert-venue-${r.rowId}-quote`} style={S.convertVenueAmount}>
                             {fmtAssetCompact(jq.outAmount, rOutDec, rOutSym)}
+                          </Text>
+                        ) : eq != null ? (
+                          <Text testID={`convert-venue-${r.rowId}-quote`} style={S.convertVenueAmount}>
+                            {fmtAssetCompact(eq.quote.amountOut, rOutDec, rOutSym)}
                           </Text>
                         ) : rq != null ? (
                           <Text testID={`convert-venue-${r.rowId}-quote`} style={S.convertVenueAmount}>
@@ -2052,6 +2215,14 @@ export function ConvertIntentSheet({
       </View>
     </View>
   );
+}
+
+/** wei → the shortest exact ETH decimal string (the fee line's own unit). */
+function fromBaseUnitsWei(wei: string): string {
+  const w = BigInt(wei);
+  const whole = w / 10n ** 18n;
+  const frac = (w % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '');
+  return frac.length === 0 ? whole.toString() : `${whole}.${frac}`;
 }
 
 // ── ConvertFieldTracker — the Settlement Field record view (brief Part I + V.5) ─────────────

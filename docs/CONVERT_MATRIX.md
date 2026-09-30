@@ -31,3 +31,124 @@ facts. Both directions of a pair are offered unless stated otherwise.
 14 venue rows: 6 ic_amm, 3 solana_amm, 5 cefi.
 Testnet rows (offline fixtures) are excluded. dpay takes no cut on any row: relay-pinned
 markup/commission is zero, and dpay is never a party to a conversion.
+
+
+## Pair coverage (derived)
+
+Every ordered pair across the mainnet rails (11 rails), DERIVED from the
+catalog × the per-venue capability walk — never a hand list. A pair with no executable
+route stays VISIBLE and refuses with its reason (honest unavailability, 2026-09-28):
+46 of 110 ordered pairs are routable today.
+
+| from → to | route |
+|---|---|
+| ICP → VCHF | direct pool (`icpswap`) |
+| ICP → ckUSDC | direct pool (`icpswap-ckusdc`) |
+| ICP → ckBTC | direct pool (`icpswap-ckbtc`) |
+| ICP → ckETH | direct pool (`icpswap-cketh`) |
+| ICP → USDC | cefi order (`sideshift-usdc`) |
+| ICP → EURC | cefi order (`sideshift-eurc`) |
+| ICP → ZCHF·Ethereum | refused — no venue (honest unavailability) |
+| ICP → ETH (native) | cefi order (`sideshift-eth`) |
+| ICP → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
+| ICP → ETH (native)·Arb | cefi order (`sideshift-eth`) |
+| VCHF → ICP | direct pool (`icpswap`) |
+| VCHF → ckUSDC | direct pool (`icpswap-vchf-ckusdc`) |
+| VCHF → ckBTC | hub 2-hop via ICP |
+| VCHF → ckETH | hub 2-hop via ICP |
+| VCHF → USDC | composed: IC legs → ICP → cefi (`sideshift`) |
+| VCHF → EURC | composed: IC legs → ICP → cefi (`sideshift`) |
+| VCHF → ZCHF·Ethereum | refused — no venue (honest unavailability) |
+| VCHF → ETH (native) | refused — no venue (honest unavailability) |
+| VCHF → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
+| VCHF → ETH (native)·Arb | refused — no venue (honest unavailability) |
+| ckUSDC → ICP | direct pool (`icpswap-ckusdc`) |
+| ckUSDC → VCHF | direct pool (`icpswap-vchf-ckusdc`) |
+| ckUSDC → ckBTC | hub 2-hop via ICP |
+| ckUSDC → ckETH | hub 2-hop via ICP |
+| ckUSDC → USDC | composed: IC legs → ICP → cefi (`sideshift`) |
+| ckUSDC → EURC | composed: IC legs → ICP → cefi (`sideshift`) |
+| ckUSDC → ZCHF·Ethereum | refused — no venue (honest unavailability) |
+| ckUSDC → ETH (native) | refused — no venue (honest unavailability) |
+| ckUSDC → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
+| ckUSDC → ETH (native)·Arb | refused — no venue (honest unavailability) |
+| ckBTC → ICP | direct pool (`icpswap-ckbtc`) |
+| ckBTC → VCHF | hub 2-hop via ICP |
+| ckBTC → ckUSDC | hub 2-hop via ICP |
+| ckBTC → ckETH | direct pool (`icpswap-ckbtc-cketh`) |
+| ckBTC → USDC | composed: IC legs → ICP → cefi (`sideshift`) |
+| ckBTC → EURC | composed: IC legs → ICP → cefi (`sideshift`) |
+| ckBTC → ZCHF·Ethereum | refused — no venue (honest unavailability) |
+| ckBTC → ETH (native) | refused — no venue (honest unavailability) |
+| ckBTC → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
+| ckBTC → ETH (native)·Arb | refused — no venue (honest unavailability) |
+| ckETH → ICP | direct pool (`icpswap-cketh`) |
+| ckETH → VCHF | hub 2-hop via ICP |
+| ckETH → ckUSDC | hub 2-hop via ICP |
+| ckETH → ckBTC | direct pool (`icpswap-ckbtc-cketh`) |
+| ckETH → USDC | composed: IC legs → ICP → cefi (`sideshift`) |
+| ckETH → EURC | composed: IC legs → ICP → cefi (`sideshift`) |
+| ckETH → ZCHF·Ethereum | refused — no venue (honest unavailability) |
+| ckETH → ETH (native) | refused — no venue (honest unavailability) |
+| ckETH → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
+| ckETH → ETH (native)·Arb | refused — no venue (honest unavailability) |
+| USDC → ICP | cefi order (`sideshift-usdc`) |
+| USDC → VCHF | chain: cefi (`sideshift-usdc`) → ICP → IC legs |
+| USDC → ckUSDC | chain: cefi (`sideshift-usdc`) → ICP → IC legs |
+| USDC → ckBTC | chain: cefi (`sideshift-usdc`) → ICP → IC legs |
+| USDC → ckETH | chain: cefi (`sideshift-usdc`) → ICP → IC legs |
+| USDC → EURC | refused — no venue (honest unavailability) |
+| USDC → ZCHF·Ethereum | refused — no venue (honest unavailability) |
+| USDC → ETH (native) | refused — no venue (honest unavailability) |
+| USDC → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
+| USDC → ETH (native)·Arb | refused — no venue (honest unavailability) |
+| EURC → ICP | cefi order (`sideshift-eurc`) |
+| EURC → VCHF | chain: cefi (`sideshift-eurc`) → ICP → IC legs |
+| EURC → ckUSDC | chain: cefi (`sideshift-eurc`) → ICP → IC legs |
+| EURC → ckBTC | chain: cefi (`sideshift-eurc`) → ICP → IC legs |
+| EURC → ckETH | chain: cefi (`sideshift-eurc`) → ICP → IC legs |
+| EURC → USDC | refused — no venue (honest unavailability) |
+| EURC → ZCHF·Ethereum | refused — no venue (honest unavailability) |
+| EURC → ETH (native) | refused — no venue (honest unavailability) |
+| EURC → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
+| EURC → ETH (native)·Arb | refused — no venue (honest unavailability) |
+| ZCHF·Ethereum → ICP | refused — no venue (honest unavailability) |
+| ZCHF·Ethereum → VCHF | refused — no venue (honest unavailability) |
+| ZCHF·Ethereum → ckUSDC | refused — no venue (honest unavailability) |
+| ZCHF·Ethereum → ckBTC | refused — no venue (honest unavailability) |
+| ZCHF·Ethereum → ckETH | refused — no venue (honest unavailability) |
+| ZCHF·Ethereum → USDC | refused — no venue (honest unavailability) |
+| ZCHF·Ethereum → EURC | refused — no venue (honest unavailability) |
+| ZCHF·Ethereum → ETH (native) | Uniswap V3 (`uniswapv3-eth`) |
+| ZCHF·Ethereum → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
+| ZCHF·Ethereum → ETH (native)·Arb | refused — no venue (honest unavailability) |
+| ETH (native) → ICP | refused — no venue (honest unavailability) |
+| ETH (native) → VCHF | refused — no venue (honest unavailability) |
+| ETH (native) → ckUSDC | refused — no venue (honest unavailability) |
+| ETH (native) → ckBTC | refused — no venue (honest unavailability) |
+| ETH (native) → ckETH | refused — no venue (honest unavailability) |
+| ETH (native) → USDC | refused — no venue (honest unavailability) |
+| ETH (native) → EURC | refused — no venue (honest unavailability) |
+| ETH (native) → ZCHF·Ethereum | Uniswap V3 (`uniswapv3-eth`) |
+| ETH (native) → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
+| ETH (native) → ETH (native)·Arb | refused — no venue (honest unavailability) |
+| ZCHF·Arbitrum → ICP | refused — no venue (honest unavailability) |
+| ZCHF·Arbitrum → VCHF | refused — no venue (honest unavailability) |
+| ZCHF·Arbitrum → ckUSDC | refused — no venue (honest unavailability) |
+| ZCHF·Arbitrum → ckBTC | refused — no venue (honest unavailability) |
+| ZCHF·Arbitrum → ckETH | refused — no venue (honest unavailability) |
+| ZCHF·Arbitrum → USDC | refused — no venue (honest unavailability) |
+| ZCHF·Arbitrum → EURC | refused — no venue (honest unavailability) |
+| ZCHF·Arbitrum → ZCHF·Ethereum | refused — no venue (honest unavailability) |
+| ZCHF·Arbitrum → ETH (native) | refused — no venue (honest unavailability) |
+| ZCHF·Arbitrum → ETH (native)·Arb | Uniswap V3 (`uniswapv3-arb`) |
+| ETH (native)·Arb → ICP | refused — no venue (honest unavailability) |
+| ETH (native)·Arb → VCHF | refused — no venue (honest unavailability) |
+| ETH (native)·Arb → ckUSDC | refused — no venue (honest unavailability) |
+| ETH (native)·Arb → ckBTC | refused — no venue (honest unavailability) |
+| ETH (native)·Arb → ckETH | refused — no venue (honest unavailability) |
+| ETH (native)·Arb → USDC | refused — no venue (honest unavailability) |
+| ETH (native)·Arb → EURC | refused — no venue (honest unavailability) |
+| ETH (native)·Arb → ZCHF·Ethereum | refused — no venue (honest unavailability) |
+| ETH (native)·Arb → ETH (native) | refused — no venue (honest unavailability) |
+| ETH (native)·Arb → ZCHF·Arbitrum | Uniswap V3 (`uniswapv3-arb`) |

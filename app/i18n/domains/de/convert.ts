@@ -56,6 +56,7 @@ export const convertDe: ConvertMessages = {
   smallerAmount: 'Wandle einen kleineren Betrag um',
   noPathTitle: inSym => `Keine Route von ${inSym}`,
   noPathBody: pairs => `Routen heute: ${pairs}`,
+  noVenueBody: (inSym, outSym) => `Noch kein Anbieter tauscht ${inSym} zu ${outSym}. Das Paar bleibt hier gelistet; neue Anbieter erscheinen, sobald sie hinzukommen.`,
   noPathAction: 'Geld einzahlen',
   externalSignTitle: 'Ein Schritt braucht deine eigene Ethereum-Wallet',
   externalSignBody: 'Du signierst die Überquerung in deiner eigenen Wallet; dpay hat ihre Schlüssel nie. Alles andere bleibt in diesem Sheet.',
@@ -145,6 +146,15 @@ export const convertDe: ConvertMessages = {
   stuckAcknowledge: 'Verstanden — nicht mehr beobachten',
   stuckAcknowledged: 'Beobachtung gestoppt — später bewegte Mittel landen weiterhin an der Adresse dieser Wallet.',
 
+  evm: {
+    heading: (inSym, outSym, chain) => `${inSym} zu ${outSym} tauschen (${chain})`,
+    feeLabel: unit => `Netzwerkgebühr (${unit}, Schätzung)`,
+    pendingBody: 'Der Tausch ist on-chain bestätigt. Warten Sie, bis Ihr Guthaben ihn zeigt.',
+    failedBody: (inSym, detail) => String(detail).includes('approve landed')
+      ? `Der Tausch scheiterte nach der Freigabe. Ihre ${inSym} sind noch in Ihrer Wallet; die ungenutzte Freigabe gilt nur für den exakten Tauschbetrag.`
+      : `Es wurde nichts gesendet. Ihre ${inSym} sind noch in Ihrer Wallet.`,
+    stuckBody: outSym => `Der Tausch ist vielleicht gelandet. Ihr ${outSym}-Guthaben klärt sich von selbst; starten Sie keinen zweiten Tausch.`,
+  },
   multihop: {
     destLabel: 'Ziel',
     destDirect: sym => `${sym} — in dieser Wallet`,

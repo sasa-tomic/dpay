@@ -37,6 +37,7 @@ import {usePendingPays} from '../hooks/usePendingPays';
 import {useConvertResumeEngine} from '../hooks/useConvertResumeEngine';
 import {useSolanaHistory} from '../hooks/useSolanaHistory';
 import {useEvmBalances} from '../hooks/useEvmBalances';
+import {evmAssetsOf} from '../config/catalog';
 import {useEvmHistory} from '../hooks/useEvmHistory';
 import {useFundsReady} from '../hooks/useFundsReady';
 import {TripStrip} from './TripStrip';
@@ -327,6 +328,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // The ckBTC currency id (and any future asset's) is RESOLVED from this, never hardcoded (issue #7).
   const networks = useCatalog(relayUrl);
   const catalog = useMemo(() => icpCatalogOf(networks), [networks]);
+  const evmAssets = useMemo(() => evmAssetsOf(networks), [networks]);
 
   // Certified-clock read_state routing follows the catalog's DEMO row (services/icp
   // `setIcClockRoutingCanister`): on mainnet that row IS the prod DUSD principal the clock
@@ -2020,6 +2022,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               // The Solana rail's own balances (the fund gate + insufficient check read the
               // same strings the Balances tab shows).
               solana={{sol: solState.balance, tokens: solTokenAmounts}}
+              // The EVM rail: the catalog's token rows (the evm-token settle rails) + the
+              // selected EVM asset's own balance (the fund gate + Max prefill).
+              evmAssets={evmAssets}
+              evmBalance={selectedEvmBalance}
             />
            : <Ledger history={walletHistory} catalog={catalog} assets={assets} dropped={solDropped + evmDropped} staleFailure={solHistoryFailure ?? evmHistoryFailure} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
       </ScrollView>

@@ -309,7 +309,7 @@ export async function ethMaxPriorityFeePerGas(url: string | readonly string[], o
  *  (pending-state dependent; the relay never caches it). 0x-hex units of gas. */
 export async function ethEstimateGas(
   url: string | readonly string[],
-  tx: {from?: string; to: string; data?: string},
+  tx: {from?: string; to: string; data?: string; value?: string},
   opts?: EvmRpcOpts,
 ): Promise<string> {
   return asHex(await rpcFetch(url, 'eth_estimateGas', [tx], opts), 'eth_estimateGas');

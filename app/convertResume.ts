@@ -45,6 +45,7 @@ import {
   executeConvert,
   executeCrossRailConvert,
   executeCrossRailSolSwap,
+  executeEvmConvert,
   executeSolanaConvert,
   isChainConvertRecord,
   isComposedConvertRecord,
@@ -508,6 +509,28 @@ async function driveOne(id: string): Promise<void> {
           },
         });
         if (!mine()) return; // stale drive — no post-run write, no re-arm
+        if (next !== rec) {
+          const before = state.records.get(id)?.step;
+          state.records.set(id, next);
+          fireOnTerminalIfEnteredListed(before, next);
+          notify();
+        }
+      } else if (rec.evmSwap != null) {
+        // EVM driver (2026-09-28, the any-pair mandate): the legs are SIGNED here at drive
+        // time from the record's frozen facts (nonces move), every broadcast hash persisted
+        // as durable identity, receipts watched to the done line. Never re-signs past a
+        // broadcast; the aggregate gas gate refuses before any signature.
+        next = await executeEvmConvert(rec, {
+          publicHex: ctx.publicHex,
+          secretHex: ctx.secretHex,
+          onUpdate: (r) => {
+            if (!mine()) return;
+            fireOnTerminalIfEnteredListed(state.records.get(r.id)?.step, r);
+            state.records.set(r.id, r);
+            notify();
+          },
+        });
+        if (!mine()) return;
         if (next !== rec) {
           const before = state.records.get(id)?.step;
           state.records.set(id, next);

@@ -42,10 +42,17 @@ const rowKinds = (t: SwapTarget): string[] => t.rows.map(r => r.kind);
 const rowIds = (t: SwapTarget): string[] => t.rows.map(r => r.rowId);
 
 describe('resolveSwapTargets — the currency-level pair walk', () => {
-  test('VCHF source: targets in currency-list order, only reachable ones, source excluded', () => {
+  test('VCHF source: targets in currency-list order, source excluded; unreachable ones refuse honestly', () => {
     const ts = targetsFor(VCHF);
-    expect(ts.map(t => t.currency)).toEqual(['USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL']);
-    expect(ts.some(t => t.currency === 'CHF')).toBe(false);
+    // HONEST UNAVAILABILITY (2026-09-28): every requested target is RETURNED — the
+    // self-pair (VCHF→VCHF, currency CHF) has no executable row and carries the
+    // no-venue marker instead of being silently hidden. The source asset's own
+    // RAIL is still never a target row.
+    expect(ts.map(t => t.currency)).toEqual(['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL']);
+    const chf = ts.find(t => t.currency === 'CHF')!;
+    expect(chf.rows.length).toBe(0);
+    expect(chf.unavailable).toBe('no-venue');
+    expect(ts.find(t => t.currency === 'USD')!.rows.length).toBeGreaterThan(0);
   });
 
   test('row kind order is fixed per target: direct, hub, composed, crossrail, cefi, solamm', () => {
