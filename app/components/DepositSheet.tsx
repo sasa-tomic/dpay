@@ -19,6 +19,7 @@ import {IconCheck, IconCopy} from './icons';
 import {InstrLine} from './InstrLine';
 import {TrustWalletFundButton} from './TrustWalletFundButton';
 import {isTrustWalletFundableBtc} from '../trustwallet';
+import {classifyIcReadFailure} from '../transportFailure';
 import {M} from '../i18n';
 
 /**
@@ -33,6 +34,15 @@ import {M} from '../i18n';
  * network facts).
  */
 export function DepositSheet({identity, relayUrl, catalog, currency, display, funding, onClose}: {identity: Identity; relayUrl: string; catalog: CurrencyDescriptor[]; currency: number; display: FamilyDisplay; funding?: ReactNode; onClose: () => void}) {
+  /** The minter's deposit-address read produced no fact. The blame is CLASSIFIED (the shared
+   *  oracle — the SOL head is off the IC path this read failed on), never a flat "check your
+   *  connection" while the phone is online (work order 2026-09-30). Nothing is at risk either
+   *  way: no funds move toward an address the wallet never showed. */
+  async function addressFetchErr(): Promise<string> {
+    return (await classifyIcReadFailure()) === 'offline'
+      ? M.deposit.ck.addressOffline
+      : M.deposit.ck.addressUnreachable;
+  }
   const [info, setInfo] = useState<DepositInfo | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [mintedTotal, setMintedTotal] = useState<string | null>(null);
@@ -82,7 +92,7 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, fu
         // mock); the address pays out to Account{owner: user principal}, never facade custody.
         const a = await railBtcDepositAddress(identity.secretHex, minter, signal);
         if (!alive) return;
-        if (!a) { setErr(M.deposit.ck.addressErr); return; } // unreachable/query-rejected
+        if (!a) { setErr(await addressFetchErr()); return; } // no fact — blame classified below
         setAddress(a);
       } catch (e: unknown) {
         // The address IS this sheet. Swallowing the reason left one generic line on screen and
@@ -90,7 +100,7 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, fu
         // looked identical while a user waited for somewhere to send real funds. Same contract as
         // the info + balance catches below.
         console.warn('deposit address fetch failed:', e instanceof Error ? e.message : String(e));
-        if (alive) setErr(M.deposit.ck.addressErr);
+        if (alive) setErr(await addressFetchErr());
       } finally {
         if (alive) setLoading(false);
         cancel();

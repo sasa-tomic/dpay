@@ -25,6 +25,7 @@ import renderer, {act} from 'react-test-renderer';
 import {DepositSheet} from '../components/DepositSheet';
 import {BUNDLED_NETWORKS, familyDisplay, icpCatalogOf} from '../config/catalog';
 import type {Identity} from '../lib/types';
+import {M} from '../i18n';
 
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 
@@ -91,6 +92,37 @@ describe('DepositSheet — failure paths leave a reason behind', () => {
     expect(has(tree, 'deposit-address')).toBe(false);
     expect(has(tree, 'deposit-qr')).toBe(false);
     act(() => { tree.unmount(); });
+  });
+
+  test('a null address answer while ONLINE ⇒ the unreachable sentence: connection fine, IC named (work order 2026-09-30)', async () => {
+    // The old copy — "Check your connection and try again." — blamed the phone while it was
+    // online and the minter's side was down. The blame is now CLASSIFIED in the sheet
+    // (`classifyIcReadFailure`); the override makes the arm hermetic.
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'};
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'online';
+    jest.mocked(railBtcDepositAddress).mockResolvedValue(null as never);
+    const tree = await mount();
+    const texts = tree.root.findAll(n => n.props && typeof n.props.children === 'string') as renderer.ReactTestInstance[];
+    const errText = texts.map(t => t.props.children as string).find(s => s.includes('Internet Computer'));
+    expect(errText).toBe(M.deposit.ck.addressUnreachable);
+    expect(errText).toMatch(/connection is fine/);
+    expect(errText).toMatch(/untouched/i);
+    expect(has(tree, 'deposit-qr')).toBe(false);
+    act(() => { tree.unmount(); });
+    delete g.__DPAY_TEST_SOLANA_CONNECTIVITY;
+  });
+
+  test('a throwing address fetch while OFFLINE ⇒ the offline sentence, nobody blamed', async () => {
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'};
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'offline';
+    jest.mocked(railBtcDepositAddress).mockRejectedValue(new Error('boundary unreachable: ECONNRESET'));
+    const tree = await mount();
+    const texts = tree.root.findAll(n => n.props && typeof n.props.children === 'string') as renderer.ReactTestInstance[];
+    const errText = texts.map(t => t.props.children as string).find(s => s.includes('offline'));
+    expect(errText).toBe(M.deposit.ck.addressOffline);
+    expect(errText).not.toMatch(/check your connection/i);
+    act(() => { tree.unmount(); });
+    delete g.__DPAY_TEST_SOLANA_CONNECTIVITY;
   });
 
   test('a rejected self-principal derivation names its reason and still omits only the section address', async () => {

@@ -25,7 +25,9 @@ export const depositFr: DepositMessages = {
   checkNow: 'Vérifier',
 
   ck: {
-    addressErr: 'Impossible de charger votre adresse de dépôt. Vérifiez votre connexion et réessayez.',
+    addressOffline: 'Vous semblez hors ligne, donc votre adresse de dépôt n’a pas pu être créée. Votre argent est intact. Réessayez une fois de nouveau en ligne.',
+    addressUnreachable: 'Votre connexion est bonne, mais Internet Computer ne répond pas, donc votre adresse de dépôt n’a pas pu être créée. Votre argent est intact. Réessayez dans un instant.',
+    addressCreateErr: 'Votre adresse n’a pas pu être créée. Votre argent est intact. Fermez cet écran et réessayez.',
     noMinter: 'Cet actif n’est pas encore disponible en dépôt.',
     fetchingAddress: 'Récupération de votre adresse de dépôt…',
     noAddress: 'Aucune adresse de dépôt disponible.',

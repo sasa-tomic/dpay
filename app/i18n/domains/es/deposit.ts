@@ -24,7 +24,9 @@ export const depositEs: DepositMessages = {
   checkNow: 'Revisar ahora',
 
   ck: {
-    addressErr: 'No se pudo cargar tu dirección de depósito. Revisa tu conexión e inténtalo de nuevo.',
+    addressOffline: 'Pareces estar sin conexión, así que no se pudo crear tu dirección de depósito. Tu dinero está intacto. Inténtalo de nuevo cuando vuelvas a estar en línea.',
+    addressUnreachable: 'Tu conexión está bien, pero Internet Computer no responde, así que no se pudo crear tu dirección de depósito. Tu dinero está intacto. Inténtalo de nuevo en un momento.',
+    addressCreateErr: 'No se pudo crear tu dirección. Tu dinero está intacto. Cierra esta pantalla e inténtalo de nuevo.',
     noMinter: 'Este activo aún no admite depósitos.',
     fetchingAddress: 'Obteniendo tu dirección de depósito…',
     noAddress: 'No hay ninguna dirección de depósito disponible.',

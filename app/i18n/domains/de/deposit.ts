@@ -23,7 +23,9 @@ export const depositDe: DepositMessages = {
   checkNow: 'Jetzt prüfen',
 
   ck: {
-    addressErr: 'Deine Einzahlungsadresse konnte nicht geladen werden. Prüfe deine Verbindung und versuche es erneut.',
+    addressOffline: 'Du scheinst offline zu sein, daher konnte deine Einzahlungsadresse nicht erstellt werden. Dein Geld ist unangetastet. Versuche es erneut, sobald du wieder online bist.',
+    addressUnreachable: 'Deine Verbindung ist in Ordnung, aber der Internet Computer antwortet nicht, daher konnte deine Einzahlungsadresse nicht erstellt werden. Dein Geld ist unangetastet. Versuche es gleich noch einmal.',
+    addressCreateErr: 'Deine Adresse konnte nicht erstellt werden. Dein Geld ist unangetastet. Schließe diesen Bildschirm und versuche es erneut.',
     noMinter: 'Für dieses Asset sind Einzahlungen noch nicht möglich.',
     fetchingAddress: 'Einzahlungsadresse wird geladen…',
     noAddress: 'Keine Einzahlungsadresse verfügbar.',

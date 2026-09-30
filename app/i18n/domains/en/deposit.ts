@@ -54,8 +54,14 @@ export type DepositMessages = {
 
   /** ck-minter rail (DepositSheet): one real native address, watched for the mint. */
   ck: {
-    /** The address couldn't be loaded — transient (network/timeout/gateway). Carries its own retry hint. */
-    addressErr: string;
+    /** The minter's deposit-address read produced no fact. Blame CLASSIFIED via
+     *  app/transportFailure.ts classifyIcReadFailure — offline blames nobody; unreachable
+     *  says the connection is fine and names the Internet Computer (work order 2026-09-30). */
+    addressOffline: string;
+    addressUnreachable: string;
+    /** IcrcDepositSheet's LOCAL derivation failed — no network step exists on that path,
+     *  so this sentence must never blame a connection. */
+    addressCreateErr: string;
     /** No minter is registered for this asset, so there is no deposit rail at all. Not retryable. */
     noMinter: string;
     fetchingAddress: string;
@@ -347,7 +353,9 @@ export const depositEn: DepositMessages = {
   checkNow: 'Check now',
 
   ck: {
-    addressErr: "Couldn't load your deposit address. Check your connection and try again.",
+    addressOffline: 'You seem offline, so the deposit address couldn’t be created. Your money is untouched. Try again once you’re back online.',
+    addressUnreachable: 'Your connection is fine, but the Internet Computer isn’t answering, so the deposit address couldn’t be created. Your money is untouched. Try again in a moment.',
+    addressCreateErr: 'Couldn’t create your address. Your money is untouched. Close this screen and try again.',
     noMinter: "This asset isn't available for deposits yet.",
     fetchingAddress: 'Fetching your deposit address…',
     noAddress: 'No deposit address available.',
