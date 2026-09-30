@@ -880,6 +880,8 @@ function buildStyles(p: Palette) {
   ataBannerRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
   ataBannerTitle: {flexShrink: 1, fontSize: 15, fontWeight: '600', color: p.ink, lineHeight: 20, fontFamily: FONT.sans},
   ataBannerCost: {fontSize: 12, color: p.sub2, marginTop: 4, lineHeight: 17, fontFamily: FONT.sans},
+  ataBannerLine: {fontSize: 16, color: p.ink, lineHeight: 22, marginTop: 8, fontFamily: FONT.sans},
+  ataBannerNote: {fontSize: 12, color: p.sub2, lineHeight: 17, marginTop: 10, fontFamily: FONT.sans},
   ataAddrRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10},
   ataAddrText: {flexShrink: 1, fontSize: 12, color: p.ink, fontFamily: FONT.mono, letterSpacing: 0.2},
   instrLine: {fontSize: 16, color: p.ink, textAlign: 'center', lineHeight: 22, marginBottom: 8, fontFamily: FONT.sans},

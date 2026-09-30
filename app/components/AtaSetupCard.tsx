@@ -118,7 +118,7 @@ export function AtaSetupCard({
     return (
       <View testID={`${testIDPrefix}-refuse`} style={S.ataBanner}>
         {targets.map(t => (
-          <Text key={t} style={S.instrLine}>{M.deposit.ata.absent(t)}</Text>
+          <Text key={t} style={S.ataBannerLine}>{M.deposit.ata.absent(t)}</Text>
         ))}
         <Text testID={`${testIDPrefix}-need-sol`} style={S.warnNote}>{M.deposit.ata.needSol(costLine)}</Text>
         {solAddress != null && onCopySolAddress != null ? (
@@ -169,9 +169,9 @@ export function AtaSetupCard({
       )}
       <Text style={S.ataBannerCost}>{M.deposit.ata.costShort(costLine)}</Text>
       {expanded ? targets.map(t => (
-        <Text key={t} style={S.instrLine}>{M.deposit.ata.absent(t)}</Text>
+        <Text key={t} style={S.ataBannerLine}>{M.deposit.ata.absent(t)}</Text>
       )) : null}
-      {fundFromLine != null ? <Text style={S.instrCustody}>{fundFromLine}</Text> : null}
+      {fundFromLine != null ? <Text style={S.ataBannerNote}>{fundFromLine}</Text> : null}
       <Pressable
         testID={`${testIDPrefix}-complete`}
         style={S.primaryWide}
