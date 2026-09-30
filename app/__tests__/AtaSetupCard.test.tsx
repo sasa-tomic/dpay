@@ -1,5 +1,5 @@
 /**
- * AtaSetupCard — the wallet-level ONE-TAP token-account setup card (2026-09-30, banner
+ * AtaSetupCard - the wallet-level ONE-TAP token-account setup card (2026-09-30, banner
  * redesign).
  *
  * Pins the founder gap's surface contract: ONE compact banner with ONE "Complete setup" button
@@ -8,7 +8,7 @@
  * executes on the single press (the disclosed cost + the button press are the consent, the same
  * contract the per-asset SolanaAtaSetupCard established); the refusal is the honest dead end
  * (needSol copy, the SOL receive address with a copy affordance, NO button); busy states what
- * is happening (creating, or the still-in-flight venue swap). Copy is driven by the i18n — the
+ * is happening (creating, or the still-in-flight venue swap). Copy is driven by the i18n - the
  * four-locale contract for the keys is pinned in ataSetupCopy.test.ts.
  */
 import {describe, test, expect, jest} from '@jest/globals';
@@ -44,7 +44,7 @@ const textOf = (tree: renderer.ReactTestRenderer, testID: string): string =>
     .map(n => n.props.children).join('\n');
 
 describe('AtaSetupCard — the ONE button (create: SOL already covers)', () => {
-  test('the compact banner carries the ONE press — no confirm gate on the no-swap path', () => {
+  test('the compact banner carries the ONE press - no confirm gate on the no-swap path', () => {
     const onStart = jest.fn();
     const tree = mount({kind: 'create', onStart});
     expect(has(tree, 'ata-setup-EUR-banner')).toBe(true);
@@ -81,7 +81,7 @@ describe('AtaSetupCard — the ONE button (create: SOL already covers)', () => {
   });
 });
 
-describe('AtaSetupCard — the swap runs (fund and fund-ic: confirm is REQUIRED)', () => {
+describe('AtaSetupCard - the swap runs (fund and fund-ic: confirm is REQUIRED)', () => {
   test('the single press does NOT execute — it opens the ONE confirm stating the total', () => {
     for (const kind of ['fund', 'fund-ic'] as const) {
       const onStart = jest.fn();
@@ -115,7 +115,7 @@ describe('AtaSetupCard — the swap runs (fund and fund-ic: confirm is REQUIRED)
   });
 });
 
-describe('AtaSetupCard — the honest refusal and the busy runs', () => {
+describe('AtaSetupCard - the honest refusal and the busy runs', () => {
   test('refuse: the needSol dead end renders, there is NO Complete-setup button', () => {
     const onStart = jest.fn();
     const tree = mount({kind: 'refuse', onStart});

@@ -3,10 +3,10 @@
 // to any currency, by swapping + completing the setup".
 //
 // PURE: no React, no network, no clocks. Deterministic in (targets, solBalance, sources,
-// icSources) plus the STATIC venue registry (config/venues — compiled data, no fetch). Entry
+// icSources) plus the STATIC venue registry (config/venues - compiled data, no fetch). Entry
 // points:
 //
-//   planAtaSetup   — which of the five verdicts holds:
+//   planAtaSetup   - which of the five verdicts holds:
 //                      {kind:'none'}    nothing is absent; there is no setup.
 //                      {kind:'create'}  the SOL balance already covers every absent account's
 //                                       rent + fee: create them, no swap.
@@ -24,7 +24,7 @@
 //                                       dead end: the UI shows the needSol copy and the device's
 //                                       SOL address. NEVER a forced losing swap.
 //
-//   sizeAtaFundPlan — the SPL executor's sizing walk over a fund plan, with the Jupiter quotes
+//   sizeAtaFundPlan - the SPL executor's sizing walk over a fund plan, with the Jupiter quotes
 //                     INJECTED (the caller owns the network seam, so this stays testable):
 //                     per candidate, quote the full balance into wrapped SOL; the venue's own
 //                     floor (`otherAmountThreshold`) plus the SOL already held must reach the
@@ -35,18 +35,18 @@
 //                     wins (the candidates are few: every funded token with a wrapped-SOL
 //                     venue); null = nothing in the wallet can reach the target.
 //
-//   sizeAtaIcFundPlan — the fund-ic twin, same discipline over the IC candidates: per
+//   sizeAtaIcFundPlan - the fund-ic twin, same discipline over the IC candidates: per
 //                     candidate, quote the full balance into SOL through the caller's seam
 //                     (the convert engine's own quote path for that source's cross-rail
 //                     route). A venue that answers with its own below-minimum refusal hands
 //                     back the minimum input: a wallet that cannot reach it is skipped for
 //                     the next candidate; one that can swaps AT the minimum when it already
-//                     covers (the smallest honest input), else shrinks to the shortfall —
+//                     covers (the smallest honest input), else shrinks to the shortfall -
 //                     never below the venue minimum, never past the balance. Null = no
 //                     candidate can reach the target: the caller falls through to refuse.
 //
 // Funding sources are in-wallet money only, and every swap is the USER's own signed
-// conversion over a REGISTERED venue — the no-custody/no-cut red lines are inherited from
+// conversion over a REGISTERED venue - the no-custody/no-cut red lines are inherited from
 // the convert engine, never re-stated here.
 
 import {registeredVenues} from '../config/venues';
@@ -68,7 +68,7 @@ export type AtaSetupTokenInput = {
 export type AtaFundSource = {mint: string; symbol: string; decimals: number; rawAmount: string};
 
 /** An IC-side funding candidate (fund-ic): a funded IC-ledger asset the convert engine's own
- *  cross-rail route can carry into SOL. Pure data — `currencyKey` is the wallet's stable asset
+ *  cross-rail route can carry into SOL. Pure data - `currencyKey` is the wallet's stable asset
  *  id (`ic:<currency>`); the executor resolves the catalog row and the route against it. */
 export type AtaIcFundSource = {currencyKey: string; symbol: string; decimals: number; rawAmount: string};
 
@@ -129,14 +129,14 @@ export function planAtaSetup(args: {
       mints,
       costLamports: cost.toString(),
       // The TOTAL SOL the wallet must hold after the funding swap (the shortfall is the
-      // sizer's subtraction — the plan states the wallet-level requirement once).
+      // sizer's subtraction - the plan states the wallet-level requirement once).
       targetLamports: (cost + ATA_FUND_BUFFER_LAMPORTS).toString(),
       candidates,
     };
   }
   // The fund-ic branch (founder override 2026-09-30): no usable SPL source, but the wallet
   // holds measured IC-side money. The candidates are the caller's registry-ordered list,
-  // re-checked defensively here — only a measured positive balance is a candidate, the same
+  // re-checked defensively here - only a measured positive balance is a candidate, the same
   // bar the SPL walk applies.
   const icCandidates: AtaIcFundSource[] = [];
   for (const c of args.icSources ?? []) {
@@ -203,20 +203,20 @@ export type SizedAtaIcFund = {source: AtaIcFundSource; inAmount: string; outFloo
 /** The injected quote seam's answer for one IC candidate. `quote` carries the venue's own
  *  SOL-out figure at the asked input; `belowMin` carries the venue's own published minimum
  *  INPUT (raw candidate units) when it refused the amount. Null = unquotable (no market, no
- *  route, venue unreachable) — the candidate is skipped, never a crash. */
+ *  route, venue unreachable) - the candidate is skipped, never a crash. */
 export type AtaIcQuote =
   | {kind: 'quote'; outLamports: string}
   | {kind: 'belowMin'; minInRaw: string};
 
 /**
- * Size a fund-ic plan against (injected) live quotes — the `sizeAtaFundPlan` discipline over
+ * Size a fund-ic plan against (injected) live quotes - the `sizeAtaFundPlan` discipline over
  * the IC candidates. `solKnown` is the wallet's CURRENT SOL: it counts toward the target, so
  * the swap only covers the shortfall + buffer. Per candidate: a below-minimum refusal names
- * the venue's own minimum — a wallet that cannot reach it is skipped for the next candidate;
+ * the venue's own minimum - a wallet that cannot reach it is skipped for the next candidate;
  * one that can re-quotes at the minimum. A quoted input whose SOL floor covers the target is
  * then shrunk toward the shortfall-equivalent (+5% margin), never below the venue minimum and
  * never past the balance. First deliverable candidate wins; null = no candidate can reach the
- * target — the caller falls through to the honest refusal, never a forced losing swap.
+ * target - the caller falls through to the honest refusal, never a forced losing swap.
  */
 export async function sizeAtaIcFundPlan(args: {
   plan: Extract<AtaSetupPlan, {kind: 'fund-ic'}>;
@@ -227,7 +227,7 @@ export async function sizeAtaIcFundPlan(args: {
   const sol = rawDigits(args.solKnown) ?? 0n;
   const target = BigInt(plan.targetLamports);
   const swapNeeded = target > sol ? target - sol : 0n;
-  if (swapNeeded === 0n) return null; // nothing to fund — the caller should have re-planned
+  if (swapNeeded === 0n) return null; // nothing to fund - the caller should have re-planned
   for (const source of plan.candidates) {
     const balance = rawDigits(source.rawAmount);
     if (balance == null || balance <= 0n) continue;
@@ -236,18 +236,18 @@ export async function sizeAtaIcFundPlan(args: {
     let best: SizedAtaIcFund | null = null;
     for (let k = 0; k < 6; k += 1) {
       const q = await quote(source, input.toString());
-      if (q == null) break; // unquotable at this size — the next candidate's turn
+      if (q == null) break; // unquotable at this size - the next candidate's turn
       if (q.kind === 'belowMin') {
         const min = rawDigits(q.minInRaw);
         if (min == null || min <= 0n) break;
-        if (balance < min) break; // the wallet cannot reach the venue minimum — next candidate
+        if (balance < min) break; // the wallet cannot reach the venue minimum - next candidate
         venueMin = min;
         input = min;
         continue; // re-quote AT the venue's own minimum
       }
       const floor = rawDigits(q.outLamports);
       if (floor == null) break;
-      if (floor + sol < swapNeeded) break; // under target at this input — a smaller one never covers either
+      if (floor + sol < swapNeeded) break; // under target at this input - a smaller one never covers either
       best = {source, inAmount: input.toString(), outFloor: floor.toString()};
       if (venueMin > 0n && input === venueMin) break; // at the venue minimum: the smallest honest input
       const scaled = floor === 0n ? input : (input * swapNeeded * 105n) / (floor * 100n) + 1n;

@@ -87,7 +87,7 @@ import {useWalletHistory} from '../hooks/useWalletHistory';
 // The convert-engine route from an IC catalog row to the SOL rail (fund-ic, 2026-09-30): the
 // plain cefi row when the source IS the venue's IC side (ICP), else the composed route (the IC
 // legs land the venue's deposit asset, the registered venue settles SOL at the device's own
-// address). Null = no registered route — the row is not a funding candidate. Registry order
+// address). Null = no registered route - the row is not a funding candidate. Registry order
 // throughout, and PURE over the registry (no fetch): the executor does the quoting.
 type AtaIcRoute =
   | {kind: 'cefi'; venue: VenueEntry; depositLedger: string}
@@ -766,12 +766,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // planAtaSetup (lib/ataSetup, pure + unit-tested) decides: create (SOL covers every absent
   // account) | fund (a funded SPL token with a registered wrapped-SOL venue pays — size the
   // swap, confirm once) | fund-ic (no usable SPL source, but IC-side money: the convert
-  // engine's own cross-rail route to SOL — a registered CeFi venue behind the IC legs — sized
+  // engine's own cross-rail route to SOL - a registered CeFi venue behind the IC legs - sized
   // against the venue's own minimum; founder override 2026-09-30, retiring the old
   // IC-side exclusion) | refuse (the honest dead end). One run creates ALL absent accounts.
   // The fund leg runs through the convert engine's Solana driver; the fund-ic leg runs through
   // the convert surface's OWN composed/cefi confirm path (fetchComposedQuotes /
-  // fetchCeFiQuoteResult + prepare*, adopted into the resume engine — the same verified
+  // fetchCeFiQuoteResult + prepare*, adopted into the resume engine - the same verified
   // bytes, the same history record, never a fork). The badge clears itself when the polls
   // flip 'absent' → 'balance'.
   const [ataSetupConfirm, setAtaSetupConfirm] = useState<SizedAtaFund | null>(null);
@@ -788,7 +788,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       .map(a => ({mint: a.mint!, symbol: a.symbol, decimals: a.decimals, amount: tokenStates[a.mint!]?.amount ?? null, status: 'balance' as const}));
     // The IC-side funding candidates (fund-ic): every mainnet catalog row with a MEASURED
     // positive balance and a registered convert-engine route to SOL, in catalog (registry/
-    // matrix) order. The RAW polled balance — the sizer re-checks against live quotes anyway.
+    // matrix) order. The RAW polled balance - the sizer re-checks against live quotes anyway.
     const icCandidates: AtaIcFundSource[] = [];
     for (const row of catalog) {
       if (row.testnet || row.ledger == null || row.decimals == null) continue;
@@ -797,7 +797,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       if (symbol == null) continue;
       const bal = assetBalances[row.currency];
       if (bal == null || !/^\d+$/.test(bal) || BigInt(bal) <= 0n) continue;
-      if (icSolRouteOf(row) == null) continue; // no registered route to SOL — not a candidate
+      if (icSolRouteOf(row) == null) continue; // no registered route to SOL - not a candidate
       icCandidates.push({currencyKey: `ic:${row.currency}`, symbol, decimals: row.decimals, rawAmount: bal});
     }
     const plan = planAtaSetup({targets, solBalance: solState.balance, sources, icSources: icCandidates});
@@ -825,8 +825,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   }, [relayUrl]);
   // The fund-ic quote seam: the convert engine's OWN quote path for the candidate's route to
   // SOL, in the shape `sizeAtaIcFundPlan` consumes. A below-minimum venue verdict is mapped
-  // onto the seam's `belowMin` answer — the venue's minimum, scaled back to the candidate's
-  // own input units along the quoted floor chain (+5% margin) — so the pure sizer decides
+  // onto the seam's `belowMin` answer - the venue's minimum, scaled back to the candidate's
+  // own input units along the quoted floor chain (+5% margin) - so the pure sizer decides
   // reachability without knowing the route shapes. Null = unquotable (no market, no route).
   const quoteAtaIcFund = useCallback(async (source: AtaIcFundSource, inRaw: string): Promise<AtaIcQuote | null> => {
     const row = catalog.find(c => `ic:${c.currency}` === source.currencyKey && !c.testnet);
@@ -848,7 +848,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         }
       }
       // The composed route: the IC legs' compounding floor, then the settle venue's quote ON
-      // the floor (the exact amount the order prices) — the same walk fetchComposedQuotes
+      // the floor (the exact amount the order prices) - the same walk fetchComposedQuotes
       // runs for the review, kept inline so the floors are in hand when the venue answers
       // below-minimum.
       const legs = route.route.legs;
@@ -889,7 +889,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     }
   }, [relayUrl, catalog]);
   // The fund-ic prepare: a FRESH quote bundle at the confirmed input (the confirm surface's
-  // own sequence — nothing is adopted from the sizing quotes), held to the plan's target, then
+  // own sequence - nothing is adopted from the sizing quotes), held to the plan's target, then
   // the matching prepare. The venue settles SOL at the device's own address; the record rides
   // the resume engine from there.
   const prepareAtaIcSwap = useCallback(async (sized: SizedAtaIcFund): Promise<ConvertRecord> => {
@@ -902,7 +902,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     if (route == null) throw new Error(M.deposit.ata.swapFailed);
     const inSymbol = row.backing_symbol ?? row.symbol ?? sized.source.symbol;
     if (route.kind === 'cefi') {
-      // The plain cefi row — the confirm surface's exact order-first sequence: the venue's
+      // The plain cefi row - the confirm surface's exact order-first sequence: the venue's
       // fresh quote, the order on it, the legless record. settleAddress is the user's OWN SOL
       // address (never typed); the refund address their own IC account.
       const depositDecimal = rawToDecimal(sized.inAmount, row.decimals ?? 0);
@@ -940,7 +940,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         outDecimals: SOL_DECIMALS,
       });
     }
-    // The composed route — the confirm surface's ONE-consent branch, re-quoted fresh at the
+    // The composed route - the confirm surface's ONE-consent branch, re-quoted fresh at the
     // SAME confirmed input. A moved venue rate that can no longer cover the plan target
     // refuses instead of swapping blind (the fund leg's own rule).
     const fresh = await fetchComposedQuotes(relayUrl, route.route, sized.inAmount, route.route.endpoints[0]!.fee, CONVERT_SLIPPAGE_BPS_DEFAULT);
@@ -1009,7 +1009,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     }
   }, [ataSetupBusy, identity.secretHex, identity.publicHex, relayUrl, solAddress, solState.balance, refreshSol, refreshToken, createAtaForMint]);
   // The entry the ONE button calls. create runs straight away (the disclosed cost + the press
-  // are the consent); fund and fund-ic size first and wait for the banner's ONE confirm — a
+  // are the consent); fund and fund-ic size first and wait for the banner's ONE confirm - a
   // swap is a real spend and never runs without it; refuse never reaches a button at all.
   const beginAtaSetup = useCallback(async () => {
     const {plan} = ataSetupModel;
@@ -1022,7 +1022,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         const sized = await sizeAtaIcFundPlan({plan, solKnown: solState.balance, quote: quoteAtaIcFund});
         if (sized == null) {
           // Nothing qualified: no candidate's balance can reach the venue minimum and the
-          // target. The honest fall-through — the same dead end the plan would have named.
+          // target. The honest fall-through - the same dead end the plan would have named.
           setAtaSetupErr(M.deposit.ata.fundShort(plan.candidates[0]?.symbol ?? ''));
           return;
         }

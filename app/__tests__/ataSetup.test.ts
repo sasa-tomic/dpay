@@ -139,7 +139,7 @@ const icSource = (over: Partial<AtaIcFundSource> = {}): AtaIcFundSource => ({
   currencyKey: 'ic:7', symbol: 'VCHF', decimals: 8, rawAmount: '2000000000', ...over,
 });
 
-describe('planAtaSetup — the fund-ic branch (no SPL source, IC-side money funds the swap)', () => {
+describe('planAtaSetup - the fund-ic branch (no SPL source, IC-side money funds the swap)', () => {
   test('SOL short, no usable SPL source, a funded IC asset → fund-ic naming the candidate', () => {
     const plan = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [icSource()]});
     expect(plan.kind).toBe('fund-ic');
@@ -190,7 +190,7 @@ describe('planAtaSetup — the fund-ic branch (no SPL source, IC-side money fund
   });
 });
 
-describe('sizeAtaIcFundPlan — the injected-quote sizing walk over the IC candidates', () => {
+describe('sizeAtaIcFundPlan - the injected-quote sizing walk over the IC candidates', () => {
   // The target for one absent account, SOL 0.
   const plan = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [icSource()]});
   if (plan.kind !== 'fund-ic') throw new Error('fixture: expected a fund-ic plan');

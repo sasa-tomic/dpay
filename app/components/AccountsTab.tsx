@@ -21,7 +21,7 @@ import type {BalanceView} from '../lib/assetBalances';
 
 /** The wallet-level ONE-TAP token-account setup, computed by Wallet (the planner + the run
  *  state) and rendered as ONE banner above the currency list (the 2026-09-30 redesign: the
- *  single setup affordance — the per-row buttons are gone, so the row badge and the banner can
+ *  single setup affordance - the per-row buttons are gone, so the row badge and the banner can
  *  never state the setup twice). */
 export type AtaSetupViewModel = {
   /** Every absent account's display symbol, wallet-wide. */
@@ -36,7 +36,7 @@ export type AtaSetupViewModel = {
    *  banner says so honestly). Null = the default line. */
   busyLine: string | null;
   /** The device's SOL receive address for the refuse panel's copy affordance (null when the
-   *  rail is unavailable — the panel then falls back to the deposit-sheet escape). */
+   *  rail is unavailable - the panel then falls back to the deposit-sheet escape). */
   solAddress: string | null;
   err: string | null;
 };
@@ -66,7 +66,7 @@ export type AtaSetupViewModel = {
 // from refuse (or nothing-known) into an actionable one because a balance changed, the banner
 // expands ONCE per app session so the single click is presented. Module state, not component
 // state: the route unmounts on navigation, and "once per app session" must survive that. It
-// never auto-spends — a swap-sized run still asks through the ONE confirm.
+// never auto-spends - a swap-sized run still asks through the ONE confirm.
 let ataSurfacePrev: 'absent' | 'refuse' | 'actionable' = 'absent';
 let ataSurfaceAutoDone = false;
 

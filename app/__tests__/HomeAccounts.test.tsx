@@ -274,7 +274,7 @@ describe('AccountsTab — a KNOWN-absent token account grows the setup badge on 
   });
 });
 
-describe('AccountsTab — the setup banner is the ONE affordance (founder gap, 2026-09-30 redesign)', () => {
+describe('AccountsTab - the setup banner is the ONE affordance (founder gap, 2026-09-30 redesign)', () => {
   const mintOf = (id: string) => {
     const a = ASSETS.find(x => x.id === id);
     return a != null && a.protocol === 'solana' ? a.mint ?? '' : '';

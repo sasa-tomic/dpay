@@ -4,7 +4,7 @@ import {C} from '../config/palette';
 import {M} from '../i18n';
 
 /**
- * The wallet-level ONE-TAP setup card (2026-09-30, banner redesign) — the AccountsTab's SINGLE
+ * The wallet-level ONE-TAP setup card (2026-09-30, banner redesign) - the AccountsTab's SINGLE
  * setup affordance, rendered above the currency list. One compact card, ONE primary button:
  * the per-row setup buttons are gone, so the "Needs setup" badge and this card can never state
  * the setup twice. Visual grammar: the instruction card (S.instrCard's radius/padding) + the
@@ -12,17 +12,17 @@ import {M} from '../i18n';
  * expanded.
  *
  * Four states, driven entirely by props (the parent owns the plan + the run):
- *   busy    — the run is on chain: spinner + one honest line (what is being created, or the
+ *   busy    - the run is on chain: spinner + one honest line (what is being created, or the
  *             still-in-flight venue swap when the parent says so via `busyLine`).
- *   confirm — a swap run's ONE confirmation, stating the total: the sized swap, its source,
+ *   confirm - a swap run's ONE confirmation, stating the total: the sized swap, its source,
  *             what it creates, what it costs. Confirm executes; cancel returns.
- *   refuse  — the honest dead end: what is missing, what it costs, the needSol copy and the
+ *   refuse  - the honest dead end: what is missing, what it costs, the needSol copy and the
  *             device's SOL receive address with a copy affordance (the deposit-sheet escape
- *             when the parent cannot show one). NO button — never a fake one.
- *   idle    — create (SOL covers), fund (a SPL swap pays) or fund-ic (a cross-rail venue swap
+ *             when the parent cannot show one). NO button - never a fake one.
+ *   idle    - create (SOL covers), fund (a SPL swap pays) or fund-ic (a cross-rail venue swap
  *             pays): the ONE "Complete setup" button. A fund/fund-ic run presses through to
  *             the confirm; create runs straight away (the button itself is the consent, cost
- *             disclosed above — the same contract the per-asset setup card established).
+ *             disclosed above - the same contract the per-asset setup card established).
  *
  * All money figures arrive PRE-FORMATTED (the caller owns `fmtAssetCompact` — the i18n rule);
  * `testIDPrefix` keeps parallel cards tellable (`ata-setup-EUR-complete`, …).
@@ -55,7 +55,7 @@ export function AtaSetupCard({
   kind: 'create' | 'fund' | 'fund-ic' | 'refuse';
   /** The already-formatted SOL total the setup costs ("0.00204428 SOL"). */
   costLine: string;
-  /** The swap card's source line — set only when the funding token is unambiguous. */
+  /** The swap card's source line - set only when the funding token is unambiguous. */
   fundFromLine?: string | null;
   /** True once the parent has sized the swap and is waiting for the confirm press. */
   confirming?: boolean;
@@ -71,7 +71,7 @@ export function AtaSetupCard({
   onToggleExpanded?: () => void;
   /** The refuse panel's receive address (the device's SOL address, when the parent has it). */
   solAddress?: string | null;
-  /** True for the beat after the copy tap — the button says so. */
+  /** True for the beat after the copy tap - the button says so. */
   solCopied?: boolean;
   onStart?: () => void;
   onConfirm?: () => void;
@@ -147,7 +147,7 @@ export function AtaSetupCard({
       </View>
     );
   }
-  // Idle: the compact banner — one-line summary row (title + cost) and the ONE button. The
+  // Idle: the compact banner - one-line summary row (title + cost) and the ONE button. The
   // summary row expands to the per-asset detail lines (toggled by tap, auto-set once per
   // session by the parent's refuse-to-actionable auto-surface).
   return (

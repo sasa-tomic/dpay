@@ -1,5 +1,5 @@
 /**
- * flow 214 (ata-fund-ic) — the ONE-button fund-ic setup, end to end: a wallet holding ONLY
+ * flow 214 (ata-fund-ic) - the ONE-button fund-ic setup, end to end: a wallet holding ONLY
  * IC-side money (20 VCHF, the founder's exact scenario) with a KNOWN-absent EURC account and
  * no SOL completes its setup from the AccountsTab banner. Hermetic per-flow file: one private
  * relay, the relay's SideShift upstream stub for the order + status, a fetch wrapper answering
@@ -44,7 +44,7 @@ async function storeRecords(publicHex: string): Promise<Record<string, StoreReco
 
 /** The proportional venue QUOTE surface: settleAmount = deposit × 0.02475 (SOL per ICP), the
  *  linear shape the sizer's shrink-to-fit assumes. The request STILL goes through to the
- *  relay (its stub remembers the quoted deposit and echoes it on the order — the exact-amount
+ *  relay (its stub remembers the quoted deposit and echoes it on the order - the exact-amount
  *  gate depends on that); only the ANSWER's settle figure is rewritten. Everything else passes
  *  through to the harness rewrite (the order route keeps riding the relay's own stub). */
 function installProportionalSideShiftQuote(): () => void {
@@ -132,7 +132,7 @@ function installAtaSolStub(mints: string[]): {state: {lamports: number; funded: 
   return {state, sent};
 }
 
-hermeticDescribe('flow 214 — the fund-ic setup: IC-side money completes the SOL accounts', () => {
+hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL accounts', () => {
   let restoreQuote: (() => void) | null = null;
   afterEach(() => {
     if (restoreQuote != null) { restoreQuote(); restoreQuote = null; }

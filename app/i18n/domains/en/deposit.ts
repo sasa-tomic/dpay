@@ -293,7 +293,7 @@ export type DepositMessages = {
     /** The busy line for the whole run (one or more accounts). */
     creatingAll: (targets: string) => string;
     /** The busy line while a fund-ic venue swap is still in flight (the accounts are created
-     *  the moment the SOL lands — the watcher runs the same create step). */
+     *  the moment the SOL lands - the watcher runs the same create step). */
     swapPending: (targets: string) => string;
     /** The funding swap's two honest endings. `swapFailed` = the chain refused the swap (the
      *  input never left the wallet); `swapUnknown` = accepted, confirmation missed (check the
