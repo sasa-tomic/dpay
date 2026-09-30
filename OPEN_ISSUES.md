@@ -119,14 +119,15 @@ funds-ledgered trip per new adapter before any "supported" claim (D31 rule).
   as USD today (ckUSDC/USDC): same asset, `chooseRail` picks the network, no exchange semantics,
   zero new UI. Value 7 / effort S (verification only; the rail additions are their own M once
   verified).
-- **NEXT TOPIC (founder 2026-09-30): CoW Swap = later venue row; Uniswap V3 stays first.**
-  Uniswap V3 remains the first EVM adapter (GOAL above: spec work item #2, D31-hardened seed
-  script; one adapter generalizes to any ERC-20 — the actual general solution). CoW Swap is
-  mechanically heavier (EIP-712 signed off-chain orders, solver settlement in seconds-to-minutes,
-  an order API to poll): fine for convert, useless for checkout. The trigger to file real work:
-  measured rates on thin ZCHF pairs beating Uniswap enough to matter. Under the adapter pattern
-  it is then a cheap follow-up venue row, not a redesign. Value 5 / effort M, parked on its
-  trigger.
+- **NEXT TOPIC (founder 2026-09-30): CoW Swap is the SECOND EVM venue — build BOTH, in that
+  order (founder directive same day: target 2+ venues per currency, so no single venue is a
+  point of failure).** Uniswap V3 remains the first EVM adapter (GOAL above: spec work item #2,
+  D31-hardened seed script; one adapter generalizes to any ERC-20 — the actual general
+  solution). CoW Swap follows once Uniswap V3 is shipped and live-proven (D31 rule). It is
+  mechanically heavier (EIP-712 signed off-chain orders, solver settlement in
+  seconds-to-minutes, an order API to poll): fine for convert, useless for checkout. Under the
+  adapter pattern it lands as a second venue row, not a redesign. Value 6 / effort M, ordered
+  after the Uniswap V3 adapter.
 
 - **"Check your connection" copy fires on RELAY failures while the phone is online
   (founder question 2026-09-29; value 6 / effort M).** The prod relay was probed healthy
