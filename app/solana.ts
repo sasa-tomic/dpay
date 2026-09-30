@@ -859,6 +859,15 @@ export async function sendSolanaPay(
   }
 }
 
+/** One READ: does this account exist on chain? The recipient-ATA affordability gate's seam
+ *  (SolanaWithdrawSheet, 2026-09-30) — the same bounded module load and RPC posture the send
+ *  paths use; a throw means unreadable, and the caller must treat that as "unknown", never
+ *  as a verdict. Read-only, never signs. */
+export async function getSolAccountExists(address: string, signal?: AbortSignal): Promise<boolean> {
+  const {accountExists} = await loadRpcForSend();
+  return accountExists(solanaRpcUrls(), address, {signal});
+}
+
 /** One-time token account (ATA) setup for THIS device's wallet — the receiver-side onboarding for
  *  a registered Solana SPL token (2026-08-14; generalized per-mint 2026-09-06). Builds, signs
  *  LOCALLY (device key), broadcasts, and confirms a single AssociatedTokenProgram.createIdempotent

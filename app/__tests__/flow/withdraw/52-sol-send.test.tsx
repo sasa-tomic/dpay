@@ -5,8 +5,11 @@
  * 52: SOL selectable via the SAME tab IA every currency uses; the send↔scan toggle round-trip
  * preserves state; a Bitcoin paste is refused BY NAME with Confirm disabled; a valid destination
  * has its route disclosed; confirm signs + broadcasts → "Sent ✓" + signature. 77: the USDC send —
- * USDC units, the recipient-ATA rent disclosure note, Sent ✓ — plus the below-rent pre-check that
- * refuses with the WHOLE sentence (unit printed once) and never reaches Sent.
+ * USDC units, the recipient-ATA rent disclosure note, Sent ✓ — plus the recipient-ATA
+ * AFFORDABILITY gate (the 2026-09-30 INERT-confirm fix): a KNOWN-absent recipient ATA with
+ * rail SOL below the rent floor disables Confirm BEFORE the press and shows the exact top-up
+ * address and amount; the gate releases on its own once the rail is topped up and the same
+ * send then completes.
  *
  * LOAD-ORDER CONTRACT: the RPC override is set before the harness require (see ../pay/solrpc).
  */
@@ -87,7 +90,7 @@ hermeticDescribe('flow 52 — SOL withdraw (native SOL send sheet)', () => {
 });
 
 hermeticDescribe('flow 77 — Solana USDC "Send to address" (SPL transfer + rent pre-check)', () => {
-  it('happy path: USDC units + rent note → Sent ✓; absent recipient ATA + low rent → honest refusal', async () => {
+  it('happy path: USDC units + rent note → Sent ✓; absent recipient ATA + low rent → the affordability gate, then a topped-up send completes', async () => {
     const m = await onboardWallet('jest-sol-usdc-send');
 
     // Stateful per-address stub: the device/source ATA is learned from the first getAccountInfo
@@ -141,7 +144,9 @@ hermeticDescribe('flow 77 — Solana USDC "Send to address" (SPL transfer + rent
     expect(m.driver.readText('sol-send-signature')).toMatch(/^sig_spl_/);
 
     // 5. CASE 2 — recipient ATA ABSENT + sender SOL below the rent floor. A FRESH sheet mounts;
-    //    sendSpl's pre-check throws BEFORE any broadcast.
+    //    the affordability gate engages BEFORE any press (the INERT-confirm fix): Confirm is
+    //    disabled WITH the reason and the exact top-up address/amount — the practical
+    //    instruction the founder rule demands, in place of the old stranded form.
     await m.driver.click('btn-sol-send-done', {timeoutMs: 5000});
     await m.driver.waitGone('sol-send-outcome', {timeoutMs: 5000});
     st.recipientAtaAbsent = true;
@@ -150,17 +155,23 @@ hermeticDescribe('flow 77 — Solana USDC "Send to address" (SPL transfer + rent
     await m.driver.findByTestID('sol-send-address-input', {timeoutMs: 8000});
     await m.driver.type('sol-send-address-input', DEST_ADDR, {timeoutMs: 4000});
     await m.driver.type('sol-send-amount-input', '1.5', {timeoutMs: 4000});
+    await m.driver.findByTestID('sol-send-ata-gate', {timeoutMs: 12_000});
+    const gate = m.driver.readText('sol-send-ata-gate');
+    assertIncludes(gate, 'no USDC account yet', 'the gate names the missing account');
+    assertIncludes(gate, '0.00204428 SOL', 'the exact rent the send would owe');
+    assertIncludes(gate, '0.001', 'the SOL actually held');
+    await m.driver.findByTestID('sol-send-topup-address', {timeoutMs: 5000});
+    assertDisabled(m, 'btn-sol-send-confirm', 'the unaffordable rent gates the confirm BEFORE the press');
     await m.driver.click('btn-sol-send-confirm', {timeoutMs: 5000});
+    expect(m.driver.isPresent('sol-send-outcome')).toBe(false); // the press never sends while gated
 
-    await m.driver.findByTestID('sol-send-err', {timeoutMs: 12_000});
-    // The WHOLE sentence — the prefix version passed two years of a double-printed unit (see twin).
-    assertEq(
-      m.driver.readText('sol-send-err'),
-      'They have no USDC account yet. Creating it costs about 0.00204428 SOL, paid by you — send a little SOL here first',
-      'the pre-check error renders the whole sentence, the rent amount carrying its unit ONCE',
-    );
-    expect(m.driver.isPresent('sol-send-outcome')).toBe(false);
-    await m.driver.findByTestID('sol-send-address-input', {timeoutMs: 5000});
+    // 6. TOP-UP: the rail receives SOL; the gate releases on its own and the same send
+    //    completes — the gate is an instruction, not a dead end.
+    st.solLamports = 5_000_000_000;
+    await lib.waitForEnabled(m, 'btn-sol-send-confirm', {timeoutMs: 20_000});
+    await m.driver.click('btn-sol-send-confirm', {timeoutMs: 5000});
+    await m.driver.findByTestID('sol-send-outcome', {timeoutMs: 12_000});
+    assertIncludes(m.driver.readText('sol-send-outcome'), 'Sent', 'the topped-up send completes');
 
     await m.unmount();
   }, 180_000);

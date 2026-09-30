@@ -99,8 +99,10 @@ describe('the send sheet over the REAL seam — recorded-stub repro harness (202
       getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
     });
     let tree!: ReturnType<typeof rtr.create>;
+    // SOL ABOVE the ATA-setup floor: the affordability gate must not add a read to this story
+    // (the below-floor variant is its own case below).
     await act(async () => {
-      tree = rtr.create(createElement({identity: IDENT, token: 'EURC', mint: EURC!.mint, balance: '1500000', solBalance: '2000000', onSent: () => {}, onClose: () => {}}));
+      tree = rtr.create(createElement({identity: IDENT, token: 'EURC', mint: EURC!.mint, balance: '1500000', solBalance: '3000000', onSent: () => {}, onClose: () => {}}));
     });
     await drive(tree, '1.5'); // 1.5 EURC at 6 decimals
 
@@ -123,20 +125,27 @@ describe('the send sheet over the REAL seam — recorded-stub repro harness (202
 
   test('a missing recipient ATA adds the rent pre-check to the story — still exactly one broadcast', async () => {
     const EURC = tokens.solanaTokenInfo('EURC');
-    let ataCalls = 0;
+    // KEYED BY ADDRESS: the sender's ATA exists, the recipient's does not. (A call-count stub
+    // would answer the affordability gate's own read first and mis-key the story.) The reads
+    // carry the ATA addresses, so the key is the sender's derived ATA for this mint.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const identity = require('../solana/identity') as typeof import('../solana/identity');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const spl = require('../solana/spl') as typeof import('../solana/spl');
+    const b58mod = require('bs58') as {default: {encode: (b: Uint8Array) => string}};
+    const senderAta = b58mod.default.encode(spl.deriveAta(identity.deriveSolanaAddress(IDENT.secretHex), EURC!.mint!));
     const {calls} = recordingStub({
-      getAccountInfo: () => {
-        ataCalls += 1;
-        return ataCalls === 1 ? ATA_ACCOUNT : {value: null}; // sender yes, recipient NO
-      },
+      getAccountInfo: (params: unknown[]) => (senderAta === String(params[0]) ? ATA_ACCOUNT : {value: null}),
       getBalance: () => ({value: 1000000000}), // rent pre-check: 1 SOL ≥ the one-time rent
       getLatestBlockhash: BLOCKHASH_OK,
       sendTransaction: () => SIG,
       getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
     });
     let tree!: ReturnType<typeof rtr.create>;
+    // SOL above the floor: the rent pre-check runs INSIDE the send (the seam's own honest
+    // cost check), the send proceeds, and the story is exactly the six calls.
     await act(async () => {
-      tree = rtr.create(createElement({identity: IDENT, token: 'EURC', mint: EURC!.mint, balance: '1500000', solBalance: '2000000', onSent: () => {}, onClose: () => {}}));
+      tree = rtr.create(createElement({identity: IDENT, token: 'EURC', mint: EURC!.mint, balance: '1500000', solBalance: '3000000', onSent: () => {}, onClose: () => {}}));
     });
     await drive(tree, '1.5');
 
@@ -145,6 +154,36 @@ describe('the send sheet over the REAL seam — recorded-stub repro harness (202
     ]);
     expect(calls.filter(c => c.method === 'sendTransaction')).toHaveLength(1);
     expect(has(tree, 'sol-send-outcome')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a missing recipient ATA with SOL BELOW the rent floor gates the send BEFORE the press — no broadcast, the top-up instruction renders', async () => {
+    // The 2026-09-28 live defect, end to end over the real seam: the old build took the press,
+    // refused pre-broadcast inside the send, and left the form stranded. The gate now refuses
+    // BEFORE the press: the reads never get past the account checks, and the practical
+    // instruction (exact amount + the device address to fund) renders.
+    const EURC = tokens.solanaTokenInfo('EURC');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const identity = require('../solana/identity') as typeof import('../solana/identity');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const spl = require('../solana/spl') as typeof import('../solana/spl');
+    const b58mod2 = require('bs58') as {default: {encode: (b: Uint8Array) => string}};
+    const senderAta = b58mod2.default.encode(spl.deriveAta(identity.deriveSolanaAddress(IDENT.secretHex), EURC!.mint!));
+    const {calls} = recordingStub({
+      getAccountInfo: (params: unknown[]) => (senderAta === String(params[0]) ? ATA_ACCOUNT : {value: null}),
+    });
+    let tree!: ReturnType<typeof rtr.create>;
+    await act(async () => {
+      tree = rtr.create(createElement({identity: IDENT, token: 'EURC', mint: EURC!.mint, balance: '1500000', solBalance: '2000000', onSent: () => {}, onClose: () => {}}));
+    });
+    await drive(tree, '1.5');
+
+    // Reads only — no getBalance, no blockhash, NO broadcast.
+    expect(calls.every(c => c.method === 'getAccountInfo')).toBe(true);
+    expect(has(tree, 'sol-send-outcome')).toBe(false);
+    expect(has(tree, 'sol-send-ata-gate')).toBe(true);
+    expect(has(tree, 'sol-send-topup-address')).toBe(true);
+    expect(tree.root.findByProps({testID: 'btn-sol-send-confirm'}).props.disabled).toBe(true);
     act(() => { tree.unmount(); });
   });
 
@@ -158,7 +197,7 @@ describe('the send sheet over the REAL seam — recorded-stub repro harness (202
     });
     let tree!: ReturnType<typeof rtr.create>;
     await act(async () => {
-      tree = rtr.create(createElement({identity: IDENT, token: 'EURC', mint: EURC!.mint, balance: '1500000', solBalance: '2000000', onSent: () => {}, onClose: () => {}}));
+      tree = rtr.create(createElement({identity: IDENT, token: 'EURC', mint: EURC!.mint, balance: '1500000', solBalance: '3000000', onSent: () => {}, onClose: () => {}}));
     });
     await drive(tree, '1.5');
     expect(has(tree, 'sol-send-err')).toBe(true);

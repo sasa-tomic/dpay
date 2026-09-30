@@ -175,13 +175,30 @@ export const depositFr: DepositMessages = {
   ata: {
     absent: asset => `Pas encore de compte ${asset} sur cet appareil.`,
     cost: (setupCost, asset) =>
-      `La création de votre compte ${asset} coûte ${setupCost}, sur votre solde SOL. Il reste le vôtre, sous vos clés.`,
+      `La création de vos ${asset} coûte ${setupCost}, sur votre solde SOL. Ils restent les vôtres, sous vos clés.`,
     checkingSol: 'Vérification de votre solde SOL…',
     needSol: setupCost =>
       `Il vous faut d’abord environ ${setupCost} en SOL — recevez-en à votre adresse, puis créez le compte.`,
     showSolAddress: 'Voir mon adresse SOL',
     creating: asset => `Création de votre compte ${asset} — confirmation sur Solana…`,
     createHint: (setupCost, asset) => `Crée votre compte ${asset} pour ${setupCost} sur votre solde SOL`,
+    completeSetup: 'Terminer la configuration',
+    completeHint: setupCost => `Tout configure en un geste (environ ${setupCost})`,
+    targetsLabel: raw => {
+      const symbols = Array.isArray(raw) ? raw : [String(raw)];
+      return symbols.length === 1
+        ? `compte ${symbols[0]}`
+        : `comptes ${symbols.slice(0, -1).join(', ')} et ${symbols[symbols.length - 1]}`;
+    },
+    fundFrom: source => `Un petit échange de vos ${source} contre du SOL le paie.`,
+    fundConfirm: (swap, source, targets, setupCost) =>
+      `Échange environ ${swap} de vos ${source} contre du SOL et crée vos ${targets} (${setupCost}).`,
+    fundShort: source => `Même tous vos ${source} ne suffisent pas — recevez un peu de SOL à votre adresse.`,
+    confirmAction: 'Confirmer',
+    cancelAction: 'Annuler',
+    creatingAll: targets => `Création de vos ${targets} — confirmation sur Solana…`,
+    swapFailed: 'L’échange n’a pas abouti — rien n’a été créé et le token échangé est toujours dans votre wallet. Vous pouvez réessayer.',
+    swapUnknown: 'L’échange a été accepté mais n’est pas encore confirmé. Vérifiez votre solde SOL dans un instant, puis terminez la configuration à nouveau.',
   },
 
   trust: {
@@ -367,5 +384,8 @@ export const withdrawFr: WithdrawMessages = {
     recipientAtaNote: (cost, asset) =>
       `Si le destinataire n’a pas encore de compte ${asset}, cet envoi le crée pour lui (≈${cost} une seule fois, à votre charge).`,
     confirmLabel: asset => `Confirmer l’envoi de ${asset}`,
+    ataRentGate: (cost, held, asset) =>
+      `Le destinataire n’a pas encore de compte ${asset} — sa création coûte environ ${cost}. Vos ${held} de SOL ne suffisent pas.`,
+    ataRentTopUp: cost => `Recevez environ ${cost} de SOL à votre adresse, puis envoyez :`,
   },
 };

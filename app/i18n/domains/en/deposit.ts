@@ -263,6 +263,33 @@ export type DepositMessages = {
     showSolAddress: string;
     creating: (asset: string) => string;
     createHint: (setupCost: string, asset: string) => string;
+
+    /** The AccountsTab one-tap completion (AtaSetupCard, 2026-09-30): ONE button that creates
+     *  every absent token account, funding itself from a funded SPL token when SOL is short. */
+    /** The single button's label — the founder's "a SINGLE button that sets up everything". */
+    completeSetup: string;
+    /** The button's screen-reader hint; `setupCost` is the already-formatted SOL total. */
+    completeHint: (setupCost: string) => string;
+    /** The missing accounts as ONE noun phrase ("EURC account", "EURC and USDC accounts").
+     *  Scalar-tolerant by the catalog-fuzzer contract: any non-array argument renders as its
+     *  single-symbol phrase instead of throwing. */
+    targetsLabel: (symbols: string[] | string | number) => string;
+    /** The fund-branch line naming the (unique) token the swap draws from. */
+    fundFrom: (source: string) => string;
+    /** The fund confirm, stating the total: the sized swap, its source, what it creates, the cost. */
+    fundConfirm: (swap: string, source: string, targets: string, setupCost: string) => string;
+    /** Sizing refused: even the whole named balance cannot reach the SOL target. */
+    fundShort: (source: string) => string;
+    /** The confirm's two controls. */
+    confirmAction: string;
+    cancelAction: string;
+    /** The busy line for the whole run (one or more accounts). */
+    creatingAll: (targets: string) => string;
+    /** The funding swap's two honest endings. `swapFailed` = the chain refused the swap (the
+     *  input never left the wallet); `swapUnknown` = accepted, confirmation missed (check the
+     *  SOL balance before retrying). */
+    swapFailed: string;
+    swapUnknown: string;
   };
 
   /** One-tap funding from Trust Wallet (Android only). */
@@ -503,13 +530,30 @@ export const depositEn: DepositMessages = {
   ata: {
     absent: asset => `No ${asset} account on this device yet.`,
     cost: (setupCost, asset) =>
-      `Creating your ${asset} account costs ${setupCost}, from your SOL balance. It stays yours, on your keys.`,
+      `Creating your ${asset} costs ${setupCost}, from your SOL balance. It stays yours, on your keys.`,
     checkingSol: 'Checking your SOL balance…',
     needSol: setupCost =>
       `You need about ${setupCost} in SOL first — receive it at your address, then create the account.`,
     showSolAddress: 'Show my SOL address',
     creating: asset => `Creating your ${asset} account — confirming on Solana…`,
     createHint: (setupCost, asset) => `Create your ${asset} account for ${setupCost} from your SOL balance`,
+    completeSetup: 'Complete setup',
+    completeHint: setupCost => `Sets up everything in one tap (about ${setupCost})`,
+    targetsLabel: raw => {
+      const symbols = Array.isArray(raw) ? raw : [String(raw)];
+      return symbols.length === 1
+        ? `${symbols[0]} account`
+        : `${symbols.slice(0, -1).join(', ')} and ${symbols[symbols.length - 1]} accounts`;
+    },
+    fundFrom: source => `A small swap of your ${source} into SOL pays for it.`,
+    fundConfirm: (swap, source, targets, setupCost) =>
+      `Swaps about ${swap} of your ${source} into SOL and creates your ${targets} (${setupCost}).`,
+    fundShort: source => `Even all your ${source} doesn't cover it — receive a little SOL at your address instead.`,
+    confirmAction: 'Confirm',
+    cancelAction: 'Cancel',
+    creatingAll: targets => `Creating your ${targets} — confirming on Solana…`,
+    swapFailed: 'The swap did not go through — nothing was created and the swapped token is still in your wallet. You can try again.',
+    swapUnknown: 'The swap was accepted but not confirmed yet. Check your SOL balance in a moment, then complete the setup again.',
   },
 
   trust: {
@@ -741,6 +785,11 @@ export type WithdrawMessages = {
     sendAmount: (amount: string) => string;
     recipientAtaNote: (cost: string, asset: string) => string;
     confirmLabel: (asset: string) => string;
+    /** The affordability gate (the INERT-confirm defect, 2026-09-28 live finding): a KNOWN-absent
+     *  recipient ATA with KNOWN-short SOL refuses BEFORE the press. `cost`/`held` pre-formatted. */
+    ataRentGate: (cost: string, held: string, asset: string) => string;
+    /** The practical instruction over the address: what to receive, then send. */
+    ataRentTopUp: (cost: string) => string;
   };
 };
 
@@ -864,5 +913,8 @@ export const withdrawEn: WithdrawMessages = {
     recipientAtaNote: (cost, asset) =>
       `If they have no ${asset} account yet, this creates it for them (one-time ≈${cost} paid by you).`,
     confirmLabel: asset => `Confirm ${asset} send`,
+    ataRentGate: (cost, held, asset) =>
+      `They have no ${asset} account yet — creating it costs about ${cost}. Your ${held} of SOL can't cover it.`,
+    ataRentTopUp: cost => `Receive about ${cost} of SOL at your address, then send:`,
   },
 };

@@ -31,12 +31,15 @@ jest.mock('../solana', () => ({
   sendSpl: jest.fn(),
   // The unknown terminal's Check status read (read-only, never re-signs) — armed per test below.
   getSolSignatureStatus: jest.fn(),
+  // The recipient-ATA existence read behind the affordability gate (defect: the INERT confirm,
+  // 2026-09-28 live finding) — armed per test below.
+  getSolAccountExists: jest.fn(),
   // The sheet warms the lazily-loaded network module at mount (the 2026-09-21 engine-load fix);
   // a no-op here — this suite owns the seam's behavior, not the module load.
   preloadSolanaRpc: () => {},
 }));
 
-import {sendSol, sendSpl, getSolSignatureStatus} from '../solana';
+import {sendSol, sendSpl, getSolSignatureStatus, getSolAccountExists} from '../solana';
 import {deriveSolanaAddress} from '../solana/identity';
 import {hasStamp, loadJourney} from '../lib/journey';
 import {loadAddressBook} from '../services/addressBook';
@@ -454,6 +457,72 @@ describe('SolanaWithdrawSheet — the unknown terminal: Check status + no-re-sen
     expect(calls).toBe(2); // each error retry was one fresh, single-armed chain
     expect(has(tree, 'sol-send-nothing-sent')).toBe(true); // the nothing-was-sent guidance
     expect(has(tree, 'sol-send-fee-note')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('SolanaWithdrawSheet — the recipient-ATA affordability gate (the INERT-confirm defect)', () => {
+  // The 2026-09-28 live finding (OPEN_ISSUES): a token send to a FRESH venue-deposit address
+  // needs the sender to pay the recipient ATA's one-time rent; with rail SOL below that floor
+  // the review showed the cost but the confirm press produced no terminal state and no next
+  // action. The fix: the gate engages BEFORE the press — disabled confirm + the reason + the
+  // exact top-up address and amount. Only a KNOWN-absent recipient ATA with KNOWN-short SOL
+  // gates; a failed or in-flight read keeps the form usable (the send-time pre-check remains
+  // the honest backstop).
+  const SHORT_SOL = '1702955'; // the live trip's rail: 0.0017 SOL < the 0.00204428 floor
+
+  /** Fill the form like the stale-ok suite does, then flush the ATA existence read. */
+  async function fillAndFlush(tree: renderer.ReactTestRenderer, dest: string = SOL_DEST) {
+    await act(async () => {
+      tree.root.findByProps({testID: 'sol-send-address-input'}).props.onChangeText(dest);
+      tree.root.findByProps({testID: 'sol-send-amount-input'}).props.onChangeText('1.5');
+    });
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+  }
+  const confirmDisabled = (tree: renderer.ReactTestRenderer): boolean =>
+    tree.root.findByProps({testID: 'btn-sol-send-confirm'}).props.disabled as boolean;
+
+  test('short SOL + KNOWN-absent recipient ATA → confirm disabled with the reason and the top-up address', async () => {
+    jest.mocked(getSolAccountExists).mockResolvedValue(false);
+    const tree = await mount({token: 'EURC', mint: 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr', solBalance: SHORT_SOL, solChecking: false});
+    await fillAndFlush(tree);
+    expect(confirmDisabled(tree)).toBe(true);
+    expect(has(tree, 'sol-send-ata-gate')).toBe(true);
+    const gate = tree.root.findByProps({testID: 'sol-send-ata-gate'}).props.children as string;
+    expect(gate).toContain('EURC');
+    expect(gate).toContain('0.00204428 SOL'); // the exact rent the send would owe
+    expect(gate).toContain('0.00170295');    // the SOL actually held
+    expect(has(tree, 'btn-sol-send-topup-copy')).toBe(true); // the practical instruction: fund HERE
+    // The press never fires a send while gated.
+    await act(async () => { await tree.root.findByProps({testID: 'btn-sol-send-confirm'}).props.onPress(); });
+    expect(sendSpl).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+
+  test('the recipient ATA already exists → no gate; only the fee is owed and the send proceeds', async () => {
+    jest.mocked(getSolAccountExists).mockResolvedValue(true);
+    jest.mocked(sendSpl).mockResolvedValue('sig_ok');
+    const tree = await mount({token: 'EURC', mint: 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr', solBalance: SHORT_SOL, solChecking: false});
+    await fillAndFlush(tree);
+    expect(confirmDisabled(tree)).toBe(false);
+    expect(has(tree, 'sol-send-ata-gate')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a failed or in-flight ATA read does NOT gate (the send-time pre-check stays the backstop)', async () => {
+    jest.mocked(getSolAccountExists).mockRejectedValue(new Error('rpc down'));
+    const tree = await mount({token: 'EURC', mint: 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr', solBalance: SHORT_SOL, solChecking: false});
+    await fillAndFlush(tree);
+    expect(confirmDisabled(tree)).toBe(false);
+    expect(has(tree, 'sol-send-ata-gate')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('funded SOL → no read, no gate (healthy wallets gain zero new RPC calls)', async () => {
+    const tree = await mount({token: 'EURC', mint: 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr', solBalance: '2044280', solChecking: false});
+    await fillAndFlush(tree);
+    expect(getSolAccountExists).not.toHaveBeenCalled();
+    expect(confirmDisabled(tree)).toBe(false);
     act(() => { tree.unmount(); });
   });
 });

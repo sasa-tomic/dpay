@@ -174,13 +174,30 @@ export const depositEs: DepositMessages = {
   ata: {
     absent: asset => `Aún no hay una cuenta de ${asset} en este dispositivo.`,
     cost: (setupCost, asset) =>
-      `Crear tu cuenta de ${asset} cuesta ${setupCost}, de tu saldo de SOL. La cuenta es tuya y está bajo tus claves.`,
+      `Crear tus ${asset} cuesta ${setupCost}, de tu saldo de SOL. Las cuentas son tuyas y están bajo tus claves.`,
     checkingSol: 'Revisando tu saldo de SOL…',
     needSol: setupCost =>
       `Primero necesitas unos ${setupCost} en SOL: recíbelos en tu dirección y luego crea la cuenta.`,
     showSolAddress: 'Ver mi dirección de SOL',
     creating: asset => `Creando tu cuenta de ${asset}. Confirmando en Solana…`,
     createHint: (setupCost, asset) => `Crea tu cuenta de ${asset} por ${setupCost} de tu saldo de SOL`,
+    completeSetup: 'Completar configuración',
+    completeHint: setupCost => `Lo configura todo con un toque (unos ${setupCost})`,
+    targetsLabel: raw => {
+      const symbols = Array.isArray(raw) ? raw : [String(raw)];
+      return symbols.length === 1
+        ? `cuenta de ${symbols[0]}`
+        : `cuentas de ${symbols.slice(0, -1).join(', ')} y ${symbols[symbols.length - 1]}`;
+    },
+    fundFrom: source => `Un pequeño canje de tus ${source} por SOL lo paga.`,
+    fundConfirm: (swap, source, targets, setupCost) =>
+      `Canjea unos ${swap} de tus ${source} por SOL y crea tus ${targets} (${setupCost}).`,
+    fundShort: source => `Ni todos tus ${source} alcanzan: recibe algo de SOL en tu dirección.`,
+    confirmAction: 'Confirmar',
+    cancelAction: 'Cancelar',
+    creatingAll: targets => `Creando tus ${targets}. Confirmando en Solana…`,
+    swapFailed: 'El canje no se completó: no se creó nada y el token canjeado sigue en tu wallet. Puedes intentarlo de nuevo.',
+    swapUnknown: 'El canje fue aceptado pero aún no se confirma. Revisa tu saldo de SOL en un momento y vuelve a completar la configuración.',
   },
 
   trust: {
@@ -365,5 +382,8 @@ export const withdrawEs: WithdrawMessages = {
     recipientAtaNote: (cost, asset) =>
       `Si aún no tiene cuenta de ${asset}, se la crea (una sola vez, ≈${cost}, lo pagas tú).`,
     confirmLabel: asset => `Confirmar envío de ${asset}`,
+    ataRentGate: (cost, held, asset) =>
+      `Aún no tiene una cuenta de ${asset}: crearla cuesta unos ${cost}. Tus ${held} de SOL no alcanzan.`,
+    ataRentTopUp: cost => `Recibe unos ${cost} de SOL en tu dirección y luego envía:`,
   },
 };

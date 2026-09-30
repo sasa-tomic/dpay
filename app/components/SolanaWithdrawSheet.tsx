@@ -11,13 +11,15 @@ import {awardPaymentTested} from '../lib/readiness';
 import {detectAddressShape, routeForSolana, chainNameOfShape, isBase58NearMiss} from '../lib/destination';
 import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT, deriveSolanaAddress, isValidSolanaAddress} from '../solana/identity';
-import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
+import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS, deriveAta} from '../solana/spl';
 import {solanaTokenInfo} from '../solana/tokens';
-import {sendSol, sendSpl, preloadSolanaRpc, getSolSignatureStatus} from '../solana';
+import {sendSol, sendSpl, preloadSolanaRpc, getSolSignatureStatus, getSolAccountExists} from '../solana';
+import bs58 from 'bs58';
 import {friendlySolError, isSolTransactionFailed} from '../solana/errors';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
 import {saveTxNote} from '../services/txNotes';
 import {useEscapeToClose} from '../hooks/useHotkeys';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
 import {AddressField} from './AddressField';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
@@ -80,6 +82,9 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
   // saved only while the destination is still that address — a hand-edited destination is a
   // different payment with no claim.
   const [linkNote, setLinkNote] = useState<{who: string; msg: string; for: string} | null>(null);
+  // Copy feedback for the affordability gate's top-up address (the same affordance the
+  // deposit sheets carry).
+  const {copied, copy: doCopy} = useCopyFeedback();
   // Trip Ready J5b — paymentTested: the same stamp the IC rails award, on the same event (a send
   // that CONFIRMED). `sendSol`/`sendSpl` resolve only on a confirmed signature and throw otherwise,
   // so the catch below — the honest "we don't know" path — never reaches the award.
@@ -191,7 +196,48 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
     return {text: M.withdraw.send.routeSolana(SOL_NETWORK), tone: 'ok'};
   }, [resolved, selfAddress]);
 
-  const canReview = resolved?.ok === true && raw !== '0' && balanceKnown && !overBalance;
+  // The recipient-ATA AFFORDABILITY GATE (2026-09-30, the INERT-confirm defect): a token send
+  // to a destination with no token account yet makes the SENDER pay the one-time ATA rent
+  // (about 0.00204428 SOL — the review card already discloses it). With rail SOL below that
+  // floor the press used to strand the user: the send refused pre-broadcast and the form just
+  // stayed. Now the gate engages BEFORE the press — disabled confirm + the reason + the exact
+  // top-up address and amount — but ONLY on a KNOWN-absent recipient ATA with KNOWN-short SOL:
+  //   • the existence read runs ONLY for short-SOL SPL sends (healthy wallets gain zero RPC
+  //     calls), on the derived ATA of the resolved destination;
+  //   • 'checking' and 'unknown' (failed read) never gate — the form stays usable and the
+  //     send-time pre-check remains the honest backstop (its error phase is the pinned
+  //     behavior in flow 52);
+  //   • an EXISTING recipient account means only the fee is owed, which short SOL covers —
+  //     no gate (the venue-deposit wall from the live trip was exactly this state's absence).
+  const solShort = solBalance != null && !solChecking && BigInt(solBalance) < SOL_ATA_SETUP_MIN_LAMPORTS;
+  const ataCheckTarget: string | null =
+    isSpl && !ataAbsent && solShort && resolved?.ok === true && mint != null ? `${resolved.destination}|${mint}` : null;
+  const [recipientAtaState, setRecipientAtaState] = useState<'checking' | 'absent' | 'exists' | 'unknown'>('checking');
+  useEffect(() => {
+    if (ataCheckTarget == null) {
+      setRecipientAtaState('checking'); // not gating — the state is simply not applicable
+      return;
+    }
+    let alive = true;
+    setRecipientAtaState('checking');
+    const sep = ataCheckTarget.indexOf('|');
+    const dest = ataCheckTarget.slice(0, sep);
+    const mintKey = ataCheckTarget.slice(sep + 1);
+    (async () => {
+      try {
+        const exists = await getSolAccountExists(bs58.encode(deriveAta(dest, mintKey)));
+        if (alive) setRecipientAtaState(exists ? 'exists' : 'absent');
+      } catch {
+        if (alive) setRecipientAtaState('unknown'); // an unreadable state never gates
+      }
+    })();
+    return () => { alive = false; };
+  }, [ataCheckTarget]);
+  const ataRentBlocked = recipientAtaState === 'absent';
+  const ataRentCost = fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT);
+  const ataRentHeld = solBalance != null ? fmtAssetCompact(solBalance, SOL_DECIMALS, SOL_UNIT) : '';
+
+  const canReview = resolved?.ok === true && raw !== '0' && balanceKnown && !overBalance && !ataRentBlocked;
 
   // Surface ownership (the offline-gate half of the same live attempt): the FIRST rendered
   // review reports up, sticky for this mount. The parent's 3-strike offline gate then stops
@@ -453,6 +499,26 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
               recipient-ATA creation are paid in SOL — say so BEFORE the user types an amount, so
               a funded-token/zero-SOL wallet learns the real constraint up front (honest, no block). */}
           {isSpl && !solChecking && solBalance === '0' ? <Text testID="sol-send-needs-sol" style={S.warnNote}>{M.withdraw.sol.needsSol(unit)}</Text> : null}
+
+          {/* The affordability gate: a KNOWN-absent recipient ATA + KNOWN-short SOL refuses
+              BEFORE the press, with the reason and the practical instruction (the device's own
+              SOL address to fund, exact amount named). Disabled confirm + this block replace
+              the old inert press. */}
+          {ataRentBlocked ? (
+            <View testID="sol-send-ata-gate-wrap">
+              <Text testID="sol-send-ata-gate" style={S.warnNote}>{M.withdraw.sol.ataRentGate(ataRentCost, ataRentHeld, unit)}</Text>
+              <Text style={S.dim2}>{M.withdraw.sol.ataRentTopUp(ataRentCost)}</Text>
+              <Text testID="sol-send-topup-address" style={S.dim2}>{selfAddress}</Text>
+              <Pressable
+                testID="btn-sol-send-topup-copy"
+                style={S.linkBtn}
+                onPress={() => { void doCopy(selfAddress); }}
+                accessibilityRole="button"
+                accessibilityLabel={M.deposit.copyAddress}>
+                <Text style={S.linkText}>{copied === 'clipboard' ? M.deposit.copied : M.deposit.copyAddress}</Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           {(phase === 'form' || phase === 'error') && raw !== '0' ? (
             <View testID="sol-send-review" style={S.reviewCard}>
