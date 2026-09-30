@@ -320,7 +320,8 @@ export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balanc
 
   function friendlySettleError(msg: string): string {
     if (/not configured/.test(msg)) return M.receive.solanaOffline;
-    if (/failed to load|engine chunk/.test(msg)) return M.evm.engineLoad;
+    // Engine-chunk failures need no mapping here: `loadEvmRpcForSend` throws the CLASSIFIED final
+    // copy itself (app/transportFailure.ts `engineLoadCopy`), which passes through verbatim.
     return msg;
   }
 

@@ -75,5 +75,4 @@ export const evmDe: EvmMessages = {
   gasGateReady: 'Aufgeladen? Erneut versuchen',
   tryAgain: 'Erneut versuchen',
   wrongChain: (expected, actual) => `Der Endpunkt bedient ${actual}, aber dieses Asset liegt auf ${expected}. Nichts wurde gesendet — prüfe Einstellungen ▸ Erweitert.`,
-  engineLoad: 'Die Zahlungs-Engine wurde nicht geladen — prüfe deine Verbindung und versuche es erneut. Dein Geld ist unangetastet.',
 };

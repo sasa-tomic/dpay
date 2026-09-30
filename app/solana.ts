@@ -25,7 +25,7 @@
 //   await (send path)                          bound                                   owner
 //   ─────────────────────────────────────────  ──────────────────────────────────────  ────────────────────────────────────────
 //   module load `import('./solana/rpc')`       SOL_RPC_IMPORT_DEADLINE_MS (10s)        `loadRpcForSend` — races the import,
-//     (the lazy chunk; no signal of its own)     + sheet-mount preload (preloadSolanaRpc)  fails with the engine-load class, stays retryable
+//     (the lazy chunk; no signal of its own)     + sheet-mount preload (preloadSolanaRpc)  fails with the classified engine copy, retryable
 //   blockhash fetch / broadcast                per-attempt rpcFetch deadline (8s,      `solana/rpc.ts` rpcFetch — halving under the
 //   (`getLatestBlockhash`, `sendTransaction`)    halving per candidate, 1s floor)        candidate walk; caller signal composed in
 //   pre-check reads (ATA existence, balance,   per-attempt rpcFetch deadline + the     `solana/rpc.ts` rpcFetch over the READ candidate
@@ -44,7 +44,7 @@
 
 import bs58 from 'bs58';
 import {solanaRpcUrl, solanaRpcUrls, solanaBroadcastRpcUrls, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS, SOL_RPC_IMPORT_DEADLINE_MS} from './config/constants';
-import {classifyTransportFailure} from './transportFailure';
+import {classifyTransportFailure, engineLoadCopy} from './transportFailure';
 import {solanaTokenAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
 import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
@@ -115,7 +115,7 @@ export type {SolanaSignatureStatus} from './solana/rpc';
 // So the money path now: (1) PRELOADS the module when the send sheet mounts (minutes before any
 // click — the normal click-time import is already resolved); (2) races the click-time import
 // against a bound (`SOL_RPC_IMPORT_DEADLINE_MS`) and fails with classified, actionable copy
-// (`M.sol.engineLoad`) instead of hanging; (3) TRACES each step to console.warn — the on-device
+// (`M.errors.engine.*`) instead of hanging; (3) TRACES each step to console.warn — the on-device
 // log mirror (services/log.ts installLogSink) captures warn, so the last traced line names the
 // exact hung step on any future live attempt. The prefix matches `logMoney`'s so the file reads
 // as one story; the services layer itself is NOT imported from here (it pulls the native module,
@@ -145,11 +145,13 @@ export function preloadSolanaRpc(): void {
 }
 
 /** The bounded module load for every MONEY path that awaits the network module. Races the import
- *  against `SOL_RPC_IMPORT_DEADLINE_MS`; on expiry throws the engine-load class (friendlySolError
- *  → `M.sol.engineLoad`: check your connection, reopen, retry) instead of hanging the send for
- *  the caller's whole deadline on a stalled chunk. The underlying import keeps loading and its
- *  eventual resolution warms the module map — the RETRY then succeeds without re-fetching. The
- *  loader is injectable for tests. */
+ *  against `SOL_RPC_IMPORT_DEADLINE_MS`; on expiry throws the CLASSIFIED engine copy
+ *  (`engineLoadCopy` in `app/transportFailure.ts` → `M.errors.engine.*`) instead of hanging the
+ *  send for the caller's whole deadline on a stalled chunk — and never the old flat "check your
+ *  connection" to a phone whose connection is fine (work order 2026-09-30). A fast import
+ *  failure (a broken/stale chunk on the origin) is the same user fact and classifies the same
+ *  way. The underlying import keeps loading and its eventual resolution warms the module map —
+ *  the RETRY then succeeds without re-fetching. The loader is injectable for tests. */
 export async function loadRpcForSend(
   deadlineMs: number = SOL_RPC_IMPORT_DEADLINE_MS,
   load: () => Promise<typeof import('./solana/rpc')> = () => import('./solana/rpc'),
@@ -159,11 +161,19 @@ export async function loadRpcForSend(
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       rpcPreloadStarted = false; // a timed-out load must be retryable
-      reject(new Error(`solana rpc module failed to load within ${deadlineMs}ms (the payment engine chunk never arrived — check the connection to the relay and retry)`));
+      reject(new Error(`solana rpc module failed to load within ${deadlineMs}ms (the engine chunk never arrived)`));
     }, deadlineMs);
   });
   try {
     return await Promise.race([load(), deadline]);
+  } catch (e) {
+    const raw = e instanceof Error ? e.message : String(e);
+    const copy = await engineLoadCopy(raw);
+    if (copy != null) {
+      console.warn(`money: sol send loadRpcForSend — the engine chunk never arrived: ${raw}`);
+      throw new Error(copy);
+    }
+    throw e;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }

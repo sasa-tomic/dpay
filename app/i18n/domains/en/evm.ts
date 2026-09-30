@@ -96,7 +96,6 @@ export type EvmMessages = {
   tryAgain: string;
   /** The wrong-chain guard's copy (D10/D12) — names both chains. */
   wrongChain: (expected: string, actual: string) => string;
-  engineLoad: string;
 };
 
 export const evmEn: EvmMessages = {
@@ -170,5 +169,4 @@ export const evmEn: EvmMessages = {
   gasGateReady: 'Funded? Try again',
   tryAgain: 'Try again',
   wrongChain: (expected, actual) => `The endpoint serves ${actual}, but this asset lives on ${expected}. Nothing was sent — check Settings ▸ Advanced.`,
-  engineLoad: 'The payment engine didn’t load — check your connection and try again. Your money is untouched.',
 };

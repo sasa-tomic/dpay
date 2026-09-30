@@ -705,13 +705,20 @@ describe('solana seam — the send path\u2019s module load is bounded and traced
     jest.useRealTimers();
   });
 
-  test('loadRpcForSend rejects with the engine-load class when the chunk never arrives', async () => {
+  test('loadRpcForSend rejects with the CLASSIFIED engine copy when the chunk never arrives', async () => {
     jest.useFakeTimers();
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'};
     const {loadRpcForSend} = require('../solana') as {loadRpcForSend: (d: number, load?: () => Promise<unknown>) => Promise<unknown>};
+    const {M} = require('../i18n') as typeof import('../i18n');
+    // Online phone, stalled chunk: the rejection NAMES dpay's engine (the old copy blamed the
+    // connection). The override short-circuits the oracle, so the classification is hermetic
+    // under fake timers.
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'online';
     const p = loadRpcForSend(50, () => new Promise(() => { /* the chunk fetch hangs — the live shape */ }));
-    const settled = expect(p).rejects.toThrow(/rpc module failed to load/);
+    const settled = expect(p).rejects.toThrow(M.errors.engine.unreachable);
     await jest.advanceTimersByTimeAsync(51);
     await settled;
+    delete g.__DPAY_TEST_SOLANA_CONNECTIVITY;
   });
 
   test('the bound is a RACE, not a cap — a loader that answers in time is honored', async () => {
@@ -723,11 +730,13 @@ describe('solana seam — the send path\u2019s module load is bounded and traced
     await expect(p).resolves.toBe(marker);
   });
 
-  test('friendlySolError maps the engine-load class to the actionable reopen instruction', () => {
+  test('friendlySolError keeps the timeout class distinct and no longer re-maps engine loads', () => {
     const {friendlySolError} = require('../solana/errors') as {friendlySolError: (m: string) => string};
-    const {M} = require('../i18n') as {M: {sol: {engineLoad: string; timedOut: string}}};
-    expect(friendlySolError('solana rpc module failed to load within 10000ms (the payment engine chunk never arrived)')).toBe(M.sol.engineLoad);
-    // ...and the mapping does NOT swallow the timeout class into it (distinct copies).
+    const {M} = require('../i18n') as typeof import('../i18n');
+    // Engine-chunk failures are classified AT THE LOADER (app/transportFailure.ts engineLoadCopy
+    // throws the final copy), so the mapper has no engine branch anymore: the timeout class maps,
+    // and unknown raw classes fall through VERBATIM — engine copies included (they ARE final
+    // copy now).
     expect(friendlySolError('sol send aborted (deadline)')).toBe(M.sol.timedOut);
   });
 
