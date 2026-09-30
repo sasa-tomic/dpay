@@ -52,6 +52,9 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       expect(occurrences(icConfirm, COST)).toBe(1);
       expect(icConfirm).toContain('USDC');
       expect(d.ata.swapPending(two)).toContain('EURC');
+      // The house style: plain hyphens in the setup copy, never em-dashes.
+      const surfaces = [short, icConfirm, d.ata.needSol(COST), d.ata.creatingAll(two), d.ata.creating('EURC'), d.ata.swapFailed];
+      expect(surfaces.join('\n')).not.toContain('—');
     });
   }
 });

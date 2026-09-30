@@ -79,6 +79,15 @@ export type AtaSetupPlan =
   | {kind: 'fund-ic'; mints: string[]; costLamports: string; targetLamports: string; candidates: AtaIcFundSource[]}
   | {kind: 'refuse'};
 
+/** The proven-unfundable flip: the fund-ic sizing or the swap's own floor check answered that
+ *  no IC candidate can reach the target. The banner trades the doomed retry button for the
+ *  refuse panel - the honest dead end that carries the SOL receive address with its copy
+ *  affordance. Only fund-ic flips: a fund plan's SPL source stays retryable (top up the same
+ *  asset), and create/none/refuse have no swap to give up on. */
+export function ataPlanAfterFundShort<P extends AtaSetupPlan>(plan: P): P | {kind: 'refuse'} {
+  return plan.kind === 'fund-ic' ? {kind: 'refuse'} : plan;
+}
+
 /** The swap's own fee buffer: the funding transaction's signature fee plus one signature of
  *  margin, so the wallet lands ABOVE the setup floor, never exactly on it. The create fees
  *  themselves are already inside `costLamports` (per-mint rent + fee). */

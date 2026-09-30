@@ -176,9 +176,9 @@ export const depositDe: DepositMessages = {
       `Das Erstellen deiner ${asset} kostet ${setupCost}, aus deinem SOL-Guthaben. Sie bleiben deins, unter deinen Schlüsseln.`,
     checkingSol: 'Dein SOL-Guthaben wird geprüft…',
     needSol: setupCost =>
-      `Du brauchst zuerst etwa ${setupCost} in SOL — empfange es an deiner Adresse und erstelle dann das Konto.`,
+      `Du brauchst zuerst etwa ${setupCost} in SOL - empfange es an deiner Adresse und erstelle dann das Konto.`,
     showSolAddress: 'Meine SOL-Adresse zeigen',
-    creating: asset => `Dein ${asset}-Konto wird erstellt — Bestätigung auf Solana…`,
+    creating: asset => `Dein ${asset}-Konto wird erstellt - Bestätigung auf Solana…`,
     createHint: (setupCost, asset) => `Erstellt dein ${asset}-Konto für ${setupCost} aus deinem SOL-Guthaben`,
     completeSetup: 'Einrichtung abschließen',
     completeHint: setupCost => `Richtet alles mit einem Tipp ein (etwa ${setupCost})`,
@@ -195,12 +195,12 @@ export const depositDe: DepositMessages = {
       `Tauscht etwa ${swap} deiner ${source} in SOL und erstellt deine ${targets} (${setupCost}).`,
     fundIcConfirm: (swap, source, targets, setupCost) =>
       `Tauscht etwa ${swap} deiner ${source} in SOL und erstellt deine ${targets} (${setupCost}). Der Anbieter kann ein bis zwei Minuten brauchen; überschüssiges SOL bleibt in deiner Wallet.`,
-    fundShort: source => `Nicht mal deine ganzen ${source} reichen — empfange etwas SOL an deiner Adresse.`,
+    fundShort: source => `Nicht mal deine ganzen ${source} reichen - empfange etwas SOL an deiner Adresse.`,
     confirmAction: 'Bestätigen',
     cancelAction: 'Abbrechen',
-    creatingAll: targets => `Deine ${targets} werden erstellt — Bestätigung auf Solana…`,
+    creatingAll: targets => `Deine ${targets} werden erstellt - Bestätigung auf Solana…`,
     swapPending: targets => `Tausch in SOL läuft. Deine ${targets} werden erstellt, sobald er ankommt.`,
-    swapFailed: 'Der Tausch ist nicht durchgegangen — nichts wurde erstellt, der getauschte Token ist noch in deiner Wallet. Du kannst es erneut versuchen.',
+    swapFailed: 'Der Tausch ist nicht durchgegangen - nichts wurde erstellt, der getauschte Token ist noch in deiner Wallet. Du kannst es erneut versuchen.',
     swapUnknown: 'Der Tausch wurde angenommen, aber noch nicht bestätigt. Prüfe gleich dein SOL-Guthaben und schließe die Einrichtung dann erneut ab.',
   },
 
@@ -389,7 +389,7 @@ export const withdrawDe: WithdrawMessages = {
       `Falls die Person noch kein ${asset}-Konto hat, wird es hiermit für sie erstellt (einmalig ≈${cost}, von dir bezahlt).`,
     confirmLabel: asset => `Senden von ${asset} bestätigen`,
     ataRentGate: (cost, held, asset) =>
-      `Noch kein ${asset}-Konto des Empfängers — das Erstellen kostet etwa ${cost}. Deine ${held} SOL reichen nicht.`,
+      `Noch kein ${asset}-Konto des Empfängers - das Erstellen kostet etwa ${cost}. Deine ${held} SOL reichen nicht.`,
     ataRentTopUp: cost => `Empfange etwa ${cost} SOL an deiner Adresse und sende dann:`,
   },
 };

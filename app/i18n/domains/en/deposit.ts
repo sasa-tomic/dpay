@@ -543,9 +543,9 @@ export const depositEn: DepositMessages = {
       `Creating your ${asset} costs ${setupCost}, from your SOL balance. It stays yours, on your keys.`,
     checkingSol: 'Checking your SOL balance…',
     needSol: setupCost =>
-      `You need about ${setupCost} in SOL first — receive it at your address, then create the account.`,
+      `You need about ${setupCost} in SOL first - receive it at your address, then create the account.`,
     showSolAddress: 'Show my SOL address',
-    creating: asset => `Creating your ${asset} account — confirming on Solana…`,
+    creating: asset => `Creating your ${asset} account - confirming on Solana…`,
     createHint: (setupCost, asset) => `Create your ${asset} account for ${setupCost} from your SOL balance`,
     completeSetup: 'Complete setup',
     completeHint: setupCost => `Sets up everything in one tap (about ${setupCost})`,
@@ -562,12 +562,12 @@ export const depositEn: DepositMessages = {
       `Swaps about ${swap} of your ${source} into SOL and creates your ${targets} (${setupCost}).`,
     fundIcConfirm: (swap, source, targets, setupCost) =>
       `Swaps about ${swap} of your ${source} into SOL and creates your ${targets} (${setupCost}). The venue can take a minute or two; surplus SOL stays spendable in your wallet.`,
-    fundShort: source => `Even all your ${source} doesn't cover it — receive a little SOL at your address instead.`,
+    fundShort: source => `Even all your ${source} doesn't cover it - receive a little SOL at your address instead.`,
     confirmAction: 'Confirm',
     cancelAction: 'Cancel',
-    creatingAll: targets => `Creating your ${targets} — confirming on Solana…`,
+    creatingAll: targets => `Creating your ${targets} - confirming on Solana…`,
     swapPending: targets => `Swapping into SOL. Your ${targets} are created as soon as it lands.`,
-    swapFailed: 'The swap did not go through — nothing was created and the swapped token is still in your wallet. You can try again.',
+    swapFailed: 'The swap did not go through - nothing was created and the swapped token is still in your wallet. You can try again.',
     swapUnknown: 'The swap was accepted but not confirmed yet. Check your SOL balance in a moment, then complete the setup again.',
   },
 
@@ -929,7 +929,7 @@ export const withdrawEn: WithdrawMessages = {
       `If they have no ${asset} account yet, this creates it for them (one-time ≈${cost} paid by you).`,
     confirmLabel: asset => `Confirm ${asset} send`,
     ataRentGate: (cost, held, asset) =>
-      `They have no ${asset} account yet — creating it costs about ${cost}. Your ${held} of SOL can't cover it.`,
+      `They have no ${asset} account yet - creating it costs about ${cost}. Your ${held} of SOL can't cover it.`,
     ataRentTopUp: cost => `Receive about ${cost} of SOL at your address, then send:`,
   },
 };

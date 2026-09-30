@@ -18,7 +18,7 @@
 import {describe, test, expect} from '@jest/globals';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS} from '../solana/tokens';
-import {planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
+import {planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
 
 const EURC = EURC_MINT_ADDRESS;
 const USDC = USDC_MINT_ADDRESS;
@@ -361,5 +361,26 @@ describe('sizeAtaFundPlan — the injected-quote sizing walk', () => {
     expect(BigInt(sized.outFloor) + BigInt(shortSol)).toBeGreaterThanOrEqual(target);
     // …and the sized input is tiny (it only covers the shortfall + buffer).
     expect(BigInt(sized.inAmount)).toBeLessThan(1_000_000n);
+  });
+});
+
+describe('ataPlanAfterFundShort - the proven-unfundable flip to the refuse panel', () => {
+  // The live run proved no IC candidate can reach the target (sizing null, or the run-time
+  // floor check). The banner must trade the doomed retry button for the refuse panel — the
+  // honest dead end that carries the SOL receive address with its copy affordance.
+  test('a fund-ic plan flips to refuse', () => {
+    const plan = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [icSource()]});
+    if (plan.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
+    expect(ataPlanAfterFundShort(plan)).toEqual({kind: 'refuse'});
+  });
+
+  test('create, fund, none and refuse pass through unchanged (only fund-ic flips)', () => {
+    const create = planAtaSetup({targets: [absent()], solBalance: SOL_ATA_SETUP_MIN_LAMPORTS.toString(), sources: [], icSources: [icSource()]});
+    expect(ataPlanAfterFundShort(create)).toEqual(create);
+    const fund = planAtaSetup({targets: [absent()], solBalance: '0', sources: [funded()], icSources: [icSource()]});
+    if (fund.kind !== 'fund') throw new Error('fixture: expected fund');
+    expect(ataPlanAfterFundShort(fund)).toEqual(fund);
+    expect(ataPlanAfterFundShort({kind: 'none'})).toEqual({kind: 'none'});
+    expect(ataPlanAfterFundShort({kind: 'refuse'})).toEqual({kind: 'refuse'});
   });
 });

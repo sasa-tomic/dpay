@@ -19,7 +19,7 @@ import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILIT
 import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
 import {setRuntimePoolNames, registeredVenues, venueOfId, type VenueEntry} from '../config/venues';
-import {planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
+import {ataPlanAfterFundShort, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
 import {fetchJupiterQuote} from '../services/jupiter';
 import {prepareSolanaConvertRecord, executeSolanaConvert} from '../convert/executeSolana';
 import {CONVERT_SLIPPAGE_BPS_DEFAULT, CONVERT_CEFI_CONFIRM_TIMEOUT_MS, resolveConvertDestinations, type ComposedConvertRoute} from '../config/convert';
@@ -777,6 +777,11 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   const [ataSetupConfirm, setAtaSetupConfirm] = useState<SizedAtaFund | null>(null);
   const [ataIcConfirm, setAtaIcConfirm] = useState<SizedAtaIcFund | null>(null);
   const [ataSwapPending, setAtaSwapPending] = useState(false);
+  // Set once the fund-ic route is PROVEN unfundable (sizing found no qualifying candidate, or
+  // the swap's floor check refused): the banner flips to the refuse panel instead of keeping a
+  // button that can only fail again. Cleared whenever the plan's inputs change (any balance
+  // refresh re-plans honestly).
+  const [icFundShort, setIcFundShort] = useState(false);
   const ataSwapRecord = useRef<{id: string; mints: string[]} | null>(null);
   const ataSetupModel = useMemo(() => {
     const solAssets = assets.filter((a): a is Extract<typeof a, {mint: string | null}> => a.protocol === 'solana' && a.mint != null);
@@ -946,7 +951,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     const fresh = await fetchComposedQuotes(relayUrl, route.route, sized.inAmount, route.route.endpoints[0]!.fee, CONVERT_SLIPPAGE_BPS_DEFAULT);
     const solNow = /^\d+$/.test(solState.balance ?? '') ? BigInt(solState.balance!) : 0n;
     if (BigInt(fresh.cefi.amountOutGross) + solNow < BigInt(plan.targetLamports)) {
-      throw new Error(M.deposit.ata.fundShort(sized.source.symbol));
+      // Tagged: the catch flips the banner to the refuse panel (the remedy is receiving SOL,
+      // not retrying the same doomed swap).
+      throw Object.assign(new Error(M.deposit.ata.fundShort(sized.source.symbol)), {ataFundShort: true});
     }
     return prepareComposedConvertRecord({
       id: randNonceHex(),
@@ -1022,8 +1029,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         const sized = await sizeAtaIcFundPlan({plan, solKnown: solState.balance, quote: quoteAtaIcFund});
         if (sized == null) {
           // Nothing qualified: no candidate's balance can reach the venue minimum and the
-          // target. The honest fall-through - the same dead end the plan would have named.
-          setAtaSetupErr(M.deposit.ata.fundShort(plan.candidates[0]?.symbol ?? ''));
+          // target. The banner flips to the refuse panel - the dead end with the SOL receive
+          // affordance, not a button that can only fail again.
+          setIcFundShort(true);
           return;
         }
         setAtaIcConfirm(sized);
@@ -1060,7 +1068,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       console.warn('runAtaIcSetup failed:', msg);
       setAtaSwapPending(false);
       ataSwapRecord.current = null;
-      setAtaSetupErr(msg.length > 0 ? msg : M.deposit.ata.swapFailed);
+      if ((e as {ataFundShort?: boolean} | null)?.ataFundShort === true) {
+        setIcFundShort(true);
+        setAtaSetupErr(null);
+      } else {
+        setAtaSetupErr(msg.length > 0 ? msg : M.deposit.ata.swapFailed);
+      }
     } finally {
       setAtaSetupBusy(false);
     }
@@ -1126,7 +1139,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         : null;
     return {
       targets: ataSetupModel.targets,
-      kind: plan.kind === 'none' ? 'create' as const : plan.kind,
+      kind: plan.kind === 'none' ? 'create' as const
+        : icFundShort ? ataPlanAfterFundShort(plan).kind
+        : plan.kind,
       costLine: ataSetupModel.costLine,
       fundFromLine: ataSetupModel.fundFromLine,
       confirming: ataSetupConfirm != null || ataIcConfirm != null,
@@ -1136,7 +1151,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       solAddress: solAddress,
       err: ataSetupErr,
     };
-  }, [ataSetupModel, ataSetupConfirm, ataIcConfirm, ataSetupBusy, ataSwapPending, ataSetupErr, solAddress]);
+  }, [ataSetupModel, ataSetupConfirm, ataIcConfirm, ataSetupBusy, ataSwapPending, ataSetupErr, solAddress, icFundShort]);
+  // Any re-plan (a balance or token refresh moved the inputs) re-answers honestly: the flip
+  // is only ever as old as the evidence behind it.
+  useEffect(() => { setIcFundShort(false); }, [ataSetupModel]);
   // Refresh the SELECTED token's account state (naming its mint when known; else repoll all).
   const refreshSelectedToken = useCallback(() => {
     if (activeSolAsset?.mint != null) refreshToken(activeSolAsset.mint);

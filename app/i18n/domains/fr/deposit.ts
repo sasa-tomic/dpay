@@ -178,9 +178,9 @@ export const depositFr: DepositMessages = {
       `La création de vos ${asset} coûte ${setupCost}, sur votre solde SOL. Ils restent les vôtres, sous vos clés.`,
     checkingSol: 'Vérification de votre solde SOL…',
     needSol: setupCost =>
-      `Il vous faut d’abord environ ${setupCost} en SOL — recevez-en à votre adresse, puis créez le compte.`,
+      `Il vous faut d’abord environ ${setupCost} en SOL - recevez-en à votre adresse, puis créez le compte.`,
     showSolAddress: 'Voir mon adresse SOL',
-    creating: asset => `Création de votre compte ${asset} — confirmation sur Solana…`,
+    creating: asset => `Création de votre compte ${asset} - confirmation sur Solana…`,
     createHint: (setupCost, asset) => `Crée votre compte ${asset} pour ${setupCost} sur votre solde SOL`,
     completeSetup: 'Terminer la configuration',
     completeHint: setupCost => `Tout configure en un geste (environ ${setupCost})`,
@@ -197,12 +197,12 @@ export const depositFr: DepositMessages = {
       `Échange environ ${swap} de vos ${source} contre du SOL et crée vos ${targets} (${setupCost}).`,
     fundIcConfirm: (swap, source, targets, setupCost) =>
       `Échange environ ${swap} de vos ${source} contre du SOL et crée vos ${targets} (${setupCost}). Le service peut prendre une à deux minutes ; le SOL en surplus reste utilisable dans votre wallet.`,
-    fundShort: source => `Même tous vos ${source} ne suffisent pas — recevez un peu de SOL à votre adresse.`,
+    fundShort: source => `Même tous vos ${source} ne suffisent pas - recevez un peu de SOL à votre adresse.`,
     confirmAction: 'Confirmer',
     cancelAction: 'Annuler',
-    creatingAll: targets => `Création de vos ${targets} — confirmation sur Solana…`,
+    creatingAll: targets => `Création de vos ${targets} - confirmation sur Solana…`,
     swapPending: targets => `Échange vers SOL en cours. Vos ${targets} seront créés dès son arrivée.`,
-    swapFailed: 'L’échange n’a pas abouti — rien n’a été créé et le token échangé est toujours dans votre wallet. Vous pouvez réessayer.',
+    swapFailed: 'L’échange n’a pas abouti - rien n’a été créé et le token échangé est toujours dans votre wallet. Vous pouvez réessayer.',
     swapUnknown: 'L’échange a été accepté mais n’est pas encore confirmé. Vérifiez votre solde SOL dans un instant, puis terminez la configuration à nouveau.',
   },
 
@@ -390,7 +390,7 @@ export const withdrawFr: WithdrawMessages = {
       `Si le destinataire n’a pas encore de compte ${asset}, cet envoi le crée pour lui (≈${cost} une seule fois, à votre charge).`,
     confirmLabel: asset => `Confirmer l’envoi de ${asset}`,
     ataRentGate: (cost, held, asset) =>
-      `Le destinataire n’a pas encore de compte ${asset} — sa création coûte environ ${cost}. Vos ${held} de SOL ne suffisent pas.`,
+      `Le destinataire n’a pas encore de compte ${asset} - sa création coûte environ ${cost}. Vos ${held} de SOL ne suffisent pas.`,
     ataRentTopUp: cost => `Recevez environ ${cost} de SOL à votre adresse, puis envoyez :`,
   },
 };

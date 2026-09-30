@@ -849,8 +849,10 @@ function buildStyles(p: Palette) {
   pickCheck: {marginLeft: 8},
   // pickTextCol - the name+subtitle column right of the AssetGlyph chip, shared by BOTH
   // CurrencyRow variants. Takes flex:1 so the trailing check pushes to the row's right edge; the
-  // 10px marginLeft is the chip-to-text gap in both variants.
-  pickTextCol: {flex: 1, marginLeft: 10},
+  // 10px marginLeft is the chip-to-text gap in both variants. alignSelf stretch gives the column
+  // a DEFINITE width: the centered row's shrink-to-fit sizing ignored the flex-basis-0 name Text
+  // and starved it to the sub-line's width ("Schweizer" broke mid-word, 2026-10-01 emulator pass).
+  pickTextCol: {flex: 1, marginLeft: 10, alignSelf: 'stretch'},
   // pickSubtitle - the chain-label line below the name in a plain-variant row.
   pickSubtitle: {fontSize: 12, color: p.sub2, marginTop: 3, fontFamily: FONT.sans},
   // Pay-scan NFC status row - a large colored NFC mark + a short label, leading the scanner. Green
