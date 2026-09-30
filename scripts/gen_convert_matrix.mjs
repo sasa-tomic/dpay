@@ -26,6 +26,7 @@ import {SOLANA_TOKENS, WRAPPED_SOL_MINT_ADDRESS} from '../app/solana/tokens.ts';
 // the app's bundled twin). This module is dependency-free PURE by contract, so the generator
 // can import it: the doc stays a VIEW over the app's own registries.
 import {EVM_NATIVE_VENUES, ETH_NATIVE_RAIL_ID} from '../app/config/evmConvert.ts';
+import {EVM_AMM_VENUES, evmAmmRailId, evmNativeRailId, EVM_AMM_CHAINS} from '../app/config/evmAmm.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TRUTH = JSON.parse(readFileSync(join(ROOT, 'dfx/catalog_truth.json'), 'utf8'));
@@ -164,6 +165,122 @@ export function generateConvertMatrix() {
     ];
     return `| ${cells.join(' | ')} |`;
   });
+  // ── The DERIVED PAIR COVERAGE (2026-09-28, the any-pair mandate): the (source, destination)
+  // candidate set from the catalog crossed with the per-venue capability walk. A pair with no
+  // executable route stays VISIBLE and refuses with its reason — no silent hiding.
+  const ic = [
+    ['ICP', TRUTH.principals.icp_ledger],
+    ['VCHF', TRUTH.principals.vchf_ledger],
+    ['ckUSDC', TRUTH.principals.ckusdc_ledger],
+    ['ckBTC', TRUTH.principals.ckbtc_ledger],
+    ['ckETH', TRUTH.principals.cketh_ledger],
+  ];
+  const sol = Object.entries(SOLANA_TOKENS)
+    .filter(([, info]) => info.mint != null)
+    .map(([sym, info]) => [sym, info.mint]);
+  const zchfOf = (id) => {
+    const v = EVM_AMM_VENUES.find((x) => x.venue_id === id);
+    return v != null ? v.pair_ledgers[0] : null;
+  };
+  const evm = [
+    ['ZCHF·Ethereum', zchfOf('uniswapv3-eth')],
+    ['ETH (native)', evmNativeRailId(1)],
+    ['ZCHF·Arbitrum', zchfOf('uniswapv3-arb')],
+    ['ETH (native)', evmNativeRailId(42161)],
+  ];
+  const rails = [
+    ...ic.map(([sym, id]) => ({sym, id, rail: 'ic'})),
+    ...sol.map(([sym, id]) => ({sym, id, rail: 'sol'})),
+    ...evm.map(([sym, id], i) => ({sym: sym + (sym.startsWith('ETH') ? (i >= 2 ? '·Arb' : '') : ''), id, rail: id.startsWith('evm:native') ? 'evm-native' : 'evm-token'})),
+  ];
+  const venuePairs = [...TRUTH.venues, ...EVM_NATIVE_VENUES, ...EVM_AMM_VENUES]
+    .filter((v) => !v.testnet)
+    .map((v) => ({kind: v.kind, pair: new Set(v.pair_ledgers), id: v.venue_id, endpoint: v.endpoint}));
+  const icPools = venuePairs.filter((v) => v.kind === 'ic_amm');
+  const cefiRows = venuePairs.filter((v) => v.kind === 'cefi');
+  const evmRows = venuePairs.filter((v) => v.kind === 'evm_amm');
+  const directIc = (a, b) => icPools.find((v) => v.pair.has(a) && v.pair.has(b)) ?? null;
+  const cefiPair = (a, b) => cefiRows.find((v) => v.pair.has(a) && v.pair.has(b)) ?? null;
+  const icHubs = (a, b) => {
+    const mids = new Set();
+    for (const p1 of icPools) {
+      if (!p1.pair.has(a)) continue;
+      for (const mid of p1.pair) {
+        if (mid === a) continue;
+        if (icPools.some((p2) => p2 !== p1 && p2.pair.has(mid) && p2.pair.has(b))) mids.add(mid);
+      }
+    }
+    return [...mids];
+  };
+  const icReach = (a, b) => directIc(a, b) != null || icHubs(a, b).length > 0;
+  const classify = (a, b) => {
+    const d = directIc(a.id, b.id);
+    if (d != null) return `direct pool (\`${d.id}\`)`;
+    const c = cefiPair(a.id, b.id);
+    if (c != null) return `cefi order (\`${c.id}\`)`;
+    const e = evmRows.find((v) => v.pair.has(a.id) && v.pair.has(b.id));
+    if (e != null) return `Uniswap V3 (\`${e.id}\`)`;
+    const hubs = icHubs(a.id, b.id);
+    if (hubs.length > 0) return `hub 2-hop via ${hubs.map((mid) => symOf(mid)).join(', ')}`;
+    if (a.rail === 'ic' && b.rail === 'sol') {
+      // composed: IC legs (direct or hub) into a ledger a cefi venue buys, paying this mint.
+      for (const v of cefiRows) {
+        const mids = [...v.pair].filter((x) => ic.some(([, id]) => id === x));
+        for (const mid of mids) {
+          if (icReach(a.id, mid)) return `composed: IC legs → ${symOf(mid)} → cefi (\`${v.id}\`)`;
+        }
+      }
+      // CCTP Route B: an IC leg into THE canonical ckUSDC row, then Circle's burn.
+      if (b.id === SOLANA_TOKENS.USDC.mint && icReach(a.id, TRUTH.principals.ckusdc_ledger)) {
+        return 'composed: IC legs → ckUSDC → CCTP burn (Circle, infrastructure)';
+      }
+    }
+    if (a.rail === 'sol' && b.rail === 'ic') {
+      for (const v of cefiRows) {
+        const mids = [...v.pair].filter((x) => ic.some(([, id]) => id === x));
+        for (const mid of mids) {
+          if (v.pair.has(a.id) && icReach(mid, b.id)) return `chain: cefi (\`${v.id}\`) → ${symOf(mid)} → IC legs`;
+        }
+      }
+    }
+    if (a.rail === 'ic' && b.rail === 'evm-native') {
+      for (const v of cefiRows) {
+        if (v.pair.has(a.id) && v.pair.has('evm:native-eth')) return `cefi order (\`${v.id}\`)`;
+      }
+    }
+    if (a.rail === 'evm-token' && b.rail === 'evm-native') {
+      const chain = EVM_AMM_CHAINS[Number(a.id.split(':')[1])];
+      if (chain != null && b.id === evmNativeRailId(chain.id)) return `Uniswap V3 (via WETH, chain ${chain.id})`;
+    }
+    return null;
+  };
+  const idOf = {};
+  for (const r of rails) idOf[r.id] = r.sym;
+  const symOf = (id) => idOf[id] ?? id;
+  const hOf = (id) => id;
+  const hubSym = (id) => symOf(id);
+  const coverage = [];
+  for (const a of rails) {
+    for (const b of rails) {
+      if (a.id === b.id) continue;
+      const route = classify(a, b);
+      coverage.push(`| ${a.sym} → ${b.sym} | ${route ?? 'refused — no venue (honest unavailability)'} |`);
+    }
+  }
+  const reach = coverage.filter((l) => !l.includes('refused')).length;
+  const coverageHeader = [
+    '',
+    '## Pair coverage (derived)',
+    '',
+    `Every ordered pair across the mainnet rails (${rails.length} rails), DERIVED from the`,
+    'catalog × the per-venue capability walk — never a hand list. A pair with no executable',
+    'route stays VISIBLE and refuses with its reason (honest unavailability, 2026-09-28):',
+    `${reach} of ${coverage.length} ordered pairs are routable today.`,
+    '',
+    '| from → to | route |',
+    '|---|---|',
+  ];
+  const coverageRows = [...coverageHeader, ...coverage, ''];
   const byKind = {};
   for (const v of all) byKind[v.kind] = (byKind[v.kind] ?? 0) + 1;
   const summary = [
@@ -173,7 +290,7 @@ export function generateConvertMatrix() {
     'markup/commission is zero, and dpay is never a party to a conversion.',
     '',
   ];
-  return [...header, ...rows, ...summary].join('\n');
+  return [...header, ...rows, ...summary, ...coverageRows].join('\n');
 }
 
 function main() {
