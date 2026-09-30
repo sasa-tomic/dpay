@@ -55,6 +55,7 @@ export const convertEs: ConvertMessages = {
   smallerAmount: 'Convierte un importe menor',
   noPathTitle: inSym => `Sin ruta desde ${inSym}`,
   noPathBody: pairs => `Rutas hoy: ${pairs}`,
+  noVenueBody: (inSym, outSym) => `Todavía no hay un sitio que convierta ${inSym} a ${outSym}. El par sigue listado aquí; los nuevos sitios aparecen cuando se agregan.`,
   noPathAction: 'Añadir dinero',
   externalSignTitle: 'Un paso necesita tu propia billetera Ethereum',
   externalSignBody: 'Firmas el cruce en tu propia billetera; dpay nunca tiene sus claves. Todo lo demás queda en esta hoja.',
@@ -144,6 +145,15 @@ export const convertEs: ConvertMessages = {
   stuckAcknowledge: 'Entendido — dejar de vigilar',
   stuckAcknowledged: 'Vigilancia detenida — los fondos que se muevan más tarde seguirán llegando a la dirección de esta billetera.',
 
+  evm: {
+    heading: (inSym, outSym, chain) => `Convertir ${inSym} a ${outSym} (${chain})`,
+    feeLabel: unit => `Tarifa de red (${unit}, estimación)`,
+    pendingBody: 'El intercambio está confirmado en la cadena. Espere a que su saldo lo muestre.',
+    failedBody: (inSym, detail) => String(detail).includes('approve landed')
+      ? `El intercambio falló tras la aprobación. Su ${inSym} sigue en su cartera; la aprobación sin usar cubre solo el monto exacto del intercambio.`
+      : `No se envió nada. Su ${inSym} sigue en su cartera.`,
+    stuckBody: outSym => `El intercambio puede haber llegado o no. Su saldo de ${outSym} se resolverá solo; no inicie un segundo intercambio.`,
+  },
   multihop: {
     destLabel: 'Destino',
     destDirect: sym => `${sym} — en esta billetera`,

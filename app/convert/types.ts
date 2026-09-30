@@ -29,6 +29,44 @@ export type ConvertStep =
   // leg is OFFERED for the user to confirm on a fresh quote (Route C only).
   | 'awaiting_external' | 'crossing' | 'sol_ready';
 
+/** The EVM widening (2026-09-28, the any-pair mandate): the FROZEN facts of a Uniswap V3
+ *  swap the device signs on the EVM rail (an `evm_amm` venue row — config/evmAmm.ts). The
+ *  executor re-derives the tx sequence from THESE facts alone at drive time (nonces move, so
+ *  EVM legs are signed at execution, never frozen — the Solana leg's mirror exception), and
+ *  the record's own rail ids (`evm:<chainId>:<address>`, `evm:native-eth:<chainId>`) make a
+ *  cross-chain execution structurally impossible. dpay never custodies: the device key signs,
+ *  gas is the user's own, the gas-honesty gate runs BEFORE any signature. */
+export type EvmSwapLeg = {
+  protocol: 'evm';
+  chainId: number;
+  /** The evm_amm venue row id (looked up via venueOfId at drive time — never assumed). */
+  venueId: string;
+  /** Rail-canonical ids (the record's inLedger/outLedger carry the SAME strings). */
+  inRailId: string;
+  outRailId: string;
+  /** Token contracts, lowercase ('' = the chain's native gas on the OUT side → the unwrap
+   *  path; native IN is not derived yet). */
+  tokenIn: string;
+  tokenOut: string;
+  inSymbol: string;
+  outSymbol: string;
+  inDecimals: number;
+  outDecimals: number;
+  /** Raw amounts: the exact input the approve leg sizes, and the slippage FLOOR the swap
+   *  leg signs (the D31 5%-headroom lesson generalized: min-out from the quote + bps). */
+  amountIn: string;
+  minOut: string;
+  feeTier: number;
+  /** Absolute unix seconds — the multicall deadline (the trade's own expiry). */
+  deadlineSecs: number;
+  slippageBps: number;
+  /** The OUT rail's pre-trade raw balance (the realized-credit baseline; null fails open). */
+  preOutRaw?: string;
+  /** Durable identity per broadcast leg, in order (approve, swap, …) — the crash-safe
+   *  watch keys; the EVM twin of `outTx`/`hopTx`. */
+  txHashes?: string[];
+};
+
 /** ONE signed IC update, frozen at prepare time. The executor only ever re-submits the
  *  envelope bytes; `argHex` is kept for audit/recovery, not re-signing. */
 export type SignedLeg = {
@@ -290,6 +328,11 @@ export type ConvertRecord = {
    *  hydration pins all three). `inFee`/`outFee` are '0' on this shape (no ledger fees); the
    *  Solana network fee is a separate fact (`solFeeLamports`, paid in SOL by the fee payer). */
   solanaLeg?: SolanaSwapLeg;
+  /** The EVM widening (2026-09-28): present iff the record is EVM-shaped (mutually exclusive
+   *  with solanaLeg, legs>0, and providerRef — hydration pins all of them). The device signs
+   *  the legs AT EXECUTION from these frozen facts (nonces move); `evmSwap.txHashes` carries
+   *  each broadcast leg's durable identity as it lands. */
+  evmSwap?: EvmSwapLeg;
   /** The realized Solana network fee quote for the swap tx (lamports, SOL-paid), frozen at
    *  prepare — the honest fee line on the Solana done/failure screens. */
   solFeeLamports?: string;
@@ -467,6 +510,11 @@ export const SOLANA_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
   'swapping', 'settling', 'done', 'pending_withdrawal', 'failed_refunded', 'stuck',
   'aborted',
 ]);
+
+/** The steps an EVM-shaped record (`evmSwap`) may sit at: the SAME vocabulary as the Solana
+ *  shape (the driver signs + watches inside `swapping`, the final balance read runs under
+ *  `settling`). */
+export const EVM_CONVERT_STEPS: ReadonlySet<ConvertStep> = SOLANA_CONVERT_STEPS;
 
 /** The steps a COMPOSED record (`composedDeposit`) may sit at: the planned executor's own
  *  flight states while the IC legs + the deposit leg run, the provider vocabulary once the

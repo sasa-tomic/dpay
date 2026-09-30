@@ -102,6 +102,8 @@ import {
 // Type-only re-exports: the hooks consume these shapes but must reach the network module only
 // through this seam. `export type` is erased, so nothing is pulled into the bundle.
 export type {EvmHistory, EvmHistoryRow};
+import type {UniswapQuote, UniswapSwapPlan} from './evm/uniswapPlan';
+export type {UniswapQuote, UniswapSwapPlan};
 export type {
   EvmBalancesRead,
   EvmFeeQuote,
@@ -500,4 +502,59 @@ export function syncEvmCatalogDeployments(rows: ReadonlyArray<{chainId: number; 
  *  rail does not render under jest/e2e until a seam URL is configured — D11). */
 export function isEvmRailConfigured(): boolean {
   return evmRailConfigured();
+}
+
+// ── The Uniswap V3 convert surface (the any-pair mandate, 2026-09-28) ──────────────────────────
+// Same seam discipline as every function above: gated on the rail being configured, the
+// network module loaded lazily, the caller's signal honored end to end. The quote is the
+// venue's own number (QuoterV2 through the relay pipe, the best fee tier's answer); the
+// executor carries the gas-honesty gate (the whole sequence's worst case checked before any
+// signature) and sequential nonces with per-leg receipts (the D31 discipline).
+
+/** The venue's own quote for one EVM pair across the Uniswap V3 fee tiers. */
+export async function quoteUniswapSwap(
+  args: Parameters<typeof import('./evm/uniswap')['quoteUniswap']>[0],
+  signal?: AbortSignal,
+): Promise<UniswapQuote> {
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  const {quoteUniswap} = await import('./evm/uniswap');
+  return quoteUniswap(args, signal);
+}
+
+/** The sequence's aggregate worst-case fee, before anything is signed (the review's
+ *  "network fee (estimate)" line and prepare's own dry gate). */
+export async function estimateUniswapSequenceFee(
+  secretHex: string,
+  args: {chainId: number; plan: UniswapSwapPlan},
+  signal?: AbortSignal,
+): Promise<{maxFeeWei: string}> {
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  const {estimateSequenceFee} = await import('./evm/uniswap');
+  return estimateSequenceFee(secretHex, args, signal);
+}
+
+/** Execute the frozen plan: gate → per-leg sign/broadcast/receipt. `onBroadcast` fires per
+ *  accepted leg (the record's durable hash list). */
+export async function executeUniswapSequence(
+  secretHex: string,
+  args: {chainId: number; plan: UniswapSwapPlan},
+  signal?: AbortSignal,
+  onBroadcast?: (step: {label: string; txHash: string}) => void,
+): Promise<{steps: Array<{label: string; txHash: string}>}> {
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  const {executeUniswapSequence: run} = await import('./evm/uniswap');
+  return run(secretHex, args, signal, onBroadcast as Parameters<typeof run>[3]);
+}
+
+/** One raw EVM balance read for the convert surface's realized-credit line (token or native). */
+export async function readEvmRailBalance(
+  chainId: number,
+  secretHex: string,
+  token: string | null,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (evmRpcUrl(chainId) === '') return null;
+  const {readEvmTokenRaw, readEvmNativeRaw} = await import('./evm/uniswap');
+  const owner = deriveEvmAddress(secretHex);
+  return token != null ? readEvmTokenRaw(chainId, token, owner, signal) : readEvmNativeRaw(chainId, owner, signal);
 }

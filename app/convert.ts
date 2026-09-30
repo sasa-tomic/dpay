@@ -124,6 +124,11 @@ export {executeConvert, probeConvertSettlement, probeDepositRow, probeHopPayout}
 export type {SolanaConvertPrepareArgs, SolanaExecutorDeps, SolanaExecutorOpts} from './convert/executeSolana';
 export {executeSolanaConvert, prepareSolanaConvertRecord} from './convert/executeSolana';
 
+export type {EvmConvertPrepareArgs} from './convert/prepareEvm';
+export {prepareEvmConvertRecord} from './convert/prepareEvm';
+export type {EvmExecutorDeps, EvmExecutorOpts} from './convert/executeEvm';
+export {executeEvmConvert} from './convert/executeEvm';
+
 export type {CrossRailDeps, CrossRailOpts} from './convert/executeCrossRail';
 export {
   executeCrossRailConvert,

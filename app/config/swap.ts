@@ -42,6 +42,8 @@ import {hubRoutes, multihopRoutesFrom, type HubRoute, type MultihopRoute} from '
 import {hubEndpointOf} from '../routes';
 import {resolveConvertDestinations, type ChainConvertRoute, type ComposedConvertRoute} from './convert';
 import {ETH_NATIVE_CHAIN_ID, ETH_NATIVE_DECIMALS, ETH_NATIVE_RAIL_ID, ETH_NATIVE_SYMBOL, evmNativeVenuesForLedger} from './evmConvert';
+import {evmAmmChainOf, evmAmmRailId, evmAmmVenuesForRail, evmNativeRailId} from './evmAmm';
+import type {EvmAsset} from '../lib/evmCatalog';
 import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 
 /** Mint → {symbol, decimals} for venue-pair mints: the wrapped-SOL identifier resolves to SOL
@@ -73,10 +75,19 @@ export type SwapRow =
       *  (the discriminator the sheet and the quote call key on — the quote sends it as the
       *  settle rail id, exactly what the relay maps onto the venue's coin/network codes). */
      outRailId: string | null}
-  | {kind: 'solamm'; rowId: string; venue: VenueEntry; inMint: string; outMint: string; outSym: string; outDecimals: number};
+  | {kind: 'solamm'; rowId: string; venue: VenueEntry; inMint: string; outMint: string; outSym: string; outDecimals: number}
+  // The EVM widening (2026-09-28, the any-pair mandate): a Uniswap V3 row (config/evmAmm.ts)
+  // trading an EVM-token source into a same-chain rail — native gas (the unwrap path) or
+  // another catalog token. Rail ids are chain-qualified (`evm:<chainId>:<address>`), so a
+  // row can never cross chains: one chain serves one ledger (the wrong-chain gate's doctrine).
+  | {kind: 'evmamm'; rowId: string; venue: VenueEntry; chainId: number; inRailId: string; inAddress: string; inSymbol: string; inDecimals: number;
+     out: {kind: 'native'; railId: string; symbol: string; decimals: number}
+       | {kind: 'token'; railId: string; address: string; symbol: string; decimals: number}};
 
-/** One TARGET CURRENCY and every row that reaches it from the standing source. */
-export type SwapTarget = {currency: HomeCurrency; rows: SwapRow[]};
+/** One TARGET CURRENCY and every row that reaches it from the standing source. `unavailable`
+ *  is set (with the reason) when NO executable row exists: the pair stays VISIBLE and refuses
+ *  honestly — absence is never the verdict for a named target (the any-pair mandate, 2026-09-28). */
+export type SwapTarget = {currency: HomeCurrency; rows: SwapRow[]; unavailable?: 'no-venue'};
 
 /** One TARGET RAIL, resolved from the CATALOG and the Solana token registry — deliberately NOT
  *  from the wallet's selectable-asset list: the asset list is RPC-gated (a Solana rail whose
@@ -86,12 +97,22 @@ export type SwapTarget = {currency: HomeCurrency; rows: SwapRow[]};
  *  list (`evmEnabled`), because its completion UX is the chain's own balance surface — a
  *  destination whose arrival the device cannot show is a silent dead end (the 84d07b3 rule). */
 type SwapRail = {kind: 'ic'; ledger: string} | {kind: 'sol'; mint: string}
-  | {kind: 'evm-native'; railId: string; chainId: number};
+  | {kind: 'evm-native'; railId: string; chainId: number}
+  | {kind: 'evm-token'; railId: string; chainId: number; address: string; symbol: string; decimals: number};
 
 /** Every mainnet rail that settles `currency`, in preference order: the IC catalog rows whose
- *  link token settles it, then the SOL-registry mints, then the EVM-native settle rails
- *  (`evmConvert.ts`, gated on the caller's EVM-rail enablement). Derived, never hardcoded. */
-function railsOfCurrency(currency: HomeCurrency, catalog: CurrencyDescriptor[], evmEnabled: boolean): SwapRail[] {
+ *  link token settles it, then the SOL-registry mints, then the EVM rails (catalog token rows +
+ *  the chain-qualified native settle rails — `evmConvert.ts` / `evmAmm.ts`, gated on the
+ *  caller's EVM-rail enablement). Derived, never hardcoded. `sourceChainId` scopes the native
+ *  settle rail to the SOURCE's chain when the source itself is an EVM rail: a destination the
+ *  source chain cannot pay for is not a rail (one chain serves one ledger). */
+function railsOfCurrency(
+  currency: HomeCurrency,
+  catalog: CurrencyDescriptor[],
+  evmEnabled: boolean,
+  evmAssets: readonly EvmAsset[],
+  sourceChainId: number | null,
+): SwapRail[] {
   const rails: SwapRail[] = [];
   for (const row of catalog) {
     if (row.testnet || row.ledger == null || row.ledger === '') continue;
@@ -102,32 +123,52 @@ function railsOfCurrency(currency: HomeCurrency, catalog: CurrencyDescriptor[], 
     // Native SOL rides the registry's WRAPPED identifier (the venue rows' own convention).
     rails.push({kind: 'sol', mint: info.mint ?? WRAPPED_SOL_MINT_ADDRESS});
   }
-  // The EVM-native settle rails: first (and only) is native ETH on Ethereum mainnet —
-  // gated, like the asset list, on the EVM rail being configured at all (the per-chain
-  // endpoint refinement is the completion surface's own honesty, not the pair walk's).
+  // The EVM-token settle rails: the catalog's own EVM rows, chain-qualified.
+  if (evmEnabled) {
+    for (const row of evmAssets) {
+      if (row.testnet) continue;
+      if (currencyOfLinkToken(row.token) !== currency) continue;
+      rails.push({kind: 'evm-token', chainId: row.chainId, railId: evmAmmRailId(row.chainId, row.address), address: row.address, symbol: row.symbol, decimals: row.decimals});
+    }
+  }
+  // The EVM-native settle rails: first the chain-1 rail every IC/SOL cefi row settles
+  // (`ETH_NATIVE_RAIL_ID`), then — when the SOURCE itself is an EVM rail — the source
+  // chain's own native rail (the Uniswap unwrap destination). Gated, like the asset list,
+  // on the EVM rail being configured at all.
   if (evmEnabled && currency === 'ETH') {
     rails.push({kind: 'evm-native', railId: ETH_NATIVE_RAIL_ID, chainId: ETH_NATIVE_CHAIN_ID});
+    if (sourceChainId != null) {
+      const railId = evmNativeRailId(sourceChainId);
+      if (!rails.some(r => r.kind === 'evm-native' && r.railId === railId)) {
+        rails.push({kind: 'evm-native', railId, chainId: sourceChainId});
+      }
+    }
   }
   return rails;
 }
 
 /** Every target-currency + rows list for the standing source, over the caller's target
- *  currencies (the visible list — the wallet's own currency-first scope). A target with NO
- *  executable row is not offered: absence is the honest verdict for an unquoted pair, and the
- *  screen's no-market state covers the venue-side emptiness (the flow-207 pattern). Null when
- *  the source rail itself cannot be resolved (no catalog row, a testnet row, an unknown mint). */
+ *  currencies (the visible list — the wallet's own currency-first scope). EVERY requested
+ *  target is returned: one with no executable row carries `unavailable: 'no-venue'` — the
+ *  pair is visible and refused with the reason, never silently hidden (the any-pair
+ *  mandate, 2026-09-28). Null when the source rail itself cannot be resolved (no catalog
+ *  row, a testnet row, an unknown mint). */
 export function resolveSwapTargets(args: {
   catalog: CurrencyDescriptor[];
   source: SelectableAsset;
   /** The currencies offered as targets, in presentation order, source EXCLUDED by the caller. */
   targetCurrencies: readonly HomeCurrency[];
   /** Whether the EVM rail is configured (the same `isEvmRailConfigured` gate the EVM asset
-   *  surfaces read). Gates the EVM-NATIVE settle rails only — absent/false resolves exactly
-   *  the pre-ETH walk (byte-stable history for every other row). */
+   *  surfaces read). Gates the EVM rails — absent/false resolves exactly the pre-ETH walk
+   *  (byte-stable history for every other row). */
   evmEnabled?: boolean;
+  /** The catalog's EVM token rows (the `evmAssetsOf(networks)` view) — the evm-token settle
+   *  rails + the EVM source's own display facts derive from them. */
+  evmAssets?: readonly EvmAsset[];
 }): SwapTarget[] | null {
   const {catalog, source, targetCurrencies} = args;
   const evmEnabled = args.evmEnabled ?? false;
+  const evmAssets = args.evmAssets ?? [];
   const inLedger = source.protocol === 'ic'
     ? catalog.find(c => c.currency === source.currency)?.ledger ?? null
     : null;
@@ -140,6 +181,18 @@ export function resolveSwapTargets(args: {
     : null;
   if (source.protocol === 'ic' && (inRow == null || inRow.testnet)) return null;
   if (source.protocol === 'solana' && solAssetOfMint(inMint!) == null) return null;
+  // The EVM source rail: the asset's own chain + contract (a parsed, EIP-55-verified row —
+  // the wallet only mounts Convert on assets the catalog served).
+  const inEvm = source.protocol === 'evm' && evmEnabled
+    ? {
+        chainId: source.chainId,
+        railId: evmAmmRailId(source.chainId, source.address),
+        address: source.address,
+        symbol: source.symbol,
+        decimals: source.decimals,
+      }
+    : null;
+  const sourceChainId = inEvm?.chainId ?? null;
 
   // Pre-resolve the composed-route walks once per source (they are source-keyed, not
   // target-keyed): the crossrail rows filter the same walk every previous surface walked.
@@ -171,7 +224,8 @@ export function resolveSwapTargets(args: {
     const cross: SwapRow[] = [];
     const cefi: SwapRow[] = [];
     const amm: SwapRow[] = [];
-    for (const rail of railsOfCurrency(currency, catalog, evmEnabled)) {
+    const evmamm: SwapRow[] = [];
+    for (const rail of railsOfCurrency(currency, catalog, evmEnabled, evmAssets, sourceChainId)) {
       const ledger = rail.kind === 'ic' ? rail.ledger : null;
       const mint = rail.kind === 'sol' ? rail.mint : null;
       const evmRailId = rail.kind === 'evm-native' ? rail.railId : null;
@@ -294,15 +348,40 @@ export function resolveSwapTargets(args: {
           amm.push({kind: 'solamm', rowId: v.venue_id, venue: v, inMint, outMint: mint, outSym: tok.symbol, outDecimals: tok.decimals});
         }
       }
+      // EVMAMM — a Uniswap V3 row trading the EVM-token source into this EVM rail
+      // (native gas of the SAME chain, or another catalog token on it). The venue rows
+      // carry chain-qualified rail ids, so a cross-chain match is structurally impossible.
+      if (inEvm != null && (rail.kind === 'evm-native' || rail.kind === 'evm-token')) {
+        const outRailId = rail.railId;
+        if (outRailId !== inEvm.railId) {
+          for (const v of evmAmmVenuesForRail(inEvm.railId)) {
+            const otherSide = v.pair_ledgers.find(l => l !== inEvm.railId);
+            if (otherSide !== outRailId) continue;
+            const out = rail.kind === 'evm-native'
+              ? {kind: 'native' as const, railId: rail.railId, symbol: railChainNative(v)?.nativeSymbol ?? 'ETH', decimals: 18}
+              : {kind: 'token' as const, railId: rail.railId, address: rail.address, symbol: rail.symbol, decimals: rail.decimals};
+            evmamm.push({kind: 'evmamm', rowId: v.venue_id, venue: v, chainId: inEvm.chainId, inRailId: inEvm.railId, inAddress: inEvm.address, inSymbol: inEvm.symbol, inDecimals: inEvm.decimals, out});
+          }
+        }
+      }
     }
-    // Kind order is fixed (direct, hub, composed, chain, crossrail, cefi, solamm); inside a
-    // kind, registry walk order. A duplicate rowId cannot exist within one kind (venue/route
-    // ids are unique per walk), and one row lands in exactly one kind — the list is
-    // dedupe-free by construction.
-    const all = [...direct, ...hub, ...composed, ...chain, ...cross, ...cefi, ...amm];
-    if (all.length > 0) targets.push({currency, rows: all});
+    // Kind order is fixed (direct, hub, composed, chain, crossrail, cefi, solamm, evmamm);
+    // inside a kind, registry walk order. A duplicate rowId cannot exist within one kind
+    // (venue/route ids are unique per walk), and one row lands in exactly one kind — the
+    // list is dedupe-free by construction.
+    const all = [...direct, ...hub, ...composed, ...chain, ...cross, ...cefi, ...amm, ...evmamm];
+    // HONEST UNAVAILABILITY: a target with no executable row is still returned, refused
+    // with the reason — the pair stays visible in the picker (the any-pair mandate).
+    targets.push(all.length > 0 ? {currency, rows: all} : {currency, rows: [], unavailable: 'no-venue'});
   }
   return targets;
+}
+
+/** The evmAmm chain facts behind a venue row (the native rail's display name comes from the
+ *  chain registry — the venue row itself carries only rail ids). */
+function railChainNative(v: {venue_id: string}): {nativeSymbol: string} | null {
+  const chain = evmAmmChainOf(v.venue_id);
+  return chain != null ? {nativeSymbol: chain.nativeSymbol} : null;
 }
 
 /** The STANDING target: for a STABLE source, the stable pair (CHF→USD, not CHF→a volatile) —
@@ -330,5 +409,5 @@ export function standingTarget(targets: SwapTarget[]): SwapTarget | null {
     }
     return best;
   };
-  return walk(true) ?? walk(false) ?? targets[0] ?? null;
+  return walk(true) ?? walk(false) ?? targets.find(t => t.rows.length > 0) ?? null;
 }

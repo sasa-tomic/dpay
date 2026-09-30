@@ -55,6 +55,7 @@ export const convertFr: ConvertMessages = {
   smallerAmount: 'Convertissez un montant moins élevé',
   noPathTitle: inSym => `Aucune route depuis ${inSym}`,
   noPathBody: pairs => `Routes aujourd'hui : ${pairs}`,
+  noVenueBody: (inSym, outSym) => `Aucun site ne convertit encore ${inSym} en ${outSym}. La paire reste listée ici ; les nouveaux sites apparaîtront dès leur ajout.`,
   noPathAction: 'Ajouter des fonds',
   externalSignTitle: 'Une étape demande votre propre portefeuille Ethereum',
   externalSignBody: 'Vous signez la traversée dans votre propre portefeuille ; dpay n\u2019en détient jamais les clés. Tout le reste reste dans ce volet.',
@@ -144,6 +145,15 @@ export const convertFr: ConvertMessages = {
   stuckAcknowledge: 'Compris — arrêter la surveillance',
   stuckAcknowledged: 'Surveillance arrêtée — des fonds bougeant plus tard arriveront toujours à l\u2019adresse de ce portefeuille.',
 
+  evm: {
+    heading: (inSym, outSym, chain) => `Convertir ${inSym} en ${outSym} (${chain})`,
+    feeLabel: unit => `Frais de réseau (${unit}, estimation)`,
+    pendingBody: 'L’échange est confirmé sur la chaîne. Attendez que votre solde l’affiche.',
+    failedBody: (inSym, detail) => String(detail).includes('approve landed')
+      ? `L’échange a échoué après l’approbation. Vos ${inSym} sont toujours dans votre portefeuille ; l’approbation inutilisée ne couvre que le montant exact de l’échange.`
+      : `Rien n’a été envoyé. Vos ${inSym} sont toujours dans votre portefeuille.`,
+    stuckBody: outSym => `L’échange a pu aboutir ou non. Votre solde de ${outSym} se résoudra de lui-même ; ne lancez pas un second échange.`,
+  },
   multihop: {
     destLabel: 'Destination',
     destDirect: sym => `${sym} — dans ce portefeuille`,

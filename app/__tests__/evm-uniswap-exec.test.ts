@@ -109,7 +109,7 @@ describe('executeUniswapSequence — gate order', () => {
 
   it('proves the chain BEFORE any spend-shaped request', async () => {
     const h = await load(happyRoutes());
-    await h.execute(SEED_HEX, {chainId: 1, plan: planFor(), minOut: 10n ** 14n, deadlineSecs: 9n ** 9n});
+    await h.execute(SEED_HEX, {chainId: 1, plan: planFor()});
     expect(h.calls[0]!.method).toBe('eth_chainId');
     const spendIdx = h.calls.findIndex(c => c.method === 'eth_sendRawTransaction');
     expect(h.calls.slice(0, spendIdx).map(c => c.method)).toContain('eth_chainId');
@@ -118,7 +118,7 @@ describe('executeUniswapSequence — gate order', () => {
   it('refuses at the gate when the native balance covers leg 1 but not the WHOLE sequence', async () => {
     // Legs estimate ~50k each with headroom → ~2 × 60k × maxFee. 0.001 ETH covers neither.
     const h = await load({...happyRoutes(), eth_getBalance: '0xe8d4a51000'}); // 0.001 ETH
-    await expect(h.execute(SEED_HEX, {chainId: 1, plan: planFor(), minOut: 10n ** 14n, deadlineSecs: 9n ** 9n}))
+    await expect(h.execute(SEED_HEX, {chainId: 1, plan: planFor()}))
       .rejects.toMatchObject({name: 'EvmGasGateError'});
     expect(h.calls.map(c => c.method)).not.toContain('eth_sendRawTransaction');
     // The gate's requiredWei is the aggregate (both legs), not leg 1's alone.
@@ -135,7 +135,7 @@ describe('executeUniswapSequence — gate order', () => {
     };
     routes.eth_getTransactionReceipt = {status: '0x1'};
     const h = await load(routes);
-    const {steps} = await h.execute(SEED_HEX, {chainId: 1, plan: planFor(), minOut: 10n ** 14n, deadlineSecs: 9n ** 9n});
+    const {steps} = await h.execute(SEED_HEX, {chainId: 1, plan: planFor()});
     expect(steps.map(s => s.label)).toEqual(['approve', 'swap']);
     // ONE nonce read, two sequential nonces.
     expect(h.calls.filter(c => c.method === 'eth_getTransactionCount').length).toBe(1);
@@ -169,14 +169,14 @@ describe('executeUniswapSequence — gate order', () => {
     const routes = happyRoutes();
     routes.eth_getTransactionReceipt = {status: '0x0'};
     const h = await load(routes);
-    await expect(h.execute(SEED_HEX, {chainId: 1, plan: planFor(), minOut: 10n ** 14n, deadlineSecs: 9n ** 9n}))
+    await expect(h.execute(SEED_HEX, {chainId: 1, plan: planFor()}))
       .rejects.toThrow(/reverted on-chain/);
     expect(h.calls.filter(c => c.method === 'eth_sendRawTransaction').length).toBe(1);
   });
 
   it('does not sign when the chain verdict names another chain', async () => {
     const h = await load({...happyRoutes(), eth_chainId: '0xa'});
-    await expect(h.execute(SEED_HEX, {chainId: 1, plan: planFor(), minOut: 10n ** 14n, deadlineSecs: 9n ** 9n}))
+    await expect(h.execute(SEED_HEX, {chainId: 1, plan: planFor()}))
       .rejects.toMatchObject({name: 'EvmWrongChainError'});
     expect(h.calls.map(c => c.method)).not.toContain('eth_sendRawTransaction');
   });

@@ -14,12 +14,14 @@ import {
   CROSSRAIL_CONVERT_STEPS,
   PROVIDER_CONVERT_STEPS,
   PROVIDER_ONLY_STEPS,
+  EVM_CONVERT_STEPS,
   SOLANA_CONVERT_STEPS,
   type ChainRouteInfo,
   type ComposedDepositInfo,
   type ConvertRecord,
   type ConvertStep,
   type CrossRailInfo,
+  type EvmSwapLeg,
   type GasFundPreLeg,
   type LegKind,
   type LegPlan,
@@ -556,6 +558,52 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     }
   }
   if (composedDeposit != null && solanaLeg != null) return null; // composed never carries a Solana leg
+  let evmSwap: EvmSwapLeg | undefined;
+  if (r.evmSwap != null) {
+    // The EVM widening (2026-09-28): mutually exclusive with every other shape (the Solana
+    // leg's pins, verbatim) and only at the driver's own steps.
+    if (solanaLeg != null || legs.length > 0 || legPlan != null) return null;
+    if (composedDeposit != null || crossRail != null || chainRoute != null || rec.gasPre != null) return null;
+    if (r.providerRef != null) return null;
+    const e = r.evmSwap as Record<string, unknown>;
+    if (!e || typeof e !== 'object' || e.protocol !== 'evm') return null;
+    if (typeof e.venueId !== 'string' || e.venueId.length === 0) return null;
+    if (typeof e.chainId !== 'number' || !Number.isSafeInteger(e.chainId)) return null;
+    for (const k of ['inRailId', 'outRailId', 'tokenIn', 'tokenOut', 'inSymbol', 'outSymbol'] as const) {
+      if (typeof e[k] !== 'string') return null;
+    }
+    for (const k of ['amountIn', 'minOut'] as const) {
+      if (typeof e[k] !== 'string' || !/^\d+$/.test(e[k] as string)) return null;
+    }
+    for (const k of ['inDecimals', 'outDecimals', 'feeTier', 'deadlineSecs', 'slippageBps'] as const) {
+      if (typeof e[k] !== 'number' || !Number.isSafeInteger(e[k] as number)) return null;
+    }
+    if (!EVM_CONVERT_STEPS.has(rec.step)) return null;
+    evmSwap = {
+      protocol: 'evm',
+      chainId: e.chainId as number,
+      venueId: e.venueId as string,
+      inRailId: e.inRailId as string,
+      outRailId: e.outRailId as string,
+      tokenIn: e.tokenIn as string,
+      tokenOut: e.tokenOut as string,
+      inSymbol: e.inSymbol as string,
+      outSymbol: e.outSymbol as string,
+      inDecimals: e.inDecimals as number,
+      outDecimals: e.outDecimals as number,
+      amountIn: e.amountIn as string,
+      minOut: e.minOut as string,
+      feeTier: e.feeTier as number,
+      deadlineSecs: e.deadlineSecs as number,
+      slippageBps: e.slippageBps as number,
+      ...(typeof e.preOutRaw === 'string' && /^\d+$/.test(e.preOutRaw) ? {preOutRaw: e.preOutRaw} : {}),
+      ...(Array.isArray(e.txHashes) && e.txHashes.every(h => typeof h === 'string' && /^0x[0-9a-fA-F]{64}$/.test(h))
+        ? {txHashes: e.txHashes as string[]}
+        : {}),
+    };
+    rec.evmSwap = evmSwap;
+  }
+  if (evmSwap != null && solanaLeg != null) return null; // one leg protocol per record
   // A legs>0 record parked at `quote`/`confirming` is a shape no driver can advance: the
   // executor only knows approving→approved→swapping→settling→pending_withdrawal, so the resume
   // engine would re-arm a no-op drive forever with no escape (the unreachable-by-construction
@@ -570,7 +618,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // provider vocabulary (the venue poll advances it once the deposit transfer is sent) —
   // its engine dispatch keys on composedDeposit, so these steps are drivable for it.
   if (legs.length > 0 && composedDeposit == null && PROVIDER_ONLY_STEPS.has(rec.step)) return null;
-  if (legs.length === 0 && solanaLeg == null) {
+  if (legs.length === 0 && solanaLeg == null && evmSwap == null) {
     const pr = r.providerRef;
     if (!pr || typeof pr !== 'object' || typeof (pr as Record<string, unknown>).orderId !== 'string') return null;
     const statusUrl = (pr as Record<string, unknown>).statusUrl;
@@ -633,7 +681,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // resolves no venue, so the classification is still fail-closed.)
   const cefiProviderRecord = legs.length === 0 && solanaLeg == null
     && venueOfId(rec.venueId ?? '')?.kind === 'cefi';
-  if ((solanaLeg == null || crossRail != null) && !cefiProviderRecord && composedDeposit == null
+  if ((solanaLeg == null || crossRail != null) && evmSwap == null && !cefiProviderRecord && composedDeposit == null
     && (rec.inCurrency == null || rec.outCurrency == null)) return null;
   if (rec.id !== id) return null;
   const full = rec as ConvertRecord;
