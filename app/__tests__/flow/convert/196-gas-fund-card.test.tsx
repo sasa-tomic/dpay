@@ -14,6 +14,7 @@ import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, installCctpStub, installMutableEthBalance,
+  deriveEvmKeypair, eip55,
 } from './convertStubs';
 
 installHeapProbe();
@@ -54,7 +55,8 @@ hermeticDescribe('flow 196 — the cross-rail gas-fund card', () => {
       installCctpStub({});
       const eth = installMutableEthBalance('0x' + SEED_ETH.toString(16));
 
-      // §1 checksum at entry + the one-time re-type gate.
+      // §1 the payout default + the editor's checksum and one-time re-type gates.
+      // The derived address is confirmed by construction — shown, never typed, no re-type.
       await openConvertFor(m, 'icp');
       await pickSwapTarget(m, 'SOL');
       await typeConvertAmount(m, '5');
@@ -62,6 +64,13 @@ hermeticDescribe('flow 196 — the cross-rail gas-fund card', () => {
       await m.driver.findByTestID('convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter', {timeoutMs: 3_000});
       await m.driver.click('convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter');
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
+      await m.driver.waitForFunction(() => m!.driver.isPresent('convert-dest-shown'), {timeoutMs: 8_000, label: 'the payout default rendered'});
+      expect(m.driver.readText('convert-dest-shown')).toBe(eip55(deriveEvmKeypair(account!.secretHex).address.toLowerCase()));
+      expect(m.driver.isPresent('convert-dest-reenter')).toBe(false);
+
+      // The advanced control reveals the typed field, pre-filled with the derived address.
+      await m.driver.click('btn-convert-dest-change');
+      await m.driver.findByTestID('convert-dest-address', {timeoutMs: 5_000});
 
       // Shape-valid but checksum-bad: refused AT ENTRY, minimal line, no re-type ask yet.
       await m.driver.type('convert-dest-address', DEST_BAD);

@@ -19,7 +19,7 @@ import {
   deriveSolanaKeypair, deriveAta, bs58Encode, jupiterSwapTxB64,
   solConvertTxDetail, solSentTxs, fmt, floor99,
   installEvmSignSeam, evmSignsRecorded, setCctpMessageState, cctpStubState,
-  enableSolRail,
+  enableSolRail, deriveEvmKeypair, eip55,
 } from './convertStubs';
 
 installHeapProbe();
@@ -44,7 +44,6 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
   it('composes the EURC route, hands off keyless, resumes, and lands EURC without double units', async () => {
     const ROUTE_C_SOL_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter';
     const ROUTE_C_EURC_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc';
-    const DEST = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
     const BURN_HASH = '0x' + '2c'.repeat(32);
     const EURC_OUT = '10300000';
     const EURC_FLOOR = '10200000';
@@ -54,6 +53,8 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
       await enableSolRail();
       m = await onboardWallet('jest-crossrail-icp-eurc');
       const account = await accountOf(m);
+      // The payout default: the wallet's OWN derived EVM address (founder directive 2026-09-30).
+      const DEST = eip55(deriveEvmKeypair(account!.secretHex).address.toLowerCase());
       const fundIcp = await faucetAccount(account!.publicHex, 2000000000, {currency: 8}); // 20 ICP
       expect(fundIcp.ok).toBe(true);
       const fundEth = await faucetAccount(account!.publicHex, 400000000000000, {currency: 6});
@@ -96,7 +97,11 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
       await pickSwapTarget(m, 'EUR');
       expect(await m.driver.findByTestID(ROUTE_C_EURC_ROW, {timeoutMs: 3_000}).then(() => true).catch(() => false)).toBe(true);
       await m.driver.click(ROUTE_C_EURC_ROW);
-      await m.driver.type('convert-dest-address', DEST);
+      // The payout default renders shown, never typed; no re-type arms (founder directive).
+      await m.driver.waitForFunction(() => m!.driver.isPresent('convert-dest-shown'), {timeoutMs: 8_000, label: 'the payout default rendered'});
+      expect(m.driver.readText('convert-dest-shown')).toBe(DEST);
+      expect(m.driver.isPresent('convert-dest-address')).toBe(false);
+      expect(m.driver.isPresent('convert-dest-reenter')).toBe(false);
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
       assertIncludes(m.driver.readText('convert-dest-cross-note'), 'also signs the crossing', 'the destination warns that this address also SIGNS the crossing');
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset');

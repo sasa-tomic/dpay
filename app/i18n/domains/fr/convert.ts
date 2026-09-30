@@ -162,6 +162,8 @@ export const convertFr: ConvertMessages = {
     routeHeadingCollapsed: (inSym, hopSym, network) => `Route : ${inSym} → ${hopSym} (vers ${network})`,
     destAddressLabel: 'Votre propre adresse sur le réseau de destination',
     destAddressInvalid: 'Adresse invalide — attendu : 0x suivi de 40 caractères hexadécimaux.',
+    destPayoutNote: 'Les fonds arrivent sur votre propre adresse de wallet.',
+    destChange: 'Changer la destination',
     routeHeading: (inSym, hopSym, destSym, network) => `Route : ${inSym} → ${hopSym} → ${destSym} sur ${network}`,
     swapPaysLabel: 'L\u2019échange paie dans ce portefeuille',
     legApprovePull: sym => `Autoriser le pool à prendre vos ${sym}`,

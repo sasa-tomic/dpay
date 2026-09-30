@@ -19,6 +19,7 @@ import {
   deriveSolanaKeypair, deriveAta, bs58Encode, jupiterSwapTxB64,
   solConvertTxDetail, solSentTxs, fmt, floor99,
   installEvmSignSeam, setCctpMessageState, enableSolRail,
+  deriveEvmKeypair, eip55,
 } from './convertStubs';
 
 installHeapProbe();
@@ -47,7 +48,6 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
     await venueKnob(FIXTURE_VENUE, true);
   });
   it('names the chain at the picker + census, reads the floor as mid-stop, attributes the receipt', async () => {
-    const DEST = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
     const BURN_HASH = '0x' + 'c7'.repeat(32);
     const SOL_OUT = '260000000';
     const SOL_FLOOR = '257000000';
@@ -59,6 +59,8 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
       await enableSolRail();
       m = await onboardWallet('jest-crossrail-vchf-sol');
       const account = await accountOf(m);
+      // The payout default: the wallet's OWN derived EVM address (founder directive 2026-09-30).
+      const DEST = eip55(deriveEvmKeypair(account!.secretHex).address.toLowerCase());
       const fundVchf = await faucetAccount(account!.publicHex, 50000000000, {currency: 7}); // 500 VCHF
       expect(fundVchf.ok).toBe(true);
       const fundEth = await faucetAccount(account!.publicHex, 400000000000000, {currency: 6});
@@ -100,7 +102,11 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
       await m.driver.findByTestID('convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp:jupiter', {timeoutMs: 10_000});
       await m.driver.click('convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp:jupiter', {timeoutMs: 10_000});
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-      await m.driver.type('convert-dest-address', DEST);
+      // The payout default: shown, never typed; no re-type arms (founder directive).
+      await m.driver.waitForFunction(() => m!.driver.isPresent('convert-dest-shown'), {timeoutMs: 8_000, label: 'the payout default rendered'});
+      expect(m.driver.readText('convert-dest-shown')).toBe(DEST);
+      expect(m.driver.isPresent('convert-dest-address')).toBe(false);
+      expect(m.driver.isPresent('convert-dest-reenter')).toBe(false);
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 20_000});
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset');
 

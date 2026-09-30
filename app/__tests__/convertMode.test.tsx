@@ -119,6 +119,8 @@ import {convertDe} from '../i18n/domains/de/convert';
 import {convertEs} from '../i18n/domains/es/convert';
 import {convertFr} from '../i18n/domains/fr/convert';
 import {fmtAssetCompact} from '../lib/format';
+import {deriveEvmAddress} from '../evm';
+import {toChecksumAddress} from '../evm/identity';
 
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 // The wallet's real asset list carries BOTH rails of every multi-rail currency — the swap
@@ -126,6 +128,9 @@ const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
 const ICP_ASSET = ASSETS.find(a => a.protocol === 'ic' && a.currency === 8)!;
 const IDENTITY: Identity = {secretHex: 'aa'.repeat(32), publicHex: 'bb'.repeat(32), username: 'tester'};
+// The device's OWN EVM address — the standing payout destination (founder directive
+// 2026-09-30). Tests assert the sheet derives exactly this from the identity seed.
+const OWN_EVM = toChecksumAddress(deriveEvmAddress(IDENTITY.secretHex));
 
 const QUOTE: ConvertQuote = {
   venueId: 'icpswap',
@@ -980,30 +985,62 @@ describe('multihop — the composed routes are Other-venues rows under the auto-
     expect(present(tree, 'convert-venue-multihop:icpswap-ckusdc:2')).toBe(false);
   });
 
-  test('opting into Route B swaps the surface: the external-sign note, the floor, the address input', async () => {
+  test('Route B pays out to the wallet\u2019s OWN address by default; editing sits behind the advanced control', async () => {
     const tree = await mountConvert('250000000', '1');
     await pickRow(tree, ROUTE_B_ROW);
     // The external-signature exception, disclosed at tap 1 (brief 5.4.1).
     expect(textOf(tree, 'convert-external-sign-note')).toContain(convertEn.externalSignTitle);
-    expect(present(tree, 'convert-dest-address')).toBe(true);
+    // The founder directive (2026-09-30): the payout address IS the wallet's own derived
+    // address — shown, never typed on entry. No input, no re-type; the crossing note keeps
+    // its signer warning; manual destinations wait behind the ONE advanced control.
+    expect(present(tree, 'convert-dest-address')).toBe(false);
+    expect(present(tree, 'convert-dest-reenter')).toBe(false);
+    expect(textOf(tree, 'convert-dest-shown')).toBe(OWN_EVM);
+    expect(textOf(tree, 'convert-dest-cross-note')).toBe(convertEn.crossrail.destAddressCrossNote);
+    expect(present(tree, 'btn-convert-dest-change')).toBe(true);
     expect(present(tree, 'convert-route-min')).toBe(true);
     expect(present(tree, 'convert-min-out')).toBe(false);
     await openDetails(tree);
     expect(present(tree, 'convert-minter-principal')).toBe(true);
     expect(present(tree, 'convert-gas-note')).toBe(true);
-    // a malformed address is flagged in copy, never silently signed
+    // A malformed address is flagged in copy, never silently signed — behind the control.
+    await act(async () => {
+      node(tree, 'btn-convert-dest-change')!.props.onPress();
+    });
     await act(async () => {
       node(tree, 'convert-dest-address')!.props.onChangeText('0x1234');
     });
     expect(present(tree, 'convert-dest-address-invalid')).toBe(true);
   });
 
-  test('a KNOWN ckETH shortfall blocks the confirm and names the requirement first', async () => {
-    const tree = await mountConvert('250000000', '1', {assetBalances: {8: '250000000', 6: '1000000000'}});
+  test('editing the destination keeps the checksum + re-type gates; the derived value auto-satisfies', async () => {
+    const tree = await mountConvert('250000000', '1');
     await pickRow(tree, ROUTE_B_ROW);
+    await act(async () => {
+      node(tree, 'btn-convert-dest-change')!.props.onPress();
+    });
+    // The editor opens pre-filled with the derived address — already confirmed, no re-type.
+    expect(node(tree, 'convert-dest-address')!.props.value).toBe(OWN_EVM);
+    expect(present(tree, 'convert-dest-reenter')).toBe(false);
+    // A custom valid address brings the one-time re-type back.
     await act(async () => {
       node(tree, 'convert-dest-address')!.props.onChangeText(DEST);
     });
+    expect(present(tree, 'convert-dest-reenter')).toBe(true);
+    await act(async () => {
+      node(tree, 'convert-dest-reenter')!.props.onChangeText(DEST);
+    });
+    expect(present(tree, 'convert-dest-reenter')).toBe(false);
+    // Editing BACK to the derived value auto-satisfies: the re-type never asks again.
+    await act(async () => {
+      node(tree, 'convert-dest-address')!.props.onChangeText(OWN_EVM);
+    });
+    expect(present(tree, 'convert-dest-reenter')).toBe(false);
+  });
+
+  test('a KNOWN ckETH shortfall blocks the confirm and names the requirement first', async () => {
+    const tree = await mountConvert('250000000', '1', {assetBalances: {8: '250000000', 6: '1000000000'}});
+    await pickRow(tree, ROUTE_B_ROW);
     expect(present(tree, 'convert-gas-preflight')).toBe(true);
     expect(textOf(tree, 'convert-gas-preflight')).toBe(convertEn.multihop.gasPreflightTitle + ' ' + convertEn.multihop.gasPreflightBody('0.00008 ETH'));
     expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
@@ -1012,9 +1049,6 @@ describe('multihop — the composed routes are Other-venues rows under the auto-
   test('an unknown ckETH balance stays fail-open; a funded one offers the confirm, and confirming prepares the ROUTE record', async () => {
     const unknown = await mountConvert('250000000', '1');
     await pickRow(unknown, ROUTE_B_ROW);
-    await act(async () => {
-      node(unknown, 'convert-dest-address')!.props.onChangeText(DEST);
-    });
     expect(present(unknown, 'convert-gas-preflight')).toBe(false);
     expect(node(unknown, 'btn-convert-confirm')!.props.disabled).toBe(false);
     // Tear the probe tree down HERE: `mounted` holds only the LAST tree, so an un-unmounted
@@ -1029,15 +1063,13 @@ describe('multihop — the composed routes are Other-venues rows under the auto-
     } as never);
     const tree = await mountConvert('250000000', '1', {assetBalances: {8: '250000000', 6: '100000000000000000'}});
     await pickRow(tree, ROUTE_B_ROW);
-    await act(async () => {
-      node(tree, 'convert-dest-address')!.props.onChangeText(DEST);
-    });
     expect(present(tree, 'convert-gas-preflight')).toBe(false);
     await act(async () => {
       node(tree, 'btn-convert-confirm')!.props.onPress();
     });
     expect(prepareMultihopConvertRecord).toHaveBeenCalledTimes(1);
-    expect(jest.mocked(prepareMultihopConvertRecord).mock.calls[0][0]).toMatchObject({destAddress: DEST});
+    // The payout lands at the wallet's OWN derived address — zero typing (founder directive).
+    expect(jest.mocked(prepareMultihopConvertRecord).mock.calls[0][0]).toMatchObject({destAddress: OWN_EVM});
     expect(adoptConvertRecord).toHaveBeenCalledTimes(1);
   });
 });

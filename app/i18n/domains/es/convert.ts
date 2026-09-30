@@ -162,6 +162,8 @@ export const convertEs: ConvertMessages = {
     routeHeadingCollapsed: (inSym, hopSym, network) => `Ruta: ${inSym} → ${hopSym} (hacia ${network})`,
     destAddressLabel: 'Tu propia dirección en la red de destino',
     destAddressInvalid: 'Dirección no válida — se espera 0x seguido de 40 caracteres hexadecimales.',
+    destPayoutNote: 'Los fondos llegan a tu propia dirección de wallet.',
+    destChange: 'Cambiar destino',
     routeHeading: (inSym, hopSym, destSym, network) => `Ruta: ${inSym} → ${hopSym} → ${destSym} en ${network}`,
     swapPaysLabel: 'El intercambio paga a esta billetera',
     legApprovePull: sym => `Autorizar al pool a tomar tus ${sym}`,

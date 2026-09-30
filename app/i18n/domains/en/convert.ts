@@ -307,6 +307,11 @@ export type ConvertMessages = {
     hubSurplusNote: (hubSym: string, destSym: string) => string;
     destAddressLabel: string;
     destAddressInvalid: string;
+    /** The standing payout line (founder directive 2026-09-30): a route without a crossing
+     *  states where the funds land. The crossing rows keep crossrail.destAddressCrossNote. */
+    destPayoutNote: string;
+    /** The advanced control that reveals the typed destination field (power users). */
+    destChange: string;
     /** The confirm-time route summary: ordered legs, fee census per leg (INV-6 style), no dpay cut. */
     routeHeading: (inSym: string, hopSym: string, destSym: string, network: string) => string;
     /** Route-mode headline label: names where the quoted number LANDS (in-wallet hop asset),
@@ -731,6 +736,8 @@ export const convertEn: ConvertMessages = {
     routeHeadingCollapsed: (inSym, hopSym, network) => `Route: ${inSym} → ${hopSym} (to ${network})`,
     destAddressLabel: 'Your own address on the destination network',
     destAddressInvalid: 'Invalid address — expected 0x followed by 40 hex characters.',
+    destPayoutNote: 'Funds land at your own wallet address.',
+    destChange: 'Change destination',
     routeHeading: (inSym, hopSym, destSym, network) => `Route: ${inSym} → ${hopSym} → ${destSym} on ${network}`,
     swapPaysLabel: 'The swap pays into this wallet',
     legApprovePull: sym => `Approve the pool to pull your ${sym}`,

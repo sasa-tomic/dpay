@@ -18,6 +18,7 @@ import {
   deriveAta, bs58Encode, jupiterSwapTxB64, solConvertTxDetail,
   solSentTxs, installEvmSignSeam, setCctpMessageState, cctpStubState,
   enableSolRail, installSideShiftStub, sideShiftStubState, sideshiftRelayHits,
+  deriveEvmKeypair, eip55,
 } from './convertStubs';
 
 installHeapProbe();
@@ -40,7 +41,6 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
   });
   it('stops honestly at each phase, freezes the watches, and stays aborted across a reload', async () => {
     const ROUTE_C_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter';
-    const DEST = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
     const BURN_209 = '0x' + '3c'.repeat(32);
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const AsyncStorage = require('@react-native-async-storage/async-storage') as {getItem: (k: string) => Promise<string | null>};
@@ -74,12 +74,14 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
       });
       installEvmSignSeam(BURN_209);
 
-      /** One Route C run up to a LIVE crossing (the 209 helper). */
+      /** One Route C run up to a LIVE crossing (the 209 helper). The payout address is the
+       *  wallet's OWN derived default — nothing to type (founder directive 2026-09-30). */
       const attachBurnAndGetCrossing = async (amountText: string): Promise<void> => {
         for (let attempt = 0; attempt < 3; attempt++) {
           await typeConvertAmount(m!, amountText).catch(() => undefined);
           await m!.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-          await m!.driver.type('convert-dest-address', DEST);
+          await m!.driver.waitForFunction(() => m!.driver.isPresent('convert-dest-shown'), {timeoutMs: 8_000, label: 'the payout default rendered'});
+          expect(m!.driver.readText('convert-dest-shown')).toBe(eip55(deriveEvmKeypair(account!.secretHex).address.toLowerCase()));
           await m!.driver.findByTestID('convert-route-min', {timeoutMs: 20_000});
           await m!.driver.click('btn-convert-confirm');
           const changed = await m!.driver.findByTestID('convert-moved-note', {timeoutMs: 2_000}).catch(() => null);

@@ -14,7 +14,7 @@ import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
-  disposeConvertStubs, venueKnob, fmt,
+  disposeConvertStubs, venueKnob, fmt, deriveEvmKeypair, eip55,
 } from './convertStubs';
 
 installHeapProbe();
@@ -89,7 +89,12 @@ hermeticDescribe('flow 188 — the VCHF ↔ ckUSDC pair (registry order + both-d
       await openOtherVenues(m);
       await m.driver.findByTestID('convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp', {timeoutMs: 3_000});
       await m.driver.click('convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp', {timeoutMs: 4_000});
-      await m.driver.type('convert-dest-address', '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48');
+      // The payout default: the wallet's OWN derived EVM address — shown, never typed
+      // (founder directive 2026-09-30).
+      await m.driver.waitForFunction(() => m!.driver.isPresent('convert-dest-shown'), {timeoutMs: 8_000, label: 'the payout default rendered'});
+      expect(m.driver.readText('convert-dest-shown')).toBe(eip55(deriveEvmKeypair(account!.secretHex).address.toLowerCase()));
+      expect(m.driver.isPresent('convert-dest-address')).toBe(false);
+      expect(m.driver.isPresent('convert-dest-reenter')).toBe(false);
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
       expect(m.driver.isPresent('convert-dest-address-invalid')).toBe(false);
       const minOut = (fwdOut / 10000n) * 9900n + ((fwdOut % 10000n) * 9900n) / 10000n;

@@ -890,7 +890,17 @@ export function ConvertIntentSheet({
     : null;
 
   // ── The route's destination address (the CCTP crossing's signer side) — verbatim gates. ──
-  const [destAddress, setDestAddress] = useState('');
+  // The founder directive (2026-09-30): every swap payout lands at the user's OWN wallet.
+  // The default IS the device's derived EVM address (the same derivation the CeFi native-ETH
+  // settle uses); the typed field is demoted behind the "Change destination" control, and the
+  // re-type/checksum gates arm only for a value the user edited in. Route B/C semantics are
+  // unchanged: the crossing still signs outside this device (the note stays).
+  const ownEvmAddress = useMemo(
+    () => toChecksumAddress(deriveEvmAddress(identity.secretHex)),
+    [identity.secretHex],
+  );
+  const [destAddress, setDestAddress] = useState(ownEvmAddress);
+  const [destEditing, setDestEditing] = useState(false);
   const [destRetype, setDestRetype] = useState('');
   const [destReentered, setDestReentered] = useState<string | null>(null);
   const [destEthWei, setDestEthWei] = useState<string | null | undefined>(undefined);
@@ -901,7 +911,9 @@ export function ConvertIntentSheet({
   const destShapeValid = isValidDestinationAddress('CkEthErc20', destAddress);
   const destChecksumBad = eip55ChecksumBad(destAddress);
   const destValid = destShapeValid && !destChecksumBad;
-  const destConfirmed = destReentered != null && destReentered === destAddress.toLowerCase();
+  // The derived default is confirmed by construction; the re-type gate arms for edits only.
+  const destOwn = destAddress.toLowerCase() === ownEvmAddress.toLowerCase();
+  const destConfirmed = destOwn || (destReentered != null && destReentered === destAddress.toLowerCase());
   const gasNeededN = routeGas != null ? BigInt(routeGas.feeWei) + BigInt(routeGas.gasLedgerFee) : null;
   const gasBalRaw = crossRow != null ? assetBalances[crossRow.route.burn.gasCurrency] : undefined;
   const gasShort = crossRow != null && gasNeededN != null && gasBalRaw != null && gasBalRaw.length > 0 && BigInt(gasBalRaw) < gasNeededN;
@@ -1904,54 +1916,76 @@ export function ConvertIntentSheet({
             </View>
           ) : null}
 
-          {/* The route's destination address — required by the CCTP crossing, validated live,
-              re-typed once (verbatim machinery). */}
+          {/* The payout destination — the device's OWN address by default (founder directive
+              2026-09-30): shown, never typed. The typed field lives behind the ONE advanced
+              control for power users; the crossing note keeps its signer warning. */}
           {routeMode ? (
             <View>
-              <Text style={S.convertAmountLabel}>{M.convert.multihop.destAddressLabel}</Text>
-              <View style={S.amountRow}>
-                <TextInput
-                  testID="convert-dest-address"
-                  style={S.monoInput}
-                  value={destAddress}
-                  onChangeText={t => {
-                    setDestAddress(t);
-                    setDestRetype('');
-                    setDestReentered(null);
-                  }}
-                  autoCorrect={false}
-                  autoCapitalize="none"
-                  placeholderTextColor={C.sub}
-                />
-              </View>
-              {destAddress.length > 0 && !destShapeValid ? (
-                <Text testID="convert-dest-address-invalid" style={S.err}>{M.convert.multihop.destAddressInvalid}</Text>
-              ) : destChecksumBad ? (
-                <Text testID="convert-dest-checksum" style={S.err}>{M.convert.crossrail.checksumMismatch}</Text>
-              ) : null}
-              {destShapeValid && !destChecksumBad && !destConfirmed ? (
+              {destEditing ? (
                 <View>
-                  <Text style={S.convertAmountLabel}>{M.convert.crossrail.retypeAddress}</Text>
+                  <Text style={S.convertAmountLabel}>{M.convert.multihop.destAddressLabel}</Text>
                   <View style={S.amountRow}>
                     <TextInput
-                      testID="convert-dest-reenter"
+                      testID="convert-dest-address"
                       style={S.monoInput}
-                      value={destRetype}
+                      value={destAddress}
                       onChangeText={t => {
-                        setDestRetype(t);
-                        if (t.toLowerCase() === destAddress.toLowerCase()) setDestReentered(t.toLowerCase());
+                        setDestAddress(t);
+                        setDestRetype('');
+                        setDestReentered(null);
                       }}
                       autoCorrect={false}
                       autoCapitalize="none"
                       placeholderTextColor={C.sub}
                     />
                   </View>
-                  {destRetype.length >= destAddress.length && destAddress.length > 0 && !destConfirmed ? (
-                    <Text testID="convert-dest-reenter-mismatch" style={S.err}>{M.convert.crossrail.retypeMismatch}</Text>
+                  {destAddress.length > 0 && !destShapeValid ? (
+                    <Text testID="convert-dest-address-invalid" style={S.err}>{M.convert.multihop.destAddressInvalid}</Text>
+                  ) : destChecksumBad ? (
+                    <Text testID="convert-dest-checksum" style={S.err}>{M.convert.crossrail.checksumMismatch}</Text>
+                  ) : null}
+                  {destShapeValid && !destChecksumBad && !destConfirmed ? (
+                    <View>
+                      <Text style={S.convertAmountLabel}>{M.convert.crossrail.retypeAddress}</Text>
+                      <View style={S.amountRow}>
+                        <TextInput
+                          testID="convert-dest-reenter"
+                          style={S.monoInput}
+                          value={destRetype}
+                          onChangeText={t => {
+                            setDestRetype(t);
+                            if (t.toLowerCase() === destAddress.toLowerCase()) setDestReentered(t.toLowerCase());
+                          }}
+                          autoCorrect={false}
+                          autoCapitalize="none"
+                          placeholderTextColor={C.sub}
+                        />
+                      </View>
+                      {destRetype.length >= destAddress.length && destAddress.length > 0 && !destConfirmed ? (
+                        <Text testID="convert-dest-reenter-mismatch" style={S.err}>{M.convert.crossrail.retypeMismatch}</Text>
+                      ) : null}
+                    </View>
                   ) : null}
                 </View>
-              ) : null}
-              <Text testID="convert-dest-cross-note" style={S.convertMetaLine}>{M.convert.crossrail.destAddressCrossNote}</Text>
+              ) : (
+                <View>
+                  <Text style={S.convertAmountLabel}>{M.convert.multihop.destAddressLabel}</Text>
+                  <Text testID="convert-dest-shown" style={S.convertMetaLine} selectable>{destAddress}</Text>
+                  <Pressable
+                    testID="btn-convert-dest-change"
+                    onPress={() => setDestEditing(true)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={M.convert.multihop.destChange}>
+                    <Text style={S.linkText}>{M.convert.multihop.destChange}</Text>
+                  </Pressable>
+                </View>
+              )}
+              {crossInfo != null ? (
+                <Text testID="convert-dest-cross-note" style={S.convertMetaLine}>{M.convert.crossrail.destAddressCrossNote}</Text>
+              ) : (
+                <Text testID="convert-dest-payout-note" style={S.convertMetaLine}>{M.convert.multihop.destPayoutNote}</Text>
+              )}
             </View>
           ) : null}
 
