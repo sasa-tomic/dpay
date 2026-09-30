@@ -768,6 +768,11 @@ export type WithdrawMessages = {
     sendAmount: (amount: string) => string;
     recipientAtaNote: (cost: string, asset: string) => string;
     confirmLabel: (asset: string) => string;
+    /** The affordability gate (the INERT-confirm defect, 2026-09-28 live finding): a KNOWN-absent
+     *  recipient ATA with KNOWN-short SOL refuses BEFORE the press. `cost`/`held` pre-formatted. */
+    ataRentGate: (cost: string, held: string, asset: string) => string;
+    /** The practical instruction over the address: what to receive, then send. */
+    ataRentTopUp: (cost: string) => string;
   };
 };
 
@@ -890,5 +895,8 @@ export const withdrawEn: WithdrawMessages = {
     recipientAtaNote: (cost, asset) =>
       `If they have no ${asset} account yet, this creates it for them (one-time ≈${cost} paid by you).`,
     confirmLabel: asset => `Confirm ${asset} send`,
+    ataRentGate: (cost, held, asset) =>
+      `They have no ${asset} account yet — creating it costs about ${cost}. Your ${held} of SOL can't cover it.`,
+    ataRentTopUp: cost => `Receive about ${cost} of SOL at your address, then send:`,
   },
 };

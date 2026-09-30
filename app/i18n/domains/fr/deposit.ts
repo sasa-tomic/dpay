@@ -378,5 +378,8 @@ export const withdrawFr: WithdrawMessages = {
     recipientAtaNote: (cost, asset) =>
       `Si le destinataire n’a pas encore de compte ${asset}, cet envoi le crée pour lui (≈${cost} une seule fois, à votre charge).`,
     confirmLabel: asset => `Confirmer l’envoi de ${asset}`,
+    ataRentGate: (cost, held, asset) =>
+      `Le destinataire n’a pas encore de compte ${asset} — sa création coûte environ ${cost}. Vos ${held} de SOL ne suffisent pas.`,
+    ataRentTopUp: cost => `Recevez environ ${cost} de SOL à votre adresse, puis envoyez :`,
   },
 };
