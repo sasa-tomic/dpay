@@ -61,6 +61,11 @@ export const errorsDe: ErrorMessages = {
         : `Wallet hat Netzwerk ${approved} freigegeben, diese Einzahlung läuft über Netzwerk ${requested}. Wechsle und verbinde erneut.`,
   },
 
+  engine: {
+    offline: 'Du scheinst offline zu sein, daher wurde die Zahlungs-Engine nicht geladen. Dein Geld ist unangetastet. Öffne diesen Bildschirm erneut, sobald du wieder online bist.',
+    unreachable: 'Deine Verbindung ist in Ordnung, aber dpays Zahlungs-Engine wurde nicht geladen. Dein Geld ist unangetastet. Öffne diesen Bildschirm gleich erneut und versuche es noch einmal.',
+  },
+
   tap: {
     couldntConfirmOffline: 'Nicht bestätigt — prüfe dein Guthaben, sobald du online bist',
     couldntVerifyRequest: 'Diese Anfrage konnte nicht geprüft werden',

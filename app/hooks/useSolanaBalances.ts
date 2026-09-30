@@ -1,7 +1,8 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {POLL} from '../config/constants';
-import {classifyTransportFailure, readSolanaBalances} from '../solana';
+import {readSolanaBalances} from '../solana';
+import {classifyTransportFailure} from '../transportFailure';
 import type {SolanaBalancesRead, SolanaReadFailure, SolanaTokenBalanceResult} from '../solana';
 import {loadSolTokenState, recordSolTokenFact} from '../services/solTokenStatePersist';
 import {usePollCadence} from './usePollCadence';

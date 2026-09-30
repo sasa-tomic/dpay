@@ -18,7 +18,8 @@ jest.mock('../solana', () => ({
   classifyTransportFailure: jest.fn(async () => 'unreachable' as const),
 }));
 
-import {classifyTransportFailure, getSolanaHistory} from '../solana';
+import {getSolanaHistory} from '../solana';
+import {classifyTransportFailure} from '../transportFailure';
 import type {SolanaHistoryResult, SolanaHistoryRow} from '../solana';
 import {useSolanaHistory} from '../hooks/useSolanaHistory';
 import {POLL} from '../config/constants';

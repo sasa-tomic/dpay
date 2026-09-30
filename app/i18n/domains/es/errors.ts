@@ -60,6 +60,11 @@ export const errorsEs: ErrorMessages = {
         : `La billetera autorizó la red ${approved}; este depósito se liquida en la red ${requested}. Cambia y vuelve a conectar.`,
   },
 
+  engine: {
+    offline: 'Pareces estar sin conexión, así que el motor de pagos no cargó. Tu dinero está intacto. Vuelve a abrir esta pantalla cuando vuelvas a estar en línea.',
+    unreachable: 'Tu conexión está bien, pero el motor de pagos de dpay no cargó. Tu dinero está intacto. Vuelve a abrir esta pantalla e inténtalo de nuevo en un momento.',
+  },
+
   tap: {
     couldntConfirmOffline: 'No se pudo confirmar: revisa tu saldo cuando tengas conexión',
     couldntVerifyRequest: 'No se pudo verificar esta solicitud',

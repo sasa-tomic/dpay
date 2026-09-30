@@ -138,6 +138,21 @@ export type ErrorMessages = {
   };
 
   /**
+   * The payment engine (either rail's lazily-loaded network module — `loadRpcForSend` /
+   * `loadEvmRpcForSend`) never arrived: the served web build fetches it as a chunk from the page
+   * origin, and a stalled or broken origin fetch used to print "check your connection" to phones
+   * whose connection was fine. The shared oracle (`app/transportFailure.ts` `engineLoadCopy`)
+   * classifies the blame and the loaders throw the matching sentence directly.
+   */
+  engine: {
+    /** Nothing answered anywhere — the phone has no connectivity; no one is blamed. */
+    offline: string;
+    /** The phone is online (the IC-boundary probe answered), so the relay's serving of the
+     *  engine chunk is what failed. Names dpay, keeps the money untouched, gives the move. */
+    unreachable: string;
+  };
+
+  /**
    * NFC tap terminal reasons — the tap status view renders these verbatim as its sub-line, so an
    * unknown outcome must read as unknown ("Couldn't confirm"), never as a decline.
    */
@@ -238,6 +253,11 @@ export const errorsEn: ErrorMessages = {
       approved === ''
         ? `Wallet approved no Ethereum network — this deposit settles on network ${requested}. Switch to it, then connect again.`
         : `Wallet approved network ${approved}; this deposit settles on network ${requested}. Switch, then connect again.`,
+  },
+
+  engine: {
+    offline: 'You seem offline, so the payment engine didn’t load. Your money is untouched. Reopen this screen once you’re back online.',
+    unreachable: 'Your connection is fine, but dpay’s payment engine didn’t load. Your money is untouched. Reopen this screen and try again in a moment.',
   },
 
   tap: {

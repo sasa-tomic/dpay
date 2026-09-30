@@ -62,6 +62,11 @@ export const errorsFr: ErrorMessages = {
         : `Le portefeuille a autorisé le réseau ${approved} ; ce dépôt se règle sur le réseau ${requested}. Changez, puis reconnectez-vous.`,
   },
 
+  engine: {
+    offline: 'Vous semblez hors ligne, donc le moteur de paiement ne s’est pas chargé. Votre argent est intact. Rouvrez cet écran une fois de nouveau en ligne.',
+    unreachable: 'Votre connexion est bonne, mais le moteur de paiement de dpay ne s’est pas chargé. Votre argent est intact. Rouvrez cet écran puis réessayez dans un instant.',
+  },
+
   tap: {
     couldntConfirmOffline: 'Impossible de confirmer — vérifiez votre solde une fois en ligne',
     couldntVerifyRequest: 'Impossible de vérifier cette demande',
