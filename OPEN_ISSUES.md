@@ -111,6 +111,23 @@ Uniswap V3 adapter (ZCHF first; seed = `scripts/evm-mainnet-zchf-buy.mjs`, D31-h
 auto-compose A→hub→B with combined-fee honesty, refuse venue-less pairs honestly. One live
 funds-ledgered trip per new adapter before any "supported" claim (D31 rule).
 
+- **NEXT TOPIC (founder 2026-09-30): VCHF is multichain — "We also have VCHF on ICP, ETH, SOL."**
+  Verify BEFORE any rail is added: the canonical VNX contract addresses per chain, and the
+  cross-chain mechanism (issuer mint/burn bridge vs third-party bridge — under our rules that
+  decision is what makes moving between rails ROUTING, not an EXCHANGE). If canonical,
+  `CURRENCY_RAILS.CHF` grows ETH/SOL rails and CHF gets true multi-rail routing, the same shape
+  as USD today (ckUSDC/USDC): same asset, `chooseRail` picks the network, no exchange semantics,
+  zero new UI. Value 7 / effort S (verification only; the rail additions are their own M once
+  verified).
+- **NEXT TOPIC (founder 2026-09-30): CoW Swap = later venue row; Uniswap V3 stays first.**
+  Uniswap V3 remains the first EVM adapter (GOAL above: spec work item #2, D31-hardened seed
+  script; one adapter generalizes to any ERC-20 — the actual general solution). CoW Swap is
+  mechanically heavier (EIP-712 signed off-chain orders, solver settlement in seconds-to-minutes,
+  an order API to poll): fine for convert, useless for checkout. The trigger to file real work:
+  measured rates on thin ZCHF pairs beating Uniswap enough to matter. Under the adapter pattern
+  it is then a cheap follow-up venue row, not a redesign. Value 5 / effort M, parked on its
+  trigger.
+
 - **"Check your connection" copy fires on RELAY failures while the phone is online
   (founder question 2026-09-29; value 6 / effort M).** The prod relay was probed healthy
   mid-session (version/currencies/venues ~0.2 s, swap_quote 0.39 s, sideshift proxy 0.53 s,
