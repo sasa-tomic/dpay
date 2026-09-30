@@ -41,7 +41,7 @@ export const errorsFr: ErrorMessages = {
       `${network} a envoyé des données que ce portefeuille ne peut pas lire — soldes plus à jour. Rien n’a bougé ; dpay continue de réessayer.`,
     historyStale: network =>
       `L’historique ${network} n’est pas à jour. Rien n’a bougé — il se met à jour tout seul.`,
-    unreachableHint: () => 'Ouvre Paramètres ▸ Avancé.',
+    unreachableHint: () => 'Ouvrez Paramètres ▸ Avancé.',
   },
 
   ethWallet: {

@@ -49,7 +49,7 @@ export const payFr: PayMessages = {
   localBalanceMayNotCover: 'Votre solde local ne suffit peut-être pas — le commerçant vérifie.',
   approve: 'Approuver',
   approveA11y: 'Approuver le paiement',
-  approveHint: 'Signe le montant affiché avec votre clé et l’envoie',
+  approveHint: 'Signez le montant affiché avec votre clé et l’envoyez',
   signing: 'Signature…',
   signsOffline: 'Signature hors ligne — le commerçant le règle en l’envoyant.',
 

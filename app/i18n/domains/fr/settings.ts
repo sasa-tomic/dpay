@@ -74,7 +74,7 @@ export const settingsFr: SettingsMessages = {
 
   learn: {
     label: 'Découvrir',
-    passportHint: 'Ouvre le passeport',
+    passportHint: 'Ouvrez le passeport',
     passportCount: filled => `${filled}/4`,
     howItWorksHint: 'Rejoue la présentation',
   },
@@ -182,7 +182,7 @@ export const onboardingFr: OnboardingMessages = {
   ownSeed: {
     useOwn: 'Utiliser plutôt mon code',
     useRandom: 'Générer plutôt un code aléatoire',
-    toggleHint: 'Colle le code d’un portefeuille existant',
+    toggleHint: 'Collez le code d’un portefeuille existant',
     placeholder: 'Vos 24 mots ou votre code hexa',
     a11y: 'Mon code de récupération',
     hint: 'Le code à partir duquel construire ce portefeuille',

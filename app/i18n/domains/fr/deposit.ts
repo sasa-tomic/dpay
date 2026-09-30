@@ -184,7 +184,7 @@ export const depositFr: DepositMessages = {
 
   trust: {
     fund: 'Alimenter via Trust Wallet',
-    fundHint: asset => `Ouvre Trust Wallet pour envoyer des ${asset} vers votre adresse dpay`,
+    fundHint: asset => `Ouvrez Trust Wallet pour envoyer des ${asset} vers votre adresse dpay`,
     err: 'Impossible d’ouvrir Trust Wallet. Réessayez.',
   },
 

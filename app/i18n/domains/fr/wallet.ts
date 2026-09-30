@@ -23,7 +23,7 @@ export const walletFr: WalletMessages = {
 
   homeCurrency: {
     name: {CHF: 'Francs suisses', USD: 'Dollars américains', EUR: 'Euros', BTC: 'Bitcoin', ETH: 'Ether', ICP: 'Internet Computer', SOL: 'Solana'},
-    chooseTitle: 'Dans quelle monnaie penses-tu ?',
+    chooseTitle: 'Dans quelle monnaie pensez-vous ?',
     chooseBody: 'Affichage seulement.',
     railReason: {destination: 'c’est lui que demande le paiement', funded: 'solde présent ici'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
@@ -31,8 +31,8 @@ export const walletFr: WalletMessages = {
     settingsTitle: 'Monnaie principale',
     settingsHint: 'Affichée en premier ; par défaut pour payer.',
     confirm: 'Continuer',
-    pickFirst: 'Choisis d’abord une monnaie.',
-    noneAvailable: 'Aucune monnaie chargée. Vérifie l’adresse du serveur dans les Réglages, puis rouvre dpay.',
+    pickFirst: 'Choisissez d’abord une monnaie.',
+    noneAvailable: 'Aucune monnaie chargée. Vérifiez l’adresse du serveur dans les Réglages, puis rouvrez dpay.',
     a11y: currency => `Choisir ${currency}`,
   },
 
