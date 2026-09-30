@@ -27,9 +27,12 @@ import {DEMO_ASSET_ID, buildSelectableAssets} from '../config/assets';
 import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {offerableCurrencies} from '../config/currency';
+import type {EvmSelectableAsset} from '../lib/evmCatalog';
 
 const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: BUNDLED_NETWORKS});
+// The EVM arm on (the D5/D13 rows): ZCHF & co. — per-RAIL assets with NO HomeCurrency.
+const ASSETS_EVM = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: BUNDLED_NETWORKS, evmEnabled: true});
 const VISIBLE = offerableCurrencies(ASSETS); // stables then tokens, offerable only — the Wallet-derived list
 
 /** The REAL per-asset views over the bundled catalog. */
@@ -178,6 +181,19 @@ describe('AccountsTab — the gestures', () => {
     }
     expect(onConvertCurrency).toHaveBeenCalledTimes(VISIBLE.length);
     expect(onConvertCurrency).toHaveBeenLastCalledWith(VISIBLE[VISIBLE.length - 1]);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the EVM-token rows (no HomeCurrency) carry the SAME Convert action, wired per ASSET', () => {
+    const onConvertAsset = jest.fn();
+    const tree = mount(views, sums, {assets: ASSETS_EVM, onConvertAsset});
+    const evmRows = ASSETS_EVM.filter((a): a is EvmSelectableAsset => a.protocol === 'evm');
+    expect(evmRows.length).toBeGreaterThanOrEqual(1);
+    for (const a of evmRows) {
+      expect(has(tree, `btn-accounts-convert-evm-${a.testKey}`)).toBe(true);
+      act(() => { pressable(tree, `btn-accounts-convert-evm-${a.testKey}`).props.onPress(); });
+      expect(onConvertAsset).toHaveBeenCalledWith(a.id);
+    }
     act(() => { tree.unmount(); });
   });
 

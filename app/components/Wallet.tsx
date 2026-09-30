@@ -1559,6 +1559,13 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     selectAsset(rail.id);
     setMode('convert');
   }, [selectionLocked, assets, balances, selectAsset]);
+  // An EVM-token row's Convert (the uniform-entry rule): the asset IS the source rail (there
+  // is no HomeCurrency to resolve a rail for). Same gesture contract as the currency entry.
+  const openConvertForAsset = useCallback((id: AssetId) => {
+    if (!shouldAllowUserSelect(selectionLocked)) return;
+    selectAsset(id);
+    setMode('convert');
+  }, [selectionLocked, selectAsset]);
   // Withdraw funds (the Home action row): the EXISTING withdraw surface for the main rail — the
   // Pay tab's "Send to address" sub-mode, where the IC withdraw and the Solana withdraw sheets
   // both live (the off-ramp; partner off-ramps land in this entry when the legal blockers clear).
@@ -1850,6 +1857,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               onBack={closeAccounts}
               onOpenCurrency={openCurrencyAsMain}
               onConvertCurrency={openConvertForCurrency}
+              onConvertAsset={openConvertForAsset}
               onOpenAddCurrency={openAddCurrency}
               onSelect={handleSelect}
               onTopUp={topUp}

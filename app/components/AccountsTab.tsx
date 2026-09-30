@@ -57,7 +57,7 @@ export type AtaSetupViewModel = {
 export function AccountsTab({
   assets, balances, currencyBalances, homeCurrency, visibleCurrencies, selectedId,
   demoFaucetAvailable, topUpBusy, hasTestnet, showTestnet, onToggleTestnet,
-  onBack, onOpenCurrency, onConvertCurrency, onOpenAddCurrency, onSelect, onTopUp, onOpenSettings,
+  onBack, onOpenCurrency, onConvertCurrency, onConvertAsset, onOpenAddCurrency, onSelect, onTopUp, onOpenSettings,
   ataSetup, onAtaSetupStart, onAtaSetupConfirm, onAtaSetupCancel, onAtaSetupShowSol,
 }: {
   assets: SelectableAsset[];
@@ -81,6 +81,10 @@ export function AccountsTab({
   onOpenCurrency: (c: HomeCurrency) => void;
   /** The row's Convert — open the swap surface with this currency as the source. */
   onConvertCurrency: (c: HomeCurrency) => void;
+  /** The EVM-token row's Convert — open the swap surface with THIS ASSET as the source.
+   *  An EVM row has no HomeCurrency (no currency chip of its own), so its Convert is
+   *  asset-keyed; optional so the pure-row mount stays legal without the host wiring. */
+  onConvertAsset?: (id: AssetId) => void;
   /** [Add new currency] — the add-currency route. */
   onOpenAddCurrency: () => void;
   /** The practice row's select — the ONE per-asset gesture left here (practice is never main). */
@@ -280,6 +284,23 @@ export function AccountsTab({
             accessibilityLabel={M.wallet.balances.select(a.symbol)}
             accessibilityHint={M.wallet.balances.selectHint}
             variant="card"
+            actions={onConvertAsset != null ? (
+              // The SAME Convert action every currency row carries, asset-keyed: an EVM row
+              // settles no HomeCurrency, so the per-currency chip cannot exist — the convert
+              // surface is still one gesture away (the uniform-entry rule).
+              <Pressable
+                testID={`btn-accounts-convert-evm-${a.testKey}`}
+                style={S.assetActionBtn}
+                onPress={() => onConvertAsset(a.id)}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.actionConvert}
+                accessibilityHint={M.wallet.accounts.convertHint}
+                accessibilityState={{disabled: false}}
+              >
+                <IconSwap size={16} color={C.brandText} />
+                <Text style={S.assetActionText}>{M.convert.actionConvert}</Text>
+              </Pressable>
+            ) : null}
           />
         ))}
         {/* The practice divider sits IMMEDIATELY above the practice row, so the sentence and the
