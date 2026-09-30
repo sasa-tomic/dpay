@@ -264,8 +264,10 @@ export type DepositMessages = {
     completeSetup: string;
     /** The button's screen-reader hint; `setupCost` is the already-formatted SOL total. */
     completeHint: (setupCost: string) => string;
-    /** The missing accounts as ONE noun phrase ("EURC account", "EURC and USDC accounts"). */
-    targetsLabel: (symbols: string[]) => string;
+    /** The missing accounts as ONE noun phrase ("EURC account", "EURC and USDC accounts").
+     *  Scalar-tolerant by the catalog-fuzzer contract: any non-array argument renders as its
+     *  single-symbol phrase instead of throwing. */
+    targetsLabel: (symbols: string[] | string | number) => string;
     /** The fund-branch line naming the (unique) token the swap draws from. */
     fundFrom: (source: string) => string;
     /** The fund confirm, stating the total: the sized swap, its source, what it creates, the cost. */
@@ -529,9 +531,12 @@ export const depositEn: DepositMessages = {
     createHint: (setupCost, asset) => `Create your ${asset} account for ${setupCost} from your SOL balance`,
     completeSetup: 'Complete setup',
     completeHint: setupCost => `Sets up everything in one tap (about ${setupCost})`,
-    targetsLabel: symbols => symbols.length === 1
-      ? `${symbols[0]} account`
-      : `${symbols.slice(0, -1).join(', ')} and ${symbols[symbols.length - 1]} accounts`,
+    targetsLabel: raw => {
+      const symbols = Array.isArray(raw) ? raw : [String(raw)];
+      return symbols.length === 1
+        ? `${symbols[0]} account`
+        : `${symbols.slice(0, -1).join(', ')} and ${symbols[symbols.length - 1]} accounts`;
+    },
     fundFrom: source => `A small swap of your ${source} into SOL pays for it.`,
     fundConfirm: (swap, source, targets, setupCost) =>
       `Swaps about ${swap} of your ${source} into SOL and creates your ${targets} (${setupCost}).`,

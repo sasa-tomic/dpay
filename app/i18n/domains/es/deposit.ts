@@ -181,9 +181,12 @@ export const depositEs: DepositMessages = {
     createHint: (setupCost, asset) => `Crea tu cuenta de ${asset} por ${setupCost} de tu saldo de SOL`,
     completeSetup: 'Completar configuración',
     completeHint: setupCost => `Lo configura todo con un toque (unos ${setupCost})`,
-    targetsLabel: symbols => symbols.length === 1
-      ? `cuenta de ${symbols[0]}`
-      : `cuentas de ${symbols.slice(0, -1).join(', ')} y ${symbols[symbols.length - 1]}`,
+    targetsLabel: raw => {
+      const symbols = Array.isArray(raw) ? raw : [String(raw)];
+      return symbols.length === 1
+        ? `cuenta de ${symbols[0]}`
+        : `cuentas de ${symbols.slice(0, -1).join(', ')} y ${symbols[symbols.length - 1]}`;
+    },
     fundFrom: source => `Un pequeño canje de tus ${source} por SOL lo paga.`,
     fundConfirm: (swap, source, targets, setupCost) =>
       `Canjea unos ${swap} de tus ${source} por SOL y crea tus ${targets} (${setupCost}).`,

@@ -180,9 +180,12 @@ export const depositDe: DepositMessages = {
     createHint: (setupCost, asset) => `Erstellt dein ${asset}-Konto für ${setupCost} aus deinem SOL-Guthaben`,
     completeSetup: 'Einrichtung abschließen',
     completeHint: setupCost => `Richtet alles mit einem Tipp ein (etwa ${setupCost})`,
-    targetsLabel: symbols => symbols.length === 1
-      ? `${symbols[0]}-Konto`
-      : `${symbols.slice(0, -1).join(', ')}- und ${symbols[symbols.length - 1]}-Konten`,
+    targetsLabel: raw => {
+      const symbols = Array.isArray(raw) ? raw : [String(raw)];
+      return symbols.length === 1
+        ? `${symbols[0]}-Konto`
+        : `${symbols.slice(0, -1).join(', ')}- und ${symbols[symbols.length - 1]}-Konten`;
+    },
     fundFrom: source => `Ein kleiner Tausch deiner ${source} in SOL bezahlt das.`,
     fundConfirm: (swap, source, targets, setupCost) =>
       `Tauscht etwa ${swap} deiner ${source} in SOL und erstellt deine ${targets} (${setupCost}).`,
