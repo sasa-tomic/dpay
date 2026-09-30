@@ -58,11 +58,11 @@ const SURFACES = [
   // The convert venue chooser (light twin of flow 84's): two rows, each with its own quote,
   // NOTHING picked (V5). Both per-row quote-attribution clock lines are masked.
   { capture: '40-vr-convert-chooser', baseline: 'convert-chooser',
-    masksFromTestIDs: ['convert-quote-source'] },
+    masksFromTestIDs: ['convert-quote-source', 'convert-venue-auto'] },
   // The convert pre-sign checklist (light twin) under a pick (the real venue): fees,
   // counterparty, refusal — the active quote's timestamp is masked.
   { capture: '40-vr-convert-checklist', baseline: 'convert-checklist',
-    masksFromTestIDs: ['convert-quote-source'] },
+    masksFromTestIDs: ['convert-quote-source', 'convert-venue-auto'] },
 ];
 
 const SEED = 300000000; // 3 ICP (plain Number — the faucet body is JSON)

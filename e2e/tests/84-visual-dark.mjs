@@ -56,11 +56,11 @@ const SURFACES = [
   // The convert venue chooser: two rows, each with its own quote, NOTHING picked (V5). Both
   // per-row quote-attribution clock lines are masked.
   { capture: '84-vr-dark-convert-chooser', baseline: 'convert-chooser',
-    masksFromTestIDs: ['convert-quote-source'] },
+    masksFromTestIDs: ['convert-quote-source', 'convert-venue-auto'] },
   // The convert pre-sign checklist under a pick (the real venue): fees, counterparty, refusal —
   // the active quote's timestamp is masked.
   { capture: '84-vr-dark-convert-checklist', baseline: 'convert-checklist',
-    masksFromTestIDs: ['convert-quote-source'] },
+    masksFromTestIDs: ['convert-quote-source', 'convert-venue-auto'] },
 ];
 
 const REGEN = process.env.DPAY_E2E_REGEN_BASELINES === '1';
