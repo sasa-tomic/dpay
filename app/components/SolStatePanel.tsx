@@ -67,8 +67,9 @@ export function SolStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
       {record.step === 'pending_withdrawal' ? (
         <View testID="convert-pending">
           <Text style={S.convertStateTitle}>{M.convert.pendingTitle}</Text>
+          {/* sol.pendingBody already carries the watch fact ("resolves on its own") —
+              a second watching line stacked meta on meta (round-2 verbosity validation). */}
           <Text style={S.convertStateBody}>{M.convert.sol.pendingBody}</Text>
-          <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
         </View>
       ) : null}
       {record.step === 'failed_refunded' ? (

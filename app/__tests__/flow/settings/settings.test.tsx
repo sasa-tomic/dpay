@@ -72,7 +72,7 @@ hermeticDescribe('flow 12 — settings', () => {
     assertEq(m.driver.readInputValue('settings-relay'), relay, 'settings-relay should hold the active relay URL');
     await m.driver.findByTestID('privacy-policy', {timeoutMs: 4000});
     const aboutText = m.driver.readText('about-custody');
-    assertIncludes(aboutText, 'non-custodial', 'Settings About must use the explicit term');
+    assertIncludes(aboutText.toLowerCase(), 'non-custodial', 'Settings About must use the explicit term');
     assertIncludes(aboutText, 'cannot move, freeze, or recover it', 'Settings About must state the concrete limits');
 
     // 4. Editing updates it (the polls retarget); Apply NORMALIZES each line (R1 list editor).

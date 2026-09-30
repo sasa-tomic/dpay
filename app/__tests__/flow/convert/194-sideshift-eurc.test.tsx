@@ -88,7 +88,7 @@ hermeticDescribe('flow 194 — ICP → EURC via sideshift-eurc (the EUR→IC bri
       expect(await m.driver.findByTestID('convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc', {timeoutMs: 3_000}).then(() => true).catch(() => false)).toBe(true);
       assertIncludes(m.driver.readText('convert-settle-address'), kp.address, 'the payout address is the wallet\'s OWN derived Solana address');
       expect(await m.driver.waitForText(`≈ ${fmtHero('49500', 6, 'EURC', {stable: true})}`, {timeoutMs: 15_000})).toBe(true);
-      assertIncludes(m.driver.readText('convert-quote-source'), 'SideShift', 'the quote is attributed to SideShift');
+      assertIncludes(m.driver.readText('convert-venue-auto'), 'SideShift', 'the quote is attributed to SideShift (the ONE merged line, auto-picked)');
       await m.driver.click('convert-details', {timeoutMs: 5_000});
       await m.driver.waitForFunction(() => m!.driver.isPresent('convert-quote-verbatim'), {timeoutMs: 15_000, label: 'the census mounted'});
       assertIncludes(m.driver.readText('convert-quote-verbatim'), '0.0495 EURC', 'Details carries SideShift\'s verbatim quoted settle figure');

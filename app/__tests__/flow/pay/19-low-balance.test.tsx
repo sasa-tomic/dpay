@@ -63,7 +63,7 @@ hermeticDescribe('flow 19 — low balance: offline signs with the hand-off, onli
     await m.driver.findByTestID('pay-amount', {timeoutMs: 5000});
     await m.driver.findByTestID('review-lowbal', {timeoutMs: 5000});
     const note = m.driver.readText('review-lowbal');
-    assertIncludes(note, 'Not enough balance to cover this payment.', 'review-lowbal should state the online block');
+    assertIncludes(note, 'Not enough balance.', 'review-lowbal should state the online block');
     expect(m.driver.isPresent('btn-approve')).toBe(false); // C2: no sign control exists at all
     expect(m.driver.isPresent('btn-paid')).toBe(false); // no offline hand-off for a blocked payment
     await m.driver.findByTestID('btn-review-cancel', {timeoutMs: 4000});
@@ -89,7 +89,7 @@ hermeticDescribe('flow 159 — lowbal-recovers: the refusal clears when the poll
     scanSeam()(requestQR);
     await m.driver.findByTestID('pay-amount', {timeoutMs: 5000});
     await m.driver.findByTestID('review-lowbal', {timeoutMs: 5000});
-    assertIncludes(m.driver.readText('review-lowbal'), 'Not enough balance to cover this payment.',
+    assertIncludes(m.driver.readText('review-lowbal'), 'Not enough balance.',
       'the online refusal must state the block, not the offline warning');
     expect(m.driver.isPresent('btn-approve')).toBe(false);
 

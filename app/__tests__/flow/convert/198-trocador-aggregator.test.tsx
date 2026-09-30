@@ -57,8 +57,8 @@ hermeticDescribe('flow 198 — SOL → ICP via the trocador aggregator: every ve
         () => m!.driver.readTextSafe('convert-headline')?.includes('0.0496 ICP') === true,
         {timeoutMs: 20_000, label: 'the venue settle figure rendered (the rate arrived)'},
       );
-      assertIncludes(m.driver.readText('convert-quote-source'), 'Trocador', 'attribution names the venue');
-      assertIncludes(m.driver.readText('convert-quote-source'), 'fetched', 'attribution carries the read instant');
+      assertIncludes(m.driver.readText('convert-quote-source'), 'Trocador', 'attribution names the venue (override: the plain attribution line)');
+      expect(m.driver.readText('convert-quote-source')).toMatch(/\d{1,2}:\d{2}/);
       await m.driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
       const settle = m.driver.readText('convert-settle-address');
       expect(settle).toBe(await icpAccountIdHex(account!.publicHex));

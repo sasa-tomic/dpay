@@ -330,81 +330,81 @@ export const payEn: PayMessages = {
   signedOffline: 'signed offline ✓',
   waitingToScan: who => `Waiting for ${who} to scan…`,
   offlineSettles: who =>
-    `Offline — ${who} settles this when they submit it. You’ll see it on your balance once you’re back online.`,
+    `Offline — ${who} settles it when they submit. Your balance updates once you’re online.`,
   solOfflineSettles:
-    "Offline — the merchant settles this when they submit it. You'll see it on your balance once it's confirmed.",
+    "Offline — the merchant settles it when they submit. Your balance updates once it's confirmed.",
   handedTo: who => `Handed to ${who}`,
   handedToMerchant: 'Handed to merchant',
-  handedOffHint: 'Mark this payment as handed off. Your balance updates when the merchant settles',
+  handedOffHint: 'Marks the payment handed off — your balance updates when the merchant settles',
 
   unsupportedAsset: 'Unsupported asset',
   unsupportedAssetBody: currency =>
     `This payment asks for an asset this wallet can’t pay (currency ${currency}). dpay never swaps — ask the merchant for a supported asset.`,
   paying: 'Paying',
   payAmount: amount => `Pay ${amount}`,
-  notEnoughBalance: 'Not enough balance to cover this payment.',
-  localBalanceMayNotCover: 'Your local balance may not cover this — the merchant will verify.',
+  notEnoughBalance: 'Not enough balance.',
+  localBalanceMayNotCover: 'Your local balance may not cover it — the merchant verifies.',
   approve: 'Approve',
   approveA11y: 'Approve payment',
   approveHint: 'Sign the displayed amount with your key and send it',
   signing: 'Signing…',
-  signsOffline: 'This signs offline — the merchant settles when they submit it.',
+  signsOffline: 'Signs offline — the merchant settles it when they submit.',
 
   link: {
     title: 'This payment link can’t be paid',
     part: {recipient: 'the account to pay', asset: 'the asset', network: 'the network', amount: 'the amount', ref: 'the reference'},
-    malformed: part => `The link is missing or has a damaged ${part}. Ask the sender for a new link.`,
+    malformed: part => `The link is missing or has a damaged ${part}. Ask for a new link.`,
     unknownAsset: (token, network) =>
-      `The link asks for ${token} on ${network}, which this wallet doesn’t hold. dpay never swaps — ask the sender for a link in an asset you hold.`,
+      `The link asks for ${token} on ${network} — you hold none. dpay never swaps: ask for a link in an asset you hold.`,
     wrongNetwork: (token, network) =>
-      `The link asks for ${token} on ${network}, but you hold ${token} elsewhere. Paying would send your money to the wrong chain — ask the sender for a link on a network you hold.`,
+      `The link asks for ${token} on ${network}, but you hold ${token} elsewhere. Paying would land your money on the wrong chain — ask the sender for a link on a network you hold.`,
     hiddenAsset: token =>
-      `The link asks for ${token}, a test-network asset. Open Balances, turn on “Show testnet assets”, then open the link again.`,
+      `The link asks for ${token}, a test-network asset. In Balances, turn on “Show testnet assets”, then open the link again.`,
     unsupportedAsset: token =>
-      `The link asks for ${token}, which this wallet can’t pay. dpay never swaps — ask the sender for a link in an asset you hold.`,
+      `The link asks for ${token}, which this wallet can’t pay. dpay never swaps — ask for a link in an asset you hold.`,
     badAmount: (amount, token) =>
-      `“${amount}” isn’t a valid ${token} amount — it may use too many decimal places. Ask the sender for a new link.`,
+      `“${amount}” isn’t a valid ${token} amount — check the decimal places. Ask for a new link.`,
     badAccount: network =>
-      `The account in this link isn’t a valid ${network} account. Ask the sender to check it and send a new link.`,
+      `That account isn’t a valid ${network} account. Ask the sender to check it and send a new link.`,
   },
 
   ocp: {
     solanaTokenUnsupported: symbol =>
-      `This checkout takes ${symbol} on Solana, but its code doesn’t say which account to pay. Paying could send money to the wrong account — pay with SOL instead, or switch in Balances to another asset this checkout takes.`,
+      `This checkout takes ${symbol} on Solana, but its code doesn’t say which account to pay — money could land on the wrong one, so pay with SOL instead, or switch in Balances.`,
     chooseAsset: selected =>
-      `This checkout doesn’t take ${selected}, but it takes these. Pick one to pay with — dpay never swaps.`,
+      `This checkout doesn’t take ${selected}, but it takes these — dpay never swaps.`,
     assetNotAccepted: (selected, accepted) =>
-      `This checkout doesn’t take ${selected} — it takes ${accepted}. dpay never swaps, so switch in Balances and scan again.`,
+      `This checkout takes ${accepted}, not ${selected}. dpay never swaps — switch in Balances and scan again.`,
     methodUnavailable: (selected, alternatives) =>
       alternatives
-        ? `This checkout takes ${selected}, but its provider can’t process it right now. The checkout also takes ${alternatives} — dpay never swaps, so switch in Balances and scan again.`
-        : `This checkout takes ${selected}, but its provider can’t process it right now, and nothing else it takes can be paid from this wallet. Ask the merchant for another way to pay.`,
+        ? `The checkout takes ${selected}, but its provider can’t process it right now. It also takes ${alternatives} — switch in Balances and scan again.`
+        : `The checkout takes ${selected}, but its provider can’t process it, and nothing else it takes is payable here. Ask the merchant for another way to pay.`,
     noPayableAsset: accepted =>
-      `dpay can’t pay this checkout. It takes ${accepted}, which this wallet can’t pay — dpay never swaps. Pay another way.`,
+      `This checkout takes ${accepted} — nothing this wallet can pay. dpay never swaps. Pay another way.`,
     quoteExpired:
-      'This price expired — prices last about five minutes. Scan the code again for a fresh one.',
+      'This price expired — scan the code again for a fresh one.',
     notEnoughTime:
-      'This price runs out too soon to pay it safely. Scan the code again for a fresh price.',
+      'This price runs out too soon to pay safely — scan again for a fresh one.',
     unreportable: host =>
-      `${host} gave dpay no way to report your payment, so paying would take your money without crediting the sale. Nothing has been paid. Scanning again won’t help — ask the merchant for another way to pay.`,
+      `${host} gave no way to report a payment — paying could take your money without crediting the sale. Nothing has been paid. Rescanning won’t help — ask the merchant for another way to pay.`,
     proofElsewhere: (quoteHost, proofHost) =>
-      `This code’s price comes from ${quoteHost}, but your payment proof would go to ${proofHost}. One payment can’t answer to two companies, so dpay stopped. Nothing has been paid — ask the merchant for their own payment code.`,
+      `The price comes from ${quoteHost}, but your payment proof would go to ${proofHost}. One sale can’t answer to two companies. Nothing has been paid — ask the merchant for their own code.`,
     checkoutPrice: (price, host) => `${price} · price from ${host}`,
-    checkingCheckout: 'Checking with the merchant’s payment provider…',
+    checkingCheckout: 'Checking with the payment provider…',
     badCode:
-      'This code is damaged, or it isn’t a payment code. Ask the merchant to show it again, and check nothing is covering it.',
+      'This code is damaged, or it isn’t a payment code. Ask the merchant to show it again — check nothing covers it.',
     notHttps:
-      'This code points to an insecure address, so dpay won’t open it. Ask the merchant for their own payment code — a sticker over the real one looks exactly like this.',
+      'This code points to an insecure address, so dpay won’t open it. Ask the merchant for their own code — a sticker over the real one looks exactly like this.',
     providerUnreachable:
-      'Couldn’t reach the merchant’s payment provider. Nothing has been paid. Check your connection and scan again.',
+      'Couldn’t reach the payment provider. Nothing has been paid — check your connection and scan again.',
     badDestination: host =>
-      `${host} returned a payment address that doesn’t match what you chose, so dpay stopped. Nothing has been paid — don’t pay this code. Ask the merchant for their own code again.`,
+      `${host} returned a payment address that doesn’t match what you chose, so dpay stopped. Nothing has been paid — don’t pay this code. Ask the merchant for a fresh one.`,
     providerRefused: (host, detail) =>
-      `The merchant’s payment provider (${host}) refused this payment. Nothing has been paid. Ask the merchant to open a fresh charge, then scan the code. If it keeps failing, show them what their provider said: “${detail}”.`,
+      `The payment provider (${host}) refused this payment. Nothing has been paid. Ask the merchant to open a fresh charge and scan again. If it keeps failing, show them what it said: “${detail}”.`,
     providerFailed: (host, status) =>
-      `The merchant’s payment provider (${host}) returned an error (${status}) with no reason. Nothing has been paid. Wait a moment and scan again; if it keeps failing, ask the merchant for another way to pay.`,
+      `The payment provider (${host}) returned an error (${status}) with no reason. Nothing has been paid. Wait a moment and scan again; if it keeps failing, ask the merchant for another way to pay.`,
     badAnswer: (host, part) =>
-      `The merchant’s payment provider (${host}) didn’t send ${part}, so dpay can’t pay this checkout. Nothing has been paid. Scan again, and tell the merchant if it keeps happening.`,
+      `The payment provider (${host}) didn’t send ${part}, so dpay can’t pay this checkout. Nothing has been paid. Scan again, and tell the merchant if it keeps happening.`,
     answerPart: {
       body: 'a readable answer',
       details: 'complete payment details',
@@ -412,26 +412,26 @@ export const payEn: PayMessages = {
       expiry: 'a readable expiry time',
     },
     noPendingCharge: merchant =>
-      `${merchant}’s checkout has no charge waiting. Ask the cashier to open a charge first, then scan again.`,
+      `${merchant}’s checkout has no charge open. Ask the cashier to open one, then scan again.`,
     ref: {
       icBlock: index => `ledger block ${index}`,
       solTransaction: signature => `Solana transaction ${signature}`,
     },
     submitUnknown: reference =>
-      `Your transfer went through, but the provider didn’t confirm it — neither paid nor failed. The money has left your wallet: don’t pay again. Show the merchant ${reference}, the proof of your transfer.`,
+      `Your transfer went through, but the provider didn’t confirm it — neither paid nor failed. The money has left your wallet: don’t pay again. Show the merchant ${reference}, your transfer’s proof.`,
     submitPending: reference =>
-      `Your transfer went through and the provider has been told — it just hasn’t matched this sale yet. It credits as soon as it sees the transfer. The money has left your wallet: don’t pay again. If the checkout doesn’t show it, give the merchant ${reference}.`,
+      `Your transfer went through and the provider has been told — it just hasn’t matched this sale yet; it credits when it sees the transfer. The money has left your wallet: don’t pay again. If the checkout doesn’t show it, give the merchant ${reference}.`,
     submitRejected: (reference, said) =>
-      `Your transfer went through, but the provider refused the proof, so the sale wasn’t credited. The money has left your wallet: don’t pay again. Give the merchant ${reference}.`
+      `Your transfer went through, but the provider refused the proof — the sale wasn’t credited. The money has left your wallet: don’t pay again. Give the merchant ${reference}.`
       + (said === null ? '' : ` The provider said: “${said}”`),
     submitTooLate: reference =>
-      `Your transfer went through, but only after the price expired, so the sale wasn’t credited. The money has left your wallet: don’t pay again. Give the merchant ${reference}, the proof of your transfer.`,
+      `Your transfer went through, but only after the price expired — the sale wasn’t credited. The money has left your wallet: don’t pay again. Give the merchant ${reference}.`,
     transferUnknown:
-      'dpay couldn’t confirm your transfer yet, so the merchant hasn’t been told — neither paid nor failed. Keep this screen open: dpay is still checking and will finish the payment if it went through. Don’t pay again meanwhile.',
+      'Your transfer isn’t confirmed yet, so the merchant hasn’t been told — neither paid nor failed. Keep this screen open: dpay is still checking and will finish the payment if it went through. Don’t pay again meanwhile.',
     transferRefused: reason =>
-      `Your transfer did not go through — nothing was paid and your money is still in your wallet: ${reason}. Scan again to pay this checkout.`,
+      `The transfer didn’t go through — nothing was paid and your money is still in your wallet: ${reason}. Scan again to pay.`,
     transferFailed:
-      'The Solana network rejected your transaction — nothing was paid. The amount is still in your wallet, but a small network fee was charged. Scan again to try once more.',
+      'The Solana network rejected your transaction — nothing was paid. Your amount is intact; a small network fee was charged. Scan again to retry.',
     providerHost: host => `Price from ${host}`,
   },
 
@@ -457,45 +457,45 @@ export const payEn: PayMessages = {
 
   offlineSendTitle: 'Sending to an address needs a connection',
   offlineSendBody: symbol =>
-    `Scan the merchant's payment code instead — their phone submits your ${symbol} payment while you're offline.`,
+    `Scan the merchant's code instead — their phone submits your ${symbol} payment while you're offline.`,
   scannedAddressNotSendable: symbol =>
-    `That's a wallet address. ${symbol} can't be sent to an address — scan the merchant's payment code to pay.`,
+    `That's a wallet address — ${symbol} can't be sent to one. Scan a payment code to pay.`,
 
   spay: {
     wrongRail:
-      "That's a Solana Pay request. This screen settles on the Internet Computer — switch to Solana in Balances and scan it there.",
+      "That's a Solana Pay code. This screen settles on the Internet Computer — switch to Solana in Balances and scan it there.",
     badUri: 'This Solana Pay code is damaged. Ask the merchant for a fresh QR.',
-    badRecipient: "The recipient in this Solana Pay code isn't a valid Solana address. Ask the merchant for a fresh QR.",
-    badAmount: "The amount in this Solana Pay code isn't a plain number above zero. Ask the merchant for a fresh QR.",
-    badSplToken: "The token mint in this Solana Pay code isn't valid. Ask the merchant for a fresh QR.",
-    badReference: "The payment reference in this Solana Pay code isn't valid. Ask the merchant for a fresh QR.",
+    badRecipient: "This code's recipient isn't a valid Solana address. Ask the merchant for a fresh QR.",
+    badAmount: "This code's amount isn't a plain number above zero. Ask the merchant for a fresh QR.",
+    badSplToken: "This code's token mint isn't valid. Ask the merchant for a fresh QR.",
+    badReference: "This code's payment reference isn't valid. Ask the merchant for a fresh QR.",
     unexpectedParam: param =>
-      `This Solana Pay code carries an unknown parameter (${param}), so dpay can't review what paying would sign. Ask the merchant for a code without it.`,
-    memoTooLong: 'The memo in this Solana Pay code is too long for a Solana transaction. Ask the merchant for a fresh QR.',
+      `This code carries an unknown parameter (${param}), so dpay can't review what paying would sign. Ask the merchant for a code without it.`,
+    memoTooLong: "This code's memo is too long for a Solana transaction. Ask the merchant for a fresh QR.",
     unknownMint: mint =>
-      `This Solana Pay code asks for a token dpay doesn't carry (mint ${mint}). Pay it with a wallet that supports it.`,
+      `This code asks for a token dpay doesn't carry (mint ${mint}). Pay it with a wallet that supports it.`,
     offline:
-      'Paying a Solana Pay code submits from your phone, so it needs a connection. Go online and scan again.',
+      'Paying a Solana Pay code submits from your phone, so it needs a connection — go online and scan again.',
     amountLabel: 'Amount',
-    merchantMessage: message => `Message from the merchant: ${message}`,
+    merchantMessage: message => `From the merchant: ${message}`,
     pendingNote:
-      'The network accepted this payment, but confirmation is still on the way. The signature below is your record — check it before paying again.',
+      'The network accepted this payment; confirmation is still on the way. The signature below is your record — check it before paying again.',
   },
 
   scanToPay: 'Scan to pay',
   sendToAddress: 'Send to address',
   tapOrScanToPay: 'Tap or scan to pay',
-  solScanHint: "Scan the merchant's payment code to pay offline.",
+  solScanHint: "Scan the merchant's code to pay offline.",
   payNow: 'Pay Now',
   payNowA11y: 'Pay now',
-  payNowHint: 'Turn on the camera and tap-to-pay to pay a merchant',
+  payNowHint: 'Starts the camera and tap-to-pay',
   nfcNotAvailable: 'NFC not available',
   whyNfcUnavailable: 'Why NFC is unavailable',
   nfcUnavailableTitle: 'NFC unavailable',
   close: 'Close',
 
   noCameraFound: 'No camera found on this device.',
-  pointCamera: 'Point your camera at a payment code to pay',
+  pointCamera: 'Point the camera at a payment code',
   cameraPrivacy: 'Only used to scan codes. Never recorded or uploaded.',
   allowCameraScan: 'Allow camera scan',
 };
@@ -730,7 +730,7 @@ export const receiveEn: ReceiveMessages = {
   shareRequestLink: 'Share request link',
   linkUnavailable: 'This asset can’t be named in a payment code. Pick another asset to request a payment.',
   scanPayerSignedCode: "Scan the payer's signed code",
-  confirmWithTheirPhone: 'If the payer paid without scanning your code, tap here to confirm with their phone.',
+  confirmWithTheirPhone: 'If the payer paid without scanning your code, confirm with their phone.',
   newRequest: 'New request',
   back: 'Back',
 
@@ -761,73 +761,73 @@ export const receiveEn: ReceiveMessages = {
   broadcasting: 'Broadcasting on Solana — this can take up to a minute.',
 
   checkout: {
-    checkoutCode: 'Also show a code for OpenCryptoPay-compatible apps (Binance Pay, MoonPay) — the payer must have the app open',
+    checkoutCode: 'Also show a checkout code for OpenCryptoPay apps (Binance Pay, MoonPay) — the payer must have the app open',
 
     openChargeHint: 'Open this charge on your checkout and show the customer a payable code',
     badAmount: reason =>
       reason === 'too-precise'
-        ? 'A checkout charge is in whole rappen — enter 10.50 rather than 10.505.'
+        ? 'A charge is in whole rappen — enter 10.50, not 10.505.'
         : reason === 'too-large'
-        ? 'That total is too large to open a charge with. Enter what this customer owes.'
+        ? 'That total is too large to open. Enter what this customer owes.'
         : 'Enter the total to charge, like 10.50.',
 
     wrongAssetTitle: 'A checkout code is paid in VCHF',
     wrongAsset: (selected, network) =>
-      `A checkout code is always paid in VCHF on the Internet Computer — dpay never swaps. This request is in ${selected}${network ? ` on ${network}` : ''}. Switch to VCHF to open one, or keep the dpay code: any phone camera opens it, and it is paid in ${selected}.`,
+      `A checkout code is always paid in VCHF on the Internet Computer — dpay never swaps. This request is in ${selected}${network ? ` on ${network}` : ''}. Switch to VCHF, or keep the dpay code: any phone camera opens it, and it is paid in ${selected}.`,
     noCheckoutAsset:
       'This wallet has no VCHF, so there is no account for a checkout charge. Use the dpay code instead — any phone camera opens it, and it takes the asset you chose.',
     switchTo: asset => `Switch to ${asset}`,
 
     failedTitle: 'The charge was not opened',
     notServed: host =>
-      `${host} does not serve checkout codes, so nothing was opened. Ask whoever runs that relay to turn the checkout on, or use the dpay code — it needs no checkout.`,
+      `${host} does not serve checkout codes, so nothing was opened. Ask whoever runs that relay to turn the checkout on, or use the dpay code.`,
     unreachable: host =>
-      `dpay could not reach ${host}, so nothing was opened. Checkout codes are created online. Check the connection and try again — or use the dpay code, which this phone can show while offline.`,
+      `Couldn’t reach ${host}, so nothing was opened. Checkout codes are created online — check the connection and try again, or use the dpay code (this phone can show it offline).`,
     refused: said =>
-      `The checkout refused this charge: “${said}” Nothing is payable. Put that right, then open a fresh charge.`,
+      `The checkout refused this charge: “${said}” Nothing is payable. Fix that, then open a fresh charge.`,
     refusedNoReason: status =>
-      `The checkout refused this charge (HTTP ${status}) without a reason, so nothing is payable. Open a fresh charge; if it refuses twice, tell whoever runs the relay.`,
+      `The checkout refused this charge (HTTP ${status}) without a reason — nothing is payable. Open a fresh charge; if it refuses twice, tell whoever runs the relay.`,
     mispriced: (entered, quoted) =>
-      `You entered ${entered}, but the checkout answered with ${quoted}. dpay won’t show a code for a number nobody chose, so nothing is payable. Open a fresh charge; if it happens twice, tell whoever runs the relay before taking money.`,
+      `You entered ${entered}, but the checkout answered ${quoted} — dpay won’t show a code for a number nobody chose. Open a fresh charge; if it happens twice, tell whoever runs the relay before taking money.`,
     servedOther: (served, picked) =>
-      `The checkout opened this charge in ${served}, not ${picked} — it does not settle ${picked} yet, so nothing is payable. Open a fresh charge in ${served}, or ask whoever runs the relay to serve it.`,
+      `The checkout opened this charge in ${served}, not ${picked} — it does not settle ${picked} yet. Open a fresh charge in ${served}, or ask whoever runs the relay to serve it.`,
     unsigned:
-      'This phone could not sign the charge, so nothing is payable. Close and reopen dpay, then open a fresh charge.',
+      'This phone could not sign the charge, so nothing is payable. Restart dpay, then open a fresh charge.',
     tryAgain: 'Try again',
 
     settleOption: (token, currency) => `${token} · ${currency}`,
 
     settlesAs: (amount, price) =>
-      `You receive ${amount} on the Internet Computer. The ledger fee is yours, so the customer pays exactly ${price}.`,
+      `You receive ${amount} — the ledger fee is yours, so the customer pays exactly ${price}.`,
     collecting: 'Collecting the customer’s approved payment…',
     collectNotApproved:
-      'The customer’s wallet didn’t approve enough, or the approval ran out. Ask them to pay the code again — nothing has been taken.',
+      'The customer didn’t approve enough, or the approval ran out. Ask them to pay the code again — nothing has been taken.',
     collectNoFunds:
-      'The customer approved the payment but lacks the money. Nothing has been taken — ask them to top up and pay again.',
+      'The customer approved but lacks the money. Nothing has been taken — ask them to top up and pay again.',
     collectFailed:
-      'The approved payment could not be collected, and nothing has been taken. The code is still payable — ask them to scan again or tap.',
+      'The approved payment could not be collected, and nothing has been taken. The code is still payable — ask them to scan or tap again.',
     noFeeTitle: 'This checkout cannot price a charge',
     noFee: (symbol, host) =>
       `The shop pays the ledger fee out of the price, but dpay has no fee for ${symbol} — a charge here would quietly bill the customer for it. Nothing is payable. Update dpay, or tell whoever runs ${host} that its currency list is missing the ${symbol} fee.`,
     showToCustomer: nfc =>
       nfc === 'tap'
-        ? 'Show this to the customer — any phone camera opens it, and a dpay phone can tap it too.'
+        ? 'Show this to the customer — any phone camera opens it; a dpay phone can tap too.'
         : nfc === 'expired'
-        ? 'Show this to the customer — any phone camera opens it. Tapping has timed out on this code; open a fresh charge if they want to tap.'
+        ? 'Show this to the customer — any phone camera opens it. Tapping timed out on this code; open a fresh charge for taps.'
         : 'Show this to the customer — any phone camera opens it and pays.',
     waiting: 'Waiting for the payment…',
     cantCheck:
-      'Can’t check this charge right now — the checkout is out of contact. That does NOT mean it is unpaid. Keep the code up; this screen updates the moment it reaches the checkout again.',
+      'Can’t check this charge — the checkout is out of contact. That does NOT mean it is unpaid. Keep the code up; this screen updates the moment it reconnects.',
     expiredWatching:
-      'This code expired, so nobody new can pay it. If the customer already paid, the money can still land — watching a moment longer.',
+      'This code expired, so nobody new can pay it. If the customer already paid, the money can still land — watching a little longer.',
     cancel: 'Cancel charge',
     cancelling: 'Cancelling…',
     cancelFailed: said =>
-      `The charge was NOT cancelled: “${said}” It may still be payable — read that, then decide whether to hand anything over.`,
+      `The charge was NOT cancelled: “${said}” It may still be payable — decide whether to hand anything over.`,
     cancelFailedNoReason: status =>
-      `The charge was NOT cancelled (HTTP ${status}), so treat it as still payable. Try again, and don’t hand anything over until it clears or expires.`,
+      `The charge was NOT cancelled (HTTP ${status}) — treat it as still payable. Try again; hand over nothing until it clears or expires.`,
     cancelUnreachable: host =>
-      `dpay could not reach ${host}, so this charge was NOT cancelled — it stays payable until it expires. Try again once the connection is back.`,
+      `Couldn’t reach ${host}, so this charge was NOT cancelled — it stays payable until it expires. Try again once the connection is back.`,
 
     endedTitle: reason =>
       reason === 'expired' ? 'This code expired'

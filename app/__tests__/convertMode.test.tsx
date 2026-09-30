@@ -268,7 +268,7 @@ describe('C1 — the unit is printed exactly once on every money line', () => {
         d.approvingBody('9.99 ICP', '14:42'),
         d.outputFeeLine('9.99 VCHF'),
         d.composedOrderLine('ICPSwap', '9.99 VCHF'),
-        d.atLeast('9.99 VCHF', '1%'),
+        d.atLeast('9.99 VCHF'),
         d.doneBody('9.99 VCHF'),
       ];
       for (const line of lines) {
@@ -400,7 +400,7 @@ describe('C4 — slippage is a disclosed default inside Details, not a visible d
     for (const bps of [50, 100, 300]) {
       expect(present(tree, `convert-bps-${bps}`)).toBe(false);
     }
-    expect(textOf(tree, 'convert-min-out')).toContain('1% slippage'); // the floor carries it too
+    expect(textOf(tree, 'convert-min-out')).toContain(fmtAssetCompact(MATH.minOut, 8, 'VCHF')); // the floor
     await openDetails(tree);
     expect(textOf(tree, 'convert-slippage')).toContain(convertEn.slippageLabel);
     expect(textOf(tree, 'convert-slippage')).toContain('1%');
@@ -412,8 +412,8 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
     const tree = await mountConvert('250000000', '1');
     const headline = textOf(tree, 'convert-headline');
     // VCHF is currency-class: the hero reads like money (2 decimals), the one ≈ in the copy.
+    // (The sell half has no row: the input above IS the sell figure, the CTA names the amount.)
     expect(headline).toContain(convertEn.youReceive('0.41 VCHF'));
-    expect(headline).toContain(convertEn.youConvert('1 ICP'));
     // The venue's verbatim figure is NOT lost — Details carries the quote's own GROSS
     // figure, unchanged, attributed (the net hero subtracts only the disclosed ledger fee).
     await openDetails(tree);
@@ -422,9 +422,9 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
 
   test('not one §5 census fact was dropped — the sheet carries them; the census folds behind Details', async () => {
     const tree = await mountConvert('250000000', '1');
-    // On the open sheet: the decision facts — receive figure, attribution, floor, the
-    // ONE venue pick line, the CTA. The net/dpay lines are GONE (asserted below).
-    for (const id of ['convert-min-out', 'convert-quote-source', 'convert-venue-auto', 'convert-receive']) {
+    // On the open sheet: the decision facts — receive figure, the ONE merged quote line
+    // (attribution + instant + pick count), floor, CTA. The net/dpay lines are GONE (below).
+    for (const id of ['convert-min-out', 'convert-venue-auto', 'convert-receive']) {
       expect(`${id}: ${present(tree, id)}`).toBe(`${id}: true`);
     }
     expect(present(tree, 'convert-net')).toBe(false);
@@ -450,10 +450,11 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
   test('the pick line is a MECHANICAL disclosure — it states the pick, never a "best" claim', async () => {
     const tree = await mountConvert('250000000', '1');
     const pickLine = textOf(tree, 'convert-venue-auto');
-    expect(pickLine).toContain('Executed via ICPSwap'); // the executor, named
+    expect(pickLine).toContain('ICPSwap'); // the executor, named
+    expect(pickLine).toMatch(/\d{1,2}:\d{2}/); // the quote's read instant, on the same line
     expect(pickLine.toLowerCase()).not.toContain('best'); // the designed-out word, absent
-    // The attribution + timestamp ride their own line, exactly as before.
-    expect(textOf(tree, 'convert-quote-source')).toContain('Quote from ICPSwap, fetched');
+    // ONE venue quotable → the plain attribution, no comparison that never happened.
+    expect(pickLine).not.toContain('of 2 venues');
   });
 
   test('the displayed rate is EXACTLY the derivation of the venue\'s own reply digits', async () => {
@@ -556,13 +557,13 @@ describe('AUTO — the disclosed mechanical venue pick', () => {
 
   test('the pick FOLLOWS the highest net quoted output and says so — with the count', async () => {
     const tree = await mountConvert('250000000', '1');
-    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueLine(VENUE_B.display_name, 2));
+    // ONE merged quote line: venue + read instant + the mechanical comparison count.
+    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueLine(VENUE_B.display_name, nonBreakingClock(new Date(QUOTE_B.fetchedAtMs)), 2));
     // The hero figure is B's own number at the hero's standard display precision — the pick
     // never blends or recomputes; the venue's VERBATIM figure sits in Details, attributed.
     expect(textOf(tree, 'convert-receive')).toContain(convertEn.youReceive('0.89 VCHF'));
     await openDetails(tree);
     expect(textOf(tree, 'convert-quote-verbatim')).toContain(convertEn.quoteVerbatim(VENUE_B.display_name, fmtAssetCompact(QUOTE_B.amountOutGross, 8, 'VCHF')));
-    expect(textOf(tree, 'convert-quote-source')).toContain(VENUE_B.display_name);
     // Armed at the pick: tap 2 exists without any further decision.
     expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(false);
   });
@@ -583,7 +584,7 @@ describe('AUTO — the disclosed mechanical venue pick', () => {
         : {...QUOTE_A, amountOutGross: '90000000'}) as never));
     const tree = await mountConvert('250000000', '1');
     // Now A quotes strictly better — the PICK flips to A, mechanically…
-    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueLine(VENUE_A.display_name, 2));
+    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueLine(VENUE_A.display_name, nonBreakingClock(new Date(QUOTE_A.fetchedAtMs)), 2));
     // …and the expander STILL lists the other row first-served, registry order, unchanged.
     await openVenues(tree);
     expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_B.venue_id}`]);
@@ -622,7 +623,8 @@ describe('AUTO — the disclosed mechanical venue pick', () => {
   test('a pair with ONE quotable venue discloses the single form — no comparison that never happened', async () => {
     setRuntimeVenues(null); // the bundled registry alone: exactly one quotable venue on the pair
     const tree = await mountConvert('250000000', '1');
-    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueSingle(VENUE_A.display_name));
+    // ONE venue = the plain attribution on the merged line, no count that never happened.
+    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.quoteSource(nonBreakingClock(new Date(QUOTE_A.fetchedAtMs)), VENUE_A.display_name));
     // The pick is already armed: the common case is literally two taps.
     expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(false);
   });
@@ -1099,14 +1101,13 @@ describe('hub destination — the two-quote composed surface under the sheet (20
     expect(present(tree, 'convert-dest-address')).toBe(false);
     expect(present(tree, 'convert-gas-preflight')).toBe(false);
     expect(textOf(tree, 'convert-route-min')).toBe(
-      convertEn.multihop.routeMinWalletLine(fmtAssetCompact('2970000000000', 18, 'ETH'), '1%'));
+      convertEn.multihop.routeMinWalletLine(fmtAssetCompact('2970000000000', 18, 'ETH')));
     expect(present(tree, 'convert-min-out')).toBe(false);
     // The heading names the CURRENCY pair (currency-first grammar): CHF → ETH.
     const headingTexts = tree.root.findAllByType(Text).filter(n => n.props.children === convertEn.heading('CHF', 'ETH'));
     expect(headingTexts.length).toBeGreaterThanOrEqual(1);
     // The receive figure is the composed net estimate; BOTH venues verbatim on the line.
     expect(textOf(tree, 'convert-headline')).toContain(convertEn.youReceive(fmtAssetCompact('1000000000000', 18, 'ETH')));
-    expect(textOf(tree, 'convert-headline')).toContain(convertEn.youConvert('2.4997 VCHF'));
     expect(textOf(tree, 'convert-quote-source')).toBe(
       convertEn.multihop.hubQuoteSource('ICPSwap', 'ICPSwap', nbclock(1_700_000_005_000)));
     expect(textOf(tree, 'convert-route-via')).toBe(convertEn.multihop.viaHub('ICP'));

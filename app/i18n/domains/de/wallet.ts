@@ -22,21 +22,21 @@ export const walletDe: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Schweizer Franken', USD: 'US-Dollar', EUR: 'Euro', BTC: 'Bitcoin', ETH: 'Ether', ICP: 'Internet Computer', SOL: 'Solana'},
     chooseTitle: 'In welcher Währung denkst du?',
-    chooseBody: 'Legt die zuerst angezeigte Währung fest — nur Anzeige.',
-    railReason: {destination: 'die Zahlung verlangt diesen Weg', funded: 'du hast hier ein Guthaben'},
+    chooseBody: 'Nur Anzeige.',
+    railReason: {destination: 'wird für die Zahlung gebraucht', funded: 'Guthaben vorhanden'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Haupt',
     settingsTitle: 'Hauptwährung',
-    settingsHint: 'Die Währung, die dpay zuerst anzeigt und standardmässig verwendet',
+    settingsHint: 'Zuerst angezeigt; Standard beim Bezahlen.',
     confirm: 'Weiter',
     pickFirst: 'Wähle zuerst eine Währung.',
-    noneAvailable: 'Es konnten keine Währungen geladen werden. Prüfe die Serveradresse in den Einstellungen und öffne dpay erneut.',
+    noneAvailable: 'Keine Währungen geladen. Prüfe die Serveradresse in den Einstellungen und öffne dpay erneut.',
     a11y: currency => `${currency} wählen`,
   },
 
   railHealth: {
     thin: 'Geringe Liquidität',
-    deep: 'Zirkuliert heute breit on-chain.',
+    deep: 'Weit verbreitet.',
   },
 
   railDetail: {
@@ -57,14 +57,14 @@ export const walletDe: WalletMessages = {
     },
     balanceEyebrow: code => `Guthaben ${code}`,
     menu: {
-      ledger: 'Transaktionsliste',
+      ledger: 'Verlauf',
       remove: 'Entfernen',
-      close: 'Menü schließen',
+      close: 'Schliessen',
     },
     removeRefusal: {
-      nonzero: amount => `Du besitzt noch ${amount}. Tausche oder verschiebe es zuerst, dann entferne.`,
-      unreadable: 'dpay kann dieses Guthaben gerade nicht lesen. Verbinde dich erneut und versuche es dann.',
-      last: 'Deine Wallet braucht mindestens eine Währung.',
+      nonzero: amount => `${amount} zuerst tauschen oder verschieben.`,
+      unreadable: 'Guthaben nicht lesbar. Verbinde dich erneut und versuche es dann.',
+      last: 'Mindestens eine Währung muss bleiben.',
     },
     activity: {
       title: 'Aktivität',
@@ -77,12 +77,12 @@ export const walletDe: WalletMessages = {
 
   accounts: {
     title: 'Konten',
-    intro: 'Tippe auf eine Währung, um sie zur Hauptwährung zu machen.',
+    intro: 'Antippen setzt die Hauptwährung.',
     back: 'Zurück',
-    practice: 'Übungsgeld. Es funktioniert nur in dpay — kein Geschäft nimmt es an.',
+    practice: 'Übungsgeld. Kein Geschäft nimmt es an.',
     convertHint: 'Bei einem externen Handelsplatz tauschen',
-    setMainHint: 'Macht diese Währung zur Hauptwährung',
-    addCurrency: 'Neue Währung',
+    setMainHint: 'Setzt sie als Hauptwährung',
+    addCurrency: 'Währung hinzufügen',
   },
 
   addCurrency: {
@@ -92,22 +92,22 @@ export const walletDe: WalletMessages = {
     other: 'Andere',
     inWallet: 'In der Wallet',
     add: 'Hinzufügen',
-    none: 'Keine Währung gefunden.',
+    none: 'Keine Treffer.',
   },
 
   addressBook: {
     title: 'Adressbuch',
-    intro: 'Adressen, an die du gesendet hast — nur auf diesem Gerät gespeichert.',
+    intro: 'Nur auf diesem Gerät gespeichert.',
     back: 'Zurück',
-    empty: 'Noch keine gespeicherten Adressen. Adressen, an die du sendest, werden hier automatisch gespeichert.',
+    empty: 'Noch keine gespeicherten Adressen. Adressen, an die du sendest, erscheinen hier automatisch.',
     addEntry: 'Adresse hinzufügen',
     assetLabel: 'Für',
     addressLabel: 'Adresse',
     addressPlaceholder: 'Adresse einfügen',
     addressHint: 'Genau so, wie du senden würdest',
     nameLabel: 'Name',
-    namePlaceholder: 'z. B. Alice (optional)',
-    save: 'Adresse speichern',
+    namePlaceholder: 'z. B. Alice',
+    save: 'Speichern',
     rename: 'Umbenennen',
     renameHint: who => `${who} umbenennen`,
   },
@@ -115,7 +115,7 @@ export const walletDe: WalletMessages = {
   backToPaying: asset => `Zurück zum Bezahlen mit ${asset}`,
 
   faucet: {
-    unavailableOnRelay: 'Demo-Aufladen ist auf diesem Relay nicht verfügbar',
+    unavailableOnRelay: 'Aufladen auf diesem Relay nicht verfügbar',
     failed: 'Aufladen fehlgeschlagen',
     unavailable: 'Faucet nicht verfügbar',
     offline: 'Offline — versuche es erneut, wenn du verbunden bist',
@@ -127,29 +127,28 @@ export const walletDe: WalletMessages = {
     demoFundsHint: 'Fügt ∂100 Demo-Geld hinzu',
     needsSetup: 'Einrichtung nötig',
     select: symbol => `${symbol} auswählen`,
-    selectHint: 'Auf deinem Startbildschirm anzeigen',
-    selectSolanaHint: symbol => `Zeigt ${symbol} auf dem Startbildschirm; Bezahlen und Empfangen nutzen Solana`,
+    selectHint: 'Für Bezahlen und Empfangen verwendet',
     showTestnet: 'Testnet-Assets zeigen',
     hideTestnet: 'Testnet-Assets verbergen',
   },
 
   ledger: {
     empty: 'Noch keine Zahlungen.',
-    emptyHint: 'Tippe auf Empfangen, um eine Zahlungsanfrage zu erstellen, oder auf Bezahlen, um eine zu scannen.',
+    emptyHint: 'Tippe auf Empfangen für eine Anfrage, auf Bezahlen zum Scannen.',
     recent: 'Zuletzt',
     allAssets: 'Alle Assets',
     all: 'Alle',
     filter: label => `${label} filtern`,
     to: who => `an ${who}`,
     from: who => `von ${who}`,
-    fromPool: 'von einem Liquiditätspool',
-    toPool: 'an einen Liquiditätspool',
+    fromPool: 'von einem Pool',
+    toPool: 'an einen Pool',
     fees: fee => `− ${fee} Gebühren`,
     mintCounterparty: 'Demo-Guthaben',
-    failed: 'Fehlgeschlagen — nur die Netzwerkgebühr wurde abgebucht',
+    failed: 'Fehlgeschlagen — nur die Gebühr wurde abgebucht',
     dropped: count => count === 1
-      ? '1 Solana-Transaktion konnte nicht gelesen werden — sie existiert on-chain, wird hier aber nicht angezeigt.'
-      : `${count} Solana-Transaktionen konnten nicht gelesen werden — sie existieren on-chain, werden hier aber nicht angezeigt.`,
+      ? '1 Solana-Transaktion konnte nicht gelesen werden — sie existiert weiterhin on-chain.'
+      : `${count} Solana-Transaktionen konnten nicht gelesen werden — sie existieren weiterhin on-chain.`,
   },
 
   fund: {checking: 'Wird geprüft…', checkAgain: 'Erneut prüfen'},
@@ -183,7 +182,7 @@ export const educationDe: EducationMessages = {
       key: {
         eyebrow: 'Dein Geld',
         title: 'Dein Schlüssel bleibt auf diesem Gerät',
-        body: 'dpay hält kein Geld und kann keine Zahlungen für dich freigeben. Es gibt kein dpay-Konto — nur deinen Schlüssel.',
+        body: 'dpay hält kein Geld und kann keine Zahlungen freigeben. Es gibt kein dpay-Konto — nur deinen Schlüssel.',
       },
       exact: {
         eyebrow: 'Keine Überraschung',
@@ -205,33 +204,33 @@ export const educationDe: EducationMessages = {
     eyebrow: 'Übung',
     payeeName: 'Übungsladen',
     title: 'Mach eine Zahlung, ganz echt',
-    cardLine: 'Der Code, den dir ein Laden zeigt.',
-    balance: amount => `Du hast ${amount} Übungsgeld.`,
+    cardLine: 'Der Code, den ein Laden zeigt.',
+    balance: amount => `${amount} Übungsgeld.`,
     review: 'Zahlung prüfen',
     skip: 'Übung überspringen',
     bothSides: 'Die Übung braucht eine Verbindung — dein Handy spielt beide Seiten. Unterwegs nur der Laden.',
-    settledBody: 'Eine echte Zahlung: dein Handy hat sie signiert, und das Übungs-Ledger hat sie abgewickelt.',
+    settledBody: 'Von deinem Handy signiert, vom Übungs-Ledger abgewickelt.',
     settledBalance: amount => `Noch ${amount} Übungsgeld übrig.`,
-    pendingBody: 'Signiert und gesendet, noch nicht abgewickelt — bestätigt ist nichts. Genau so sieht eine echte ausstehende Zahlung aus.',
-    refusedTitle: 'Das Ledger hat sie abgelehnt',
+    pendingBody: 'Signiert und gesendet, noch nicht abgewickelt — bestätigt ist nichts. So sieht ausstehend aus.',
+    refusedTitle: 'Abgelehnt',
     refusedBody: 'Es wurde nichts bewegt.',
     continue: 'Einrichtung fortsetzen',
     punchline: 'Übungsgeld hat keinen Gegenwert.',
     noFaucet: {
       title: 'Hier gibt es kein Übungsgeld',
-      body: 'Dieser Server gibt kein Übungsgeld aus. In deiner Wallet fehlt nichts — mach weiter und wähle deine Währung.',
+      body: 'Dieser Server hat gerade keinen. In deiner Wallet fehlt nichts — mach weiter und wähle deine Währung.',
     },
     cooldown: {
       title: 'Übungsgeld, gleich',
-      body: reason => `Dieser Server gibt Übungsgeld nur ab und zu aus — gerade eben hat er es getan. Er meldet: ${reason} Mach mit der Einrichtung weiter; komm jederzeit zurück.`,
+      body: reason => `Dieser Server gibt Übungsgeld nur ab und zu aus — gerade eben hat er es getan. Er meldet: ${reason} Mach weiter; komm jederzeit zurück.`,
     },
     offline: {
-      title: 'Diese Übung braucht eine Verbindung',
-      body: 'Die Übung braucht eine Verbindung, weil dein Handy beide Seiten spielt. Verbinde dich wieder und versuche es erneut, oder mach mit der Einrichtung weiter.',
+      title: 'Die Übung braucht eine Verbindung',
+      body: 'Dein Handy spielt beide Seiten. Verbinde dich wieder und versuche es erneut, oder mach mit der Einrichtung weiter.',
     },
     empty: {
-      title: 'Noch nichts zum Üben da',
-      body: 'Dein Übungsguthaben ist leer. Mit deiner Wallet ist alles in Ordnung — mach weiter und wähle deine Währung.',
+      title: 'Noch kein Übungsgeld',
+      body: 'In deiner Wallet fehlt nichts — mach weiter und wähle deine Währung.',
     },
   },
 
@@ -242,7 +241,7 @@ export const educationDe: EducationMessages = {
     },
     offlineQr: {
       title: 'Signiert — nicht abgewickelt',
-      body: 'Kein Signal? Dieser signierte Code ist dein Zahlungsnachweis. Die Verbindung des Empfängers wickelt ihn ab — der Status aktualisiert sich, sobald du wieder da bist.',
+      body: 'Dieser signierte Code ist dein Zahlungsnachweis. Die Verbindung des Empfängers wickelt ihn ab — der Status aktualisiert sich, sobald du wieder da bist.',
     },
     pendingOutcome: {
       title: 'Noch ausstehend',

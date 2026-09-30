@@ -404,7 +404,7 @@ describe('rail health + ramp lines — catalog facts or silence', () => {
 
   it('states thin in 2–3 words on the rail it sits on, and deep as a plain fact', () => {
     expect(railLiquidityLine(legacyVeur)).toBe('Thin liquidity');
-    expect(railLiquidityLine(eurc)).toBe('Circulates widely on-chain today.');
+    expect(railLiquidityLine(eurc)).toBe('Circulates widely.');
     // Untiered rows make NO statement — no speculative copy for a tier the catalog cannot name.
     expect(railLiquidityLine(vchf)).toBeNull();
     expect(railLiquidityLine(sol)).toBeNull();

@@ -56,7 +56,7 @@ hermeticDescribe('flow 169 — a pending conversion survives an app reload; the 
 
       await openConvertFor(m, 'icp');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
 
       // Park the conversion on the honest pending (venue holds the output) — both pools, the
       // winner-derived gross, exactly flow 141's adaptation to the two-venue world.

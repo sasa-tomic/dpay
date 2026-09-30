@@ -32,12 +32,12 @@ export const payEs: PayMessages = {
   signedOffline: 'firmado sin conexión ✓',
   waitingToScan: who => `Esperando a que ${who} lo escanee…`,
   offlineSettles: who =>
-    `Sin conexión: ${who} lo confirmará al enviarlo. Lo verás en tu saldo cuando vuelvas a tener conexión.`,
+    `Sin conexión: ${who} lo confirma al enviarlo. Tu saldo se actualiza cuando vuelvas a tener conexión.`,
   solOfflineSettles:
-    'Sin conexión: el comercio lo confirmará al enviarlo. Lo verás en tu saldo cuando quede confirmado.',
+    'Sin conexión: el comercio lo confirma al enviarlo. Tu saldo se actualiza cuando quede confirmado.',
   handedTo: who => `Entregado a ${who}`,
   handedToMerchant: 'Entregado al comercio',
-  handedOffHint: 'Marca este pago como entregado. Tu saldo se actualiza cuando el comercio lo confirme',
+  handedOffHint: 'Marca el pago como entregado — tu saldo se actualiza cuando el comercio lo confirme',
 
   unsupportedAsset: 'Activo no admitido',
   unsupportedAssetBody: currency =>
@@ -45,68 +45,68 @@ export const payEs: PayMessages = {
   paying: 'Pagando',
   payAmount: amount => `Pagar ${amount}`,
   notEnoughBalance: 'No tienes saldo suficiente para este pago.',
-  localBalanceMayNotCover: 'Puede que tu saldo local no alcance; el comercio lo verificará.',
+  localBalanceMayNotCover: 'Puede que tu saldo local no alcance; el comercio lo verifica.',
   approve: 'Aprobar',
   approveA11y: 'Aprobar el pago',
   approveHint: 'Firma con tu clave el importe mostrado y lo envía',
   signing: 'Firmando…',
-  signsOffline: 'Esto se firma sin conexión: el comercio lo confirma al enviarlo.',
+  signsOffline: 'Se firma sin conexión: el comercio lo confirma al enviarlo.',
 
   link: {
     title: 'Este enlace de pago no se puede pagar',
     part: {recipient: 'la cuenta que cobra', asset: 'el activo', network: 'la red', amount: 'el importe', ref: 'la referencia'},
-    malformed: part => `Al enlace le falta ${part}, o el valor está dañado. Pide un enlace nuevo a quien te lo envió.`,
+    malformed: part => `Al enlace le falta ${part}, o el valor está dañado. Pide un enlace nuevo.`,
     unknownAsset: (token, network) =>
-      `El enlace pide ${token} en ${network}, que esta cartera no tiene. dpay nunca convierte: pide un enlace en un activo que tengas.`,
+      `El enlace pide ${token} en ${network} y no tienes ninguno. dpay nunca convierte: pide un enlace en un activo que tengas.`,
     wrongNetwork: (token, network) =>
-      `El enlace pide ${token} en ${network}, pero tienes ${token} en otra red. Pagar enviaría tu dinero a la cadena equivocada: pide un enlace en una red que tengas.`,
+      `El enlace pide ${token} en ${network}, pero tienes ${token} en otra red. Pagar enviaría tu dinero a la cadena equivocada: pide a quien te lo envió un enlace en una red que tengas.`,
     hiddenAsset: token =>
-      `El enlace pide ${token}, un activo de red de pruebas. Abre «Saldos», activa «Mostrar activos de prueba» y vuelve a abrir el enlace.`,
+      `El enlace pide ${token}, un activo de red de pruebas. En «Saldos», activa «Mostrar activos de prueba» y vuelve a abrir el enlace.`,
     unsupportedAsset: token =>
-      `El enlace pide ${token} y esta cartera no puede pagarlo. dpay nunca convierte: pide un enlace en un activo que tengas.`,
+      `El enlace pide ${token} y esta billetera no puede pagarlo. dpay nunca convierte: pide un enlace en un activo que tengas.`,
     badAmount: (amount, token) =>
-      `«${amount}» no es un importe válido de ${token}: puede usar demasiados decimales. Pide un enlace nuevo.`,
+      `«${amount}» no es un importe válido de ${token}: revisa los decimales. Pide un enlace nuevo.`,
     badAccount: network =>
-      `La cuenta de este enlace no es una cuenta válida de ${network}. Pide a quien te lo envió que la revise y envíe un enlace nuevo.`,
+      `Esa cuenta no es una cuenta válida de ${network}. Pide a quien te lo envió que la revise y envíe un enlace nuevo.`,
   },
 
   ocp: {
     solanaTokenUnsupported: symbol =>
-      `Esta caja acepta ${symbol} en Solana, pero su código no indica qué cuenta pagar. Pagar podría enviar dinero a la cuenta equivocada: paga con SOL, o cambia en «Saldos» a otro activo que acepte esta caja.`,
+      `Esta caja acepta ${symbol} en Solana, pero su código no indica qué cuenta pagar: el dinero podría caer en la equivocada, así que paga con SOL, o cambia en «Saldos».`,
     chooseAsset: selected =>
-      `Esta caja no acepta ${selected}, pero sí estos. Elige con cuál pagar: dpay nunca convierte.`,
+      `Esta caja no acepta ${selected}, pero sí estos: dpay nunca convierte.`,
     assetNotAccepted: (selected, accepted) =>
-      `Esta caja no acepta ${selected}: acepta ${accepted}. dpay nunca convierte, así que cambia en «Saldos» y vuelve a escanear.`,
+      `Esta caja acepta ${accepted}, no ${selected}. dpay nunca convierte: cambia en «Saldos» y vuelve a escanear.`,
     methodUnavailable: (selected, alternatives) =>
       alternatives
-        ? `Esta caja acepta ${selected}, pero su proveedor no puede procesarla ahora mismo. La caja también acepta ${alternatives}: dpay nunca convierte, así que cambia en «Saldos» y vuelve a escanear.`
-        : `Esta caja acepta ${selected}, pero su proveedor no puede procesarla ahora mismo, y esta billetera no puede pagar ningún otro activo que acepte la caja. Pide al comercio otra forma de pago.`,
+        ? `La caja acepta ${selected}, pero su proveedor no puede procesarla ahora mismo. También acepta ${alternatives}: cambia en «Saldos» y vuelve a escanear.`
+        : `La caja acepta ${selected}, pero su proveedor no puede procesarla, y esta billetera no puede pagar ningún otro activo que acepte la caja. Pide al comercio otra forma de pago.`,
     noPayableAsset: accepted =>
-      `dpay no puede pagar en esta caja. Acepta ${accepted}, que esta billetera no puede pagar: dpay nunca convierte. Paga de otra forma.`,
+      `Esta caja acepta ${accepted}, nada que esta billetera pueda pagar. dpay nunca convierte. Paga de otra forma.`,
     quoteExpired:
-      'Este precio ha caducado: los precios duran unos cinco minutos. Vuelve a escanear el código para obtener uno nuevo.',
+      'Este precio ha caducado: vuelve a escanear el código para obtener uno nuevo.',
     notEnoughTime:
-      'Este precio caduca demasiado pronto para pagarlo con seguridad. Vuelve a escanear el código para obtener un precio nuevo.',
+      'Este precio caduca demasiado pronto para pagarlo con seguridad: vuelve a escanear para obtener uno nuevo.',
     unreportable: host =>
-      `${host} no le ha dado a dpay ninguna forma de informar de tu pago, así que pagar te costaría el dinero sin que se abone la venta. No se ha pagado nada. Volver a escanear no ayudará: pide al comercio otra forma de pago.`,
+      `${host} no dio ninguna forma de informar de un pago, así que pagar te costaría el dinero sin que se abone la venta. No se ha pagado nada. Volver a escanear no ayudará: pide al comercio otra forma de pago.`,
     proofElsewhere: (quoteHost, proofHost) =>
-      `El precio de este código viene de ${quoteHost}, pero el comprobante de tu pago iría a ${proofHost}. Un pago no puede responder ante dos empresas, así que dpay se ha detenido. No se ha pagado nada: pide al comercio su propio código de pago.`,
+      `El precio viene de ${quoteHost}, pero el comprobante de tu pago iría a ${proofHost}. Una venta no puede responder ante dos empresas. No se ha pagado nada: pide al comercio su propio código.`,
     checkoutPrice: (price, host) => `${price} · precio de ${host}`,
-    checkingCheckout: 'Comprobando con el proveedor de pagos del comercio…',
+    checkingCheckout: 'Comprobando con el proveedor de pagos…',
     badCode:
-      'Este código está dañado, o no es un código de pago. Pide al comercio que lo muestre otra vez y comprueba que no lo tape nada.',
+      'Este código está dañado, o no es un código de pago. Pide al comercio que lo muestre otra vez: comprueba que no lo tape nada.',
     notHttps:
-      'Este código apunta a una dirección insegura, así que dpay no lo abre. Pide al comercio su propio código de pago: una pegatina encima del real tiene exactamente este aspecto.',
+      'Este código apunta a una dirección insegura, así que dpay no lo abre. Pide al comercio su propio código: una pegatina encima del real tiene exactamente este aspecto.',
     providerUnreachable:
-      'No se pudo contactar con el proveedor de pagos del comercio. No se ha pagado nada. Comprueba tu conexión y vuelve a escanear.',
+      'No se pudo contactar con el proveedor de pagos. No se ha pagado nada: comprueba tu conexión y vuelve a escanear.',
     badDestination: host =>
-      `${host} devolvió una dirección de pago que no coincide con lo que elegiste, así que dpay se ha detenido. No se ha pagado nada: no pagues este código. Pide al comercio su propio código otra vez.`,
+      `${host} devolvió una dirección de pago que no coincide con lo que elegiste, así que dpay se ha detenido. No se ha pagado nada: no pagues este código. Pide al comercio uno nuevo.`,
     providerRefused: (host, detail) =>
-      `El proveedor de pagos del comercio (${host}) rechazó este pago. No se ha pagado nada. Pide al comercio que registre de nuevo la venta y vuelve a escanear. Si sigue fallando, muéstrale lo que dijo su proveedor: «${detail}».`,
+      `El proveedor de pagos (${host}) rechazó este pago. No se ha pagado nada. Pide al comercio que registre de nuevo la venta y vuelve a escanear. Si sigue fallando, muéstrale lo que dijo: «${detail}».`,
     providerFailed: (host, status) =>
-      `El proveedor de pagos del comercio (${host}) devolvió un error (${status}) sin motivo. No se ha pagado nada. Espera un momento y vuelve a escanear; si sigue fallando, pide al comercio otra forma de pago.`,
+      `El proveedor de pagos (${host}) devolvió un error (${status}) sin motivo. No se ha pagado nada. Espera un momento y vuelve a escanear; si sigue fallando, pide al comercio otra forma de pago.`,
     badAnswer: (host, part) =>
-      `El proveedor de pagos del comercio (${host}) no envió ${part}, así que dpay no puede pagar en esta caja. No se ha pagado nada. Vuelve a escanear y avisa al comercio si sigue ocurriendo.`,
+      `El proveedor de pagos (${host}) no envió ${part}, así que dpay no puede pagar en esta caja. No se ha pagado nada. Vuelve a escanear y avisa al comercio si sigue ocurriendo.`,
     answerPart: {
       body: 'una respuesta legible',
       details: 'los datos de pago completos',
@@ -114,7 +114,7 @@ export const payEs: PayMessages = {
       expiry: 'una fecha de caducidad legible',
     },
     noPendingCharge: merchant =>
-      `La caja de ${merchant} no tiene ningún cobro pendiente. Pide que registren la venta primero y vuelve a escanear.`,
+      `La caja de ${merchant} no tiene ningún cobro abierto. Pide que registren uno primero y vuelve a escanear.`,
     ref: {
       icBlock: index => `el bloque ${index} del registro`,
       solTransaction: signature => `la transacción de Solana ${signature}`,
@@ -122,18 +122,18 @@ export const payEs: PayMessages = {
     submitUnknown: reference =>
       `Tu transferencia se realizó, pero el proveedor no la confirmó: ni pagada ni fallida. El dinero ha salido de tu billetera: no pagues otra vez. Muestra al comercio ${reference}, la prueba de tu transferencia.`,
     submitPending: reference =>
-      `Tu transferencia se realizó y el proveedor ya lo sabe: solo que aún no la ha asociado a esta venta. Se abonará en cuanto vea la transferencia. El dinero ha salido de tu billetera: no pagues otra vez. Si la caja no la muestra, da ${reference} al comercio.`,
+      `Tu transferencia se realizó y el proveedor ya lo sabe: solo que aún no la ha asociado a esta venta; se abonará en cuanto la vea. El dinero ha salido de tu billetera: no pagues otra vez. Si la caja no la muestra, da ${reference} al comercio.`,
     submitRejected: (reference, said) =>
-      `Tu transferencia se realizó, pero el proveedor rechazó la prueba, así que la venta no se ha abonado. El dinero ha salido de tu billetera: no pagues otra vez. Da ${reference} al comercio.`
+      `Tu transferencia se realizó, pero el proveedor rechazó la prueba: la venta no se ha abonado. El dinero ha salido de tu billetera: no pagues otra vez. Da ${reference} al comercio.`
       + (said === null ? '' : ` El proveedor indica: «${said}»`),
     submitTooLate: reference =>
-      `Tu transferencia se realizó, pero solo después de que el precio caducara, así que la venta no se ha abonado. El dinero ha salido de tu billetera: no pagues otra vez. Da al comercio ${reference}, la prueba de tu transferencia.`,
+      `Tu transferencia se realizó, pero solo después de que el precio caducara: la venta no se ha abonado. El dinero ha salido de tu billetera: no pagues otra vez. Da al comercio ${reference}.`,
     transferUnknown:
-      'dpay aún no ha podido confirmar tu transferencia, así que el comercio no sabe nada: ni pagada ni fallida. Deja esta pantalla abierta: dpay sigue comprobándolo y completará el pago si la transferencia se realizó. Mientras tanto, no pagues otra vez.',
+      'Tu transferencia aún no está confirmada, así que el comercio no sabe nada: ni pagada ni fallida. Deja esta pantalla abierta: dpay sigue comprobándolo y completará el pago si la transferencia se realizó. Mientras tanto, no pagues otra vez.',
     transferRefused: reason =>
-      `Tu transferencia no se realizó — no se ha pagado nada y tu dinero sigue en tu billetera: ${reason}. Vuelve a escanear para pagar en esta caja.`,
+      `La transferencia no se realizó: no se ha pagado nada y tu dinero sigue en tu billetera: ${reason}. Vuelve a escanear para pagar.`,
     transferFailed:
-      'La red de Solana rechazó tu transacción: no se ha pagado nada. El importe sigue en tu billetera, pero se ha cobrado una pequeña comisión de red. Vuelve a escanear para intentarlo de nuevo.',
+      'La red de Solana rechazó tu transacción: no se ha pagado nada. Tu importe está intacto; se cobró una pequeña comisión de red. Vuelve a escanear para reintentar.',
     providerHost: host => `Precio de ${host}`,
   },
 
@@ -159,45 +159,45 @@ export const payEs: PayMessages = {
 
   offlineSendTitle: 'Enviar a una dirección necesita conexión',
   offlineSendBody: symbol =>
-    `Escanea el código de pago del comercio: su teléfono envía tu pago en ${symbol} mientras estás sin conexión.`,
+    `Escanea el código del comercio: su teléfono envía tu pago en ${symbol} mientras estás sin conexión.`,
   scannedAddressNotSendable: symbol =>
-    `Eso es una dirección de billetera. ${symbol} no se puede enviar a una dirección: escanea el código de pago del comercio para pagar.`,
+    `Eso es una dirección de billetera: ${symbol} no se puede enviar a una. Escanea un código de pago para pagar.`,
 
   spay: {
     wrongRail:
-      'Esa es una solicitud de Solana Pay. Esta pantalla paga por Internet Computer: cambia a Solana en Saldos y escanea el código allí.',
+      'Esa es un código de Solana Pay. Esta pantalla paga por Internet Computer: cambia a Solana en Saldos y escanea el código allí.',
     badUri: 'Este código de Solana Pay está dañado. Pide al comercio un QR nuevo.',
-    badRecipient: 'El destinatario de este código de Solana Pay no es una dirección Solana válida. Pide al comercio un QR nuevo.',
-    badAmount: 'El importe de este código de Solana Pay no es un número simple mayor que cero. Pide al comercio un QR nuevo.',
-    badSplToken: 'El mint de token de este código de Solana Pay no es válido. Pide al comercio un QR nuevo.',
-    badReference: 'La referencia de pago de este código de Solana Pay no es válida. Pide al comercio un QR nuevo.',
+    badRecipient: 'El destinatario de este código no es una dirección Solana válida. Pide al comercio un QR nuevo.',
+    badAmount: 'El importe de este código no es un número simple mayor que cero. Pide al comercio un QR nuevo.',
+    badSplToken: 'El mint de token de este código no es válido. Pide al comercio un QR nuevo.',
+    badReference: 'La referencia de pago de este código no es válida. Pide al comercio un QR nuevo.',
     unexpectedParam: param =>
-      `Este código de Solana Pay trae un parámetro desconocido (${param}): dpay no puede revisar lo que firmaría el pago. Pide al comercio un código sin él.`,
-    memoTooLong: 'El memo de este código de Solana Pay es demasiado largo para una transacción Solana. Pide al comercio un QR nuevo.',
+      `Este código trae un parámetro desconocido (${param}): dpay no puede revisar lo que firmaría el pago. Pide al comercio un código sin él.`,
+    memoTooLong: 'El memo de este código es demasiado largo para una transacción Solana. Pide al comercio un QR nuevo.',
     unknownMint: mint =>
-      `Este código de Solana Pay pide un token que dpay no ofrece (mint ${mint}). Págalo con una billetera que lo admita.`,
+      `Este código pide un token que dpay no ofrece (mint ${mint}). Págalo con una billetera que lo admita.`,
     offline:
-      'Con un código de Solana Pay es tu teléfono quien envía, así que necesita conexión. Conéctate y vuelve a escanear.',
+      'Con un código de Solana Pay es tu teléfono quien envía, así que necesita conexión: conéctate y vuelve a escanear.',
     amountLabel: 'Importe',
-    merchantMessage: message => `Mensaje del comercio: ${message}`,
+    merchantMessage: message => `Del comercio: ${message}`,
     pendingNote:
-      'La red aceptó este pago, pero la confirmación sigue en camino. La firma de abajo es tu comprobante: revísala antes de pagar de nuevo.',
+      'La red aceptó este pago; la confirmación sigue en camino. La firma de abajo es tu comprobante: revísala antes de pagar de nuevo.',
   },
 
   scanToPay: 'Escanear y pagar',
   sendToAddress: 'Enviar a dirección',
   tapOrScanToPay: 'Acerca o escanea para pagar',
-  solScanHint: 'Escanea el código de pago del comercio para pagar sin conexión.',
+  solScanHint: 'Escanea el código del comercio para pagar sin conexión.',
   payNow: 'Pagar ahora',
   payNowA11y: 'Pagar ahora',
-  payNowHint: 'Activa la cámara y el pago sin contacto para poder pagar en un comercio',
+  payNowHint: 'Inicia la cámara y el pago sin contacto',
   nfcNotAvailable: 'NFC no disponible',
   whyNfcUnavailable: 'Por qué el NFC no está disponible',
   nfcUnavailableTitle: 'NFC no disponible',
   close: 'Cerrar',
 
   noCameraFound: 'No se encontró ninguna cámara en este dispositivo.',
-  pointCamera: 'Apunta con la cámara a un código de pago para pagar',
+  pointCamera: 'Apunta la cámara a un código de pago',
   cameraPrivacy: 'Solo para escanear códigos: nunca graba ni sube nada.',
   allowCameraScan: 'Permitir la cámara',
 };
@@ -241,7 +241,7 @@ export const receiveEs: ReceiveMessages = {
   shareRequestLink: 'Compartir enlace de la solicitud',
   linkUnavailable: 'Este activo no puede nombrarse en un código de pago. Elige otro activo para solicitar un pago.',
   scanPayerSignedCode: 'Escanea el código firmado de quien paga',
-  confirmWithTheirPhone: 'Si quien paga lo hizo sin escanear tu código, toca aquí para confirmarlo con su teléfono.',
+  confirmWithTheirPhone: 'Si quien paga lo hizo sin escanear tu código, confírmalo con su teléfono.',
   newRequest: 'Nueva solicitud',
   back: 'Atrás',
 
@@ -272,51 +272,51 @@ export const receiveEs: ReceiveMessages = {
   broadcasting: 'Enviando a la red de Solana: puede tardar hasta un minuto.',
 
   checkout: {
-    checkoutCode: 'Muestra también un código para apps compatibles con OpenCryptoPay (Binance Pay, MoonPay) — el pagador debe tener la app abierta',
+    checkoutCode: 'Muestra también un código de caja para apps OpenCryptoPay (Binance Pay, MoonPay) — el pagador debe tener la app abierta',
 
     openChargeHint: 'Abrir este importe en tu caja y mostrar al cliente un código pagable',
     badAmount: reason =>
       reason === 'too-precise'
-        ? 'Un importe de caja llega hasta el céntimo: pon 10.50 en lugar de 10.505.'
+        ? 'Un importe de caja llega hasta el céntimo: pon 10.50, no 10.505.'
         : reason === 'too-large'
-        ? 'Ese importe es demasiado alto para una caja. Escribe lo que debe este cliente.'
+        ? 'Ese importe es demasiado alto para abrirlo. Escribe lo que debe este cliente.'
         : 'Escribe el importe a cobrar, por ejemplo 10.50.',
 
     wrongAssetTitle: 'Un código de caja se paga en VCHF',
     wrongAsset: (selected, network) =>
-      `Un código de caja se paga siempre en VCHF en Internet Computer: dpay nunca convierte. Esta solicitud está en ${selected}${network ? ` en ${network}` : ''}. Cambia a VCHF para cobrar, o quédate con el código dpay: cualquier cámara de teléfono lo abre, y se paga en ${selected}.`,
+      `Un código de caja se paga siempre en VCHF en Internet Computer: dpay nunca convierte. Esta solicitud está en ${selected}${network ? ` en ${network}` : ''}. Cambia a VCHF, o quédate con el código dpay: cualquier cámara de teléfono lo abre, y se paga en ${selected}.`,
     noCheckoutAsset:
-      'Este monedero no tiene VCHF, así que no hay cuenta para un cobro de caja. Usa el código dpay: cualquier cámara de teléfono lo abre, y acepta el activo que has elegido.',
+      'Esta billetera no tiene VCHF, así que no hay cuenta para un cobro de caja. Usa el código dpay: cualquier cámara de teléfono lo abre, y acepta el activo que has elegido.',
     switchTo: asset => `Cambiar a ${asset}`,
 
     failedTitle: 'El importe no se abrió',
     notServed: host =>
-      `${host} no sirve códigos de caja: no se abrió nada. Pide a quien gestiona ese relay que active la caja, o usa el código dpay, que no necesita caja.`,
+      `${host} no sirve códigos de caja: no se abrió nada. Pide a quien gestiona ese relay que active la caja, o usa el código dpay.`,
     unreachable: host =>
-      `dpay no pudo contactar con ${host}: no se abrió nada. Los códigos de caja se crean en línea. Comprueba la conexión e inténtalo de nuevo, o usa el código dpay, que este teléfono puede mostrar sin conexión.`,
+      `No se pudo contactar con ${host}: no se abrió nada. Los códigos de caja se crean en línea: comprueba la conexión e inténtalo de nuevo, o usa el código dpay (este teléfono puede mostrarlo sin conexión).`,
     refused: said =>
       `La caja rechazó este importe: «${said}» No hay nada que pagar. Corrígelo y vuelve a cobrar.`,
     refusedNoReason: status =>
-      `La caja rechazó este importe (HTTP ${status}) sin motivo, así que no hay nada que pagar. Vuelve a cobrar; si lo rechaza dos veces, avisa a quien gestiona el relay.`,
+      `La caja rechazó este importe (HTTP ${status}) sin motivo: no hay nada que pagar. Vuelve a cobrar; si lo rechaza dos veces, avisa a quien gestiona el relay.`,
     mispriced: (cobrado, quoted) =>
-      `Cobraste ${cobrado}, pero la caja respondió con ${quoted}. dpay no mostrará un código con una cifra que nadie ha elegido: no hay nada que pagar. Vuelve a cobrar; si ocurre otra vez, avisa a quien gestiona el relay antes de aceptar dinero.`,
+      `Cobraste ${cobrado}, pero la caja respondió con ${quoted}: dpay no mostrará un código con una cifra que nadie ha elegido. Vuelve a cobrar; si ocurre otra vez, avisa a quien gestiona el relay antes de aceptar dinero.`,
     unsigned:
-      'Este teléfono no pudo firmar el importe, así que no hay nada que pagar. Cierra dpay, ábrelo otra vez y vuelve a cobrar.',
+      'Este teléfono no pudo firmar el importe: no hay nada que pagar. Reinicia dpay y vuelve a cobrar.',
     servedOther: (served, picked) =>
-      `La caja abrió este cobro en ${served}, no en ${picked} — todavía no liquida ${picked}, así que no hay nada que pagar. Vuelve a cobrar en ${served} o avisa a quien gestiona el relay.`,
+      `La caja abrió este cobro en ${served}, no en ${picked}: todavía no liquida ${picked}. Vuelve a cobrar en ${served} o avisa a quien gestiona el relay.`,
     tryAgain: 'Reintentar',
 
     settleOption: (token, currency) => `${token} · ${currency}`,
 
     settlesAs: (amount, price) =>
-      `Usted recibe ${amount} en Internet Computer. La comisión del libro mayor corre de su cuenta, así que el cliente paga exactamente ${price}.`,
+      `Usted recibe ${amount} — la comisión del libro mayor corre de su cuenta, así que el cliente paga exactamente ${price}.`,
     collecting: 'Cobrando el pago autorizado por el cliente…',
     collectNotApproved:
-      'La cartera del cliente no autorizó lo suficiente, o la autorización ha caducado. Pídale que vuelva a pagar el código: no se ha cobrado nada.',
+      'El cliente no autorizó lo suficiente, o la autorización ha caducado. Pídale que vuelva a pagar el código: no se ha cobrado nada.',
     collectNoFunds:
-      'El cliente autorizó el pago pero no tiene el dinero. No se ha cobrado nada: pídale que recargue y pague otra vez.',
+      'El cliente autorizó pero no tiene el dinero. No se ha cobrado nada: pídale que recargue y pague otra vez.',
     collectFailed:
-      'No se pudo cobrar el pago autorizado, y no se ha cobrado nada. El código sigue siendo pagable: pídale que lo escanee otra vez o que acerque su teléfono.',
+      'No se pudo cobrar el pago autorizado, y no se ha cobrado nada. El código sigue siendo pagable: pídale que lo escanee o acerque su teléfono otra vez.',
     noFeeTitle: 'Esta caja no puede fijar un importe',
     noFee: (symbol, host) =>
       `La comisión del libro mayor la paga el comercio y se descuenta del precio, pero dpay no conoce ninguna comisión para ${symbol}: un cobro se la cobraría al cliente en silencio. No hay nada que pagar. Actualice dpay, o avise a quien gestiona ${host} de que a su lista de monedas le falta la comisión de ${symbol}.`,
@@ -324,21 +324,21 @@ export const receiveEs: ReceiveMessages = {
       nfc === 'tap'
         ? 'Enséñaselo al cliente: cualquier cámara de teléfono lo abre, y un teléfono dpay también puede acercarlo.'
         : nfc === 'expired'
-        ? 'Enséñaselo al cliente: cualquier cámara de teléfono lo abre. Acercar el teléfono ha caducado en este código; vuelve a marcar el importe si quiere acercarlo.'
+        ? 'Enséñaselo al cliente: cualquier cámara de teléfono lo abre. Acercar el teléfono ha caducado en este código: vuelve a marcar el importe para acercarlo.'
         : 'Enséñaselo al cliente: cualquier cámara de teléfono lo abre y paga.',
     waiting: 'Esperando el pago…',
     cantCheck:
-      'Ahora mismo no se puede comprobar este importe: la caja está incomunicada. Eso NO significa que esté sin pagar. Deja el código a la vista; esta pantalla se actualiza en cuanto vuelva a alcanzar la caja.',
+      'No se puede comprobar este importe: la caja está incomunicada. Eso NO significa que esté sin pagar. Deja el código a la vista; esta pantalla se actualiza en cuanto vuelva el contacto.',
     expiredWatching:
       'Este código ha caducado, así que ya nadie nuevo puede pagarlo. Si el cliente ya pagó, el dinero todavía puede llegar: se sigue vigilando un momento más.',
     cancel: 'Anular el cobro',
     cancelling: 'Anulando…',
     cancelFailed: said =>
-      `El cobro NO se anuló: «${said}» Puede seguir siendo pagable: léelo y decide antes de entregar nada.`,
+      `El cobro NO se anuló: «${said}» Puede seguir siendo pagable: decide antes de entregar nada.`,
     cancelFailedNoReason: status =>
-      `El cobro NO se anuló (HTTP ${status}): trátalo como pagable. Inténtalo otra vez y no entregues nada hasta que se anule o caduque.`,
+      `El cobro NO se anuló (HTTP ${status}): trátalo como pagable. Inténtalo otra vez; no entregues nada hasta que se anule o caduque.`,
     cancelUnreachable: host =>
-      `dpay no pudo contactar con ${host}, así que este cobro NO se anuló: sigue siendo pagable hasta que caduque. Inténtalo otra vez cuando vuelva la conexión.`,
+      `No se pudo contactar con ${host}, así que este cobro NO se anuló: sigue siendo pagable hasta que caduque. Inténtalo otra vez cuando vuelva la conexión.`,
 
     endedTitle: reason =>
       reason === 'expired' ? 'Este código ha caducado'

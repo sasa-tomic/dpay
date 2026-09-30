@@ -235,8 +235,11 @@ describe('the composed one-press consent', () => {
     // quote (0.9 ICP floored to 0.891, quoted 0.88 EUR), attributed to SideShift — the venue
     // + locked figure are disclosed BEFORE the tap.
     expect(textOf(tree, 'convert-receive')).toContain('0.88');
-    expect(textOf(tree, 'convert-quote-source')).toContain('SideShift');
-    expect(exists(tree, 'convert-venue-auto')).toBe(true);
+    // ONE merged quote line (the pair's only row → the plain attribution, no count):
+    // venue + read instant, the SideShift attribution carried before the tap.
+    expect(textOf(tree, 'convert-venue-auto')).toContain('SideShift');
+    expect(textOf(tree, 'convert-venue-auto')).toMatch(/\d{1,2}:\d{2}/);
+    expect(exists(tree, 'convert-quote-source')).toBe(false);
     // Nothing is adopted, no order exists.
     expect(jest.mocked(adoptConvertRecord).mock.calls.length).toBe(0);
     expect(jest.mocked(createSideShiftFixedShift).mock.calls.length).toBe(0);

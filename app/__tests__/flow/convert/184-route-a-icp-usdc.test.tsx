@@ -61,7 +61,7 @@ hermeticDescribe('flow 184 — Route A: ICP → USDC(Ethereum) as one opt-in int
         expect(await m.driver.findByTestID(`convert-venue-${rowId}`, {timeoutMs: 4_000}).then(() => true).catch(() => false)).toBe(true);
       }
       expect(await m.driver.findByTestID('convert-venue-multihop:icpswap-ckusdc:2', {timeoutMs: 1_000}).then(() => true).catch(() => false)).toBe(false);
-      assertIncludes(m.driver.readText('convert-venue-auto'), 'Executed via', 'the direct pool is the auto pick (disclosed mechanically)');
+      assertIncludes(m.driver.readText('convert-venue-auto'), 'ICPSwap', 'the direct pool is the auto pick (disclosed mechanically)');
       expect(m.driver.isPresent('convert-headline')).toBe(true);
       expect(m.driver.isPresent('convert-dest-address')).toBe(false);
 

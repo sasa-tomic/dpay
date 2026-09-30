@@ -75,7 +75,7 @@ hermeticDescribe('flow 206 — the intent sheet\'s target grammar: the standing 
       expect(layout.includes('convert-target-line')).toBe(true);
       assertIncludes(m.driver.readText('convert-target-line'), 'Euros', 'a stable source stands on its value twin');
       // The pair walk arms the sheet: the standing pair is already quoted on open.
-      await m.driver.findByTestID('convert-quote-source', {timeoutMs: 15_000});
+      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 15_000});
 
       // 2. one chip tap re-resolves the pair (the optional decision, one tap).
       await pickSwapTarget(m, 'ICP');
@@ -86,7 +86,7 @@ hermeticDescribe('flow 206 — the intent sheet\'s target grammar: the standing 
       // 3. the USD pair: its OTHER rows in the expander, kind order.
       await pickSwapTarget(m, 'USD');
       await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
-      assertIncludes(m.driver.readText('convert-venue-auto'), 'Executed via', 'the direct pool is auto-picked and mechanically disclosed');
+      assertIncludes(m.driver.readText('convert-venue-auto'), 'ICPSwap', 'the direct pool is auto-picked and mechanically disclosed');
       await openOtherVenues(m);
       const venueRows = targetLayout(m)
         .filter((t) => t.startsWith('convert-venue-') && t !== 'convert-venue-auto' && !/-quote$|-err$|-slow$/.test(t));

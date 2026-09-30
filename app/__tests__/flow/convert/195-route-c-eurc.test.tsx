@@ -98,7 +98,7 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
       await m.driver.click(ROUTE_C_EURC_ROW);
       await m.driver.type('convert-dest-address', DEST);
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
-      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'also the wallet that signs', 'the destination warns that this address also SIGNS the crossing');
+      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'also signs the crossing', 'the destination warns that this address also SIGNS the crossing');
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset');
 
       // §2 the census (unchanged from the SOL route, USDC-denominated).
@@ -179,7 +179,7 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
       const ready = m.driver.readText('crossrail-sol-ready');
       assertIncludes(ready, `${fmt(mintCredit, 6)} USDC`, 'the verified mint credit renders');
       assertIncludes(ready, ataString, 'the USDC location is named: the user\'s own ATA');
-      assertIncludes(ready, 'it is yours either way', 'keeping the USDC is offered as an equal exit');
+      assertIncludes(ready, 'yours either way', 'keeping the USDC is offered as an equal exit');
       assertIncludes(m.driver.readText('crossrail-sol-out'), fmt(EURC_OUT, 6), 'the fresh Jupiter estimate renders in EURC units');
       assertIncludes(ready, `${fmt(EURC_FLOOR, 6)} EURC`, 'the final leg\'s floor is Jupiter\'s own otherAmountThreshold, named EURC');
       expect(ready.includes('EURC EURC')).toBe(false);

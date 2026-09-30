@@ -89,7 +89,7 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
       );
       await m.driver.click('convert-details', {timeoutMs: 5_000});
       assertIncludes(m.driver.readText('convert-quote-verbatim'), `${fmt(gross2, 18)} ETH`, 'Details carries swap2\'s verbatim quoted figure');
-      assertIncludes(m.driver.readText('convert-quote-source'), 'Quotes from ICPSwap and ICPSwap, fetched ', 'the attribution names BOTH venues verbatim');
+      assertIncludes(m.driver.readText('convert-quote-source'), 'ICPSwap + ICPSwap', 'the attribution names BOTH venues verbatim');
       assertIncludes(m.driver.readText('convert-route-via'), 'via ICP · 2 swaps', 'the route chip names the hub and the swap count');
       const census = m.driver.readText('convert-hub-census');
       assertIncludes(census, 'Two swaps, itemized', 'the census heading names the fold');
@@ -142,7 +142,7 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
       await openConvertFor(m, 'vchf');
       await pickSwapTarget(m, 'USD');
       await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 15_000});
-      assertIncludes(m.driver.readText('convert-venue-auto'), 'Executed via', 'the direct pool is the auto pick for the USD pair');
+      assertIncludes(m.driver.readText('convert-venue-auto'), 'ICPSwap', 'the direct pool is the auto pick for the USD pair');
       await openOtherVenues(m);
       const hubRow = m.driver.readText('convert-venue-hub:icpswap:8:icpswap-ckusdc');
       assertIncludes(hubRow, 'Via ICP', 'the opt-in hub row names its mechanism');

@@ -594,7 +594,7 @@ describe('solana seam — createTokenAta (receiver-side one-tap setup)', () => {
       return Promise.resolve({});
     });
     const {createTokenAta} = require('../solana');
-    await expect((createTokenAta as (s: string, m: string) => Promise<string>)(SEED_HEX, USDC_MINT)).rejects.toThrow('not available');
+    await expect((createTokenAta as (s: string, m: string) => Promise<string>)(SEED_HEX, USDC_MINT)).rejects.toThrow('unavailable (no endpoint configured)');
     expect(called).toBe(false);
   });
 

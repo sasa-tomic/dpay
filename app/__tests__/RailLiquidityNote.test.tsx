@@ -75,7 +75,7 @@ describe('RailLiquidityNote — tone gates tier, catalog gates everything', () =
   test('pro on a DEEP rail (EURC): the plain fact line, no icon, same testID', () => {
     const tree = renderNote('solana:EURC', 'pro')!;
     expect(hasNote(tree)).toBe(true);
-    expect(noteText(tree)).toBe('Circulates widely on-chain today.');
+    expect(noteText(tree)).toBe('Circulates widely.');
     act(() => { tree.unmount(); });
   });
 

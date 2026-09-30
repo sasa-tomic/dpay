@@ -79,7 +79,7 @@ hermeticDescribe('flow 196 — the cross-rail gas-fund card', () => {
       await m.driver.type('convert-dest-reenter', DEST);
       await m.driver.waitForFunction(() => !m!.driver.isPresent('convert-dest-reenter'), {timeoutMs: 8_000, label: 'the re-type gate passed'});
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
-      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'also the wallet that signs', 'the destination input warns this address also SIGNS the crossing');
+      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'also signs the crossing', 'the destination input warns this address also SIGNS the crossing');
 
       // §2 the offer card: Need ≈ / Your wallet: (one number per line).
       await m.driver.findByTestID('convert-gas-fund-card', {timeoutMs: 20_000});

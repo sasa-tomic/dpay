@@ -105,7 +105,7 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
       await m.driver.type('convert-dest-address', DEST);
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
-      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'also the wallet that signs', 'the destination input warns that this address also SIGNS the crossing');
+      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'also signs the crossing', 'the destination input warns that this address also SIGNS the crossing');
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset');
 
       // §2 the cross-rail fee census (the census lines mount behind Details).
@@ -211,7 +211,7 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
       const ready = m.driver.readText('crossrail-sol-ready');
       assertIncludes(ready, `${fmt(mintCredit, 6)} USDC`, 'the verified mint credit renders (corroborated at the ATA)');
       assertIncludes(ready, ataString, 'the USDC location is named: the user\'s own ATA');
-      assertIncludes(ready, 'it is yours either way', 'keeping the USDC is offered as an equal exit');
+      assertIncludes(ready, 'yours either way', 'keeping the USDC is offered as an equal exit');
       assertIncludes(m.driver.readText('crossrail-sol-out'), fmt(SOL_OUT, 9), 'the fresh Jupiter estimate renders (SOL now, not USDC)');
       assertIncludes(ready, `${fmt(SOL_FLOOR, 9)} SOL`, 'the final leg\'s floor is Jupiter\'s own otherAmountThreshold');
 

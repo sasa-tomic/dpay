@@ -167,8 +167,8 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
       present(tree, 'convert-amount')[0].props.onChangeText('1');
     });
     await act(async () => {});
-    expect(present(tree, 'convert-quote-source').length).toBeGreaterThan(0);
-    expect(textOf(present(tree, 'convert-quote-source')[0])).toContain('SideShift');
+    expect(present(tree, 'convert-venue-auto').length).toBeGreaterThan(0);
+    expect(textOf(present(tree, 'convert-venue-auto')[0])).toContain('SideShift');
   });
 
   test('a relay-demoted (settlement-degraded) cefi row says so honestly: the slow line renders', async () => {
@@ -212,7 +212,7 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     // The settle figure is the venue's own number, verbatim (V8): 0.0495 ICP raw = 4950000.
     expect(present(tree, 'convert-headline').length).toBeGreaterThan(0);
     expect(textOf(present(tree, 'convert-headline')[0])).toContain('0.0495');
-    expect(textOf(present(tree, 'convert-quote-source')[0])).toContain('SideShift');
+    expect(textOf(present(tree, 'convert-venue-auto')[0])).toContain('SideShift');
     // The payout target is the wallet's OWN derived IC account identifier (DpayCore,
     // never typed) — the pinned 64-hex vector, derived from the principal by the core;
     // the derivation chain's exact call shapes are pinned too.

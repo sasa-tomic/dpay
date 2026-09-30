@@ -1268,18 +1268,6 @@ export function ConvertIntentSheet({
     ?? (ammRow != null ? ammRow.venue.venue_id : null)
     ?? (composedRow != null ? composedRow.route.cefiVenueId : null) // the receive figure's venue
     ?? (chainRow != null ? chainRow.route.legs[chainRow.route.legs.length - 1]!.venueId : null);
-  // The auto-pick disclosure's venue: the effective pick's own attribution.
-  const pickVenueName: string | null = (() => {
-    if (autoPick == null) return null;
-    const r = rows.find(x => x.rowId === autoPick.rowId);
-    if (r == null) return null;
-    if (r.kind === 'hub') return venueDisplayName(r.route.legs[0].venueId);
-    if (r.kind === 'crossrail') return venueDisplayName(r.route.swapVenueId);
-    if (r.kind === 'composed') return venueDisplayName(r.route.cefiVenueId);
-    if (r.kind === 'chain') return venueDisplayName(r.route.cefiVenueId); // the order's venue
-    return venueDisplayName(r.venue.venue_id);
-  })();
-
   // The target chips: every OTHER reachable currency (the source is not a target; the
   // standing target IS the line).
   const chipTargets = targets.filter(t => t.currency !== targetCode);
@@ -1400,11 +1388,6 @@ export function ConvertIntentSheet({
 
         {/* ── The review card (the sheet's whole body) ────────────────────────────────────── */}
         <View testID="convert-headline" style={S.intentCard}>
-          {sellStr != null ? (
-            <View style={S.reviewPairRow}>
-              <Text style={S.reviewConvertLabel}>{M.convert.youConvert(sellStr)}</Text>
-            </View>
-          ) : null}
           <Text testID="convert-receive" style={S.reviewReceiveAmount} numberOfLines={2}>
             {receiveStr != null
               ? M.convert.youReceive(receiveStr)
@@ -1412,6 +1395,10 @@ export function ConvertIntentSheet({
                 ? (counterVenueId != null ? M.convert.quoteFetching(venueDisplayName(counterVenueId)) : M.convert.quoteFetching(''))
                 : '—'}
           </Text>
+          {/* THE one quote line (second verbosity pass 2026-09-29): attribution + read instant,
+              and — when the AUTO pick compared venues — the mechanical count on the same line.
+              The venue + timestamp red line lives here; an override renders the plain
+              attribution and the mechanical-pick line stands down. A hub names BOTH venues. */}
           {receiveStr != null && hubRow != null && activeHub != null ? (
             <Text testID="convert-quote-source" style={S.reviewMeta}>
               {M.convert.multihop.hubQuoteSource(
@@ -1420,26 +1407,22 @@ export function ConvertIntentSheet({
                 nonBreakingClock(new Date(Math.max(activeHub.q1.fetchedAtMs, activeHub.q2.fetchedAtMs))),
               )}
             </Text>
-          ) : receiveStr != null && counterVenueId != null ? (
-            <Text testID="convert-quote-source" style={S.reviewMeta}>
-              {M.convert.quoteSource(nonBreakingClock(new Date(
-                activeIcQuote?.fetchedAtMs
-                ?? activeCefiQuote?.fetchedAtMs
-                ?? activeComposed?.cefi.fetchedAtMs
-                ?? activeJup?.fetchedAtMs
-                ?? (activeHub != null ? Math.max(activeHub.q1.fetchedAtMs, activeHub.q2.fetchedAtMs) : Date.now()),
-              )), venueDisplayName(counterVenueId))}
-            </Text>
-          ) : null}
-          {/* The mechanical venue-pick disclosure (auto pick only — an override's line is the
-              plain attribution above; the pick criterion no longer describes it). */}
-          {autoApplied && pickVenueName != null ? (
-            <Text testID="convert-venue-auto" style={S.reviewMeta}>
-              {autoPick!.compared >= 2
-                ? M.convert.autoVenueLine(pickVenueName, autoPick!.compared)
-                : M.convert.autoVenueSingle(pickVenueName)}
-            </Text>
-          ) : null}
+          ) : receiveStr != null && counterVenueId != null ? (() => {
+            const at = nonBreakingClock(new Date(
+              activeIcQuote?.fetchedAtMs
+              ?? activeCefiQuote?.fetchedAtMs
+              ?? activeComposed?.cefi.fetchedAtMs
+              ?? activeJup?.fetchedAtMs
+              ?? Date.now(),
+            ));
+            return (
+              <Text testID={autoApplied ? 'convert-venue-auto' : 'convert-quote-source'} style={S.reviewMeta}>
+                {autoApplied && autoPick!.compared >= 2
+                  ? M.convert.autoVenueLine(venueDisplayName(counterVenueId), at, autoPick!.compared)
+                  : M.convert.quoteSource(at, venueDisplayName(counterVenueId))}
+              </Text>
+            );
+          })() : null}
           {activeRow != null && (activeRow.kind === 'direct' || activeRow.kind === 'solamm' || activeRow.kind === 'cefi')
             && activeRow.venue.health?.status === 'degraded' ? (
             <Text testID={`convert-venue-${activeRow.rowId}-slow`} style={S.reviewMeta}>
@@ -1504,13 +1487,13 @@ export function ConvertIntentSheet({
           {hubMode && activeHub != null ? (
             <View testID="convert-route-min">
               <Text style={S.convertMinOutLine}>
-                {M.convert.multihop.routeMinWalletLine(minOutStr ?? '', formatBps(slippageBps))}
+                {M.convert.multihop.routeMinWalletLine(minOutStr ?? '')}
               </Text>
             </View>
           ) : math != null && routeMode && crossRow != null ? (
             <View testID="convert-route-min">
               <Text style={S.convertMinOutLine}>
-                {M.convert.multihop.routeMinLine(minOutStr ?? '', formatBps(slippageBps))}
+                {M.convert.multihop.routeMinLine(minOutStr ?? '')}
               </Text>
               {routeGasErr != null ? (
                 <Text testID="convert-gas-note" style={S.err}>{routeGasErr}</Text>
@@ -1523,7 +1506,7 @@ export function ConvertIntentSheet({
             </View>
           ) : minOutStr != null && !cefiMode ? (
             <Text testID="convert-min-out" style={S.convertMinOutLine}>
-              {M.convert.atLeast(minOutStr, formatBps(slippageBps))}
+              {M.convert.atLeast(minOutStr)}
             </Text>
           ) : null}
           {moved != null ? (() => {

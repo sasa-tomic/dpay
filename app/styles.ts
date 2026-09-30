@@ -1071,10 +1071,6 @@ function buildStyles(p: Palette) {
   presetRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8},
   // The review card is the sheet's whole body: what moves, what lands, whose numbers they are.
   intentCard: {backgroundColor: p.panel2, borderRadius: 12, padding: 16, alignSelf: 'stretch', marginTop: 16},
-  reviewPairRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, alignSelf: 'stretch'},
-  reviewConvertLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
-  reviewConvertAmount: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.4, textAlign: 'right', flexShrink: 1, fontVariant: ['tabular-nums']},
-  reviewArrow: {fontSize: 20, color: p.sub2, textAlign: 'center', marginTop: 2, fontFamily: FONT.sans},
   reviewReceiveRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, alignSelf: 'stretch', marginTop: 10},
   reviewReceiveAmount: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.4, textAlign: 'right', flexShrink: 1, fontVariant: ['tabular-nums']},
   // The mechanical venue-pick disclosure + attribution: quiet meta lines under the figure.

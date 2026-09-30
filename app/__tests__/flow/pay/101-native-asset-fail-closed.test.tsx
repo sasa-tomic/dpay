@@ -3,7 +3,7 @@
  * no-minter native rows inherit the wallet's fail-closed posture).
  *
  * Insufficient (per asset, VCHF then ICP): a request over that asset's balance parks on
- * review-lowbal "Not enough balance to cover this payment." with NO approve/paid button, no signed
+ * review-lowbal "Not enough balance." with NO approve/paid button, no signed
  * envelope (the canister-call recorder stays empty), the payee receives nothing. Unknown currency
  * (99): the unsupported-asset branch, "Unsupported asset" + "(currency 99)", no fallback — dpay
  * never swaps. After all legs the wallet keeps exactly what was seeded: nothing moved.
@@ -69,7 +69,7 @@ hermeticDescribe('flow 101 — native-asset fail-closed: insufficient + unsuppor
         scanSeam()(requestQR);
 
         // WAIT for the refusal, then snapshot (never snapshot the pre-render surface).
-        assert(await m.driver.waitForText('Not enough balance to cover this payment.', {timeoutMs: 10_000}),
+        assert(await m.driver.waitForText('Not enough balance.', {timeoutMs: 10_000}),
           `${leg.tag}: review must show the insufficient-balance block`);
         const body = m.driver.bodyText();
         assertIncludes(body, `Pay 1.00000001 ${leg.tag}`, `${leg.tag}: blocked review still shows the exact amount`);

@@ -115,7 +115,7 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
       assertIncludes(m.driver.readText('crossrail-circle-fee'), `${fmt(fees.maxFee, 6)} USDC`, 'Circle\'s published fee renders as its own census line');
       const floorLine = m.driver.readText('crossrail-mint-floor');
       assertIncludes(floorLine, `${fmt(fees.mintFloor, 6)} USDC`, 'the mint floor names what survives the fee, in the HOP asset');
-      assertIncludes(floorLine, 'crosses to your Solana address', 'the floor line reads USDC as the MID-STOP');
+      assertIncludes(floorLine, 'the final step swaps it onward', 'the floor line reads USDC as the MID-STOP');
       assertIncludes(floorLine, 'final step swaps it on', 'the floor line names the onward swap');
       await m.driver.findByTestID('crossrail-dest-estimate', {timeoutMs: 10_000});
       const estimateLine = m.driver.readText('crossrail-dest-estimate');
@@ -141,7 +141,7 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
       assertIncludes(handoff, `${fmt(minOut, 6)} USDC`, 'the intro names the crossed amount (the burn floor)');
       assertIncludes(handoff, `${fmt(fees.maxFee, 6)} USDC`, 'Circle\'s fee line renders in the handoff too');
       assertIncludes(handoff, `${fmt(fees.mintFloor, 6)} USDC`, 'the handoff floor line carries the hop-asset figure');
-      assertIncludes(handoff, 'crosses to your Solana address', 'the handoff floor line reads USDC as the MID-STOP');
+      assertIncludes(handoff, 'the final step swaps it onward', 'the handoff floor line reads USDC as the MID-STOP');
 
       // The wallet double signs, the app attaches the reported hash.
       await m!.driver.type('crossrail-burn-tx', 'signed');

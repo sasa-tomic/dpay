@@ -483,6 +483,6 @@ describe('the chain prepare (confirm path) — order first, exact deposit', () =
       amountRaw: '10000000',
       slippageBps: 100,
       settleAddressIc: 'account-id-text',
-    })).rejects.toThrow('A quote could not be shown');
+    })).rejects.toThrow('Quote unavailable (code order)');
   });
 });

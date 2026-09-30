@@ -42,7 +42,7 @@ hermeticDescribe('flow 192 — the Stop during a LIVE swap aborts honestly', () 
       await openConvertFor(m, 'icp');
       expect(m.driver.isPresent('convert-screen')).toBe(true);
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
 
       // The swap reply stays pending 12 s — the deterministic in-flight window.
       await icDelayKnob('depositFromAndSwap', 12_000);

@@ -7,7 +7,7 @@
  * 47: NETTED request (wire 0.000995 for a 0.001 price — the customer pays exactly the price, the
  *     payee nets the fee) → request AUTO-SIGNS on arrival → "Paying 0.001 SOL" → receipt
  *     (status 0, rid+sig exact match) → the honest pending "Sent · awaiting".
- * 66: expired solreq auto-declines AT SIGN ("This payment request has expired", no solpay URI);
+ * 66: expired solreq auto-declines AT SIGN ("This payment request expired", no solpay URI);
  *     transport error → "Tap failed"; late error after settling is IGNORED (no false failure);
  *     the merchant reader sees the same decline.
  * 139: receipt code 3 (settle-verify MISMATCH) → the payer lands on honest pending, NEVER a
@@ -117,7 +117,7 @@ hermeticDescribe('flow 66 — SOL v2 NFC failure modes', () => {
     expect(await m.driver.waitForText('Declined', {timeoutMs: 5000})).toBe(true);
     const expiredBody = m.driver.bodyText();
     expect(expiredBody).not.toMatch(/\bPaid\b/);
-    expect(expiredBody).toContain('This payment request has expired');
+    expect(expiredBody).toContain('This payment request expired');
     expect(g.__DPAY_SOL_NFC_LAST).toBeUndefined(); // nothing signed
     expect(await clickByAria(m, 'Done')).toBe('Done');
     await m.driver.waitGone('sol-nfc-status', {timeoutMs: 5000});

@@ -73,7 +73,7 @@ hermeticDescribe('flow 183 — the pair-scoped ICPSwap venues (ckUSDC, ckETH) ar
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
       await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 15_000});
       const autoLine = m.driver.readText('convert-venue-auto');
-      assertIncludes(autoLine, 'Executed via', 'the pick line names its executor');
+      assertIncludes(autoLine, 'ICPSwap', 'the pick line names its executor');
       expect(autoLine).not.toContain('of 2 venues');
       expect(m.driver.isPresent('convert-venue-none')).toBe(false);
       await openOtherVenues(m);

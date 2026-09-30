@@ -96,9 +96,9 @@ hermeticDescribe('flow 147 — rail-unreadable', () => {
     const unreachableLine = m.driver.readText('rail-unreadable-solana');
     expect(unreachableLine).toContain('unreachable while you are online');
     expect(unreachableLine).toContain('dpay’s relay can’t reach');
-    expect(unreachableLine).toContain('Your money is untouched');
-    expect(unreachableLine).toContain('Internet Computer payments still work');
-    expect(unreachableLine).toContain('still sign payments offline');
+    expect(unreachableLine).toContain('Money untouched');
+    expect(unreachableLine).toContain('IC payments work');
+    expect(unreachableLine).toContain('still sign offline');
     expect(unreachableLine.includes('Internet Computer balances')).toBe(false);
     expect(unreachableLine.includes('offline QR payments are unaffected')).toBe(false);
     expect(unreachableLine).toContain('Settings ▸ Advanced');
@@ -119,8 +119,8 @@ hermeticDescribe('flow 147 — rail-unreadable', () => {
     const offlineLine = m.driver.readText('rail-unreadable-solana');
     expect(offlineLine).toContain('You seem offline');
     expect(offlineLine).toContain('Nothing moved');
-    expect(offlineLine).toContain('update when you reconnect');
-    expect(offlineLine).toContain('QR payments still work offline');
+    expect(offlineLine).toContain('update on reconnect');
+    expect(offlineLine).toContain('QR payments work offline');
     expect(offlineLine.includes('Settings')).toBe(false);
 
     await m.unmount();

@@ -23,21 +23,21 @@ export const walletEs: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Francos suizos', USD: 'Dólares estadounidenses', EUR: 'Euros', BTC: 'Bitcoin', ETH: 'Ether', ICP: 'Internet Computer', SOL: 'Solana'},
     chooseTitle: '¿En qué moneda piensas?',
-    chooseBody: 'Define la moneda que se muestra primero — solo vista.',
-    railReason: {destination: 'es el que pide el cobro', funded: 'aquí tienes saldo'},
+    chooseBody: 'Solo vista.',
+    railReason: {destination: 'es el que pide el cobro', funded: 'tienes saldo aquí'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Principal',
     settingsTitle: 'Moneda principal',
-    settingsHint: 'La moneda que dpay muestra primero y usa por defecto',
+    settingsHint: 'Se muestra primero; por defecto al pagar.',
     confirm: 'Continuar',
     pickFirst: 'Elige antes una moneda.',
-    noneAvailable: 'No se pudo cargar ninguna moneda. Revisa la dirección del servidor en Ajustes y vuelve a abrir dpay.',
+    noneAvailable: 'No se cargó ninguna moneda. Revisa la dirección del servidor en Ajustes y vuelve a abrir dpay.',
     a11y: currency => `Elegir ${currency}`,
   },
 
   railHealth: {
     thin: 'Baja liquidez',
-    deep: 'Circula ampliamente on-chain hoy.',
+    deep: 'Circula ampliamente.',
   },
 
   railDetail: {
@@ -58,14 +58,14 @@ export const walletEs: WalletMessages = {
     },
     balanceEyebrow: code => `Saldo ${code}`,
     menu: {
-      ledger: 'Lista de transacciones',
+      ledger: 'Movimientos',
       remove: 'Quitar',
-      close: 'Cerrar menú',
+      close: 'Cerrar',
     },
     removeRefusal: {
-      nonzero: amount => `Todavía tienes ${amount}. Conviértelo o muévelo primero, y después quítalo.`,
-      unreadable: 'dpay no puede leer este saldo ahora mismo. Reconéctate e inténtalo de nuevo.',
-      last: 'Tu cartera necesita al menos una moneda.',
+      nonzero: amount => `Convierte o mueve ${amount} primero.`,
+      unreadable: 'Saldo ilegible. Reconéctate e inténtalo de nuevo.',
+      last: 'Debe quedar al menos una moneda.',
     },
     activity: {
       title: 'Actividad',
@@ -78,12 +78,12 @@ export const walletEs: WalletMessages = {
 
   accounts: {
     title: 'Cuentas',
-    intro: 'Toca una moneda para convertirla en tu principal.',
+    intro: 'Toca una moneda para hacerla principal.',
     back: 'Atrás',
-    practice: 'Dinero de práctica. Solo funciona dentro de dpay, y ninguna tienda lo acepta.',
+    practice: 'Dinero de práctica. Ninguna tienda lo acepta.',
     convertHint: 'Convertir en un servicio externo',
     setMainHint: 'La convierte en tu moneda principal',
-    addCurrency: 'Añadir nueva moneda',
+    addCurrency: 'Añadir moneda',
   },
 
   addCurrency: {
@@ -91,24 +91,24 @@ export const walletEs: WalletMessages = {
     search: 'Buscar',
     stable: 'Monedas estables',
     other: 'Otras',
-    inWallet: 'En la cartera',
+    inWallet: 'En la billetera',
     add: 'Añadir',
-    none: 'Ninguna moneda coincide.',
+    none: 'Sin coincidencias.',
   },
 
   addressBook: {
     title: 'Libreta de direcciones',
-    intro: 'Direcciones a las que has enviado, guardadas solo en este dispositivo.',
+    intro: 'Guardadas solo en este dispositivo.',
     back: 'Atrás',
-    empty: 'Aún no hay direcciones guardadas. Las que uses para enviar se guardan aquí automáticamente.',
-    addEntry: 'Añadir una dirección',
+    empty: 'Aún no hay direcciones guardadas. Las que uses para enviar aparecen aquí automáticamente.',
+    addEntry: 'Añadir dirección',
     assetLabel: 'Para',
     addressLabel: 'Dirección',
     addressPlaceholder: 'Pega la dirección',
     addressHint: 'Exactamente como la usarías para enviar',
     nameLabel: 'Nombre',
-    namePlaceholder: 'p. ej. Alice (opcional)',
-    save: 'Guardar dirección',
+    namePlaceholder: 'p. ej. Alice',
+    save: 'Guardar',
     rename: 'Renombrar',
     renameHint: who => `Renombrar ${who}`,
   },
@@ -116,7 +116,7 @@ export const walletEs: WalletMessages = {
   backToPaying: asset => `Volver a pagar con ${asset}`,
 
   faucet: {
-    unavailableOnRelay: 'La recarga de prueba no está disponible en este servidor',
+    unavailableOnRelay: 'Recarga no disponible en este servidor',
     failed: 'Falló la recarga',
     unavailable: 'Recarga no disponible',
     offline: 'Sin conexión: inténtalo cuando vuelvas a conectarte',
@@ -128,29 +128,28 @@ export const walletEs: WalletMessages = {
     demoFundsHint: 'Añade ∂100 de prueba',
     needsSetup: 'Sin configurar',
     select: symbol => `Seleccionar ${symbol}`,
-    selectHint: 'Mostrar en tu pantalla de inicio',
-    selectSolanaHint: symbol => `Muestra ${symbol} en tu inicio; Pagar y Recibir usan Solana`,
+    selectHint: 'Se usa en Pagar y Recibir',
     showTestnet: 'Mostrar activos de testnet',
     hideTestnet: 'Ocultar activos de testnet',
   },
 
   ledger: {
     empty: 'Todavía no hay pagos.',
-    emptyHint: 'Toca Recibir para crear una solicitud de pago, o Pagar para escanear una.',
+    emptyHint: 'Toca Recibir para solicitar, o Pagar para escanear.',
     recent: 'Recientes',
     allAssets: 'Todos los activos',
     all: 'Todos',
     filter: label => `Filtrar ${label}`,
     to: who => `a ${who}`,
     from: who => `de ${who}`,
-    fromPool: 'de un pool de liquidez',
-    toPool: 'a un pool de liquidez',
+    fromPool: 'de un pool',
+    toPool: 'a un pool',
     fees: fee => `− ${fee} de comisiones`,
     mintCounterparty: 'Fondos de prueba',
-    failed: 'Falló — solo se cobró la comisión de red',
+    failed: 'Falló — solo se cobró la comisión',
     dropped: count => count === 1
-      ? 'No se pudo leer 1 transacción de Solana: existe on-chain, pero no se muestra aquí.'
-      : `No se pudieron leer ${count} transacciones de Solana: existen on-chain, pero no se muestran aquí.`,
+      ? 'No se pudo leer 1 transacción de Solana: sigue existiendo on-chain.'
+      : `No se pudieron leer ${count} transacciones de Solana: siguen existiendo on-chain.`,
   },
 
   fund: {checking: 'Revisando…', checkAgain: 'Revisar de nuevo'},
@@ -184,7 +183,7 @@ export const educationEs: EducationMessages = {
       key: {
         eyebrow: 'Tu dinero',
         title: 'Tu clave se queda en este dispositivo',
-        body: 'dpay no guarda dinero ni puede aprobar pagos por ti. No hay ninguna cuenta de dpay: solo tu clave.',
+        body: 'dpay no guarda dinero ni puede aprobar pagos. No hay ninguna cuenta de dpay: solo tu clave.',
       },
       exact: {
         eyebrow: 'Sin sorpresas',
@@ -206,33 +205,33 @@ export const educationEs: EducationMessages = {
     eyebrow: 'Práctica',
     payeeName: 'Tienda de práctica',
     title: 'Haz un pago de verdad',
-    cardLine: 'El código que te mostraría una tienda.',
-    balance: amount => `Tienes ${amount} en dinero de práctica.`,
+    cardLine: 'El código que muestra una tienda.',
+    balance: amount => `${amount} en dinero de práctica.`,
     review: 'Revisar el pago',
     skip: 'Saltar la práctica',
     bothSides: 'La práctica necesita conexión: tu teléfono hace los dos papeles. En un viaje, solo la tienda.',
-    settledBody: 'Un pago real: tu teléfono lo firmó y la red de práctica lo confirmó.',
+    settledBody: 'Tu teléfono lo firmó y la red de práctica lo confirmó.',
     settledBalance: amount => `Te quedan ${amount} en dinero de práctica.`,
-    pendingBody: 'Firmado y enviado, aún sin confirmar: no hay nada confirmado. Así se ve exactamente un pago pendiente real.',
-    refusedTitle: 'La red lo rechazó',
+    pendingBody: 'Firmado y enviado, aún sin confirmar: no hay nada confirmado. Así se ve un pago pendiente.',
+    refusedTitle: 'Rechazado',
     refusedBody: 'No se movió nada.',
     continue: 'Seguir con la configuración',
     punchline: 'El dinero de práctica no tiene valor.',
     noFaucet: {
       title: 'Aquí no hay dinero de práctica',
-      body: 'Este servidor no reparte dinero de práctica. A tu billetera no le falta nada: sigue y elige tu moneda.',
+      body: 'Este servidor no tiene ahora mismo. A tu billetera no le falta nada: sigue y elige tu moneda.',
     },
     cooldown: {
       title: 'Dinero de práctica, en un momento',
-      body: reason => `Este servidor reparte dinero de práctica de vez en cuando, y acaba de hacerlo. Dice: ${reason} Sigue con la configuración; vuelve cuando quieras.`,
+      body: reason => `Este servidor reparte dinero de práctica de vez en cuando, y acaba de hacerlo. Dice: ${reason} Sigue; vuelve cuando quieras.`,
     },
     offline: {
-      title: 'Esta práctica necesita conexión',
-      body: 'La práctica necesita conexión porque tu teléfono hace los dos papeles. Vuelve a conectarte e inténtalo otra vez, o sigue con la configuración.',
+      title: 'La práctica necesita conexión',
+      body: 'Tu teléfono hace los dos papeles. Vuelve a conectarte e inténtalo otra vez, o sigue con la configuración.',
     },
     empty: {
-      title: 'Todavía no hay con qué practicar',
-      body: 'Tu saldo de práctica está vacío. Tu billetera no tiene ningún problema: sigue y elige tu moneda.',
+      title: 'Aún no hay dinero de práctica',
+      body: 'A tu billetera no le falta nada: sigue y elige tu moneda.',
     },
   },
 
@@ -243,7 +242,7 @@ export const educationEs: EducationMessages = {
     },
     offlineQr: {
       title: 'Firmado, no confirmado',
-      body: '¿Sin señal? Este código firmado es tu comprobante de pago. La conexión de quien lo recibe lo confirma; el estado se actualiza cuando vuelvas.',
+      body: 'Este código firmado es tu comprobante de pago. La conexión de quien lo recibe lo confirma; el estado se actualiza cuando vuelvas.',
     },
     pendingOutcome: {
       title: 'Todavía pendiente',

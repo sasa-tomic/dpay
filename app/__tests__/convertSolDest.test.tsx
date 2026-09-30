@@ -217,7 +217,7 @@ describe('SOL source target-currency picker (the intent sheet)', () => {
     // single live venue (chain rows rank only when nothing device-signable is quoted
     // above them), and tap 2 arms.
     expect(exists(tree, 'btn-convert-venues-other')).toBe(true);
-    expect(textOf(tree, 'convert-venue-auto')).toContain('Executed via');
+    expect(textOf(tree, 'convert-venue-auto')).toContain('Jupiter'); // the merged attribution line
     expect(present(tree, 'btn-convert-confirm')[0].props.disabled).toBe(false);
     // Typing re-quotes at the typed amount.
     await act(async () => {

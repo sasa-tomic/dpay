@@ -43,7 +43,7 @@ function venueRowOrder(m: Mount): string[] {
  *  instead of snapshot-reading the racing first render (low host load flips these constantly). */
 async function awaitVenueComparison(m: Mount): Promise<string> {
   await m.driver.waitForFunction(
-    () => (m.driver.readTextSafe('convert-venue-auto') ?? '').includes('of 2 venues'),
+    () => (m.driver.readTextSafe('convert-venue-auto') ?? '').includes('2 venues'),
     {timeoutMs: 10_000, label: 'the auto pick discloses the venue comparison count'},
   );
   return m.driver.readText('convert-venue-auto');
@@ -86,8 +86,8 @@ hermeticDescribe('flow 173 — the auto-pick invariants in the REVERSE direction
         {timeoutMs: 15_000, label: 'the pick flipped to the fixture venue (reverse)'},
       );
       const autoLine1 = await awaitVenueComparison(m);
-      assertIncludes(autoLine1, 'Executed via ICPSwap (offline fixture)', 'the pick followed the strictly-better fixture venue');
-      assertIncludes(autoLine1, 'highest quoted rate of 2 venues', 'the pick states the comparison count');
+      assertIncludes(autoLine1, 'ICPSwap (offline fixture)', 'the pick followed the strictly-better fixture venue');
+      assertIncludes(autoLine1, '2 venues', 'the pick states the comparison count');
       const after1 = venueRowOrder(m);
       expect(after1.length).toBe(1);
       expect(after1[0]).toBe('convert-venue-icpswap');
@@ -105,12 +105,12 @@ hermeticDescribe('flow 173 — the auto-pick invariants in the REVERSE direction
       await m.driver.waitForFunction(
         () => {
           const auto = m!.driver.readTextSafe('convert-venue-auto') ?? '';
-          return auto.includes('Executed via ICPSwap,') && !auto.includes('offline fixture');
+          return auto.includes('ICPSwap ·') && !auto.includes('offline fixture');
         },
         {timeoutMs: 15_000, label: 'the pick flipped back to the real venue (reverse)'},
       );
       const autoLine2 = m.driver.readText('convert-venue-auto');
-      assertIncludes(autoLine2, 'Executed via ICPSwap,', 'the pick flipped back to the real venue');
+      assertIncludes(autoLine2, 'ICPSwap ·', 'the pick flipped back to the real venue');
       expect(autoLine2).not.toContain('offline fixture');
       const after2 = venueRowOrder(m);
       expect(after2.length).toBe(1);

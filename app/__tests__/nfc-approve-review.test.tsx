@@ -333,7 +333,7 @@ describe('SolNfcTap (SOL) auto-sign (one-press rule)', () => {
     expect(signSolPayment).not.toHaveBeenCalled();
     expect(DpaySolNfc.approveSolCard).not.toHaveBeenCalled();
     expect(DpaySolNfc.declineSolCard).toHaveBeenCalled();
-    expect(hasText('This payment request has expired')).toBe(true);
+    expect(hasText('This payment request expired')).toBe(true);
   });
 
   // ── Per-request-mint sign gate (OPEN_ISSUES 6(a)) ─────────────────────────────────────────

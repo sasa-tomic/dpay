@@ -324,7 +324,7 @@ hermeticDescribe('flow 172 — device-saved notes name the transaction log, acro
     expect(m.driver.isPresent('txn-receipt-note')).toBe(false); // NO Note line
     assertIncludes(m.driver.readText('txn-receipt-account'), payer4Principal, '(d) receipt account is the FULL payer principal');
     assertIncludes(m.driver.readText('txn-receipt-ref'), nonceD, '(d) receipt reference is the hex nonce');
-    assertIncludes(m.driver.bodyText(), 'read from the ledger', '(d) the plain receipt keeps the plain footer');
+    assertIncludes(m.driver.bodyText(), 'Read from the ledger', '(d) the plain receipt keeps the plain footer');
     await m.driver.click('btn-txn-receipt-close', {timeoutMs: 4000});
     await m.driver.waitGone('txn-receipt', {timeoutMs: 4000});
 

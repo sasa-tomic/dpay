@@ -58,7 +58,7 @@ hermeticDescribe('flow 141 — pool #ok with a held withdrawal is an honest pend
 
       await openConvertFor(m, 'icp');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
 
       // Hold the venue's output leg BEFORE confirming (BOTH pools — the pick follows the live
       // quotes in the two-venue world); re-read the winning pool's quote right before arming so

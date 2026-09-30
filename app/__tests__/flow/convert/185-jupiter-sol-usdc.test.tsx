@@ -67,16 +67,15 @@ hermeticDescribe('flow 185 — SOL → USDC(Solana) via Jupiter, end to end, off
 
       // §2 Jupiter's own digits, verbatim through the relay proxy.
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
-      const quoteSource = m.driver.readText('convert-quote-source');
+      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      const quoteSource = m.driver.readText('convert-venue-auto');
       assertIncludes(quoteSource, 'Jupiter', 'attribution names the venue');
-      assertIncludes(quoteSource, 'fetched', 'attribution carries the read instant');
+      expect(quoteSource).toMatch(/\d{1,2}:\d{2}/); // the read instant
       await m.driver.waitForFunction(
         () => m!.driver.readTextSafe('convert-headline')?.includes('10.36 USDC') === true,
         {timeoutMs: 15_000, label: 'the receive estimate re-keyed to the typed amount'},
       );
       assertIncludes(m.driver.readText('convert-min-out'), '10.25 USDC', 'minimum is otherAmountThreshold verbatim');
-      assertIncludes(m.driver.readText('convert-min-out'), '1% slippage', 'slippage choice shown (default 1%)');
 
       // The census folds behind Details; the fee-note + dpay lines are GONE.
       await m.driver.click('convert-details', {timeoutMs: 5_000});

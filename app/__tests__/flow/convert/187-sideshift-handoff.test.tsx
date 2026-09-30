@@ -89,7 +89,7 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
       await m.driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
       assertIncludes(m.driver.readText('convert-settle-address'), kp.address, 'the payout address is the wallet\'s OWN derived Solana address');
       expect(await m.driver.waitForText('0.0495 SOL', {timeoutMs: 15_000})).toBe(true);
-      assertIncludes(m.driver.readText('convert-quote-source'), 'SideShift', 'the quote is attributed to SideShift');
+      assertIncludes(m.driver.readText('convert-venue-auto'), 'SideShift', 'the quote is attributed to SideShift (the ONE merged line, auto-picked)');
       await m.driver.click('convert-details', {timeoutMs: 5_000});
       await m.driver.waitForFunction(() => m!.driver.isPresent('convert-counterparty'), {timeoutMs: 15_000, label: 'the census mounted'});
       const counterparty = m.driver.readText('convert-counterparty');

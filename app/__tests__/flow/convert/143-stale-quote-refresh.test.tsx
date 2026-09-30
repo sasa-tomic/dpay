@@ -45,13 +45,13 @@ hermeticDescribe('flow 143 — a stale quote refreshes itself; confirm re-quotes
 
       await openConvertFor(m, 'icp');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
 
       // Fresh: attributed + timestamped, no stale notice, no quote-changed interrupt.
-      assertIncludes(m.driver.readText('convert-quote-source'), 'Quote from ICPSwap, fetched', 'fresh quote renders attributed + timestamped');
+      assertIncludes(m.driver.readText('convert-venue-auto'), 'ICPSwap', 'fresh quote renders attributed');
       expect(m.driver.isPresent('convert-stale')).toBe(false);
       expect(m.driver.isPresent('convert-moved-note')).toBe(false);
-      const fetchedBefore = m.driver.readText('convert-quote-source');
+      const fetchedBefore = m.driver.readText('convert-venue-auto');
 
       // Deterministic re-fetch proof: count every /api/v1/swap_quote request the surface issues.
       let quoteFetches = 0;
@@ -69,8 +69,8 @@ hermeticDescribe('flow 143 — a stale quote refreshes itself; confirm re-quotes
       // The stale notice appears (the 1 s staleness sweep picks it up), then clears on refresh.
       await m.driver.findByTestID('convert-stale', {timeoutMs: 10_000});
       await m.driver.waitForFunction(() => !m!.driver.isPresent('convert-stale'), {timeoutMs: 12_000, label: 'the stale notice cleared on refresh'});
-      const fetchedAfter = m.driver.readText('convert-quote-source');
-      assertIncludes(fetchedAfter, 'Quote from ICPSwap, fetched', 'refreshed quote is still attributed + timestamped');
+      const fetchedAfter = m.driver.readText('convert-venue-auto');
+      assertIncludes(fetchedAfter, 'ICPSwap', 'refreshed quote is still attributed');
       expect(quoteFetches).toBeGreaterThan(fetchesBefore);
       if (fetchedBefore === fetchedAfter) {
         // formatClock is minute-granular — the instant MAY render identically within one minute;
@@ -86,7 +86,7 @@ hermeticDescribe('flow 143 — a stale quote refreshes itself; confirm re-quotes
       expect(knobB.ok).toBe(true);
       await m.driver.findByTestID('convert-moved-note', {timeoutMs: 15_000});
       const changedText = m.driver.readText('convert-moved-note');
-      assertIncludes(changedText, 'The rate moved', 'the interrupt names what happened, both figures inline');
+      assertIncludes(changedText, 'Rate moved', 'the interrupt names what happened, both figures inline');
       assertIncludes(changedText, 'Confirm again', 'the interrupt re-arms the same button');
       expect(await isDisabled(m, 'btn-convert-confirm')).toBe(false);
     } finally {

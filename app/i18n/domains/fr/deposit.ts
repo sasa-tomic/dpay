@@ -58,7 +58,7 @@ export const depositFr: DepositMessages = {
       {t: ', ou retirez-en depuis une plateforme d’échange qui le prend en charge.'},
     ],
     onlyAccepts: (symbol, network) =>
-      `Cette adresse reçoit ${symbol} envoyé sur ${network}. Rien d’autre ne sera crédité.`,
+      `Cette adresse reçoit ${symbol} envoyé sur ${network} — rien d’autre ne sera crédité.`,
     noMemo: 'Aucun memo ni référence nécessaire.',
     feeLine: fee => `Frais de réseau ${fee}`,
     receivedAmount: amount => `${amount} reçus`,
@@ -79,7 +79,7 @@ export const depositFr: DepositMessages = {
     pairFailed: 'Impossible d’associer votre portefeuille.',
     wrongNetwork: (networkLabel, expected, actual) =>
       `Mauvais réseau : connectez-vous à ${networkLabel} (chaîne ${expected}). Votre portefeuille est sur la chaîne ${actual}.`,
-    connectFailed: 'Impossible de se connecter à votre portefeuille. Ouvrez votre application de portefeuille, approuvez-y la demande de connexion, puis réessayez.',
+    connectFailed: 'Connexion impossible. Ouvrez votre application de portefeuille, approuvez-y la demande, puis réessayez.',
     noWalletApp: 'Aucune application de portefeuille trouvée. Scannez plutôt le QR avec un portefeuille sur un autre appareil.',
     walletDisconnected: 'Portefeuille déconnecté.',
     amountRequired: 'Saisissez un montant supérieur à zéro.',
@@ -87,17 +87,17 @@ export const depositFr: DepositMessages = {
     txReverted: 'La transaction a échoué sur la chaîne.',
     txUnconfirmed: 'Transaction envoyée mais pas encore confirmée — nous surveillons toujours l’émission.',
     approveReverted:
-      'L’approbation a échoué sur la chaîne. Aucun dépôt n’a été envoyé et aucun argent n’a quitté votre portefeuille. Réessayez — votre portefeuille demandera d’abord l’approbation, puis le dépôt.',
+      'L’approbation a échoué sur la chaîne. Aucun dépôt envoyé, aucun argent quitté. Réessayez — d’abord l’approbation, puis le dépôt.',
     approveUnconfirmed:
       'L’approbation a été envoyée mais pas confirmée : aucun argent n’a quitté votre portefeuille. Patientez un instant, puis réessayez — votre portefeuille redemandera l’approbation. C’est normal et cela ne coûte que des frais de réseau.',
     depositHashUnknown:
       'Vérifiez l’activité récente de votre portefeuille avant de réessayer. Si le dépôt s’y trouve, il sera crédité dans une vingtaine de minutes — déposer à nouveau paierait deux fois.',
     approveHashUnknown:
-      'Aucun dépôt n’a été fait et aucun argent n’a quitté votre portefeuille. Vérifiez l’activité récente de votre portefeuille, puis réessayez — il redemandera d’abord l’approbation, c’est normal et cela ne coûte que des frais de réseau.',
+      'Aucun dépôt n’a été fait et aucun argent n’a quitté votre portefeuille. Vérifiez l’activité récente de votre portefeuille, puis réessayez — l’approbation vient d’abord, c’est normal et cela ne coûte que des frais de réseau.',
     txNotSigned: 'Transaction non signée.',
     txFailed: 'Échec de la transaction.',
     allowanceStands:
-      'Votre approbation de dépense est déjà confirmée sur la chaîne, et aucun argent n’a quitté votre portefeuille. Un nouvel essai redemande les deux signatures : l’approbation, puis le dépôt.',
+      'Votre approbation de dépense est déjà confirmée sur la chaîne, et aucun argent n’a quitté votre portefeuille. Réessayer redemande les deux signatures : l’approbation, puis le dépôt.',
     sendOnly: (nativeAsset, networkLabel) => [
       {t: 'Envoyez uniquement des '},
       {t: nativeAsset, em: true},
@@ -127,14 +127,14 @@ export const depositFr: DepositMessages = {
     amountPlaceholder: '0.00',
     fromAccount: shortAccount => `Depuis ${shortAccount}`,
     confirmingLabel: 'Confirmation dans votre portefeuille',
-    switchToWalletApp: 'Votre portefeuille devrait s’ouvrir pour approuver. Sinon, ouvrez-le vous-même — puis revenez ici.',
+    switchToWalletApp: 'Votre portefeuille devrait s’ouvrir pour approuver. Sinon, ouvrez-le vous-même, puis revenez.',
     deposit: 'Déposer',
     approveDepositLabel: 'Approuver et déposer',
     approveDeposit: 'Approuver & déposer',
     confirming: 'Confirmez dans votre portefeuille…',
     depositingAmount: (amount, asset) => `Dépôt de ${amount} ${asset} en cours`,
     watchingResumed:
-      'Dépôt en attente (~20 min) — votre portefeuille n’est pas connecté, mais nous surveillons toujours l’émission.',
+      'Dépôt en attente (~20 min) — votre portefeuille n’est pas connecté, mais la surveillance de l’émission continue.',
     watchingFresh: 'En attente de confirmation — votre dépôt apparaîtra dans une vingtaine de minutes.',
     startNew: 'Nouveau dépôt',
     mintedToWallet: asset => `${asset} émis dans votre portefeuille.`,
@@ -151,7 +151,7 @@ export const depositFr: DepositMessages = {
     ataUnverifiedOffline: asset =>
       `Votre adresse est correcte — vous semblez hors ligne, donc votre compte ${asset} n’a pas pu être confirmé. Rien n’a bougé. Vérifiez à nouveau une fois de retour en ligne.`,
     ataUnverifiedUnreachable: asset =>
-      `Votre adresse est correcte — le relais de dpay n’arrive pas à joindre Solana, donc votre compte ${asset} n’a pas pu être confirmé. Votre connexion est bonne ; votre argent est intact et vos paiements Internet Computer fonctionnent toujours. Réessayez dans un instant.`,
+      `Votre adresse est correcte — le relais de dpay n’arrive pas à joindre Solana, donc votre compte ${asset} n’a pas pu être confirmé. Votre argent est intact et vos paiements Internet Computer fonctionnent toujours. Réessayez dans un instant.`,
     ataUnverifiedUnreadable: asset =>
       `Votre adresse est correcte — Solana a envoyé des données que dpay ne peut pas lire, donc votre compte ${asset} n’a pas pu être confirmé. Rien n’a bougé. Réessayez dans un instant.`,
     retryAtaLabel: asset => `Réessayer la vérification du compte ${asset}`,
@@ -165,18 +165,18 @@ export const depositFr: DepositMessages = {
       {t: ' ci-dessous.'},
     ],
     devnetWarn: asset =>
-      `Connecté au devnet Solana. N’envoyez PAS de ${asset} du mainnet ici — ils n’apparaîtront pas. Utilisez uniquement des ${asset} du devnet.`,
+      `Connecté au devnet Solana — n’envoyez PAS de ${asset} du mainnet ici, ils n’apparaîtront pas. Uniquement des ${asset} du devnet.`,
     waitingDeposit: 'En attente de votre dépôt · vérifié toutes les quelques secondes',
     copyAssetAddress: asset => `Copier l’adresse ${asset}`,
   },
 
   ata: {
-    absent: asset => `Vous n’avez pas encore de compte ${asset} sur cet appareil.`,
+    absent: asset => `Pas encore de compte ${asset} sur cet appareil.`,
     cost: (setupCost, asset) =>
-      `La création de votre compte ${asset} coûte ${setupCost}, à payer sur votre solde SOL. Il reste le vôtre, sous vos clés.`,
+      `La création de votre compte ${asset} coûte ${setupCost}, sur votre solde SOL. Il reste le vôtre, sous vos clés.`,
     checkingSol: 'Vérification de votre solde SOL…',
     needSol: setupCost =>
-      `Il vous faut d’abord environ ${setupCost} ici. Recevez des SOL à votre adresse, puis créez le compte.`,
+      `Il vous faut d’abord environ ${setupCost} en SOL — recevez-en à votre adresse, puis créez le compte.`,
     showSolAddress: 'Voir mon adresse SOL',
     creating: asset => `Création de votre compte ${asset} — confirmation sur Solana…`,
     createHint: (setupCost, asset) => `Crée votre compte ${asset} pour ${setupCost} sur votre solde SOL`,
@@ -198,13 +198,13 @@ export const depositFr: DepositMessages = {
       {t: ', puis envoyez-les à l\'adresse ci-dessus.'},
     ],
     bridgeWithGas: (token, chain, gasToken) => [
-      {t: 'Il n’existe pas d’adresse pour celui-ci. Achetez des '},
+      {t: 'Il n’existe pas d’adresse pour celui-ci : achetez des '},
       {t: token, em: true},
       {t: ' sur '},
       {t: chain, em: true},
-      {t: ' dans un portefeuille qui vous appartient, et gardez-y un peu d\''},
+      {t: ' dans un portefeuille qui vous appartient, gardez-y un peu d\''},
       {t: gasToken, em: true},
-      {t: ' pour les frais. Connectez ensuite ce portefeuille ici : c\'est lui qui signe le transfert.'},
+      {t: ' pour les frais, puis connectez ce portefeuille ici : c\'est lui qui signe le transfert.'},
     ],
     bridgeSelfGas: (token, chain) => [
       {t: 'Il n’existe pas d’adresse pour celui-ci. Achetez des '},
@@ -243,8 +243,8 @@ export const depositFr: DepositMessages = {
     qPix: 'Pix',
     upTo: pct => `jusqu\'à ${pct}`,
     from: pct => `à partir de ${pct}`,
-    attribution: readOn => `Chiffres publiés par chaque fournisseur, consultés le ${readOn}. Ce sont des plafonds, pas des prix. Vos frais exacts s\'affichent avant le paiement ; la plupart des fournisseurs ajoutent en plus une marge dans le taux.`,
-    noEndorsement: 'Par ordre alphabétique. dpay n\'en recommande aucun, n\'est payé par aucun et n\'intervient pas dans votre achat.',
+    attribution: readOn => `Chiffres publiés par chaque fournisseur, consultés le ${readOn} — des plafonds, pas des prix. Vos frais exacts s\'affichent avant le paiement ; la plupart ajoutent en plus une marge dans le taux.`,
+    noEndorsement: 'Par ordre alphabétique : dpay n\'en recommande aucun, n\'est payé par aucun et n\'intervient pas dans votre achat.',
   },
 };
 
@@ -276,7 +276,7 @@ export const withdrawFr: WithdrawMessages = {
     inProgress: 'Retrait en cours',
     withdrawAmount: amount => `Retirer ${amount}`,
     resumeNote:
-      'Déjà signé — Réessayer renvoie le même paiement (aucune double dépense possible). Modifier le formulaire lance un nouveau retrait.',
+      'Déjà signé — Réessayer renvoie le même paiement (aucune double dépense). Modifier le formulaire lance un nouveau retrait.',
     reviewTitle: 'Vérifier le retrait',
     confirmLabel: 'Confirmer le retrait',
     retry: 'Réessayer le retrait',
@@ -307,8 +307,8 @@ export const withdrawFr: WithdrawMessages = {
     refuseMistypedIc: 'Cette adresse Internet Computer est incomplète ou mal saisie — vérifiez que vous l’avez copiée en entier.',
     refuseMistypedLegacy: 'Cette adresse de compte ICP est incomplète ou mal saisie — vérifiez que vous avez bien copié les 64 caractères.',
     refuseOwnSubaccount:
-      'C’est un sous-compte de votre propre portefeuille. dpay n’affiche et n’utilise que votre compte principal, donc les fonds envoyés là n’apparaîtraient plus ici. Vous détenez déjà cet actif — collez l’adresse de quelqu’un d’autre pour l’envoyer.',
-    selfWarning: 'C’est votre propre adresse. L’argent vous revient directement et les frais restent à votre charge.',
+      'C’est un sous-compte de votre propre portefeuille. dpay n’affiche et n’utilise que votre compte principal, donc les fonds envoyés là n’apparaîtraient plus ici. Collez l’adresse de quelqu’un d’autre pour envoyer.',
+    selfWarning: 'Votre propre adresse — l’argent vous revient directement et les frais restent à votre charge.',
 
     maxLabel: 'Max',
     feeLine: fee => `Frais de réseau ${fee}`,
@@ -328,7 +328,7 @@ export const withdrawFr: WithdrawMessages = {
     sent: 'Envoyé',
     sentUnknown: 'Pas encore confirmé',
     sentUnknownBody:
-      'Le transfert a été soumis mais n’est pas encore confirmé. Il peut encore aboutir — vérifiez votre solde dans un instant au lieu de l’envoyer à nouveau.',
+      'Soumis mais pas encore confirmé. Il peut encore aboutir — vérifiez votre solde dans un instant au lieu de l’envoyer à nouveau.',
     blockIndex: index => `Bloc ${index} du registre`,
     noLedger: 'Cet actif n’a aucun registre : il ne peut donc pas être envoyé.',
 
@@ -338,7 +338,7 @@ export const withdrawFr: WithdrawMessages = {
     checking: 'Vérification…',
     checkFailed: 'Impossible de vérifier pour le moment. Réessayez dans un instant.',
     failed: 'Échec',
-    feeOnly: 'Le transfert a échoué sur la chaîne. Rien n’a été livré, seuls les frais de réseau ont été prélevés.',
+    feeOnly: 'Échec sur la chaîne — rien n’a été livré, seuls les frais de réseau ont été prélevés.',
     nothingSent: 'Rien n’a été envoyé. Le réseau a refusé le transfert avant de l’accepter, votre argent n’a donc jamais quitté le portefeuille.',
   },
 
@@ -350,15 +350,15 @@ export const withdrawFr: WithdrawMessages = {
     copySignatureLabel: 'Copier la signature de la transaction',
     copySignature: 'Copier la signature',
     sending: amount => `Envoi de ${amount}…`,
-    confirmingOnSolana: 'Confirmation sur Solana — cela peut prendre jusqu’à une minute.',
+    confirmingOnSolana: 'Confirmation sur Solana — jusqu’à une minute.',
     sentUnknown: 'Envoyé — pas encore confirmé',
     sentUnknownBody:
-      'Le réseau a accepté le transfert mais la confirmation n’est pas arrivée à temps. Il peut encore aboutir — vérifiez votre solde dans un instant au lieu de renvoyer.',
+      'Le réseau l’a accepté, mais la confirmation n’est pas arrivée à temps. Il peut encore aboutir — vérifiez votre solde au lieu de renvoyer.',
     sendToSolana: asset => `Envoyez vos ${asset} vers une adresse Solana`,
     available: available => `Disponible : ${available}`,
     tokenAmountPlaceholder: '1.5',
     solAmountPlaceholder: '0.025',
-    needsSol: asset => `L’envoi de ${asset} demande un peu de SOL dans le portefeuille pour les frais de réseau — ajoutez-en d’abord.`,
+    needsSol: asset => `L’envoi de ${asset} demande un peu de SOL pour les frais de réseau — ajoutez-en d’abord.`,
     reviewTitle: 'Vérifier l’envoi',
     sendAmount: amount => `Envoyer ${amount}`,
     recipientAtaNote: (cost, asset) =>

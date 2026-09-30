@@ -33,7 +33,7 @@ hermeticDescribe('flow 01 — onboard', () => {
 
     // 1b. The create-button subtext never solicits money; DEMO is named valueless (M7).
     const onboardBody = m.driver.bodyText();
-    assertIncludes(onboardBody, 'does not deposit, buy, or move any money', 'onboarding must state creation never moves money');
+    assertIncludes(onboardBody, 'moves no money', 'onboarding must state creation never moves money');
     assertIncludes(onboardBody, 'practice money with no cash value', 'onboarding must state DEMO is valueless');
     // 1c. Custody honesty: no account, key never leaves the phone.
     assertIncludes(onboardBody, 'No account', 'onboarding must state there is no dpay account');

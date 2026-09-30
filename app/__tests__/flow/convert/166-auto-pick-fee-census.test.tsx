@@ -56,7 +56,7 @@ function venueRowOrder(m: Mount): string[] {
  *  instead of snapshot-reading the racing first render (low host load flips these constantly). */
 async function awaitVenueComparison(m: Mount): Promise<string> {
   await m.driver.waitForFunction(
-    () => (m.driver.readTextSafe('convert-venue-auto') ?? '').includes('of 2 venues'),
+    () => (m.driver.readTextSafe('convert-venue-auto') ?? '').includes('2 venues'),
     {timeoutMs: 10_000, label: 'the auto pick discloses the venue comparison count'},
   );
   return m.driver.readText('convert-venue-auto');
@@ -95,8 +95,8 @@ hermeticDescribe('flow 166 — the disclosed auto pick + the one-tap override + 
         : {id: 'icpswap', name: 'ICPSwap', net: netA};
 
       const autoLine = await awaitVenueComparison(m);
-      assertIncludes(autoLine, 'Executed via', 'the pick line names its executor');
-      assertIncludes(autoLine, 'highest quoted rate of 2 venues', 'the pick states the comparison count as a fact');
+      expect(autoLine).toMatch(/\d{1,2}:\d{2}/); // the read instant rides the merged line
+      assertIncludes(autoLine, '2 venues', 'the pick states the comparison count as a fact');
       expect(autoLine.toLowerCase()).not.toContain('best');
       assertIncludes(autoLine, best.name, `the pick followed the higher net quote (${best.name})`);
       const headlineNet = m.driver.readText('convert-receive');
@@ -121,8 +121,8 @@ hermeticDescribe('flow 166 — the disclosed auto pick + the one-tap override + 
       await m.driver.click(`convert-venue-${otherId}`, {timeoutMs: 5_000});
       await m.driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
       const overriddenSource = m.driver.readText('convert-quote-source');
-      assertIncludes(overriddenSource, 'fetched', 'the overridden card still carries attribution + a timestamp');
-      assertIncludes(overriddenSource, otherId === 'icpswap' ? 'Quote from ICPSwap,' : 'ICPSwap (offline fixture)', 'the attribution names the OVERRIDDEN venue');
+      expect(overriddenSource).toMatch(/\d{1,2}:\d{2}/); // attribution + a timestamp
+      assertIncludes(overriddenSource, otherId === 'icpswap' ? 'ICPSwap ·' : 'ICPSwap (offline fixture)', 'the attribution names the OVERRIDDEN venue');
       expect(m.driver.isPresent('convert-venue-auto')).toBe(false);
       // The overridden row's fresh quote lands async — the deterministic signal is the hero
       // itself carrying the overridden venue's own reply (the flow-140 oracle pattern).
@@ -168,7 +168,6 @@ hermeticDescribe('flow 166 — the disclosed auto pick + the one-tap override + 
       assertIncludes(m.driver.readText('convert-quote-verbatim'), `${fmt8(gross)} VCHF`, 'Details carries the forced quote\'s verbatim gross');
       const minOutLine = m.driver.readText('convert-min-out');
       assertIncludes(minOutLine, `${fmt8(minOut)} VCHF`, 'the floor = the core\'s floor math on the forced quote');
-      assertIncludes(minOutLine, '1% slippage', 'at the default 1% slippage');
       expect(m.driver.isPresent('convert-net')).toBe(false);
       expect(m.driver.readText('convert-venue-disclosure').trim().length).toBeGreaterThan(0);
       expect(m.driver.isPresent('convert-impact')).toBe(false);

@@ -495,7 +495,7 @@ describe('a silent wallet is given up on, and says what it was asked', () => {
       // to a generic connect failure: nothing was signed here, so it may name a next action. The
       // diagnostic stays on the fields and in the log line, which names the method and the bound.
       expect((e as Error).message).toBe(M.errors.ethWallet.requestTimedOut);
-      expect((e as Error).message).toContain("didn't answer");
+      expect((e as Error).message).toContain("didn’t answer");
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('eth_requestAccounts'));
       expect(warn).toHaveBeenCalledWith(expect.stringContaining(String(WALLET_APPROVAL_TIMEOUT_MS)));
     } finally {

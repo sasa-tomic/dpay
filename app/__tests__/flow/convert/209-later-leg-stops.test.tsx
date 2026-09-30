@@ -167,7 +167,7 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
       await m.driver.click('btn-convert-stop', {timeoutMs: 5_000});
       await m.driver.findByTestID('convert-aborted', {timeoutMs: 15_000});
       const providerAborted = m.driver.readText('convert-aborted');
-      assertIncludes(providerAborted, 'never sent the deposit', 'the aborted card carries the unfunded-order truth');
+      assertIncludes(providerAborted, 'No deposit sent', 'the aborted card carries the unfunded-order truth');
       assertIncludes(providerAborted, 'may still settle', 'the aborted card carries the deposit-already-sent truth');
       assertIncludes(providerAborted, SHIFT_ID, 'the venue shift id renders');
       expect(m.driver.isPresent('btn-convert-stop')).toBe(false);

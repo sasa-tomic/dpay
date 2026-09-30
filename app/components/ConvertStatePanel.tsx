@@ -302,18 +302,6 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
                   {M.convert.cefi.shiftId(record.providerRef.orderId)}
                 </Text>
               ) : null}
-              {record.providerRef != null ? (
-                <>
-                  {/* The calming PAIR (founder escalation 2026-09-20): what is already true,
-                      then dpay's commitment — never a "contact support" deflection. */}
-                  <Text testID="convert-cefi-settling-note" style={S.convertStateMeta}>
-                    {M.convert.cefi.settlingFundsLine}
-                  </Text>
-                  <Text testID="convert-cefi-settling-watch" style={S.convertStateMeta}>
-                    {M.convert.cefi.settlingWatchLine}
-                  </Text>
-                </>
-              ) : null}
             </View>
           ) : null}
           {/* Deposit context says "deposit", never "payout" — the generic watching line belongs
@@ -327,7 +315,22 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.providerProcessingTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.providerProcessingBody(outSymbol, venueName)}</Text>
-          <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
+          {/* The calming PAIR (founder escalation 2026-09-20), moved here from
+              awaiting_deposit (round-2 verbosity validation): "funds confirmed" is only
+              true once the venue HOLDS the deposit — this is that state. The pair carries
+              the watch commitment; the generic stillWatching line stacked a second one. */}
+          {record.providerRef != null ? (
+            <>
+              <Text testID="convert-cefi-settling-note" style={S.convertStateMeta}>
+                {M.convert.cefi.settlingFundsLine}
+              </Text>
+              <Text testID="convert-cefi-settling-watch" style={S.convertStateMeta}>
+                {M.convert.cefi.settlingWatchLine}
+              </Text>
+            </>
+          ) : (
+            <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
+          )}
           {/* The honest wait line (2026-09-24): when the engine last completed a status
               read. A timestamp only — the venue publishes no SLA, so none is invented and
               no verdict is implied. Hidden until this session's own first read lands. */}

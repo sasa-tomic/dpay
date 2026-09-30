@@ -95,7 +95,7 @@ hermeticDescribe('flow 152 — practice-payment', () => {
     await m.driver.click('btn-approve', {timeoutMs: 5000});
     await m.driver.findByTestID('practice-outcome', {timeoutMs: 30_000});
     expect(m.driver.readText('practice-outcome-body')).toBe(
-      'A real payment: your phone signed it and the practice ledger settled it.');
+      'Signed by your phone, settled by the practice ledger.');
     // The "what is left" line never delays the confirmed mark — it pops in when the relay answers
     // (Practice.tsx). Await the pop-in, then read the measured number.
     await m.driver.findByTestID('practice-left', {timeoutMs: 8000});
@@ -154,7 +154,7 @@ hermeticDescribe('flow 153 — practice-not-settled', () => {
       await m.driver.findByTestID('practice-outcome', {timeoutMs: 40_000});
 
       expect(m.driver.readText('practice-outcome-body')).toBe(
-        'Signed and sent, not yet settled — nothing is confirmed. This is what a real pending payment looks like.');
+        'Signed and sent, not yet settled — nothing is confirmed. This is what pending looks like.');
       const unknownScreen = m.driver.readText('practice-outcome');
       expect(unknownScreen.includes('the ledger settled it')).toBe(false);
       expect(m.driver.isPresent('practice-left')).toBe(false);

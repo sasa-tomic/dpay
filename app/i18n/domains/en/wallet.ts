@@ -249,7 +249,6 @@ export type WalletMessages = {
     needsSetup: string;
     select: (symbol: string) => string;
     selectHint: string;
-    selectSolanaHint: (symbol: string) => string;
     showTestnet: string;
     hideTestnet: string;
   };
@@ -342,21 +341,21 @@ export const walletEn: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Swiss francs', USD: 'US dollars', EUR: 'Euros', BTC: 'Bitcoin', ETH: 'Ether', ICP: 'Internet Computer', SOL: 'Solana'},
     chooseTitle: 'Which currency do you think in?',
-    chooseBody: 'Sets the currency shown first — display only.',
-    railReason: {destination: 'the payment asks for this rail', funded: 'you hold a balance here'},
+    chooseBody: 'Display only.',
+    railReason: {destination: 'the payment asks for it', funded: 'you hold funds here'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Main',
     settingsTitle: 'Main currency',
-    settingsHint: 'The currency dpay shows first and pays in by default',
+    settingsHint: 'Shown first; the default when paying.',
     confirm: 'Continue',
     pickFirst: 'Pick a currency first.',
-    noneAvailable: 'No currencies could be loaded. Check the server address in Settings, then reopen dpay.',
+    noneAvailable: 'No currencies loaded. Check the server address in Settings, then reopen dpay.',
     a11y: currency => `Choose ${currency}`,
   },
 
   railHealth: {
     thin: 'Thin liquidity',
-    deep: 'Circulates widely on-chain today.',
+    deep: 'Circulates widely.',
   },
 
   railDetail: {
@@ -373,18 +372,18 @@ export const walletEn: WalletMessages = {
       addFunds: 'Add funds',
       convert: 'Convert',
       withdraw: 'Withdraw',
-      more: 'More actions',
+      more: 'More',
     },
     balanceEyebrow: code => `Balance ${code}`,
     menu: {
-      ledger: 'Transaction list',
+      ledger: 'Transactions',
       remove: 'Remove',
-      close: 'Close menu',
+      close: 'Close',
     },
     removeRefusal: {
-      nonzero: amount => `You still hold ${amount}. Move or convert it first, then remove.`,
-      unreadable: 'dpay can’t read this balance right now. Reconnect, then try again.',
-      last: 'Your wallet needs at least one currency.',
+      nonzero: amount => `Move or convert ${amount} first.`,
+      unreadable: 'Balance unreadable. Reconnect, then try again.',
+      last: 'Keep at least one currency.',
     },
     activity: {
       title: 'Activity',
@@ -397,12 +396,12 @@ export const walletEn: WalletMessages = {
 
   accounts: {
     title: 'Accounts',
-    intro: 'Tap a currency to make it your main.',
+    intro: 'Tap a currency to make it main.',
     back: 'Back',
-    practice: 'Practice money. It works only inside dpay — no shop takes it.',
+    practice: 'Practice money. No shop takes it.',
     convertHint: 'Convert at an outside venue',
-    setMainHint: 'Makes this your main currency',
-    addCurrency: 'Add new currency',
+    setMainHint: 'Sets it as your main currency',
+    addCurrency: 'Add currency',
   },
 
   addCurrency: {
@@ -412,22 +411,22 @@ export const walletEn: WalletMessages = {
     other: 'Other',
     inWallet: 'In wallet',
     add: 'Add',
-    none: 'No currency matches.',
+    none: 'No matches.',
   },
 
   addressBook: {
     title: 'Address book',
-    intro: 'Addresses you’ve sent to, saved on this device only.',
+    intro: 'Saved on this device only.',
     back: 'Back',
-    empty: 'No saved addresses yet. Ones you send to are saved here automatically.',
-    addEntry: 'Add an address',
+    empty: 'No saved addresses yet. Addresses you send to appear here automatically.',
+    addEntry: 'Add address',
     assetLabel: 'For',
     addressLabel: 'Address',
     addressPlaceholder: 'Paste address',
     addressHint: 'Exactly as you would send to it',
     nameLabel: 'Name',
-    namePlaceholder: 'e.g. Alice (optional)',
-    save: 'Save address',
+    namePlaceholder: 'e.g. Alice',
+    save: 'Save',
     rename: 'Rename',
     renameHint: who => `Rename ${who}`,
   },
@@ -435,7 +434,7 @@ export const walletEn: WalletMessages = {
   backToPaying: asset => `Back to paying ${asset}`,
 
   faucet: {
-    unavailableOnRelay: 'Demo top-up isn’t available on this relay',
+    unavailableOnRelay: 'Top-up unavailable on this relay',
     failed: 'Top-up failed',
     unavailable: 'Faucet unavailable',
     offline: 'Offline — try again when connected',
@@ -447,29 +446,28 @@ export const walletEn: WalletMessages = {
     demoFundsHint: 'Adds ∂100 demo money',
     needsSetup: 'Needs setup',
     select: symbol => `Select ${symbol}`,
-    selectHint: 'Show on your home screen',
-    selectSolanaHint: symbol => `Show ${symbol} on home; Pay and Receive use Solana`,
+    selectHint: 'Used for Pay and Receive',
     showTestnet: 'Show testnet assets',
     hideTestnet: 'Hide testnet assets',
   },
 
   ledger: {
     empty: 'No payments yet.',
-    emptyHint: 'Tap Receive to create a payment request, or Pay to scan one.',
+    emptyHint: 'Tap Receive to request, or Pay to scan.',
     recent: 'Recent',
     allAssets: 'All assets',
     all: 'All',
     filter: label => `Filter ${label}`,
     to: who => `to ${who}`,
     from: who => `from ${who}`,
-    fromPool: 'from a liquidity pool',
-    toPool: 'to a liquidity pool',
+    fromPool: 'from a pool',
+    toPool: 'to a pool',
     fees: fee => `− ${fee} fees`,
     mintCounterparty: 'Demo funds',
-    failed: 'Failed — only the network fee was charged',
+    failed: 'Failed — only the fee was charged',
     dropped: count => count === 1
-      ? '1 Solana transaction couldn’t be read — it exists on-chain but is not shown here.'
-      : `${count} Solana transactions couldn’t be read — they exist on-chain but are not shown here.`,
+      ? '1 Solana transaction couldn’t be read — it still exists on-chain.'
+      : `${count} Solana transactions couldn’t be read — they still exist on-chain.`,
   },
 
   fund: {checking: 'Checking…', checkAgain: 'Check again'},
@@ -614,7 +612,7 @@ export const educationEn: EducationMessages = {
       key: {
         eyebrow: 'Your money',
         title: 'Your key stays on this device',
-        body: 'dpay holds no money and cannot approve payments for you. There is no dpay account — only your key.',
+        body: 'dpay holds no money and cannot approve payments. There is no dpay account — only your key.',
       },
       exact: {
         eyebrow: 'No surprises',
@@ -636,33 +634,33 @@ export const educationEn: EducationMessages = {
     eyebrow: 'Practice',
     payeeName: 'Practice shop',
     title: 'Make one payment, for real',
-    cardLine: 'The code a shop would show you.',
-    balance: amount => `You have ${amount} of practice money.`,
+    cardLine: 'The code a shop shows.',
+    balance: amount => `${amount} of practice money.`,
     review: 'Review payment',
     skip: 'Skip practice',
     bothSides: 'Practice needs a connection — your phone plays both sides. On a trip, only the shop does.',
-    settledBody: 'A real payment: your phone signed it and the practice ledger settled it.',
+    settledBody: 'Signed by your phone, settled by the practice ledger.',
     settledBalance: amount => `${amount} of practice money left.`,
-    pendingBody: 'Signed and sent, not yet settled — nothing is confirmed. This is what a real pending payment looks like.',
-    refusedTitle: 'The ledger refused it',
+    pendingBody: 'Signed and sent, not yet settled — nothing is confirmed. This is what pending looks like.',
+    refusedTitle: 'Refused',
     refusedBody: 'Nothing moved.',
     continue: 'Continue setup',
     punchline: 'Practice money has no cash value.',
     noFaucet: {
       title: 'No practice money here',
-      body: 'This server isn’t handing out practice money. Nothing is wrong — carry on and pick your currency.',
+      body: 'This server has none right now. Nothing is wrong — carry on and pick your currency.',
     },
     cooldown: {
       title: 'Practice money, in a moment',
-      body: reason => `This server gives out practice money once in a while — it just did. It said: ${reason} Carry on with setup; come back any time.`,
+      body: reason => `This server gives out practice money once in a while — it just did. It said: ${reason} Carry on; come back any time.`,
     },
     offline: {
-      title: 'This practice needs a connection',
-      body: 'Practice needs a connection because your phone plays both sides. Reconnect and try again, or carry on with setup.',
+      title: 'Practice needs a connection',
+      body: 'Your phone plays both sides. Reconnect and try again, or carry on with setup.',
     },
     empty: {
-      title: 'Nothing to practise with yet',
-      body: 'Your practice balance is empty. Nothing is wrong — carry on and pick your currency.',
+      title: 'No practice money yet',
+      body: 'Nothing is wrong — carry on and pick your currency.',
     },
   },
 
@@ -673,7 +671,7 @@ export const educationEn: EducationMessages = {
     },
     offlineQr: {
       title: 'Signed — not settled',
-      body: "No signal? This signed code is your proof of payment. The receiver's connection settles it — status updates when you're back.",
+      body: "This signed code is your proof of payment. The receiver's connection settles it — status updates when you're back.",
     },
     pendingOutcome: {
       title: 'Still pending',

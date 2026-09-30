@@ -93,7 +93,7 @@ hermeticDescribe('flow 117 — a tap credits the shop’s own charge (the refere
     assertEq(String(req.amount), String(PAY_RAW), 'the tap asks for the price less the fee the shop absorbs');
     assertEq(req.currency, VCHF, 'a checkout charge settles in VCHF and nothing else');
     assertEq(req.nonceHex, open.reference, 'the tap request’s nonce must be the charge’s own reference');
-    assertIncludes(m.driver.bodyText(), 'any phone camera opens it, and a dpay phone can tap it too',
+    assertIncludes(m.driver.bodyText(), 'any phone camera opens it; a dpay phone can tap too',
       'the cashier is told the code opens on any camera and taps on a dpay phone');
 
     // --- the customer taps: an offline-signed bundle over the merchant's reader. ----------------

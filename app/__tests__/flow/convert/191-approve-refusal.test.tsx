@@ -43,7 +43,7 @@ hermeticDescribe('flow 191 — the approve refusal is a terminal failed card, ne
       await openConvertFor(m, 'icp');
       expect(m.driver.isPresent('convert-screen')).toBe(true);
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
 
       // Arm the approve_fail knob (AllowanceChanged{0}, the live-defect shape; one refusal).
       await approveFailKnob(ICP_LEDGER);

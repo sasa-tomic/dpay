@@ -365,7 +365,7 @@ describe('CkErc20DepositSheet — submit() routes on whether the DEPOSIT tx was 
     expect(sendTransaction).toHaveBeenCalledTimes(1); // the deposit was never attempted
     // This one timed OUT, so the copy must not say the wallet accepted anything — dpay does not
     // know it ever saw the request. That claim was the defect; the step copy is unchanged.
-    expect(statusText(tree)).toContain("Your wallet didn't answer");
+    expect(statusText(tree)).toContain("Wallet didn’t answer");
     expect(statusText(tree)).not.toMatch(/accepted/i);
     expect(statusText(tree)).toContain('No deposit was made');
     expect(statusText(tree)).not.toContain('pay twice'); // that risk is the deposit's

@@ -72,15 +72,14 @@ hermeticDescribe('flow 193 — the rail-local FX pair: USDC(Solana) → EURC via
 
       // §2 Jupiter's digits for the standing FX pair, verbatim.
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
-      assertIncludes(m.driver.readText('convert-quote-source'), 'Jupiter', 'attribution names the venue');
-      assertIncludes(m.driver.readText('convert-quote-source'), 'fetched', 'attribution carries the read instant');
+      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      assertIncludes(m.driver.readText('convert-venue-auto'), 'Jupiter', 'attribution names the venue');
+      expect(m.driver.readText('convert-venue-auto')).toMatch(/\d{1,2}:\d{2}/);
       await m.driver.waitForFunction(
         () => m!.driver.readTextSafe('convert-headline')?.includes('0.87 EURC') === true,
         {timeoutMs: 15_000, label: 'the receive estimate re-keyed to the typed amount'},
       );
       assertIncludes(m.driver.readText('convert-min-out'), '0.855 EURC', 'minimum is otherAmountThreshold verbatim');
-      assertIncludes(m.driver.readText('convert-min-out'), '1% slippage', 'slippage choice shown');
       await m.driver.click('convert-details', {timeoutMs: 5_000});
       await m.driver.waitForFunction(
         () => m!.driver.isPresent('convert-rate') && m!.driver.isPresent('convert-sol-impact'),

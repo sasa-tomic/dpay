@@ -3,7 +3,8 @@
  * Types, documentation des clés et copie de référence : ../en/convert.ts. Glossaire : ../../fr.ts.
  * Glossaire : « venue » → plateforme ; « quote » → devis. Le nom de la plateforme arrive en
  * argument (nom d'affichage du registre des venues, jamais codé en dur ici). Les montants et
- * principals arrivent déjà formatés en chaînes d'affichage.
+ * principals arrivent déjà formatés en chaînes d'affichage. Deuxième passe de concision
+ * (2026-09-29) : des fragments plutôt que des phrases quand le sens le permet.
  */
 import type {ConvertMessages} from '../../keys';
 
@@ -13,70 +14,50 @@ export const convertFr: ConvertMessages = {
   backToWallet: 'Retour au portefeuille',
 
 
-  amountLabel: sym => `Montant (${sym})`,
+  amountLabel: sym => `${sym}`,
   maxAmount: 'Max',
-  balanceLine: balance => `Solde : ${balance}`,
+  balanceLine: balance => `Solde ${balance}`,
   counterparty: venue => `Exécuté par le pool ${venue}.`,
   counterpartySigns: 'Ton téléphone signe ; le pool prélève exactement le montant approuvé.',
-  quoteSource: (at, venue) => `Devis ${venue}, récupéré ${at}`,
+  quoteSource: (at, venue) => `${venue} · ${at}`,
   quoteVerbatim: (venue, amt) => `${venue} a indiqué exactement ${amt}`,
-  rateLabel: (inSym, outSym) => `Taux de ce devis (${inSym} → ${outSym})`,
+  rateLabel: (inSym, outSym) => `Taux (${inSym} → ${outSym})`,
   poolFeeTier: (tier, venue) => `Frais du pool : ${tier} (palier ${venue})`,
   inputFeeLine: fee => `Frais d'entrée : ${fee}`,
   outputFeeLine: fee => `Frais de sortie : ${fee}`,
   disclosures: {
     byKey: {
-      // disclosure_key 'icpswap' (la clé du registre pour les pools ICPSwap) : le fait propre à
-      // la venue est OÙ tourne l'échange — son propre contrat de pool.
-      icpswap: venue => `L'échange s'exécute sur le propre contrat de pool de ${venue}.`,
-      // disclosure_key 'jupiter' (la clé du registre pour la ligne de la venue Solana) : les faits
-      // propres à la venue sont CE qu'est Jupiter — un agrégateur on-chain autonome — et que le
-      // devis est le sien, affiché tel qu'il le publie, tandis que dpay reste hors de l'échange.
-      // Ton miroir de icpswap : attribuer, nommer le signataire, nier la partie.
+      icpswap: venue => `Tourne sur le propre contrat de pool de ${venue}.`,
       jupiter: venue =>
-        `${venue} est un agrégateur on-chain autonome sur Solana — il choisit la route et la route l'exécute. Ce portefeuille signe la transaction que ${venue} construit, et le devis est celui de ${venue}, affiché exactement comme il le publie. dpay n'en est pas partie.`,
-      // disclosure_key 'sideshift' (la clé de la première venue CeFi, 2026-09-15) : les faits
-      // CeFi fixés par le fondateur — un service d'échange automatisé détenant les fonds
-      // pendant l'échange, pas un prestataire agréé ; le KYC selon SA politique est à LUI de
-      // le divulguer (ses propres conditions publiées sont nommées) ; dpay n'est pas partie
-      // et ne touche rien (le relay épinglé commissionRate « 0 »).
+        `${venue} est un agrégateur on-chain autonome sur Solana — il choisit la route ; la route l'exécute. Ce portefeuille signe la transaction que ${venue} construit, et le devis est celui de ${venue}, tel quel. dpay n'en est pas partie.`,
       sideshift: venue =>
-        `${venue} est un service d'échange automatisé — ni un prestataire agréé, ni une banque. Il détient tes fonds pendant l'échange, puis paie vers ta propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité selon sa politique, sont publiées sur sideshift.ai/terms. Ce portefeuille t'affiche le devis propre de ${venue} et l'adresse de dépôt, et dpay ne signe rien. dpay n'est pas partie à l'échange et ne touche rien.`,
-
-      // disclosure_key 'trocador' (la clé du registre pour la première ligne CeFI
-      // d'AGRÉGATEUR, 2026-09-20) : les mêmes vérités CeFi que sideshift — un service
-      // d'échange automatisé détenant les fonds pendant l'échange, conditions nommées,
-      // dpay n'est pas partie et ne touche rien — plus le fait d'agrégateur : la venue
-      // choisit parmi ses propres services (dpay ne classe jamais en dessous de ce choix)
-      // et on ne lui demande que des services sans vérification d'identité.
+        `${venue} est un service d'échange automatisé — ni un prestataire agréé, ni une banque. Il détient tes fonds pendant l'échange, puis paie vers ta propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité selon sa politique, sont sur sideshift.ai/terms. Ce portefeuille affiche le devis propre de ${venue} et l'adresse de dépôt — dpay ne signe rien, n'est pas partie et ne touche rien.`,
       trocador: venue =>
-        `${venue} est un agrégateur d'échange automatisé — il dirige ton échange vers l'un de ses propres services d'échange et détient tes fonds pendant l'échange, puis paie vers ta propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité qu'un service peut appliquer, sont publiées sur trocador.app/terms. dpay demande à ${venue} des services sans vérification d'identité. Ce portefeuille t'affiche le devis propre de ${venue} et l'adresse de dépôt, et dpay ne signe rien. dpay n'est pas partie à l'échange et ne touche rien.`,
+        `${venue} est un agrégateur d'échange automatisé — il dirige ton échange vers l'un de ses propres services et détient tes fonds pendant l'échange, puis paie vers ta propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité d'un service, sont sur trocador.app/terms. dpay demande à ${venue} uniquement des services sans vérification d'identité. Ce portefeuille affiche le devis propre de ${venue} et l'adresse de dépôt — dpay ne signe rien, n'est pas partie et ne touche rien.`,
     },
-    generic: venue => `Cette conversion est exécutée par ${venue}.`,
+    generic: venue => `Exécuté par ${venue}.`,
   },
   slippageLabel: 'Slippage',
   refusalLine: sym =>
-    `Si le prix du pool dépasse ton minimum, l'échange échoue : ton ${sym} reste dans ton portefeuille et l'autorisation expire sans être utilisée.`,
+    `Passé ton minimum, l'échange échoue — ton ${sym} reste dans ton portefeuille et l'autorisation expire sans être utilisée.`,
   detailsLabel: 'Détails',
   staleRefreshing: 'Devis périmé — actualisation…',
   venueSlow: 'Récemment lent à régler.',
   sheetTitle: inSym => `Convertir ${inSym}`,
-  youConvert: amt => `Tu convertis ${amt}`,
   youReceive: amt => `Tu recevras ≈ ${amt}`,
-  quoteFetching: venue => `Récupération du devis de ${venue}`,
-  autoVenueLine: (venue, n) => `Exécuté via ${venue}, devis le plus élevé parmi ${n} plateformes`,
-  autoVenueSingle: venue => `Exécuté via ${venue}`,
+  quoteFetching: venue => `Devis de ${venue}…`,
+  autoVenueLine: (venue, at, n) => `${venue} · ${at} · ${n} plateformes`,
   otherVenues: n => `Autres plateformes (${n})`,
-  atLeast: (amt, pct) => `Au moins ${amt} (${pct} de slippage)`,
+  atLeast: amt => `Min ${amt}`,
   ctaConvert: amt => `Convertir ${amt}`,
   rateMoved: (oldAmt, newAmt) => `Le devis a bougé : ${oldAmt} → ${newAmt}. Confirme à nouveau.`,
   neededVsHave: (need, have) => `${need} nécessaires, tu as ${have}`,
   smallerAmount: 'Convertis un montant moins élevé',
-  noPathTitle: inSym => `Aucune route de conversion depuis ${inSym} pour le moment`,
-  noPathBody: pairs => `Paires avec des routes aujourd'hui : ${pairs}`,
+  noPathTitle: inSym => `Aucune route depuis ${inSym}`,
+  noPathBody: pairs => `Routes aujourd'hui : ${pairs}`,
   noPathAction: 'Ajouter des fonds',
   externalSignTitle: 'Une étape demande ton propre portefeuille Ethereum',
-  externalSignBody: 'Tu signes la traversée dans ton propre portefeuille ; dpay n\'en détient jamais les clés. Tout avant et après reste dans ce volet.',
+  externalSignBody: 'Tu signes la traversée dans ton propre portefeuille ; dpay n\u2019en détient jamais les clés. Tout le reste reste dans ce volet.',
   signing: 'Signature…',
   swapVia: venue => `Échange via ${venue}`,
   awaitingPool: 'En attente du paiement du pool',
@@ -84,86 +65,84 @@ export const convertFr: ConvertMessages = {
   viaChain: venue => `via ${venue}`,
   depositLegSent: (venue, amt) => `Dépôt de ${amt} envoyé à ${venue}`,
   depositLegPending: (venue, amt) => `Envoi de ${amt} vers ${venue}`,
-  composedOrderLine: (venue, amt) => `Ordre créé chez ${venue}, paiement verrouillé ${amt}`,
+  composedOrderLine: (venue, amt) => `Ordre chez ${venue}, paiement verrouillé ${amt}`,
   depositRefusedBody: (hopSym, venue) =>
-    `Le dépôt vers ${venue} a été refusé — l'échange lui-même est passé et vos ${hopSym} sont toujours dans ce portefeuille. Rien de plus ne sera signé ; convertissez ou envoyez les ${hopSym} depuis leur propre compte.`,
+    `Le dépôt vers ${venue} a été refusé — l'échange est passé et tes ${hopSym} sont toujours dans ce portefeuille. Rien de plus ne sera signé : convertis ou envoie les ${hopSym} depuis leur propre compte.`,
 
   sol: {
     heading: (inSym, outSym) => `Convertir ${inSym} en ${outSym} (Solana)`,
     counterparty: venue => `Exécuté par ${venue}.`,
-    counterpartySigns: 'Ton téléphone signe la transaction que la venue a construite — personne d\u2019autre ne signe rien.',
+    counterpartySigns: 'Ton téléphone signe la transaction de la plateforme — personne d\u2019autre ne signe rien.',
     priceImpactLine: (pct, venue) => `Impact sur le prix : ${pct} (chiffre propre de ${venue})`,
-    solFeeLine: fee => `Frais de réseau Solana : ${fee} (payés au réseau, pas à la venue, pas à dpay)`,
+    solFeeLine: fee => `Frais de réseau Solana : ${fee} (au réseau, pas à la plateforme, pas à dpay)`,
     refusalLine: sym =>
-      `Si le prix dépasse le minimum, la transaction échoue on-chain : ton ${sym} reste dans ton portefeuille et rien d'autre n'a été signé.`,
-    pendingBody:
-      'La transaction d\u2019échange est sur le réseau Solana. Cet écran observe la chaîne elle-même et se résout de lui-même — sans recharger, sans réessayer.',
+      `Passé le minimum, l'échange échoue entier on-chain — ton ${sym} reste dans ton portefeuille.`,
+    pendingBody: 'L\u2019échange est sur Solana — cet écran se résout tout seul.',
     failedBody: (sym, venue, detail) =>
-      `La transaction d'échange de ${venue} a échoué${detail ? ` (${detail})` : ''}. Sur Solana, une transaction échouée ne déplace jamais de fonds — ton ${sym} est là où il était.`,
+      `L'échange de ${venue} a échoué${detail ? ` (${detail})` : ''} — sur Solana, rien n'a bougé ; ton ${sym} est là où il était.`,
   },
 
   fundBody: (sym, receiveTab, myAddress) =>
-    `Ce portefeuille n'a pas de ${sym}. Pour convertir des ${sym}, reçois d'abord des ${sym} à ton adresse : ouvre « ${receiveTab} » en bas et choisis « ${myAddress} ».`,
-  fundOtherHolds: (held, toSym) => `Tu as ${held} — tu peux plutôt le convertir en ${toSym}.`,
+    `Pas de ${sym} ici. Pour convertir, reçois d'abord des ${sym} : ouvre « ${receiveTab} » en bas et choisis « ${myAddress} ».`,
+  fundOtherHolds: (held, toSym) => `Tu as ${held} — convertis-le plutôt en ${toSym}.`,
   fundOtherSwitch: sym => `Convertir depuis ${sym} à la place`,
-  insufficientLine: (needed, balance) =>
-    `Cette conversion demande ${needed} — le montant plus deux frais de ledger — et ce portefeuille détient ${balance}. Baisse le montant, ou reçois-en d'abord davantage.`,
+  insufficientLine: (needed, balance) => `${needed} nécessaires, tu as ${balance}`,
 
   approvingTitle: 'Approbation en cours',
   approvingBody: (amount, at) =>
-    `Ton téléphone approuve le prélèvement exact de ${amount} par le pool. L'autorisation expire à ${at} si elle ne sert pas.`,
+    `Approbation : le pool peut prélever exactement ${amount}. Inutilisée, elle expire à ${at}.`,
   swappingTitle: 'Échange en cours',
-  swappingBody: venue => `Envoi de l'échange au pool ${venue}. Il ne peut prélever que le montant approuvé.`,
+  swappingBody: venue => `Envoi au pool ${venue} — il ne peut prélever que le montant approuvé.`,
   settlingTitle: 'Règlement',
-  settlingBody: sym => `Le pool a accepté l'échange. En attente de ton ${sym} dans ton portefeuille…`,
+  settlingBody: sym => `Le pool a accepté — en attente de ton ${sym}…`,
   doneTitle: 'Converti ✓',
   doneBody: amount => `${amount} reçus dans ton portefeuille.`,
   doneTx: tx => `Référence du versement : ${tx}`,
   pendingTitle: 'Versement en attente',
   pendingBody: (sym, pool, at) =>
-    `Le pool a accepté l'échange, mais le versement en ${sym} n'est pas encore arrivé dans ton portefeuille. Cet écran continue de surveiller — rien à faire pour l'instant. S'il n'arrive jamais, communique ceci au support : pool ${pool}, échange envoyé à ${at}.`,
+    `Échange accepté — le versement en ${sym} n'est pas encore arrivé. S'il n'arrive jamais, communique ceci au support : pool ${pool}, envoyé à ${at}.`,
   stillWatching: 'Toujours en attente du versement…',
   failedTitle: 'Échange non exécuté',
   failedApproveBody: sym =>
-    `Le ledger ${sym} a refusé l'approbation, donc rien n'a bougé — tu possèdes toujours chaque unité de ton ${sym}. Aucune autorisation n'a été créée ; rien à rembourser ni à annuler.`,
+    `Le ledger ${sym} a refusé l'approbation — rien n'a bougé, rien à annuler.`,
   failedSwapBody: (reason, sym, venue) =>
-    `Le pool ${venue} a refusé l'échange (${reason}). Ton ${sym} n'a jamais quitté ton portefeuille — rien d'autre n'est nécessaire.`,
+    `Le pool ${venue} a refusé l'échange (${reason}) — ton ${sym} n'a jamais quitté ton portefeuille.`,
   refundedBody: sym =>
-    `L'échange a échoué et le pool t'a rendu ton ${sym} — ton solde est de nouveau intact.`,
+    `L'échange a échoué — le pool t'a rendu ton ${sym}. Solde à nouveau intact.`,
   stuckTitle: 'Issue inconnue',
-  chainStuckTitle: 'Sort du dépôt inconnu',
+  chainStuckTitle: 'Issue du dépôt inconnue',
   chainStuckBody: venue =>
-    `Le dépôt pour ${venue} a été signé et envoyé, mais sa diffusion n'a pas été confirmée. Il aboutit de lui-même ou expire sans rien déplacer — ne l'envoyez jamais une seconde fois. dpay continue de surveiller et cet écran se met à jour tout seul.`,
+    `Le dépôt pour ${venue} a été envoyé mais jamais confirmé. Il aboutit de lui-même ou expire — ne l'envoie jamais une seconde fois.`,
   stop: 'Arrêter',
   stopWatching: 'Arrêter le suivi',
   stopProvider: 'Arrêter le suivi',
   abortedTitle: 'Arrêté',
-  abortedClean: 'Rien n’a quitté votre portefeuille.',
-  abortedFee: 'Vous avez déjà payé des petits frais d’approbation.',
-  abortedWatching: 'L’échange peut encore passer. Vérifiez Soldes plus tard.',
+  abortedClean: 'Rien n’a quitté ton portefeuille.',
+  abortedFee: 'Tu as payé de petits frais d’approbation.',
+  abortedWatching: 'L’échange peut encore passer. Vérifie Soldes plus tard.',
   abortedProvider:
-    'Surveillance arrêtée. Si vous n’avez jamais envoyé le dépôt, rien ne peut bouger — l’ordre meurt sans fonds chez la plateforme. Si vous l’avez déjà envoyé, l’échange peut encore aboutir : vérifiez Soldes et la page de statut de la plateforme \u2014 l\u2019ID du shift est juste en dessous.',
+    'Surveillance arrêtée. Sans dépôt envoyé, rien ne peut bouger ; déjà envoyé → l’échange peut encore aboutir. Vérifie Soldes et la page de statut de la plateforme — l’ID du shift est en dessous.',
   stuckBody:
-    'L’échange a été envoyé, mais la réponse du pool n’est pas arrivée. Ne lance pas un second échange avec les mêmes fonds. Si le versement arrive, cet écran passera tout seul à « Converti ».',
+    'Échange envoyé — la réponse du pool n’est jamais arrivée. Ne lance pas un second échange.',
   stuckSigned: (amount, minAmount, venue) =>
-    `Ce qui a été signé : approuver ${amount} au pool ${venue} ; échanger pour un minimum de ${minAmount}.`,
-  expiryLine: at => `Les instructions signées expirent au plus tard à ${at} — après, plus rien ne peut bouger.`,
+    `Signé : approuver ${amount} au pool ${venue}, échanger pour un minimum de ${minAmount}.`,
+  expiryLine: at => `Expire au plus tard à ${at} — après, plus rien ne peut bouger.`,
 
   awaitingDepositTitle: 'En attente du dépôt',
   awaitingDepositBody: (sym, venue) =>
-    `${venue} a émis cette commande et attend son dépôt en ${sym}. L'échange s'exécute quand le prestataire voit le dépôt ; dpay continue de surveiller son statut. Si aucun dépôt n'arrive à temps, le devis expire et rien ne bouge.`,
-  providerProcessingTitle: 'Traitement chez le prestataire',
+    `${venue} attend son dépôt en ${sym} ; l'échange démarre quand il arrive. Si rien n'arrive à temps, le devis expire et rien ne bouge.`,
+  providerProcessingTitle: 'Traitement chez la plateforme',
   providerProcessingBody: (sym, venue) =>
-    `${venue} détient le dépôt et exécute la commande. Ton ${sym} arrive quand le prestataire la termine — dpay continue de surveiller jusqu'à sa résolution.`,
+    `${venue} détient le dépôt et exécute la commande. Ton ${sym} arrive quand elle termine.`,
   quoteExpiredTitle: 'Devis expiré',
   quoteExpiredBody: (sym, venue) =>
-    `Le devis a expiré avant l'arrivée du dépôt : ${venue} a cessé d'attendre, donc rien n'a été échangé. Si un dépôt arrive quand même en retard, la plateforme le renvoie — dpay continue de surveiller en arrière-plan et cet écran se met à jour tout seul. Ton ${sym} reste où il est entre-temps.`,
-  providerRefundedTitle: 'Remboursé par le prestataire',
+    `Le devis a expiré avant l'arrivée du dépôt : ${venue} a cessé d'attendre, rien n'a été échangé. Un dépôt en retard — la plateforme le renvoie ; dpay continue de surveiller en arrière-plan et cet écran se met à jour tout seul. Ton ${sym} reste où il est.`,
+  providerRefundedTitle: 'Remboursé par la plateforme',
   providerRefundedBody: (sym, venue) =>
-    `${venue} a annulé cette commande et retourné le dépôt. Surveille le retour de ton ${sym}.`,
-  stuckWatching: 'dpay continue de surveiller ceci en arrière-plan. Si le paiement ou le remboursement arrive, cet écran bascule tout seul.',
+    `${venue} a annulé la commande et retourné ton ${sym}. Surveille Soldes.`,
+  stuckWatching: 'dpay continue de surveiller — si des fonds bougent, cet écran bascule tout seul.',
   stuckAcknowledge: 'Compris — arrêter la surveillance',
-  stuckAcknowledged: 'Tu en as pris note et la surveillance en arrière-plan est arrêtée. Si des fonds bougent plus tard, ils arriveront toujours à l\u2019adresse de ce portefeuille.',
+  stuckAcknowledged: 'Surveillance arrêtée — des fonds bougeant plus tard arriveront toujours à l\u2019adresse de ce portefeuille.',
 
   multihop: {
     destLabel: 'Destination',
@@ -171,24 +150,8 @@ export const convertFr: ConvertMessages = {
     destRoute: (sym, network) => `${sym} — vers ton adresse ${network}`,
     destRouteSol: (sym, network, venue) => `${sym} — vers ton adresse ${network} · dernière étape via ${venue}`,
     routeHeadingCollapsed: (inSym, hopSym, network) => `Route : ${inSym} → ${hopSym} (vers ${network})`,
-    destInWallet: sym => `${sym} — dans ce portefeuille`,
-    destGroupOther: 'Autres destinations',
-    mechDirect: 'Pool direct',
-    mechViaHub: hubSym => `Via ${hubSym}`,
-    mechViaCctp: 'Via Circle CCTP',
-    mechViaVenue: venue => `Via ${venue}`,
-    mechNoneSelected: 'Choisis un moyen ci-dessus pour voir le devis.',
-    viaHub: hubSym => `via ${hubSym} · 2 échanges`,
-    hubShape: () => '2 échanges',
-    routeMinWalletLine: (amount, pct) => `Au moins ${amount} restent dans ce portefeuille (plancher de glissement ${pct})`,
-    hubQuoteSource: (venue1, venue2, at) => `Devis de ${venue1} et ${venue2}, obtenus ${at}`,
-    hubCensusHeading: 'Deux échanges, détaillés un par un',
-    approveFeeLine: amount => `L\u2019autorisation du prochain pool coûte ${amount} (les propres frais de transfert du registre)`,
-    hubRateLine: (inSym, destSym) => `Taux combiné ${inSym} → ${destSym} :`,
-    hubSurplusNote: (hubSym, destSym) =>
-      `Si un échange paie au-dessus de son plancher, le surplus reste dans ce portefeuille en ${hubSym} ou en ${destSym}.`,
     destAddressLabel: 'Ta propre adresse sur le réseau de destination',
-    destAddressInvalid: 'Adresse de destination invalide — attendu : 0x suivi de 40 caractères hexadécimaux.',
+    destAddressInvalid: 'Adresse invalide — attendu : 0x suivi de 40 caractères hexadécimaux.',
     routeHeading: (inSym, hopSym, destSym, network) => `Route : ${inSym} → ${hopSym} → ${destSym} sur ${network}`,
     swapPaysLabel: 'L\u2019échange paie dans ce portefeuille',
     legApprovePull: sym => `Autoriser le pool à prendre tes ${sym}`,
@@ -201,150 +164,154 @@ export const convertFr: ConvertMessages = {
     legStateConfirmed: 'Confirmé',
     legStateFailed: 'Refusé',
     legProgress: (n, total) => `Étape ${n} sur ${total}`,
-    gasFeeLine: amount => `Gaz du retrait (devis en direct du minter) : ${amount}`,
-    routeMinLine: (amount, pct) => `Au moins ${amount} à ton adresse (plancher de glissement ${pct})`,
-    routeSurplusNote: hopSym => `Si l\u2019échange paie au-dessus du plancher, l\u2019excédent reste dans ce portefeuille en ${hopSym}.`,
+    destInWallet: sym => `${sym} — dans ce portefeuille`,
+    destGroupOther: 'Autres destinations',
+    mechDirect: 'Pool direct',
+    mechViaHub: hubSym => `Via ${hubSym}`,
+    mechViaCctp: 'Via Circle CCTP',
+    mechViaVenue: venue => `Via ${venue}`,
+    mechNoneSelected: 'Choisis un moyen ci-dessus pour voir le devis.',
+    viaHub: hubSym => `via ${hubSym} · 2 échanges`,
+    hubShape: () => '2 échanges',
+    routeMinWalletLine: amount => `Min ${amount} dans ce portefeuille`,
+    hubQuoteSource: (venue1, venue2, at) => `${venue1} + ${venue2} · ${at}`,
+    hubCensusHeading: 'Deux échanges, détaillés un par un',
+    approveFeeLine: amount => `L\u2019autorisation du prochain pool coûte ${amount} (les propres frais de transfert du registre)`,
+    hubRateLine: (inSym, destSym) => `Taux combiné ${inSym} → ${destSym} :`,
+    hubSurplusNote: (hubSym, destSym) =>
+      `Au-dessus du plancher, l'excédent reste dans ce portefeuille en ${hubSym} ou en ${destSym}.`,
+    gasFeeLine: amount => `Gaz du retrait (devis en direct) : ${amount}`,
+    routeMinLine: amount => `Min ${amount} à ton adresse`,
+    routeSurplusNote: hopSym => `Au-dessus du plancher, l'excédent reste dans ce portefeuille en ${hopSym}.`,
     routeDestEstimate: (amount, sym) =>
-      `Arrivée estimée : \u2248 ${amount} ${sym} à ton adresse Solana — la dernière étape passe par Jupiter avec une cotation fraîche`,
+      `Atterrit \u2248 ${amount} ${sym} à ton adresse Solana — la dernière étape Jupiter requote en direct`,
     routeVenues: (icVenue, solVenue) => `Route : ${icVenue} → Circle CCTP → ${solVenue}`,
-    gasPreflightTitle: 'Le retrait exige du gaz d\u2019abord',
+    gasPreflightTitle: 'D\u2019abord le gaz',
     gasPreflightBody: needed =>
-      `Brûler vers Ethereum coûte un gaz payé en ckETH, et ce portefeuille n\u2019en a pas assez. Il en faut environ ${needed} (le devis de gaz en direct du minter plus ses frais d\u2019autorisation). Procure-toi du ckETH dans ce portefeuille d\u2019abord, puis reviens — acheter une part de gaz ici est un travail futur, et dpay ne te cachera pas ce coût.`,
+      `Brûler vers Ethereum demande environ ${needed} de gaz en ckETH — ce portefeuille en détient trop peu. Procure-toi du ckETH dans ce portefeuille d'abord, puis reviens.`,
     executingTitle: 'Route en cours',
     doneRouteTitle: 'Retrait en route',
     doneRouteBody: (amount, address) => `Au moins ${amount} est en route vers ${address}.`,
-    doneOnItsWay: 'La livraison se fait sur Ethereum et peut prendre du temps — dpay ne peut pas surveiller ce réseau. Tu n\u2019as rien de plus à faire.',
-    failedLegTitle: 'L\u2019étape du retrait a été refusée',
+    doneOnItsWay: 'La livraison passe par Ethereum et peut prendre du temps — dpay ne peut pas surveiller ce réseau.',
+    failedLegTitle: 'Retrait refusé',
     failedLegBody: (sym, reason) =>
-      `L\u2019échange a bien eu lieu — tes fonds sont en ${sym} dans ce portefeuille, rien de perdu ni de bloqué. Le retrait a été refusé${reason ? ` : ${reason}` : ''}.`,
-    failedLegExit: 'Pour retirer, ouvre Payer, choisis Vers une adresse et colle n\u2019importe quelle adresse de destination — l\u2019étape de retrait part de là.',
-    stuckRouteBody: 'Une étape a été envoyée mais son issue reste inconnue. dpay continue de surveiller les registres en arrière-plan ; dès que le paiement ou le remboursement arrive, cet écran changera tout seul.',
-    failedHop2Title: 'Le second échange a été refusé',
+      `L'échange est passé — tes fonds sont en ${sym} dans ce portefeuille. Le retrait a été refusé${reason ? ` : ${reason}` : ''}.`,
+    failedLegExit: 'Retirer via Payer ▸ Vers une adresse — colle n\u2019importe quelle adresse de destination.',
+    stuckRouteBody: 'L\u2019issue d\u2019une étape reste inconnue — dpay surveille les registres ; cet écran change tout seul.',
+    failedHop2Title: 'Second échange refusé',
     failedHop2Body: (hubSym, outSym, reason) =>
-      `Le premier échange est passé — tu détiens ${hubSym} dans ce portefeuille, rien n\u2019est perdu ni bloqué. L\u2019échange ${hubSym} → ${outSym} a été refusé${reason ? ` : ${reason}` : ''}.`,
+      `Le premier échange est passé — tu détiens ${hubSym} dans ce portefeuille. L'échange ${hubSym} → ${outSym} a été refusé${reason ? ` : ${reason}` : ''}.`,
     failedHop2Exit: hubSym =>
-      `Tes ${hubSym} sont dépensables tels quels : garde-les, convertis-les plus tard depuis leur propre compte, ou envoie-les. Rien à annuler.`,
-    stuckHoldsLine: hubSym => `Accompli jusqu\u2019ici : tu détiens ${hubSym} dans ce portefeuille.`,
+      `Tes ${hubSym} sont dépensables tels quels — garde-les, convertis-les ou envoie-les. Rien à annuler.`,
+    stuckHoldsLine: hubSym => `Jusqu'ici : ${hubSym} dans ce portefeuille.`,
     insufficientHubLine: (needed, balance) =>
-      `Cette conversion nécessite ${needed} — le montant plus trois frais de registre — et ce portefeuille détient ${balance}. Baisse le montant, ou reçois d\u2019abord plus.`,
+      `Il faut ${needed} — le montant plus trois frais — tu as ${balance}.`,
   },
 
-  /** Venues CeFi (élargissement SideShift, 2026-09-15) : la remise du dépôt. La venue
-   *  détient les fonds pendant l'échange ; le dépôt de l'utilisateur EST le mouvement de
-   *  valeur — dpay ne signe rien. Chaque adresse/montant affiché est celui de la venue,
-   *  tel quel. */
   cefi: {
     destRow: (sym, network, venue) => `${sym} sur ${network} — via ${venue} (service d'échange)`,
     destRowMulti: (sym, network) => `${sym} sur ${network}`,
-    settleAddressLabel: 'Le paiement arrive sur ta propre adresse sur le réseau de destination',
+    settleAddressLabel: 'Le paiement arrive sur ta propre adresse',
     settleRailEthereum: 'Le paiement est versé en ETH natif sur Ethereum mainnet',
     depositAddressLabel: 'Adresse de dépôt',
-    depositAmountLabel: 'Montant exact à déposer',
+    depositAmountLabel: 'Montant exact',
     depositMemoLabel: 'Memo (obligatoire)',
-    depositExpiryLine: at => `L'ordre expire ${at}`,
-    noExpiryLine: 'Pas d’expiration publiée — dpay continue de surveiller jusqu’à ce que la plateforme résolve la commande.',
-    lastCheckedLine: at => `Dernière vérification : ${at}.`,
-    shiftId: id => `Shift ${id}`,
-    settlingFundsLine: `Fonds confirmés auprès de la plateforme — votre versement est verrouillé au montant coté.`,
-    settlingWatchLine: `La plupart des conversions sont réglées en quelques minutes. dpay surveille chaque shift et intervient auprès de la plateforme si l'un bloque — rien à faire de votre côté.`,
     counterparty: venue =>
-      `Exécuté par ${venue} — un service d'échange automatisé, pas un prestataire agréé et pas dpay.`,
+      `Exécuté par ${venue} — un service d'échange automatisé, ni une banque, ni dpay.`,
     checklistSigns:
       'Rien n\'est signé sur ce téléphone — après confirmation, c\'est toi qui envoies le dépôt à l\'adresse du service.',
     refusalLine: sym =>
-      `Si le dépôt n'arrive pas, l'ordre expire — rien ne bouge et ton ${sym} reste dans ton portefeuille.`,
+      `Si le dépôt n'arrive jamais, l'ordre expire — rien ne bouge et ton ${sym} reste dans ton portefeuille.`,
     insufficientLine: (needed, balance) =>
-      `Ce dépôt exige ${needed} — le montant plus un seul frais de transfert — et ce portefeuille détient ${balance}. Réduis le montant ou reçois d'abord davantage.`,
+      `Le dépôt exige ${needed} (frais de transfert inclus) — tu as ${balance}.`,
     payoutAt: address => `Payé sur ta propre adresse : ${address}`,
+    depositExpiryLine: at => `L'ordre expire ${at}`,
+    noExpiryLine: 'Pas d’expiration publiée — dpay continue de surveiller.',
+    lastCheckedLine: at => `Dernière vérification : ${at}.`,
+    shiftId: id => `Shift ${id}`,
+    settlingFundsLine: 'Fonds confirmés — ton versement est verrouillé au montant coté.',
+    settlingWatchLine: 'La plupart se règlent en minutes — dpay surveille chaque shift et intervient si l\u2019un bloque.',
     depositNote: (venue, sym) =>
-      `Envoie ${sym} depuis ton portefeuille vers l'adresse de dépôt de ${venue} ci-dessus — exactement le montant indiqué. ${venue} est un service d'échange automatisé : il détient ton ${sym} pendant l'échange, puis paie vers ton adresse. dpay n'est pas partie à cet échange et ne touche rien.`,
+      `Envoie ${sym} depuis ton portefeuille vers l'adresse de dépôt de ${venue} ci-dessus — exactement le montant indiqué. ${venue} le détient pendant l'échange, puis paie vers ton adresse. dpay n'est pas partie et ne touche rien.`,
     stillWaitingDeposit: 'Toujours en attente de ton dépôt — cet écran se met à jour tout seul.',
-    depositSolFeeNote: 'L\u2019envoi du dépôt paie aussi de petits frais de réseau en SOL — garde un peu de SOL dans ce portefeuille.',
+    depositSolFeeNote: 'Le dépôt paie aussi de petits frais de réseau en SOL — garde un peu de SOL dans ce portefeuille.',
     solInsufficientLine: (needed, balance) =>
-      `Ce dépôt envoie exactement ${needed} et ce portefeuille détient ${balance}. Réduis le montant ou reçois d\u2019abord davantage.`,
-    noQuoteTitle: 'Pas de marché pour cette paire pour le moment',
+      `Le dépôt envoie exactement ${needed} — tu as ${balance}.`,
+    noQuoteTitle: 'Pas de marché en direct',
     noQuoteBody: venue =>
       `${venue} référence cette paire mais n\u2019a pas de marché en direct pour le moment. Rien n\u2019a été envoyé. Choisis une autre plateforme ou réessaie plus tard.`,
     minDepositBody: (venue, venueMessage, min) =>
-      `${venue} a refusé ce montant : « ${venueMessage} » (dépôt minimum : ${min}). Rien n\u2019a été envoyé. Augmente le montant et réessaie.`,
+      `${venue} a refusé ce montant : « ${venueMessage} » (minimum ${min}). Rien n\u2019a été envoyé — augmente le montant et réessaie.`,
   },
 
-  /** La famille chain (2026-09-28, le mandat any-pair) : un consentement, deux phases —
-   *  d\u2019abord la commande du venue + le dépôt signé, puis les jambes IC depuis le plan
-   *  gelé quand le venue nomme le paiement. Chaque impasse nomme où sont les fonds. */
   chain: {
     depositSending: venue => `Envoi du dépôt à ${venue}`,
-    orderLine: (venue, depositAmt, midSym) => `Commande créée chez ${venue} : ${depositAmt} en entrée, ${midSym} en sortie`,
+    orderLine: (venue, depositAmt, midSym) => `Commande chez ${venue} : ${depositAmt} en entrée, ${midSym} en sortie`,
     depositSent: (venue, depositAmt, midSym) => `${depositAmt} envoyé à ${venue} — en attente du paiement en ${midSym}`,
-    phase2Note: 'La seconde jambe convertit automatiquement dès que le paiement arrive — sans second appui.',
-    phase2Leg: (midSym, outSym, venue) => `Puis ${midSym} → ${outSym} via ${venue}, requoté dès que le paiement arrive`,
+    phase2Note: 'La seconde étape tourne seule dès que le paiement arrive.',
+    phase2Leg: (midSym, outSym, venue) => `Puis ${midSym} → ${outSym} via ${venue} — requoté à l\u2019arrivée du paiement`,
     rowShape: midSym => `via ${midSym}, se convertit d’un appui`,
-    phase2Failed: midSym => `La seconde jambe n\u2019a pas pu s\u2019exécuter. Tes ${midSym} sont dans ce portefeuille — convertis-les avec un Convert normal (il sera présélectionné).`,
-    depositFailed: sym => `Le dépôt n’a jamais atterri on-chain — tes ${sym} n’ont jamais quitté le portefeuille. Rien à annuler.`,
+    phase2Failed: midSym => `La seconde étape n\u2019a pas pu s\u2019exécuter — tes ${midSym} sont dans ce portefeuille. Convertis-les normalement (présélectionné).`,
+    depositFailed: sym => `Le dépôt n’a jamais atterri on-chain — tes ${sym} n’ont jamais quitté le portefeuille.`,
   },
 
-  /** La famille cross-rail (routes B/C, 2026-09-16) : tout ce qui suit les cinq jambes IC —
-   *  la remise CCTP (dpay affiche les transactions exactes, c\u2019est le portefeuille Ethereum
-   *  PROPRE de l\u2019utilisateur qui signe ; dpay ne détient jamais de clé EVM), l\u2019attente de
-   *  l\u2019attestation de Circle et l\u2019offre finale de Jupiter en route C. Chaque impasse nomme
-   *  où se trouvent les fonds et la sortie. */
   crossrail: {
     heading: 'Signer dans ton portefeuille Ethereum',
     handoffIntro: (amount) =>
-      `La partie Internet Computer est faite : ${amount} est arrivé à ton adresse Ethereum. Ton portefeuille l\u2019envoie maintenant de l\u2019autre côté — dpay ne touche jamais à tes clés Ethereum.`,
+      `Partie IC faite : ${amount} est à ton adresse Ethereum. Ton portefeuille le fait traverser — dpay ne touche jamais à tes clés Ethereum.`,
     stepApproveLabel: 'Étape 1 — autoriser le contrat de Circle à déplacer les USDC',
     stepBurnLabel: 'Étape 2 — brûler les USDC pour le transfer vers Solana',
     txAmountLabel: 'Montant',
     copy: 'Copier',
     copied: 'Copié',
-    approveHint: 'Cela autorise le TokenMessenger de Circle à déplacer exactement les USDC envoyés — rien de plus.',
-    burnHint: 'Cela verrouille les USDC sur Ethereum. Le pont de Circle frappe ensuite ces mêmes USDC à ton adresse Solana — pas de jeton enveloppé, Circle exécute l\u2019arrivée pour toi.',
-    timingNote: 'Sur la voie rapide, l\u2019arrivée prend typiquement de quelques secondes à quelques minutes (~20 s lors de notre vérification en direct). Si Ethereum est chargé, cela peut durer plus longtemps — cet écran se met à jour tout seul.',
-    externalGasLine: 'Le gaz Ethereum de ces deux transactions est payé par l\u2019ETH de ton propre portefeuille. dpay ne peut ni le payer ni le chiffrer exactement.',
-    circleFeeLine: fee => `Frais du pont de Circle (son propre chiffre, déduit du montant) : au plus ${fee}`,
+    approveHint: 'Autorise le TokenMessenger de Circle à déplacer exactement ces USDC — rien de plus.',
+    burnHint: 'Verrouille les USDC sur Ethereum ; le pont de Circle frappe ces mêmes USDC à ton adresse Solana — pas de jeton enveloppé.',
+    timingNote: 'Voie rapide : de quelques secondes à quelques minutes (~20 s mesurés). Ethereum chargé, plus longtemps — cet écran se met à jour tout seul.',
+    externalGasLine: 'Le gaz se paie avec l\u2019ETH de ton propre portefeuille — dpay ne peut ni le payer ni le chiffrer exactement.',
+    circleFeeLine: fee => `Frais du pont de Circle (son propre chiffre, sur le montant) : au plus ${fee}`,
     mintFloorLine: (floor, sym) =>
-      `Au moins ${floor} ${sym} traversent vers ton adresse Solana — la dernière étape les échange contre ta destination`,
+      `Min ${floor} ${sym} à ton adresse Solana — la dernière étape échange vers ta destination`,
     mintFloorDestLine: (floor, sym) => `Au moins ${floor} ${sym} arrivent à ton adresse Solana`,
-    burnTxLabel: 'Hash de la transaction de burn (de ton portefeuille, après signature)',
+    burnTxLabel: 'Hash de la tx de burn (de ton portefeuille)',
     burnTxPlaceholder: '0x…',
     attachButton: 'Je l\u2019ai signé — surveiller la traversée',
-    burnTxInvalid: 'Ça ne ressemble pas à un hash de transaction Ethereum.',
-    declineButton: 'Je ne signe pas ça',
-    whatSigning: 'Tu signes deux transactions Ethereum tout à fait ordinaires dans ton propre portefeuille : une approbation, puis le burn. Rien n\u2019est signé côté dpay à cette étape.',
+    burnTxInvalid: 'Pas un hash de transaction Ethereum.',
+    declineButton: 'Je ne signe pas',
+    whatSigning: 'Tu signes deux transactions Ethereum ordinaires dans ton propre portefeuille : une approbation, puis le burn. Rien n\u2019est signé côté dpay.',
     crossingTitle: 'Traversée vers Solana',
-    crossingBody: 'Circle atteste le burn et frappe les USDC à ton adresse Solana. dpay surveille le propre flux d\u2019état de Circle — cet écran changera tout seul.',
+    crossingBody: 'Circle atteste le burn et frappe les USDC à ton adresse Solana — dpay surveille le flux d\u2019état de Circle.',
     viewBurnTx: 'Voir la transaction de burn',
     viewCircle: 'Page d\u2019état de Circle',
-    stillCrossing: 'L\u2019attestation n\u2019est pas encore prête. Cela reste en attente — ce n\u2019est pas un échec. Sur la voie rapide, comptes des secondes à des minutes ; Ethereum congestionné, plus longtemps.',
+    stillCrossing: 'Encore en attente — pas un échec. Voie rapide : secondes à minutes ; Ethereum congestionné, plus longtemps.',
     solReadyTitle: 'Les USDC sont arrivés sur Solana',
-    solReadyBody: (credit, ata) => `${credit} sont à ${ata}, vérifié on-chain. Termine la route — ou laisse les USDC là, ils sont à toi dans les deux cas.`,
+    solReadyBody: (credit, ata) => `${credit} vérifiés à ${ata}. Termine la route — ou garde les USDC ; ils sont à toi dans les deux cas.`,
     abortedCrossing: ata =>
-      `Suveillance arrêtée. Votre burn est déjà parti, Circle peut donc encore compléter le mint — l’USDC arrive de toute façon à votre propre adresse Solana ${ata}. Vérifiez Soldes plus tard.`,
+      `Suveillance arrêtée. Ton burn est déjà parti — Circle peut encore compléter le mint ; l’USDC arrive de toute façon à ta propre adresse Solana ${ata}. Vérifie Soldes plus tard.`,
     abortedSolReady: ata =>
-      `Rien n’a été signé — l’échange final n’a jamais été lancé. Vos USDC sont à votre adresse Solana ${ata} : gardez-les ou convertissez-les là-bas.`,
-    solQuoteLabel: venue => `Devis ${venue} (en direct)`,
-    solMinLine: (min, sym) => `Au moins ${min} ${sym} à ton adresse`,
+      `Rien n’a été signé — l’échange final n’a jamais été lancé. Tes USDC sont à ton adresse Solana ${ata} : garde-les ou convertis-les là-bas.`,
+    solQuoteLabel: venue => `Devis ${venue}`,
+    solMinLine: (min, sym) => `Min ${min} ${sym} à ton adresse`,
     solConfirmButton: sym => `Échanger contre ${sym}`,
-    solFeeLine: fee => `Frais de transaction Solana : ${fee}`,
-    solPreflightTitle: 'Un peu de SOL est nécessaire pour les frais',
+    solFeeLine: fee => `Frais Solana : ${fee}`,
+    solPreflightTitle: 'SOL nécessaire pour les frais',
     solPreflightBody:
-      'Les frais réseau de l\u2019échange se paient en SOL et ce portefeuille ne détient pas de SOL. Procure-toi d\u2019abord un peu de SOL dans ce portefeuille — les USDC restent en sécurité entre-temps.',
+      'Les frais se paient en SOL et ce portefeuille n\u2019en détient pas. Ajoute un peu de SOL — les USDC restent en place.',
     doneTitle: 'Converti',
     doneBody: (amount, sym, address) => `${amount} ${sym} sont à ton adresse Solana ${address} — vérifié on-chain.`,
-    doneVia: (icVenue, solVenue) => `Converti via ${icVenue}, Circle et ${solVenue}.`,
+    doneVia: (icVenue, solVenue) => `Via ${icVenue}, Circle et ${solVenue}.`,
     declinedTitle: 'Remise annulée',
     declinedBody: address =>
-      `Rien n\u2019a traversé. Tes USDC se trouvent à ta propre adresse Ethereum ${address} — envoie-les où tu veux depuis ton portefeuille ou relance cette route plus tard.`,
-    solFailedTitle: 'L\u2019échange Solana n\u2019a pas abouti',
+      `Rien n\u2019a traversé. Tes USDC sont à ta propre adresse Ethereum ${address} — envoie-les où tu veux ou relance cette route plus tard.`,
+    solFailedTitle: 'L\u2019échange Solana a échoué',
     solFailedBody: (ata, venue) =>
-      `Les USDC ont déjà traversé sans problème et sont à ton adresse Solana ${ata}. ${venue} a refusé l\u2019échange final — réessaie ici dans un instant ou garde les USDC.`,
+      `Les USDC ont déjà traversé — ils sont à ton adresse Solana ${ata}. ${venue} a refusé l\u2019échange final : réessaie ici dans un instant ou garde les USDC.`,
     legCctpBurn: (sym, network) => `Emmener ${sym} vers ${network} via Circle (tu signes ça dans ton portefeuille)`,
     legSolSwap: (venue, sym) => `Échanger contre ${sym} sur ${venue}`,
-    destAddressCrossNote: 'Cette adresse Ethereum est aussi le portefeuille qui signe la traversée — colle une adresse que tu contrôles.',
+    destAddressCrossNote: 'Cette adresse signe aussi la traversée — colle une adresse que tu contrôles.',
     checksumMismatch: 'Erreur de checksum',
     retypeAddress: 'Retape l\u2019adresse',
     retypeMismatch: 'Ne correspond pas',
-    gasFundTitle: 'Cette conversion a besoin de gaz ETH que tu n\u2019as pas',
+    gasFundTitle: 'Il manque du gaz ETH',
     gasFundNeed: eth => `Besoin \u2248 ${eth}`,
     gasFundHave: eth => `Ton portefeuille : ${eth}`,
     gasFundWalletButton: 'Financer depuis ce portefeuille',
@@ -353,24 +320,24 @@ export const convertFr: ConvertMessages = {
     gasFundRecheck: 'Revérifier',
     gasFundShort: short => `Il manque toujours ${short}`,
     gasLegsNote: 'Les premières étapes financent le gaz.',
-    abortedGasBody: 'Le financement du gaz est terminé — il est toujours dans ce portefeuille. La conversion, elle, n\u2019a jamais tourné.',
+    abortedGasBody: 'Le financement du gaz est arrivé — toujours dans ce portefeuille. La conversion n\u2019a jamais été lancée.',
     declinedWithGasBody: address => `Rien n\u2019a traversé. Tes USDC sont à ton adresse Ethereum ${address} ; le gaz financé est toujours dans ce portefeuille.`,
     gasShortFailedBody: needed => `Le financement du gaz est resté sous ${needed}. Rien n\u2019a quitté ce portefeuille — la conversion n\u2019a jamais démarré.`,
   },
 
   errors: {
-    quoteUnreachable: venue => `Impossible d'obtenir le devis de ${venue} via le relay de dpay. Rien n'a été envoyé. Si ta connexion fonctionne, le relay ou ${venue} est momentanément indisponible. Réessaie dans un instant.`,
-    quoteRefused: venue => `${venue} a refusé d'établir un devis pour cette paire pour l'instant.`,
-    buildRefused: venue => `${venue} n'a pas pu préparer cet échange pour le moment. Rien n'a bougé, réessayez dans un instant.`,
+    quoteUnreachable: venue => `${venue} était inaccessible via le relay de dpay. Rien n'a été envoyé — vérifie ta connexion et réessaie dans un instant.`,
+    quoteRefused: venue => `${venue} a refusé pour l'instant d'établir un devis pour cette paire.`,
+    buildRefused: venue => `${venue} n'a pas pu préparer cet échange. Rien n'a bougé — réessaie dans un instant.`,
     quoteUnavailable: code => `Devis indisponible (${code}).`,
     quoteUnconfigured: venue =>
-      `${venue} n'est pas encore configuré sur ce relay — aucune identification de partenaire n'est configurée, aucun devis ne peut donc être demandé. Ton portefeuille n'a aucun problème.`,
-    gasUnavailable: 'Le prix du gaz du minter de retrait n\u2019a pas pu être demandé — rien n\u2019a été signé. Réessaie.',
+      `${venue} n'est pas encore configuré sur ce relay — aucun devis ne peut être demandé. Ton portefeuille n'a aucun problème.`,
+    gasUnavailable: 'Le prix du gaz du minter était indisponible — rien n\u2019a été signé. Réessaie.',
     cctpFeeUnavailable: 'Les frais du pont de Circle n\u2019ont pas pu être récupérés — rien n\u2019a été signé. Vérifie ta connexion et réessaie.',
     chainDepositUnreadable: venue =>
       `L\u2019adresse de dépôt de ${venue} n\u2019a pas pu être vérifiée sur Solana — rien n\u2019a été signé. Vérifie ta connexion et réessaie, ou envoie le dépôt depuis ton propre portefeuille.`,
-    chainSenderEmpty: sym => `Ce portefeuille n\u2019a pas de compte de jetons ${sym} — rien n\u2019a été signé. Reçois d\u2019abord des ${sym}, puis convertis.`,
+    chainSenderEmpty: sym => `Pas de compte de jetons ${sym} dans ce portefeuille — rien n\u2019a été signé. Reçois d\u2019abord des ${sym}.`,
     chainSenderShort: sym => `Le solde de ${sym} du portefeuille ne couvre pas ce montant — rien n\u2019a été signé.`,
-    chainRentShort: sym => `Créer le compte ${sym} du venue demande un peu de SOL pour le loyer et le portefeuille est court — rien n\u2019a été signé. Recharge en SOL et réessaie.`,
+    chainRentShort: sym => `Le compte ${sym} de la plateforme demande un peu de SOL pour le loyer — le portefeuille n’en a pas assez. Rien n\u2019a été signé ; recharge en SOL et réessaie.`,
   },
 };

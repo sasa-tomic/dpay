@@ -1302,7 +1302,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
       <View style={S.viewfinderCenter}>
         <IconScan size={32} color={DARK.brandText} />
         <Text style={S.camText}>{M.pay.pointCamera}</Text>
-        <Text style={S.camSubText}>{M.pay.cameraPrivacy}</Text>
+        {/* The camera-privacy line renders ONLY on the permission screen (QrScanner), where it
+            answers the question the OS dialog raises. On the idle instrument it was one more
+            line under a hint the payer has already acted on (verbosity pass 2026-09-29). */}
       </View>
     </View>
   );

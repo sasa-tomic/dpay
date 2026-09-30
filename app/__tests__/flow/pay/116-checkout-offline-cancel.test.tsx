@@ -28,7 +28,7 @@ hermeticDescribe('flow 116 — checkout offline + cancel: out of contact is not 
 
     // --- 1. out of contact -------------------------------------------------------------------------
     await goOffline(m);
-    assert(await m.driver.waitForText('Can’t check this charge right now', {timeoutMs: 20_000}),
+    assert(await m.driver.waitForText('Can’t check this charge', {timeoutMs: 20_000}),
       'an unreachable checkout must say so');
     const offline = m.driver.bodyText();
     // The two sentences that would be lies — and the denial that makes the first one honest.
