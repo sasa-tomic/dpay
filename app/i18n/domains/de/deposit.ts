@@ -23,7 +23,9 @@ export const depositDe: DepositMessages = {
   checkNow: 'Jetzt prüfen',
 
   ck: {
-    addressErr: 'Deine Einzahlungsadresse konnte nicht geladen werden. Prüfe deine Verbindung und versuche es erneut.',
+    addressOffline: 'Du scheinst offline zu sein, daher konnte deine Einzahlungsadresse nicht erstellt werden. Dein Geld ist unangetastet. Versuche es erneut, sobald du wieder online bist.',
+    addressUnreachable: 'Deine Verbindung ist in Ordnung, aber der Internet Computer antwortet nicht, daher konnte deine Einzahlungsadresse nicht erstellt werden. Dein Geld ist unangetastet. Versuche es gleich noch einmal.',
+    addressCreateErr: 'Deine Adresse konnte nicht erstellt werden. Dein Geld ist unangetastet. Schließe diesen Bildschirm und versuche es erneut.',
     noMinter: 'Für dieses Asset sind Einzahlungen noch nicht möglich.',
     fetchingAddress: 'Einzahlungsadresse wird geladen…',
     noAddress: 'Keine Einzahlungsadresse verfügbar.',
@@ -262,7 +264,8 @@ export const withdrawDe: WithdrawMessages = {
     withdrawalUnknown:
       'Die Auszahlung konnte nicht bestätigt werden — sie kann trotzdem noch ankommen; prüfe bald dein Guthaben',
     noRail: 'Für dieses Asset ist kein Auszahlungsweg konfiguriert',
-    gasFeeErr: 'Die aktuelle Gas-Gebühr konnte nicht geladen werden — prüfe deine Verbindung',
+    gasFeeErrOffline: 'Du scheinst offline zu sein, daher konnte die aktuelle Gas-Gebühr nicht gelesen werden. Nichts wurde gesendet. Versuche es erneut, sobald du wieder online bist.',
+    gasFeeErrUnreachable: 'Deine Verbindung ist in Ordnung, aber der Internet Computer antwortet nicht, daher konnte die aktuelle Gas-Gebühr nicht gelesen werden. Dein Geld ist unangetastet. Versuche es gleich noch einmal.',
     withdrawn: 'Ausgezahlt ✓',
     sentTo: 'Gesendet an',
     copyDestinationLabel: 'Zieladresse kopieren',

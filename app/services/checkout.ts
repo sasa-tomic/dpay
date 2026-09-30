@@ -48,6 +48,7 @@ import {canonicalizeDecimal} from '../i18n/intl';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import {base, nowSecs, randNonceHex} from '../lib/format';
 import type {Identity} from '../lib/types';
+import {classifyTransportFailure, type TransportBlame} from '../transportFailure';
 
 /** The ONE method/asset pair dpay's checkout serves — `METHOD`/`ASSET` in `crates/dpay-relay/src/checkout.rs`.
  *  Spelled in the PROVIDER's vocabulary because that is what it is matched against: `offerNamesAsset`
@@ -159,8 +160,13 @@ export type CheckoutOpenOutcome =
   /** The relay could not be reached at all. `tried` names the address(es) this call actually
    *  tried — the pin ALONE once a session is pinned to an address still in the configured list
    *  (a mid-session failure is a fact about that one relay), else every address of the walk —
-   *  so the merchant's error never blames a relay that was not asked. */
-  | {kind: 'unreachable'; detail: string; tried: string[]}
+   *  so the merchant's error never blames a relay that was not asked. `blame` is the CLASSIFIED
+   *  side that failed (work order 2026-09-30): 'offline' = nothing answered anywhere, nobody's
+   *  fault; 'unreachable' = the phone is online and dpay's relay is the side that did not
+   *  answer. The transport catch probes the IC boundary (off the relay path); the arms where the
+   *  relay ANSWERED but served garbage set 'unreachable' directly — an HTTP answer already
+   *  proves the phone online, the SolanaRelayPathDown precedent. */
+  | {kind: 'unreachable'; detail: string; tried: string[]; blame: TransportBlame}
   /** This device could not produce the signature. Nothing was sent. */
   | {kind: 'unsigned'; detail: string};
 
@@ -176,11 +182,11 @@ export type CheckoutVoidOutcome =
   /** Includes the one refusal that matters: the charge was already PAID, with the block that paid
    *  it named in `said`. Money moved, so nothing voids it. */
   | {kind: 'refused'; said: string | null; status: number}
-  /** Same attribution as the open path's `unreachable`: the addresses actually asked — the pin
-   *  ALONE once a session is pinned to an address still in the configured list, else the whole
-   *  walk in order — so the "could NOT cancel" copy names who did not answer instead of blaming
-   *  the caller's preferred URL. */
-  | {kind: 'unreachable'; detail: string; tried: string[]}
+  /** Same attribution as the open path's `unreachable` (`tried` + the classified `blame`): the
+   *  addresses actually asked — the pin ALONE once a session is pinned to an address still in
+   *  the configured list, else the whole walk in order — so the "could NOT cancel" copy names
+   *  who did not answer instead of blaming the caller's preferred URL. */
+  | {kind: 'unreachable'; detail: string; tried: string[]; blame: TransportBlame}
   | {kind: 'unsigned'; detail: string};
 
 /** What the cashier typed, as whole minor units (rappen/cents) of the settlement asset's own
@@ -510,7 +516,7 @@ export async function openCheckoutCharge(
     const detail = errText(e);
     const tried = e instanceof CheckoutUnreachable ? e.tried : [base(relayUrl)];
     console.warn(`checkout: checkout-open could not reach ${tried.join(', ')}: ${detail}`);
-    return {kind: 'unreachable', detail, tried};
+    return {kind: 'unreachable', detail, tried, blame: await classifyTransportFailure()};
   }
   const json = await readJson(r);
   if (!r.ok) {
@@ -520,7 +526,7 @@ export async function openCheckoutCharge(
     return {kind: 'refused', said: said(json), status: r.status};
   }
   if (typeof json !== 'object' || json === null) {
-    return {kind: 'unreachable', detail: `checkout-open answered HTTP ${r.status} with an unreadable body`, tried: [addr]};
+    return {kind: 'unreachable', detail: `checkout-open answered HTTP ${r.status} with an unreadable body`, tried: [addr], blame: 'unreachable'};
   }
   const o = json as Record<string, unknown>;
   const id = str(o, 'id');
@@ -537,7 +543,7 @@ export async function openCheckoutCharge(
       || reference === null || !/^[0-9a-f]{32}$/.test(reference)) {
     const detail = `checkout-open answered without {id, qr, amount, reference, created_secs, expires_at}: ${JSON.stringify(o).slice(0, 200)}`;
     console.warn(`checkout: ${detail}`);
-    return {kind: 'unreachable', detail, tried: [addr]};
+    return {kind: 'unreachable', detail, tried: [addr], blame: 'unreachable'};
   }
   // THE ASSET CHECK. The answer names the asset it opened the charge in (`asset`, the relay's own
   // `ASSET` constant on the wire). When it names something other than the asset the cashier
@@ -663,7 +669,7 @@ export async function cancelCheckoutCharge(relayUrl: string, identity: Identity)
     const detail = errText(e);
     const tried = e instanceof CheckoutUnreachable ? e.tried : [base(relayUrl)];
     console.warn(`checkout: cancellation could not reach ${tried.join(', ')}: ${detail}`);
-    return {kind: 'unreachable', detail, tried};
+    return {kind: 'unreachable', detail, tried, blame: await classifyTransportFailure()};
   }
   const json = await readJson(r);
   if (!r.ok) return {kind: 'refused', said: said(json), status: r.status};
@@ -671,7 +677,7 @@ export async function cancelCheckoutCharge(relayUrl: string, identity: Identity)
   if (status === null) {
     const detail = `cancellation answered HTTP ${r.status} with an unreadable status body`;
     console.warn(`checkout: ${detail}`);
-    return {kind: 'unreachable', detail, tried: [answeredBy]};
+    return {kind: 'unreachable', detail, tried: [answeredBy], blame: 'unreachable'};
   }
   return {kind: 'cancelled', status};
 }

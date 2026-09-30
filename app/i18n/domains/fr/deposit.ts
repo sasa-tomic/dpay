@@ -25,7 +25,9 @@ export const depositFr: DepositMessages = {
   checkNow: 'Vérifier',
 
   ck: {
-    addressErr: 'Impossible de charger votre adresse de dépôt. Vérifiez votre connexion et réessayez.',
+    addressOffline: 'Vous semblez hors ligne, donc votre adresse de dépôt n’a pas pu être créée. Votre argent est intact. Réessayez une fois de nouveau en ligne.',
+    addressUnreachable: 'Votre connexion est bonne, mais Internet Computer ne répond pas, donc votre adresse de dépôt n’a pas pu être créée. Votre argent est intact. Réessayez dans un instant.',
+    addressCreateErr: 'Votre adresse n’a pas pu être créée. Votre argent est intact. Fermez cet écran et réessayez.',
     noMinter: 'Cet actif n’est pas encore disponible en dépôt.',
     fetchingAddress: 'Récupération de votre adresse de dépôt…',
     noAddress: 'Aucune adresse de dépôt disponible.',
@@ -263,7 +265,8 @@ export const withdrawFr: WithdrawMessages = {
     approvalUnknown: 'Impossible de confirmer l’approbation — vérifiez votre solde une fois de retour en ligne',
     withdrawalUnknown: 'Impossible de confirmer le retrait — il peut encore aboutir ; vérifiez votre solde bientôt',
     noRail: 'Le retrait n’est pas configuré pour cet actif',
-    gasFeeErr: 'Impossible de récupérer les frais de réseau actuels — vérifiez votre connexion',
+    gasFeeErrOffline: 'Vous semblez hors ligne, donc les frais de réseau actuels n’ont pas pu être lus. Rien n’a été envoyé. Réessayez une fois de nouveau en ligne.',
+    gasFeeErrUnreachable: 'Votre connexion est bonne, mais Internet Computer ne répond pas, donc les frais de réseau actuels n’ont pas pu être lus. Votre argent est intact. Réessayez dans un instant.',
     withdrawn: 'Retiré ✓',
     sentTo: 'Envoyé à',
     copyDestinationLabel: 'Copier l’adresse de destination',

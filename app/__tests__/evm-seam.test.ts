@@ -257,3 +257,43 @@ describe('evm seam — configured (isolated registry, mocked fetch)', () => {
     expect(getLogs!.params[0].fromBlock).toBe('0x0');
   });
 });
+
+// ============================================================================
+// The bounded engine load (work order 2026-09-30): `loadEvmRpcForSend` throws the CLASSIFIED
+// copy from app/transportFailure.ts `engineLoadCopy` — the EVM mirror of the solana-seam pin.
+// The old flat copy ("check your connection") fired while the phone was online and the relay's
+// serving of the chunk was what failed; the classified copy names the facts per blame.
+// ============================================================================
+describe('loadEvmRpcForSend — the classified engine-chunk copy', () => {
+  const g = globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'};
+  const {M} = require('../i18n') as typeof import('../i18n');
+
+  afterEach(() => {
+    delete g.__DPAY_TEST_SOLANA_CONNECTIVITY;
+  });
+
+  test('a chunk that never arrives rejects with the blame-classified sentence, both arms', async () => {
+    const never = (): Promise<never> => new Promise(() => {});
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'online';
+    const a = require('../evm') as typeof import('../evm');
+    await expect(a.loadEvmRpcForSend(20, never)).rejects.toThrow(M.errors.engine.unreachable);
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'offline';
+    const b = require('../evm') as typeof import('../evm');
+    await expect(b.loadEvmRpcForSend(20, never)).rejects.toThrow(M.errors.engine.offline);
+    expect(M.errors.engine.offline).not.toBe(M.errors.engine.unreachable);
+  });
+
+  test('a fast dynamic-import failure is the same user fact and classifies too', async () => {
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'online';
+    const a = require('../evm') as typeof import('../evm');
+    await expect(a.loadEvmRpcForSend(5_000, () => Promise.reject(
+      new TypeError('Failed to fetch dynamically imported module: https://relay.test/evm-service-1.js'),
+    ))).rejects.toThrow(M.errors.engine.unreachable);
+  });
+
+  test('a deadline that is never reached still resolves the loader — a fast module load is honored', async () => {
+    const marker = {rpc: true};
+    const a = require('../evm') as typeof import('../evm');
+    await expect(a.loadEvmRpcForSend(5_000, () => Promise.resolve(marker as unknown as typeof import('../evm/service')))).resolves.toBe(marker);
+  });
+});

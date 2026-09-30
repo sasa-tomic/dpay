@@ -728,7 +728,14 @@ function relayHost(relayUrl: string): string {
 function failureBody(outcome: Exclude<CheckoutOpenOutcome, {kind: 'open'} | {kind: 'served-other'}>, entered: string): string {
   switch (outcome.kind) {
     case 'not-served': return M.receive.checkout.notServed(relayHost(outcome.addr));
-    case 'unreachable': return M.receive.checkout.unreachable(outcome.tried.map(relayHost).join(', '));
+    case 'unreachable': {
+      // The CLASSIFIED blame picks the sentence (work order 2026-09-30): offline blames nobody;
+      // online says the connection is fine and names the relay(s) that did not answer.
+      const hosts = outcome.tried.map(relayHost).join(', ');
+      return outcome.blame === 'offline'
+        ? M.receive.checkout.unreachableOffline(hosts)
+        : M.receive.checkout.unreachable(hosts);
+    }
     case 'unsigned': return M.receive.checkout.unsigned;
     case 'mispriced': return M.receive.checkout.mispriced(entered, outcome.quoted);
     case 'refused':
@@ -746,7 +753,14 @@ function cancelRefusal(outcome: Exclude<CheckoutVoidOutcome, {kind: 'cancelled'}
     // Wave-2: the SAME host attribution as the open path — the outcome carries the addresses
     // actually tried (the pin alone, or the whole walk), so the cashier reads WHO did not
     // answer instead of a generic "the checkout" that blames nobody and helps nobody.
-    case 'unreachable': return M.receive.checkout.cancelUnreachable(outcome.tried.map(relayHost).join(', '));
+    case 'unreachable': {
+      const hosts = outcome.tried.map(relayHost).join(', ');
+      // The CLASSIFIED blame picks the sentence (work order 2026-09-30); the charge stays
+      // payable in BOTH arms — that fact never moves.
+      return outcome.blame === 'offline'
+        ? M.receive.checkout.cancelUnreachableOffline(hosts)
+        : M.receive.checkout.cancelUnreachable(hosts);
+    }
     case 'unsigned': return M.receive.checkout.unsigned;
     case 'refused':
       return outcome.said !== null

@@ -846,3 +846,31 @@ describe('ReceiveMode — the message box is one box, whatever the code form', (
     act(() => { tree.unmount(); });
   });
 });
+
+describe('ReceiveMode — the failed submit no longer blames the connection (work order 2026-09-30)', () => {
+  test('a thrown submit shows the honest unknown-outcome sentence, never "check the connection"', async () => {
+    // The merchant scan-back's submit seam THROWS only on a local failure AFTER the envelope POST
+    // (icSubmit never throws; the poll catches its own errors) — the outcome is UNKNOWN, and the
+    // old copy ("check the connection") blamed a transport step this path does not even have.
+    const rail = await import('../services/rail');
+    jest.mocked(rail.qrPayloadToEnvelopeHex).mockReturnValue('ab'.repeat(200));
+    jest.mocked(rail.submitAndConfirmIncomingTransfer).mockRejectedValue(new Error('derive failed'));
+    const tree = mountReceive({
+      catalog: [{currency: 0, ledger: 'demo-ledger-canister'} as unknown as CurrencyDescriptor],
+    });
+    await makeRequest(tree);
+    // Open the scan-back, then drive its (mocked) scanner — onScan IS onSignedQr.
+    const toggle = tree.root.findAll(
+      node => node.props && node.props.accessibilityLabel === M.receive.scanPayerSignedCode,
+    )[0];
+    await act(async () => { await toggle.props.onPress(); });
+    const scanner = tree.root.findAll(node => node.props && typeof node.props.onScan === 'function')[0];
+    await act(async () => {
+      await scanner.props.onScan('signed-qr-raw');
+    });
+    const joined = texts(tree).join(' ');
+    expect(joined).toContain(M.receive.couldNotSubmit);
+    expect(M.receive.couldNotSubmit).not.toMatch(/connection/i);
+    expect(M.receive.couldNotSubmit).toMatch(/balance/i);
+  });
+});

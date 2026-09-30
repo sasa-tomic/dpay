@@ -59,7 +59,9 @@ export function IcrcDepositSheet({identity, catalog, asset, funding, onClose}: {
         const p = await DpayCore.icpSelfPrincipal(identity.secretHex);
         if (alive) setPrincipal(p);
       } catch {
-        if (alive) setErr(M.deposit.ck.addressErr);
+        // Local derivation only — there is NO network step on this path, so the shared
+        // transport copy would falsely blame the connection. Own sentence:
+        if (alive) setErr(M.deposit.ck.addressCreateErr);
       } finally {
         if (alive) setLoading(false);
       }

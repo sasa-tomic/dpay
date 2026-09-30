@@ -75,5 +75,4 @@ export const evmEs: EvmMessages = {
   gasGateReady: '¿Fondos añadidos? Reintentar',
   tryAgain: 'Reintentar',
   wrongChain: (expected, actual) => `El punto de conexión sirve ${actual}, pero este activo vive en ${expected}. No se envió nada — revisa Ajustes ▸ Avanzado.`,
-  engineLoad: 'El motor de pagos no cargó: comprueba tu conexión e inténtalo de nuevo. Tu dinero está intacto.',
 };

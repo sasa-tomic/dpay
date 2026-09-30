@@ -24,7 +24,9 @@ export const depositEs: DepositMessages = {
   checkNow: 'Revisar ahora',
 
   ck: {
-    addressErr: 'No se pudo cargar tu dirección de depósito. Revisa tu conexión e inténtalo de nuevo.',
+    addressOffline: 'Pareces estar sin conexión, así que no se pudo crear tu dirección de depósito. Tu dinero está intacto. Inténtalo de nuevo cuando vuelvas a estar en línea.',
+    addressUnreachable: 'Tu conexión está bien, pero Internet Computer no responde, así que no se pudo crear tu dirección de depósito. Tu dinero está intacto. Inténtalo de nuevo en un momento.',
+    addressCreateErr: 'No se pudo crear tu dirección. Tu dinero está intacto. Cierra esta pantalla e inténtalo de nuevo.',
     noMinter: 'Este activo aún no admite depósitos.',
     fetchingAddress: 'Obteniendo tu dirección de depósito…',
     noAddress: 'No hay ninguna dirección de depósito disponible.',
@@ -261,7 +263,8 @@ export const withdrawEs: WithdrawMessages = {
     approvalUnknown: 'No se pudo confirmar la aprobación: revisa tu saldo cuando vuelvas a tener conexión',
     withdrawalUnknown: 'No se pudo confirmar el retiro: puede que aún llegue; revisa tu saldo en breve',
     noRail: 'Este activo no tiene configurada ninguna vía de retiro',
-    gasFeeErr: 'No se pudo obtener la comisión de gas actual: revisa tu conexión',
+    gasFeeErrOffline: 'Pareces estar sin conexión, así que no se pudo leer la comisión de gas actual. No se envió nada. Inténtalo de nuevo cuando vuelvas a estar en línea.',
+    gasFeeErrUnreachable: 'Tu conexión está bien, pero Internet Computer no responde, así que no se pudo leer la comisión de gas actual. Tu dinero está intacto. Inténtalo de nuevo en un momento.',
     withdrawn: 'Retirado ✓',
     sentTo: 'Enviado a',
     copyDestinationLabel: 'Copiar dirección de destino',

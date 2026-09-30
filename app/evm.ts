@@ -52,6 +52,7 @@ import {
 } from './evm/endpoints';
 import {deriveEvmKeypair} from './evm/identity';
 import {EVM_CHAINS, setEvmCatalogDeployment, type EvmChainId} from './evm/chains';
+import {engineLoadCopy} from './transportFailure';
 import {
   isEvmEndpointRefusal,
   isEvmGasGateError,
@@ -180,8 +181,11 @@ export function preloadEvmRpc(): void {
 
 /** The bounded module load for every MONEY path that awaits the network module (the
  *  `loadRpcForSend` mirror, 10s bound): races the import against EVM_RPC_IMPORT_DEADLINE_MS and
- *  fails with the engine-load class instead of hanging the send on a stalled chunk. The
- *  underlying import keeps loading; the RETRY then succeeds without re-fetching. */
+ *  fails with the CLASSIFIED engine copy (`engineLoadCopy` in `app/transportFailure.ts` →
+ *  `M.errors.engine.*`) instead of hanging the send on a stalled chunk — never a flat "check
+ *  your connection" to a phone whose connection is fine (work order 2026-09-30). A fast import
+ *  failure (a broken/stale chunk on the origin) is the same user fact and classifies the same
+ *  way. The underlying import keeps loading; the RETRY then succeeds without re-fetching. */
 export async function loadEvmRpcForSend(
   deadlineMs: number = EVM_RPC_IMPORT_DEADLINE_MS,
   load: () => Promise<typeof import('./evm/service')> = () => import('./evm/service'),
@@ -191,11 +195,19 @@ export async function loadEvmRpcForSend(
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       rpcPreloadStarted = false; // a timed-out load must be retryable
-      reject(new Error(`evm rpc module failed to load within ${deadlineMs}ms (the payment engine chunk never arrived — check the connection to the relay and retry)`));
+      reject(new Error(`evm rpc module failed to load within ${deadlineMs}ms (the engine chunk never arrived)`));
     }, deadlineMs);
   });
   try {
     return await Promise.race([load(), deadline]);
+  } catch (e) {
+    const raw = e instanceof Error ? e.message : String(e);
+    const copy = await engineLoadCopy(raw);
+    if (copy != null) {
+      console.warn(`money: evm send loadEvmRpcForSend — the engine chunk never arrived: ${raw}`);
+      throw new Error(copy);
+    }
+    throw e;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }

@@ -249,7 +249,7 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
       }
       setErr(isEvmWrongChainError(e)
         ? M.evm.wrongChain(asset.chainName, String((e as unknown as {actualChainId?: number}).actualChainId ?? ''))
-        : friendly(msg));
+        : msg);
       setPhase('error');
     } finally {
       cancel();
@@ -437,9 +437,4 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
 
 function fmtNative(wei: string): string {
   return fromBaseUnits(BigInt(wei), 18) + ' ETH';
-}
-
-function friendly(msg: string): string {
-  if (/failed to load|engine chunk/.test(msg)) return M.evm.engineLoad;
-  return msg;
 }

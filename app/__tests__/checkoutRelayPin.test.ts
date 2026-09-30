@@ -166,6 +166,11 @@ describe('the checkout resolves ONE relay per session (first address that answer
 
 describe('failure attribution — a dead relay is named by who was actually asked (M5)', () => {
   test('a mid-session failure names the PIN, never the preferred URL', async () => {
+    // The unreachable catch now CLASSIFIES the blame (work order 2026-09-30). The connectivity
+    // override keeps that hermetic — the oracle short-circuits with no probe fetch, so this
+    // test's exact request ledger stays about the RELAY WALK, which is its subject.
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'};
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'online';
     serve({
       [A]: {'/api/v1/checkout': 'reject'},
       [B]: {'/api/v1/checkout': {ok: true, status: 200, body: openOk('charge-5')}},
@@ -181,12 +186,14 @@ describe('failure attribution — a dead relay is named by who was actually aske
       expect(outcome.kind).toBe('unreachable');
       if (outcome.kind !== 'unreachable') return;
       expect(outcome.tried).toEqual([B]); // the pin ALONE — the caller's A was never asked
+      expect(outcome.blame).toBe('unreachable'); // phone online (override), the relay is the dead side
       const said = warn.mock.calls.map((c) => String(c[0])).join('\n');
       expect(said).toContain(B); // the diagnostics name the relay actually tried
       expect(said).not.toContain(A); // …not the preferred URL that was not
       expect(requests).toEqual([`${B}/api/v1/checkout`]);
     } finally {
       warn.mockRestore();
+      delete g.__DPAY_TEST_SOLANA_CONNECTIVITY;
     }
   });
 });

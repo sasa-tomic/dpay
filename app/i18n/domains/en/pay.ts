@@ -579,6 +579,8 @@ export type ReceiveMessages = {
   receiptUnreadable: string;
   couldNotConfirmYet: string;
   unknownLedger: string;
+  /** A thrown submit is a LOCAL failure AFTER the envelope POST (icSubmit never throws) — the
+   *  outcome is unknown, and the old copy blamed a connection this path never touched. */
   couldNotSubmit: string;
   noOpenRequest: string;
   paymentRejected: string;
@@ -627,7 +629,10 @@ export type ReceiveMessages = {
     /** Opening a charge did not happen. Nothing is payable in any of these — say so, then say what next. */
     failedTitle: string;
     notServed: (host: string) => string;
+    /** The CLASSIFIED blame (work order 2026-09-30): offline blames nobody; the online arm
+     *  says the connection is fine and names the relay(s) that did not answer. */
     unreachable: (host: string) => string;
+    unreachableOffline: (host: string) => string;
     /** The checkout's OWN sentence, quoted: it already names the fix (the price bound, the clock skew,
      *  the reused nonce), and it is what the merchant repeats to whoever runs the relay. */
     refused: (said: string) => string;
@@ -676,7 +681,9 @@ export type ReceiveMessages = {
     cancelFailed: (said: string) => string;
     cancelFailedNoReason: (status: number) => string;
     /** `host` = the relay address(es) actually tried (the pin alone, or the whole walk). */
+    /** Classified blame, same split as the open path; the charge stays payable in both. */
     cancelUnreachable: (host: string) => string;
+    cancelUnreachableOffline: (host: string) => string;
 
     /** The four ways a charge stops being payable without being paid. They are told apart because
      *  they send the cashier — and the customer standing there — to do different things. */
@@ -747,7 +754,7 @@ export const receiveEn: ReceiveMessages = {
   receiptUnreadable: "Couldn't read this receipt link.",
   couldNotConfirmYet: 'Couldn’t confirm this payment yet — if the payer paid, it lands with the next balance refresh.',
   unknownLedger: 'Unknown ledger for this asset — couldn’t submit',
-  couldNotSubmit: "Couldn't submit the payment — check the connection",
+  couldNotSubmit: 'Couldn’t submit that payment. Scan it again. If it already went through, it shows in your balance.',
   noOpenRequest: 'No open request.',
   paymentRejected: 'Payment rejected.',
   paymentRejectedDetail: 'Payment rejected — the payer may lack balance, or the blockhash expired.',
@@ -782,7 +789,9 @@ export const receiveEn: ReceiveMessages = {
     notServed: host =>
       `${host} does not serve checkout codes, so nothing was opened. Ask whoever runs that relay to turn the checkout on, or use the dpay code.`,
     unreachable: host =>
-      `Couldn’t reach ${host}, so nothing was opened. Checkout codes are created online — check the connection and try again, or use the dpay code (this phone can show it offline).`,
+      `Your connection is fine, but ${host} isn’t answering, so nothing was opened. Try again in a moment, or use the dpay code (this phone can show it offline).`,
+    unreachableOffline: host =>
+      `You seem offline, so ${host} couldn’t be reached and nothing was opened. Use the dpay code for now, or try again once you’re back online.`,
     refused: said =>
       `The checkout refused this charge: “${said}” Nothing is payable. Fix that, then open a fresh charge.`,
     refusedNoReason: status =>
@@ -827,7 +836,9 @@ export const receiveEn: ReceiveMessages = {
     cancelFailedNoReason: status =>
       `The charge was NOT cancelled (HTTP ${status}) — treat it as still payable. Try again; hand over nothing until it clears or expires.`,
     cancelUnreachable: host =>
-      `Couldn’t reach ${host}, so this charge was NOT cancelled — it stays payable until it expires. Try again once the connection is back.`,
+      `Your connection is fine, but ${host} isn’t answering, so this charge was NOT cancelled — it stays payable until it expires. Try again in a moment.`,
+    cancelUnreachableOffline: host =>
+      `You seem offline, so ${host} couldn’t be reached and this charge was NOT cancelled — it stays payable until it expires. Try again once you’re back online.`,
 
     endedTitle: reason =>
       reason === 'expired' ? 'This code expired'

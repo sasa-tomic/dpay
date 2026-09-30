@@ -38,13 +38,15 @@ hermeticDescribe('flow 22 — deposit error: dead gateway → honest error, no s
     await selectCurrency(m, 'ckbtc');
     await openReceiveAddress(m);
 
-    // The sheet's query fails fast → the error state renders. H5: plain-language transient copy
-    // (dead gateway = ECONNREFUSED → transient), with a plain retry hint and NO dev jargon.
-    const errShown = await m.driver.waitForText("Couldn't load your deposit address", {timeoutMs: 10_000});
+    // The sheet's query fails fast → the error state renders. H5: plain-language transient copy,
+    // CLASSIFIED (work order 2026-09-30): everything here is dead (gateway AND the relay), so the
+    // oracle answers 'offline' and the copy blames nobody — money untouched, the move stated.
+    const errShown = await m.driver.waitForText('You seem offline, so the deposit address couldn’t be created', {timeoutMs: 10_000});
     const body = m.driver.bodyText();
     assert(errShown, `the deposit sheet should show the plain-language transient error. body excerpt:\n${body.slice(0, 600)}`);
     expect(/relay/i.test(body)).toBe(false);
-    assertIncludes(body, 'Check your connection and try again', 'transient error carries a plain retry hint (H5)');
+    assertIncludes(body, 'Your money is untouched', 'the honest no-blame sentence carries the money fact');
+    assertIncludes(body, 'Try again once you’re back online', 'transient error carries a plain retry hint (H5)');
 
     // Terminal error, not stuck loading: no address/status UI ever rendered.
     expect(m.driver.isPresent('deposit-status')).toBe(false);
