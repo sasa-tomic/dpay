@@ -7,7 +7,7 @@ import {M} from '../i18n';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, HIDDEN_CURRENCIES_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY, PRACTICE_CURRENCY} from '../config/constants';
 import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog';
 import {setIcClockRoutingCanister} from '../services/icp';
-import {base, randNonceHex, fmtTime, fmtAssetCompact} from '../lib/format';
+import {base, randNonceHex, fmtTime, fmtAssetCompact, rawToDecimal, toUnits} from '../lib/format';
 import {applyOffline} from '../lib/amount';import {withTimeout} from '../lib/timeout';
 import {buildSelectableAssets, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
 import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
@@ -18,13 +18,17 @@ import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILITIES, type RelayCapabilities} from '../services/relay';
 import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
-import {setRuntimePoolNames, registeredVenues, venueOfId} from '../config/venues';
-import {planAtaSetup, sizeAtaFundPlan, type AtaFundSource, type SizedAtaFund} from '../lib/ataSetup';
+import {setRuntimePoolNames, registeredVenues, venueOfId, type VenueEntry} from '../config/venues';
+import {planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
 import {fetchJupiterQuote} from '../services/jupiter';
 import {prepareSolanaConvertRecord, executeSolanaConvert} from '../convert/executeSolana';
-import {CONVERT_SLIPPAGE_BPS_DEFAULT} from '../config/convert';
+import {CONVERT_SLIPPAGE_BPS_DEFAULT, CONVERT_CEFI_CONFIRM_TIMEOUT_MS, resolveConvertDestinations, type ComposedConvertRoute} from '../config/convert';
+import {CeFiMinDepositError, ceFiQuoteFromResult, ceFiServiceError, createCeFiOrder, deriveConvertMath, fetchCeFiConvertQuote, fetchCeFiQuoteResult, fetchConvertQuote} from '../convert/quotes';
+import {prepareCeFiConvertRecord, prepareComposedConvertRecord} from '../convert/prepare';
+import type {ConvertRecord} from '../convert/types';
+import {isTerminalConvertStep} from '../convert';
 import {WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
-import {convertResumeSnapshot, subscribeConvertRecords} from '../convertResume';
+import {adoptConvertRecord, convertResumeSnapshot, subscribeConvertRecords} from '../convertResume';
 import {normalizePendingKey, removePendingPays} from '../services/pendingPays';
 import {solanaTokenInfo} from '../solana/tokens';
 import {useHotkeys} from '../hooks/useHotkeys';
@@ -72,11 +76,34 @@ import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 import {HomeCurrencyChooser} from './HomeCurrencyChooser';
 import {AddCurrencyTab} from './AddCurrencyTab';
 import {type HomeCurrency, chooseRail, offerableCurrencies, parseHiddenCurrencies, preferredRail, removeCurrencyGuard, type RemoveRefusal} from '../config/currency';
+import {type CurrencyDescriptor} from '../config/catalog';
+import {fetchComposedQuotes} from './ConvertShared';
 import {HomeMenu} from './HomeMenu';
 import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 import {modeForScreen, screenForMode, type WalletMode, type WalletRoute} from '../lib/walletRoute';
 import {useWalletHistory} from '../hooks/useWalletHistory';
+
+// The convert-engine route from an IC catalog row to the SOL rail (fund-ic, 2026-09-30): the
+// plain cefi row when the source IS the venue's IC side (ICP), else the composed route (the IC
+// legs land the venue's deposit asset, the registered venue settles SOL at the device's own
+// address). Null = no registered route — the row is not a funding candidate. Registry order
+// throughout, and PURE over the registry (no fetch): the executor does the quoting.
+type AtaIcRoute =
+  | {kind: 'cefi'; venue: VenueEntry; depositLedger: string}
+  | {kind: 'composed'; route: ComposedConvertRoute};
+
+function icSolRouteOf(row: CurrencyDescriptor): AtaIcRoute | null {
+  if (row.ledger == null || row.testnet) return null;
+  const cefi = registeredVenues().find(v =>
+    v.kind === 'cefi' && !v.testnet
+    && v.pair_ledgers.includes(row.ledger!) && v.pair_ledgers.includes(WRAPPED_SOL_MINT_ADDRESS));
+  if (cefi != null) return {kind: 'cefi', venue: cefi, depositLedger: row.ledger};
+  const route = resolveConvertDestinations(row.ledger, false)
+    .find(d => d.destLedger === WRAPPED_SOL_MINT_ADDRESS)
+    ?.routes.find((r): r is ComposedConvertRoute => r.kind === 'composed');
+  return route != null ? {kind: 'composed', route} : null;
+}
 
 // Founder requirement #2 (2026-09-15): a balance view older than this while offline renders
 // APPROXIMATE (~ prefix, the same marker demoView always showed). 60 s chosen by the founder as
@@ -738,11 +765,19 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   //
   // planAtaSetup (lib/ataSetup, pure + unit-tested) decides: create (SOL covers every absent
   // account) | fund (a funded SPL token with a registered wrapped-SOL venue pays — size the
-  // swap, confirm once) | refuse (the honest dead end). One run creates ALL absent accounts.
-  // The fund leg runs through the convert engine's Solana driver (prepare + execute — the same
-  // verified-and-signed bytes path, recorded in conversion history), then createTokenAta per
-  // absent mint. The badge clears itself when the poll flips 'absent' → 'balance'.
+  // swap, confirm once) | fund-ic (no usable SPL source, but IC-side money: the convert
+  // engine's own cross-rail route to SOL — a registered CeFi venue behind the IC legs — sized
+  // against the venue's own minimum; founder override 2026-09-30, retiring the old
+  // IC-side exclusion) | refuse (the honest dead end). One run creates ALL absent accounts.
+  // The fund leg runs through the convert engine's Solana driver; the fund-ic leg runs through
+  // the convert surface's OWN composed/cefi confirm path (fetchComposedQuotes /
+  // fetchCeFiQuoteResult + prepare*, adopted into the resume engine — the same verified
+  // bytes, the same history record, never a fork). The badge clears itself when the polls
+  // flip 'absent' → 'balance'.
   const [ataSetupConfirm, setAtaSetupConfirm] = useState<SizedAtaFund | null>(null);
+  const [ataIcConfirm, setAtaIcConfirm] = useState<SizedAtaIcFund | null>(null);
+  const [ataSwapPending, setAtaSwapPending] = useState(false);
+  const ataSwapRecord = useRef<{id: string; mints: string[]} | null>(null);
   const ataSetupModel = useMemo(() => {
     const solAssets = assets.filter((a): a is Extract<typeof a, {mint: string | null}> => a.protocol === 'solana' && a.mint != null);
     const targets = solAssets
@@ -751,18 +786,31 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     const sources = solAssets
       .filter(a => tokenStates[a.mint!]?.status === 'balance')
       .map(a => ({mint: a.mint!, symbol: a.symbol, decimals: a.decimals, amount: tokenStates[a.mint!]?.amount ?? null, status: 'balance' as const}));
-    const plan = planAtaSetup({targets, solBalance: solState.balance, sources});
+    // The IC-side funding candidates (fund-ic): every mainnet catalog row with a MEASURED
+    // positive balance and a registered convert-engine route to SOL, in catalog (registry/
+    // matrix) order. The RAW polled balance — the sizer re-checks against live quotes anyway.
+    const icCandidates: AtaIcFundSource[] = [];
+    for (const row of catalog) {
+      if (row.testnet || row.ledger == null || row.decimals == null) continue;
+      const symbol = row.backing_symbol ?? row.symbol;
+      if (symbol == null) continue;
+      const bal = assetBalances[row.currency];
+      if (bal == null || !/^\d+$/.test(bal) || BigInt(bal) <= 0n) continue;
+      if (icSolRouteOf(row) == null) continue; // no registered route to SOL — not a candidate
+      icCandidates.push({currencyKey: `ic:${row.currency}`, symbol, decimals: row.decimals, rawAmount: bal});
+    }
+    const plan = planAtaSetup({targets, solBalance: solState.balance, sources, icSources: icCandidates});
     return {
       plan,
       targets: targets.map(t => t.symbol),
-      costLine: plan.kind === 'create' || plan.kind === 'fund'
+      costLine: plan.kind === 'create' || plan.kind === 'fund' || plan.kind === 'fund-ic'
         ? fmtAssetCompact(plan.costLamports, SOL_DECIMALS, SOL_UNIT)
         : '',
-      fundFromLine: plan.kind === 'fund' && plan.candidates.length === 1
+      fundFromLine: (plan.kind === 'fund' || plan.kind === 'fund-ic') && plan.candidates.length === 1
         ? M.deposit.ata.fundFrom(plan.candidates[0]!.symbol)
         : null,
     };
-  }, [assets, tokenStates, solState.balance]);
+  }, [assets, tokenStates, solState.balance, catalog, assetBalances]);
   // The injected quote seam: the registered wrapped-SOL venue for a mint, quoted through the
   // relay proxy. Returns the full verbatim quote (the executor needs the raw object to sign);
   // null = unquotable (refused / too small / unreachable).
@@ -774,6 +822,144 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     const res = await fetchJupiterQuote(relayUrl, venue, source.mint, WRAPPED_SOL_MINT_ADDRESS, inRaw, CONVERT_SLIPPAGE_BPS_DEFAULT);
     return res.ok ? res.quote : null;
   }, [relayUrl]);
+  // The fund-ic quote seam: the convert engine's OWN quote path for the candidate's route to
+  // SOL, in the shape `sizeAtaIcFundPlan` consumes. A below-minimum venue verdict is mapped
+  // onto the seam's `belowMin` answer — the venue's minimum, scaled back to the candidate's
+  // own input units along the quoted floor chain (+5% margin) — so the pure sizer decides
+  // reachability without knowing the route shapes. Null = unquotable (no market, no route).
+  const quoteAtaIcFund = useCallback(async (source: AtaIcFundSource, inRaw: string): Promise<AtaIcQuote | null> => {
+    const row = catalog.find(c => `ic:${c.currency}` === source.currencyKey && !c.testnet);
+    if (row == null || row.ledger == null) return null;
+    const route = icSolRouteOf(row);
+    if (route == null) return null;
+    try {
+      if (route.kind === 'cefi') {
+        // The plain cefi row: the venue quotes the deposit amount straight into SOL.
+        try {
+          const q = await fetchCeFiConvertQuote(relayUrl, route.venue, row.ledger, WRAPPED_SOL_MINT_ADDRESS, inRaw,
+            {inDecimals: row.decimals ?? 0, outDecimals: SOL_DECIMALS});
+          return {kind: 'quote', outLamports: q.amountOutGross};
+        } catch (e) {
+          if (e instanceof CeFiMinDepositError) {
+            return {kind: 'belowMin', minInRaw: toUnits(e.minDeposit, row.decimals ?? 0)};
+          }
+          return null;
+        }
+      }
+      // The composed route: the IC legs' compounding floor, then the settle venue's quote ON
+      // the floor (the exact amount the order prices) — the same walk fetchComposedQuotes
+      // runs for the review, kept inline so the floors are in hand when the venue answers
+      // below-minimum.
+      const legs = route.route.legs;
+      const depEp = route.route.endpoints[legs.length]!;
+      if (depEp.fee == null || depEp.decimals == null) return null;
+      const leg1 = legs[0]!;
+      const q1 = await fetchConvertQuote(relayUrl, leg1.fromLedger, leg1.toLedger, inRaw,
+        {venue: venueOfId(leg1.venueId) ?? undefined});
+      const m1 = await deriveConvertMath(q1, route.route.endpoints[0]!.fee, route.route.endpoints[1]!.fee, CONVERT_SLIPPAGE_BPS_DEFAULT);
+      let floor = m1.minOut;
+      if (legs.length === 2) {
+        const leg2 = legs[1]!;
+        const q2 = await fetchConvertQuote(relayUrl, leg2.fromLedger, leg2.toLedger, m1.minOut,
+          {venue: venueOfId(leg2.venueId) ?? undefined});
+        const m2 = await deriveConvertMath(q2, route.route.endpoints[1]!.fee, depEp.fee, CONVERT_SLIPPAGE_BPS_DEFAULT);
+        floor = m2.minOut;
+      }
+      try {
+        const cefi = await fetchCeFiConvertQuote(relayUrl, venueOfId(route.route.cefiVenueId)!, depEp.ledger, route.route.settleMint, floor,
+          {inDecimals: depEp.decimals, outDecimals: route.route.settleDecimals});
+        return {kind: 'quote', outLamports: cefi.amountOutGross};
+      } catch (e) {
+        if (e instanceof CeFiMinDepositError) {
+          const minFloorStr = toUnits(e.minDeposit, depEp.decimals);
+          const floorRaw = /^\d+$/.test(floor) ? BigInt(floor) : 0n;
+          const minFloorRaw = /^\d+$/.test(minFloorStr) ? BigInt(minFloorStr) : 0n;
+          if (floorRaw <= 0n || minFloorRaw <= 0n) return null;
+          // input such that its floor ≈ the venue minimum: scale the asked input by the
+          // floors' ratio (+5% margin, ceil).
+          const scaled = (BigInt(inRaw) * minFloorRaw * 105n) / (floorRaw * 100n) + 1n;
+          if (scaled <= 0n) return null;
+          return {kind: 'belowMin', minInRaw: scaled.toString()};
+        }
+        return null;
+      }
+    } catch {
+      return null; // a dead leg or an unreachable venue is not a candidate, never a crash
+    }
+  }, [relayUrl, catalog]);
+  // The fund-ic prepare: a FRESH quote bundle at the confirmed input (the confirm surface's
+  // own sequence — nothing is adopted from the sizing quotes), held to the plan's target, then
+  // the matching prepare. The venue settles SOL at the device's own address; the record rides
+  // the resume engine from there.
+  const prepareAtaIcSwap = useCallback(async (sized: SizedAtaIcFund): Promise<ConvertRecord> => {
+    const plan = ataSetupModel.plan;
+    if (plan.kind !== 'fund-ic') throw new Error(M.deposit.ata.swapFailed);
+    if (solAddress == null) throw new Error(M.errors.solana.offline);
+    const row = catalog.find(c => `ic:${c.currency}` === sized.source.currencyKey && !c.testnet);
+    if (row == null || row.ledger == null) throw new Error(M.deposit.ata.swapFailed);
+    const route = icSolRouteOf(row);
+    if (route == null) throw new Error(M.deposit.ata.swapFailed);
+    const inSymbol = row.backing_symbol ?? row.symbol ?? sized.source.symbol;
+    if (route.kind === 'cefi') {
+      // The plain cefi row — the confirm surface's exact order-first sequence: the venue's
+      // fresh quote, the order on it, the legless record. settleAddress is the user's OWN SOL
+      // address (never typed); the refund address their own IC account.
+      const depositDecimal = rawToDecimal(sized.inAmount, row.decimals ?? 0);
+      let quoteRes;
+      try {
+        quoteRes = await fetchCeFiQuoteResult(relayUrl, route.venue, row.ledger, WRAPPED_SOL_MINT_ADDRESS, depositDecimal, CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
+      } catch (e) {
+        throw ceFiServiceError(e, route.venue.display_name);
+      }
+      const principal = await DpayCore.icpPrincipalFromPubkey(identity.publicHex);
+      const refundAddress = await DpayCore.icpAccountIdFromPrincipal(principal, '');
+      let order;
+      try {
+        order = await createCeFiOrder(relayUrl, route.venue, quoteRes, {
+          settleAddress: solAddress,
+          refundAddress,
+          depositLedger: row.ledger,
+          settleLedger: WRAPPED_SOL_MINT_ADDRESS,
+          depositAmountDecimal: depositDecimal,
+          clientOrderId: randNonceHex(),
+        }, CONVERT_CEFI_CONFIRM_TIMEOUT_MS);
+      } catch (e) {
+        throw ceFiServiceError(e, route.venue.display_name);
+      }
+      return prepareCeFiConvertRecord({
+        id: randNonceHex(),
+        quote: ceFiQuoteFromResult(route.venue, row.ledger, WRAPPED_SOL_MINT_ADDRESS, sized.inAmount, quoteRes, SOL_DECIMALS),
+        order,
+        relayUrl,
+        settleAddress: solAddress,
+        inCurrency: row.currency,
+        inSymbol,
+        outSymbol: WRAPPED_SOL_TOKEN,
+        inDecimals: row.decimals ?? undefined,
+        outDecimals: SOL_DECIMALS,
+      });
+    }
+    // The composed route — the confirm surface's ONE-consent branch, re-quoted fresh at the
+    // SAME confirmed input. A moved venue rate that can no longer cover the plan target
+    // refuses instead of swapping blind (the fund leg's own rule).
+    const fresh = await fetchComposedQuotes(relayUrl, route.route, sized.inAmount, route.route.endpoints[0]!.fee, CONVERT_SLIPPAGE_BPS_DEFAULT);
+    const solNow = /^\d+$/.test(solState.balance ?? '') ? BigInt(solState.balance!) : 0n;
+    if (BigInt(fresh.cefi.amountOutGross) + solNow < BigInt(plan.targetLamports)) {
+      throw new Error(M.deposit.ata.fundShort(sized.source.symbol));
+    }
+    return prepareComposedConvertRecord({
+      id: randNonceHex(),
+      secretHex: identity.secretHex,
+      publicHex: identity.publicHex,
+      relayUrl,
+      route: route.route,
+      inDesc: row,
+      quote1: fresh.q1,
+      math1: fresh.m1,
+      ...(fresh.q2 != null && fresh.m2 != null ? {quote2: fresh.q2, math2: fresh.m2} : {}),
+      reviewedGrossRaw: fresh.q1.amountOutGross,
+    });
+  }, [ataSetupModel.plan, catalog, identity.publicHex, identity.secretHex, relayUrl, solAddress, solState.balance]);
   // The runner: the (optional) fund swap, then createTokenAta per absent mint, then the
   // balance refreshes. Every failure lands in ataSetupErr as a complete instruction.
   const runAtaSetup = useCallback(async (plan: typeof ataSetupModel.plan, sized: SizedAtaFund | null) => {
@@ -822,8 +1008,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     }
   }, [ataSetupBusy, identity.secretHex, identity.publicHex, relayUrl, solAddress, solState.balance, refreshSol, refreshToken, createAtaForMint]);
   // The entry the ONE button calls. create runs straight away (the disclosed cost + the press
-  // are the consent); fund sizes first and waits for the card's ONE confirm — a swap is a real
-  // spend and never runs without it; refuse only opens the card (no handler).
+  // are the consent); fund and fund-ic size first and wait for the banner's ONE confirm — a
+  // swap is a real spend and never runs without it; refuse never reaches a button at all.
   const beginAtaSetup = useCallback(async () => {
     const {plan} = ataSetupModel;
     if (ataSetupBusy || plan.kind === 'none' || plan.kind === 'refuse') return;
@@ -831,6 +1017,17 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     setAtaSetupErr(null);
     setAtaSetupBusy(true);
     try {
+      if (plan.kind === 'fund-ic') {
+        const sized = await sizeAtaIcFundPlan({plan, solKnown: solState.balance, quote: quoteAtaIcFund});
+        if (sized == null) {
+          // Nothing qualified: no candidate's balance can reach the venue minimum and the
+          // target. The honest fall-through — the same dead end the plan would have named.
+          setAtaSetupErr(M.deposit.ata.fundShort(plan.candidates[0]?.symbol ?? ''));
+          return;
+        }
+        setAtaIcConfirm(sized);
+        return;
+      }
       const sized = await sizeAtaFundPlan({plan, solKnown: solState.balance, quote: quoteAtaFund});
       if (sized == null) {
         setAtaSetupErr(M.deposit.ata.fundShort(plan.candidates[0]?.symbol ?? ''));
@@ -840,32 +1037,105 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     } finally {
       setAtaSetupBusy(false);
     }
-  }, [ataSetupModel, ataSetupBusy, solState.balance, quoteAtaFund, runAtaSetup]);
+  }, [ataSetupModel, ataSetupBusy, solState.balance, quoteAtaFund, quoteAtaIcFund, runAtaSetup]);
+  // The fund-ic execute: prepare the record fresh (never from the sizing quotes), adopt it
+  // into the resume engine, and let the watcher finish the setup when the venue settles.
+  const runAtaIcSetup = useCallback(async (sized: SizedAtaIcFund) => {
+    if (ataSetupBusy) return;
+    if (solAddress == null) { setAtaSetupErr(M.errors.solana.offline); return; }
+    setAtaSetupBusy(true);
+    setAtaSetupErr(null);
+    try {
+      const rec = await prepareAtaIcSwap(sized);
+      ataSwapRecord.current = {
+        id: rec.id,
+        mints: ataSetupModel.plan.kind === 'fund-ic' ? ataSetupModel.plan.mints : [],
+      };
+      setAtaIcConfirm(null);
+      setAtaSwapPending(true);
+      await adoptConvertRecord(rec);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('runAtaIcSetup failed:', msg);
+      setAtaSwapPending(false);
+      ataSwapRecord.current = null;
+      setAtaSetupErr(msg.length > 0 ? msg : M.deposit.ata.swapFailed);
+    } finally {
+      setAtaSetupBusy(false);
+    }
+  }, [ataSetupBusy, ataSetupModel.plan, prepareAtaIcSwap, solAddress]);
+  // The fund-ic watcher: the venue settles on minutes, so the create step rides the resume
+  // engine's own record updates. done → the SOL landed: the SAME create leg the direct runner
+  // uses (createTokenAta per absent mint), under one busy state. Any other terminal step →
+  // the honest ending (the record's own state panel carries the detail).
+  useEffect(() => subscribeConvertRecords(records => {
+    const pending = ataSwapRecord.current;
+    if (pending == null) return;
+    const rec = records[pending.id];
+    if (rec == null) return;
+    if (rec.step === 'done') {
+      ataSwapRecord.current = null;
+      setAtaSwapPending(false);
+      void (async () => {
+        setAtaSetupBusy(true);
+        try {
+          for (const mint of pending.mints) await createAtaForMint(mint);
+          refreshSol();
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          setAtaSetupErr(friendlySolError(msg));
+        } finally {
+          setAtaSetupBusy(false);
+        }
+      })();
+    } else if (isTerminalConvertStep(rec.step)) {
+      ataSwapRecord.current = null;
+      setAtaSwapPending(false);
+      setAtaSetupErr(M.deposit.ata.swapFailed);
+    }
+  }), [createAtaForMint, refreshSol]);
   const confirmAtaSetup = useCallback(async () => {
+    if (ataSetupBusy) return;
+    const ic = ataIcConfirm;
+    if (ic != null) { setAtaIcConfirm(null); await runAtaIcSetup(ic); return; }
     const sized = ataSetupConfirm;
-    if (sized == null || ataSetupBusy) return;
+    if (sized == null) return;
     setAtaSetupConfirm(null);
     await runAtaSetup(ataSetupModel.plan, sized);
-  }, [ataSetupConfirm, ataSetupBusy, ataSetupModel.plan, runAtaSetup]);
-  const cancelAtaSetup = useCallback(() => { setAtaSetupConfirm(null); }, []);
-  // The AccountsTab view model: the shared plan, rendered on whichever row was pressed.
-  const ataSetupView = useMemo(() => ({
-    targets: ataSetupModel.targets,
-    kind: ataSetupModel.plan.kind === 'none' ? 'create' as const : ataSetupModel.plan.kind,
-    costLine: ataSetupModel.costLine,
-    fundFromLine: ataSetupModel.fundFromLine,
-    confirming: ataSetupConfirm != null,
-    confirmLine: ataSetupConfirm != null
+  }, [ataIcConfirm, ataSetupConfirm, ataSetupBusy, ataSetupModel.plan, runAtaSetup, runAtaIcSetup]);
+  const cancelAtaSetup = useCallback(() => { setAtaSetupConfirm(null); setAtaIcConfirm(null); }, []);
+  // The AccountsTab view model: the shared plan, rendered by the ONE banner above the list.
+  const ataSetupView = useMemo(() => {
+    const plan = ataSetupModel.plan;
+    const targetsPhrase = M.deposit.ata.targetsLabel(ataSetupModel.targets);
+    const confirmLine = ataSetupConfirm != null
       ? M.deposit.ata.fundConfirm(
           fmtAssetCompact(ataSetupConfirm.inAmount, ataSetupConfirm.source.decimals, ataSetupConfirm.source.symbol),
           ataSetupConfirm.source.symbol,
-          M.deposit.ata.targetsLabel(ataSetupModel.targets),
+          targetsPhrase,
           ataSetupModel.costLine,
         )
-      : null,
-    busy: ataSetupBusy,
-    err: ataSetupErr,
-  }), [ataSetupModel, ataSetupConfirm, ataSetupBusy, ataSetupErr]);
+      : ataIcConfirm != null
+        ? M.deposit.ata.fundIcConfirm(
+            fmtAssetCompact(ataIcConfirm.inAmount, ataIcConfirm.source.decimals, ataIcConfirm.source.symbol),
+            ataIcConfirm.source.symbol,
+            targetsPhrase,
+            ataSetupModel.costLine,
+          )
+        : null;
+    return {
+      targets: ataSetupModel.targets,
+      kind: plan.kind === 'none' ? 'create' as const : plan.kind,
+      costLine: ataSetupModel.costLine,
+      fundFromLine: ataSetupModel.fundFromLine,
+      confirming: ataSetupConfirm != null || ataIcConfirm != null,
+      confirmLine,
+      busy: ataSetupBusy,
+      busyLine: ataSwapPending ? M.deposit.ata.swapPending(targetsPhrase) : null,
+      solAddress: solAddress,
+      err: ataSetupErr,
+    };
+  }, [ataSetupModel, ataSetupConfirm, ataIcConfirm, ataSetupBusy, ataSwapPending, ataSetupErr, solAddress]);
   // Refresh the SELECTED token's account state (naming its mint when known; else repoll all).
   const refreshSelectedToken = useCallback(() => {
     if (activeSolAsset?.mint != null) refreshToken(activeSolAsset.mint);
