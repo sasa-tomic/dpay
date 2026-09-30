@@ -12,6 +12,7 @@
 //   - fixture entries — invented offline stand-ins are never BUNDLED (they reach a wallet only
 //     when the offline test relay serves them knob-gated, V5).
 import {BUNDLED_NETWORKS, icpCatalogOf} from './catalog';
+import {EVM_AMM_VENUES} from './evmAmm';
 import {EVM_NATIVE_VENUES} from './evmConvert';
 import {
   EURC_MINT_ADDRESS,
@@ -26,9 +27,13 @@ import {
 const _evmNativeRowsAreVenueEntries: readonly VenueEntry[] = EVM_NATIVE_VENUES;
 void _evmNativeRowsAreVenueEntries;
 
+// The same pin for the evm_amm rows (config/evmAmm.ts): derived, registry-shaped.
+const _evmAmmRowsAreVenueEntries: readonly VenueEntry[] = EVM_AMM_VENUES;
+void _evmAmmRowsAreVenueEntries;
+
 // Extensible by design: each new venue kind is a new value here + in the truth file, not a
 // schema break (`kind` stays a plain string on the wire).
-export type VenueKind = 'ic_amm' | 'cefi' | 'solana_amm';
+export type VenueKind = 'ic_amm' | 'cefi' | 'solana_amm' | 'evm_amm';
 
 /** One venue's settlement verdict block (relay probe result, verdict derived relay-side —
  *  see VenueEntry.health). settle_seconds is the measured order→settle latency; measured_at
@@ -301,6 +306,10 @@ export function venueOfId(venueId: string): VenueEntry | null {
     // resolves the record's venue through THIS lookup, so the adapter-owned rows must
     // resolve here exactly like a bundled one.
     ?? EVM_NATIVE_VENUES.find(v => v.venue_id === venueId)
+    // The evm_amm rows (2026-09-28, the any-pair mandate) ride outside for the same
+    // reason (app/config/evmAmm.ts): DERIVED from the catalog's chain_id + contract,
+    // never hand-registered in the drift-alarmed truth file.
+    ?? EVM_AMM_VENUES.find(v => v.venue_id === venueId)
     ?? null;
 }
 

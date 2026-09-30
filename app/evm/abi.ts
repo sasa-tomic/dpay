@@ -59,6 +59,12 @@ const SELECTOR_BALANCE_OF = functionSelector('balanceOf(address)');
 const SELECTOR_TRANSFER_FROM = functionSelector('transferFrom(address,address,uint256)');
 const SELECTOR_ALLOWANCE = functionSelector('allowance(address,address)');
 const SELECTOR_PERMIT = functionSelector('permit(address,address,uint256,uint256,uint8,bytes32,bytes32)');
+const SELECTOR_APPROVE = functionSelector('approve(address,uint256)');
+
+/** calldata for ERC-20 `approve(address spender,uint256 amount)` (selector 095ea7b3). */
+export function encodeApprove(spender: string, amount: bigint): Uint8Array {
+  return call(SELECTOR_APPROVE, addressWord(spender), uint256Word(amount));
+}
 
 /** calldata for `transfer(address to,uint256 amount)`. */
 export function encodeTransfer(to: string, amount: bigint): Uint8Array {
