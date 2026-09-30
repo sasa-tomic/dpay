@@ -247,6 +247,16 @@ until the blockers land. THE thing that unblocks it:**
   payouts default to the wallet's OWN address with typed destination demoted
   (`5cc18f64`) and every asset row gets the Convert action (`b5dfe0fd`). The D31 live ZCHF
   trip remains in the work order; swap-typing stage 2/3 and the CeFi residual filed above.
+- **ATA-setup UX defects (on-device report 2026-09-30: "Einrichtung nötig" twice per row,
+  explains-only dead end)** — DONE 2026-09-30 (atafix wave `3e1f87e9..cde178e3`): ONE
+  wallet-level banner replaces the duplicated per-row affordances (`28df5ce2`); the button
+  ALWAYS acts - create = one tap, SPL fund = tap + confirm, new fund-ic kind swaps IC-side
+  money (ckUSDC/VCHF/ICP) to SOL through the convert engine with venue-minimum sizing
+  (`37693989`, `7a319659`, flow 214 pins it end to end `d72a803e`); a proven-unfundable run
+  flips the banner to the honest refuse panel with the SOL receive address + copy
+  (`2a34a00a`); name column fits its longest word and needSol names SOL exactly once
+  (`d777eba6`); banner lines share one left alignment (`1e3f83fe`); accounts visual
+  baselines reseeded light+dark (`cde178e3`). Verified on emulator (screencap rounds 1-4).
 
 - **CHAIN route deposit broadcast** — RESOLVED 2026-09-29 same day (`dfde0468`, live-proven D33):
   `submitRawSolTx` adopts `skipPreflight: true, maxRetries: 0` and the rpcFetch walk widens to
