@@ -25,8 +25,10 @@
  *       zero acceptances;
  *   (b3) accepted then FAILED on-chain → the definite `transaction failed:` class (the chain
  *       is the referee; classification intact);
- *   (c) an instruction-error refusal does NOT walk — one endpoint, no failover, no refresh
- *       (a genuinely invalid tx would be refused everywhere);
+ *   (c) a preflight-shaped simulation refusal is the ANSWERING NODE's opinion, not a verdict
+ *       on the bytes — the SAME signed bytes walk to the next candidate (no refresh, no
+ *       re-sign); a genuine byte-verdict refuses in place at the first venue (a genuinely
+ *       invalid tx would be refused everywhere);
  *   (d) the candidate list + order pin: derived = relay homes in order then the public tail;
  *       the operator/test overrides and a devnet-shaped derivation stay single-homed.
  */
@@ -47,7 +49,8 @@ const B = 'https://b.example/api/v1/solana/rpc';
 const PUBLIC = 'https://api.mainnet-beta.solana.com';
 
 const BH_REFUSAL = {code: -32002, message: 'Blockhash not found'}; // the live 2xx-wrapped shape
-const IX_REFUSAL = {code: -32002, message: 'Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1'};
+const IX_REFUSAL = {code: -32002, message: 'Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1'}; // preflight-shaped — the node's opinion, walk-worthy
+const IX_VERDICT = {code: -32002, message: 'ExecutionCustom error: invalid instruction data'}; // a verdict on the bytes — refused everywhere, never walked
 
 /** One recorded JSON-RPC POST: URL + method + the exact wire body. */
 interface Call {url: string; method: string; body: string}
@@ -304,13 +307,49 @@ describe('proof (b3): accepted then FAILED on-chain → the definite transaction
   });
 });
 
-describe('proof (c): an instruction-error refusal does NOT walk', () => {
-  test('single endpoint, no failover, no refresh — the venue message surfaces with the refusal brand', async () => {
+describe("proof (c): a preflight simulation refusal is the node's opinion, not the bytes — the walk answers", () => {
+  test("B accepts the SAME signed bytes after the head's preflight refusal — one sign, one blockhash, no refresh", async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const recorded = installRpc({
-      [A]: headThatServesReads({error: IX_REFUSAL}), // a verdict on the tx itself
-      [B]: {sendTransaction: SIG_OK}, // MUST never be consulted
-      [PUBLIC]: {sendTransaction: SIG_OK}, // MUST never be consulted
+      [A]: headThatServesReads({error: IX_REFUSAL}), // the head's simulation layer speaks
+      [B]: {sendTransaction: SIG_OK}, // the next home takes the SAME bytes
+      [PUBLIC]: {sendTransaction: SIG_OK}, // never consulted — B answered
+    });
+    const sig = await withDerivedList(solana => sendEurc(solana, MERCHANT_ADDRESS, 8_800_000n));
+    expect(sig).toBe(SIG_OK.result);
+    // THE WALK: A's preflight refusal, B accepted — deterministic order, and the
+    // pre-check/confirm reads stayed on the read list at A.
+    expect(recorded.map(c => `${c.url} ${c.method}`)).toEqual([
+      `${A} getAccountInfo`, // sender ATA
+      `${A} getAccountInfo`, // venue ATA (missing → createIdempotent joins)
+      `${A} getBalance`, // rent pre-check
+      `${A} getLatestBlockhash`, // ONE fetch — the seam never re-fetched
+      `${A} sendTransaction`, // the preflight refusal
+      `${B} sendTransaction`, // walked, SAME bytes — accepted
+      `${A} getSignatureStatuses`, // confirm at the read list, as ever
+    ]);
+    // Byte-identical signed bodies — ONE signature, replayed verbatim (no re-sign anywhere).
+    const sends = sendCalls(recorded);
+    expect(sends).toHaveLength(2);
+    expect(sends[1].body).toBe(sends[0].body);
+    expect(bhCalls(recorded)).toHaveLength(1);
+    // The tracer tells the single walk; no refresh step exists.
+    expect(stepLines(warnLines(warn))).toEqual([
+      'sender-ata-check', 'recipient-ata-check', 'sender-balance-check',
+      'blockhash', 'sign', 'broadcast',
+      'rpc-failover a.example → b.example (blockhash-not-found)',
+      'confirm',
+    ]);
+    expect(warnLines(warn).some(l => /BROADCAST accepted sig=5HCVuLRv/.test(l))).toBe(true);
+    warn.mockRestore();
+  });
+
+  test('a genuine byte-verdict refuses in place at the first venue — B and PUBLIC never consulted, the venue message surfaces', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const recorded = installRpc({
+      [A]: headThatServesReads({error: IX_VERDICT}), // a verdict on the tx itself
+      [B]: {sendTransaction: {error: IX_VERDICT}}, // MUST never be consulted
+      [PUBLIC]: {sendTransaction: {error: IX_VERDICT}}, // MUST never be consulted
     });
     let refusedBrand = false;
     await expect(withDerivedList(async solana => {
@@ -320,13 +359,16 @@ describe('proof (c): an instruction-error refusal does NOT walk', () => {
         refusedBrand = isEndpointRefusal(e);
         throw e;
       }
-    })).rejects.toThrow(/custom program error: 0x1/);
+    })).rejects.toThrow(/invalid instruction data/);
     expect(refusedBrand).toBe(true);
-    // ONE endpoint consulted for the broadcast — B and the public tail never saw a genuinely
-    // invalid transaction, and the seam never refreshed.
+    // ONE venue consulted for the broadcast — the walk never swallows a genuine byte-verdict,
+    // and the seam never refreshed.
     expect(sendCalls(recorded).map(c => c.url)).toEqual([A]);
     expect(bhCalls(recorded)).toHaveLength(1);
-    expect(stepLines(warnLines(warn))).not.toContain('blockhash-refresh-retry');
+    expect(stepLines(warnLines(warn))).toEqual([
+      'sender-ata-check', 'recipient-ata-check', 'sender-balance-check',
+      'blockhash', 'sign', 'broadcast',
+    ]);
     expect(warnLines(warn).every(l => !l.includes('rpc-failover'))).toBe(true);
     warn.mockRestore();
   });

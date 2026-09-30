@@ -10,10 +10,10 @@
  *     today, no walk;
  *   • 2xx is the answer — a return, never walked past (sendTransaction's one forbidden move)
  *     — EXCEPT a 2xx body carrying the relay marker (a broken/hostile relay), which walks;
- *   • (attempt-#6) a Blockhash-not-found refusal on sendTransaction — however wrapped (2xx
- *     JSON-RPC error object or HTTP error body) — WALKS, re-sending the SAME signed bytes;
- *     every other refusal refuses in place, and reads never walk on it (see the last
- *     describe below);
+ *   • (attempt-#6 + the D32 widening) a Blockhash-not-found OR preflight-simulation refusal
+ *     on sendTransaction — however wrapped (2xx JSON-RPC error object or HTTP error body) —
+ *     WALKS, re-sending the SAME signed bytes; every other refusal refuses in place, and
+ *     reads never walk on it (see the last describe below);
  *   • a multi-candidate walk arms EVERY attempt with its own deadline (attempt 0 = the FULL
  *     timeoutMs, attempt i = timeoutMs>>i floored at 1 s, total ≈2×timeoutMs); an armed
  *     expiry is transport-dead. A single-candidate list keeps the caller-owns-deadline
@@ -413,9 +413,10 @@ describe('the SEAM — marker exhaustion classifies unreachable with NO IC probe
 // "Blockhash not found" JSON-RPC error, the walk treated that 2xx as a completed call, and the
 // list had one entry — while the byte-exact replay of the SAME signed tx to
 // api.mainnet-beta.solana.com was ACCEPTED and FINALIZED. Pins, at the rpc layer:
-//   • sendTransaction (and ONLY sendTransaction) walks a blockhash-not-found refusal — however
-//     wrapped — to the next candidate with the SAME signed bytes (byte-identity re-pinned);
-//   • every OTHER JSON-RPC/HTTP refusal refuses in place (a genuinely invalid tx would be
+//   • sendTransaction (and ONLY sendTransaction) walks a preflight-state refusal (blockhash-
+//     not-found or the simulation family) — however wrapped — to the next candidate with the
+//     SAME signed bytes (byte-identity re-pinned);
+//   • every OTHER JSON-RPC/HTTP refusal refuses in place (a genuine byte-verdict would be
 //     refused everywhere; failover homes are not hammered);
 //   • reads NEVER walk on it (the tail is broadcast-only);
 //   • exhaustion is the UNANIMOUS refusal: any transport death, provider 5xx or relay marker
@@ -426,9 +427,9 @@ describe('the SEAM — marker exhaustion classifies unreachable with NO IC probe
 // the preflight-running paths (submitRawSolTx's venue hand-off, broadcastSolPayment's merchant
 // rail) and is defensive parity for the seam; the seam's old refresh-and-resign is retired.
 // ============================================================================
-describe('the send-preflight walk — blockhash-not-found is walk-worthy for sendTransaction only', () => {
+describe('the send-preflight walk — a preflight-state refusal is walk-worthy for sendTransaction only', () => {
   const BH_ERR = JSON.stringify({error: {code: -32002, message: 'Blockhash not found'}});
-  const IX_ERR = JSON.stringify({error: {code: -32002, message: 'Transaction simulation failed: Error processing Instruction 0: custom program error: 0x1'}});
+  const IX_VERDICT = JSON.stringify({error: {code: -32002, message: 'ExecutionCustom error: invalid instruction data'}});
 
   test('a 2xx-wrapped blockhash refusal walks the SAME signed bytes to the next home', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -502,14 +503,19 @@ describe('the send-preflight walk — blockhash-not-found is walk-worthy for sen
     });
   });
 
-  test('an instruction-error refusal does NOT walk — one home asked, refused in place', async () => {
-    let calls = installRoutes({[A]: res(200, IX_ERR), [B]: res(200, JSON.stringify({result: 'SigFromB'}))});
+  test('a genuine byte-verdict refuses in place — one home asked, the invalid tx never walks', async () => {
+    let calls = installRoutes({[A]: res(200, IX_VERDICT), [B]: res(200, JSON.stringify({result: 'SigFromB'}))});
     const rpc = freshRpc();
-    await expect(rpc.sendTransaction([A, B], new Uint8Array([1]))).rejects.toThrow(/custom program error: 0x1/);
+    const err: unknown = await rpc.sendTransaction([A, B], new Uint8Array([1])).then(
+      () => { throw new Error('expected the byte-verdict to refuse in place'); },
+      (e: unknown) => e,
+    );
+    expect((err as Error).message).toMatch(/invalid instruction data/);
+    expect((err as {dpayEndpointRefused?: boolean}).dpayEndpointRefused).toBe(true);
     expect(calls).toEqual([A]); // B never saw a genuinely invalid transaction
   });
 
-  test('an HTTP-400 body naming the blockhash state walks too — however wrapped; an HTTP-400 ix body does not', async () => {
+  test('an HTTP-400 body naming preflight state walks too — however wrapped; a non-preflight 400 body does not', async () => {
     let calls = installRoutes({
       [A]: res(400, '{"error":"Blockhash not found"}'),
       [B]: res(200, JSON.stringify({result: 'SigFromB'})),
@@ -522,7 +528,14 @@ describe('the send-preflight walk — blockhash-not-found is walk-worthy for sen
       [A]: res(400, '{"error":"Transaction simulation failed: InstructionError"}'),
       [B]: res(200, JSON.stringify({result: 'SigFromB'})),
     });
-    await expect(rpc.sendTransaction([A, B], new Uint8Array([2]))).rejects.toMatchObject({
+    await expect(rpc.sendTransaction([A, B], new Uint8Array([2]))).resolves.toBe('SigFromB'); // the simulation wording is the node's opinion — walk
+    expect(calls).toEqual([A, B]);
+
+    calls = installRoutes({
+      [A]: res(400, '{"error":"ExecutionCustom error: invalid instruction data"}'),
+      [B]: res(200, JSON.stringify({result: 'SigFromB'})),
+    });
+    await expect(rpc.sendTransaction([A, B], new Uint8Array([3]))).rejects.toMatchObject({
       dpayEndpointRefused: true,
       status: 400,
     });
