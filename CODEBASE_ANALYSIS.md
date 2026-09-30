@@ -483,6 +483,15 @@ The first EVM-rail FUNDING trip: the CeFi convert path pays out NATIVE ETH on Et
 - **The settle address is the chain-independent EVM identity** (`deriveEvmAddress`, m/44'/60'/0'/0/0), sent EIP-55-checksummed; the order body carries `settleLedger` so the relay's `addrcheck` gates the payout address against the `ethereum` arm (the legacy icp↔solana complement could never validate a 0x address — the optional field keeps pre-ETH bodies byte-compatible).
 - **Completion proof is the record + the gas balance, NOT chain history.** Inbound native ETH emits no ERC-20 Transfer log, so `evm/history.ts` intentionally never shows it; the convert record (`destAddress`, `outTx` = the venue's settleHash) plus `eth_getBalance` (the receive surface's `evm-recv-gas` line) is the visibility story (pinned in `prepare.ts`'s comment + e2e flow 223).
 
+## VCHF multichain verification (2026-09-30) — the CHF rails question is settled on evidence
+
+Verification-only pass (spec `docs/specs/2026-09-30-vchf-multichain-verification.md`, no rails added). Findings that hold for any future CHF-rail work:
+
+- **The founder's "VCHF on ICP, ETH, SOL" is confirmed, and it is the SAME asset on each chain.** VNX's own registry (https://vnx.gitbook.io/vnx-global/transparency/standards-and-contracts.md) pins ICP `ly36x-wiaaa-aaaai-aqj7q-cai` (matching `dfx/catalog_truth.json` and the Oisy env pin byte-for-byte), Ethereum `0x79d4f0232A66c4c91b89c76362016A1707CFBF4f`, Solana `AhhdRu5YZdjVkKR3wbnUDaymVQL2ucjMQ63sZ3LFHsch`, plus Base, Celo, Stellar, Tezos (7 chains). Each address was cross-checked against an explorer/API on 2026-09-30 (Blockscout, Solana RPC, Jupiter, Horizon, ICP dashboard). No Arbitrum/Avalanche/Q-chain exists in any VNX source.
+- **The cross-chain mechanism is an ISSUER burn/mint bridge (VNX-operated), not a third-party bridge** (https://vnx.gitbook.io/vnx-global/institutional/products/bridge.md, https://vnx.io/bridge): burn on source, mint native on destination, "no wrapped IOUs", M-of-N multisig, sanctions/Travel-Rule screening, platform-gated (my.vnx.io login), fees unpublished. So VCHF ICP<->ETH/SOL movement is semantically ROUTING (one currency, another rail — `CURRENCY_RAILS.CHF` may grow ETH/SOL entries like `USD: ['ckUSDC', 'USDC']`), but mechanically it stays OUTSIDE dpay: the only bridge is VNX's own account-gated platform flow, not a permissionless route dpay can drive. A new VCHF-ETH/SOL catalog row is a routing decision; an in-app chain-move would be venue/CeFi legs, never modeled as dpay's CCTP-style cross-rail.
+- **Decimals trap: 8dp (ICP) / 18dp (EVM) / 9dp (SPL)** for the same ticker. Any multi-rail VCHF code normalizes per rail; ICP raw figures never cross an 18dp/9dp boundary unconverted.
+- Per-chain VCHF liquidity is thin (Solana deepest non-ICP rail, Ethereum smallest); see the spec's recommendations before ordering rails.
+
 ## Maintenance contract
 
 - **Read first.** Any agent starting work on this repo reads `CLAUDE.md` (project memory + non-negotiables) **and** this file before editing.
