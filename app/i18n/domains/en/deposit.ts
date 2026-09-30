@@ -257,6 +257,26 @@ export type DepositMessages = {
     showSolAddress: string;
     creating: (asset: string) => string;
     createHint: (setupCost: string, asset: string) => string;
+
+    /** The AccountsTab one-tap completion (AtaSetupCard, 2026-09-30): ONE button that creates
+     *  every absent token account, funding itself from a funded SPL token when SOL is short. */
+    /** The single button's label — the founder's "a SINGLE button that sets up everything". */
+    completeSetup: string;
+    /** The button's screen-reader hint; `setupCost` is the already-formatted SOL total. */
+    completeHint: (setupCost: string) => string;
+    /** The missing accounts as ONE noun phrase ("EURC account", "EURC and USDC accounts"). */
+    targetsLabel: (symbols: string[]) => string;
+    /** The fund-branch line naming the (unique) token the swap draws from. */
+    fundFrom: (source: string) => string;
+    /** The fund confirm, stating the total: the sized swap, its source, what it creates, the cost. */
+    fundConfirm: (swap: string, source: string, targets: string, setupCost: string) => string;
+    /** Sizing refused: even the whole named balance cannot reach the SOL target. */
+    fundShort: (source: string) => string;
+    /** The confirm's two controls. */
+    confirmAction: string;
+    cancelAction: string;
+    /** The busy line for the whole run (one or more accounts). */
+    creatingAll: (targets: string) => string;
   };
 
   /** One-tap funding from Trust Wallet (Android only). */
@@ -495,13 +515,25 @@ export const depositEn: DepositMessages = {
   ata: {
     absent: asset => `No ${asset} account on this device yet.`,
     cost: (setupCost, asset) =>
-      `Creating your ${asset} account costs ${setupCost}, from your SOL balance. It stays yours, on your keys.`,
+      `Creating your ${asset} costs ${setupCost}, from your SOL balance. It stays yours, on your keys.`,
     checkingSol: 'Checking your SOL balance…',
     needSol: setupCost =>
       `You need about ${setupCost} in SOL first — receive it at your address, then create the account.`,
     showSolAddress: 'Show my SOL address',
     creating: asset => `Creating your ${asset} account — confirming on Solana…`,
     createHint: (setupCost, asset) => `Create your ${asset} account for ${setupCost} from your SOL balance`,
+    completeSetup: 'Complete setup',
+    completeHint: setupCost => `Sets up everything in one tap (about ${setupCost})`,
+    targetsLabel: symbols => symbols.length === 1
+      ? `${symbols[0]} account`
+      : `${symbols.slice(0, -1).join(', ')} and ${symbols[symbols.length - 1]} accounts`,
+    fundFrom: source => `A small swap of your ${source} into SOL pays for it.`,
+    fundConfirm: (swap, source, targets, setupCost) =>
+      `Swaps about ${swap} of your ${source} into SOL and creates your ${targets} (${setupCost}).`,
+    fundShort: source => `Even all your ${source} doesn't cover it — receive a little SOL at your address instead.`,
+    confirmAction: 'Confirm',
+    cancelAction: 'Cancel',
+    creatingAll: targets => `Creating your ${targets} — confirming on Solana…`,
   },
 
   trust: {

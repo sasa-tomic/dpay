@@ -17,7 +17,7 @@
  */
 import {describe, test, expect} from '@jest/globals';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
-import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
+import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS} from '../solana/tokens';
 import {planAtaSetup, sizeAtaFundPlan, type AtaSetupTokenInput} from '../lib/ataSetup';
 
 const EURC = EURC_MINT_ADDRESS;
