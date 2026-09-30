@@ -597,6 +597,17 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
       deadlineSecs: e.deadlineSecs as number,
       slippageBps: e.slippageBps as number,
       ...(typeof e.preOutRaw === 'string' && /^\d+$/.test(e.preOutRaw) ? {preOutRaw: e.preOutRaw} : {}),
+      ...(e.hub != null && typeof e.hub === 'object'
+        && typeof (e.hub as Record<string, unknown>).feeTierLeg1 === 'number'
+        && typeof (e.hub as Record<string, unknown>).feeTierLeg2 === 'number'
+        && typeof (e.hub as Record<string, unknown>).minOutLeg1 === 'string'
+        && /^\d+$/.test((e.hub as Record<string, unknown>).minOutLeg1 as string)
+        ? {hub: {
+            feeTierLeg1: (e.hub as Record<string, unknown>).feeTierLeg1 as number,
+            feeTierLeg2: (e.hub as Record<string, unknown>).feeTierLeg2 as number,
+            minOutLeg1: (e.hub as Record<string, unknown>).minOutLeg1 as string,
+          }}
+        : {}),
       ...(Array.isArray(e.txHashes) && e.txHashes.every(h => typeof h === 'string' && /^0x[0-9a-fA-F]{64}$/.test(h))
         ? {txHashes: e.txHashes as string[]}
         : {}),

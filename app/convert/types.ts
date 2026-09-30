@@ -60,6 +60,9 @@ export type EvmSwapLeg = {
   /** Absolute unix seconds — the multicall deadline (the trade's own expiry). */
   deadlineSecs: number;
   slippageBps: number;
+  /** The WETH-hub composition's frozen facts (present iff the quote was the hub fallback —
+   *  no direct pool answered). The executor builds the 2-leg plan from them. */
+  hub?: {feeTierLeg1: number; feeTierLeg2: number; minOutLeg1: string};
   /** The OUT rail's pre-trade raw balance (the realized-credit baseline; null fails open). */
   preOutRaw?: string;
   /** Durable identity per broadcast leg, in order (approve, swap, …) — the crash-safe

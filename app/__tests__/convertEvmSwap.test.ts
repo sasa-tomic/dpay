@@ -5,7 +5,7 @@
 //   * THE RECORD — the frozen facts hydrate (the EvmSwapLeg widening, mutually exclusive with
 //     every other shape), and the executor turns a gas-gate refusal into the honest
 //     failed_refunded state with NOTHING signed.
-import {describe, expect, jest, beforeEach, afterEach, test} from '@jest/globals';
+import {describe, expect, jest, beforeEach, test} from '@jest/globals';
 
 jest.mock('../services/native', () => ({
   DpayCore: {

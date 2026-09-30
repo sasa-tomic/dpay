@@ -13,7 +13,7 @@
 import {executeUniswapSequence, readEvmRailBalance} from '../evm';
 import {venueOfId, venueDisplayName} from '../config/venues';
 import {evmAmmChainOf} from '../config/evmAmm';
-import {planTokenToNative, planTokenToToken} from '../evm/uniswapPlan';
+import {planTokenToNative, planTokenToToken, planTokenViaWethHub} from '../evm/uniswapPlan';
 import {saveTxNote} from '../services/txNotes';
 import {type ConvertRecord} from './types';
 import {saveConvertRecord} from './records';
@@ -56,7 +56,9 @@ export async function executeEvmConvert(
     }
     const plan = leg.tokenOut === ''
       ? planTokenToNative({chain, tokenIn: leg.tokenIn, amountIn: BigInt(leg.amountIn), minOut: BigInt(leg.minOut), feeTier: leg.feeTier, deadlineSecs: BigInt(leg.deadlineSecs)})
-      : planTokenToToken({chain, tokenIn: leg.tokenIn, tokenOut: leg.tokenOut, amountIn: BigInt(leg.amountIn), minOut: BigInt(leg.minOut), feeTier: leg.feeTier, deadlineSecs: BigInt(leg.deadlineSecs)});
+      : leg.hub != null
+        ? planTokenViaWethHub({chain, tokenIn: leg.tokenIn, tokenOut: leg.tokenOut, amountIn: BigInt(leg.amountIn), minOutLeg1: BigInt(leg.hub.minOutLeg1), minOut: BigInt(leg.minOut), feeTierLeg1: leg.hub.feeTierLeg1, feeTierLeg2: leg.hub.feeTierLeg2, deadlineSecs: BigInt(leg.deadlineSecs)})
+        : planTokenToToken({chain, tokenIn: leg.tokenIn, tokenOut: leg.tokenOut, amountIn: BigInt(leg.amountIn), minOut: BigInt(leg.minOut), feeTier: leg.feeTier, deadlineSecs: BigInt(leg.deadlineSecs)});
     const hashes = [...(leg.txHashes ?? [])];
     try {
       await executeUniswapSequence(deps.secretHex, {

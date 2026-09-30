@@ -1259,6 +1259,7 @@ export function ConvertIntentSheet({
             tokenIn: activeRow.inAddress,
             tokenOut,
             outRailId: activeRow.out.railId,
+            ...(b.quote.hub != null ? {hub: b.quote.hub} : {}),
           },
           inSymbol: activeRow.inSymbol,
           outSymbol: activeRow.out.symbol,

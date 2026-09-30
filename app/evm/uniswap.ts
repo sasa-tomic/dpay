@@ -83,6 +83,27 @@ export async function quoteUniswap(args: UniswapQuoteArgs, signal?: AbortSignal)
       || (args.kind === 'exact-input' ? amount > best.amount : amount < best.amount);
     if (better) best = {tier, amount};
   }
+  if (best == null && args.kind === 'exact-input') {
+    // THE HUB FALLBACK (2026-09-28): no direct pool answers — compose A → WETH → B. The
+    // chain's wrap target is the hub asset; each leg takes its own best tier and the FLOORS
+    // compound (leg 2 is sized on leg 1's floor). Both legs are the venue's own quotes.
+    const chain = (await import('../config/evmAmm')).EVM_AMM_CHAINS[args.chainId];
+    if (chain == null || args.tokenIn === chain.weth || args.tokenOut === chain.weth) {
+      throw new Error('uniswap: no liquidity at any fee tier for this pair');
+    }
+    const leg1 = await bestTierQuote(args.tokenIn, chain.weth, args.amountIn, urls, quoter, signal);
+    if (leg1 == null) throw new Error('uniswap: no liquidity at any fee tier for this pair');
+    const leg2 = await bestTierQuote(chain.weth, args.tokenOut, leg1.amount, urls, quoter, signal);
+    if (leg2 == null) throw new Error('uniswap: no liquidity via the WETH hub either');
+    return {
+      feeTier: leg1.tier,
+      amountIn: args.amountIn.toString(),
+      amountOut: leg2.amount.toString(),
+      gasEstimate: (leg1.gas + leg2.gas).toString(),
+      fetchedAtMs: Date.now(),
+      hub: {feeTierLeg1: leg1.tier, feeTierLeg2: leg2.tier, minOutLeg1: leg1.amount.toString()},
+    };
+  }
   if (best == null) throw new Error('uniswap: no liquidity at any fee tier for this pair');
   // Re-quote the WINNING tier for its gas estimate (one free read; the quote above carried
   // the same shape — decode it fully this round).
@@ -97,6 +118,36 @@ export async function quoteUniswap(args: UniswapQuoteArgs, signal?: AbortSignal)
     gasEstimate: full.gasEstimate.toString(),
     fetchedAtMs: Date.now(),
   };
+}
+
+/** One leg's best-tier answer: (tier, amountOut, gasEstimate) or null when every tier is dry. */
+async function bestTierQuote(
+  tokenIn: string,
+  tokenOut: string,
+  amountIn: bigint,
+  urls: readonly string[],
+  quoter: string,
+  signal?: AbortSignal,
+): Promise<{tier: number; amount: bigint; gas: bigint} | null> {
+  let best: {tier: number; amount: bigint; gas: bigint} | null = null;
+  for (const tier of UNISWAP_FEE_TIERS) {
+    let raw: string;
+    try {
+      raw = await ethCall(urls, quoter, encodeQuoteExactInputSingle({tokenIn, tokenOut, amountIn, fee: tier}), {signal});
+    } catch (e) {
+      if (signal?.aborted) throw e;
+      continue;
+    }
+    let q;
+    try {
+      q = decodeUniswapQuote(raw);
+    } catch {
+      continue;
+    }
+    if (q.amount <= 0n) continue;
+    if (best == null || q.amount > best.amount) best = {tier, amount: q.amount, gas: q.gasEstimate};
+  }
+  return best;
 }
 
 // ── The executor (network — the sequence the device signs) ─────────────────────────────────────

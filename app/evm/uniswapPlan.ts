@@ -62,6 +62,9 @@ export interface UniswapQuote {
   /** The winning tier's own gas estimate (QuoterV2's figure — attribution, never a promise). */
   readonly gasEstimate: string;
   readonly fetchedAtMs: number;
+  /** Present when the quote is the WETH-hub composition (no direct pool answered): the two
+   *  legs' tiers + leg 1's own floor, the hub facts the plan builder re-derives from. */
+  readonly hub?: {feeTierLeg1: number; feeTierLeg2: number; minOutLeg1: string};
 }
 
 /** The QuoterV2 answer: (uint256 amount, uint160 sqrtPriceX96After, uint32 ticks, uint256 gas). */
@@ -226,3 +229,46 @@ export function planTokenToToken(args: {
   };
 }
 
+
+/** token → WETH → token (the HUB fallback, 2026-09-28): when no direct pool answers for a
+ *  same-chain pair, the chain's wrap target is the hub asset — ONE multicall runs both legs,
+ *  leg 1 pays the ROUTER, leg 2 pays the user, and leg 2's own floor rides on leg 1's floor
+ *  (the compounding-floor rule every other hub route follows). Both legs are QUOTED before
+ *  commit; the fee surface shows the two pool fees. */
+export function planTokenViaWethHub(args: {
+  chain: EvmAmmChain;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: bigint;
+  /** Leg 1's floor in WETH raw units (the hub floor leg 2 is sized on). */
+  minOutLeg1: bigint;
+  /** The final floor in tokenOut raw units (the swap leg's amountOutMinimum). */
+  minOut: bigint;
+  feeTierLeg1: number;
+  feeTierLeg2: number;
+  deadlineSecs: bigint;
+}): UniswapSwapPlan {
+  const {chain, tokenIn, tokenOut, amountIn} = args;
+  return {
+    chainId: chain.id,
+    recipient: '',
+    txs: [
+      {to: tokenIn, value: 0n, data: encodeApproveHex(chain.router, amountIn), label: 'approve'},
+      {
+        to: chain.router,
+        value: 0n,
+        data: encodeMulticall([
+          encodeExactInputSingle({
+            tokenIn, tokenOut: chain.weth, fee: args.feeTierLeg1, recipient: chain.router,
+            amountIn, amountOutMinimum: args.minOutLeg1,
+          }),
+          encodeExactInputSingle({
+            tokenIn: chain.weth, tokenOut, fee: args.feeTierLeg2, recipient: '0x' + RECIPIENT_PLACEHOLDER,
+            amountIn: args.minOutLeg1, amountOutMinimum: args.minOut,
+          }),
+        ], args.deadlineSecs),
+        label: 'swap',
+      },
+    ],
+  };
+}

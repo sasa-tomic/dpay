@@ -24,6 +24,7 @@ import {
   type UniswapSwapPlan,
 } from '../evm/uniswap';
 import {EVM_AMM_CHAINS} from '../config/evmAmm';
+import {planTokenViaWethHub} from '../evm/uniswapPlan';
 
 const ROUTER = '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45';
 const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
@@ -183,6 +184,33 @@ describe('plan builders — the sequences the executor signs', () => {
     expect(swapHex).toContain('000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee');
     expect(swapHex).toContain('04e45aaf');
     expect(swapHex).not.toContain('49404b7c');
+  });
+
+  it('the WETH HUB fallback: token A -> WETH -> token B in ONE multicall, floors compounding', () => {
+    // No direct pool: the hub composition trades A into WETH (recipient = the ROUTER),
+    // then WETH into B (recipient = the user). Leg 2's input is leg 1's FLOOR — the
+    // compounding-floor rule every other hub route follows.
+    const plan = planTokenViaWethHub({
+      chain,
+      tokenIn: ZCHF,
+      tokenOut: '0x2222222222222222222222222222222222222222',
+      amountIn: 1000n,
+      minOutLeg1: 900n,
+      minOut: 800n,
+      feeTierLeg1: 3000,
+      feeTierLeg2: 500,
+      deadlineSecs: 5n,
+    });
+    expect(plan.txs.length).toBe(2);
+    const swapHex = plan.txs[1]!.data;
+    expect(swapHex.slice(0, 10)).toBe('0x5ae401dc');
+    expect(swapHex).toContain('04e45aaf');
+    expect(swapHex).not.toContain('49404b7c');
+    // Leg 1 routes A -> WETH with the ROUTER as recipient; leg 2 routes WETH -> B.
+    expect(swapHex).toContain('000000000000000000000000b58e61c3098d85632df34eecfb899a1ed80921cb');
+    expect(swapHex).toContain('0000000000000000000000002222222222222222222222222222222222222222');
+    // Exactly TWO subcalls.
+    expect(swapHex).toContain('0000000000000000000000000000000000000000000000000000000000000002');
   });
 
   it('plans are pure: same inputs, same bytes', () => {

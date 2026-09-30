@@ -22,7 +22,7 @@ import {
 } from '../evm';
 import {venueOfId, type VenueEntry} from '../config/venues';
 import {evmAmmChainOf, type EvmAmmChain} from '../config/evmAmm';
-import {planTokenToNative, planTokenToToken, type UniswapSwapPlan} from '../evm/uniswapPlan';
+import {planTokenToNative, planTokenToToken, planTokenViaWethHub, type UniswapSwapPlan} from '../evm/uniswapPlan';
 import {M} from '../i18n';
 import {type ConvertRecord, type EvmSwapLeg} from './types';
 
@@ -39,6 +39,8 @@ export type EvmConvertPrepareArgs = {
     tokenIn: string; // lowercase address
     tokenOut: string; // lowercase address ('' = native out → the unwrap path)
     outRailId: string;
+    /** The WETH-hub composition facts when the quote was the hub fallback. */
+    hub?: {feeTierLeg1: number; feeTierLeg2: number; minOutLeg1: string};
   };
   inSymbol: string;
   outSymbol: string;
@@ -69,9 +71,12 @@ export async function prepareEvmConvertRecord(args: EvmConvertPrepareArgs): Prom
   if (!/^\d+$/.test(minOut) || BigInt(minOut) <= 0n) {
     throw new Error(M.convert.errors.quoteUnavailable('shape'));
   }
+  const hub = quote.hub;
   const plan = quote.tokenOut === ''
     ? planTokenToNative({chain, tokenIn: quote.tokenIn, amountIn: BigInt(quote.amountIn), minOut: BigInt(minOut), feeTier: quote.feeTier, deadlineSecs})
-    : planTokenToToken({chain, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amountIn: BigInt(quote.amountIn), minOut: BigInt(minOut), feeTier: quote.feeTier, deadlineSecs});
+    : hub != null
+      ? planTokenViaWethHub({chain, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amountIn: BigInt(quote.amountIn), minOutLeg1: BigInt(hub.minOutLeg1), minOut: BigInt(minOut), feeTierLeg1: hub.feeTierLeg1, feeTierLeg2: hub.feeTierLeg2, deadlineSecs})
+      : planTokenToToken({chain, tokenIn: quote.tokenIn, tokenOut: quote.tokenOut, amountIn: BigInt(quote.amountIn), minOut: BigInt(minOut), feeTier: quote.feeTier, deadlineSecs});
   // The dry GAS GATE: refuse before anything is adopted (the executor re-runs it live).
   const fee = await estimateUniswapSequenceFee(args.secretHex, {chainId: chain.id, plan});
   const gasWei = await readEvmRailBalance(chain.id, args.secretHex, null);
@@ -107,6 +112,7 @@ export async function prepareEvmConvertRecord(args: EvmConvertPrepareArgs): Prom
     feeTier: quote.feeTier,
     deadlineSecs: Number(deadlineSecs),
     slippageBps: args.slippageBps,
+    ...(hub != null ? {hub} : {}),
     ...(preOutRaw != null ? {preOutRaw} : {}),
   };
   const record: ConvertRecord = {
