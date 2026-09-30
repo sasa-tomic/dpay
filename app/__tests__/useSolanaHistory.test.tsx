@@ -15,6 +15,8 @@ import renderer, {act} from 'react-test-renderer';
 
 jest.mock('../solana', () => ({
   getSolanaHistory: jest.fn(),
+}));
+jest.mock('../transportFailure', () => ({
   classifyTransportFailure: jest.fn(async () => 'unreachable' as const),
 }));
 
