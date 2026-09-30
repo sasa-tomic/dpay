@@ -260,7 +260,7 @@ export const receiveDe: ReceiveMessages = {
   couldNotConfirmYet:
     'Diese Zahlung konnte noch nicht bestätigt werden — falls der Zahler bezahlt hat, erscheint sie bei der nächsten Guthabenaktualisierung.',
   unknownLedger: 'Unbekanntes Ledger für dieses Asset — Einreichen nicht möglich',
-  couldNotSubmit: 'Die Zahlung konnte nicht eingereicht werden — prüfe die Verbindung',
+  couldNotSubmit: 'Die Zahlung konnte nicht eingereicht werden. Scanne sie erneut. Ist sie schon durchgegangen, erscheint sie in deinem Guthaben.',
   noOpenRequest: 'Keine offene Anfrage.',
   paymentRejected: 'Zahlung abgelehnt.',
   paymentRejectedDetail:
@@ -300,7 +300,9 @@ export const receiveDe: ReceiveMessages = {
     notServed: host =>
       `${host} bietet keine Kassen-Codes an; es wurde nichts gebucht. Bitte die Person, die dieses Relay betreibt, die Kasse einzuschalten — oder nimm den dpay-Code.`,
     unreachable: host =>
-      `${host} wurde nicht erreicht; es wurde nichts gebucht. Kassen-Codes entstehen online — prüfe die Verbindung und versuche es erneut, oder nimm den dpay-Code (zeigt dieses Telefon auch offline).`,
+      `Deine Verbindung ist in Ordnung, aber ${host} antwortet nicht; es wurde nichts gebucht. Versuche es gleich noch einmal, oder nimm den dpay-Code (zeigt dieses Telefon auch offline).`,
+    unreachableOffline: host =>
+      `Du scheinst offline zu sein, daher wurde ${host} nicht erreicht und nichts gebucht. Nimm vorerst den dpay-Code oder versuche es erneut, sobald du wieder online bist.`,
     refused: said =>
       `Die Kasse hat diese Buchung abgelehnt: „${said}“ Nichts ist bezahlbar. Bring das in Ordnung und buche erneut.`,
     refusedNoReason: status =>
@@ -345,7 +347,9 @@ export const receiveDe: ReceiveMessages = {
     cancelFailedNoReason: status =>
       `Die Buchung wurde NICHT storniert (HTTP ${status}) — behandle sie als weiterhin bezahlbar. Versuch es erneut; gib nichts heraus, bis sie storniert ist oder abläuft.`,
     cancelUnreachable: host =>
-      `${host} wurde nicht erreicht, diese Buchung wurde also NICHT storniert — sie bleibt bezahlbar, bis sie abläuft. Versuch es erneut, sobald die Verbindung steht.`,
+      `Deine Verbindung ist in Ordnung, aber ${host} antwortet nicht, diese Buchung wurde also NICHT storniert — sie bleibt bezahlbar, bis sie abläuft. Versuche es gleich noch einmal.`,
+    cancelUnreachableOffline: host =>
+      `Du scheinst offline zu sein, daher wurde ${host} nicht erreicht und diese Buchung NICHT storniert — sie bleibt bezahlbar, bis sie abläuft. Versuche es erneut, sobald du wieder online bist.`,
 
     endedTitle: reason =>
       reason === 'expired' ? 'Dieser Code ist abgelaufen'

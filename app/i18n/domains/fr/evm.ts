@@ -75,5 +75,4 @@ export const evmFr: EvmMessages = {
   gasGateReady: 'Approvisionné ? Réessayer',
   tryAgain: 'Réessayer',
   wrongChain: (expected, actual) => `Le point d'accès sert ${actual}, mais cet actif vit sur ${expected}. Rien n'a été envoyé — vérifiez Réglages ▸ Avancé.`,
-  engineLoad: 'Le moteur de paiement ne s\'est pas chargé — vérifiez votre connexion et réessayez. Votre argent est intact.',
 };

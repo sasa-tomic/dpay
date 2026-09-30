@@ -11,7 +11,8 @@ export const errorsDe: ErrorMessages = {
     clockUnreachable: 'IC-Uhr nicht erreichbar',
     clockSkew: 'IC-Zeitabweichung zu groß',
     noLedgerForCurrency: 'Asset nicht unterstützt',
-    feeUnavailable: 'Ledger-Gebühr konnte nicht geladen werden. Prüfe die Verbindung.',
+    feeUnavailableOffline: 'Du scheinst offline zu sein, daher konnte die Ledger-Gebühr nicht gelesen werden. Nichts wurde gesendet. Versuche es erneut, sobald du wieder online bist.',
+    feeUnavailableUnreachable: 'Deine Verbindung ist in Ordnung, aber der Internet Computer antwortet nicht, daher konnte die Ledger-Gebühr nicht gelesen werden. Dein Geld ist unangetastet. Versuche es gleich noch einmal.',
   },
 
   solana: {
@@ -59,6 +60,11 @@ export const errorsDe: ErrorMessages = {
       approved === ''
         ? `Wallet hat kein Ethereum-Netzwerk freigegeben — diese Einzahlung läuft über Netzwerk ${requested}. Wechsle dorthin und verbinde erneut.`
         : `Wallet hat Netzwerk ${approved} freigegeben, diese Einzahlung läuft über Netzwerk ${requested}. Wechsle und verbinde erneut.`,
+  },
+
+  engine: {
+    offline: 'Du scheinst offline zu sein, daher wurde die Zahlungs-Engine nicht geladen. Dein Geld ist unangetastet. Öffne diesen Bildschirm erneut, sobald du wieder online bist.',
+    unreachable: 'Deine Verbindung ist in Ordnung, aber dpays Zahlungs-Engine wurde nicht geladen. Dein Geld ist unangetastet. Öffne diesen Bildschirm gleich erneut und versuche es noch einmal.',
   },
 
   tap: {

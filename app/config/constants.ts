@@ -448,7 +448,7 @@ export function solSendTimeoutMs(): number {
 // await in the send chain the caller's deadline cannot cut. 2026-09-21: three live EURC sends died
 // exactly there (stalled origin fetches stalled the chunk; the sheet hung in `submitting`, nothing
 // broadcast), so the money path now races the import against this bound and fails with honest,
-// actionable copy (`M.sol.engineLoad`) instead of hanging. Generous over the slowest real 3G load —
+// classified copy (`M.errors.engine.*`, app/transportFailure.ts) instead of hanging. Generous over the slowest real 3G load —
 // the normal path never sees it, because the sheet preloads the module at mount (minutes before a
 // click) and the balance poll loads it at boot.
 export const SOL_RPC_IMPORT_DEADLINE_MS = 10000;

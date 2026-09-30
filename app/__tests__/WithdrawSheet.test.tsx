@@ -55,6 +55,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {OfframpStep} from '../services/rail';
 import type {Identity} from '../lib/types';
 import type {CurrencyDescriptor, FamilyDisplay, MinterFamily} from '../config/catalog';
+import {M} from '../i18n';
 
 const IDENTITY: Identity = {secretHex: '11'.repeat(32), publicHex: '22'.repeat(32), username: 'Bob'};
 
@@ -261,7 +262,9 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
   });
 
   test('clean pre-submit failure (gas fetch null) re-prepares on retry — nothing was signed', async () => {
-    // native-ETH path needs fetchGasFeeWei; mock it failing then succeeding.
+    // native-ETH path needs fetchGasFeeWei; mock it failing then succeeding. The thrown copy is
+    // CLASSIFIED (work order 2026-09-30): the connectivity override decides the arm, hermetically.
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'};
     const {fetchGasFeeWei} = await import('../services/rail');
     jest.mocked(fetchGasFeeWei)
       .mockResolvedValueOnce(null)
@@ -272,9 +275,12 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
     await act(async () => {
       root.root.findByProps({testID: 'withdraw-amount-input'}).props.onChangeText('0.001');
     });
-    await driveConfirm(root); // gas fetch null → clean pre-submit error
-    expect(root.root.findByProps({testID: 'withdraw-err'}).props.children).toContain("Couldn't fetch the live gas fee");
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'online';
+    await driveConfirm(root); // gas fetch null → clean pre-submit error, ONLINE: the IC is named
+    expect(root.root.findByProps({testID: 'withdraw-err'}).props.children).toContain(M.withdraw.ic.gasFeeErrUnreachable);
     expect(prepareEthWithdrawal).not.toHaveBeenCalled(); // nothing was ever signed
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'offline';
+    jest.mocked(fetchGasFeeWei).mockResolvedValueOnce(null);
     await driveConfirm(root); // retry — preparing fresh is SAFE (no envelope was ever submitted)
     // The first attempt threw at the gas fetch, BEFORE any prepare — so the retry's prepare is the
     // FIRST and only signature (a retained record never existed to resume).
@@ -282,6 +288,42 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
     expect(jest.mocked(submitOfframpStep).mock.calls.length).toBeGreaterThanOrEqual(1);
     expect(root.root.findByProps({testID: 'withdraw-status'}).props.children).toBe('Withdrawn ✓');
     act(() => { root.unmount(); });
+    delete g.__DPAY_TEST_SOLANA_CONNECTIVITY;
+  });
+
+  test('the gas-fee blame is CLASSIFIED: offline blames nobody, online names the IC (both arms)', async () => {
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'};
+    const {fetchGasFeeWei} = await import('../services/rail');
+    jest.mocked(fetchGasFeeWei).mockResolvedValue(null);
+    jest.mocked(submitOfframpStep).mockResolvedValue({kind: 'settled', blockIndex: '1'});
+
+    // The offline arm: "you seem offline", nobody blamed, no connection instruction.
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'offline';
+    let root = await renderSheet();
+    await act(async () => {
+      root.root.findByProps({testID: 'withdraw-amount-input'}).props.onChangeText('0.001');
+    });
+    await driveConfirm(root);
+    const offlineErr = root.root.findByProps({testID: 'withdraw-err'}).props.children as string;
+    expect(offlineErr).toBe(M.withdraw.ic.gasFeeErrOffline);
+    expect(offlineErr).toMatch(/offline/i);
+    expect(offlineErr).not.toMatch(/check your connection|check the connection/i);
+    act(() => { root.unmount(); });
+
+    // The online arm: the connection is fine; the Internet Computer is the side that is down.
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'online';
+    root = await renderSheet();
+    await act(async () => {
+      root.root.findByProps({testID: 'withdraw-amount-input'}).props.onChangeText('0.001');
+    });
+    await driveConfirm(root);
+    const onlineErr = root.root.findByProps({testID: 'withdraw-err'}).props.children as string;
+    expect(onlineErr).toBe(M.withdraw.ic.gasFeeErrUnreachable);
+    expect(onlineErr).toMatch(/connection is fine/);
+    expect(onlineErr).toMatch(/Internet Computer/);
+    expect(onlineErr).toMatch(/untouched/i);
+    act(() => { root.unmount(); });
+    delete g.__DPAY_TEST_SOLANA_CONNECTIVITY;
   });
 });
 

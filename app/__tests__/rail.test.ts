@@ -25,11 +25,13 @@ jest.mock('../services/native', () => ({
     icpSelfPrincipal: jest.fn(),
     icpMinterAccountArg: jest.fn(),
     icpDecodeText: jest.fn(),
+    icpDecodeInt: jest.fn(),
     icpIngressExpiry: jest.fn(),
   },
 }));
 jest.mock('../services/icp', () => ({
   icSubmit: jest.fn(),
+  icQuery: jest.fn(),
   icPollRequestStatus: jest.fn(),
   icPollSignedRequestStatus: jest.fn(),
   icStampExpiry: jest.fn(),
@@ -48,10 +50,11 @@ jest.mock('../services/relay', () => ({
   readBodyWithin: jest.requireActual<typeof import('../services/relay')>('../services/relay').readBodyWithin,
 }));
 
-import {confirmIncomingTransfer, pollTransfer, prepareNfcTransfer, prepareTransfer, railBtcDepositAddress, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage, wireRequestToIntent} from '../services/rail';
+import {confirmIncomingTransfer, fetchLedgerFee, pollTransfer, prepareNfcTransfer, prepareTransfer, railBtcDepositAddress, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage, wireRequestToIntent} from '../services/rail';
 import {DpayCore} from '../services/native';
-import {icPollRequestStatus, icPollSignedRequestStatus, icStampExpiry, icSubmit, IcClockUnreachable} from '../services/icp';
+import {icPollRequestStatus, icPollSignedRequestStatus, icQuery, icStampExpiry, icSubmit, IcClockUnreachable} from '../services/icp';
 import {relayFetch} from '../services/relay';
+import {M} from '../i18n';
 
 const PREPARED = {ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', requestIdHex: 'cd'.repeat(32)};
 
@@ -483,5 +486,50 @@ describe('railBtcDepositAddress — get_btc_address as an UPDATE call', () => {
     jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'done'} as never);
     await expect(railBtcDepositAddress(SECRET, MINTER)).resolves.toBeNull();
     expect(DpayCore.icpDecodeText).not.toHaveBeenCalled();
+  });
+});
+
+describe('fetchLedgerFee — the classified fee-unavailable copy (work order 2026-09-30)', () => {
+  // "Couldn't fetch the ledger fee. Check connection." fired on every failed icrc1_fee read —
+  // including when the phone was ONLINE and the IC boundary was the side that was down (the
+  // founder's 2026-09-29 finding). The blame is now classified at the seam (the shared oracle,
+  // `classifyIcReadFailure`, probing the SOL rail head — off the IC path), and the thrown
+  // message is the matching honest sentence. The `__DPAY_TEST_SOLANA_CONNECTIVITY` override
+  // short-circuits the oracle, so these pins are hermetic: no fetch, no probe.
+  const SECRET = '22'.repeat(32);
+  const LEDGER = 'td2nx-oaaaa-aaaab-qhdnq-cai';
+  const g = globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'};
+
+  test('no answer while the phone is offline ⇒ the offline sentence (nobody is blamed)', async () => {
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'offline';
+    jest.mocked(icQuery).mockResolvedValue(null as never);
+    const err = await fetchLedgerFee(SECRET, LEDGER).then(() => null, (e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.message).toBe(M.errors.ic.feeUnavailableOffline);
+  });
+
+  test('no answer while the phone is online ⇒ the unreachable sentence (the IC side is named)', async () => {
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'online';
+    jest.mocked(icQuery).mockResolvedValue(null as never);
+    const err = await fetchLedgerFee(SECRET, LEDGER).then(() => null, (e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.message).toBe(M.errors.ic.feeUnavailableUnreachable);
+    expect(err!.message).not.toContain('Check connection');
+  });
+
+  test('a real answer still decodes and is written through to the display cache', async () => {
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'online';
+    jest.mocked(icQuery).mockResolvedValue('fee-reply' as never);
+    jest.mocked(DpayCore.icpDecodeInt).mockResolvedValue('10000' as never);
+    await expect(fetchLedgerFee(SECRET, LEDGER)).resolves.toBe('10000');
+  });
+
+  test('the two arms are distinct, name the facts, and never say "check connection"', async () => {
+    expect(M.errors.ic.feeUnavailableOffline).not.toBe(M.errors.ic.feeUnavailableUnreachable);
+    expect(M.errors.ic.feeUnavailableOffline).toMatch(/offline/i);
+    expect(M.errors.ic.feeUnavailableUnreachable).toMatch(/connection is fine/i);
+    expect(M.errors.ic.feeUnavailableUnreachable).toMatch(/Internet Computer/);
+    expect(M.errors.ic.feeUnavailableOffline).not.toMatch(/check your connection/i);
+    expect(M.errors.ic.feeUnavailableUnreachable).not.toMatch(/check connection|check your connection/i);
   });
 });

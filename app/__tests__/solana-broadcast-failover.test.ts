@@ -383,27 +383,30 @@ describe("proof (c): a preflight simulation refusal is the node's opinion, not t
 // (e/f) THE HANG BOUNDS (2026-09 stream D pins, extending the audit table in `solana.ts`'s
 // header). Every await on the send path answers to exactly one deadline; these two pin the
 // bounds that live OUTSIDE the sheet's 60s withTimeout:
-//   (e) the module load's own bound (`loadRpcForSend`) — expiry throws the engine-load class
-//       (friendlySolError → M.sol.engineLoad), never an unbounded wait on the lazy chunk;
+//   (e) the module load's own bound (`loadRpcForSend`) — expiry throws the CLASSIFIED engine
+//       copy (M.errors.engine.*, via app/transportFailure.ts engineLoadCopy), never an unbounded
+//       wait on the lazy chunk and never a flat "check your connection" to an online phone;
 //   (f) the confirm loop's own bound (`confirmTransaction`) — the poll throws at its deadline,
 //       which is what turns "the chain never answered" into the sheet's honest unknown.
 // ============================================================================
 
 describe('the hang bounds: module-load deadline and confirm-loop deadline', () => {
-  test('(e) loadRpcForSend expiry throws the engine-load class — the lazy chunk can never hang a send', async () => {
+  test('(e) loadRpcForSend expiry throws the CLASSIFIED engine copy — the lazy chunk can never hang a send', async () => {
     const {loadRpcForSend} = require('../solana') as typeof import('../solana');
-    const {friendlySolError} = require('../solana/errors') as typeof import('../solana/errors');
     const {M} = require('../i18n') as typeof import('../i18n');
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'};
     // A chunk that never arrives (the stalled origin fetch of the 2026-09-21 live sends) against
-    // a short injected deadline: the race must REJECT, with the message the classifier maps to
-    // the engine-load copy ("check your connection, reopen, retry"), not a silent hang.
+    // a short injected deadline: the race must REJECT with the blame-classified sentence — the
+    // phone was online, so the copy names dpay's engine and keeps the money untouched — never a
+    // silent hang and never connection blame.
     const never = (): Promise<never> => new Promise(() => {});
-    let raw = '';
-    await expect(loadRpcForSend(20, never).catch((err: unknown) => {
-      raw = err instanceof Error ? err.message : String(err);
-      throw err;
-    })).rejects.toThrow(/rpc module failed to load within 20ms/);
-    expect(friendlySolError(raw)).toBe(M.sol.engineLoad);
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'online';
+    await expect(loadRpcForSend(20, never)).rejects.toThrow(M.errors.engine.unreachable);
+    // …and the offline arm is a different sentence that blames nobody.
+    g.__DPAY_TEST_SOLANA_CONNECTIVITY = 'offline';
+    await expect(loadRpcForSend(20, never)).rejects.toThrow(M.errors.engine.offline);
+    expect(M.errors.engine.offline).not.toBe(M.errors.engine.unreachable);
+    delete g.__DPAY_TEST_SOLANA_CONNECTIVITY;
   });
 
   test('(f) confirmTransaction throws at its deadline — the poll is bounded, never a forever loop', async () => {

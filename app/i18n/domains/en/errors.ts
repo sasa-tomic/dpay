@@ -28,8 +28,12 @@ export type ErrorMessages = {
     clockSkew: string;
     /** The requested currency has no ledger in the catalog — nothing payable, so nothing is signed. */
     noLedgerForCurrency: string;
-    /** `icrc1_fee` is unreadable, so an ICRC-2 approve cannot carry the fee the ledger demands. */
-    feeUnavailable: string;
+    /** `icrc1_fee` produced no fact. The blame is CLASSIFIED (app/transportFailure.ts
+     *  `classifyIcReadFailure`): offline blames nobody; unreachable says the connection is fine
+     *  and names the Internet Computer as the side that isn't answering (the old single
+     *  `feeUnavailable` read "Check connection." to online phones — founder finding 2026-09-29). */
+    feeUnavailableOffline: string;
+    feeUnavailableUnreachable: string;
   };
 
   /** Solana rail — the device-key send path and the one-time token account (ATA) setup. Every
@@ -138,6 +142,21 @@ export type ErrorMessages = {
   };
 
   /**
+   * The payment engine (either rail's lazily-loaded network module — `loadRpcForSend` /
+   * `loadEvmRpcForSend`) never arrived: the served web build fetches it as a chunk from the page
+   * origin, and a stalled or broken origin fetch used to print "check your connection" to phones
+   * whose connection was fine. The shared oracle (`app/transportFailure.ts` `engineLoadCopy`)
+   * classifies the blame and the loaders throw the matching sentence directly.
+   */
+  engine: {
+    /** Nothing answered anywhere — the phone has no connectivity; no one is blamed. */
+    offline: string;
+    /** The phone is online (the IC-boundary probe answered), so the relay's serving of the
+     *  engine chunk is what failed. Names dpay, keeps the money untouched, gives the move. */
+    unreachable: string;
+  };
+
+  /**
    * NFC tap terminal reasons — the tap status view renders these verbatim as its sub-line, so an
    * unknown outcome must read as unknown ("Couldn't confirm"), never as a decline.
    */
@@ -188,7 +207,8 @@ export const errorsEn: ErrorMessages = {
     clockUnreachable: 'IC clock unreachable',
     clockSkew: 'IC clock skew too large',
     noLedgerForCurrency: 'Unsupported asset',
-    feeUnavailable: 'Couldn’t fetch the ledger fee. Check connection.',
+    feeUnavailableOffline: 'You seem offline, so the ledger fee couldn’t be read. Nothing was sent. Try again once you’re back online.',
+    feeUnavailableUnreachable: 'Your connection is fine, but the Internet Computer isn’t answering, so the ledger fee couldn’t be read. Your money is untouched. Try again in a moment.',
   },
 
   solana: {
@@ -238,6 +258,11 @@ export const errorsEn: ErrorMessages = {
       approved === ''
         ? `Wallet approved no Ethereum network — this deposit settles on network ${requested}. Switch to it, then connect again.`
         : `Wallet approved network ${approved}; this deposit settles on network ${requested}. Switch, then connect again.`,
+  },
+
+  engine: {
+    offline: 'You seem offline, so the payment engine didn’t load. Your money is untouched. Reopen this screen once you’re back online.',
+    unreachable: 'Your connection is fine, but dpay’s payment engine didn’t load. Your money is untouched. Reopen this screen and try again in a moment.',
   },
 
   tap: {

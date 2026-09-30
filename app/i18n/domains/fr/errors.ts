@@ -12,7 +12,8 @@ export const errorsFr: ErrorMessages = {
     clockUnreachable: 'Horloge IC inaccessible',
     clockSkew: 'Décalage d’horloge IC trop important',
     noLedgerForCurrency: 'Actif non pris en charge',
-    feeUnavailable: 'Impossible de récupérer les frais du registre. Vérifiez votre connexion.',
+    feeUnavailableOffline: 'Vous semblez hors ligne, donc les frais du registre n’ont pas pu être lus. Rien n’a été envoyé. Réessayez une fois de nouveau en ligne.',
+    feeUnavailableUnreachable: 'Votre connexion est bonne, mais Internet Computer ne répond pas, donc les frais du registre n’ont pas pu être lus. Votre argent est intact. Réessayez dans un instant.',
   },
 
   solana: {
@@ -60,6 +61,11 @@ export const errorsFr: ErrorMessages = {
       approved === ''
         ? `Le portefeuille n’a autorisé aucun réseau Ethereum ; ce dépôt se règle sur le réseau ${requested}. Passez-y, puis reconnectez-vous.`
         : `Le portefeuille a autorisé le réseau ${approved} ; ce dépôt se règle sur le réseau ${requested}. Changez, puis reconnectez-vous.`,
+  },
+
+  engine: {
+    offline: 'Vous semblez hors ligne, donc le moteur de paiement ne s’est pas chargé. Votre argent est intact. Rouvrez cet écran une fois de nouveau en ligne.',
+    unreachable: 'Votre connexion est bonne, mais le moteur de paiement de dpay ne s’est pas chargé. Votre argent est intact. Rouvrez cet écran puis réessayez dans un instant.',
   },
 
   tap: {

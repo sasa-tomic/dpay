@@ -43,6 +43,7 @@ jest.mock('../services/rail', () => ({
 }));
 
 import {railBalanceOf} from '../services/rail';
+import {M} from '../i18n';
 
 const IDENTITY: Identity = {secretHex: '11'.repeat(32), publicHex: '22'.repeat(32), username: 'test'};
 
@@ -169,6 +170,21 @@ describe('IcrcDepositSheet', () => {
     expect(has(tree, 'deposit-qr')).toBe(false);
     expect(has(tree, 'btn-deposit-copy')).toBe(false);
     expect(has(tree, 'btn-deposit-check')).toBe(false);
+  });
+
+  test('a failed PRINCIPAL DERIVATION does not blame the connection (work order 2026-09-30)', async () => {
+    // This sheet's address is derived LOCALLY (icpSelfPrincipal) — no network step exists on this
+    // path, so the old shared `addressErr` ("Check your connection") was a false blame. The
+    // surface now has its own sentence: what failed, money untouched, the move.
+    const {DpayCore} = await import('../services/native');
+    (DpayCore.icpSelfPrincipal as unknown as ReturnType<typeof jest.fn>).mockRejectedValueOnce(new Error('derive failed'));
+    (railBalanceOf as unknown as ReturnType<typeof jest.fn>).mockResolvedValue(null);
+    const tree = await renderSheet(7);
+    const errText = allText(tree.root).toString();
+    expect(errText).toBe(M.deposit.ck.addressCreateErr);
+    expect(errText).toMatch(/untouched/i);
+    expect(errText).not.toMatch(/connection/i);
+    expect(has(tree, 'deposit-qr')).toBe(false);
   });
 
   test('received delta: strictly-higher balance → success card with the exact amount + Done', async () => {

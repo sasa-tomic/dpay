@@ -14,6 +14,7 @@ import {planOfframpConfirm, type RetainedOfframp} from '../services/offrampRetry
 import {loadOfframp, saveOfframp, clearOfframp} from '../services/offrampPersist';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
+import {classifyIcReadFailure} from '../transportFailure';
 import {IconCheck, IconCopy} from './icons';
 import {M} from '../i18n';
 
@@ -130,6 +131,15 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
     awardPaymentTested(journey);
   }
 
+  /** The live gas fee never answered. The blame is CLASSIFIED (the shared oracle — the SOL head
+   *  is off the IC path the minter query failed on), never a flat "check your connection" while
+   *  the phone is online (work order 2026-09-30). Pre-submit: nothing was signed or sent. */
+  async function gasFeeErr(): Promise<string> {
+    return (await classifyIcReadFailure()) === 'offline'
+      ? M.withdraw.ic.gasFeeErrOffline
+      : M.withdraw.ic.gasFeeErrUnreachable;
+  }
+
   async function confirm() {
     if (phase === 'submitting') return;
     // Double-burn guard: with a retained offramp, Confirm RESUMES the SAME envelope bytes — only a
@@ -161,7 +171,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
       } else if (family === 'CkEthErc20' && tokenContract != null) {
         if (!gasLedger) throw new Error(M.withdraw.ic.noRail);
         const gas = await fetchGasFeeWei(identity.secretHex, minter, ledger);
-        if (gas == null) throw new Error(M.withdraw.ic.gasFeeErr);
+        if (gas == null) throw new Error(await gasFeeErr());
         steps = await prepareErc20Withdrawal(identity.secretHex, ledger, gasLedger, minter, dest, raw, gas);
       } else if (family === 'CkEthErc20') {
         // Native ETH: passes the ckETH AMOUNT ledger as the eip_1559_transaction_price arg.
@@ -171,7 +181,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
         // mainnet_cketh_minter_eip1559_price_args probe. No observable difference; revisit only if
         // the minter ever starts rejecting it.
         const gas = await fetchGasFeeWei(identity.secretHex, minter, ledger);
-        if (gas == null) throw new Error(M.withdraw.ic.gasFeeErr);
+        if (gas == null) throw new Error(await gasFeeErr());
         steps = await prepareEthWithdrawal(identity.secretHex, ledger, minter, dest, raw, gas);
       } else {
         // FAIL CLOSED on an unrecognised family. This branch used to be the native-ETH `else`,

@@ -25,7 +25,7 @@
 //   await (send path)                          bound                                   owner
 //   ─────────────────────────────────────────  ──────────────────────────────────────  ────────────────────────────────────────
 //   module load `import('./solana/rpc')`       SOL_RPC_IMPORT_DEADLINE_MS (10s)        `loadRpcForSend` — races the import,
-//     (the lazy chunk; no signal of its own)     + sheet-mount preload (preloadSolanaRpc)  fails with the engine-load class, stays retryable
+//     (the lazy chunk; no signal of its own)     + sheet-mount preload (preloadSolanaRpc)  fails with the classified engine copy, retryable
 //   blockhash fetch / broadcast                per-attempt rpcFetch deadline (8s,      `solana/rpc.ts` rpcFetch — halving under the
 //   (`getLatestBlockhash`, `sendTransaction`)    halving per candidate, 1s floor)        candidate walk; caller signal composed in
 //   pre-check reads (ATA existence, balance,   per-attempt rpcFetch deadline + the     `solana/rpc.ts` rpcFetch over the READ candidate
@@ -43,7 +43,8 @@
 // ============================================================================
 
 import bs58 from 'bs58';
-import {solanaRpcUrl, solanaRpcUrls, solanaBroadcastRpcUrls, icGatewayUrl, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS, SOL_RPC_IMPORT_DEADLINE_MS} from './config/constants';
+import {solanaRpcUrl, solanaRpcUrls, solanaBroadcastRpcUrls, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS, SOL_RPC_IMPORT_DEADLINE_MS} from './config/constants';
+import {classifyTransportFailure, engineLoadCopy} from './transportFailure';
 import {solanaTokenAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
 import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
@@ -114,7 +115,7 @@ export type {SolanaSignatureStatus} from './solana/rpc';
 // So the money path now: (1) PRELOADS the module when the send sheet mounts (minutes before any
 // click — the normal click-time import is already resolved); (2) races the click-time import
 // against a bound (`SOL_RPC_IMPORT_DEADLINE_MS`) and fails with classified, actionable copy
-// (`M.sol.engineLoad`) instead of hanging; (3) TRACES each step to console.warn — the on-device
+// (`M.errors.engine.*`) instead of hanging; (3) TRACES each step to console.warn — the on-device
 // log mirror (services/log.ts installLogSink) captures warn, so the last traced line names the
 // exact hung step on any future live attempt. The prefix matches `logMoney`'s so the file reads
 // as one story; the services layer itself is NOT imported from here (it pulls the native module,
@@ -144,11 +145,13 @@ export function preloadSolanaRpc(): void {
 }
 
 /** The bounded module load for every MONEY path that awaits the network module. Races the import
- *  against `SOL_RPC_IMPORT_DEADLINE_MS`; on expiry throws the engine-load class (friendlySolError
- *  → `M.sol.engineLoad`: check your connection, reopen, retry) instead of hanging the send for
- *  the caller's whole deadline on a stalled chunk. The underlying import keeps loading and its
- *  eventual resolution warms the module map — the RETRY then succeeds without re-fetching. The
- *  loader is injectable for tests. */
+ *  against `SOL_RPC_IMPORT_DEADLINE_MS`; on expiry throws the CLASSIFIED engine copy
+ *  (`engineLoadCopy` in `app/transportFailure.ts` → `M.errors.engine.*`) instead of hanging the
+ *  send for the caller's whole deadline on a stalled chunk — and never the old flat "check your
+ *  connection" to a phone whose connection is fine (work order 2026-09-30). A fast import
+ *  failure (a broken/stale chunk on the origin) is the same user fact and classifies the same
+ *  way. The underlying import keeps loading and its eventual resolution warms the module map —
+ *  the RETRY then succeeds without re-fetching. The loader is injectable for tests. */
 export async function loadRpcForSend(
   deadlineMs: number = SOL_RPC_IMPORT_DEADLINE_MS,
   load: () => Promise<typeof import('./solana/rpc')> = () => import('./solana/rpc'),
@@ -158,11 +161,19 @@ export async function loadRpcForSend(
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       rpcPreloadStarted = false; // a timed-out load must be retryable
-      reject(new Error(`solana rpc module failed to load within ${deadlineMs}ms (the payment engine chunk never arrived — check the connection to the relay and retry)`));
+      reject(new Error(`solana rpc module failed to load within ${deadlineMs}ms (the engine chunk never arrived)`));
     }, deadlineMs);
   });
   try {
     return await Promise.race([load(), deadline]);
+  } catch (e) {
+    const raw = e instanceof Error ? e.message : String(e);
+    const copy = await engineLoadCopy(raw);
+    if (copy != null) {
+      console.warn(`money: sol send loadRpcForSend — the engine chunk never arrived: ${raw}`);
+      throw new Error(copy);
+    }
+    throw e;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
@@ -277,7 +288,8 @@ export type SolanaTokenBalanceResult =
  *  connectivity; no one is at fault, and dpay must not claim an outage it cannot see. This is the
  *  payer's normal, designed state. `unreachable`: nothing answered on the rail's path while the
  *  phone IS online — reached one of two ways: every walk candidate died on transport AND the IC
- *  boundary probe answered (`classifyTransportFailure` below), or the walk exhausted with the
+ *  boundary probe answered (`classifyTransportFailure` in `app/transportFailure.ts`, the SHARED
+ *  oracle), or the walk exhausted with the
  *  relay's own `dpayRelayError` marker on every candidate (`SolanaRelayPathDown` from
  *  `solana/rpc.ts` — the relay itself answered HTTP and reported its Solana leg dead, so no
  *  probe is needed; the fast path, checked first in the catches). `unreadable`: the endpoint
@@ -295,81 +307,6 @@ export type SolanaBalancesRead = {
   sol: SolanaSolBalanceResult;
   tokens: Record<string, SolanaTokenBalanceResult>;
 };
-
-/** How long the offline/unreachable oracle waits for the IC boundary's answer. Short on purpose:
- *  it informs COPY, not money decisions, and a user waiting on a note should not wait on a probe. */
-const CONNECTIVITY_PROBE_MS = 2500;
-/** Dedupe window for the connectivity probe. The probe exists so a FAILING poll can tell "this
- *  phone has no connectivity" from "the service side is down" — and the balance poll fails once
- *  per `POLL.balance` tick (2.5s in a shipped build), which is FASTER than this window on purpose:
- *  without the memo every failing active tick would fire a fresh probe (the 2s pre-audit value did
- *  exactly that). 10s bounds the probe to ~1 per decade of ticks while the rail is down and still
- *  re-probes soon enough that a phone that came back is re-classified within a few ticks. */
-const CONNECTIVITY_PROBE_TTL_MS = 10000;
-let connectivityMemo: {probeUrl: string; at: number; result: 'unreachable' | 'offline'} | null = null;
-
-/** The IC boundary origin the oracle probes — the SAME resolution `services/icp.ts` submits to
- *  (`icGatewayUrl()` in config/constants: the operator override, then the per-call
- *  `__DPAY_TEST_IC_GATEWAY` seam, then icp-api.io). This seam must not statically import the
- *  services layer — icp.ts pulls the native DpayCore module, and the offline jest/e2e loop must
- *  never load it from here — which is exactly why the resolution lives in config/constants, the
- *  one pure module both sides can share (before the operator override existed the literal was
- *  duplicated here; the duplication ended when the two resolutions had to agree). Read PER CALL,
- *  exactly like icp.ts, so the e2e harness's fake-IC gateway redirect covers the oracle too: in
- *  e2e the probe lands on the in-process gateway (a known origin), never on the real icp-api.io. */
-const icProbeUrl = (): string => icGatewayUrl();
-
-/**
- * The offline/unreachable oracle (R3, spec 2026-09-09: "the phone has no connectivity" vs "the
- * rail is unreachable while the phone is online" are different facts with different blame). A
- * transport failure on the Solana rail's path proves only that NOTHING answered there; to tell "no
- * connectivity" from "the service side is down" the seam asks a host that is deliberately OFF that
- * path: the IC boundary (`https://icp-api.io` — the app's other value rail, which never touches
- * the Solana path). Any HTTP answer from it — 200, 404, 405, all of it — proves the phone is
- * online, so the rail's path is what is down ('unreachable'); that answer is also what
- * substantiates the unreachable copy's "your Internet Computer payments still work" claim, because
- * the probe literally is the IC check. No answer there either means nothing is reachable from this
- * phone ('offline') — and the copy must not blame dpay, the endpoint, or anyone, because the
- * wallet cannot see that far.
- *
- * The reference host CANNOT be the relay: post-proxy (spec direction 1) the Solana rail path IS
- * the relay, so a relay outage would fail both the read AND a relay probe — the phone would be
- * told "you are offline" while dpay is down, the exact collapse R3 exists to prevent. Probing the
- * IC boundary instead keeps the two facts independent in every topology.
- *
- * Checked BEFORE any network probe, in order: (1) the test override
- * `__DPAY_TEST_SOLANA_CONNECTIVITY: 'offline' | 'online'` (hermetic jest; the e2e driver injects
- * it per stage); (2) `navigator.onLine === false`, the web's own free signal (absent on RN —
- * harmless); (3) the probe, deduped per probe URL for CONNECTIVITY_PROBE_TTL_MS.
- */
-export async function classifyTransportFailure(): Promise<'unreachable' | 'offline'> {
-  const override =
-    (globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'}).__DPAY_TEST_SOLANA_CONNECTIVITY;
-  if (override === 'offline') return 'offline';
-  if (override === 'online') return 'unreachable';
-  const nav = (globalThis as unknown as {navigator?: {onLine?: boolean}}).navigator;
-  if (nav?.onLine === false) return 'offline';
-  const probeUrl = icProbeUrl();
-  if (connectivityMemo != null && connectivityMemo.probeUrl === probeUrl
-      && Date.now() - connectivityMemo.at < CONNECTIVITY_PROBE_TTL_MS) {
-    return connectivityMemo.result;
-  }
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), CONNECTIVITY_PROBE_MS);
-  let result: 'unreachable' | 'offline';
-  try {
-    // ANY HTTP answer — 200, 4xx, 405 on HEAD, all of it — proves transport off the Solana path
-    // works. icp-api.io has no health path; the bare origin IS the reference.
-    await fetch(probeUrl, {method: 'HEAD', signal: ctrl.signal});
-    result = 'unreachable';
-  } catch {
-    result = 'offline';
-  } finally {
-    clearTimeout(timer);
-  }
-  connectivityMemo = {probeUrl, at: Date.now(), result};
-  return result;
-}
 
 /**
  * ONE request for the whole wallet: native SOL lamports and every requested mint's token balance,
