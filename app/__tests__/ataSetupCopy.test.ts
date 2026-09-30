@@ -36,6 +36,10 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       const short = d.ata.fundShort('USDC');
       expect(short).toContain('USDC');
       expect(short).not.toContain('undefined');
+      // needSol receives the cost WITH its unit, so the sentence must not name SOL twice.
+      const need = d.ata.needSol(COST);
+      expect(need).toContain(COST);
+      expect(occurrences(need, 'SOL')).toBe(1);
       expect(d.ata.confirmAction.length).toBeGreaterThan(0);
       expect(d.ata.creatingAll(two)).toContain('EURC');
       // The pre-existing per-asset keys the card shares keep their register.

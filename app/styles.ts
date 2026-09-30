@@ -700,7 +700,7 @@ function buildStyles(p: Palette) {
   assetLabel: {flex: 1, fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
   // flexShrink 0: the amount is the money column - it wraps never (the name column flexes
   // instead); measured '1.9998\nICP' on the Accounts ICP row, 2026-09-28.
-  assetAmt: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, marginLeft: 10, flexShrink: 0, fontVariant: ['tabular-nums']},
+  assetAmt: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, marginLeft: 6, flexShrink: 0, fontVariant: ['tabular-nums']},
   assetSub: {fontSize: 12, color: p.sub2, marginTop: 4, fontFamily: FONT.sans},
   // Rail-detail panel - the chooser's inline per-rail expansion (EUR dual-rail, Stage 5). An
   // inset WELL inside the asset card (panel2 + line border, per brief §IV), so the detail reads
@@ -724,8 +724,8 @@ function buildStyles(p: Palette) {
   // The row's action slot. A COLUMN, not a row: since 2026-09-08 the selected row can carry two
   // pills (Convert plus DEMO's faucet), and a row of two pills beside the flex:1 select block
   // squeezes both off a 390px phone. Stacking is deterministic at any pill count.
-  assetActions: {flexDirection: 'column', alignItems: 'flex-end', gap: 8, marginLeft: 10},
-  assetActionBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, minHeight: 44, backgroundColor: p.card},
+  assetActions: {flexDirection: 'column', alignItems: 'flex-end', gap: 8, marginLeft: 8},
+  assetActionBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8, minHeight: 44, backgroundColor: p.card},
   assetActionText: {color: p.sub, fontWeight: '600', fontSize: 13, fontFamily: FONT.sansMedium},
   assetCardZero: {color: p.sub2},
   // AssetGlyph monogram chips (AssetGlyph.tsx) - family-hued rounded squares carrying the native
@@ -852,7 +852,7 @@ function buildStyles(p: Palette) {
   // 10px marginLeft is the chip-to-text gap in both variants. alignSelf stretch gives the column
   // a DEFINITE width: the centered row's shrink-to-fit sizing ignored the flex-basis-0 name Text
   // and starved it to the sub-line's width ("Schweizer" broke mid-word, 2026-10-01 emulator pass).
-  pickTextCol: {flex: 1, marginLeft: 10, alignSelf: 'stretch'},
+  pickTextCol: {flex: 1, marginLeft: 8, alignSelf: 'stretch'},
   // pickSubtitle - the chain-label line below the name in a plain-variant row.
   pickSubtitle: {fontSize: 12, color: p.sub2, marginTop: 3, fontFamily: FONT.sans},
   // Pay-scan NFC status row - a large colored NFC mark + a short label, leading the scanner. Green

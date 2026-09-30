@@ -543,7 +543,7 @@ export const depositEn: DepositMessages = {
       `Creating your ${asset} costs ${setupCost}, from your SOL balance. It stays yours, on your keys.`,
     checkingSol: 'Checking your SOL balance…',
     needSol: setupCost =>
-      `You need about ${setupCost} in SOL first - receive it at your address, then create the account.`,
+      `You need about ${setupCost} first - receive it at your address, then create the account.`,
     showSolAddress: 'Show my SOL address',
     creating: asset => `Creating your ${asset} account - confirming on Solana…`,
     createHint: (setupCost, asset) => `Create your ${asset} account for ${setupCost} from your SOL balance`,

@@ -176,7 +176,7 @@ export const depositDe: DepositMessages = {
       `Das Erstellen deiner ${asset} kostet ${setupCost}, aus deinem SOL-Guthaben. Sie bleiben deins, unter deinen Schlüsseln.`,
     checkingSol: 'Dein SOL-Guthaben wird geprüft…',
     needSol: setupCost =>
-      `Du brauchst zuerst etwa ${setupCost} in SOL - empfange es an deiner Adresse und erstelle dann das Konto.`,
+      `Du brauchst zuerst etwa ${setupCost} - empfange es an deiner Adresse und erstelle dann das Konto.`,
     showSolAddress: 'Meine SOL-Adresse zeigen',
     creating: asset => `Dein ${asset}-Konto wird erstellt - Bestätigung auf Solana…`,
     createHint: (setupCost, asset) => `Erstellt dein ${asset}-Konto für ${setupCost} aus deinem SOL-Guthaben`,
