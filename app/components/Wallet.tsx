@@ -7,9 +7,8 @@ import {M} from '../i18n';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, HIDDEN_CURRENCIES_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY, PRACTICE_CURRENCY} from '../config/constants';
 import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog';
 import {setIcClockRoutingCanister} from '../services/icp';
-import {base, randNonceHex, fmtTime} from '../lib/format';
-import {applyOffline} from '../lib/amount';
-import {withTimeout} from '../lib/timeout';
+import {base, randNonceHex, fmtTime, fmtAssetCompact} from '../lib/format';
+import {applyOffline} from '../lib/amount';import {withTimeout} from '../lib/timeout';
 import {buildSelectableAssets, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
 import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {mergeHistoryByTime, mergePendingByTime, settledJoinKey} from '../lib/ledger';
@@ -19,7 +18,12 @@ import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILITIES, type RelayCapabilities} from '../services/relay';
 import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
-import {setRuntimePoolNames, venueOfId} from '../config/venues';
+import {setRuntimePoolNames, registeredVenues, venueOfId} from '../config/venues';
+import {planAtaSetup, sizeAtaFundPlan, type AtaFundSource, type SizedAtaFund} from '../lib/ataSetup';
+import {fetchJupiterQuote} from '../services/jupiter';
+import {prepareSolanaConvertRecord, executeSolanaConvert} from '../convert/executeSolana';
+import {CONVERT_SLIPPAGE_BPS_DEFAULT} from '../config/convert';
+import {WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {convertResumeSnapshot, subscribeConvertRecords} from '../convertResume';
 import {normalizePendingKey, removePendingPays} from '../services/pendingPays';
 import {solanaTokenInfo} from '../solana/tokens';
@@ -37,7 +41,7 @@ import {useEvmHistory} from '../hooks/useEvmHistory';
 import {useFundsReady} from '../hooks/useFundsReady';
 import {TripStrip} from './TripStrip';
 import {deriveSolanaAddress, createTokenAta} from '../solana';
-import {isValidSolanaAddress} from '../solana/identity';
+import {isValidSolanaAddress, SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {isValidEvmAddress} from '../evm';
 import {friendlySolError} from '../solana/errors';
 import {deriveEvmAddress, isEvmRailConfigured, syncEvmCatalogDeployments} from '../evm';
@@ -695,25 +699,171 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // One-tap account setup for the SELECTED token — the only one whose gates ever render the setup
   // card. Creates that token's ATA (device-key-signed createIdempotent tx); on success both rails
   // refresh: SOL (rent debited) + the token ('absent' → 'balance' amount 0, which unhides the QR).
+  // The generalized per-mint create — the base both entry surfaces share (the scope's
+  // "createAtaForMint(mint)"): one device-signed createIdempotent tx + the balance refreshes.
+  // Busy/err ownership belongs to the caller (the selected-asset handler or the wallet-level
+  // runner below), so a wallet-wide run can sequence several mints under ONE busy state.
+  const createAtaForMint = useCallback(async (mint: string) => {
+    const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
+    try {
+      await createTokenAta(identity.secretHex, mint, signal);
+      refreshToken(mint);
+    } finally {
+      cancel();
+    }
+  }, [identity.secretHex, refreshToken]);
   const createAta = useCallback(async () => {
     if (ataSetupBusy) return;
     const mint = activeSolAsset?.mint ?? null;
     if (mint == null) return; // native SOL (or no solana selection) — no token account to create
     setAtaSetupBusy(true);
     setAtaSetupErr(null);
-    const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
     try {
-      await createTokenAta(identity.secretHex, mint, signal);
+      await createAtaForMint(mint);
       refreshSol();
-      refreshToken(mint);
     } catch (e: unknown) {
       console.warn('createTokenAta failed:', e instanceof Error ? e.message : String(e));
       setAtaSetupErr(friendlySolError(e instanceof Error ? e.message : String(e)));
     } finally {
-      cancel();
       setAtaSetupBusy(false);
     }
-  }, [ataSetupBusy, activeSolAsset, identity.secretHex, refreshSol, refreshToken]);
+  }, [ataSetupBusy, activeSolAsset, createAtaForMint, refreshSol]);
+
+  // ── The wallet-level ONE-TAP ATA setup (founder gap 2026-09-30) ────────────────────────────
+  // "EUR says a setup is needed -> complete that setup as soon as user adds funds to ANY
+  // currency, by swapping + completing the setup ... a SINGLE button that, with a SINGLE click
+  // (+ optionally confirmation) sets up everything."
+  //
+  // planAtaSetup (lib/ataSetup, pure + unit-tested) decides: create (SOL covers every absent
+  // account) | fund (a funded SPL token with a registered wrapped-SOL venue pays — size the
+  // swap, confirm once) | refuse (the honest dead end). One run creates ALL absent accounts.
+  // The fund leg runs through the convert engine's Solana driver (prepare + execute — the same
+  // verified-and-signed bytes path, recorded in conversion history), then createTokenAta per
+  // absent mint. The badge clears itself when the poll flips 'absent' → 'balance'.
+  const [ataSetupConfirm, setAtaSetupConfirm] = useState<SizedAtaFund | null>(null);
+  const ataSetupModel = useMemo(() => {
+    const solAssets = assets.filter((a): a is Extract<typeof a, {mint: string | null}> => a.protocol === 'solana' && a.mint != null);
+    const targets = solAssets
+      .filter(a => tokenStates[a.mint!]?.status === 'absent')
+      .map(a => ({mint: a.mint!, symbol: a.symbol, status: 'absent' as const}));
+    const sources = solAssets
+      .filter(a => tokenStates[a.mint!]?.status === 'balance')
+      .map(a => ({mint: a.mint!, symbol: a.symbol, decimals: a.decimals, amount: tokenStates[a.mint!]?.amount ?? null, status: 'balance' as const}));
+    const plan = planAtaSetup({targets, solBalance: solState.balance, sources});
+    return {
+      plan,
+      targets: targets.map(t => t.symbol),
+      costLine: plan.kind === 'create' || plan.kind === 'fund'
+        ? fmtAssetCompact(plan.costLamports, SOL_DECIMALS, SOL_UNIT)
+        : '',
+      fundFromLine: plan.kind === 'fund' && plan.candidates.length === 1
+        ? M.deposit.ata.fundFrom(plan.candidates[0]!.symbol)
+        : null,
+    };
+  }, [assets, tokenStates, solState.balance]);
+  // The injected quote seam: the registered wrapped-SOL venue for a mint, quoted through the
+  // relay proxy. Returns the full verbatim quote (the executor needs the raw object to sign);
+  // null = unquotable (refused / too small / unreachable).
+  const quoteAtaFund = useCallback(async (source: AtaFundSource, inRaw: string) => {
+    const venue = registeredVenues().find(v =>
+      v.kind === 'solana_amm' && !v.testnet
+      && v.pair_ledgers.includes(source.mint) && v.pair_ledgers.includes(WRAPPED_SOL_MINT_ADDRESS));
+    if (venue == null) return null;
+    const res = await fetchJupiterQuote(relayUrl, venue, source.mint, WRAPPED_SOL_MINT_ADDRESS, inRaw, CONVERT_SLIPPAGE_BPS_DEFAULT);
+    return res.ok ? res.quote : null;
+  }, [relayUrl]);
+  // The runner: the (optional) fund swap, then createTokenAta per absent mint, then the
+  // balance refreshes. Every failure lands in ataSetupErr as a complete instruction.
+  const runAtaSetup = useCallback(async (plan: typeof ataSetupModel.plan, sized: SizedAtaFund | null) => {
+    if (ataSetupBusy || plan.kind === 'none' || plan.kind === 'refuse') return;
+    if (solAddress == null) { setAtaSetupErr(M.errors.solana.offline); return; }
+    setAtaSetupBusy(true);
+    setAtaSetupErr(null);
+    try {
+      if (sized != null && plan.kind === 'fund') {
+        // The fund leg — a REAL user spend, consented one press ago. The sizing quote is
+        // seconds old; re-quote fresh at the SAME sized input and hold it to the plan's
+        // floor (a moved venue rate refuses instead of swapping blind).
+        const venue = registeredVenues().find(v =>
+          v.kind === 'solana_amm' && !v.testnet
+          && v.pair_ledgers.includes(sized.source.mint) && v.pair_ledgers.includes(WRAPPED_SOL_MINT_ADDRESS));
+        if (venue == null) throw new Error(M.deposit.ata.fundShort(sized.source.symbol));
+        const res = await fetchJupiterQuote(relayUrl, venue, sized.source.mint, WRAPPED_SOL_MINT_ADDRESS, sized.inAmount, CONVERT_SLIPPAGE_BPS_DEFAULT);
+        const solNow = /^\d+$/.test(solState.balance ?? '') ? BigInt(solState.balance!) : 0n;
+        if (!res.ok || BigInt(res.quote.otherAmountThreshold) + solNow < BigInt(plan.targetLamports)) {
+          throw new Error(M.deposit.ata.fundShort(sized.source.symbol));
+        }
+        // Build + verify + sign through the convert engine's Solana driver (beneficiary
+        // checks, device signature, conversion-history record — the proven path, not a fork).
+        const rec = await prepareSolanaConvertRecord({
+          secretHex: identity.secretHex,
+          relayUrl,
+          quote: res.quote,
+          inAsset: {symbol: sized.source.symbol, mint: sized.source.mint, decimals: sized.source.decimals},
+          outAsset: {symbol: WRAPPED_SOL_TOKEN, mint: WRAPPED_SOL_MINT_ADDRESS, decimals: SOL_DECIMALS},
+        });
+        const done = await executeSolanaConvert(rec, {publicHex: identity.publicHex, solAddress, onUpdate: () => {}});
+        if (done.step === 'failed_refunded') throw new Error(M.deposit.ata.swapFailed);
+        if (done.step !== 'done') throw new Error(M.deposit.ata.swapUnknown);
+        refreshSol();
+      }
+      for (const mint of plan.mints) {
+        await createAtaForMint(mint);
+      }
+      refreshSol();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('runAtaSetup failed:', msg);
+      setAtaSetupErr(friendlySolError(msg));
+    } finally {
+      setAtaSetupBusy(false);
+    }
+  }, [ataSetupBusy, identity.secretHex, identity.publicHex, relayUrl, solAddress, solState.balance, refreshSol, refreshToken, createAtaForMint]);
+  // The entry the ONE button calls. create runs straight away (the disclosed cost + the press
+  // are the consent); fund sizes first and waits for the card's ONE confirm — a swap is a real
+  // spend and never runs without it; refuse only opens the card (no handler).
+  const beginAtaSetup = useCallback(async () => {
+    const {plan} = ataSetupModel;
+    if (ataSetupBusy || plan.kind === 'none' || plan.kind === 'refuse') return;
+    if (plan.kind === 'create') { await runAtaSetup(plan, null); return; }
+    setAtaSetupErr(null);
+    setAtaSetupBusy(true);
+    try {
+      const sized = await sizeAtaFundPlan({plan, solKnown: solState.balance, quote: quoteAtaFund});
+      if (sized == null) {
+        setAtaSetupErr(M.deposit.ata.fundShort(plan.candidates[0]?.symbol ?? ''));
+        return;
+      }
+      setAtaSetupConfirm(sized);
+    } finally {
+      setAtaSetupBusy(false);
+    }
+  }, [ataSetupModel, ataSetupBusy, solState.balance, quoteAtaFund, runAtaSetup]);
+  const confirmAtaSetup = useCallback(async () => {
+    const sized = ataSetupConfirm;
+    if (sized == null || ataSetupBusy) return;
+    setAtaSetupConfirm(null);
+    await runAtaSetup(ataSetupModel.plan, sized);
+  }, [ataSetupConfirm, ataSetupBusy, ataSetupModel.plan, runAtaSetup]);
+  const cancelAtaSetup = useCallback(() => { setAtaSetupConfirm(null); }, []);
+  // The AccountsTab view model: the shared plan, rendered on whichever row was pressed.
+  const ataSetupView = useMemo(() => ({
+    targets: ataSetupModel.targets,
+    kind: ataSetupModel.plan.kind === 'none' ? 'create' as const : ataSetupModel.plan.kind,
+    costLine: ataSetupModel.costLine,
+    fundFromLine: ataSetupModel.fundFromLine,
+    confirming: ataSetupConfirm != null,
+    confirmLine: ataSetupConfirm != null
+      ? M.deposit.ata.fundConfirm(
+          fmtAssetCompact(ataSetupConfirm.inAmount, ataSetupConfirm.source.decimals, ataSetupConfirm.source.symbol),
+          ataSetupConfirm.source.symbol,
+          M.deposit.ata.targetsLabel(ataSetupModel.targets),
+          ataSetupModel.costLine,
+        )
+      : null,
+    busy: ataSetupBusy,
+    err: ataSetupErr,
+  }), [ataSetupModel, ataSetupConfirm, ataSetupBusy, ataSetupErr]);
   // Refresh the SELECTED token's account state (naming its mint when known; else repoll all).
   const refreshSelectedToken = useCallback(() => {
     if (activeSolAsset?.mint != null) refreshToken(activeSolAsset.mint);
@@ -1702,6 +1852,11 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               onSelect={handleSelect}
               onTopUp={topUp}
               onOpenSettings={openSettingsFromOutage}
+              ataSetup={ataSetupView}
+              onAtaSetupStart={beginAtaSetup}
+              onAtaSetupConfirm={confirmAtaSetup}
+              onAtaSetupCancel={cancelAtaSetup}
+              onAtaSetupShowSol={() => goToDeposit('solana:SOL')}
             />
            : mode === 'add-currency'
            ? <AddCurrencyTab

@@ -241,4 +241,86 @@ describe('AccountsTab — a KNOWN-absent token account grows the setup badge on 
     expect(has(tree, 'currency-USD-setup')).toBe(true);
     act(() => { tree.unmount(); });
   });
+
+  test('ANY rail absent triggers the badge — USD marks the row even with its preferred ckUSDC rail fine', () => {
+    // The full two-rail USD: ckUSDC (IC, the PREFERRED rail) reads a real zero while the
+    // Solana USDC row is KNOWN absent. The preferred-rail-only trigger hid this state; the
+    // setup is per-token on chain, so any absent rail means the currency needs it.
+    const usdcRow = ASSETS.find(a => a.id === 'solana:USDC');
+    const mint = usdcRow != null && usdcRow.protocol === 'solana' ? usdcRow.mint : null;
+    const views = assetViews({
+      icBalances: {2: '0'},
+      tokenStates: {[mint ?? '']: {amount: null, decimals: null, status: 'absent' as const}},
+    });
+    const tree = mount(views, currencyViews(views, {icBalances: {2: '0'}, tokenAmounts: {[mint ?? '']: null}}));
+    expect(has(tree, 'currency-USD-setup')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('AccountsTab — the setup badge grows the ONE-TAP completion card (founder gap)', () => {
+  const mintOf = (id: string) => {
+    const a = ASSETS.find(x => x.id === id);
+    return a != null && a.protocol === 'solana' ? a.mint ?? '' : '';
+  };
+  /** EUR with a KNOWN-absent EURC rail + a funded USDC rail beside it. */
+  function eurAbsentViews(kind: 'fund' | 'create' | 'refuse') {
+    const eurcMint = mintOf('solana:EURC');
+    const usdcMint = mintOf('solana:USDC');
+    const tokenStates: Record<string, {amount: string | null; decimals: number | null; status: 'absent' | 'balance'}> = {
+      [eurcMint]: {amount: null, decimals: null, status: 'absent'},
+      ...(kind === 'refuse' ? {} : {[usdcMint]: {amount: '5000000', decimals: 6, status: 'balance' as const}}),
+    };
+    const views = assetViews({tokenStates});
+    return {views, currencySum: currencyViews(views, {tokenAmounts: {[eurcMint]: null, [usdcMint]: '5000000'}})};
+  }
+
+  test('the actionable badge button opens the inline card; its single press starts the setup', () => {
+    const {views, currencySum} = eurAbsentViews('fund');
+    const onAtaSetupStart = jest.fn();
+    const tree = mount(views, currencySum, {
+      ataSetup: {targets: ['EURC'], kind: 'fund', costLine: '0.00204428 SOL', fundFromLine: null, confirming: false, confirmLine: null, busy: false, err: null},
+      onAtaSetupStart,
+    });
+    expect(has(tree, 'currency-EUR-setup')).toBe(true);
+    expect(has(tree, 'ata-setup-EUR-instr')).toBe(false); // closed until the badge is pressed
+    act(() => { pressable(tree, 'btn-currency-EUR-setup').props.onPress(); });
+    expect(has(tree, 'ata-setup-EUR-instr')).toBe(true);
+    expect(onAtaSetupStart).toHaveBeenCalledTimes(1); // the single press starts it
+    expect(has(tree, 'ata-setup-EUR-complete')).toBe(true);
+    act(() => { pressable(tree, 'ata-setup-EUR-complete').props.onPress(); });
+    expect(onAtaSetupStart).toHaveBeenCalledTimes(2);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a sized fund run shows the ONE confirm in place; refuse shows the honest dead end, no button', () => {
+    const {views, currencySum} = eurAbsentViews('fund');
+    const tree = mount(views, currencySum, {
+      ataSetup: {
+        targets: ['EURC'], kind: 'fund', costLine: '0.00204428 SOL', fundFromLine: null,
+        confirming: true, confirmLine: 'Swaps about 0.0021 of your USDC into SOL and creates your EURC account (0.00204428 SOL).',
+        busy: false, err: null,
+      },
+    });
+    act(() => { pressable(tree, 'btn-currency-EUR-setup').props.onPress(); });
+    expect(has(tree, 'ata-setup-EUR-confirm-btn')).toBe(true);
+    act(() => { tree.unmount(); });
+
+    const refused = eurAbsentViews('refuse');
+    const tree2 = mount(refused.views, refused.currencySum, {
+      ataSetup: {targets: ['EURC'], kind: 'refuse', costLine: '0.00204428 SOL', fundFromLine: null, confirming: false, confirmLine: null, busy: false, err: null},
+    });
+    act(() => { pressable(tree2, 'btn-currency-EUR-setup').props.onPress(); });
+    expect(has(tree2, 'ata-setup-EUR-need-sol')).toBe(true);
+    expect(has(tree2, 'ata-setup-EUR-complete')).toBe(false);
+    act(() => { tree2.unmount(); });
+  });
+
+  test('without the wallet-level setup the badge stays the passive text it always was', () => {
+    const {views, currencySum} = eurAbsentViews('fund');
+    const tree = mount(views, currencySum);
+    expect(has(tree, 'currency-EUR-setup')).toBe(true);
+    expect(has(tree, 'btn-currency-EUR-setup')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
 });

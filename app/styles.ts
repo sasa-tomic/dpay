@@ -867,6 +867,9 @@ function buildStyles(p: Palette) {
   nfcInfoCloseText: {fontSize: 16, fontWeight: '600', color: p.ink, fontFamily: FONT.sansMedium},
   // Deposit instructions - a scannable card (network/asset + est. time + fee/min + non-custody line).
   instrCard: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16, marginBottom: 18},
+  // The inline one-tap ATA setup card on an AccountsTab currency row (2026-09-30): stretches
+  // under the row content; the card itself carries its own surfaces.
+  setupCardWrap: {alignSelf: 'stretch', marginTop: 14},
   instrLine: {fontSize: 16, color: p.ink, textAlign: 'center', lineHeight: 22, marginBottom: 8, fontFamily: FONT.sans},
   instrAsset: {color: p.brandText, fontWeight: '700', fontFamily: FONT.sansBold},
   instrMeta: {fontSize: 13, color: p.sub, textAlign: 'center', fontFamily: FONT.sans, paddingVertical: 2, fontVariant: ['tabular-nums']},

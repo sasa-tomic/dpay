@@ -277,6 +277,11 @@ export type DepositMessages = {
     cancelAction: string;
     /** The busy line for the whole run (one or more accounts). */
     creatingAll: (targets: string) => string;
+    /** The funding swap's two honest endings. `swapFailed` = the chain refused the swap (the
+     *  input never left the wallet); `swapUnknown` = accepted, confirmation missed (check the
+     *  SOL balance before retrying). */
+    swapFailed: string;
+    swapUnknown: string;
   };
 
   /** One-tap funding from Trust Wallet (Android only). */
@@ -534,6 +539,8 @@ export const depositEn: DepositMessages = {
     confirmAction: 'Confirm',
     cancelAction: 'Cancel',
     creatingAll: targets => `Creating your ${targets} — confirming on Solana…`,
+    swapFailed: 'The swap did not go through — nothing was created and the swapped token is still in your wallet. You can try again.',
+    swapUnknown: 'The swap was accepted but not confirmed yet. Check your SOL balance in a moment, then complete the setup again.',
   },
 
   trust: {

@@ -190,6 +190,8 @@ export const depositDe: DepositMessages = {
     confirmAction: 'Bestätigen',
     cancelAction: 'Abbrechen',
     creatingAll: targets => `Deine ${targets} werden erstellt — Bestätigung auf Solana…`,
+    swapFailed: 'Der Tausch ist nicht durchgegangen — nichts wurde erstellt, der getauschte Token ist noch in deiner Wallet. Du kannst es erneut versuchen.',
+    swapUnknown: 'Der Tausch wurde angenommen, aber noch nicht bestätigt. Prüfe gleich dein SOL-Guthaben und schließe die Einrichtung dann erneut ab.',
   },
 
   trust: {

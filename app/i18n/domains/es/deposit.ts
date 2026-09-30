@@ -191,6 +191,8 @@ export const depositEs: DepositMessages = {
     confirmAction: 'Confirmar',
     cancelAction: 'Cancelar',
     creatingAll: targets => `Creando tus ${targets}. Confirmando en Solana…`,
+    swapFailed: 'El canje no se completó: no se creó nada y el token canjeado sigue en tu wallet. Puedes intentarlo de nuevo.',
+    swapUnknown: 'El canje fue aceptado pero aún no se confirma. Revisa tu saldo de SOL en un momento y vuelve a completar la configuración.',
   },
 
   trust: {
