@@ -792,6 +792,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     const icCandidates: AtaIcFundSource[] = [];
     for (const row of catalog) {
       if (row.testnet || row.ledger == null || row.decimals == null) continue;
+      if (row.currency === PRACTICE_CURRENCY) continue; // practice money never funds a real setup
       const symbol = row.backing_symbol ?? row.symbol;
       if (symbol == null) continue;
       const bal = assetBalances[row.currency];
