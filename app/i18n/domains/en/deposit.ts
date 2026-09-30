@@ -599,7 +599,11 @@ export type WithdrawMessages = {
     approvalUnknown: string;
     withdrawalUnknown: string;
     noRail: string;
-    gasFeeErr: string;
+    /** The minter's live gas quote produced no fact (pre-submit; nothing was signed). Blame
+     *  CLASSIFIED via app/transportFailure.ts classifyIcReadFailure — the old single
+     *  `gasFeeErr` read "check your connection" to online phones (work order 2026-09-30). */
+    gasFeeErrOffline: string;
+    gasFeeErrUnreachable: string;
     withdrawn: string;
     sentTo: string;
     copyDestinationLabel: string;
@@ -746,7 +750,8 @@ export const withdrawEn: WithdrawMessages = {
     approvalUnknown: "Couldn't confirm the approval — check your balance when back online",
     withdrawalUnknown: "Couldn't confirm the withdrawal — it may still land; check your balance soon",
     noRail: 'This asset has no withdrawal rail configured',
-    gasFeeErr: "Couldn't fetch the live gas fee — check your connection",
+    gasFeeErrOffline: 'You seem offline, so the live gas fee couldn’t be read. Nothing was sent. Try again once you’re back online.',
+    gasFeeErrUnreachable: 'Your connection is fine, but the Internet Computer isn’t answering, so the live gas fee couldn’t be read. Your money is untouched. Try again in a moment.',
     withdrawn: 'Withdrawn ✓',
     sentTo: 'Sent to',
     copyDestinationLabel: 'Copy destination address',
