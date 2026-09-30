@@ -295,7 +295,9 @@ export const receiveFr: ReceiveMessages = {
     notServed: host =>
       `${host} ne sert pas de codes de caisse : rien n’a été ouvert. Demandez à la personne qui exploite ce relais d’activer la caisse, ou utilisez le code dpay.`,
     unreachable: host =>
-      `Impossible de joindre ${host} : rien n’a été ouvert. Les codes de caisse se créent en ligne — vérifiez la connexion et réessayez, ou utilisez le code dpay (ce téléphone sait l’afficher hors ligne).`,
+      `Votre connexion est bonne, mais ${host} ne répond pas : rien n’a été ouvert. Réessayez dans un instant, ou utilisez le code dpay (ce téléphone sait l’afficher hors ligne).`,
+    unreachableOffline: host =>
+      `Vous semblez hors ligne, donc ${host} n’a pas pu être joint et rien n’a été ouvert. Utilisez le code dpay pour l’instant, ou réessayez une fois de nouveau en ligne.`,
     refused: said =>
       `La caisse a refusé ce montant : « ${said} » Rien n’est payable. Corrigez cela, puis recommencez.`,
     refusedNoReason: status =>
@@ -340,7 +342,9 @@ export const receiveFr: ReceiveMessages = {
     cancelFailedNoReason: status =>
       `Le montant n’a PAS été annulé (HTTP ${status}) : considérez-le comme toujours payable. Réessayez ; ne remettez rien tant qu’il n’est pas annulé ou expiré.`,
     cancelUnreachable: host =>
-      `Impossible de joindre ${host} : ce montant n’a donc PAS été annulé — il reste payable jusqu’à son expiration. Réessayez dès que la connexion revient.`,
+      `Votre connexion est bonne, mais ${host} ne répond pas : ce montant n’a donc PAS été annulé — il reste payable jusqu’à son expiration. Réessayez dans un instant.`,
+    cancelUnreachableOffline: host =>
+      `Vous semblez hors ligne, donc ${host} n’a pas pu être joint et ce montant n’a PAS été annulé — il reste payable jusqu’à son expiration. Réessayez une fois de nouveau en ligne.`,
 
     endedTitle: reason =>
       reason === 'expired' ? 'Ce code a expiré'

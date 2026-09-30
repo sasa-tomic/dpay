@@ -293,7 +293,9 @@ export const receiveEs: ReceiveMessages = {
     notServed: host =>
       `${host} no sirve códigos de caja: no se abrió nada. Pide a quien gestiona ese relay que active la caja, o usa el código dpay.`,
     unreachable: host =>
-      `No se pudo contactar con ${host}: no se abrió nada. Los códigos de caja se crean en línea: comprueba la conexión e inténtalo de nuevo, o usa el código dpay (este teléfono puede mostrarlo sin conexión).`,
+      `Tu conexión está bien, pero ${host} no responde: no se abrió nada. Inténtalo de nuevo en un momento, o usa el código dpay (este teléfono puede mostrarlo sin conexión).`,
+    unreachableOffline: host =>
+      `Pareces estar sin conexión, así que no se pudo contactar con ${host} y no se abrió nada. Usa por ahora el código dpay o inténtalo de nuevo cuando vuelvas a estar en línea.`,
     refused: said =>
       `La caja rechazó este importe: «${said}» No hay nada que pagar. Corrígelo y vuelve a cobrar.`,
     refusedNoReason: status =>
@@ -338,7 +340,9 @@ export const receiveEs: ReceiveMessages = {
     cancelFailedNoReason: status =>
       `El cobro NO se anuló (HTTP ${status}): trátalo como pagable. Inténtalo otra vez; no entregues nada hasta que se anule o caduque.`,
     cancelUnreachable: host =>
-      `No se pudo contactar con ${host}, así que este cobro NO se anuló: sigue siendo pagable hasta que caduque. Inténtalo otra vez cuando vuelva la conexión.`,
+      `Tu conexión está bien, pero ${host} no responde, así que este cobro NO se anuló: sigue siendo pagable hasta que caduque. Inténtalo de nuevo en un momento.`,
+    cancelUnreachableOffline: host =>
+      `Pareces estar sin conexión, así que no se pudo contactar con ${host} y este cobro NO se anuló: sigue siendo pagable hasta que caduque. Inténtalo otra vez cuando vuelvas a estar en línea.`,
 
     endedTitle: reason =>
       reason === 'expired' ? 'Este código ha caducado'

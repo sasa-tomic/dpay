@@ -392,6 +392,30 @@ describe('opening a charge', () => {
     expect(visible(tree)).toContain('Re-sync the device clock');
     act(() => { tree.unmount(); });
   });
+
+  test('an unreachable relay walk is CLASSIFIED (work order 2026-09-30): online names the host calmly, offline blames nobody', async () => {
+    // The open walk's old copy said "check the connection" unconditionally — wrong when the phone
+    // was online and dpay's relay was the side that was down. The seam now carries the blame.
+    jest.mocked(openCheckoutCharge).mockResolvedValue(
+      {kind: 'unreachable', detail: 'ECONNREFUSED', tried: [RELAY], blame: 'unreachable'});
+    let tree = mount(VCHF);
+    await openCharge(tree);
+    expect(has(tree, 'checkout-failed')).toBe(true);
+    const online = visible(tree);
+    expect(online).toContain(M.receive.checkout.unreachable('checkout.example'));
+    expect(online).toContain('connection is fine');
+    act(() => { tree.unmount(); });
+
+    jest.mocked(openCheckoutCharge).mockResolvedValue(
+      {kind: 'unreachable', detail: 'ECONNREFUSED', tried: [RELAY], blame: 'offline'});
+    tree = mount(VCHF);
+    await openCharge(tree);
+    const offline = visible(tree);
+    expect(offline).toContain(M.receive.checkout.unreachableOffline('checkout.example'));
+    expect(offline).toMatch(/offline/i);
+    expect(offline).not.toMatch(/connection is fine/);
+    act(() => { tree.unmount(); });
+  });
 });
 
 describe('the note — what this charge is for', () => {
@@ -735,15 +759,31 @@ describe('clearing the checkout', () => {
   });
 
   test('a cancellation that did not happen names the unreachable host and says it is still payable', async () => {
-    jest.mocked(cancelCheckoutCharge).mockResolvedValue({kind: 'unreachable', detail: 'ECONNREFUSED', tried: [RELAY]});
+    jest.mocked(cancelCheckoutCharge).mockResolvedValue(
+      {kind: 'unreachable', detail: 'ECONNREFUSED', tried: [RELAY], blame: 'unreachable'});
     const tree = mount(VCHF);
     await openCharge(tree);
     await act(async () => { node(tree, 'btn-checkout-cancel').props.onPress(); await flush(); });
     expect(has(tree, 'checkout-ended')).toBe(false);
     expect(has(tree, 'checkout-qr')).toBe(true);
-    // Wave-2: the refusal copy carries the host attribution (symmetric with the open path).
+    // Wave-2: the refusal copy carries the host attribution (symmetric with the open path);
+    // work order 2026-09-30: the blame is classified, so the ONLINE sentence stops implying the
+    // phone's connection is the problem.
     expect(visible(tree)).toContain(M.receive.checkout.cancelUnreachable('checkout.example'));
-    expect(visible(tree)).toContain('checkout.example');
+    expect(visible(tree)).toContain('connection is fine');
+    expect(visible(tree)).toContain('payable');
+    act(() => { tree.unmount(); });
+  });
+
+  test('an offline cancellation keeps the charge payable and blames nobody', async () => {
+    jest.mocked(cancelCheckoutCharge).mockResolvedValue(
+      {kind: 'unreachable', detail: 'ECONNREFUSED', tried: [RELAY], blame: 'offline'});
+    const tree = mount(VCHF);
+    await openCharge(tree);
+    await act(async () => { node(tree, 'btn-checkout-cancel').props.onPress(); await flush(); });
+    expect(visible(tree)).toContain(M.receive.checkout.cancelUnreachableOffline('checkout.example'));
+    expect(visible(tree)).toMatch(/offline/i);
+    expect(visible(tree)).toContain('payable');
     act(() => { tree.unmount(); });
   });
 });
