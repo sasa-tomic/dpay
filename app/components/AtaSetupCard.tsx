@@ -4,23 +4,25 @@ import {C} from '../config/palette';
 import {M} from '../i18n';
 
 /**
- * The wallet-level ONE-TAP setup card (2026-09-30) — the AccountsTab surface that turns the
- * passive "Needs setup" badge into its action. Visual grammar: SolanaAtaSetupCard (the same
- * instruction card + primary button + error line), generalized from ONE token to the wallet's
- * WHOLE set of absent accounts: one run creates ALL of them, funding itself from a funded SPL
- * token when the SOL balance falls short (the founder's "a SINGLE button that, with a SINGLE
- * click (+ optionally confirmation) sets up everything").
+ * The wallet-level ONE-TAP setup card (2026-09-30, banner redesign) — the AccountsTab's SINGLE
+ * setup affordance, rendered above the currency list. One compact card, ONE primary button:
+ * the per-row setup buttons are gone, so the "Needs setup" badge and this card can never state
+ * the setup twice. Visual grammar: the instruction card (S.instrCard's radius/padding) + the
+ * wide primary button; a one-line summary row by default, the per-asset detail lines when
+ * expanded.
  *
  * Four states, driven entirely by props (the parent owns the plan + the run):
- *   busy    — the run is on chain: spinner + what is being created.
- *   confirm — the fund run's ONE optional confirmation, stating the total: the sized swap,
- *             its source, what it creates, what it costs. Confirm executes; cancel returns.
- *   refuse  — the honest dead end: what is missing, what it costs, and the needSol copy
- *             (+ the SOL-address escape when the parent can show one). No button.
- *   idle    — create (SOL covers) or fund (a swap will pay): the ONE "Complete setup" button.
- *             A fund run presses through to the confirm; create runs straight away (the button
- *             itself is the consent, cost disclosed above — the same contract the per-asset
- *             setup card has always had).
+ *   busy    — the run is on chain: spinner + one honest line (what is being created, or the
+ *             still-in-flight venue swap when the parent says so via `busyLine`).
+ *   confirm — a swap run's ONE confirmation, stating the total: the sized swap, its source,
+ *             what it creates, what it costs. Confirm executes; cancel returns.
+ *   refuse  — the honest dead end: what is missing, what it costs, the needSol copy and the
+ *             device's SOL receive address with a copy affordance (the deposit-sheet escape
+ *             when the parent cannot show one). NO button — never a fake one.
+ *   idle    — create (SOL covers), fund (a SPL swap pays) or fund-ic (a cross-rail venue swap
+ *             pays): the ONE "Complete setup" button. A fund/fund-ic run presses through to
+ *             the confirm; create runs straight away (the button itself is the consent, cost
+ *             disclosed above — the same contract the per-asset setup card established).
  *
  * All money figures arrive PRE-FORMATTED (the caller owns `fmtAssetCompact` — the i18n rule);
  * `testIDPrefix` keeps parallel cards tellable (`ata-setup-EUR-complete`, …).
@@ -33,39 +35,58 @@ export function AtaSetupCard({
   confirming = false,
   confirmLine = null,
   busy = false,
+  busyLine = null,
   err = null,
+  expanded = true,
+  onToggleExpanded,
+  solAddress = null,
+  solCopied = false,
   onStart,
   onConfirm,
   onCancel,
+  onCopySolAddress,
   onShowSolAddress,
   testIDPrefix,
 }: {
   /** Every absent account's display symbol, wallet-wide ('EURC' / ['EURC', 'USDC']). */
   targets: string[];
-  /** The planner's verdict for THIS wallet: create (no swap) | fund (swap pays) | refuse. */
-  kind: 'create' | 'fund' | 'refuse';
+  /** The planner's verdict for THIS wallet: create (no swap) | fund (a SPL swap pays) |
+   *  fund-ic (a cross-rail venue swap pays) | refuse. */
+  kind: 'create' | 'fund' | 'fund-ic' | 'refuse';
   /** The already-formatted SOL total the setup costs ("0.00204428 SOL"). */
   costLine: string;
-  /** The fund card's source line — set only when the funding token is unambiguous. */
+  /** The swap card's source line — set only when the funding token is unambiguous. */
   fundFromLine?: string | null;
-  /** True once the parent has sized the fund swap and is waiting for the confirm press. */
+  /** True once the parent has sized the swap and is waiting for the confirm press. */
   confirming?: boolean;
   /** The sized confirm sentence (shown while `confirming`). */
   confirmLine?: string | null;
   busy?: boolean;
+  /** Overrides the default creating-all line while a fund-ic venue swap is in flight. */
+  busyLine?: string | null;
   err?: string | null;
+  /** Expanded shows the per-asset detail lines under the summary row (the auto-surface sets
+   *  it once per session; tapping the summary row toggles). */
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
+  /** The refuse panel's receive address (the device's SOL address, when the parent has it). */
+  solAddress?: string | null;
+  /** True for the beat after the copy tap — the button says so. */
+  solCopied?: boolean;
   onStart?: () => void;
   onConfirm?: () => void;
   onCancel?: () => void;
+  onCopySolAddress?: () => void;
+  /** The refuse escape when no address can be shown inline: open the deposit sheet. */
   onShowSolAddress?: () => void;
   testIDPrefix: string;
 }) {
   const targetsPhrase = M.deposit.ata.targetsLabel(targets);
   if (busy) {
     return (
-      <View testID={`${testIDPrefix}-busy`}>
+      <View testID={`${testIDPrefix}-busy`} style={S.ataBanner}>
         <ActivityIndicator color={C.brandText} />
-        <Text style={S.dim2}>{M.deposit.ata.creatingAll(targetsPhrase)}</Text>
+        <Text style={S.dim2}>{busyLine ?? M.deposit.ata.creatingAll(targetsPhrase)}</Text>
       </View>
     );
   }
@@ -93,45 +114,75 @@ export function AtaSetupCard({
       </View>
     );
   }
-  return (
-    <>
-      <View testID={`${testIDPrefix}-instr`} style={S.instrCard}>
+  if (kind === 'refuse') {
+    return (
+      <View testID={`${testIDPrefix}-refuse`} style={S.ataBanner}>
         {targets.map(t => (
           <Text key={t} style={S.instrLine}>{M.deposit.ata.absent(t)}</Text>
         ))}
-        <Text style={S.instrCustody}>{M.deposit.ata.cost(costLine, targetsPhrase)}</Text>
-        {kind === 'fund' && fundFromLine != null ? (
-          <Text style={S.instrCustody}>{fundFromLine}</Text>
-        ) : null}
-        {kind === 'refuse' ? (
-          <>
-            <Text testID={`${testIDPrefix}-need-sol`} style={S.warnNote}>{M.deposit.ata.needSol(costLine)}</Text>
-            {onShowSolAddress ? (
-              <Pressable
-                testID={`${testIDPrefix}-show-sol`}
-                style={S.linkBtn}
-                onPress={onShowSolAddress}
-                accessibilityRole="button"
-                accessibilityLabel={M.deposit.ata.showSolAddress}>
-                <Text style={S.linkText}>{M.deposit.ata.showSolAddress}</Text>
-              </Pressable>
-            ) : null}
-          </>
+        <Text testID={`${testIDPrefix}-need-sol`} style={S.warnNote}>{M.deposit.ata.needSol(costLine)}</Text>
+        {solAddress != null && onCopySolAddress != null ? (
+          <View testID={`${testIDPrefix}-sol-addr`} style={S.ataAddrRow}>
+            <Text style={S.ataAddrText}>{solAddress}</Text>
+            <Pressable
+              testID={`${testIDPrefix}-copy-sol`}
+              style={S.linkBtn}
+              onPress={onCopySolAddress}
+              accessibilityRole="button"
+              accessibilityLabel={solCopied ? M.deposit.copied : M.deposit.copyAddress}
+              accessibilityState={{disabled: false}}>
+              <Text style={S.linkText}>{solCopied ? M.deposit.copied : M.deposit.copyAddress}</Text>
+            </Pressable>
+          </View>
+        ) : onShowSolAddress ? (
+          <Pressable
+            testID={`${testIDPrefix}-show-sol`}
+            style={S.linkBtn}
+            onPress={onShowSolAddress}
+            accessibilityRole="button"
+            accessibilityLabel={M.deposit.ata.showSolAddress}>
+            <Text style={S.linkText}>{M.deposit.ata.showSolAddress}</Text>
+          </Pressable>
         ) : null}
       </View>
-      {kind === 'refuse' ? null : (
+    );
+  }
+  // Idle: the compact banner — one-line summary row (title + cost) and the ONE button. The
+  // summary row expands to the per-asset detail lines (toggled by tap, auto-set once per
+  // session by the parent's refuse-to-actionable auto-surface).
+  return (
+    <View testID={`${testIDPrefix}-banner`} style={S.ataBanner}>
+      {onToggleExpanded != null ? (
         <Pressable
-          testID={`${testIDPrefix}-complete`}
-          style={S.primaryWide}
-          onPress={onStart}
+          testID={`${testIDPrefix}-summary`}
+          style={S.ataBannerRow}
+          onPress={onToggleExpanded}
           accessibilityRole="button"
-          accessibilityLabel={M.deposit.ata.completeSetup}
-          accessibilityHint={M.deposit.ata.completeHint(costLine)}
+          accessibilityLabel={M.deposit.ata.finishSetup(M.deposit.ata.targetsLabel(targets))}
           accessibilityState={{disabled: false}}>
-          <Text style={S.primaryText}>{M.deposit.ata.completeSetup}</Text>
+          <Text style={S.ataBannerTitle}>{M.deposit.ata.finishSetup(targetsPhrase)}</Text>
         </Pressable>
+      ) : (
+        <View style={S.ataBannerRow}>
+          <Text style={S.ataBannerTitle}>{M.deposit.ata.finishSetup(targetsPhrase)}</Text>
+        </View>
       )}
+      <Text style={S.ataBannerCost}>{M.deposit.ata.costShort(costLine)}</Text>
+      {expanded ? targets.map(t => (
+        <Text key={t} style={S.instrLine}>{M.deposit.ata.absent(t)}</Text>
+      )) : null}
+      {fundFromLine != null ? <Text style={S.instrCustody}>{fundFromLine}</Text> : null}
+      <Pressable
+        testID={`${testIDPrefix}-complete`}
+        style={S.primaryWide}
+        onPress={onStart}
+        accessibilityRole="button"
+        accessibilityLabel={M.deposit.ata.completeSetup}
+        accessibilityHint={M.deposit.ata.completeHint(costLine)}
+        accessibilityState={{disabled: false}}>
+        <Text style={S.primaryText}>{M.deposit.ata.completeSetup}</Text>
+      </Pressable>
       {err ? <Text testID={`${testIDPrefix}-err`} style={S.err}>{err}</Text> : null}
-    </>
+    </View>
   );
 }

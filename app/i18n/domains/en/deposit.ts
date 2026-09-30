@@ -274,10 +274,17 @@ export type DepositMessages = {
      *  Scalar-tolerant by the catalog-fuzzer contract: any non-array argument renders as its
      *  single-symbol phrase instead of throwing. */
     targetsLabel: (symbols: string[] | string | number) => string;
+    /** The compact banner's title over the missing accounts ("Still to set up: EURC account"). */
+    finishSetup: (targets: string) => string;
+    /** The compact banner's one-line cost ("Costs 0.00204428 SOL"). */
+    costShort: (setupCost: string) => string;
     /** The fund-branch line naming the (unique) token the swap draws from. */
     fundFrom: (source: string) => string;
     /** The fund confirm, stating the total: the sized swap, its source, what it creates, the cost. */
     fundConfirm: (swap: string, source: string, targets: string, setupCost: string) => string;
+    /** The fund-ic confirm (a cross-rail venue swap): the same total, plus the honest timing
+     *  (a venue settles in minutes, not seconds) and that surplus SOL stays spendable. */
+    fundIcConfirm: (swap: string, source: string, targets: string, setupCost: string) => string;
     /** Sizing refused: even the whole named balance cannot reach the SOL target. */
     fundShort: (source: string) => string;
     /** The confirm's two controls. */
@@ -285,6 +292,9 @@ export type DepositMessages = {
     cancelAction: string;
     /** The busy line for the whole run (one or more accounts). */
     creatingAll: (targets: string) => string;
+    /** The busy line while a fund-ic venue swap is still in flight (the accounts are created
+     *  the moment the SOL lands — the watcher runs the same create step). */
+    swapPending: (targets: string) => string;
     /** The funding swap's two honest endings. `swapFailed` = the chain refused the swap (the
      *  input never left the wallet); `swapUnknown` = accepted, confirmation missed (check the
      *  SOL balance before retrying). */
@@ -545,13 +555,18 @@ export const depositEn: DepositMessages = {
         ? `${symbols[0]} account`
         : `${symbols.slice(0, -1).join(', ')} and ${symbols[symbols.length - 1]} accounts`;
     },
+    finishSetup: targets => `Still to set up: ${targets}`,
+    costShort: setupCost => `Costs ${setupCost}`,
     fundFrom: source => `A small swap of your ${source} into SOL pays for it.`,
     fundConfirm: (swap, source, targets, setupCost) =>
       `Swaps about ${swap} of your ${source} into SOL and creates your ${targets} (${setupCost}).`,
+    fundIcConfirm: (swap, source, targets, setupCost) =>
+      `Swaps about ${swap} of your ${source} into SOL and creates your ${targets} (${setupCost}). The venue can take a minute or two; surplus SOL stays spendable in your wallet.`,
     fundShort: source => `Even all your ${source} doesn't cover it — receive a little SOL at your address instead.`,
     confirmAction: 'Confirm',
     cancelAction: 'Cancel',
     creatingAll: targets => `Creating your ${targets} — confirming on Solana…`,
+    swapPending: targets => `Swapping into SOL. Your ${targets} are created as soon as it lands.`,
     swapFailed: 'The swap did not go through — nothing was created and the swapped token is still in your wallet. You can try again.',
     swapUnknown: 'The swap was accepted but not confirmed yet. Check your SOL balance in a moment, then complete the setup again.',
   },

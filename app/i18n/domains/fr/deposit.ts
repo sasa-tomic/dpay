@@ -190,13 +190,18 @@ export const depositFr: DepositMessages = {
         ? `compte ${symbols[0]}`
         : `comptes ${symbols.slice(0, -1).join(', ')} et ${symbols[symbols.length - 1]}`;
     },
+    finishSetup: targets => `Reste à configurer : ${targets}`,
+    costShort: setupCost => `Coûte ${setupCost}`,
     fundFrom: source => `Un petit échange de vos ${source} contre du SOL le paie.`,
     fundConfirm: (swap, source, targets, setupCost) =>
       `Échange environ ${swap} de vos ${source} contre du SOL et crée vos ${targets} (${setupCost}).`,
+    fundIcConfirm: (swap, source, targets, setupCost) =>
+      `Échange environ ${swap} de vos ${source} contre du SOL et crée vos ${targets} (${setupCost}). Le service peut prendre une à deux minutes ; le SOL en surplus reste utilisable dans votre wallet.`,
     fundShort: source => `Même tous vos ${source} ne suffisent pas — recevez un peu de SOL à votre adresse.`,
     confirmAction: 'Confirmer',
     cancelAction: 'Annuler',
     creatingAll: targets => `Création de vos ${targets} — confirmation sur Solana…`,
+    swapPending: targets => `Échange vers SOL en cours. Vos ${targets} seront créés dès son arrivée.`,
     swapFailed: 'L’échange n’a pas abouti — rien n’a été créé et le token échangé est toujours dans votre wallet. Vous pouvez réessayer.',
     swapUnknown: 'L’échange a été accepté mais n’est pas encore confirmé. Vérifiez votre solde SOL dans un instant, puis terminez la configuration à nouveau.',
   },

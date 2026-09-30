@@ -870,6 +870,16 @@ function buildStyles(p: Palette) {
   // The inline one-tap ATA setup card on an AccountsTab currency row (2026-09-30): stretches
   // under the row content; the card itself carries its own surfaces.
   setupCardWrap: {alignSelf: 'stretch', marginTop: 14},
+  // The wallet-level setup banner (2026-09-30 redesign): ONE compact card above the currency
+  // list - the single setup affordance. Same card grammar as instrCard (radius 12, padding 16),
+  // one-line summary row + full-width primary button; the expanded state adds the per-asset
+  // detail lines. The refuse state reuses the banner card with the honest dead-end content.
+  ataBanner: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16, marginBottom: 14},
+  ataBannerRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12},
+  ataBannerTitle: {flexShrink: 1, fontSize: 15, fontWeight: '600', color: p.ink, lineHeight: 20, fontFamily: FONT.sans},
+  ataBannerCost: {fontSize: 12, color: p.sub2, marginTop: 4, lineHeight: 17, fontFamily: FONT.sans},
+  ataAddrRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10},
+  ataAddrText: {flexShrink: 1, fontSize: 12, color: p.ink, fontFamily: FONT.mono, letterSpacing: 0.2},
   instrLine: {fontSize: 16, color: p.ink, textAlign: 'center', lineHeight: 22, marginBottom: 8, fontFamily: FONT.sans},
   instrAsset: {color: p.brandText, fontWeight: '700', fontFamily: FONT.sansBold},
   instrMeta: {fontSize: 13, color: p.sub, textAlign: 'center', fontFamily: FONT.sans, paddingVertical: 2, fontVariant: ['tabular-nums']},

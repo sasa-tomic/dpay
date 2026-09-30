@@ -1,5 +1,5 @@
 import {ActivityIndicator, Pressable, Text, View} from 'react-native';
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {M} from '../i18n';
@@ -15,21 +15,29 @@ import {HotkeyHint} from './HotkeyHint';
 import {IconChevronLeft, IconPlus, IconSwap} from './icons';
 import {RailLiquidityNote} from './RailLiquidityNote';
 import {RailUnreadableNote, railUnreadable} from './RailUnreadableNote';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import type {AssetId} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
 
 /** The wallet-level ONE-TAP token-account setup, computed by Wallet (the planner + the run
- *  state) and rendered inline on any currency row that has a KNOWN-absent rail. The action
- *  button rides the row's action column (a row SIBLING — never nested inside the select). */
+ *  state) and rendered as ONE banner above the currency list (the 2026-09-30 redesign: the
+ *  single setup affordance — the per-row buttons are gone, so the row badge and the banner can
+ *  never state the setup twice). */
 export type AtaSetupViewModel = {
   /** Every absent account's display symbol, wallet-wide. */
   targets: string[];
-  kind: 'create' | 'fund' | 'refuse';
+  kind: 'create' | 'fund' | 'fund-ic' | 'refuse';
   costLine: string;
   fundFromLine: string | null;
   confirming: boolean;
   confirmLine: string | null;
   busy: boolean;
+  /** Overrides the creating-all busy line while a fund-ic venue swap is still in flight (the
+   *  banner says so honestly). Null = the default line. */
+  busyLine: string | null;
+  /** The device's SOL receive address for the refuse panel's copy affordance (null when the
+   *  rail is unavailable — the panel then falls back to the deposit-sheet escape). */
+  solAddress: string | null;
   err: string | null;
 };
 
@@ -54,6 +62,20 @@ export type AtaSetupViewModel = {
 //   • the testnet toggle (flow 54's reveal/hide walk);
 //   • an outage belongs to a NETWORK and is stated once, above the first row it affects (X9) —
 //     now per network across the currency rows' rails.
+// The once-per-session auto-surface latch (founder design 2026-09-30): when the plan turns
+// from refuse (or nothing-known) into an actionable one because a balance changed, the banner
+// expands ONCE per app session so the single click is presented. Module state, not component
+// state: the route unmounts on navigation, and "once per app session" must survive that. It
+// never auto-spends — a swap-sized run still asks through the ONE confirm.
+let ataSurfacePrev: 'absent' | 'refuse' | 'actionable' = 'absent';
+let ataSurfaceAutoDone = false;
+
+/** Test-only: fresh session latch between suites (jest module state persists across files). */
+export function __resetAtaAutoSurfaceForTest(): void {
+  ataSurfacePrev = 'absent';
+  ataSurfaceAutoDone = false;
+}
+
 export function AccountsTab({
   assets, balances, currencyBalances, homeCurrency, visibleCurrencies, selectedId,
   demoFaucetAvailable, topUpBusy, hasTestnet, showTestnet, onToggleTestnet,
@@ -96,22 +118,28 @@ export function AccountsTab({
   /** The wallet-level one-tap token-account setup (founder gap 2026-09-30). Optional — without
    *  it the absent badge stays the passive text it has always been. */
   ataSetup?: AtaSetupViewModel;
-  /** ONE press: create when SOL covers; size the funding swap (then the card confirms);
-   *  refused plans just open the honest dead end. */
+  /** ONE press on the banner's button: create when SOL covers; size the funding swap (then the
+   *  card confirms); refused plans never reach a button at all. */
   onAtaSetupStart?: () => void;
   onAtaSetupConfirm?: () => void;
   onAtaSetupCancel?: () => void;
   onAtaSetupShowSol?: () => void;
 }) {
-  // Which currency row's setup card is expanded. Local: the run state itself lives upstream;
-  // this only decides WHERE the shared card renders. One press opens AND starts (create runs,
-  // fund sizes then confirms); a second press on the same row just collapses.
-  const [setupOpen, setSetupOpen] = useState<HomeCurrency | null>(null);
-  const toggleSetup = (c: HomeCurrency) => {
-    if (setupOpen === c) { setSetupOpen(null); return; }
-    setSetupOpen(c);
-    if (ataSetup != null && ataSetup.kind !== 'refuse') onAtaSetupStart?.();
-  };
+  // The banner's expanded state (the per-asset detail lines). The auto-surface effect below
+  // sets it once per session; the summary row toggles it by tap.
+  const [cardExpanded, setCardExpanded] = useState(false);
+  // The refuse panel's copy affordance: the device's SOL receive address, copied in place.
+  const {copied, copy} = useCopyFeedback();
+  const ataKind: 'absent' | 'refuse' | 'actionable' =
+    ataSetup == null || ataSetup.targets.length === 0 ? 'absent'
+      : ataSetup.kind === 'refuse' ? 'refuse' : 'actionable';
+  useEffect(() => {
+    if (!ataSurfaceAutoDone && ataKind === 'actionable' && ataSurfacePrev !== 'actionable') {
+      ataSurfaceAutoDone = true;
+      setCardExpanded(true);
+    }
+    ataSurfacePrev = ataKind;
+  }, [ataKind]);
   // The testnet toggle renders only when there's at least one testnet currency to reveal OR
   // testnet rows are currently shown. `hasTestnet` is computed upstream from the FULL catalog.
   const showToggle = hasTestnet || showTestnet;
@@ -137,6 +165,34 @@ export function AccountsTab({
       </View>
       <Text style={S.dim2}>{M.wallet.accounts.intro}</Text>
       <View style={S.accountsList} testID="accounts-list">
+        {/* The wallet-level setup banner (2026-09-30 redesign): the ONE setup affordance, above
+            the currency list. One compact card, ONE button; the per-row buttons are gone, so a
+            row shows exactly ONE badge and the banner carries the only action. A refused plan
+            renders the honest dead end in the same place (no button, the SOL receive address
+            with a copy affordance). */}
+        {ataSetup != null && ataSetup.targets.length > 0 ? (
+          <AtaSetupCard
+            targets={ataSetup.targets}
+            kind={ataSetup.kind}
+            costLine={ataSetup.costLine}
+            fundFromLine={ataSetup.fundFromLine}
+            confirming={ataSetup.confirming}
+            confirmLine={ataSetup.confirmLine}
+            busy={ataSetup.busy}
+            busyLine={ataSetup.busyLine}
+            err={ataSetup.err}
+            expanded={cardExpanded}
+            onToggleExpanded={ataSetup.kind === 'refuse' ? undefined : () => setCardExpanded(v => !v)}
+            solAddress={ataSetup.solAddress}
+            solCopied={copied != null}
+            onStart={onAtaSetupStart}
+            onConfirm={onAtaSetupConfirm}
+            onCancel={onAtaSetupCancel}
+            onCopySolAddress={ataSetup.solAddress != null ? () => { void copy(ataSetup.solAddress!); } : undefined}
+            onShowSolAddress={onAtaSetupShowSol}
+            testIDPrefix="ata-setup-wallet"
+          />
+        ) : null}
         {visibleCurrencies.map(currency => {
           // A visible currency always has a rail (the list is derived from the offerable set);
           // the null branch is the fail-closed shape, never a rendered row.
@@ -148,8 +204,8 @@ export function AccountsTab({
           // per-token on-chain fact: a missing ATA on the non-preferred rail is exactly as
           // real as one on the preferred rail, so USD with an absent USDC@Solana badge too —
           // the 2026-09-30 fix; the old trigger read the preferred rail only). Known-absent
-          // only (offline-first honesty rule). One tap on the row makes this the main
-          // currency; the setup action rides the row's action column when Wallet computed it.
+          // only (offline-first honesty rule). The badge is passive text: the ONE action lives
+          // in the setup banner above the list, so no row ever states the setup twice.
           const railAbsent = currencyRails(currency, assets).some(r => balances[r.id]?.status === 'absent');
           const setupBadge = railAbsent
             ? <Text testID={`currency-${currency}-setup`} style={S.assetBadge}>{M.wallet.balances.needsSetup}</Text>
@@ -193,26 +249,9 @@ export function AccountsTab({
                   </View>
                 </Pressable>
                 <View style={S.assetActions}>
-                  {/* The ONE-TAP setup action (founder gap 2026-09-30) — a row SIBLING next to
-                      Convert, never nested inside the select. One press: create when SOL
-                      covers; size the funding swap (the card then confirms); a refused plan
-                      opens the honest dead end. */}
-                  {railAbsent && ataSetup != null ? (
-                    <Pressable
-                      testID={`btn-currency-${currency}-setup`}
-                      style={[S.assetActionBtn, ataSetup.busy && S.dim]}
-                      onPress={() => toggleSetup(currency)}
-                      accessibilityRole="button"
-                      accessibilityLabel={ataSetup.kind === 'refuse' ? M.wallet.balances.needsSetup : M.deposit.ata.completeSetup}
-                      accessibilityState={{disabled: ataSetup.busy}}
-                    >
-                      <Text style={S.assetActionText}>
-                        {ataSetup.kind === 'refuse' ? M.wallet.balances.needsSetup : M.deposit.ata.completeSetup}
-                      </Text>
-                    </Pressable>
-                  ) : null}
                   {/* Convert on EVERY row — the founder sketch's per-currency action. The venue
-                      check happens INSIDE the convert surface, never here. */}
+                      check happens INSIDE the convert surface, never here. (The old per-row
+                      setup button is gone: the banner above the list is the single action.) */}
                   <Pressable
                     testID={`btn-accounts-convert-${currency}`}
                     style={S.assetActionBtn}
@@ -227,28 +266,6 @@ export function AccountsTab({
                   </Pressable>
                 </View>
               </View>
-              {/* The expanded setup card: the whole-wallet plan, rendered on the row that was
-                  pressed. The run state (busy/confirm/err) arrives through the shared view
-                  model — the card is a pure renderer. */}
-              {setupOpen === currency && ataSetup != null ? (
-                <View style={S.setupCardWrap}>
-                  <AtaSetupCard
-                    targets={ataSetup.targets}
-                    kind={ataSetup.kind}
-                    costLine={ataSetup.costLine}
-                    fundFromLine={ataSetup.fundFromLine}
-                    confirming={ataSetup.confirming}
-                    confirmLine={ataSetup.confirmLine}
-                    busy={ataSetup.busy}
-                    err={ataSetup.err}
-                    onStart={onAtaSetupStart}
-                    onConfirm={onAtaSetupConfirm}
-                    onCancel={() => { setSetupOpen(null); onAtaSetupCancel?.(); }}
-                    onShowSolAddress={onAtaSetupShowSol}
-                    testIDPrefix={`ata-setup-${currency}`}
-                  />
-                </View>
-              ) : null}
             </View>
           );
           // The outage banner sits IMMEDIATELY above the first affected row of its network, so

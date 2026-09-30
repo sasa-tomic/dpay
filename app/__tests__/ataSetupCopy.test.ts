@@ -41,6 +41,17 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       // The pre-existing per-asset keys the card shares keep their register.
       expect(d.ata.absent('EURC')).toContain('EURC');
       expect(d.ata.cost(COST, two)).toContain(COST);
+      // The compact banner (one-line summary row) and the fund-ic states (2026-09-30).
+      const banner = d.ata.finishSetup(two);
+      expect(banner).toContain('EURC');
+      expect(banner).toContain('USDC');
+      expect(d.ata.costShort(COST)).toContain(COST);
+      const icConfirm = d.ata.fundIcConfirm(SWAP, 'USDC', two, COST);
+      expect(icConfirm).not.toContain('undefined');
+      expect(occurrences(icConfirm, SWAP)).toBe(1);
+      expect(occurrences(icConfirm, COST)).toBe(1);
+      expect(icConfirm).toContain('USDC');
+      expect(d.ata.swapPending(two)).toContain('EURC');
     });
   }
 });

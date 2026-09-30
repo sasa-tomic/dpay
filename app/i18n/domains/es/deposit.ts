@@ -189,13 +189,18 @@ export const depositEs: DepositMessages = {
         ? `cuenta de ${symbols[0]}`
         : `cuentas de ${symbols.slice(0, -1).join(', ')} y ${symbols[symbols.length - 1]}`;
     },
+    finishSetup: targets => `Falta configurar: ${targets}`,
+    costShort: setupCost => `Cuesta ${setupCost}`,
     fundFrom: source => `Un pequeño canje de tus ${source} por SOL lo paga.`,
     fundConfirm: (swap, source, targets, setupCost) =>
       `Canjea unos ${swap} de tus ${source} por SOL y crea tus ${targets} (${setupCost}).`,
+    fundIcConfirm: (swap, source, targets, setupCost) =>
+      `Canjea unos ${swap} de tus ${source} por SOL y crea tus ${targets} (${setupCost}). El proveedor puede tardar uno o dos minutos; el SOL sobrante queda en tu wallet.`,
     fundShort: source => `Ni todos tus ${source} alcanzan: recibe algo de SOL en tu dirección.`,
     confirmAction: 'Confirmar',
     cancelAction: 'Cancelar',
     creatingAll: targets => `Creando tus ${targets}. Confirmando en Solana…`,
+    swapPending: targets => `Canje a SOL en curso. Tus ${targets} se crean en cuanto llegue.`,
     swapFailed: 'El canje no se completó: no se creó nada y el token canjeado sigue en tu wallet. Puedes intentarlo de nuevo.',
     swapUnknown: 'El canje fue aceptado pero aún no se confirma. Revisa tu saldo de SOL en un momento y vuelve a completar la configuración.',
   },
