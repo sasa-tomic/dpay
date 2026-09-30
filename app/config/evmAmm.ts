@@ -102,6 +102,22 @@ export function evmAmmChainOf(venueId: string): EvmAmmChain | null {
   return null;
 }
 
+// The DEV-CHAIN override (the `evm/chains.ts setEvmDevToken` precedent): the scratch anvil
+// chain (31337) is not a mainnet venue, but the node-anvil tier pins the quote path ON it —
+// the staging test installs mock contract addresses here. Empty in every prod build where
+// nothing calls the setter; the pinned mainnet registry always wins for its own chains.
+let devChainOverride: EvmAmmChain | null = null;
+
+/** Install the dev-chain facts (node-anvil staging only). */
+export function setEvmAmmChainOverride(chain: EvmAmmChain | null): void {
+  devChainOverride = chain;
+}
+
+/** The execution facts for a chain id: the dev override wins, else the pinned table. */
+export function evmAmmChainById(chainId: number): EvmAmmChain | null {
+  return devChainOverride?.id === chainId ? devChainOverride : EVM_AMM_CHAINS[chainId] ?? null;
+}
+
 /** The evm_amm venues a rail id can trade through, in table order (the
  *  `evmNativeVenuesForLedger` analog over THIS table — the bundled registry is not consulted,
  *  it cannot carry these rows). Testnet rows are kept out, like every venue walk. */

@@ -58,7 +58,8 @@ export async function quoteUniswap(args: UniswapQuoteArgs, signal?: AbortSignal)
   const urls = evmRpcUrls(args.chainId);
   if (urls[0] === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
   await ensureChain(args.chainId, urls, signal);
-  const quoter = (await import('../config/evmAmm')).EVM_AMM_CHAINS[args.chainId]?.quoter;
+  const evmAmm = await import('../config/evmAmm');
+  const quoter = evmAmm.evmAmmChainById(args.chainId)?.quoter;
   if (quoter == null) throw new Error(`uniswap: no venue on chain ${args.chainId}`);
   let best: {tier: number; amount: bigint} | null = null;
   for (const tier of UNISWAP_FEE_TIERS) {
@@ -87,7 +88,7 @@ export async function quoteUniswap(args: UniswapQuoteArgs, signal?: AbortSignal)
     // THE HUB FALLBACK (2026-09-28): no direct pool answers — compose A → WETH → B. The
     // chain's wrap target is the hub asset; each leg takes its own best tier and the FLOORS
     // compound (leg 2 is sized on leg 1's floor). Both legs are the venue's own quotes.
-    const chain = (await import('../config/evmAmm')).EVM_AMM_CHAINS[args.chainId];
+    const chain = (await import('../config/evmAmm')).evmAmmChainById(args.chainId);
     if (chain == null || args.tokenIn === chain.weth || args.tokenOut === chain.weth) {
       throw new Error('uniswap: no liquidity at any fee tier for this pair');
     }
