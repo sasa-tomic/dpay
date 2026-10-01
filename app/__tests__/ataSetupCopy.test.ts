@@ -63,6 +63,17 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       expect(min).toContain('USDC');
       expect(min).not.toContain('undefined');
       expect(occurrences(min, SWAP)).toBe(1);
+      // The card's OWN fallback copy never invites a hollow retry (2026-10-01): state facts,
+      // full stop. The banned family is the empty retry promise - a venue-verbatim
+      // failureDetail pass-through is exempt by design (ataRecordErrLine returns it
+      // verbatim), but these five keys are authored copy and must be clean in EVERY locale.
+      // (Instructional 'again' without the try-verb, like swapUnknown's 'complete the setup
+      // again', stays legal.)
+      const banned = ['try again', 'erneut versuchen', 'versuch es erneut', 'inténtalo de nuevo', 'intentarlo de nuevo', 'réessaie', 'réessayer'];
+      const fallbacks = [d.ata.swapFailed, d.ata.swapUnknown, short, min, d.ata.needSol(COST)];
+      for (const f of fallbacks) {
+        for (const b of banned) expect(f.toLowerCase()).not.toContain(b);
+      }
       // The house style: plain hyphens in the setup copy, never em-dashes.
       const surfaces = [short, icConfirm, min, d.ata.needSol(COST), d.ata.creatingAll(two), d.ata.creating('EURC'), d.ata.swapFailed];
       expect(surfaces.join('\n')).not.toContain('—');

@@ -203,7 +203,7 @@ export const depositFr: DepositMessages = {
     cancelAction: 'Annuler',
     creatingAll: targets => `Création de vos ${targets} - confirmation sur Solana…`,
     swapPending: targets => `Échange vers SOL en cours. Vos ${targets} seront créés dès son arrivée.`,
-    swapFailed: 'L’échange n’a pas abouti - rien n’a été créé et le token échangé est toujours dans votre wallet. Vous pouvez réessayer.',
+    swapFailed: 'L’échange n’a pas abouti - rien n’a été créé et le token échangé est toujours dans votre wallet.',
     swapUnknown: 'L’échange a été accepté mais n’est pas encore confirmé. Vérifiez votre solde SOL dans un instant, puis terminez la configuration à nouveau.',
   },
 

@@ -300,7 +300,8 @@ export type DepositMessages = {
     swapPending: (targets: string) => string;
     /** The funding swap's two honest endings. `swapFailed` = the chain refused the swap (the
      *  input never left the wallet); `swapUnknown` = accepted, confirmation missed (check the
-     *  SOL balance before retrying). */
+     *  SOL balance before retrying). Both state FACTS only - the card never promises a hollow
+     *  retry (2026-10-01); the venue's verbatim failureDetail passes through untouched. */
     swapFailed: string;
     swapUnknown: string;
   };
@@ -571,7 +572,7 @@ export const depositEn: DepositMessages = {
     cancelAction: 'Cancel',
     creatingAll: targets => `Creating your ${targets} - confirming on Solana…`,
     swapPending: targets => `Swapping into SOL. Your ${targets} are created as soon as it lands.`,
-    swapFailed: 'The swap did not go through - nothing was created and the swapped token is still in your wallet. You can try again.',
+    swapFailed: 'The swap did not go through - nothing was created and the swapped token is still in your wallet.',
     swapUnknown: 'The swap was accepted but not confirmed yet. Check your SOL balance in a moment, then complete the setup again.',
   },
 
