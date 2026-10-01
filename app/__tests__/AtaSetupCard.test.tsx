@@ -115,6 +115,22 @@ describe('AtaSetupCard - the swap runs (fund and fund-ic: confirm is REQUIRED)',
   });
 });
 
+describe('AtaSetupCard - the up-front minimum line (2026-10-01 founder directive)', () => {
+  test('a measured minimum REPLACES the rent line - ONE cost line, stated before anything runs', () => {
+    const tree = mount({kind: 'fund-ic', minLine: 'Needs at least 0.09 VCHF.'});
+    const banner = textOf(tree, 'ata-setup-EUR-banner');
+    expect(banner).toContain('at least 0.09 VCHF');
+    expect(banner).not.toContain('Costs 0.00204428 SOL');
+    act(() => { tree.unmount(); });
+  });
+
+  test('without a measurement the idle line stays the exact SOL rent', () => {
+    const tree = mount({kind: 'fund-ic'});
+    expect(textOf(tree, 'ata-setup-EUR-banner')).toContain('Costs 0.00204428 SOL');
+    act(() => { tree.unmount(); });
+  });
+});
+
 describe('AtaSetupCard - the honest refusal and the busy runs', () => {
   test('refuse: the needSol dead end renders, there is NO Complete-setup button', () => {
     const onStart = jest.fn();

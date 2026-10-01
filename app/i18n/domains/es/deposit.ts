@@ -191,6 +191,7 @@ export const depositEs: DepositMessages = {
     },
     finishSetup: targets => `Falta configurar: ${targets}`,
     costShort: setupCost => `Cuesta ${setupCost}`,
+    minSwap: (swap, source) => `Necesita al menos ${swap} ${source}.`,
     fundFrom: source => `Un pequeño canje de tus ${source} por SOL lo paga.`,
     fundConfirm: (swap, source, targets, setupCost) =>
       `Canjea unos ${swap} de tus ${source} por SOL y crea tus ${targets} (${setupCost}).`,

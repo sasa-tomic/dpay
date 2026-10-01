@@ -23,6 +23,7 @@ import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
 import {ACTIVITY_ROWS, HomeTab} from '../components/HomeTab';
+import {AtaSetupCard} from '../components/AtaSetupCard';
 import {buildSelectableAssets} from '../config/assets';
 import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
@@ -142,6 +143,72 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
   });
   return tree;
 }
+
+describe('HomeTab - the per-currency setup card (2026-10-01 founder directive)', () => {
+  const has = (tree: renderer.ReactTestRenderer, testID: string): boolean =>
+    tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
+  /** The view model Wallet hands over when the MAIN currency's SPL accounts are absent. */
+  const ataVm = (over: Partial<Parameters<typeof AtaSetupCard>[0]> = {}) => ({
+    targets: ['EURC'], kind: 'create' as const, costLine: '0.00204428 SOL', fundFromLine: null,
+    minLine: null as string | null, confirming: false, confirmLine: null, busy: false, busyLine: null,
+    solAddress: null as string | null, err: null as string | null, ...over,
+  });
+
+  test('the tapped currency hosts the card: per-currency prefix, ONE action, no wallet banner', () => {
+    const onStart = jest.fn();
+    const tree = mountHome({
+      homeCurrency: 'EUR', homeAsset: preferredRail('EUR', ASSETS),
+      ataSetup: ataVm(), onAtaSetupStart: onStart,
+    });
+    expect(has(tree, 'ata-setup-EUR-banner')).toBe(true);
+    expect(has(tree, 'ata-setup-EUR-complete')).toBe(true);
+    expect(has(tree, 'ata-setup-EUR-confirm-btn')).toBe(false);
+    act(() => { pressable(tree, 'ata-setup-EUR-complete').props.onPress(); });
+    expect(onStart).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('no view model, no card - a currency whose accounts exist renders nothing extra', () => {
+    const tree = mountHome();
+    expect(has(tree, 'ata-setup-EUR-banner')).toBe(false);
+    expect(has(tree, 'ata-setup-CHF-banner')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the idle card states the measured minimum up front, ONE cost line', () => {
+    const tree = mountHome({
+      homeCurrency: 'EUR', homeAsset: preferredRail('EUR', ASSETS),
+      ataSetup: ataVm({kind: 'fund-ic', minLine: 'Needs at least 0.09 VCHF.'}),
+    });
+    const banner = textUnder(tree, 'ata-setup-EUR-banner');
+    expect(banner).toContain('at least 0.09 VCHF');
+    expect(banner).not.toContain('Costs 0.00204428 SOL');
+    act(() => { tree.unmount(); });
+  });
+
+  test('the swap confirm rides the same card; refuse stays the honest dead end', () => {
+    const onConfirm = jest.fn();
+    const confirmTree = mountHome({
+      homeCurrency: 'EUR', homeAsset: preferredRail('EUR', ASSETS),
+      ataSetup: ataVm({kind: 'fund-ic', confirming: true, confirmLine: 'Swaps about 0.09 VCHF.'}),
+      onAtaSetupConfirm: onConfirm,
+    });
+    expect(has(confirmTree, 'ata-setup-EUR-confirm-btn')).toBe(true);
+    expect(has(confirmTree, 'ata-setup-EUR-complete')).toBe(false);
+    act(() => { pressable(confirmTree, 'ata-setup-EUR-confirm-btn').props.onPress(); });
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    act(() => { confirmTree.unmount(); });
+
+    const refuseTree = mountHome({
+      homeCurrency: 'EUR', homeAsset: preferredRail('EUR', ASSETS),
+      ataSetup: ataVm({kind: 'refuse', solAddress: 'DpaySoLAddress11111111111111111111111111'}),
+      onAtaSetupShowSol: jest.fn(),
+    });
+    expect(has(refuseTree, 'ata-setup-EUR-refuse')).toBe(true);
+    expect(has(refuseTree, 'ata-setup-EUR-complete')).toBe(false);
+    act(() => { refuseTree.unmount(); });
+  });
+});
 
 describe('HomeTab — the headline is the founder sketch (forks #2 + #4)', () => {
   test('eyebrow names the SHORT code, amount is the summed CURRENCY-unit figure', () => {

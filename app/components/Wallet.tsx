@@ -19,7 +19,7 @@ import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILIT
 import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
 import {setRuntimePoolNames, registeredVenues, venueOfId, type VenueEntry} from '../config/venues';
-import {ataPlanAfterFundShort, ataPlanSignature, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
+import {ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
 import {fetchJupiterQuote} from '../services/jupiter';
 import {prepareSolanaConvertRecord, executeSolanaConvert} from '../convert/executeSolana';
 import {CONVERT_SLIPPAGE_BPS_DEFAULT, CONVERT_CEFI_CONFIRM_TIMEOUT_MS, resolveConvertDestinations, type ComposedConvertRoute} from '../config/convert';
@@ -75,7 +75,7 @@ import {IconArrowDownLeft, IconChevronDown, IconClock, IconHome, IconMoon, IconQ
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 import {HomeCurrencyChooser} from './HomeCurrencyChooser';
 import {AddCurrencyTab} from './AddCurrencyTab';
-import {type HomeCurrency, chooseRail, offerableCurrencies, parseHiddenCurrencies, preferredRail, removeCurrencyGuard, type RemoveRefusal} from '../config/currency';
+import {type HomeCurrency, chooseRail, currencyRails, offerableCurrencies, parseHiddenCurrencies, preferredRail, removeCurrencyGuard, type RemoveRefusal} from '../config/currency';
 import {type CurrencyDescriptor} from '../config/catalog';
 import {fetchComposedQuotes} from './ConvertShared';
 import {HomeMenu} from './HomeMenu';
@@ -783,6 +783,15 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // refresh re-plans honestly).
   const [icFundShort, setIcFundShort] = useState(false);
   const ataSwapRecord = useRef<{id: string; mints: string[]} | null>(null);
+  // The up-front measurement (2026-10-01 founder directive: minimums show BEFORE the user
+  // initiates anything). The sizing walks are READ-ONLY (quotes, never a swap), so when a
+  // fund/fund-ic plan exists the wallet runs the walk once per plan VALUE signature - the same
+  // churn-safe keying as the verdict latch - and keeps the answer: it becomes the idle card's
+  // min line, a fund-ic null flips the verdict to the honest refuse BEFORE any press, and the
+  // ONE press reuses the measured input instead of re-asking the venues. (The effect itself
+  // lives below, after the quote seams it walks.)
+  const [ataSized, setAtaSized] = useState<{sig: string; sized: SizedAtaFund | SizedAtaIcFund | null} | null>(null);
+  const ataProbeSig = useRef<string | null>(null);
   const ataSetupModel = useMemo(() => {
     const solAssets = assets.filter((a): a is Extract<typeof a, {mint: string | null}> => a.protocol === 'solana' && a.mint != null);
     const targets = solAssets
@@ -893,6 +902,29 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       return null; // a dead leg or an unreachable venue is not a candidate, never a crash
     }
   }, [relayUrl, catalog]);
+  // The up-front measurement (see the `ataSized` state above): once per plan VALUE signature,
+  // read-only, the same sizing walk the ONE press would run - its answer IS the press's answer.
+  useEffect(() => {
+    const plan = ataSetupModel.plan;
+    if (plan.kind !== 'fund' && plan.kind !== 'fund-ic') return; // create/refuse/none need no measurement
+    if (ataSetupBusy || ataSetupConfirm != null || ataIcConfirm != null) return; // a run owns the quote seams
+    const sig = ataPlanSignature(ataSetupModel);
+    if (ataSized?.sig === sig || ataProbeSig.current === sig) return;
+    ataProbeSig.current = sig;
+    let alive = true;
+    void (async () => {
+      const sized = plan.kind === 'fund-ic'
+        ? await sizeAtaIcFundPlan({plan, solKnown: solState.balance, quote: quoteAtaIcFund})
+        : await sizeAtaFundPlan({plan, solKnown: solState.balance, quote: quoteAtaFund});
+      if (!alive) return;
+      setAtaSized({sig, sized});
+      // A fund-ic plan the probe proved unfundable flips to the refuse panel at idle - never a
+      // button that can only fail again (the same verdict a press would have earned, learned
+      // for free and without a swap).
+      if (sized == null && plan.kind === 'fund-ic') setIcFundShort(true);
+    })();
+    return () => { alive = false; };
+  }, [ataSetupModel, ataSetupBusy, ataSetupConfirm, ataIcConfirm, ataSized, solState.balance, quoteAtaFund, quoteAtaIcFund]);
   // The fund-ic prepare: a FRESH quote bundle at the confirmed input (the confirm surface's
   // own sequence - nothing is adopted from the sizing quotes), held to the plan's target, then
   // the matching prepare. The venue settles SOL at the device's own address; the record rides
@@ -999,8 +1031,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           outAsset: {symbol: WRAPPED_SOL_TOKEN, mint: WRAPPED_SOL_MINT_ADDRESS, decimals: SOL_DECIMALS},
         });
         const done = await executeSolanaConvert(rec, {publicHex: identity.publicHex, solAddress, onUpdate: () => {}});
-        if (done.step === 'failed_refunded') throw new Error(M.deposit.ata.swapFailed);
-        if (done.step !== 'done') throw new Error(M.deposit.ata.swapUnknown);
+        // Any non-done ending speaks with the record's OWN cause (failureDetail / step) - the
+        // record's real error reaches the card, never a bare "you can try again".
+        if (done.step !== 'done') throw new Error(ataRecordErrLine(done));
         refreshSol();
       }
       for (const mint of plan.mints) {
@@ -1016,12 +1049,28 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     }
   }, [ataSetupBusy, identity.secretHex, identity.publicHex, relayUrl, solAddress, solState.balance, refreshSol, refreshToken, createAtaForMint]);
   // The entry the ONE button calls. create runs straight away (the disclosed cost + the press
-  // are the consent); fund and fund-ic size first and wait for the banner's ONE confirm - a
-  // swap is a real spend and never runs without it; refuse never reaches a button at all.
+  // are the consent); fund and fund-ic reuse the idle probe's measured sizing (or size fresh
+  // when it has not landed yet) and wait for the card's ONE confirm - a swap is a real spend
+  // and never runs without it; refuse never reaches a button at all.
   const beginAtaSetup = useCallback(async () => {
     const {plan} = ataSetupModel;
     if (ataSetupBusy || plan.kind === 'none' || plan.kind === 'refuse') return;
     if (plan.kind === 'create') { await runAtaSetup(plan, null); return; }
+    // The idle probe already measured THIS exact plan (same value signature): its answer is
+    // the press's answer - straight to the confirm, or the honest refuse, no second wait.
+    const sig = ataPlanSignature(ataSetupModel);
+    if (ataSized != null && ataSized.sig === sig) {
+      const measured = ataSized.sized;
+      if (measured == null) {
+        if (plan.kind === 'fund-ic') { setIcFundShort(true); return; }
+        setAtaSetupErr(M.deposit.ata.fundShort(plan.candidates[0]?.symbol ?? ''));
+        return;
+      }
+      setAtaSetupErr(null);
+      if (plan.kind === 'fund-ic') { setAtaIcConfirm(measured as SizedAtaIcFund); return; }
+      setAtaSetupConfirm(measured as SizedAtaFund);
+      return;
+    }
     setAtaSetupErr(null);
     setAtaSetupBusy(true);
     try {
@@ -1029,7 +1078,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         const sized = await sizeAtaIcFundPlan({plan, solKnown: solState.balance, quote: quoteAtaIcFund});
         if (sized == null) {
           // Nothing qualified: no candidate's balance can reach the venue minimum and the
-          // target. The banner flips to the refuse panel - the dead end with the SOL receive
+          // target. The card flips to the refuse panel - the dead end with the SOL receive
           // affordance, not a button that can only fail again.
           setIcFundShort(true);
           return;
@@ -1043,16 +1092,17 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         return;
       }
       setAtaSetupConfirm(sized);
-    } catch {
-      // HARD RULE: the banner never returns silently to idle. The sizing walk is engineered
-      // not to throw (quote seams catch everything, the sizer answers or nulls) - if one ever
-      // does, that is a terminal state the user SEES, never a swallowed rejection that just
-      // re-arms the button.
-      setAtaSetupErr(M.deposit.ata.swapFailed);
+    } catch (e: unknown) {
+      // HARD RULE: the card never returns silently to idle, and the line is the REAL cause
+      // (2026-10-01 founder directive), never a bare 'you can try again'. The sizing walk is
+      // engineered not to throw (quote seams catch everything) - if one ever does, that is a
+      // terminal state the user SEES with its actual message.
+      const msg = e instanceof Error ? e.message : String(e);
+      setAtaSetupErr(msg.length > 0 ? friendlySolError(msg) : M.deposit.ata.swapFailed);
     } finally {
       setAtaSetupBusy(false);
     }
-  }, [ataSetupModel, ataSetupBusy, solState.balance, quoteAtaFund, quoteAtaIcFund, runAtaSetup]);
+  }, [ataSetupModel, ataSetupBusy, ataSized, solState.balance, quoteAtaFund, quoteAtaIcFund, runAtaSetup]);
   // The fund-ic execute: prepare the record fresh (never from the sizing quotes), adopt it
   // into the resume engine, and let the watcher finish the setup when the venue settles.
   const runAtaIcSetup = useCallback(async (sized: SizedAtaIcFund) => {
@@ -1111,7 +1161,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     } else if (isTerminalConvertStep(rec.step)) {
       ataSwapRecord.current = null;
       setAtaSwapPending(false);
-      setAtaSetupErr(M.deposit.ata.swapFailed);
+      // The record's REAL cause reaches the card (2026-10-01 founder directive): the engine's
+      // failureDetail verbatim, the step-mapped honest line only when the engine recorded none.
+      setAtaSetupErr(ataRecordErrLine(rec));
     }
   }), [createAtaForMint, refreshSol]);
   const confirmAtaSetup = useCallback(async () => {
@@ -1149,6 +1201,15 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         : icFundShort ? ataPlanAfterFundShort(plan).kind
         : plan.kind,
       costLine: ataSetupModel.costLine,
+      // The up-front minimum (2026-10-01): once the probe measured a deliverable input for a
+      // swap plan, the idle card states it INSTEAD of the rent line - one cost line, known
+      // before anything is initiated. Null until measured (the exact rent line speaks then).
+      minLine: (plan.kind === 'fund' || plan.kind === 'fund-ic') && ataSized?.sized != null
+        ? M.deposit.ata.minSwap(
+            fmtAssetCompact(ataSized.sized.inAmount, ataSized.sized.source.decimals, ataSized.sized.source.symbol),
+            ataSized.sized.source.symbol,
+          )
+        : null,
       fundFromLine: ataSetupModel.fundFromLine,
       confirming: ataSetupConfirm != null || ataIcConfirm != null,
       confirmLine,
@@ -1157,7 +1218,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       solAddress: solAddress,
       err: ataSetupErr,
     };
-  }, [ataSetupModel, ataSetupConfirm, ataIcConfirm, ataSetupBusy, ataSwapPending, ataSetupErr, solAddress, icFundShort]);
+  }, [ataSetupModel, ataSetupConfirm, ataIcConfirm, ataSetupBusy, ataSwapPending, ataSetupErr, solAddress, icFundShort, ataSized]);
   // Any re-plan (a balance or token refresh moved the inputs) re-answers honestly: the flip
   // is only ever as old as the evidence behind it.
   // The refuse latch's reset keys on the plan's VALUE signature, never the model's identity:
@@ -2124,6 +2185,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       {topUpErr ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text> : null}
 
       <ScrollView ref={scrollRef} style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
+        {/* The per-currency setup gate (2026-10-01 founder directive): the card lives in the
+            CURRENCY'S OWN view and only when that currency has a KNOWN-absent SPL account - the
+            exact rule the row badge uses. The wallet-level banner on the accounts route is gone. */}
         {mode === 'home'
           ? <HomeTab
               assets={assets}
@@ -2145,6 +2209,11 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               // The unreachable rail note's Settings ▸ Advanced escape (founder UX directive) —
               // opens Settings with the Advanced disclosure already expanded.
               onOpenSettings={openSettingsFromOutage}
+              ataSetup={currencyRails(homeCurrency, assets).some(r => balances[r.id]?.status === 'absent') ? ataSetupView : undefined}
+              onAtaSetupStart={beginAtaSetup}
+              onAtaSetupConfirm={confirmAtaSetup}
+              onAtaSetupCancel={cancelAtaSetup}
+              onAtaSetupShowSol={() => goToDeposit('solana:SOL')}
             />
           : mode === 'accounts'
           ? <AccountsTab
@@ -2167,11 +2236,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               onSelect={handleSelect}
               onTopUp={topUp}
               onOpenSettings={openSettingsFromOutage}
-              ataSetup={ataSetupView}
-              onAtaSetupStart={beginAtaSetup}
-              onAtaSetupConfirm={confirmAtaSetup}
-              onAtaSetupCancel={cancelAtaSetup}
-              onAtaSetupShowSol={() => goToDeposit('solana:SOL')}
             />
            : mode === 'add-currency'
            ? <AddCurrencyTab

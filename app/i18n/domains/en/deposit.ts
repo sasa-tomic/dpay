@@ -278,6 +278,9 @@ export type DepositMessages = {
     finishSetup: (targets: string) => string;
     /** The compact banner's one-line cost ("Costs 0.00204428 SOL"). */
     costShort: (setupCost: string) => string;
+    /** The idle card's up-front minimum (2026-10-01): the measured swap input that covers the
+     *  setup, stated BEFORE the user initiates anything ("Needs at least 0.09 VCHF."). */
+    minSwap: (swap: string, source: string) => string;
     /** The fund-branch line naming the (unique) token the swap draws from. */
     fundFrom: (source: string) => string;
     /** The fund confirm, stating the total: the sized swap, its source, what it creates, the cost. */
@@ -557,6 +560,7 @@ export const depositEn: DepositMessages = {
     },
     finishSetup: targets => `Still to set up: ${targets}`,
     costShort: setupCost => `Costs ${setupCost}`,
+    minSwap: (swap, source) => `Needs at least ${swap} ${source}.`,
     fundFrom: source => `A small swap of your ${source} into SOL pays for it.`,
     fundConfirm: (swap, source, targets, setupCost) =>
       `Swaps about ${swap} of your ${source} into SOL and creates your ${targets} (${setupCost}).`,

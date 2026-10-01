@@ -6,6 +6,8 @@ import {type CurrencyDescriptor} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {type HomeCurrency} from '../config/currency';
 import {HistoryRow} from './HistoryRow';
+import {AtaSetupCard, type AtaSetupViewModel} from './AtaSetupCard';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import type {TxAnnotation} from '../services/txNotes';
 import {HotkeyHint} from './HotkeyHint';
 import {IconArrowUpRight, IconChevronDown, IconMore, IconPlus, IconSwap} from './icons';
@@ -42,7 +44,7 @@ import type {BalanceView} from '../lib/assetBalances';
 /** How many ledger rows the Home feed shows. Five since 2026-09-08. */
 export const ACTIVITY_ROWS = 5;
 
-export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBalances, catalog, online, history, noteFor, onDeposit, onConvert, onWithdraw, onOpenMenu, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings}: {
+export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBalances, catalog, online, history, noteFor, onDeposit, onConvert, onWithdraw, onOpenMenu, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings, ataSetup, onAtaSetupStart, onAtaSetupConfirm, onAtaSetupCancel, onAtaSetupShowSol}: {
   assets: SelectableAsset[];
   homeCurrency: HomeCurrency;
   /** The main currency's preferred rail — the account this screen funds. Null only when the
@@ -71,6 +73,16 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   onOpenReceipt: (t: Txn) => void;
   /** Opens Settings — the unreachable rail note's Settings ▸ Advanced escape. */
   onOpenSettings?: () => void;
+  /** The per-currency token-account setup (2026-10-01). Wallet passes it ONLY when THIS
+   *  currency's SPL accounts are KNOWN absent - the card lives in the currency's own view,
+   *  never as a wallet-level banner. Optional: absent = this currency needs no setup. */
+  ataSetup?: AtaSetupViewModel;
+  /** ONE press on the card's button: create when SOL covers; size the funding swap (the card
+   *  then confirms); refused plans never reach a button at all. */
+  onAtaSetupStart?: () => void;
+  onAtaSetupConfirm?: () => void;
+  onAtaSetupCancel?: () => void;
+  onAtaSetupShowSol?: () => void;
 }) {
   // The eyebrow is the sketch's "Balance CHF" — the SHORT code, the unit a price is read in.
   // Offline OUTRANKS it: the marker moves onto the whole line, and nothing is asserted that the
@@ -90,6 +102,8 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   // (sub2 ink), it does not grow a second box inside the panel.
   const noRail = homeAsset === null;
   const actionIcon = noRail ? C.sub2 : C.brandText;
+  // The refuse panel's copy affordance: the device's SOL receive address, copied in place.
+  const {copied, copy} = useCopyFeedback();
   return (
     <View>
       {/* The headline block IS the accounts affordance (kept from 2026-09-14) — tapping the
@@ -121,6 +135,34 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
           that is not answering, once, with its Settings escape. It sits OUTSIDE the tappable
           headline — one Pressable must never nest another. */}
       {homeAsset !== null && railUnreadable(homeBalance) ? <RailUnreadableNote asset={homeAsset} failure={homeBalance?.failure} onOpenSettings={onOpenSettings} /> : null}
+      {/* The per-currency setup state (2026-10-01 founder directive): the ONE setup affordance
+          lives HERE, in the currency's own view, shown only when this currency's SPL accounts
+          are absent (Wallet passes the view model only then). The wallet-level banner above the
+          Konten list is gone; the row badge stays passive text. One currency, one card, ONE
+          action. The card renders expanded (the user tapped INTO this currency deliberately) and
+          states the required minimum up front (`minLine`) before anything is initiated. */}
+      {ataSetup != null && ataSetup.targets.length > 0 ? (
+        <AtaSetupCard
+          targets={ataSetup.targets}
+          kind={ataSetup.kind}
+          costLine={ataSetup.costLine}
+          minLine={ataSetup.minLine}
+          fundFromLine={ataSetup.fundFromLine}
+          confirming={ataSetup.confirming}
+          confirmLine={ataSetup.confirmLine}
+          busy={ataSetup.busy}
+          busyLine={ataSetup.busyLine}
+          err={ataSetup.err}
+          solAddress={ataSetup.solAddress}
+          solCopied={copied != null}
+          onStart={onAtaSetupStart}
+          onConfirm={onAtaSetupConfirm}
+          onCancel={onAtaSetupCancel}
+          onCopySolAddress={ataSetup.solAddress != null ? () => { void copy(ataSetup.solAddress!); } : undefined}
+          onShowSolAddress={onAtaSetupShowSol}
+          testIDPrefix={`ata-setup-${homeCurrency}`}
+        />
+      ) : null}
       {/* ONE divided panel (CALIBER): the four actions are cells of a single hairline-bordered
           container — not four floating cards. Cells 2..4 carry the divider; the container clips,
           so no cell carries a radius of its own. */}

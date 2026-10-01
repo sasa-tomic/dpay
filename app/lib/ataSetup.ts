@@ -50,6 +50,7 @@
 // the convert engine, never re-stated here.
 
 import {registeredVenues} from '../config/venues';
+import {M} from '../i18n';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 
@@ -283,4 +284,17 @@ export async function sizeAtaIcFundPlan(args: {
 // moved may re-ask the question. Pinned by ataSetup.test.ts and flow 214's churn arm.
 export function ataPlanSignature(model: {plan: AtaSetupPlan; targets: readonly unknown[]; costLine: string}): string {
   return JSON.stringify({kind: model.plan.kind, plan: model.plan, targets: model.targets, cost: model.costLine});
+}
+
+/**
+ * The setup card's error line for a TERMINAL engine record (2026-10-01 founder directive:
+ * errors are REAL): the record's own failureDetail is the line - the venue's or chain's
+ * actual cause, verbatim. Only when the engine recorded no cause does a generic copy speak:
+ * 'stuck' (outcome unknown) maps to swapUnknown, everything else to swapFailed. One line,
+ * never a bare "you can try again".
+ */
+export function ataRecordErrLine(rec: {step: string; failureDetail?: string}): string {
+  const detail = typeof rec.failureDetail === 'string' ? rec.failureDetail.trim() : '';
+  if (detail.length > 0) return detail;
+  return rec.step === 'stuck' ? M.deposit.ata.swapUnknown : M.deposit.ata.swapFailed;
 }

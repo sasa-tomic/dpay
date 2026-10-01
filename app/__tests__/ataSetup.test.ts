@@ -18,7 +18,7 @@
 import {describe, test, expect} from '@jest/globals';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS} from '../solana/tokens';
-import {planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, ataPlanSignature, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
+import {planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
 
 const EURC = EURC_MINT_ADDRESS;
 const USDC = USDC_MINT_ADDRESS;
@@ -382,6 +382,22 @@ describe('ataPlanAfterFundShort - the proven-unfundable flip to the refuse panel
     expect(ataPlanAfterFundShort(fund)).toEqual(fund);
     expect(ataPlanAfterFundShort({kind: 'none'})).toEqual({kind: 'none'});
     expect(ataPlanAfterFundShort({kind: 'refuse'})).toEqual({kind: 'refuse'});
+  });
+});
+
+describe('ataRecordErrLine - the real cause reaches the card, ONE line (2026-10-01)', () => {
+  test('the failureDetail IS the line - the venue words, never a paraphrase', () => {
+    expect(ataRecordErrLine({step: 'failed_refunded', failureDetail: 'deposit amount below venue minimum'}))
+      .toBe('deposit amount below venue minimum');
+    expect(ataRecordErrLine({step: 'failed_leg', failureDetail: '  rate moved  '})).toBe('rate moved');
+  });
+
+  test('no detail: a stuck record maps to the unknown-outcome copy, never a fake retry promise', () => {
+    expect(ataRecordErrLine({step: 'stuck'})).not.toContain('try again');
+  });
+
+  test('no detail, any other terminal step: the honest swap-failed fallback', () => {
+    expect(ataRecordErrLine({step: 'failed_refunded'})).toContain('did not go through');
   });
 });
 

@@ -22,7 +22,7 @@ import {describe, test, expect, jest} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
-import {AccountsTab, __resetAtaAutoSurfaceForTest} from '../components/AccountsTab';
+import {AccountsTab} from '../components/AccountsTab';
 import {DEMO_ASSET_ID, buildSelectableAssets} from '../config/assets';
 import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
@@ -274,114 +274,33 @@ describe('AccountsTab — a KNOWN-absent token account grows the setup badge on 
   });
 });
 
-describe('AccountsTab - the setup banner is the ONE affordance (founder gap, 2026-09-30 redesign)', () => {
-  const mintOf = (id: string) => {
-    const a = ASSETS.find(x => x.id === id);
-    return a != null && a.protocol === 'solana' ? a.mint ?? '' : '';
-  };
+/** The mint of a solana asset id ('' when the asset is not an SPL token). */
+const mintOf = (id: string) => {
+  const a = ASSETS.find(x => x.id === id);
+  return a != null && a.protocol === 'solana' ? a.mint ?? '' : '';
+};
+
+describe('AccountsTab - the list carries NO setup affordance (2026-10-01 founder directive)', () => {
   /** EUR with a KNOWN-absent EURC rail + a funded USDC rail beside it. */
-  function eurAbsentViews(kind: 'fund' | 'create' | 'refuse') {
+  function eurAbsentViews() {
     const eurcMint = mintOf('solana:EURC');
     const usdcMint = mintOf('solana:USDC');
     const tokenStates: Record<string, {amount: string | null; decimals: number | null; status: 'absent' | 'balance'}> = {
       [eurcMint]: {amount: null, decimals: null, status: 'absent'},
-      ...(kind === 'refuse' ? {} : {[usdcMint]: {amount: '5000000', decimals: 6, status: 'balance' as const}}),
+      [usdcMint]: {amount: '5000000', decimals: 6, status: 'balance' as const},
     };
     const views = assetViews({tokenStates});
     return {views, currencySum: currencyViews(views, {tokenAmounts: {[eurcMint]: null, [usdcMint]: '5000000'}})};
   }
-  const vm = (kind: 'fund' | 'create' | 'fund-ic' | 'refuse', over: Partial<Parameters<typeof AccountsTab>[0]['ataSetup']> = {}) => ({
-    targets: ['EURC'], kind, costLine: '0.00204428 SOL', fundFromLine: null,
-    confirming: false, confirmLine: null, busy: false, busyLine: null, solAddress: null, err: null, ...over,
-  });
 
-  test('ONE banner above the list carries the ONE action; the row keeps ONLY its badge', () => {
-    const {views, currencySum} = eurAbsentViews('fund');
-    const onAtaSetupStart = jest.fn();
-    const tree = mount(views, currencySum, {ataSetup: vm('fund'), onAtaSetupStart});
-    // The banner exists, exactly once, above the list; the button is its only action.
-    expect(has(tree, 'ata-setup-wallet-banner')).toBe(true);
-    expect(tree.root.findAll(n => n.props?.testID === 'ata-setup-wallet-complete' && typeof n.type === 'string').length).toBe(1);
-    // The EUR row shows the passive badge and NO setup button anywhere (USDC is funded here,
-    // so the USD row has no absent rail and correctly no badge either).
-    expect(has(tree, 'currency-EUR-setup')).toBe(true);
-    expect(has(tree, 'currency-USD-setup')).toBe(false);
-    expect(has(tree, 'btn-currency-EUR-setup')).toBe(false);
-    expect(has(tree, 'btn-currency-USD-setup')).toBe(false);
-    // One press on the banner's button starts it (create runs; fund/fund-ic size then confirm).
-    act(() => { pressable(tree, 'ata-setup-wallet-complete').props.onPress(); });
-    expect(onAtaSetupStart).toHaveBeenCalledTimes(1);
-    act(() => { tree.unmount(); });
-  });
-
-  test('a sized swap run shows the ONE confirm in place; only Confirm executes', () => {
-    const onAtaSetupConfirm = jest.fn();
-    const {views, currencySum} = eurAbsentViews('fund');
-    const tree = mount(views, currencySum, {
-      ataSetup: vm('fund-ic', {
-        confirming: true,
-        confirmLine: 'Swaps about 5 USDC of your ckUSDC into SOL and creates your EURC account (0.00204428 SOL).',
-      }),
-      onAtaSetupConfirm,
-    });
-    expect(has(tree, 'ata-setup-wallet-confirm-btn')).toBe(true);
-    expect(has(tree, 'ata-setup-wallet-complete')).toBe(false); // ONE action at a time
-    act(() => { pressable(tree, 'ata-setup-wallet-confirm-btn').props.onPress(); });
-    expect(onAtaSetupConfirm).toHaveBeenCalledTimes(1);
-    act(() => { tree.unmount(); });
-  });
-
-  test('refuse: the honest dead end with the SOL receive address + copy, no button', () => {
-    const {views, currencySum} = eurAbsentViews('refuse');
-    const onCopySolAddressLike = jest.fn();
-    const tree = mount(views, currencySum, {
-      ataSetup: vm('refuse', {solAddress: 'DpaySoLAddress11111111111111111111111111'}),
-      onAtaSetupShowSol: onCopySolAddressLike,
-    });
-    expect(has(tree, 'ata-setup-wallet-refuse')).toBe(true);
-    expect(has(tree, 'ata-setup-wallet-need-sol')).toBe(true);
-    expect(has(tree, 'ata-setup-wallet-copy-sol')).toBe(true);
-    expect(has(tree, 'ata-setup-wallet-complete')).toBe(false); // never a fake button
-    act(() => { tree.unmount(); });
-  });
-
-  test('the fund-ic busy line names the in-flight swap, not a finished create', () => {
-    const {views, currencySum} = eurAbsentViews('fund');
-    const tree = mount(views, currencySum, {
-      ataSetup: vm('fund-ic', {busy: true, busyLine: 'Swapping into SOL. Your EURC account are created as soon as it lands.'}),
-    });
-    expect(has(tree, 'ata-setup-wallet-busy')).toBe(true);
-    expect(has(tree, 'ata-setup-wallet-complete')).toBe(false);
-    const line = rowText(tree, 'ata-setup-wallet-busy');
-    expect(line).toContain('Swapping into SOL');
-    act(() => { tree.unmount(); });
-  });
-
-  test('auto-surface: refuse-to-actionable expands the banner ONCE per session, never twice', () => {
-    __resetAtaAutoSurfaceForTest();
-    // First: the refused plan renders collapsed (no detail lines inside the banner).
-    const refused = eurAbsentViews('refuse');
-    const collapsed = mount(refused.views, refused.currencySum, {ataSetup: vm('refuse')});
-    act(() => { pressable(collapsed, 'ata-setup-wallet-summary'); });
-    act(() => { collapsed.unmount(); });
-    // The transition refuse → fund (a balance arrived): the banner auto-expands once.
-    const funded = eurAbsentViews('fund');
-    const expanded = mount(funded.views, funded.currencySum, {ataSetup: vm('fund')});
-    expect(rowText(expanded, 'ata-setup-wallet-banner')).toContain('No EURC account');
-    act(() => { expanded.unmount(); });
-    // A second refuse→fund transition in the SAME session does NOT auto-expand again.
-    const again = mount(funded.views, funded.currencySum, {ataSetup: vm('refuse')});
-    act(() => { again.unmount(); });
-    const second = mount(funded.views, funded.currencySum, {ataSetup: vm('fund')});
-    expect(rowText(second, 'ata-setup-wallet-banner')).not.toContain('No EURC account');
-    act(() => { second.unmount(); });
-  });
-
-  test('without the wallet-level setup the badge stays the passive text it always was', () => {
-    const {views, currencySum} = eurAbsentViews('fund');
+  test('the wallet-level banner is GONE: an actionable plan renders nothing on the list - the row keeps only its passive badge, and the card lives in the currency view (HomeTab.test)', () => {
+    const {views, currencySum} = eurAbsentViews();
     const tree = mount(views, currencySum);
-    expect(has(tree, 'currency-EUR-setup')).toBe(true);
     expect(has(tree, 'ata-setup-wallet-banner')).toBe(false);
+    expect(has(tree, 'ata-setup-wallet-complete')).toBe(false);
+    // The passive badge stays; there is no per-row setup button anywhere.
+    expect(has(tree, 'currency-EUR-setup')).toBe(true);
+    expect(has(tree, 'btn-currency-EUR-setup')).toBe(false);
     act(() => { tree.unmount(); });
   });
 });

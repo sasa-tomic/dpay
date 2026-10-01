@@ -56,8 +56,15 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       expect(occurrences(icConfirm, COST)).toBe(1);
       expect(icConfirm).toContain('USDC');
       expect(d.ata.swapPending(two)).toContain('EURC');
+      // The up-front minimum line (2026-10-01): the idle card states the measured swap minimum
+      // BEFORE the user initiates anything - one line, amount once, source named.
+      const min = d.ata.minSwap(SWAP, 'USDC');
+      expect(min).toContain(SWAP);
+      expect(min).toContain('USDC');
+      expect(min).not.toContain('undefined');
+      expect(occurrences(min, SWAP)).toBe(1);
       // The house style: plain hyphens in the setup copy, never em-dashes.
-      const surfaces = [short, icConfirm, d.ata.needSol(COST), d.ata.creatingAll(two), d.ata.creating('EURC'), d.ata.swapFailed];
+      const surfaces = [short, icConfirm, min, d.ata.needSol(COST), d.ata.creatingAll(two), d.ata.creating('EURC'), d.ata.swapFailed];
       expect(surfaces.join('\n')).not.toContain('—');
     });
   }

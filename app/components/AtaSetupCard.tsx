@@ -4,12 +4,37 @@ import {C} from '../config/palette';
 import {M} from '../i18n';
 
 /**
- * The wallet-level ONE-TAP setup card (2026-09-30, banner redesign) - the AccountsTab's SINGLE
- * setup affordance, rendered above the currency list. One compact card, ONE primary button:
- * the per-row setup buttons are gone, so the "Needs setup" badge and this card can never state
- * the setup twice. Visual grammar: the instruction card (S.instrCard's radius/padding) + the
- * wide primary button; a one-line summary row by default, the per-asset detail lines when
- * expanded.
+ * The per-currency setup view model (2026-10-01): computed by Wallet (the planner + the run
+ * state + the measured minimum) for ONE currency's own view. The old wallet-level banner on
+ * the accounts route is gone - the currency the user taps hosts the ONE card.
+ */
+export type AtaSetupViewModel = {
+  /** Every absent account's display symbol, wallet-wide. */
+  targets: string[];
+  kind: 'create' | 'fund' | 'fund-ic' | 'refuse';
+  costLine: string;
+  /** The measured up-front minimum ("Needs at least 0.09 VCHF."), when the plan's sizing
+   *  probe has landed. Null until then - the exact SOL rent line speaks instead. */
+  minLine: string | null;
+  fundFromLine: string | null;
+  confirming: boolean;
+  confirmLine: string | null;
+  busy: boolean;
+  /** Overrides the creating-all busy line while a fund-ic venue swap is still in flight (the
+   *  card says so honestly). Null = the default line. */
+  busyLine: string | null;
+  /** The device's SOL receive address for the refuse panel's copy affordance (null when the
+   *  rail is unavailable - the panel then falls back to the deposit-sheet escape). */
+  solAddress: string | null;
+  err: string | null;
+};
+
+/**
+ * The ONE-TAP setup card (2026-09-30; per-currency since 2026-10-01) - hosted by the tapped
+ * currency's own view (HomeTab), the single setup affordance. One compact card, ONE primary
+ * button. Visual grammar: the instruction card (S.instrCard's radius/padding) + the wide
+ * primary button; the idle state states the required minimum UP FRONT (the measured min line,
+ * else the exact SOL rent) - no number the user has to fail a swap to learn.
  *
  * Four states, driven entirely by props (the parent owns the plan + the run):
  *   busy    - the run is on chain: spinner + one honest line (what is being created, or the
@@ -24,19 +49,20 @@ import {M} from '../i18n';
  * step. The v1 card shipped a refuse state that ONLY explained steps with no affordance at all
  * (and the idle button above it stayed a doomed retry). Refuse must always render one of its
  * two escapes below; idle/confirm/busy own the ONE button. Pinned by AtaSetupCard.test.tsx
- * (the refuse describes) and HomeAccounts.test.tsx (banner-is-the-ONE-affordance describes).
+ * and HomeTab.test.tsx.
  *   idle    - create (SOL covers), fund (a SPL swap pays) or fund-ic (a cross-rail venue swap
  *             pays): the ONE "Complete setup" button. A fund/fund-ic run presses through to
  *             the confirm; create runs straight away (the button itself is the consent, cost
  *             disclosed above - the same contract the per-asset setup card established).
  *
  * All money figures arrive PRE-FORMATTED (the caller owns `fmtAssetCompact` — the i18n rule);
- * `testIDPrefix` keeps parallel cards tellable (`ata-setup-EUR-complete`, …).
+ * `testIDPrefix` keeps parallel cards tellable (`ata-setup-EUR-complete`, `ata-setup-USD-…`).
  */
 export function AtaSetupCard({
   targets,
   kind,
   costLine,
+  minLine = null,
   fundFromLine = null,
   confirming = false,
   confirmLine = null,
@@ -61,6 +87,9 @@ export function AtaSetupCard({
   kind: 'create' | 'fund' | 'fund-ic' | 'refuse';
   /** The already-formatted SOL total the setup costs ("0.00204428 SOL"). */
   costLine: string;
+  /** The measured up-front minimum line, when the sizing probe has landed - replaces the
+   *  rent line as THE cost line (one line, never two). */
+  minLine?: string | null;
   /** The swap card's source line - set only when the funding token is unambiguous. */
   fundFromLine?: string | null;
   /** True once the parent has sized the swap and is waiting for the confirm press. */
@@ -177,7 +206,9 @@ export function AtaSetupCard({
           <Text style={S.ataBannerTitle}>{M.deposit.ata.finishSetup(targetsPhrase)}</Text>
         </View>
       )}
-      <Text style={S.ataBannerCost}>{M.deposit.ata.costShort(costLine)}</Text>
+      {/* THE cost line, stated up front: the measured minimum for a swap plan, else the exact
+          SOL rent. One line - the founder rule is no number the user must fail a swap to learn. */}
+      <Text style={S.ataBannerCost}>{minLine ?? M.deposit.ata.costShort(costLine)}</Text>
       {expanded ? targets.map(t => (
         <Text key={t} style={S.ataBannerLine}>{M.deposit.ata.absent(t)}</Text>
       )) : null}
