@@ -45,10 +45,13 @@ async function storeRecords(publicHex: string): Promise<Record<string, StoreReco
 }
 
 /** The proportional venue QUOTE surface: settleAmount = deposit × 0.02475 (SOL per ICP), the
- *  linear shape the sizer's shrink-to-fit assumes. The request STILL goes through to the
- *  relay (its stub remembers the quoted deposit and echoes it on the order - the exact-amount
- *  gate depends on that); only the ANSWER's settle figure is rewritten. Everything else passes
- *  through to the harness rewrite (the order route keeps riding the relay's own stub). */
+ *  linear shape the sizer's shrink-to-fit assumes - for BOTH settle families the registry
+ *  composes with (sideshift AND trocador pair [ICP, wSOL]; a constant settle on either would
+ *  let the multi-route fitness pick a phantom floor and shrink to dust). The request STILL
+ *  goes through to the relay (its stub remembers the quoted deposit and echoes it on the
+ *  order - the exact-amount gate depends on that); only the ANSWER's settle figure is
+ *  rewritten. Everything else passes through to the harness rewrite (the order route keeps
+ *  riding the relay's own stub). */
 function installProportionalSideShiftQuote(): () => void {
   const prev = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -59,15 +62,24 @@ function installProportionalSideShiftQuote(): () => void {
     } catch {
       return prev(input, init);
     }
-    if (parsed.pathname === '/api/v1/sideshift/quotes' && init?.method === 'POST') {
+    const isSideshift = parsed.pathname === '/api/v1/sideshift/quotes' && init?.method === 'POST';
+    const isTrocador = parsed.pathname === '/api/v1/trocador/rate' && init?.method === 'POST';
+    if (isSideshift || isTrocador) {
       const res = await prev(input, init);
       if (!res.ok) return res;
       const body = JSON.parse(String(init?.body ?? '{}')) as {depositAmount?: string};
       const deposit = Number(body.depositAmount ?? '0');
-      const j = await res.json().catch(() => null) as {quote?: {settleAmount?: string; rate?: string}} | null;
+      let j = JSON.parse(await res.clone().text().catch(() => 'null')) as
+        | {quote?: {settleAmount?: string; amount_to?: string; rate?: string} | null}
+        | null;
       if (j == null || !Number.isFinite(deposit) || deposit <= 0 || j.quote == null) return res;
-      j.quote.settleAmount = (deposit * 0.02475).toFixed(8);
-      j.quote.rate = '0.02475';
+      const settle = (deposit * 0.02475).toFixed(8);
+      if (isSideshift) {
+        j.quote.settleAmount = settle;
+        j.quote.rate = '0.02475';
+      } else {
+        j.quote.amount_to = settle;
+      }
       return new Response(JSON.stringify(j), {status: res.status, headers: {'content-type': 'application/json'}});
     }
     return prev(input, init);

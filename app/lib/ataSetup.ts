@@ -26,24 +26,23 @@
 //
 //   sizeAtaFundPlan - the SPL executor's sizing walk over a fund plan, with the Jupiter quotes
 //                     INJECTED (the caller owns the network seam, so this stays testable):
-//                     per candidate, quote the full balance into wrapped SOL; the venue's own
-//                     floor (`otherAmountThreshold`) plus the SOL already held must reach the
-//                     plan's target — a smaller input never covers either, so a full-balance
-//                     shortfall skips the candidate — otherwise shrink-to-fit the smallest
-//                     input whose floor still covers (≤4 re-quotes, +5% margin), exactly the
-//                     proven `resolveGasFundRoute` discipline. First deliverable candidate
-//                     wins (the candidates are few: every funded token with a wrapped-SOL
-//                     venue); null = nothing in the wallet can reach the target.
+//                     EVERY candidate is sized (the seam's SOL output is the one comparable
+//                     unit - never a raw cross-token balance ranking, the no-FX-quote red
+//                     line), and the winner is picked by QUOTE FITNESS: highest SOL floor,
+//                     then the smallest input at an equal floor, the caller's registry order
+//                     as the final tie-break - the exact policy the convert surface's
+//                     computeAutoPick canonizes.
 //
-//   sizeAtaIcFundPlan - the fund-ic twin, same discipline over the IC candidates: per
-//                     candidate, quote the full balance into SOL through the caller's seam
-//                     (the convert engine's own quote path for that source's cross-rail
-//                     route). A venue that answers with its own below-minimum refusal hands
-//                     back the minimum input: a wallet that cannot reach it is skipped for
-//                     the next candidate; one that can swaps AT the minimum when it already
-//                     covers (the smallest honest input), else shrinks to the shortfall -
-//                     never below the venue minimum, never past the balance. Null = no
-//                     candidate can reach the target: the caller falls through to refuse.
+//   sizeAtaIcFundPlan - the fund-ic twin, same fitness over the IC candidates: per candidate,
+//                     quote the full balance into SOL through the caller's seam (the convert
+//                     engine's own quote path for that source's routes to SOL - every cefi
+//                     venue and every composed route, resolved by the seam). A venue that
+//                     answers with its own below-minimum refusal hands back the minimum input:
+//                     a wallet that cannot reach it is skipped for the next candidate; one
+//                     that can swaps AT the minimum when it already covers (the smallest
+//                     honest input), else shrinks to the shortfall - never below the venue
+//                     minimum, never past the balance. Null = no candidate can reach the
+//                     target: the caller falls through to refuse.
 //
 // Funding sources are in-wallet money only, and every swap is the USER's own signed
 // conversion over a REGISTERED venue - the no-custody/no-cut red lines are inherited from
@@ -70,7 +69,7 @@ export type AtaFundSource = {mint: string; symbol: string; decimals: number; raw
 
 /** An IC-side funding candidate (fund-ic): a funded IC-ledger asset the convert engine's own
  *  cross-rail route can carry into SOL. Pure data - `currencyKey` is the wallet's stable asset
- *  id (`ic:<currency>`); the executor resolves the catalog row and the route against it. */
+ *  id (`ic:<currency>`); the executor resolves every registered route against it. */
 export type AtaIcFundSource = {currencyKey: string; symbol: string; decimals: number; rawAmount: string};
 
 export type AtaSetupPlan =
@@ -115,7 +114,8 @@ const rawDigits = (v: string | null | undefined): bigint | null =>
  * (their known states), `sources` the funded SPL tokens (status 'balance', positive amount —
  * the caller applies that filter; the planner re-checks defensively). An UNMEASURED SOL
  * balance is treated as zero: it never blocks the fund branch (the sizing re-checks live at
- * execute time) and never fakes a create.
+ * execute time) and never fakes a create. Candidates keep the CALLER's order - it is tie-break
+ * data for the fitness pick, never a ranking (quote fitness decides, 2026-10-01).
  */
 export function planAtaSetup(args: {
   targets: AtaSetupTokenInput[];
@@ -150,9 +150,10 @@ export function planAtaSetup(args: {
     };
   }
   // The fund-ic branch (founder override 2026-09-30): no usable SPL source, but the wallet
-  // holds measured IC-side money. The candidates are the caller's registry-ordered list,
-  // re-checked defensively here - only a measured positive balance is a candidate, the same
-  // bar the SPL walk applies.
+  // holds measured IC-side money. The candidates are the caller's list in the caller's order
+  // (tie-break data only - quote fitness decides the winner, never list position), re-checked
+  // defensively here: only a measured positive balance is a candidate, the same bar the SPL
+  // walk applies.
   const icCandidates: AtaIcFundSource[] = [];
   for (const c of args.icSources ?? []) {
     const amount = rawDigits(c.rawAmount);
@@ -174,10 +175,13 @@ export type SizedAtaFund = {source: AtaFundSource; inAmount: string; outFloor: s
 
 /**
  * Size a fund plan against (injected) live quotes. `solKnown` is the wallet's CURRENT SOL —
- * it counts toward the target, so the swap only covers the shortfall + buffer. Walks the
- * plan's candidates in order; the first candidate whose full balance can reach the target is
- * shrunk to the smallest input whose venue floor still covers it. Null = no candidate can
- * reach the target (or none quoted): the caller refuses honestly — never a forced swap.
+ * it counts toward the target, so the swap only covers the shortfall + buffer. EVERY
+ * candidate is sized (the seam's SOL output is the one comparable unit - never a raw
+ * cross-token balance ranking, the no-FX-quote red line), and the winner is picked by QUOTE
+ * FITNESS: highest SOL floor, then the smallest input at an equal floor, the caller's
+ * registry order as the final tie-break - the exact policy the convert surface's
+ * computeAutoPick canonizes. Null = no candidate can reach the target (or none quoted): the
+ * caller refuses honestly — never a forced swap.
  */
 export async function sizeAtaFundPlan(args: {
   plan: Extract<AtaSetupPlan, {kind: 'fund'}>;
@@ -191,25 +195,33 @@ export async function sizeAtaFundPlan(args: {
   const target = BigInt(plan.targetLamports);
   const swapNeeded = target > sol ? target - sol : 0n;
   if (swapNeeded === 0n) return null; // nothing to fund — the caller should have re-planned
+  // QUOTE FITNESS (2026-10-01 audit F1-F2): size every candidate, keep the fittest. The walk
+  // order is the caller's (the tie-break), never a ranking.
+  let best: SizedAtaFund | null = null;
   for (const source of plan.candidates) {
     const balance = rawDigits(source.rawAmount);
     if (balance == null || balance <= 0n) continue;
     let input = balance;
-    let best: SizedAtaFund | null = null;
+    let sized: SizedAtaFund | null = null;
     for (let k = 0; k < 4; k += 1) {
       const q = await quote(source, input.toString());
       if (q == null) break; // unquotable at this size — the next candidate's turn
       const floor = rawDigits(q.otherAmountThreshold);
       if (floor == null) break;
       if (floor + sol < swapNeeded) break; // under target — a smaller input never covers either
-      best = {source, inAmount: input.toString(), outFloor: floor.toString()};
+      sized = {source, inAmount: input.toString(), outFloor: floor.toString()};
       const scaled = floor === 0n ? input : (input * swapNeeded * 105n) / (floor * 100n) + 1n;
       if (scaled >= input) break; // converged at the floor's own resolution
       input = scaled;
     }
-    if (best != null) return best;
+    if (sized == null) continue;
+    if (best == null
+      || BigInt(sized.outFloor) > BigInt(best.outFloor)
+      || (BigInt(sized.outFloor) === BigInt(best.outFloor) && BigInt(sized.inAmount) < BigInt(best.inAmount))) {
+      best = sized;
+    }
   }
-  return null;
+  return best;
 }
 
 /** One IC candidate's quoted sizing: the input to swap and the venue's SOL floor at it. */
@@ -224,14 +236,16 @@ export type AtaIcQuote =
   | {kind: 'belowMin'; minInRaw: string};
 
 /**
- * Size a fund-ic plan against (injected) live quotes - the `sizeAtaFundPlan` discipline over
+ * Size a fund-ic plan against (injected) live quotes - the `sizeAtaFundPlan` fitness over
  * the IC candidates. `solKnown` is the wallet's CURRENT SOL: it counts toward the target, so
- * the swap only covers the shortfall + buffer. Per candidate: a below-minimum refusal names
- * the venue's own minimum - a wallet that cannot reach it is skipped for the next candidate;
- * one that can re-quotes at the minimum. A quoted input whose SOL floor covers the target is
- * then shrunk toward the shortfall-equivalent (+5% margin), never below the venue minimum and
- * never past the balance. First deliverable candidate wins; null = no candidate can reach the
- * target - the caller falls through to the honest refusal, never a forced losing swap.
+ * the swap only covers the shortfall + buffer. EVERY candidate is sized: a below-minimum
+ * refusal names the venue's own minimum - a wallet that cannot reach it is skipped for the
+ * next candidate; one that can re-quotes at the minimum. A quoted input whose SOL floor
+ * covers the target is then shrunk toward the shortfall-equivalent (+5% margin), never below
+ * the venue minimum and never past the balance. The winner is picked by QUOTE FITNESS -
+ * highest SOL floor, then the smallest input at an equal floor, the caller's registry order
+ * as the final tie-break; null = no candidate can reach the target - the caller falls
+ * through to the honest refusal, never a forced losing swap.
  */
 export async function sizeAtaIcFundPlan(args: {
   plan: Extract<AtaSetupPlan, {kind: 'fund-ic'}>;
@@ -243,12 +257,16 @@ export async function sizeAtaIcFundPlan(args: {
   const target = BigInt(plan.targetLamports);
   const swapNeeded = target > sol ? target - sol : 0n;
   if (swapNeeded === 0n) return null; // nothing to fund - the caller should have re-planned
+  // QUOTE FITNESS (2026-10-01 audit F1-F2): size every candidate, keep the fittest. The walk
+  // order is the caller's (the tie-break), never a ranking; the seam's own SOL output is the
+  // one comparable unit across candidates.
+  let best: SizedAtaIcFund | null = null;
   for (const source of plan.candidates) {
     const balance = rawDigits(source.rawAmount);
     if (balance == null || balance <= 0n) continue;
     let input = balance; // the walk starts at the whole balance and only ever shrinks
     let venueMin = 0n;
-    let best: SizedAtaIcFund | null = null;
+    let sized: SizedAtaIcFund | null = null;
     for (let k = 0; k < 6; k += 1) {
       const q = await quote(source, input.toString());
       if (q == null) break; // unquotable at this size - the next candidate's turn
@@ -263,16 +281,21 @@ export async function sizeAtaIcFundPlan(args: {
       const floor = rawDigits(q.outLamports);
       if (floor == null) break;
       if (floor + sol < swapNeeded) break; // under target at this input - a smaller one never covers either
-      best = {source, inAmount: input.toString(), outFloor: floor.toString()};
+      sized = {source, inAmount: input.toString(), outFloor: floor.toString()};
       if (venueMin > 0n && input === venueMin) break; // at the venue minimum: the smallest honest input
       const scaled = floor === 0n ? input : (input * swapNeeded * 105n) / (floor * 100n) + 1n;
       const clamped = scaled < venueMin ? venueMin : scaled;
       if (clamped >= input) break; // converged at the floor's own resolution
       input = clamped;
     }
-    if (best != null) return best;
+    if (sized == null) continue;
+    if (best == null
+      || BigInt(sized.outFloor) > BigInt(best.outFloor)
+      || (BigInt(sized.outFloor) === BigInt(best.outFloor) && BigInt(sized.inAmount) < BigInt(best.inAmount))) {
+      best = sized;
+    }
   }
-  return null;
+  return best;
 }
 
 // The latch key for the banner's one-way verdicts (the fundShort refuse flip): a VALUE

@@ -153,13 +153,55 @@ describe('planAtaSetup - the fund-ic branch (no SPL source, IC-side money funds 
     }
   });
 
-  test('IC candidates keep the caller\'s registry/matrix order (first-listed first)', () => {
-    const plan = planAtaSetup({
-      targets: [absent()], solBalance: '0', sources: [],
-      icSources: [icSource(), icSource({currencyKey: 'ic:2', symbol: 'ckUSDC', rawAmount: '1000000'})],
+  test('QUOTE FITNESS: the abundant-ICP wallet sizes the direct-cefi ICP shape, never the composed VCHF route', async () => {
+    // The founder wallet, mock-shaped (2026-10-01 audit F1-F3): registry order puts VCHF FIRST
+    // (its route to SOL is composed - ICP->SOL is the direct single-leg cefi pair) - and the
+    // fitness pick must still land on ICP: the seam's SOL output is the one comparable unit,
+    // and ICP's direct venue-min shape carries the highest floor. The direct ICP leg answers
+    // ~0.2735 lamports per raw e8s against a FLOATING venue minimum of 0.91960303 ICP; the
+    // two-account target is 2 x 2,044,280 rent + 2 x 5,000 fee = 4,098,560 lamports. NO live
+    // exact number appears in a pin - shape only: the candidate, the input EXACTLY at the
+    // mock's venue minimum, the floor covering the target.
+    const VENUE_MIN = 91_960_303n;
+    const vchf = icSource({rawAmount: '262489246'}); // 2.62 VCHF, composed, registry-FIRST
+    const icp: AtaIcFundSource = {currencyKey: 'ic:8', symbol: 'ICP', decimals: 8, rawAmount: '1097488672'};
+    const plan = planAtaSetup({targets: [absent(), absent({mint: USDC, symbol: 'USDC'})], solBalance: '0', sources: [], icSources: [vchf, icp]});
+    if (plan.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
+    const sized = await sizeAtaIcFundPlan({
+      plan,
+      solKnown: '0',
+      quote: async (source, inRaw) => {
+        if (source.symbol === 'ICP') {
+          return BigInt(inRaw) < VENUE_MIN
+            ? {kind: 'belowMin', minInRaw: VENUE_MIN.toString()}
+            : {kind: 'quote', outLamports: ((BigInt(inRaw) * 2735n) / 10000n).toString()};
+        }
+        // The composed VCHF route: deliverable, but a thin floor at any input.
+        return {kind: 'quote', outLamports: ((BigInt(inRaw) * 1660n) / 100000n).toString()};
+      },
     });
-    if (plan.kind !== 'fund-ic') throw new Error('expected fund-ic');
-    expect(plan.candidates.map(c => c.currencyKey)).toEqual(['ic:7', 'ic:2']);
+    expect(sized).not.toBeNull();
+    if (sized == null) return;
+    expect(sized.source.symbol).toBe('ICP');
+    expect(BigInt(sized.inAmount)).toBe(VENUE_MIN);
+    expect(BigInt(sized.outFloor)).toBeGreaterThanOrEqual(4_098_560n);
+  });
+
+  test('QUOTE FITNESS: at an equal floor the SMALLER input wins; a full tie keeps registry order', async () => {
+    // Constant-floor seam: every input answers the same SOL floor (above the target), so each
+    // candidate's walk only shrinks its input - the smaller starting balance lands the same
+    // floor with a smaller input and must win; identical balances tie into registry order.
+    const a = icSource({currencyKey: 'ic:3', symbol: 'A', decimals: 8, rawAmount: '600000000'});
+    const b = icSource({currencyKey: 'ic:4', symbol: 'B', decimals: 8, rawAmount: '500000000'});
+    const plan = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [a, b]});
+    if (plan.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
+    const constantFloor = async () => ({kind: 'quote' as const, outLamports: '5000000'});
+    const smaller = await sizeAtaIcFundPlan({plan, solKnown: '0', quote: constantFloor});
+    expect(smaller?.source.symbol).toBe('B');
+    const tie = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [b, icSource({currencyKey: 'ic:3', symbol: 'A', decimals: 8, rawAmount: '500000000'})]});
+    if (tie.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
+    const tied = await sizeAtaIcFundPlan({plan: tie, solKnown: '0', quote: constantFloor});
+    expect(tied?.source.symbol).toBe('B'); // identical walks: the registry-first seat holds
   });
 
   test('a zero or unmeasured IC balance is not a candidate (only a measured positive one is)', () => {
@@ -295,6 +337,60 @@ describe('sizeAtaIcFundPlan - the injected-quote sizing walk over the IC candida
   });
 });
 
+describe('sizeAtaIcFundPlan - the DIRECT-cefi shape, mocked seam (2026-10-01 live diagnosis)', () => {
+  // The founder wallet's winning walk, mock-shaped: ICP direct cefi (~0.2735 lamports per raw
+  // e8s unit ≈ 0.02735 SOL/ICP) against a FLOATING venue minimum of 0.91960303 ICP. NO live
+  // exact number appears in a pin: the assertions are SHAPE only - the candidate, the input
+  // EXACTLY at the mock's venue minimum, and a floor that covers the two-account target
+  // (2 x 2,044,280 rent + 2 x 5,000 fee = 4,098,560 lamports).
+  const VENUE_MIN = 91_960_303n; // 0.91960303 ICP, this minute's minimum (the pin's own mock)
+  const TARGET = 4_098_560n;
+  const directIcpPlan = planAtaSetup({
+    targets: [absent(), absent({mint: USDC, symbol: 'USDC'})],
+    solBalance: '0', sources: [],
+    icSources: [{currencyKey: 'ic:8', symbol: 'ICP', decimals: 8, rawAmount: '1097488672'}],
+  });
+  if (directIcpPlan.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
+  const quote: NonNullable<Parameters<typeof sizeAtaIcFundPlan>[0]['quote']> = async (_source, inRaw) =>
+    BigInt(inRaw) < VENUE_MIN
+      ? {kind: 'belowMin', minInRaw: VENUE_MIN.toString()}
+      : {kind: 'quote', outLamports: ((BigInt(inRaw) * 2735n) / 10000n).toString()};
+
+  test('walks to the venue minimum, delivers EXACTLY it, floor covering the two-account target', async () => {
+    const sized = await sizeAtaIcFundPlan({plan: directIcpPlan, solKnown: '0', quote});
+    expect(sized).not.toBeNull();
+    if (sized == null) return;
+    expect(sized.source.symbol).toBe('ICP');
+    expect(BigInt(sized.inAmount)).toBe(VENUE_MIN);
+    expect(BigInt(sized.outFloor)).toBeGreaterThanOrEqual(TARGET);
+  });
+
+  test('a balance below the venue minimum cannot deliver - null falls through to refuse', async () => {
+    const plan = planAtaSetup({
+      targets: [absent()], solBalance: '0', sources: [],
+      icSources: [{currencyKey: 'ic:8', symbol: 'ICP', decimals: 8, rawAmount: (VENUE_MIN - 1n).toString()}],
+    });
+    if (plan.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
+    const sized = await sizeAtaIcFundPlan({plan, solKnown: '0', quote});
+    expect(sized).toBeNull();
+  });
+
+  test('SOL already held never pulls the input below the venue minimum (the minimum is a floor on the input)', async () => {
+    // SOL already held lowers the shortfall, but the venue minimum is a FLOOR on the input,
+    // not on the output: even one lamport short of the target, the input stays at the min.
+    const oneAccountTarget = BigInt(SOL_ATA_SETUP_MIN_LAMPORTS) + 2n * SOL_FEE_LAMPORTS;
+    const plan = planAtaSetup({
+      targets: [absent()], solBalance: '0', sources: [],
+      icSources: [{currencyKey: 'ic:8', symbol: 'ICP', decimals: 8, rawAmount: '1097488672'}],
+    });
+    if (plan.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
+    const sized = await sizeAtaIcFundPlan({plan, solKnown: (oneAccountTarget - 1n).toString(), quote});
+    expect(sized).not.toBeNull();
+    if (sized == null) return;
+    expect(BigInt(sized.inAmount)).toBe(VENUE_MIN);
+  });
+});
+
 describe('sizeAtaFundPlan — the injected-quote sizing walk', () => {
   // Build the fund plan once (SOL 0, one funded 5-USDC source).
   const plan = planAtaSetup({targets: [absent()], solBalance: '0', sources: [funded()]});
@@ -361,6 +457,28 @@ describe('sizeAtaFundPlan — the injected-quote sizing walk', () => {
     expect(BigInt(sized.outFloor) + BigInt(shortSol)).toBeGreaterThanOrEqual(target);
     // …and the sized input is tiny (it only covers the shortfall + buffer).
     expect(BigInt(sized.inAmount)).toBeLessThan(1_000_000n);
+  });
+
+  test('QUOTE FITNESS: every deliverable candidate is sized; the higher floor wins over registry order', async () => {
+    // Registry order puts X FIRST; USDC's constant floor is higher, so fitness must displace
+    // the positional pick (2026-10-01 audit F1-F2, the computeAutoPick canon).
+    const planXFirst = planAtaSetup({
+      targets: [absent()], solBalance: '0',
+      sources: [
+        funded({symbol: 'X', amount: '10000000'}),
+        funded(),
+      ],
+    });
+    if (planXFirst.kind !== 'fund') throw new Error('fixture: expected fund');
+    const sized = await sizeAtaFundPlan({
+      plan: planXFirst,
+      solKnown: '0',
+      quote: async source => ({
+        outAmount: '5000000',
+        otherAmountThreshold: source.symbol === 'X' ? '4500000' : '5000000',
+      }),
+    });
+    expect(sized?.source.symbol).toBe('USDC');
   });
 });
 
