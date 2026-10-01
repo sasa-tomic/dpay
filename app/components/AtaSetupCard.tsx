@@ -19,6 +19,12 @@ import {M} from '../i18n';
  *   refuse  - the honest dead end: what is missing, what it costs, the needSol copy and the
  *             device's SOL receive address with a copy affordance (the deposit-sheet escape
  *             when the parent cannot show one). NO button - never a fake one.
+ *
+ * HARD RULE (2026-09-30 defect, never again): every rendered state carries an ACTIONABLE next
+ * step. The v1 card shipped a refuse state that ONLY explained steps with no affordance at all
+ * (and the idle button above it stayed a doomed retry). Refuse must always render one of its
+ * two escapes below; idle/confirm/busy own the ONE button. Pinned by AtaSetupCard.test.tsx
+ * (the refuse describes) and HomeAccounts.test.tsx (banner-is-the-ONE-affordance describes).
  *   idle    - create (SOL covers), fund (a SPL swap pays) or fund-ic (a cross-rail venue swap
  *             pays): the ONE "Complete setup" button. A fund/fund-ic run presses through to
  *             the confirm; create runs straight away (the button itself is the consent, cost
@@ -115,6 +121,10 @@ export function AtaSetupCard({
     );
   }
   if (kind === 'refuse') {
+    // Regression guard: this branch must NEVER render explains-only. One of the two escapes
+    // below (inline address + copy, or the parent's show-sol deposit escape) is load-bearing;
+    // the production parent (Wallet) always passes onShowSolAddress, so the trailing null is
+    // unreachable there - if both props are ever missing, fix the parent, not this branch.
     return (
       <View testID={`${testIDPrefix}-refuse`} style={S.ataBanner}>
         {targets.map(t => (

@@ -169,7 +169,12 @@ export function AccountsTab({
             the currency list. One compact card, ONE button; the per-row buttons are gone, so a
             row shows exactly ONE badge and the banner carries the only action. A refused plan
             renders the honest dead end in the same place (no button, the SOL receive address
-            with a copy affordance). */}
+            with a copy affordance).
+            HARD RULE (2026-09-30 defect, never again): the v1 rows showed the badge AND a
+            per-row setup button, doubling the "Einrichtung nötig" copy and leaving the button
+            explains-only. Do NOT add row-level setup actions or a second banner: the badge is
+            passive text, this card is the only affordance (pinned by HomeAccounts.test.tsx,
+            'the setup banner is the ONE affordance'). */}
         {ataSetup != null && ataSetup.targets.length > 0 ? (
           <AtaSetupCard
             targets={ataSetup.targets}

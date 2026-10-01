@@ -78,6 +78,11 @@ export type AtaSetupPlan =
   | {kind: 'fund'; mints: string[]; costLamports: string; targetLamports: string; candidates: AtaFundSource[]}
   | {kind: 'fund-ic'; mints: string[]; costLamports: string; targetLamports: string; candidates: AtaIcFundSource[]}
   | {kind: 'refuse'};
+// HARD RULE for new kinds (2026-09-30 defect, never again): every kind a wallet can receive
+// must render an ACTIONABLE next step in AtaSetupCard (a working button, or refuse's two
+// escapes). The v1 'refuse' reached the screen as explains-only instructions with no
+// affordance. A kind without a wired action is a bug: fix the card and pin it in
+// AtaSetupCard.test.tsx / HomeAccounts.test.tsx before shipping.
 
 /** The proven-unfundable flip: the fund-ic sizing or the swap's own floor check answered that
  *  no IC candidate can reach the target. The banner trades the doomed retry button for the
