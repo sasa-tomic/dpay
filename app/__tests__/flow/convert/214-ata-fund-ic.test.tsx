@@ -1,16 +1,18 @@
 /**
  * flow 214 (ata-fund-ic) - the ONE-button fund-ic setup, end to end: a wallet holding ONLY
  * IC-side money (20 VCHF, the founder's exact scenario) with a KNOWN-absent EURC account and
- * no SOL completes its setup from the AccountsTab banner. Hermetic per-flow file: one private
- * relay, the relay's SideShift upstream stub for the order + status, a fetch wrapper answering
- * the venue's QUOTE surface proportionally (a real venue pays out in proportion to the deposit;
- * the relay stub's constant settleAmount would break the sizer's shrink-to-fit convergence),
- * and a mutable in-memory SOL RPC stub that starts at zero lamports so the plan is fund-ic.
+ * no SOL completes its setup from the EUR currency view's own card (the per-currency setup,
+ * 2026-10-01). Hermetic per-flow file: one private relay, the relay's SideShift upstream stub
+ * for the order + status, a fetch wrapper answering the venue's QUOTE surface proportionally
+ * (a real venue pays out in proportion to the deposit; the relay stub's constant settleAmount
+ * would break the sizer's shrink-to-fit convergence), and a mutable in-memory SOL RPC stub that
+ * starts at zero lamports so the plan is fund-ic.
  *
- * Pinned: ONE banner + ONE button; the press sizes (never spends) and shows the ONE confirm;
- * the confirm prepares the composed record through the confirm surface's own path and adopts
- * it; the engine runs the IC legs to awaiting_deposit; the venue's settle completes the
- * record; the watcher then creates the absent accounts (real broadcasts); the banner clears.
+ * Pinned: ONE card + ONE button in the tapped currency's view; the idle card states the
+ * measured minimum BEFORE anything is initiated; the press sizes (never spends) and shows the
+ * ONE confirm; the confirm prepares the composed record through the confirm surface's own path
+ * and adopts it; the engine runs the IC legs to awaiting_deposit; the venue's settle completes
+ * the record; the watcher then creates the absent accounts (real broadcasts); the card clears.
  */
 import {it, expect, afterEach} from '@jest/globals';
 import {accountOf, onboardSeededUnfunded, openBalances, faucetAccount} from '../harness/lib';
@@ -160,23 +162,33 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       expect(fund.ok).toBe(true);
 
       await openBalances(m, {timeoutMs: 15_000});
-      // The ONE banner is up with the ONE button (fund-ic: no SPL source, IC money funds it).
-      await m.driver.findByTestID('ata-setup-wallet-banner', {timeoutMs: 20_000});
-      expect(m.driver.isPresent('ata-setup-wallet-complete')).toBe(true);
-      expect(m.driver.isPresent('ata-setup-wallet-refuse')).toBe(false);
-      expect(m.driver.readText('ata-setup-wallet-banner')).toContain('EURC');
+      // The per-currency setup (2026-10-01): the row tap opens the EUR view, which hosts the
+      // ONE card (prefix ata-setup-EUR). The wallet-level banner is gone.
+      await m.driver.click('btn-accounts-currency-EUR', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-EUR-banner', {timeoutMs: 20_000});
+      expect(m.driver.isPresent('ata-setup-EUR-complete')).toBe(true);
+      expect(m.driver.isPresent('ata-setup-EUR-refuse')).toBe(false);
+      expect(m.driver.readText('ata-setup-EUR-banner')).toContain('EURC');
+      // THE MINIMUM, UP FRONT (2026-10-01 founder directive): the idle card states the measured
+      // swap input (a VCHF figure) BEFORE anything is initiated - no number that requires a
+      // failed swap to learn.
+      await m.driver.waitForFunction(
+        () => /[\d.]+ VCHF/.test(m!.driver.readText('ata-setup-EUR-banner')),
+        {timeoutMs: 30_000, label: 'the idle card states the measured minimum swap input'},
+      );
+      expect(m.driver.readText('ata-setup-EUR-banner')).not.toContain('at least 0 VCHF');
 
       // NOTHING is adopted by the sizing press: the store stays empty; the ONE confirm shows.
-      await m.driver.click('ata-setup-wallet-complete', {timeoutMs: 10_000});
-      await m.driver.findByTestID('ata-setup-wallet-confirm-btn', {timeoutMs: 20_000});
+      await m.driver.click('ata-setup-EUR-complete', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-EUR-confirm-btn', {timeoutMs: 20_000});
       let store = await storeRecords(account!.publicHex);
       expect(Object.keys(store).length).toBe(0);
-      const confirmLine = m.driver.readText('ata-setup-wallet-confirm-line');
+      const confirmLine = m.driver.readText('ata-setup-EUR-confirm-line');
       expect(confirmLine).toContain('VCHF');
       expect(confirmLine).toContain('SOL');
 
       // THE confirm: prepare (order-first) + adopt, then the engine runs the IC legs.
-      await m.driver.click('ata-setup-wallet-confirm-btn', {timeoutMs: 10_000});
+      await m.driver.click('ata-setup-EUR-confirm-btn', {timeoutMs: 10_000});
       const deadline = budgetDeadline(STORE_TIMEOUT_MS);
       let rec: StoreRecord | null = null;
       for (;;) {
@@ -192,8 +204,8 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       stubState.lamports = 49500000; // 0.0495 SOL, the stub's locked settle figure // 0.0495 SOL, the stub's locked settle figure
       setSideShiftStatus('settled', {settleAmount: '0.0495', settleHash: 'sol-fund-ic-214'});
       await m.driver.waitForFunction(
-        () => !m!.driver.isPresent('ata-setup-wallet-banner') && !m!.driver.isPresent('ata-setup-wallet-busy'),
-        {timeoutMs: 60_000, label: 'the setup completed and the banner cleared'},
+        () => !m!.driver.isPresent('ata-setup-EUR-banner') && !m!.driver.isPresent('ata-setup-EUR-busy'),
+        {timeoutMs: 60_000, label: 'the setup completed and the card cleared'},
       );
       // The watcher's create leg broadcast REAL device-signed ATA creates (one per mint).
       expect(solSends.length).toBe(tokenMints.length);
@@ -227,25 +239,32 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       expect(fund.ok).toBe(true);
 
       await openBalances(m, {timeoutMs: 15_000});
-      await m.driver.findByTestID('ata-setup-wallet-banner', {timeoutMs: 20_000});
-      await m.driver.click('ata-setup-wallet-complete', {timeoutMs: 10_000});
-      await m.driver.findByTestID('ata-setup-wallet-refuse', {timeoutMs: 20_000});
+      // The per-currency driving (2026-10-01): the card lives in the EUR view.
+      await m.driver.click('btn-accounts-currency-EUR', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-EUR-banner', {timeoutMs: 20_000});
+      // The idle probe may already have proven the plan unfundable (the card shows refuse on
+      // its own); a press is only possible while the idle button still stands. Either path
+      // lands the refuse verdict.
+      if (m.driver.isPresent('ata-setup-EUR-complete')) {
+        await m.driver.click('ata-setup-EUR-complete', {timeoutMs: 10_000});
+      }
+      await m.driver.findByTestID('ata-setup-EUR-refuse', {timeoutMs: 20_000});
 
       // THE churn: a real balance write on the ICP primary lands through a poll while the
       // refuse verdict is on screen. The plan's semantics did not move - the verdict must not
-      // either. (RED historically: the banner silently returned within a poll.)
+      // either. (RED historically: the card silently returned within a poll.)
       const top = await faucetAccount(account!.publicHex, 1_000_000, {currency: 0});
       expect(top.ok).toBe(true);
       const deadline = budgetDeadline(30_000);
       for (;;) {
-        const refuseUp = m.driver.isPresent('ata-setup-wallet-refuse');
-        const bannerUp = m.driver.isPresent('ata-setup-wallet-banner');
-        if (bannerUp) throw new Error('the refuse verdict was wiped by a balance poll - the banner silently re-armed');
+        const refuseUp = m.driver.isPresent('ata-setup-EUR-refuse');
+        const bannerUp = m.driver.isPresent('ata-setup-EUR-banner');
+        if (bannerUp) throw new Error('the refuse verdict was wiped by a balance poll - the card silently re-armed');
         if (!refuseUp) throw new Error('neither refuse nor banner on screen - unexpected setup state');
         if (Date.now() > deadline) break;
         await new Promise(r => setTimeout(r, 500));
       }
-      expect(m.driver.isPresent('ata-setup-wallet-refuse')).toBe(true);
+      expect(m.driver.isPresent('ata-setup-EUR-refuse')).toBe(true);
     } finally {
       await m.unmount().catch(() => undefined);
     }
