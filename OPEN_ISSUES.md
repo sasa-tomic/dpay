@@ -257,6 +257,13 @@ until the blockers land. THE thing that unblocks it:**
   (`2a34a00a`); name column fits its longest word and needSol names SOL exactly once
   (`d777eba6`); banner lines share one left alignment (`1e3f83fe`); accounts visual
   baselines reseeded light+dark (`cde178e3`). Verified on emulator (screencap rounds 1-4).
+  Follow-up device defect ("setup still doesn't work" 2026-10-01): the tap fired but the
+  refuse verdict was wiped ~100ms later - the identity-keyed reset effect re-armed the
+  button whenever a balance poll re-created the plan model. Fix: verdicts reset on a plan
+  SIGNATURE, never on model identity, and beginAtaSetup gained a catch (never silent idle)
+  (`5b3345b2`, flow 214 churn arm + device re-drive: refuse stands through live polls).
+  Regression guards: hard-rule comments pin the one-affordance + always-actionable
+  invariants (`dc488ba5`).
 
 - **CHAIN route deposit broadcast** — RESOLVED 2026-09-29 same day (`dfde0468`, live-proven D33):
   `submitRawSolTx` adopts `skipPreflight: true, maxRetries: 0` and the rpcFetch walk widens to
