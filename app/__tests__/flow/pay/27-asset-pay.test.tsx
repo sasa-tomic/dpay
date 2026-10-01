@@ -59,8 +59,12 @@ hermeticDescribe('flow 27 — asset-pay (ckBTC, per-asset balance gate, ledger u
 
     // The payer's Ledger row: the FEE-INCLUSIVE net debit in ckBTC units + the fee annotation line,
     // never a dollar amount (the row headlines note.gross; fees ride only as the annotation).
+    // The row lands through the transactions poll AFTER the Ledger renders - wait for the EVENT,
+    // not the screen (the bare assert raced the poll under box load; 2026-10-01 flow 27).
     await m.driver.click('tab-transactions', {timeoutMs: 5000});
     assert(await m.driver.waitForText('Recent', {timeoutMs: 8000}), 'the Ledger should render the ckBTC row');
+    assert(await m.driver.waitForText('0.0005001 BTC', {timeoutMs: 10_000}),
+      'Ledger row must show the fee-inclusive net ckBTC debit');
     const ledgerBody = m.driver.bodyText();
     assertIncludes(ledgerBody, '0.0005001 BTC', 'Ledger row must show the fee-inclusive net ckBTC debit');
     assertIncludes(ledgerBody, '0.0000001 BTC fees', 'Ledger row must annotate the pinned 10-sat ledger fee');
