@@ -53,6 +53,16 @@ the venue is labeled UNPROVEN in-app.
 - **"My address" chip on send sheets (value 4 / effort S).** `AddressField.tsx` gets a
   one-tap "use my address" affordance so self-cash-out on sends needs no typing either; the
   empty field remains the send-elsewhere path.
+- **Setup follow-ups from the 2026-10-01 audit (value 5 / effort M total; founder-invisible
+  polish, no money risk left).** F4: ConvertMode/SolPayMode read raw SOL states where the
+  balances map shows offline-adjusted - one screen, two truths (`Wallet.tsx` ~2194/2337 vs
+  ~1613-1627). F5+F7 residual: hidden-currency money should be excluded from funding walks
+  and the source line must always render. F6: `chooseRail`'s FUNDED step ignores balance
+  magnitude (dust ckUSDC can beat a funded USDC-SOL row). F8-F15 (latent): first-venue
+  fallbacks in `quoteAtaFund`/`icAmmVenueForPair`, dead `resolveConvertDirection`, float
+  compares in money ranking, hardcoded catalog ids. One card implementation: merge
+  `SolanaAtaSetupCard.tsx` into `AtaSetupCard.tsx` (4 sheet callers keep their testIDs).
+  Full 15-finding report: ses_f068eb67dffeadjrElCVm5z8d9.
 - **Residual CeFi papercut (value 4 / effort S).** Plain-IC-source CeFi convert rows
   (`app/convert/prepare.ts` ~127-140) still hand the user a manual deposit send;
   composed/chain kinds already auto-sign. Route them through the same auto-flow or state why
@@ -264,6 +274,24 @@ until the blockers land. THE thing that unblocks it:**
   (`5b3345b2`, flow 214 churn arm + device re-drive: refuse stands through live polls).
   Regression guards: hard-rule comments pin the one-affordance + always-actionable
   invariants (`dc488ba5`).
+- **Setup UX wave 2 (founder 2026-10-01: global banner unwanted, hidden source pick, real
+  failures swallowed as "you can try again")** — DONE 2026-10-02 (`setupfix` wave
+  `82e4b0da..4487fbd6`): the wallet-level banner is GONE; setup lives ONLY in the tapped
+  currency's own view, one card per currency, per-currency testIDs; sizing is QUOTE FITNESS
+  across ALL registered venues and routes (smallest input at a live-verifiable minimum,
+  registry tie-break) - list position can no longer pick a route (`b15d813d`); the source
+  asset and the exact minimum are stated UP FRONT, before any press; failures surface the
+  venue's real cause (`failureDetail` verbatim) and the card's own copy never promises a
+  hollow retry in any locale (`92604120`); flow 214 drives the fund-ic setup through the
+  currency view (`7c9daa6c`) and its churn arm stands (`2adf26bf`); flow 27's ledger-row
+  assert waits for the row, not the screen (`4487fbd6`). Root-cause depth: the incident's
+  idiom was "registry/array position is policy for an autonomous money decision" - audit
+  found 15 findings (ses_f068eb67dffeadjrElCVm5z8d9 report); the money-affecting trio
+  (F1 fund-ic walk, F2 SPL fund walk, F3 first-venue pick) is FIXED; F4-F15 filed below.
+  All 8 gate rows green on `4487fbd6` (verify/e2e/e2e-visual/flow/test-app/smoke/core/
+  typecheck), dirty=no. DEVICE RE-DRIVE PENDING: the POCO was unplugged; reinstall the
+  staged APK and re-drive (founder keeps it unlocked), then the D31 positive trip needs
+  real funds (~0.92 ICP direct or ≥ venue minimums).
 
 - **CHAIN route deposit broadcast** — RESOLVED 2026-09-29 same day (`dfde0468`, live-proven D33):
   `submitRawSolTx` adopts `skipPreflight: true, maxRetries: 0` and the rpcFetch walk widens to
