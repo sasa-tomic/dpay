@@ -246,7 +246,9 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       // its own); a press is only possible while the idle button still stands. Either path
       // lands the refuse verdict.
       if (m.driver.isPresent('ata-setup-EUR-complete')) {
-        await m.driver.click('ata-setup-EUR-complete', {timeoutMs: 10_000});
+        // The probe may unmount the button the moment its refuse verdict lands - a lost press
+        // is fine, the refuse either way is the assertion.
+        try { await m.driver.click('ata-setup-EUR-complete', {timeoutMs: 10_000}); } catch { /* refuse landed first */ }
       }
       await m.driver.findByTestID('ata-setup-EUR-refuse', {timeoutMs: 20_000});
 
