@@ -203,4 +203,51 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       await m.unmount().catch(() => undefined);
     }
   }, budgetScaled(300_000));
+
+  it('the refuse verdict SURVIVES balance-poll churn - a re-render never un-answers it', async () => {
+    // The live-device bug this pins: the model is a useMemo over polled data, so every real
+    // balance write re-creates it; the old identity-keyed reset effect then silently cleared
+    // the refuse panel and re-armed the button (banner back to idle within seconds). A balance
+    // change that does NOT move the plan's own semantics (the ICP primary, excluded from the
+    // candidates) must leave the verdict standing.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {SOLANA_TOKENS} = require('../../../solana/tokens') as {SOLANA_TOKENS: Record<string, {mint: string; decimals: number}>};
+    const tokenMints = Object.entries(SOLANA_TOKENS).filter(([k]) => k === 'EURC' || k === 'USDC').map(([, v]) => v.mint);
+    installAtaSolStub(tokenMints);
+    await enableSolRail();
+    installSideShiftStub({initialStatus: 'waiting'});
+    restoreQuote = installProportionalSideShiftQuote();
+
+    const m = await onboardSeededUnfunded('jest-ata-fund-ic-churn');
+    try {
+      const account = await accountOf(m);
+      expect(account).not.toBeNull();
+      // A hair of IC-side money: positive (a candidate) yet far below any deliverable floor.
+      const fund = await faucetAccount(account!.publicHex, 100, {currency: 7});
+      expect(fund.ok).toBe(true);
+
+      await openBalances(m, {timeoutMs: 15_000});
+      await m.driver.findByTestID('ata-setup-wallet-banner', {timeoutMs: 20_000});
+      await m.driver.click('ata-setup-wallet-complete', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-wallet-refuse', {timeoutMs: 20_000});
+
+      // THE churn: a real balance write on the ICP primary lands through a poll while the
+      // refuse verdict is on screen. The plan's semantics did not move - the verdict must not
+      // either. (RED historically: the banner silently returned within a poll.)
+      const top = await faucetAccount(account!.publicHex, 1_000_000, {currency: 0});
+      expect(top.ok).toBe(true);
+      const deadline = budgetDeadline(30_000);
+      for (;;) {
+        const refuseUp = m.driver.isPresent('ata-setup-wallet-refuse');
+        const bannerUp = m.driver.isPresent('ata-setup-wallet-banner');
+        if (bannerUp) throw new Error('the refuse verdict was wiped by a balance poll - the banner silently re-armed');
+        if (!refuseUp) throw new Error('neither refuse nor banner on screen - unexpected setup state');
+        if (Date.now() > deadline) break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect(m.driver.isPresent('ata-setup-wallet-refuse')).toBe(true);
+    } finally {
+      await m.unmount().catch(() => undefined);
+    }
+  }, budgetScaled(300_000));
 });

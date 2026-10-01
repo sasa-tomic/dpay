@@ -273,3 +273,14 @@ export async function sizeAtaIcFundPlan(args: {
   }
   return null;
 }
+
+// The latch key for the banner's one-way verdicts (the fundShort refuse flip): a VALUE
+// signature of the plan, never the model's object identity. The model is a useMemo over
+// polled balances, so its identity churns on every real balance write even when nothing
+// about the plan moved - an identity-keyed reset silently wiped a proven verdict on a live
+// device (refuse flashed, a poll re-created the model, the banner re-armed its button).
+// Equal-value models MUST produce equal signatures; only a plan whose semantics genuinely
+// moved may re-ask the question. Pinned by ataSetup.test.ts and flow 214's churn arm.
+export function ataPlanSignature(model: {plan: AtaSetupPlan; targets: readonly unknown[]; costLine: string}): string {
+  return JSON.stringify({kind: model.plan.kind, plan: model.plan, targets: model.targets, cost: model.costLine});
+}

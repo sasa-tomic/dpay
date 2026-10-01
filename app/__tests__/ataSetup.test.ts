@@ -18,7 +18,7 @@
 import {describe, test, expect} from '@jest/globals';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS} from '../solana/tokens';
-import {planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
+import {planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, ataPlanSignature, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
 
 const EURC = EURC_MINT_ADDRESS;
 const USDC = USDC_MINT_ADDRESS;
@@ -382,5 +382,39 @@ describe('ataPlanAfterFundShort - the proven-unfundable flip to the refuse panel
     expect(ataPlanAfterFundShort(fund)).toEqual(fund);
     expect(ataPlanAfterFundShort({kind: 'none'})).toEqual({kind: 'none'});
     expect(ataPlanAfterFundShort({kind: 'refuse'})).toEqual({kind: 'refuse'});
+  });
+});
+
+describe('ataPlanSignature - the latch key that survives poll churn', () => {
+  // The refuse verdict must live across re-renders. The model is a useMemo over POLLED data
+  // (assets / tokenStates / assetBalances): its object identity churns on every real balance
+  // write even when nothing about the plan moved - the live device run cleared the refuse
+  // panel that way (banner back to idle, button silently re-armed). The reset latch must
+  // therefore key on a VALUE signature: equal-value models are equal, only a plan whose
+  // semantics genuinely moved may re-arm the question.
+  const fundIcModel = (rawAmount: string) => {
+    const plan = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [icSource({rawAmount})]});
+    if (plan.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
+    return {plan, targets: ['EURC'], costLine: '0.00408856 SOL'};
+  };
+
+  test('equal-value twins built separately carry the SAME signature (poll churn cannot re-arm)', () => {
+    expect(ataPlanSignature(fundIcModel('450000000'))).toBe(ataPlanSignature(fundIcModel('450000000')));
+  });
+
+  test('a candidate balance change is a new answer - the signature moves', () => {
+    expect(ataPlanSignature(fundIcModel('450000000'))).not.toBe(ataPlanSignature(fundIcModel('450000001')));
+  });
+
+  test('a kind change moves the signature', () => {
+    const fundIc = fundIcModel('450000000');
+    const create = planAtaSetup({targets: [absent()], solBalance: SOL_ATA_SETUP_MIN_LAMPORTS.toString(), sources: [], icSources: [icSource()]});
+    expect(ataPlanSignature(fundIc)).not.toBe(ataPlanSignature({plan: create, targets: ['EURC'], costLine: '0.00408856 SOL'}));
+  });
+
+  test('a targets change moves the signature', () => {
+    const a = fundIcModel('450000000');
+    const b = fundIcModel('450000000');
+    expect(ataPlanSignature({...a, targets: ['EURC', 'USDC']})).not.toBe(ataPlanSignature(b));
   });
 });

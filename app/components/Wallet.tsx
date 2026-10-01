@@ -19,7 +19,7 @@ import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILIT
 import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
 import {setRuntimePoolNames, registeredVenues, venueOfId, type VenueEntry} from '../config/venues';
-import {ataPlanAfterFundShort, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
+import {ataPlanAfterFundShort, ataPlanSignature, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
 import {fetchJupiterQuote} from '../services/jupiter';
 import {prepareSolanaConvertRecord, executeSolanaConvert} from '../convert/executeSolana';
 import {CONVERT_SLIPPAGE_BPS_DEFAULT, CONVERT_CEFI_CONFIRM_TIMEOUT_MS, resolveConvertDestinations, type ComposedConvertRoute} from '../config/convert';
@@ -1043,6 +1043,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         return;
       }
       setAtaSetupConfirm(sized);
+    } catch {
+      // HARD RULE: the banner never returns silently to idle. The sizing walk is engineered
+      // not to throw (quote seams catch everything, the sizer answers or nulls) - if one ever
+      // does, that is a terminal state the user SEES, never a swallowed rejection that just
+      // re-arms the button.
+      setAtaSetupErr(M.deposit.ata.swapFailed);
     } finally {
       setAtaSetupBusy(false);
     }
@@ -1154,7 +1160,17 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   }, [ataSetupModel, ataSetupConfirm, ataIcConfirm, ataSetupBusy, ataSwapPending, ataSetupErr, solAddress, icFundShort]);
   // Any re-plan (a balance or token refresh moved the inputs) re-answers honestly: the flip
   // is only ever as old as the evidence behind it.
-  useEffect(() => { setIcFundShort(false); }, [ataSetupModel]);
+  // The refuse latch's reset keys on the plan's VALUE signature, never the model's identity:
+  // the model is a useMemo over polled balances (identity churns on every real balance
+  // write), and an identity-keyed reset silently wiped a proven verdict on a live device -
+  // the refuse flashed, a poll re-created the model, the banner re-armed its doomed button.
+  // HARD RULE: only a plan whose semantics actually moved may re-ask the question.
+  const ataPlanSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    const sig = ataPlanSignature(ataSetupModel);
+    if (ataPlanSigRef.current != null && ataPlanSigRef.current !== sig) setIcFundShort(false);
+    ataPlanSigRef.current = sig;
+  }, [ataSetupModel]);
   // Refresh the SELECTED token's account state (naming its mint when known; else repoll all).
   const refreshSelectedToken = useCallback(() => {
     if (activeSolAsset?.mint != null) refreshToken(activeSolAsset.mint);
