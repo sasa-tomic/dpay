@@ -19,7 +19,7 @@ import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILIT
 import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
 import {setRuntimePoolNames, registeredVenues, venueOfId, type VenueEntry} from '../config/venues';
-import {ataConfirmPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, planAtaSetup, sendCefiDepositForRecord, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type AtaRouteAnswer, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
+import {ataConfirmPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, cefiDepositOutstanding, planAtaSetup, sendCefiDepositForRecord, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type AtaRouteAnswer, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
 import {prepareTransfer as railPrepareTransfer, prepareLegacyTransfer as railPrepareLegacyTransfer, decodeLegacyReply as railDecodeLegacyReply, submitTransfer as railSubmitTransfer} from '../services/rail';
 import {fetchJupiterQuote} from '../services/jupiter';
 import {prepareSolanaConvertRecord, executeSolanaConvert} from '../convert/executeSolana';
@@ -29,7 +29,7 @@ import {prepareCeFiConvertRecord, prepareComposedConvertRecord} from '../convert
 import type {ConvertRecord} from '../convert/types';
 import {isTerminalConvertStep} from '../convert';
 import {WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
-import {adoptConvertRecord, convertResumeSnapshot, subscribeConvertRecords} from '../convertResume';
+import {adoptConvertRecord, convertResumeSnapshot, markConvertDepositSent, subscribeConvertRecords} from '../convertResume';
 import {normalizePendingKey, removePendingPays} from '../services/pendingPays';
 import {solanaTokenInfo} from '../solana/tokens';
 import {useHotkeys} from '../hooks/useHotkeys';
@@ -1259,19 +1259,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       setAtaIcConfirm(null);
       setAtaSwapPending(true);
       await adoptConvertRecord(rec);
-      // The legless cefi record waits for the USER's deposit by design - the one-tap runner
-      // IS the user here: send the deposit with the device key so the order actually funds
-      // (2026-10-02 live trip: the order expired unused because nobody else could move the
-      // IC-side money). Non-IC records have their own drivers; unknown leaves the venue as
-      // the source of truth.
-      await sendCefiDepositForRecord(rec, {
-        catalog: {currencies: catalog},
-        secretHex: identity.secretHex,
-        prepareTransfer: railPrepareTransfer,
-        prepareLegacyTransfer: railPrepareLegacyTransfer,
-        decodeLegacyReply: railDecodeLegacyReply,
-        submitTransfer: railSubmitTransfer,
-      });
+      // The deposit is NOT sent here (2026-10-02 P0): the record-lifecycle sender in the
+      // watcher owns it — the notify inside adoptConvertRecord reached it before this line,
+      // and it fires the send exactly once (marker-persisted), for THIS record and for every
+      // recovered one. An `unknown` envelope outcome leaves the record standing at
+      // awaiting_deposit with the venue as the source of truth; the card NEVER falls back to
+      // idle either way — the live-record state renders while the record is non-terminal.
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn('runAtaIcSetup failed:', msg);
@@ -1295,12 +1288,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         // The real cause RENDERS on the refuse panel - a confirm-time failure may never
         // leave the card cause-less (2026-10-02 live-trip fix).
         setAtaSetupErr(msg.length > 0 ? msg : M.deposit.ata.swapFailed);
-      } else if (typeof (e as {ataDepositRefused?: unknown} | null)?.ataDepositRefused === 'string') {
-        // The ledger refused the deposit (definitive, never retried or re-signed): the venue's
-        // order expires unused, no money moved, and the REAL refusal words reach the card.
-        ataSwapRecord.current = null;
-        setAtaSwapPending(false);
-        setAtaSetupErr(msg.length > 0 ? friendlySolError(msg) : M.deposit.ata.swapFailed);
       } else {
         setAtaSetupErr(msg.length > 0 ? msg : M.deposit.ata.swapFailed);
       }
@@ -1312,34 +1299,80 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // engine's own record updates. done → the SOL landed: the SAME create leg the direct runner
   // uses (createTokenAta per absent mint), under one busy state. Any other terminal step →
   // the honest ending (the record's own state panel carries the detail).
+  // THE RECORD-LIFECYCLE DEPOSIT (2026-10-02 P0, the silent-strand fix): the watcher ALSO owns
+  // every cefi deposit — ANY non-terminal record sitting at `awaiting_deposit` with an
+  // IC-source deposit outstanding gets `sendCefiDepositForRecord` fired EXACTLY ONCE, keyed on
+  // the persisted `depositSentAtMs` marker plus this session's touched set. The old shape sent
+  // the deposit only inside the synchronous run (right after adopt): a slow poll answering
+  // `unknown`, the resume engine continuing a half-prepared record, or an app restart stranded
+  // the record at awaiting_deposit with nobody owning the deposit — and the card, blind to
+  // live records, re-armed the one-tap button (a second-spend invitation).
+  const ataDepositTouched = useRef<Set<string>>(new Set());
+  const sendRecordDepositOnce = useCallback(async (rec: ConvertRecord): Promise<void> => {
+    if (!cefiDepositOutstanding(rec) || ataDepositTouched.current.has(rec.id)) return;
+    ataDepositTouched.current.add(rec.id);
+    try {
+      // The marker persists BEFORE the envelope leaves: a kill mid-send can never re-send
+      // after a restart (a rebuilt envelope is a fresh transfer — a second spend).
+      if (!(await markConvertDepositSent(rec.id, Date.now()))) return; // another taker won
+      await sendCefiDepositForRecord(rec, {
+        catalog: {currencies: catalog},
+        secretHex: identity.secretHex,
+        prepareTransfer: railPrepareTransfer,
+        prepareLegacyTransfer: railPrepareLegacyTransfer,
+        decodeLegacyReply: railDecodeLegacyReply,
+        submitTransfer: railSubmitTransfer,
+      });
+    } catch (e: unknown) {
+      // A definitive ledger/destination refusal (tagged {ataDepositRefused}): nothing moved,
+      // the venue order expires unfunded. The REAL words reach the card when it is THIS
+      // setup's record; any other record's refusal stays a log line (the record's own panel
+      // carries it when it turns terminal).
+      const msg = e instanceof Error ? e.message : String(e);
+      if (ataSwapRecord.current?.id === rec.id) {
+        setAtaSetupErr(msg.length > 0 ? friendlySolError(msg) : M.deposit.ata.swapFailed);
+      } else {
+        console.warn('record deposit send refused:', msg);
+      }
+    }
+  }, [catalog, identity.secretHex]);
   useEffect(() => subscribeConvertRecords(records => {
     const pending = ataSwapRecord.current;
-    if (pending == null) return;
-    const rec = records[pending.id];
-    if (rec == null) return;
-    if (rec.step === 'done') {
-      ataSwapRecord.current = null;
-      setAtaSwapPending(false);
-      void (async () => {
-        setAtaSetupBusy(true);
-        try {
-          for (const mint of pending.mints) await createAtaForMint(mint);
-          refreshSol();
-        } catch (e: unknown) {
-          const msg = e instanceof Error ? e.message : String(e);
-          setAtaSetupErr(friendlySolError(msg));
-        } finally {
-          setAtaSetupBusy(false);
-        }
-      })();
-    } else if (isTerminalConvertStep(rec.step)) {
-      ataSwapRecord.current = null;
-      setAtaSwapPending(false);
-      // The record's REAL cause reaches the card (2026-10-01 founder directive): the engine's
-      // failureDetail verbatim, the step-mapped honest line only when the engine recorded none.
-      setAtaSetupErr(ataRecordErrLine(rec));
+    if (pending != null) {
+      const rec = records[pending.id];
+      if (rec != null) {
+      if (rec.step === 'done') {
+        ataSwapRecord.current = null;
+        setAtaSwapPending(false);
+        void (async () => {
+          setAtaSetupBusy(true);
+          try {
+            for (const mint of pending.mints) await createAtaForMint(mint);
+            refreshSol();
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            setAtaSetupErr(friendlySolError(msg));
+          } finally {
+            setAtaSetupBusy(false);
+          }
+        })();
+      } else if (isTerminalConvertStep(rec.step)) {
+        ataSwapRecord.current = null;
+        setAtaSwapPending(false);
+        // The record's REAL cause reaches the card (2026-10-01 founder directive): the engine's
+        // failureDetail verbatim, the step-mapped honest line only when the engine recorded none.
+        setAtaSetupErr(ataRecordErrLine(rec));
+      }
+      }
     }
-  }), [createAtaForMint, refreshSol]);
+    // The deposit handoff runs for EVERY record in the snapshot — the just-adopted one
+    // included (the notify inside adoptConvertRecord reaches this watcher first, so the run
+    // path itself never needs to send), plus anything recovered from a poll, a resume
+    // handoff, or a restart.
+    for (const rec of Object.values(records)) {
+      if (cefiDepositOutstanding(rec)) void sendRecordDepositOnce(rec);
+    }
+  }), [createAtaForMint, refreshSol, sendRecordDepositOnce]);
   const confirmAtaSetup = useCallback(async () => {
     if (ataSetupBusy) return;
     const ic = ataIcConfirm;
