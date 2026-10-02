@@ -53,6 +53,7 @@ import {icpCatalogOf, BUNDLED_NETWORKS} from '../config/catalog';
 import {M} from '../i18n';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
+import {isTerminalConvertStep, type ConvertStep} from '../convert/types';
 import {bytesToHex} from '@noble/hashes/utils';
 import {utf8ToBytes} from './base64url';
 
@@ -415,6 +416,25 @@ export type CefiDepositRecord = {
   amountIn: string;
   providerDeposit?: {depositAddress?: string; depositMemo?: string} | null;
 };
+
+/**
+ * The record-lifecycle deposit predicate (2026-10-02 P0). TRUE exactly when a convert record
+ * sits NON-TERMINAL at `awaiting_deposit` with an IC-source deposit nobody has taken yet: the
+ * record names an IC catalog currency it was funded from (`inCurrency`), the venue issued a
+ * deposit target (`providerDeposit.depositAddress`), and the once-only marker
+ * (`depositSentAtMs`) is absent. This is the watcher's test for "this record's cefi deposit
+ * still needs sending" — the gate that recovers the direct-cefi AND composed record families
+ * from unknown polls, resume handoffs, and app restarts. A taken deposit is never outstanding
+ * again (the persisted marker survives restarts); `provider_processing` and every terminal
+ * step belong to the venue poll, never the deposit sender.
+ */
+export function cefiDepositOutstanding(rec: CefiDepositRecord & {step: ConvertStep; depositSentAtMs?: number}): boolean {
+  if (rec.step !== 'awaiting_deposit' || isTerminalConvertStep(rec.step)) return false;
+  if (rec.depositSentAtMs != null) return false;
+  if (rec.inCurrency == null) return false;
+  const to = rec.providerDeposit?.depositAddress;
+  return typeof to === 'string' && to.length > 0;
+}
 
 export type CefiDepositDeps = {
   catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>};

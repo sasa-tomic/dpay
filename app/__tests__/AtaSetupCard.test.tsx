@@ -191,3 +191,48 @@ describe('AtaSetupCard - the honest refusal and the busy runs', () => {
     act(() => { tree.unmount(); });
   });
 });
+
+describe('AtaSetupCard - the LIVE state (2026-10-02 P0: a non-terminal record owns the card)', () => {
+  // The silent-strand defect: the card fell back to idle (button re-armed) while a convert
+  // record was still live - a second-spend invitation. The live state renders progress plus
+  // the honesty line, and NO button, NO idle probe minimum line - and it outranks every
+  // other state, because a live record must never be pasted over by idle/confirm/busy.
+  const LIVE_LINE = 'Converting 0.91 ICP. Your EURC account are created as soon as it lands.';
+  const LIVE_NOTE = 'This keeps running on its own, also if you leave this view.';
+
+  test('live: the progress line + the honesty copy render, there is NO button and NO minimum line', () => {
+    const onStart = jest.fn();
+    const tree = mount({kind: 'fund-ic', live: true, liveLine: LIVE_LINE, liveNote: LIVE_NOTE, minLine: 'Needs at least 0.09 VCHF.', onStart});
+    expect(has(tree, 'ata-setup-EUR-live')).toBe(true);
+    expect(textOf(tree, 'ata-setup-EUR-live-line')).toContain('0.91 ICP');
+    expect(has(tree, 'ata-setup-EUR-live-note')).toBe(true);
+    expect(textOf(tree, 'ata-setup-EUR-live-note')).toContain('leave this view');
+    expect(has(tree, 'ata-setup-EUR-complete')).toBe(false); // never a second spend
+    expect(has(tree, 'ata-setup-EUR-confirm-btn')).toBe(false);
+    expect(has(tree, 'ata-setup-EUR-banner')).toBe(false);
+    expect(textOf(tree, 'ata-setup-EUR-live')).not.toContain('at least 0.09 VCHF'); // no idle probe line
+    act(() => { tree.unmount(); });
+  });
+
+  test('live outranks busy and confirm: a record standing while a run (or a stale confirm) is up still hides every control', () => {
+    const tree = mount({kind: 'fund-ic', live: true, liveLine: LIVE_LINE, liveNote: LIVE_NOTE, busy: true, confirming: true, confirmLine: 'Swaps about 5 VCHF'});
+    expect(has(tree, 'ata-setup-EUR-live')).toBe(true);
+    expect(has(tree, 'ata-setup-EUR-busy')).toBe(false);
+    expect(has(tree, 'ata-setup-EUR-confirm-btn')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('live outranks refuse: the honest dead end waits until the record resolves', () => {
+    const tree = mount({kind: 'refuse', live: true, liveLine: LIVE_LINE, liveNote: LIVE_NOTE});
+    expect(has(tree, 'ata-setup-EUR-live')).toBe(true);
+    expect(has(tree, 'ata-setup-EUR-refuse')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('not live: every existing state renders exactly as before (no live chrome leaking)', () => {
+    const tree = mount({kind: 'create'});
+    expect(has(tree, 'ata-setup-EUR-live')).toBe(false);
+    expect(has(tree, 'ata-setup-EUR-banner')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+});

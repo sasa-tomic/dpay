@@ -203,6 +203,8 @@ export const depositEs: DepositMessages = {
     cancelAction: 'Cancelar',
     creatingAll: targets => `Creando tus ${targets}. Confirmando en Solana…`,
     swapPending: targets => `Canje a SOL en curso. Tus ${targets} se crean en cuanto llegue.`,
+    liveProgress: (moving, targets) => `Convirtiendo ${moving}. Tus ${targets} se crean en cuanto llegue.`,
+    liveKeepsRunning: 'Esto sigue funcionando solo, también si sales de esta vista.',
     swapFailed: 'El canje no se completó: no se creó nada y el token canjeado sigue en tu wallet.',
     swapUnknown: 'El canje fue aceptado pero aún no se confirma. Revisa tu saldo de SOL en un momento y vuelve a completar la configuración.',
   },

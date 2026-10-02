@@ -559,6 +559,38 @@ describe('hydrateConvertStore — the dpay.convert.v3 record round-trip', () => 
     // that used to be unscoped).
     expect(await loadConvertRecords('bb'.repeat(32))).toEqual({});
   });
+  test('the deposit-sent marker round-trips through hydration (the once-only deposit gate, 2026-10-02 P0)', async () => {
+    // The marker is what makes the watcher's deposit send exactly-once across restarts: a
+    // record persisted with it must hydrate WITH it (not drop the field and re-arm the send).
+    const PUB = 'cc'.repeat(32);
+    // The shape that actually carries the marker: a legless cefi record parked at
+    // awaiting_deposit (the direct-cefi family the watcher recovers).
+    const cefiShape = {
+      step: 'awaiting_deposit' as const,
+      legs: [],
+      providerRef: {orderId: 'o-depin', statusUrl: 'https://p.example/s/o-depin'},
+    };
+    const marked = record({...cefiShape, depositSentAtMs: 1727870400000});
+    const {saveConvertRecord} = await import('../convert');
+    await saveConvertRecord(PUB, marked);
+    const loaded = await loadConvertRecords(PUB);
+    expect(loaded.abc123?.step).toBe('awaiting_deposit');
+    expect(loaded.abc123?.depositSentAtMs).toBe(1727870400000);
+    // An UNmarked record stays unmarked (absent-field hydration tolerated, like inCurrency).
+    await saveConvertRecord(PUB, record(cefiShape));
+    expect((await loadConvertRecords(PUB)).abc123?.depositSentAtMs).toBeUndefined();
+    // The setup-ownership link round-trips too (the live-card key, 2026-10-02 P0), and a
+    // corrupt one is refused like any other malformed money-adjacent field.
+    const owned = record({...cefiShape, ataTargetMints: ['mint-eurc-1', 'mint-usdc-2']});
+    await saveConvertRecord(PUB, owned);
+    expect((await loadConvertRecords(PUB)).abc123?.ataTargetMints).toEqual(['mint-eurc-1', 'mint-usdc-2']);
+    await saveConvertRecord(PUB, record(cefiShape));
+    expect((await loadConvertRecords(PUB)).abc123?.ataTargetMints).toBeUndefined();
+    await AsyncStorage.setItem(`dpay.convert.v3.${PUB}`, JSON.stringify({
+      abc123: {...record(cefiShape), ataTargetMints: 'not-a-list'},
+    }));
+    expect(await loadConvertRecords(PUB)).toEqual({}); // corrupt link: the record is dropped
+  });
   test('loadConvertRecords migrates a legacy v1 store: persisted as scoped v2, v1 key removed', async () => {
     const PUB = 'aa'.repeat(32);
     const legacy = {

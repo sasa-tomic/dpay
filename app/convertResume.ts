@@ -757,6 +757,18 @@ export async function adoptConvertRecord(record: ConvertRecord): Promise<void> {
   void driveOne(record.id);
 }
 
+/** Take the cefi-deposit handoff for ONE record (2026-10-02 P0): persist the deposit-sent
+ *  marker on the engine's copy AND the scoped store BEFORE any transfer envelope leaves, so
+ *  the watcher's once-only gate survives a kill mid-send (a rebuilt envelope after a restart
+ *  would be a fresh transfer — a second spend). Idempotent: the FIRST taker's marker stands;
+ *  `false` = nothing was marked (already taken, or the record is unknown to this engine). */
+export async function markConvertDepositSent(id: string, atMs: number): Promise<boolean> {
+  const rec = state.records.get(id);
+  if (rec == null || rec.depositSentAtMs != null) return false;
+  await commit({...rec, depositSentAtMs: atMs});
+  return true;
+}
+
 /** The user's acknowledge of a `stuck` record: the instructions were read, the background watch
  *  may stop. Idempotent; refuses non-stuck records. */
 export async function acknowledgeStuckRecord(id: string): Promise<void> {

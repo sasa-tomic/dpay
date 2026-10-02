@@ -102,8 +102,10 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   // (sub2 ink), it does not grow a second box inside the panel.
   const noRail = homeAsset === null;
   // A setup run owns the money movement: the row's actions stand down until it settles
-  // (2026-10-02 audit - the action row stayed live while the card ran a venue swap).
-  const actionDisabled = noRail || ataSetup?.busy === true;
+  // (2026-10-02 audit - the action row stayed live while the card ran a venue swap). The
+  // LIVE-record state (2026-10-02 P0) masks the same way: a record still working toward the
+  // setup is the run, whatever the card's busy flag says.
+  const actionDisabled = noRail || ataSetup?.busy === true || ataSetup?.live === true;
   const actionIcon = noRail ? C.sub2 : C.brandText;
   // The refuse panel's copy affordance: the device's SOL receive address, copied in place.
   const {copied, copy} = useCopyFeedback();
@@ -151,6 +153,9 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
           costLine={ataSetup.costLine}
           minLine={ataSetup.minLine}
           fundFromLine={ataSetup.fundFromLine}
+          live={ataSetup.live}
+          liveLine={ataSetup.liveLine}
+          liveNote={ataSetup.liveNote}
           confirming={ataSetup.confirming}
           confirmLine={ataSetup.confirmLine}
           busy={ataSetup.busy}

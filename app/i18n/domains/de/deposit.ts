@@ -202,6 +202,8 @@ export const depositDe: DepositMessages = {
     cancelAction: 'Abbrechen',
     creatingAll: targets => `Deine ${targets} werden erstellt - Bestätigung auf Solana…`,
     swapPending: targets => `Tausch in SOL läuft. Deine ${targets} werden erstellt, sobald er ankommt.`,
+    liveProgress: (moving, targets) => `Konvertiert ${moving}. Deine ${targets} werden erstellt, sobald er ankommt.`,
+    liveKeepsRunning: 'Das läuft von allein weiter, auch wenn du diese Ansicht verlässt.',
     swapFailed: 'Der Tausch ist nicht durchgegangen - nichts wurde erstellt, der getauschte Token ist noch in deiner Wallet.',
     swapUnknown: 'Der Tausch wurde angenommen, aber noch nicht bestätigt. Prüfe gleich dein SOL-Guthaben und schließe die Einrichtung dann erneut ab.',
   },
