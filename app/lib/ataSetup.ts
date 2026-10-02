@@ -421,7 +421,11 @@ export type CefiDepositDeps = {
   secretHex: string;
   prepareTransfer: (secretHex: string, catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>}, req: {toAccount: string; amount: string; currency: number; nonceHex: string}) => Promise<{ledger: string; envelopeHex: string; requestIdHex: string}>;
   prepareLegacyTransfer: (secretHex: string, req: {ledger: string; toAccountId: string; amountE8s: string; feeE8s: string}) => Promise<{ledger: string; envelopeHex: string; requestIdHex: string}>;
-  submitTransfer: (prepared: {ledger: string; envelopeHex: string; requestIdHex: string}, pollerSecret: string, opts: {attempts: number; intervalMs: number}) => Promise<{kind: 'settled'; blockIndex: string} | {kind: 'rejected'; reason: string; variant?: string} | {kind: 'unknown'}>;
+  // The legacy `transfer` reply carries the LEGACY tag set (TxDuplicate, TxTooOld, ...) - the
+  // ICRC-1 default decoder throws 'DIDL decode error' on it (live 2026-10-02: the transfer
+  // landed, the decode threw, the run aborted with a red line over money that had moved).
+  decodeLegacyReply: (replyArgHex: string) => Promise<{ok: boolean; blockIndex?: string | null; errVariant?: string | null; errDetail?: string | null}>;
+  submitTransfer: (prepared: {ledger: string; envelopeHex: string; requestIdHex: string}, pollerSecret: string, opts: {attempts: number; intervalMs: number}, decodeReply?: (replyArgHex: string) => Promise<{ok: boolean; blockIndex?: string | null; errVariant?: string | null; errDetail?: string | null}>) => Promise<{kind: 'settled'; blockIndex: string} | {kind: 'rejected'; reason: string; variant?: string} | {kind: 'unknown'}>;
 };
 
 // The legacy `transfer` (64-hex account identifiers) is ICP-mainnet-only - the same
@@ -447,7 +451,9 @@ export async function sendCefiDepositForRecord(rec: CefiDepositRecord, deps: Cef
       currency: rec.inCurrency,
       nonceHex,
     });
-  const outcome = await deps.submitTransfer(prepared, deps.secretHex, {attempts: 6, intervalMs: 2500});
+  // The legacy reply decodes through the LEGACY tag set; the ICRC-1 path keeps the rail's
+  // default decoder (prod-proven).
+  const outcome = await deps.submitTransfer(prepared, deps.secretHex, {attempts: 6, intervalMs: 2500}, LEGACY_ACCOUNT_ID.test(to) ? deps.decodeLegacyReply : undefined);
   if (outcome.kind === 'settled') return {kind: 'sent', blockIndex: outcome.blockIndex};
   if (outcome.kind === 'unknown') return {kind: 'unknown'};
   throw Object.assign(new Error(outcome.reason), {ataDepositRefused: outcome.reason});

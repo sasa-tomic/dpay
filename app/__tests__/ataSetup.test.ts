@@ -607,7 +607,10 @@ describe('sendCefiDepositForRecord - the fund-ic deposit the venue order needs (
     amountIn: '0.89848158',
     providerDeposit: {depositAddress: '2vxsx-fae', depositMemo: 'm-42'},
   };
-  const baseDeps = (over: Partial<Parameters<typeof sendCefiDepositForRecord>[1]> = {}): Parameters<typeof sendCefiDepositForRecord>[1] => ({
+  const baseDeps = (over: Partial<Parameters<typeof sendCefiDepositForRecord>[1]> = {}): Parameters<typeof sendCefiDepositForRecord>[1] =>
+    // `over` may override a now-required seam with undefined (the ICRC-1 pin), so the
+    // spread needs the explicit cast to the deps shape.
+    ({
     catalog,
     secretHex: 'ab',
     prepareTransfer: async (_s, _c, req) => {
@@ -618,8 +621,9 @@ describe('sendCefiDepositForRecord - the fund-ic deposit the venue order needs (
       return prepared;
     },
     submitTransfer: async () => ({kind: 'settled' as const, blockIndex: '4242'}),
+    decodeLegacyReply: async () => ({ok: true, blockIndex: '4242'}),
     ...over,
-  });
+  }) as Parameters<typeof sendCefiDepositForRecord>[1];
 
   test('sends the exact deposit with the venue memo and reports the block', async () => {
     await expect(sendCefiDepositForRecord(rec, baseDeps())).resolves.toEqual({kind: 'sent', blockIndex: '4242'});
@@ -653,9 +657,11 @@ describe('sendCefiDepositForRecord - the fund-ic deposit the venue order needs (
 
   test('a 64-hex venue deposit rides the LEGACY ICP transfer (exact amount, catalog fee, empty memo)', async () => {
     let seen: unknown = null;
+    let seenDecoder: unknown = 'not-called';
     const deps = baseDeps({
       prepareTransfer: () => { throw new Error('must not take the ICRC-1 path'); },
       prepareLegacyTransfer: async (_s, req) => { seen = req; return prepared; },
+      submitTransfer: async (_p, _s, _o, decodeReply) => { seenDecoder = decodeReply; return {kind: 'settled' as const, blockIndex: '4242'}; },
     });
     const out = await sendCefiDepositForRecord(
       {...rec, providerDeposit: {depositAddress: 'a4ef38803ebbab5595d1afb8a7a136f8b75167d5693579df60651f96829f4ac9'}},
@@ -668,6 +674,19 @@ describe('sendCefiDepositForRecord - the fund-ic deposit the venue order needs (
       amountE8s: '0.89848158',
       feeE8s: '10000',
     });
+    // The legacy reply MUST decode through the legacy tag set - the ICRC-1 default decoder
+    // throws 'DIDL decode error: trailing bytes after value' on it (live 2026-10-02: the
+    // transfer LANDED, the decode threw, the run aborted with a scary red line).
+    expect(seenDecoder).toBe(deps.decodeLegacyReply);
+  });
+
+  test('the ICRC-1 path keeps the default reply decoder', async () => {
+    let seenDecoder: unknown = 'not-called';
+    const deps = baseDeps({
+      submitTransfer: async (_p, _s, _o, decodeReply) => { seenDecoder = decodeReply; return {kind: 'settled' as const, blockIndex: '4242'}; },
+    });
+    await sendCefiDepositForRecord(rec, deps);
+    expect(seenDecoder).toBeUndefined();
   });
 
   test('a legacy deposit carrying a venue memo is refused honestly (the legacy ledger cannot carry it)', async () => {

@@ -37,6 +37,10 @@ export type RailPrepared = {
 
 /** What one signed reply decodes to — shared by the transfer (wasm) and minter (frozen-shape)
  * decoders below so `pollTransfer` treats them identically. */
+/** What a reply decoder may answer. Null-ish fields are allowed: the wasm decoders
+ *  (icpDecodeTransferResult / icpDecodeLegacyTransferResult) spell absent optional text
+ *  as null, and every consumer treats absent the same way. */
+type DecodedReply = {ok: boolean; blockIndex?: string | null; errVariant?: string | null; errDetail?: string | null};
 type RailReplyOutcome = {ok: boolean; blockIndex?: string; errVariant?: string; errDetail?: string};
 
 export type RailOutcome =
@@ -233,7 +237,7 @@ export async function submitTransfer(
   prepared: {ledger: string; envelopeHex: string; requestIdHex: string},
   pollerSecret: string,
   opts: {attempts: number; intervalMs: number},
-  decodeReply?: (replyArgHex: string) => Promise<RailReplyOutcome>,
+  decodeReply?: (replyArgHex: string) => Promise<DecodedReply>,
 ): Promise<RailOutcome> {
   // HTTP only says what THIS POST observed. An identical peer submission may already have entered
   // consensus, so even 4xx/429 cannot safely produce a decline. The sender-authorized request_status
@@ -248,7 +252,7 @@ export async function pollTransfer(
   prepared: {ledger: string; requestIdHex: string},
   pollerSecret: string,
   opts: {attempts: number; intervalMs: number},
-  decodeReply?: (replyArgHex: string) => Promise<RailReplyOutcome>,
+  decodeReply?: (replyArgHex: string) => Promise<DecodedReply>,
 ): Promise<RailOutcome> {
   const st = await icPollRequestStatus(pollerSecret, prepared.ledger, prepared.requestIdHex, opts);
   return decodeTransferStatus(st, decodeReply);
@@ -272,12 +276,20 @@ export async function submitNfcTransfer(
 
 async function decodeTransferStatus(
   st: Awaited<ReturnType<typeof icPollRequestStatus>>,
-  decodeReply?: (replyArgHex: string) => Promise<RailReplyOutcome>,
+  decodeReply?: (replyArgHex: string) => Promise<DecodedReply>,
 ): Promise<RailOutcome> {
   if (st == null) return {kind: 'unknown'};
   if (st.state === 'replied' && st.replyArgHex != null) {
     const decode = decodeReply ?? ((hex: string) => DpayCore.icpDecodeTransferResult(hex));
-    const tr = await decode(st.replyArgHex);
+    // A reply we cannot parse is still a reply: the canister EXECUTED the call. Classify
+    // terminal-but-opaque (honest pending, the record stands, never resubmit) instead of
+    // throwing a raw DIDL error over money that has moved (live 2026-10-02).
+    let tr;
+    try {
+      tr = await decode(st.replyArgHex);
+    } catch {
+      return {kind: 'unknown'};
+    }
     if (tr.ok) return {kind: 'settled', blockIndex: tr.blockIndex ?? ''};
     // An idempotent replay is a SETTLED payment, not a decline: the ledger is telling us these
     // exact arguments already executed. Both spellings are accepted because the ICP ledger's
