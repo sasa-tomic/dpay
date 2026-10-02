@@ -9,7 +9,7 @@ import {RailDisclosure} from './RailDisclosure';
 import {FundingRoutes} from './FundingRoutes';
 import {CoachTip} from './CoachTip';
 import {LinkRow} from './ConvertShared';
-import {S} from '../styles';
+import {S, amountFontFor} from '../styles';
 import {C, FONT} from '../config/palette';
 import {IconCheck, IconChevronDown, IconClock, IconCopy, IconQr, IconShare} from './icons';
 import {QR_SIZE} from '../config/constants';
@@ -439,7 +439,7 @@ export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balanc
         </Pressable>
         <TextInput
           testID="evm-req-amount-input"
-          style={S.amountInput}
+          style={[S.amountInput, amountFontFor(amount)]}
           value={amount}
           onChangeText={setAmount}
           keyboardType="decimal-pad"

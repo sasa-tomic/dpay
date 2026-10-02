@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {View, Text, Pressable, TextInput, Platform, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import {C, FONT} from '../config/palette';
-import {S} from '../styles';
+import {S, amountFontFor} from '../styles';
 import {EXPIRY_WINDOW, NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
 import {toUnits, randNonceHex, nowSecs, rawToDecimal} from '../lib/format';
 import {nettedWireRaw} from '../lib/amount';
@@ -716,7 +716,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
                 hardware keyboard attached to a phone. The DPAY form only: a checkout-open is signed and
                 supersedes the live charge, so the shared field does not submit while the checkout
                 checkbox is checked — the checkout's own button is the one that opens the charge. */}
-            <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} onSubmitEditing={(checkoutAvailable || checkoutHeld) && codeForm === 'checkout' ? undefined : makeRequest} returnKeyType="done" />
+            <TextInput testID="amount-input" style={[S.amountInput, amountFontFor(amount)]} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} onSubmitEditing={(checkoutAvailable || checkoutHeld) && codeForm === 'checkout' ? undefined : makeRequest} returnKeyType="done" />
           </View>
           {/* The ONE message box — mounted in BOTH code forms (founder 2026-09-14): same component,
               same place under the shared amount row, same text across the checkout-checkbox toggle. In

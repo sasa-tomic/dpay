@@ -80,7 +80,7 @@ import {eip55ChecksumBad} from '../lib/eip55';
 import type {Identity} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
 import {C} from '../config/palette';
-import {S} from '../styles';
+import {S, amountFontFor} from '../styles';
 import {IconChevronDown} from './icons';
 import {
   ConvertHeader,
@@ -1450,7 +1450,7 @@ export function ConvertIntentSheet({
           <View style={S.amountRow}>
             <TextInput
               testID="convert-amount"
-              style={S.amountInput}
+              style={[S.amountInput, amountFontFor(amountText)]}
               value={amountText}
               onChangeText={t => {
                 setAmountText(t);

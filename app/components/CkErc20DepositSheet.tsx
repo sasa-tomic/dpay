@@ -2,7 +2,7 @@ import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {QrCode} from './QrCode';
 import {C} from '../config/palette';
-import {S} from '../styles';
+import {S, amountFontFor} from '../styles';
 import {POLL, DEPOSIT_TIMEOUT_MS, QR_SIZE} from '../config/constants';
 import {cmpRaw} from '../lib/amount';
 import {parseUserAmount} from '../lib/format';
@@ -592,7 +592,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
           <TextInput
             testID="ckerc20-amount"
             accessibilityLabel={M.deposit.erc20.amountPlaceholder}
-            style={S.amountInput}
+            style={[S.amountInput, amountFontFor(amount)]}
             keyboardType="decimal-pad"
             placeholder={M.deposit.erc20.amountPlaceholder}
             value={amount}

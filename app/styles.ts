@@ -1,4 +1,4 @@
-import {StyleSheet} from 'react-native';
+import {StyleSheet, type TextStyle} from 'react-native';
 import {C, DARK, FONT, LIGHT, withAlpha} from './config/palette';
 import type {Palette} from './config/palette';
 
@@ -581,7 +581,7 @@ function buildStyles(p: Palette) {
   paidText: {fontSize: 32, fontWeight: '700', color: p.ok, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
   alreadyText: {color: p.warn},
   paidSub: {fontSize: 16, color: p.sub, marginTop: 6, fontFamily: FONT.sans},
-  amountRow: {flexDirection: 'row', alignItems: 'center', backgroundColor: p.field, borderRadius: 8, paddingHorizontal: 16, height: 56, alignSelf: 'stretch', borderWidth: 1, borderColor: p.line2},
+  amountRow: {flexDirection: 'row', alignItems: 'center', backgroundColor: p.field, borderRadius: 8, paddingHorizontal: 16, minHeight: 56, alignSelf: 'stretch', borderWidth: 1, borderColor: p.line2},
   currency: {fontSize: 32, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
   // `minWidth: 0` is a NO-OP on Yoga (RN's default) and a FIX on react-native-web: a CSS flex item
   // defaults to `min-width: auto`, so an `<input>`'s intrinsic ~20-character width (414px at 34pt)
@@ -590,6 +590,14 @@ function buildStyles(p: Palette) {
   // renders with its left edge cut off (measured on Convert, 2026-09-08; every amount row shares
   // this style, so every one of them had it).
   amountInput: {flex: 1, minWidth: 0, fontSize: 32, fontWeight: '700', color: p.ink, marginLeft: 6, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
+  // The amount inputs' size steps (2026-10-02 founder defect: a long amount overflowed the
+  // fixed-height convert field - horizontal overflow plus a vertically clipped glyph box).
+  // Android's TextInput has no reliable adjustFontSizeToFit, so `amountFontFor` below picks
+  // among these three tokens by the TYPED LENGTH. Same family as amountInput (weight, face,
+  // tabular figures, color) - only the size steps down.
+  amountFontLg: {fontSize: 32, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums'], flex: 1, minWidth: 0, marginLeft: 6},
+  amountFontMd: {fontSize: 24, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums'], flex: 1, minWidth: 0, marginLeft: 6},
+  amountFontSm: {fontSize: 18, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums'], flex: 1, minWidth: 0, marginLeft: 6},
   // Long opaque strings (EVM addresses, tx hashes) - no display-sized font can hold 42+ hex
   // chars on one line, so these render at body size in the mono face instead. Same overflow
   // guard as amountInput (flex:1 + minWidth:0; measured clipping at 34px, 2026-09-20).
@@ -1127,6 +1135,19 @@ function buildStyles(p: Palette) {
 /** The live stylesheet. Read `S.x` at render time; treat the object as opaque + immutable
  *  outside `applyPalette`. */
 export const S = buildStyles(LIGHT);
+
+/**
+ * The amount-input font for the TYPED text (2026-10-02 founder defect): a long amount must
+ * stay fully visible in the field, so the size steps down by content length - 32px through
+ * 9 characters, 24px through 19, 18px beyond. Deterministic and pure (Android's
+ * TextInput has no reliable adjustFontSizeToFit); pinned by convertAmountSizing.test.ts.
+ */
+export function amountFontFor(text: string): TextStyle {
+  const len = text.trim().length;
+  if (len <= 9) return S.amountFontLg;
+  if (len <= 19) return S.amountFontMd;
+  return S.amountFontSm;
+}
 
 /** Synchronous OS-scheme probe at module load, so the FIRST paint already matches the OS theme
  *  (no light flash on a dark OS). RN Appearance covers both native (uiMode) and RNW

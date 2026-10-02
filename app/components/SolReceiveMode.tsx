@@ -3,7 +3,7 @@ import {View, Text, Pressable, TextInput, ActivityIndicator, Platform, type Text
 import {QrCode} from './QrCode';
 import bs58 from 'bs58';
 import {C, FONT} from '../config/palette';
-import {S} from '../styles';
+import {S, amountFontFor} from '../styles';
 import {isSolanaDevnet, QR_SIZE_SMALL, SOL_ACTIVE_POLL_WINDOW_MS, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAssetCompact, rawToDecimal, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
@@ -633,7 +633,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
         </Pressable>
         <TextInput
           testID="sol-req-amount-input"
-          style={S.amountInput}
+          style={[S.amountInput, amountFontFor(amount)]}
           value={amount}
           onChangeText={setAmount}
           keyboardType="decimal-pad"

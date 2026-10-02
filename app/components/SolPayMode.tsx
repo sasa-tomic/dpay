@@ -4,7 +4,7 @@ import bs58 from 'bs58';
 import {QrCode} from './QrCode';
 import {InstructionPanel} from './InstructionPanel';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
-import {S} from '../styles';
+import {S, amountFontFor} from '../styles';
 import {C} from '../config/palette';
 import {IconAlert, IconCheck, IconClock, IconScan, IconShare} from './icons';
 import {POLL, QR_SIZE} from '../config/constants';
@@ -1042,7 +1042,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
             <Text style={S.dim2}>{M.pay.spay.amountLabel}</Text>
             <TextInput
               testID="sol-spay-amount-input"
-              style={S.amountInput}
+              style={[S.amountInput, amountFontFor(spayAmount)]}
               value={spayAmount}
               onChangeText={setSpayAmount}
               keyboardType="decimal-pad"
