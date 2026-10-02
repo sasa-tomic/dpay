@@ -279,6 +279,60 @@ happens in the final report after a documented skip, never as a mid-session stal
   and used; no path means mainnet at the smallest allowed amount, and the dead end gets recorded
   with the date so future agents do not repeat the search before its time.
 
+## Non-negotiable: money in motion is never silent (set 2026-10-02)
+
+Third instance of the silent-money-path class (first: registry-order sizing picked a venue by list
+position; second: the settle-phase error swallow; third: the 2026-10-02 POCO P0 - a composed fund-ic
+run whose IC-poll answered `unknown`, stranding the record at `awaiting_deposit` while the card fell
+back to idle and re-armed the same button; the deposit never went out; recovered live by hand,
+nothing lost). These rules generalize the class - they are not about that one bug - and bind every
+future money path. Prose without a gate is a wish: the enforcement gate is the money-family pin
+inventory (below).
+
+- **Surfaces derive money state from the record store, never from run-path booleans.** While any
+  non-terminal convert/payment record exists for the active identity, every mounted surface hosting
+  that record's flow family renders — derived from the record store — a live in-progress state
+  (backed by the record id plus fresh engine evidence), a terminal state, an honest failure with
+  cause and practical instructions, a refusal, or an acknowledged honest-unknown with instructions.
+  The converse is the same bug: rendered progress with no live record. A live (non-terminal) record
+  means money is in motion; while one exists, no surface may fall back to idle or offer that money a
+  second operation. Idle-with-button during money in motion is a bug, not a UX nit. App-level Home
+  may stay an overview; DEMO play money is exempt; the acknowledged-stuck quiet state (timer stopped,
+  instructions shown) is a legal fifth state.
+- **Liveness: every non-terminal record must have a driver CAPABLE of advancing it** — watch-and-act,
+  a resubmit of its own bytes, or a rendered user action. A poll-only driver facing a required
+  unsent deposit is a strand even if the spinner is honest (the provider driver is a pure GET by
+  design; observation is not advancement). The resume/watcher engine sweeps ALL non-terminal records
+  at app start.
+- **Ownership: no money leg executes before a persistent record exists naming every leg, and in
+  every record state every leg has exactly one named owner** (the run path or the watcher — never
+  neither, never both). Enforced as a fast domain-tier state-machine property test (milliseconds, no
+  relay).
+- **A money path counts as tested ONLY by a flow-harness pin** (jest flow tier): the real app tree,
+  the private prod-shaped relay, the app's own record store and resume engine, real clients and real
+  device cryptography. Stub ONLY external-world transports (venue upstreams behind relay test knobs,
+  chain RPC simulators, the external wallet signing seam); never jest-mock app-internal modules.
+  Hermetic happy-path coverage does not qualify. The pin MUST include adversarial arms: (a) the
+  happy run, (b) a kill/restart mid-run with the resumed engine completing the money outcome, (c) an
+  unknown/slow arm handing the run to the watcher with the watcher completing. The never-idle
+  surface assertion is timer-sampled across the whole arm including transitions (the flow-214 churn
+  pattern), not spot-checked. Faults are injected at a seam, never by timing.
+- **No repeat affordance while funds are unaccounted.** While funds are neither known-settled at
+  destination nor known-returned to source, no surface may offer a repeat affordance for the same
+  money intent (source asset + destination + purpose) — including non-terminal records,
+  acknowledged-stuck, and terminal-but-unreconciled states (`quote_expired` under a late-deposit
+  watch, `failed_leg` pending the stuck trichotomy). A refusal before any signature re-arms
+  immediately. A second attempt on a live intent slot must block-and-show the live record, or
+  explicitly supersede it (user-confirmed abort with a disposition of in-flight funds). Until a
+  surface holds its first record-store snapshot for the identity, money actions render "checking",
+  never armed.
+- **Qualification is mechanical and family-scoped.** The pin inventory lives in a generated, gated
+  matrix (`convert-matrix --check` pattern; `smoke-manifest` precedent); a family may claim
+  "supported" only with a pin row. Mandatory for new families and for changes to a family's
+  lifecycle/ownership code; copy/visual tweaks exempt; existing families add the pin when next
+  touched. Pins are the automated floor only — the founder's live funds-ledgered round trip (the
+  rule above) remains the gate for calling a venue or path "supported"; D31 is not replaced.
+
 ## Projects
 
 | Name | What |
