@@ -19,7 +19,8 @@ import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILIT
 import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
 import {setRuntimePoolNames, registeredVenues, venueOfId, type VenueEntry} from '../config/venues';
-import {ataConfirmPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type AtaRouteAnswer, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
+import {ataConfirmPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, planAtaSetup, sendCefiDepositForRecord, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type AtaRouteAnswer, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
+import {prepareTransfer as railPrepareTransfer, submitTransfer as railSubmitTransfer} from '../services/rail';
 import {fetchJupiterQuote} from '../services/jupiter';
 import {prepareSolanaConvertRecord, executeSolanaConvert} from '../convert/executeSolana';
 import {CONVERT_SLIPPAGE_BPS_DEFAULT, CONVERT_CEFI_CONFIRM_TIMEOUT_MS, resolveConvertDestinations, type ComposedConvertRoute} from '../config/convert';
@@ -1258,6 +1259,17 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       setAtaIcConfirm(null);
       setAtaSwapPending(true);
       await adoptConvertRecord(rec);
+      // The legless cefi record waits for the USER's deposit by design - the one-tap runner
+      // IS the user here: send the deposit with the device key so the order actually funds
+      // (2026-10-02 live trip: the order expired unused because nobody else could move the
+      // IC-side money). Non-IC records have their own drivers; unknown leaves the venue as
+      // the source of truth.
+      await sendCefiDepositForRecord(rec, {
+        catalog: {currencies: catalog},
+        secretHex: identity.secretHex,
+        prepareTransfer: railPrepareTransfer,
+        submitTransfer: railSubmitTransfer,
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn('runAtaIcSetup failed:', msg);
@@ -1281,13 +1293,19 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         // The real cause RENDERS on the refuse panel - a confirm-time failure may never
         // leave the card cause-less (2026-10-02 live-trip fix).
         setAtaSetupErr(msg.length > 0 ? msg : M.deposit.ata.swapFailed);
+      } else if (typeof (e as {ataDepositRefused?: unknown} | null)?.ataDepositRefused === 'string') {
+        // The ledger refused the deposit (definitive, never retried or re-signed): the venue's
+        // order expires unused, no money moved, and the REAL refusal words reach the card.
+        ataSwapRecord.current = null;
+        setAtaSwapPending(false);
+        setAtaSetupErr(msg.length > 0 ? friendlySolError(msg) : M.deposit.ata.swapFailed);
       } else {
         setAtaSetupErr(msg.length > 0 ? msg : M.deposit.ata.swapFailed);
       }
     } finally {
       setAtaSetupBusy(false);
     }
-  }, [ataSetupBusy, ataSetupModel.plan, prepareAtaIcSwap, quoteAtaIcFund, solAddress, solState.balance]);
+  }, [ataSetupBusy, ataSetupModel.plan, prepareAtaIcSwap, quoteAtaIcFund, solAddress, solState.balance, catalog, identity.secretHex]);
   // The fund-ic watcher: the venue settles on minutes, so the create step rides the resume
   // engine's own record updates. done → the SOL landed: the SAME create leg the direct runner
   // uses (createTokenAta per absent mint), under one busy state. Any other terminal step →

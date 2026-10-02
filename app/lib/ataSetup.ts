@@ -52,6 +52,8 @@ import {registeredVenues} from '../config/venues';
 import {M} from '../i18n';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
+import {bytesToHex} from '@noble/hashes/utils';
+import {utf8ToBytes} from './base64url';
 
 /** One wallet SPL-token fact the planner reads. Structurally the balance hook's per-mint state
  *  (`useSolanaBalances`'s token shape) without any import of it — this module stays pure. */
@@ -381,4 +383,60 @@ export function ataRecordErrLine(rec: {step: string; failureDetail?: string}): s
   const detail = typeof rec.failureDetail === 'string' ? rec.failureDetail.trim() : '';
   if (detail.length > 0) return detail;
   return rec.step === 'stuck' ? M.deposit.ata.swapUnknown : M.deposit.ata.swapFailed;
+}
+
+/** The direct-cefi fund-ic deposit (2026-10-02 live-trip fix). A legless provider record lands at
+ *  `awaiting_deposit` by design - the venue holds the funds mid-trade and the resume engine's
+ *  provider driver ONLY polls the venue; the IC-side deposit transfer is the value movement. The
+ *  one-tap runner must therefore send that deposit ITSELF with the device key (an order nobody
+ *  funds just expires). Wallet-side seam injection keeps this pure and jest-drivable.
+ *
+ *  Outcomes:
+ *    sent          - the ledger accepted the deposit (blockIndex = evidence); the provider poll
+ *                    owns the wait from here.
+ *    not-applicable - the record takes a non-IC input or names no deposit target: the caller
+ *                    moves on (other record kinds have their own drivers).
+ *    unknown       - the envelope's fate is unproven: the record STANDS at awaiting_deposit (the
+ *                    venue is the source of truth; identical-byte resubmit is the only safe
+ *                    retry and it is NOT attempted here).
+ *  A definitive ledger/destination refusal THROWS tagged {ataDepositRefused: reason} - the real
+ *  words reach the card, the record stays at awaiting_deposit (expired unused, no money moved),
+ *  and a retry means a fresh confirm with a fresh order. */
+export type CefiDepositOutcome =
+  | {kind: 'sent'; blockIndex: string}
+  | {kind: 'not-applicable'}
+  | {kind: 'unknown'};
+
+export type CefiDepositRecord = {
+  // `undefined` rides the store's absent-field hydration (ConvertRecord stores another-rail
+  // inputs as absent); `null` is the explicit other-rail spelling. Both mean not-applicable.
+  inCurrency?: number | null;
+  amountIn: string;
+  providerDeposit?: {depositAddress?: string; depositMemo?: string} | null;
+};
+
+export type CefiDepositDeps = {
+  catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>};
+  secretHex: string;
+  prepareTransfer: (secretHex: string, catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>}, req: {toAccount: string; amount: string; currency: number; nonceHex: string}) => Promise<{ledger: string; envelopeHex: string; requestIdHex: string}>;
+  submitTransfer: (prepared: {ledger: string; envelopeHex: string; requestIdHex: string}, pollerSecret: string, opts: {attempts: number; intervalMs: number}) => Promise<{kind: 'settled'; blockIndex: string} | {kind: 'rejected'; reason: string; variant?: string} | {kind: 'unknown'}>;
+};
+
+export async function sendCefiDepositForRecord(rec: CefiDepositRecord, deps: CefiDepositDeps): Promise<CefiDepositOutcome> {
+  const to = rec.providerDeposit?.depositAddress;
+  if (rec.inCurrency == null || to == null || to.length === 0) return {kind: 'not-applicable'};
+  const memo = typeof rec.providerDeposit?.depositMemo === 'string' ? rec.providerDeposit.depositMemo : '';
+  // The deposit memo MUST ride the transfer (types.ts: it routes the venue's crediting); an
+  // empty memo is the no-memo case, never a dropped one.
+  const nonceHex = memo.length > 0 ? bytesToHex(utf8ToBytes(memo)) : '';
+  const prepared = await deps.prepareTransfer(deps.secretHex, deps.catalog, {
+    toAccount: to,
+    amount: rec.amountIn,
+    currency: rec.inCurrency,
+    nonceHex,
+  });
+  const outcome = await deps.submitTransfer(prepared, deps.secretHex, {attempts: 6, intervalMs: 2500});
+  if (outcome.kind === 'settled') return {kind: 'sent', blockIndex: outcome.blockIndex};
+  if (outcome.kind === 'unknown') return {kind: 'unknown'};
+  throw Object.assign(new Error(outcome.reason), {ataDepositRefused: outcome.reason});
 }
