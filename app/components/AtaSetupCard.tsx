@@ -249,30 +249,6 @@ export function AtaSetupCard({
       </View>
     );
   }
-  // The terminal failure (founder spec 2026-10-02): the error FIRST, then the next steps -
-  // what happens to the money and what to do now. Only a run's terminal ending reaches this
-  // branch (the wallet sets `errNext` for exactly those); when the funds are NOT verifiably
-  // accounted for (`errCanRetry` false) the repeat button STANDS DOWN - no second spend
-  // while money is unaccounted.
-  if (err != null && errNext != null) {
-    return (
-      <View testID={`${testIDPrefix}-failed`} style={S.ataBanner}>
-        <Text testID={`${testIDPrefix}-err`} style={S.err}>{err}</Text>
-        <Text testID={`${testIDPrefix}-err-next`} style={S.dim2}>{errNext}</Text>
-        {errCanRetry ? (
-          <Pressable
-            testID={`${testIDPrefix}-complete`}
-            style={S.primaryWide}
-            onPress={onStart}
-            accessibilityRole="button"
-            accessibilityLabel={M.deposit.ata.completeSetup}
-            accessibilityState={{disabled: false}}>
-            <Text style={S.primaryText}>{M.deposit.ata.completeSetup}</Text>
-          </Pressable>
-        ) : null}
-      </View>
-    );
-  }
   // Idle: the compact banner - one-line summary row (title + cost), the payer line and the
   // ONE button. 2026-10-02 audit: the per-asset 'No X account yet.' prose restated the title
   // line for line - deleted, and with it the never-wired expander machinery.
