@@ -15,7 +15,7 @@ import {readFileSync} from 'node:fs';
 import {join, dirname} from 'node:path';
 import {jest} from '@jest/globals';
 import {NativeModules, Share} from 'react-native';
-import {scaled as budgetScaled} from './budget';
+import {BUDGET_MAX, scaled as budgetScaled} from './budget';
 
 const here = dirname(__filename); // app/__tests__/flow/harness
 const appRoot = join(here, '..', '..', '..'); // app/
@@ -409,7 +409,14 @@ export function installFlowLifecycle(): void {
   // (jest-circus run.js: `hook.timeout || getState().testTimeout`), so beforeAll/afterAll knob
   // calls in flow files get the same relief. Keep it a pure positive-transition stretch: nothing
   // here weakens a refusal assertion, it only stops the clock from false-firing healthy code.
-  jest.setTimeout(budgetScaled(30_000));
+  //
+  // THE CEILING MUST DOMINATE THE WORST SCALED WAIT, not track the current factor: waits use the
+  // worker's monotone high-water (budget.ts), which can RISE past the factor this file seeded at
+  // install, and a max-stretched wait (base 30s x BUDGET_MAX 6 = 180s) must still fit under the
+  // ceiling plus the test's non-wait work. Formula: base x BUDGET_MAX + base headroom. Observed
+  // 2026-10-02 flow 31: ceiling seeded x5 = 150s, the healthy waitForText later scaled x6 =
+  // 150s — the ceiling fired ON a healthy wait and the trap dumped post-teardown noise.
+  jest.setTimeout(30_000 * BUDGET_MAX + 30_000);
   beforeEach(async () => {
     g[clipboardKey] = '';
     // WORKER-PERSISTENT HOST-GLOBAL HYGIENE (the sequential-run corruption class). Node ≥21 has a

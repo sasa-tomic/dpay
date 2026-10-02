@@ -63,16 +63,23 @@ function cpuPsiAvg10(): number {
   } catch { return 0; }
 }
 
+/** The single clamp constant both terms respect: any scaled wait is base x BUDGET_MAX at worst.
+ *  The flow tier's per-test jest ceiling (harness/setupFlow.ts) is DERIVED from this so the
+ *  ceiling can never lose the race to a max-stretched wait (observed 2026-10-02, flow 31: the
+ *  ceiling was seeded at the file-install factor x5 = 150s, the wait later scaled at the
+ *  worker's x6 high-water = 150s - the ceiling fired on a healthy wait). */
+export const BUDGET_MAX = 6;
+
 /** factor(load) — the load term of THE formula (the trailing view). */
 export function factorOf(load: number): number {
   const f = 1 + Math.max(0, load - 3) * 1.0;
-  return Math.min(6, Math.max(1, f));
+  return Math.min(BUDGET_MAX, Math.max(1, f));
 }
 
 /** factorFromPsi(psiPercent) — the instant term: 20% pressure → ×2, 80% → ×5. */
 export function psiFactorOf(psi: number): number {
   const f = 1 + psi / 20;
-  return Math.min(6, Math.max(1, f));
+  return Math.min(BUDGET_MAX, Math.max(1, f));
 }
 
 /** The EFFECTIVE multiplier right now: env override wins; otherwise the high-water of every
