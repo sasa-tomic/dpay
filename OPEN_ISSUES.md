@@ -32,36 +32,6 @@ so this needs an app rebuild from main plus the EVM float (`0x1888…27668`: 0.0
 0.4 ZCHF; worst-case gas ≈0.0007 ETH at 0.76 gwei — founder drip only if short). Until then
 the venue is labeled UNPROVEN in-app.
 
-- **P0 (founder 2026-10-02, live-device finding): a COMPOSED fund-ic run stranded silently
-  after leg-1 — the card went back to idle with the button armed while the money's journey
-  was unfinished. Make silent money paths impossible and prove it in CI.** Evidence (POCO,
-  fresh `d0e28e09` build, screenshots `/tmp/opencode/p4`-`p15`): VCHF source, confirm pressed
-  19:47:40; card idled by +3s with NO error, NO busy, NO refuse; at 19:48 leg-1 settled
-  on-chain (`an ICPSwap` -2.6302547 VCHF, `+0.97379559 ICP`, ledger block 38758651); the cefi
-  deposit was never sent; no terminal state ever rendered. The card then re-probed (ICP now
-  fundable) and re-armed the SAME one-tap button while a non-terminal record was still live
-  — a double-spend invitation. Recovery: the re-probe proposed the proven ICP-direct route;
-  that press completed the whole chain live (deposit `a7035814…` 0.91460672 ICP → venue
-  settle `+0.02476138 SOL` → two device-signed ATA creates; USDC/EURC ATAs verified on-chain,
-  rent 1488440 lamports each) — so the DIRECT path is proven on hardware, and the defect is
-  specific to the COMPOSED record's lifecycle. Root shape: the deposit send lives only in the
-  synchronous run path (`sendCefiDepositForRecord` right after adopt; composed prepare step 7);
-  any async handoff (slow IC-leg poll answered `unknown`, resume engine, app restart) strands
-  the record at `awaiting_deposit` with nobody owning the deposit, and the card has NO
-  live-record state, so it renders idle. FIX (all three parts): (1) the deposit send moves
-  into the RECORD lifecycle — the watcher/resume path sends the cefi deposit for ANY
-  non-terminal record at `awaiting_deposit` with an unsent IC-source deposit (composed AND
-  direct), so restarts and unknown polls recover; (2) the setup card renders a LIVE state
-  while a non-terminal record exists (progress + honesty line), never idle-with-button; (3)
-  `unknown` poll outcomes hand the run to the watcher instead of returning silently. PROCESS
-  (the founder's "never again"): (a) new mandatory gate — every convert/ata record family
-  (direct cefi, composed multi-leg) gets a REAL-RELAY no-money integration pin: real quotes +
-  real order minting against the prod-shaped relay, only wallet signing stubbed, asserting
-  deposit-sent AND card-never-idle-while-record-live; (b) a resume arm: kill the run
-  mid-prepare, let the resume engine continue, assert the deposit still goes; (c) hard rule in
-  CLAUDE.md: an async money path may never return without a rendered terminal-or-progress
-  state; hermetic-only coverage does NOT qualify a money path as tested. Value 9 / effort M.
-
 - **NEXT TOPIC (founder 2026-09-30): CoW Swap is the SECOND EVM venue — build BOTH, in that
   order (founder directive same day: target 2+ venues per currency, so no single venue is a
   point of failure).** Uniswap V3 is shipped (GOAL above) and awaits its D31 live trip; CoW
@@ -285,6 +255,24 @@ until the blockers land. THE thing that unblocks it:**
   OWN holdings. Nothing dpay pays, holds, or custodies.
 
 ## Retired this prune (2026-09-30 — decision-shaped; do not re-file)
+
+- **P0 composed-strand + stuck-record waves (founder 2026-10-02, live-device findings)** —
+  LANDED 2026-10-02, both merged to main `4157d272`. (1) COMPOSED fund-ic strand (POCO
+  evidence `/tmp/opencode/p4`-`p15`: leg-1 settled on-chain, deposit never sent, card idle
+  with button re-armed over a live record = double-spend invitation): the deposit send moved
+  into the RECORD lifecycle — the watcher/resume path sends the cefi deposit for ANY
+  non-terminal record at `awaiting_deposit` (composed AND direct), once per record via a
+  persisted marker, restart-safe; `unknown` poll outcomes hand the run to the watcher; the
+  setup card renders a LIVE state keyed on absent-target records (never idle-with-button
+  while money moves). Commits `4012915a` (live card), `ba50bd86`/`a0fd87ff` merges,
+  engine+card wave `fcb9c60f..a0fd87ff`. (2) STUCK records (founder's VCHF→ICP→SOL composed
+  record sat past its window with no terminal state): the engine now RESOLVES expired stuck
+  records to an honest terminal state instead of probing forever, and all six stuck surfaces
+  show the evidence, the real error, and the dead window (`stuckExpiry.ts` + `stuckProbeLog.ts`;
+  commits `72fe67a3`, `222bf443`, `4cfbaf68`, rebased `4157d272`). PROCESS landed with it:
+  CLAUDE.md "money in motion is never silent" (`cb4d1bd8`, 3-evaluator consensus) + the
+  global continuous-improvement meta-rule; qualification pins are family-scoped (the
+  real-relay 216 pin is GREEN on main; existing families add theirs when next touched).
 
 - **Connection-blame copy sweep** — DONE 2026-09-30 (merged `74c57e16`): `classifyTransportFailure`
   extracted to `app/transportFailure.ts` (+ `classifyIcReadFailure`), swept across fee /
