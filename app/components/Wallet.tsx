@@ -20,7 +20,7 @@ import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
 import {setRuntimePoolNames, registeredVenues, venueOfId, type VenueEntry} from '../config/venues';
 import {ataConfirmPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, planAtaSetup, sendCefiDepositForRecord, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type AtaRouteAnswer, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
-import {prepareTransfer as railPrepareTransfer, submitTransfer as railSubmitTransfer} from '../services/rail';
+import {prepareTransfer as railPrepareTransfer, prepareLegacyTransfer as railPrepareLegacyTransfer, submitTransfer as railSubmitTransfer} from '../services/rail';
 import {fetchJupiterQuote} from '../services/jupiter';
 import {prepareSolanaConvertRecord, executeSolanaConvert} from '../convert/executeSolana';
 import {CONVERT_SLIPPAGE_BPS_DEFAULT, CONVERT_CEFI_CONFIRM_TIMEOUT_MS, resolveConvertDestinations, type ComposedConvertRoute} from '../config/convert';
@@ -1268,6 +1268,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         catalog: {currencies: catalog},
         secretHex: identity.secretHex,
         prepareTransfer: railPrepareTransfer,
+        prepareLegacyTransfer: railPrepareLegacyTransfer,
         submitTransfer: railSubmitTransfer,
       });
     } catch (e: unknown) {

@@ -49,6 +49,7 @@
 // the convert engine, never re-stated here.
 
 import {registeredVenues} from '../config/venues';
+import {icpCatalogOf, BUNDLED_NETWORKS} from '../config/catalog';
 import {M} from '../i18n';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
@@ -419,8 +420,14 @@ export type CefiDepositDeps = {
   catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>};
   secretHex: string;
   prepareTransfer: (secretHex: string, catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>}, req: {toAccount: string; amount: string; currency: number; nonceHex: string}) => Promise<{ledger: string; envelopeHex: string; requestIdHex: string}>;
+  prepareLegacyTransfer: (secretHex: string, req: {ledger: string; toAccountId: string; amountE8s: string; feeE8s: string}) => Promise<{ledger: string; envelopeHex: string; requestIdHex: string}>;
   submitTransfer: (prepared: {ledger: string; envelopeHex: string; requestIdHex: string}, pollerSecret: string, opts: {attempts: number; intervalMs: number}) => Promise<{kind: 'settled'; blockIndex: string} | {kind: 'rejected'; reason: string; variant?: string} | {kind: 'unknown'}>;
 };
+
+// The legacy `transfer` (64-hex account identifiers) is ICP-mainnet-only - the same
+// single-truth derivation prepare.ts uses for its deposit leg.
+const ICP_MAINNET_LEDGER = icpCatalogOf(BUNDLED_NETWORKS).find(c => c.currency === 8 && !c.testnet)?.ledger ?? '';
+const LEGACY_ACCOUNT_ID = /^[0-9a-fA-F]{64}$/;
 
 export async function sendCefiDepositForRecord(rec: CefiDepositRecord, deps: CefiDepositDeps): Promise<CefiDepositOutcome> {
   const to = rec.providerDeposit?.depositAddress;
@@ -429,14 +436,45 @@ export async function sendCefiDepositForRecord(rec: CefiDepositRecord, deps: Cef
   // The deposit memo MUST ride the transfer (types.ts: it routes the venue's crediting); an
   // empty memo is the no-memo case, never a dropped one.
   const nonceHex = memo.length > 0 ? bytesToHex(utf8ToBytes(memo)) : '';
-  const prepared = await deps.prepareTransfer(deps.secretHex, deps.catalog, {
-    toAccount: to,
-    amount: rec.amountIn,
-    currency: rec.inCurrency,
-    nonceHex,
-  });
+  // Venue deposit addresses come in BOTH ICP shapes: ICRC-1 account text and the legacy
+  // 64-hex account identifier (SideShift's ICP deposits are legacy, observed live
+  // 2026-10-02). Dispatch on shape; the rail validators still verify deeper.
+  const prepared = LEGACY_ACCOUNT_ID.test(to)
+    ? await prepareLegacy(deps, rec, to, memo)
+    : await deps.prepareTransfer(deps.secretHex, deps.catalog, {
+      toAccount: to,
+      amount: rec.amountIn,
+      currency: rec.inCurrency,
+      nonceHex,
+    });
   const outcome = await deps.submitTransfer(prepared, deps.secretHex, {attempts: 6, intervalMs: 2500});
   if (outcome.kind === 'settled') return {kind: 'sent', blockIndex: outcome.blockIndex};
   if (outcome.kind === 'unknown') return {kind: 'unknown'};
   throw Object.assign(new Error(outcome.reason), {ataDepositRefused: outcome.reason});
+}
+
+async function prepareLegacy(
+  deps: CefiDepositDeps,
+  rec: CefiDepositRecord,
+  to: string,
+  memo: string,
+): Promise<{ledger: string; envelopeHex: string; requestIdHex: string}> {
+  // The legacy ledger form carries NO memo field - a venue order that needs one can never
+  // be paid this way; refuse honestly instead of dropping the memo on the floor.
+  if (memo.length > 0) {
+    throw Object.assign(new Error('venue deposit needs a memo, which the legacy ICP transfer cannot carry'), {ataDepositRefused: 'memo on legacy'});
+  }
+  const row = deps.catalog.currencies.find(r => r.currency === rec.inCurrency);
+  if (row == null || row.ledger !== ICP_MAINNET_LEDGER) {
+    throw Object.assign(new Error('legacy venue deposit is ICP-mainnet-only'), {ataDepositRefused: 'legacy ledger'});
+  }
+  if (row.fee == null) {
+    throw Object.assign(new Error('catalog carries no fee for the legacy deposit ledger'), {ataDepositRefused: 'no fee'});
+  }
+  return deps.prepareLegacyTransfer(deps.secretHex, {
+    ledger: row.ledger,
+    toAccountId: to,
+    amountE8s: rec.amountIn,
+    feeE8s: row.fee,
+  });
 }
