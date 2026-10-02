@@ -160,6 +160,9 @@ export function AtaSetupCard({
           <Text key={t} style={S.ataBannerLine}>{M.deposit.ata.absent(t)}</Text>
         ))}
         <Text testID={`${testIDPrefix}-need-sol`} style={S.warnNote}>{M.deposit.ata.needSol(costLine)}</Text>
+        {/* The run's REAL cause (2026-10-02): a refusal reached from a confirm-time failure
+            carries its actual message - never a cause-less dead end. */}
+        {err ? <Text testID={`${testIDPrefix}-err`} style={S.err}>{err}</Text> : null}
         {solAddress != null && onCopySolAddress != null ? (
           <View testID={`${testIDPrefix}-sol-addr`} style={S.ataAddrRow}>
             <Text style={S.ataAddrText}>{solAddress}</Text>
