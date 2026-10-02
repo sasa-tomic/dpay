@@ -298,6 +298,67 @@ export async function sizeAtaIcFundPlan(args: {
   return best;
 }
 
+/** One route's FRESH answer at the confirmed input, reduced for the confirm-time verdict. */
+export type AtaRouteAnswer =
+  | {kind: 'quoted'; settleRaw: string}
+  | {kind: 'belowMin'; minInRaw: string}
+  | {kind: 'dead'};
+
+/** What the confirm press does next, decided ONLY from the confirmed candidate's fresh
+ *  answers (2026-10-02 live-trip fix): sign the best covering route; RE-CONFIRM when every
+ *  route refused below-minimum but the balance still covers the most permissive fresh
+ *  minimum (a fresh sized plan is shown, the user confirms again); refuse honestly
+ *  otherwise. There is no verdict that names a symbol - the caller's message carries the
+ *  CONFIRMED source, never a foreign candidate. */
+export type AtaConfirmVerdict =
+  | {kind: 'sign'; routeIndex: number}
+  | {kind: 'reconfirm'; minInRaw: string}
+  | {kind: 'refuse'; reason: 'cannot-cover' | 'below-min' | 'no-route'};
+
+/**
+ * Reduce the confirmed candidate's fresh route answers to the confirm-time verdict. `sign`
+ * picks the highest settle with the answers' order as the tie-break (the caller enumerates
+ * routes in registry order - the computeAutoPick canon). A best settle that cannot cover
+ * the target (plus SOL already held) refuses `cannot-cover` - never a doomed order. Every
+ * route answering below-minimum reduces to the MOST PERMISSIVE minimum: the balance covers
+ * it → `reconfirm` (the fresh sizing re-walks all candidates with the sizer's skip
+ * semantics); it cannot → `refuse below-min`. No live answer at all → `refuse no-route`.
+ */
+export function ataConfirmPlan(args: {
+  answers: AtaRouteAnswer[];
+  targetLamports: string;
+  solKnown: string | null;
+  balanceRaw: string;
+}): AtaConfirmVerdict {
+  const sol = rawDigits(args.solKnown) ?? 0n;
+  const target = rawDigits(args.targetLamports) ?? 0n;
+  let best = -1;
+  let bestSettle = -1n;
+  let minMin: bigint | null = null;
+  for (let i = 0; i < args.answers.length; i += 1) {
+    const a = args.answers[i]!;
+    if (a.kind === 'dead') continue;
+    if (a.kind === 'belowMin') {
+      const min = rawDigits(a.minInRaw);
+      if (min != null && min > 0n && (minMin == null || min < minMin)) minMin = min;
+      continue;
+    }
+    const settle = rawDigits(a.settleRaw);
+    if (settle == null || settle <= bestSettle) continue;
+    bestSettle = settle;
+    best = i;
+  }
+  if (best >= 0) {
+    if (bestSettle + sol < target) return {kind: 'refuse', reason: 'cannot-cover'};
+    return {kind: 'sign', routeIndex: best};
+  }
+  if (minMin != null) {
+    const balance = rawDigits(args.balanceRaw) ?? 0n;
+    return balance >= minMin ? {kind: 'reconfirm', minInRaw: minMin.toString()} : {kind: 'refuse', reason: 'below-min'};
+  }
+  return {kind: 'refuse', reason: 'no-route'};
+}
+
 // The latch key for the banner's one-way verdicts (the fundShort refuse flip): a VALUE
 // signature of the plan, never the model's object identity. The model is a useMemo over
 // polled balances, so its identity churns on every real balance write even when nothing
