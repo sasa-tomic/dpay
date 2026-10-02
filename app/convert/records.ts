@@ -159,6 +159,14 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // The cefi-deposit handoff marker (2026-10-02 P0): parsed so the once-only deposit gate
   // survives a restart. Absent on every record this build wrote before it — byte-identical.
   if (typeof r.depositSentAtMs === 'number') rec.depositSentAtMs = r.depositSentAtMs;
+  // The setup-ownership link (2026-10-02 P0): optional, but when present it must be a real
+  // mint list — a corrupt one is a shape this build never wrote (fail closed, like every
+  // other field the setup card renders from).
+  if (r.ataTargetMints != null) {
+    if (!Array.isArray(r.ataTargetMints)
+      || (r.ataTargetMints as unknown[]).some(m => typeof m !== 'string' || (m as string).length === 0)) return null;
+    rec.ataTargetMints = r.ataTargetMints as string[];
+  }
   // The COMPOSED IC→CeFi block (2026-09-26, brief §5.4 item 2): parsed BEFORE the plan so
   // the plan-shape checks below can key on it. Every venue-issued string must be present
   // and well-formed — a half-written deposit block on a record the engine signs against is

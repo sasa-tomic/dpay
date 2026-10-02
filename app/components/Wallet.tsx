@@ -1252,13 +1252,19 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     setAtaSetupErr(null);
     try {
       const rec = await prepareAtaIcSwap(sized);
+      // Freeze the setup's OWN targets on the record (2026-10-02 P0): the live-card link.
+      // The record settles SOL fuel, not the target mints themselves - the intersection with
+      // the CURRENT plan's targets is the exact, restart-safe "this record is MINE" test.
+      const owned: ConvertRecord = ataSetupModel.plan.kind === 'fund-ic'
+        ? {...rec, ataTargetMints: [...ataSetupModel.plan.mints]}
+        : rec;
       ataSwapRecord.current = {
-        id: rec.id,
+        id: owned.id,
         mints: ataSetupModel.plan.kind === 'fund-ic' ? ataSetupModel.plan.mints : [],
       };
       setAtaIcConfirm(null);
       setAtaSwapPending(true);
-      await adoptConvertRecord(rec);
+      await adoptConvertRecord(owned);
       // The deposit is NOT sent here (2026-10-02 P0): the record-lifecycle sender in the
       // watcher owns it — the notify inside adoptConvertRecord reached it before this line,
       // and it fires the send exactly once (marker-persisted), for THIS record and for every
@@ -1388,17 +1394,21 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // silent-strand defect was exactly a card blind to one.
   const [convertRecords, setConvertRecords] = useState(() => convertResumeSnapshot());
   useEffect(() => subscribeConvertRecords(setConvertRecords), []);
-  // The LIVE record for the setup card: any NON-terminal convert record whose settle side is
-  // one of the plan's target mints. While one exists, the card renders live (progress +
-  // honesty, NO button) - never the idle probe with its re-armed one-tap button (the P0's
-  // second-spend invitation), never a stale confirm or the refuse panel pasted over it.
+  // The LIVE record for the setup card: any NON-terminal convert record this setup OWNS
+  // (`ataTargetMints`, frozen on adopt) whose targets still intersect the CURRENT plan's.
+  // While one exists, the card renders live (progress + honesty, NO button) - never the idle
+  // probe with its re-armed one-tap button (the P0's second-spend invitation), never a stale
+  // confirm or the refuse panel pasted over it. A plain convert (no ownership link) never
+  // holds the card: its landing creates no accounts, so promising any would be a lie.
   const ataLiveRecord = useMemo(() => {
     const plan = ataSetupModel.plan;
     const mints = plan.kind === 'none' || plan.kind === 'refuse' ? [] : plan.mints;
     if (mints.length === 0) return null;
     for (const rec of Object.values(convertRecords)) {
       if (isTerminalConvertStep(rec.step)) continue;
-      if (mints.includes(rec.outLedger)) return rec;
+      const owned = rec.ataTargetMints;
+      if (owned == null || !owned.some(m => mints.includes(m))) continue;
+      return rec;
     }
     return null;
   }, [convertRecords, ataSetupModel]);

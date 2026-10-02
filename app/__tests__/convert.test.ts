@@ -579,6 +579,17 @@ describe('hydrateConvertStore — the dpay.convert.v3 record round-trip', () => 
     // An UNmarked record stays unmarked (absent-field hydration tolerated, like inCurrency).
     await saveConvertRecord(PUB, record(cefiShape));
     expect((await loadConvertRecords(PUB)).abc123?.depositSentAtMs).toBeUndefined();
+    // The setup-ownership link round-trips too (the live-card key, 2026-10-02 P0), and a
+    // corrupt one is refused like any other malformed money-adjacent field.
+    const owned = record({...cefiShape, ataTargetMints: ['mint-eurc-1', 'mint-usdc-2']});
+    await saveConvertRecord(PUB, owned);
+    expect((await loadConvertRecords(PUB)).abc123?.ataTargetMints).toEqual(['mint-eurc-1', 'mint-usdc-2']);
+    await saveConvertRecord(PUB, record(cefiShape));
+    expect((await loadConvertRecords(PUB)).abc123?.ataTargetMints).toBeUndefined();
+    await AsyncStorage.setItem(`dpay.convert.v3.${PUB}`, JSON.stringify({
+      abc123: {...record(cefiShape), ataTargetMints: 'not-a-list'},
+    }));
+    expect(await loadConvertRecords(PUB)).toEqual({}); // corrupt link: the record is dropped
   });
   test('loadConvertRecords migrates a legacy v1 store: persisted as scoped v2, v1 key removed', async () => {
     const PUB = 'aa'.repeat(32);

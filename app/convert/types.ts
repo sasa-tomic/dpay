@@ -407,6 +407,12 @@ export type ConvertRecord = {
    *  a fresh transfer, and a fresh transfer is a second spend). Additive and optional: every
    *  record prepared before it existed hydrates byte-identically. */
   depositSentAtMs?: number;
+  /** The setup-ownership link (2026-10-02 P0): the absent-mint targets of the ONE-TAP setup
+   *  run that adopted this record, frozen on adopt. Non-setup records (a plain convert)
+   *  never carry it — so the setup card's LIVE state keys on the intersection with the
+   *  CURRENT plan's targets: a record holds the card exactly while its own accounts are
+   *  still absent, and never hijacks a card its conversion does not serve. */
+  ataTargetMints?: string[];
   /** The cross-rail block (Routes B/C): present iff the record was prepared on a route with
    *  a CCTP leg; extends the five IC legs with the external-signature burn and (Route C)
    *  the final Jupiter leg. */
