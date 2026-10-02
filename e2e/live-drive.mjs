@@ -18,8 +18,19 @@
 //   conv-c2 <usdc>             USDC→EURC (Jupiter)
 //   conv-c3 <eurc>             EURC→USDC (Jupiter, round-trip proof)
 //   watch                      re-open Convert and follow the parked record (resume engine)
+//   setup-ata <usd|eur>        drive the per-currency SOL token-account setup (the 2026-10-01
+//                              wave) in that currency's OWN view: Home → openBalances → tap the
+//                              currency row → the ONE setup card. Captures every state to
+//                              e2e/shots/live-ata-<cur>-<state>.png: accounts badge, card-before
+//                              (idle, with the measured minimum), confirm, busy, and the
+//                              terminal (success: card AND the 'Needs setup' badge gone; or the
+//                              refuse panel: need line + SOL address + Copy; or the card's REAL
+//                              error line verbatim in the log). A clean refuse on an unfunded
+//                              wallet is valid evidence. The Confirm press is HARD-GATED: it
+//                              fires only with DPAY_ATA_CONFIRM=1 in the environment.
 //
-// Env: DPAY_LIVE_RELAY (default http://127.0.0.1:8899), DPAY_LIVE_WEB (pin the sirv port).
+// Env: DPAY_LIVE_RELAY (default http://127.0.0.1:8899), DPAY_LIVE_WEB (pin the sirv port),
+// DPAY_ATA_CONFIRM=1 (arms setup-ata's Confirm press; unset = the press never fires).
 import {execFileSync} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
@@ -330,6 +341,183 @@ async function cmdBoot() {
     console.log(await agentBalance());
     const rb = await relayBalances(pubHex);
     console.log(`relay /api/v1/balances → ${rb.status}: ${rb.body.slice(0, 1_200)}`);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// setup-ata: the per-currency SOL token-account setup (the 2026-10-01 wave).
+// SPEND DISCIPLINE: the Complete press fires only on a probe-proven SWAP plan (measured
+// "Needs at least N <SRC>." line) — a create plan is the one kind whose Complete press moves
+// money without a confirm, and a create plan never gets a min line. The Confirm press is
+// hard-gated behind DPAY_ATA_CONFIRM=1; unset, the driver captures the confirm state and
+// presses Cancel instead. Nothing else in this command can move money.
+// ---------------------------------------------------------------------------
+
+const ATA_CURS = {
+  usd: {code: 'USD', token: 'USDC'},
+  eur: {code: 'EUR', token: 'EURC'},
+};
+
+/** The refuse panel is a VALID terminal (the honest dead end): need line + SOL address + copy. */
+async function captureAtaRefuse(driver, prefix, curKey) {
+  const needSol = (await driver.isPresent(`${prefix}-need-sol`))
+    ? await driver.readText(`${prefix}-need-sol`) : '(no need-sol line rendered)';
+  let addr = '(no inline address)';
+  if (await driver.isPresent(`${prefix}-sol-addr`)) addr = await driver.readText(`${prefix}-sol-addr`);
+  const escape = (await driver.isPresent(`${prefix}-copy-sol`)) ? 'copy-sol'
+    : (await driver.isPresent(`${prefix}-show-sol`)) ? 'show-sol' : 'NONE (hard-rule violation: explains-only refuse)';
+  log(`REFUSE: need="${needSol}" addr="${addr.replace(/\s+/g, ' ')}" escape=${escape}`);
+  await driver.screenshot(`live-ata-${curKey}-refuse`);
+}
+
+async function cmdSetupAta(curKey) {
+  const c = ATA_CURS[curKey];
+  if (c == null) throw new Error(`setup-ata: currency must be usd|eur, got ${JSON.stringify(curKey)}`);
+  const P = `ata-setup-${c.code}`; // the card's per-currency testID prefix (AtaSetupCard)
+  const badgeId = `currency-${c.code}-setup`; // the accounts-list 'Needs setup' row badge
+  const confirmArmed = process.env.DPAY_ATA_CONFIRM === '1';
+  log(`setup-ata ${curKey}: DPAY_ATA_CONFIRM=${confirmArmed ? '1 — the Confirm press WILL move money' : 'unset — the Confirm press is GATED'}`);
+  await withApp(async (driver) => {
+    driver.page.on('console', (m) => {
+      if (/^money:/.test(m.text())) log(`[tracer] ${m.text()}`);
+    });
+    // Accounts route: the passive row badge is the BEFORE evidence.
+    await openBalances(driver);
+    const badgeUp = await driver.isPresent(badgeId);
+    log(`badge ${badgeId}: ${badgeUp ? `UP — "${(await driver.readText(badgeId)).trim()}"` : 'absent'}`);
+    await driver.screenshot(`live-ata-${curKey}-accounts-before`);
+    // The row tap opens the CURRENCY VIEW (HomeTab) — the ONE card's only host. One detach
+    // retry: the balance poll replaces row nodes under the tap (the selectCurrency lesson).
+    try {
+      await driver.click(`btn-accounts-currency-${c.code}`, {timeoutMs: 10_000});
+    } catch {
+      await driver.findByTestID(`btn-accounts-currency-${c.code}`, {timeoutMs: 10_000});
+      await driver.click(`btn-accounts-currency-${c.code}`, {timeoutMs: 10_000});
+    }
+    // First state: the card mounts only once the SOL token states are MEASURED known-absent
+    // (Wallet passes the card when a rail of THIS currency is known-absent); a probe-proven-
+    // unfundable plan can already BE the refuse (flow 214's idle-refuse shape).
+    let state = null;
+    {
+      const deadline = Date.now() + 90_000;
+      for (;;) {
+        const up = await driver.whichPresent([`${P}-banner`, `${P}-refuse`]);
+        if (up.length > 0) { state = up[0]; break; }
+        if (Date.now() > deadline) {
+          const body = await driver.bodyText();
+          throw new Error(`setup-ata: neither ${P}-banner nor ${P}-refuse within 90s — surface: ${body.replace(/\s+/g, ' ').slice(0, 900)}`);
+        }
+        await sleep(1_000);
+      }
+    }
+    log(`card first state: ${state}`);
+    if (state.endsWith('-refuse')) {
+      await captureAtaRefuse(driver, P, curKey);
+      log('setup-ata verdict: REFUSE (clean terminal evidence on an unfunded wallet, nothing spent)');
+      return;
+    }
+    await driver.screenshot(`live-ata-${curKey}-card-before`);
+    log(`CARD BEFORE (verbatim): ${(await driver.readText(`${P}-banner`)).replace(/\s+/g, ' | ')}`);
+    // Wait for the measured minimum (the read-only sizing probe's answer) — it replaces the
+    // rent line as THE cost line AND doubles as the spend guard: a create plan never gets one.
+    log('waiting for the measured minimum line (read-only sizing probe)…');
+    let measured = false;
+    state = null;
+    {
+      const deadline = Date.now() + 150_000;
+      for (;;) {
+        const up = await driver.whichPresent([`${P}-refuse`, `${P}-err`]);
+        if (up.length > 0) { state = up[0]; break; }
+        const txt = await driver.readText(`${P}-banner`);
+        if (/Needs at least \d/.test(txt)) { measured = true; break; }
+        if (Date.now() > deadline) break;
+        await sleep(2_000);
+      }
+    }
+    if (state != null && state.endsWith('-refuse')) {
+      await captureAtaRefuse(driver, P, curKey);
+      log('setup-ata verdict: REFUSE (the sizing probe refused at idle), nothing spent');
+      return;
+    }
+    if (state === `${P}-err` || !measured) {
+      const errLine = (await driver.isPresent(`${P}-err`)) ? await driver.readText(`${P}-err`) : '(no err line)';
+      log(`NO MEASURED MINIMUM — refusing to press Complete (a create plan cannot be ruled out without it). err="${errLine}"`);
+      await driver.screenshot(`live-ata-${curKey}-unmeasured`);
+      return;
+    }
+    // Complete → the ONE confirm (a swap is a real spend; the app never runs it unconfirmed).
+    await driver.click(`${P}-complete`, {timeoutMs: 10_000});
+    await driver.findByTestID(`${P}-confirm-btn`, {timeoutMs: 60_000});
+    const confirmLine = await driver.readText(`${P}-confirm-line`);
+    log(`CONFIRM (verbatim): ${confirmLine}`);
+    await driver.screenshot(`live-ata-${curKey}-confirm`);
+    if (!confirmArmed) {
+      log('DPAY_ATA_CONFIRM!=1 — kill-switch: pressing Cancel, never Confirm. Nothing spent.');
+      await driver.click(`${P}-cancel-btn`, {timeoutMs: 10_000});
+      await sleep(1_000);
+      await driver.screenshot(`live-ata-${curKey}-cancelled`);
+      log('setup-ata verdict: DRY RUN (idle → confirm captured; confirm gated)');
+      return;
+    }
+    log('DPAY_ATA_CONFIRM=1 — pressing Confirm (creates the venue order; the sized swap moves)');
+    await driver.click(`${P}-confirm-btn`, {timeoutMs: 10_000});
+    // busy → terminal. fund-ic: the venue settles in minutes-to-hours; the resume-engine
+    // watcher then broadcasts the ATA creates and the card clears. Terminal states: gone
+    // (success), refuse (the plan moved under us), or the card's REAL error line.
+    const t0 = Date.now();
+    const watchMs = 45 * 60_000;
+    let busyShot = false;
+    let last = '';
+    let quietSince = null;
+    for (;;) {
+      const up = await driver.whichPresent([`${P}-busy`, `${P}-confirm`, `${P}-banner`, `${P}-refuse`]);
+      if (up.length > 0) {
+        quietSince = null;
+        if (up.includes(`${P}-banner`) && await driver.isPresent(`${P}-err`)) {
+          const errLine = await driver.readText(`${P}-err`);
+          log(`REAL ERROR LINE (verbatim): ${errLine}`);
+          await driver.screenshot(`live-ata-${curKey}-error`);
+          throw new Error(`setup-ata: terminal error — ${errLine}`);
+        }
+        if (up.includes(`${P}-refuse`)) {
+          await captureAtaRefuse(driver, P, curKey);
+          throw new Error('setup-ata: terminal refuse after confirm — the plan moved under the run');
+        }
+        if (up.includes(`${P}-busy`)) {
+          if (!busyShot) { busyShot = true; await driver.screenshot(`live-ata-${curKey}-busy`); }
+          const line = (await driver.readText(`${P}-busy`)).replace(/\s+/g, ' ');
+          if (line !== last) { log(`BUSY: ${line}`); last = line; }
+        } else if (up.includes(`${P}-confirm`) && !last.includes('re-confirm')) {
+          log('confirm still up (prepare re-asking?) — one app-instructed re-confirm');
+          last = 're-confirm';
+          await driver.click(`${P}-confirm-btn`, {timeoutMs: 10_000});
+        }
+      } else {
+        // Success needs a SUSTAINED absence (a transient unmount is not the terminal).
+        if (quietSince == null) quietSince = Date.now();
+        if (Date.now() - quietSince > 20_000) break;
+      }
+      if (Date.now() - t0 > watchMs) {
+        await driver.screenshot(`live-ata-${curKey}-timeout`);
+        throw new Error(`setup-ata: no terminal state within ${Math.round(watchMs / 60_000)}min — last: ${last || '(none)'}`);
+      }
+      await sleep(4_000);
+    }
+    // AFTER success: the badge must be gone from the accounts list; log the card's absence.
+    await openBalances(driver);
+    await sleep(1_500);
+    const badgeAfter = await driver.isPresent(badgeId);
+    log(`badge ${badgeId} AFTER: ${badgeAfter ? 'STILL UP — setup NOT complete' : 'gone'}`);
+    await driver.screenshot(`live-ata-${curKey}-accounts-after`);
+    await driver.click(`btn-accounts-currency-${c.code}`, {timeoutMs: 10_000});
+    await sleep(2_000);
+    const cardAfter = await driver.whichPresent([`${P}-banner`, `${P}-refuse`, `${P}-busy`, `${P}-confirm`]);
+    log(`card AFTER re-entering the ${c.code} view: ${cardAfter.length === 0 ? 'GONE' : `still up: ${cardAfter.join(',')}`}`);
+    await driver.screenshot(`live-ata-${curKey}-card-gone`);
+    if (badgeAfter || cardAfter.length > 0) {
+      throw new Error('setup-ata: claimed success but the badge/card is still present');
+    }
+    log('setup-ata verdict: SUCCESS (token accounts created; badge and card cleared)');
   });
 }
 
@@ -1914,6 +2102,7 @@ try {
   else if (cmd === 'b-send-ckerc20') await cmdSendCkerc20(args[0], args[1]);
   else if (cmd === 'b-send-sol') await cmdBSendSol(args[0], args[1]);
   else if (cmd === 'watch') await cmdWatch();
+  else if (cmd === 'setup-ata') await cmdSetupAta(args[0]);
   else if (cmd === 'b-send') await cmdBSend(args[0], args[1]);
   else if (cmd === 'assets') await withApp(async (driver) => {
     await openBalances(driver);
