@@ -145,6 +145,15 @@ export const convertFr: ConvertMessages = {
   stuckAcknowledge: 'Compris — arrêter la surveillance',
   stuckAcknowledged: 'Surveillance arrêtée — des fonds bougeant plus tard arriveront toujours à l\u2019adresse de ce portefeuille.',
 
+  stuckReceiptsTitle: 'Ce qui s\u2019est passé',
+  stuckErrorLine: d => `Erreur : ${d}`,
+  stuckExpiredLine: at => `Expiré à ${at} - plus rien ne peut bouger.`,
+  stuckExpiredBody:
+    'L\u2019échange signé ne peut plus s\u2019exécuter. dpay tranche avec les preuves ci-dessus : l\u2019argent encore dans ce portefeuille reste ; l\u2019argent parti apparaît dans votre solde.',
+  stuckLastCheckedLine: at => `Dernière vérification ${at}`,
+  failedWindowClosedBody: sym =>
+    `L\u2019échange n\u2019a pas pu être confirmé avant la fin de sa fenêtre - votre ${sym} n\u2019a jamais quitté votre portefeuille.`,
+
   evm: {
     heading: (inSym, outSym, chain) => `Convertir ${inSym} en ${outSym} (${chain})`,
     feeLabel: unit => `Frais de réseau (${unit}, estimation)`,

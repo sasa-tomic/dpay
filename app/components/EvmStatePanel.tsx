@@ -15,6 +15,9 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconSwap} from './icons';
 import {ConvertHeader} from './ConvertShared';
+import {ConvertStuckReceipts} from './ConvertStuckEvidence';
+import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
+import {formatClock} from '../i18n/intl';
 
 export function EvmStatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void}) {
   const [, forceTick] = useState(0);
@@ -74,6 +77,18 @@ export function EvmStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
           <Text style={S.convertStateBody}>{M.convert.evm.stuckBody(record.outSymbol)}</Text>
           <Text style={S.convertStateBody}>{M.convert.stuckSigned(fmtIn(record.amountIn), fmtOut(record.expectedNet), venueName)}</Text>
           {legs.length > 0 ? <Text style={S.convertStateMeta}>{M.convert.doneTx(legs[legs.length - 1]!)}</Text> : null}
+          {/* The receipts block (2026-10-02 POCO P0): each broadcast leg + any failure cause,
+              verbatim — never a bare "unknown". (No "keeps watching" claim: an EVM-shaped
+              record has no engine probe of its own yet — only facts.) */}
+          <ConvertStuckReceipts record={record} />
+          {(() => {
+            const at = stuckLastCheckedAtMs(record.id);
+            return at != null ? (
+              <Text testID="convert-stuck-last-checked" style={S.convertStateMeta}>
+                {M.convert.stuckLastCheckedLine(formatClock(new Date(at)))}
+              </Text>
+            ) : null;
+          })()}
           {record.acknowledgedStuckAtMs == null ? (
             <Pressable
                 testID="btn-convert-stuck-ack"

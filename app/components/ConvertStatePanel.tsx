@@ -15,6 +15,8 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconSwap} from './icons';
 import {ConvertHeader, gasPreFundedAborted, nonBreakingClock} from './ConvertShared';
+import {ConvertStuckReceipts, stuckWindowExpired} from './ConvertStuckEvidence';
+import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 
 /** Renders the §4 state-machine record — every non-done state carries practical instructions. */
 export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void}) {
@@ -160,6 +162,15 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
             <Text style={S.convertStateBody}>{M.convert.failedApproveBody(inSymbol)}</Text>
           ) : record.failureCode === 'swap_refused' ? (
             <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', inSymbol, venueName)}</Text>
+          ) : record.failureCode === 'window_closed' ? (
+            // The stuck-expiry resolution (2026-10-02): unconfirmed past the deadline, and
+            // the balance read proved nothing left — the honest body, never a phantom refund.
+            <>
+              <Text style={S.convertStateBody}>{M.convert.failedWindowClosedBody(inSymbol)}</Text>
+              {record.failureDetail != null && record.failureDetail !== '' ? (
+                <Text style={S.convertStateMeta} selectable>{M.convert.stuckErrorLine(record.failureDetail)}</Text>
+              ) : null}
+            </>
           ) : (
             <Text style={S.convertStateBody}>{M.convert.refundedBody(inSymbol)}</Text>
           )}
@@ -189,15 +200,42 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
               {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, inSymbol), fmtAssetCompact(minOut, outDecimals, outSymbol), venueName)}
             </Text>
           ) : null}
-          <Text testID="convert-expiry" style={S.convertStateMeta}>
-            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
-          </Text>
+          {/* The receipts block (2026-10-02 POCO P0): WHAT happened per leg + every tx
+              identity the record carries + the failure cause verbatim — never a bare
+              "unknown" with no evidence. */}
+          <ConvertStuckReceipts record={record} />
+          {/* The expiry line flips on the window: open → today's countdown; EXPIRED → the
+              honest nothing-can-move-anymore copy (the founder's dead-window screen). */}
+          {stuckWindowExpired(record) ? (
+            <View testID="convert-stuck-expired">
+              <Text testID="convert-expiry" style={S.convertStateMeta}>
+                {M.convert.stuckExpiredLine(formatClock(new Date(legExpiryMs)))}
+              </Text>
+              <Text style={S.convertStateMeta}>{M.convert.stuckExpiredBody}</Text>
+            </View>
+          ) : (
+            <Text testID="convert-expiry" style={S.convertStateMeta}>
+              {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+            </Text>
+          )}
+          {/* The last completed probe — the "keeps watching" claim, verifiable (no read this
+              session renders nothing; nothing is claimed). */}
+          {(() => {
+            const at = stuckLastCheckedAtMs(record.id);
+            return at != null ? (
+              <Text testID="convert-stuck-last-checked" style={S.convertStateMeta}>
+                {M.convert.stuckLastCheckedLine(formatClock(new Date(at)))}
+              </Text>
+            ) : null;
+          })()}
           {/* V6: the honest unknown stays WATCHABLE — the engine slow-probes a stuck record until
               it resolves or the USER acknowledges it. The button is the acknowledgement: reading
-              the instructions is the user's part; the watch stops only by this gesture. */}
+              the instructions is the user's part; the watch stops only by this gesture.
+              PAST the window the watching claim is gone (nothing can move) but the
+              acknowledgement stays — the engine resolves the record either way. */}
           {record.acknowledgedStuckAtMs == null ? (
             <>
-              <Text style={S.convertStateMeta}>{M.convert.stuckWatching}</Text>
+              {!stuckWindowExpired(record) ? <Text style={S.convertStateMeta}>{M.convert.stuckWatching}</Text> : null}
               <Pressable
                 testID="btn-convert-stuck-ack"
                 style={S.linkBtn}

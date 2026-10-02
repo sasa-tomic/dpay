@@ -145,6 +145,15 @@ export const convertEs: ConvertMessages = {
   stuckAcknowledge: 'Entendido — dejar de vigilar',
   stuckAcknowledged: 'Vigilancia detenida — los fondos que se muevan más tarde seguirán llegando a la dirección de esta billetera.',
 
+  stuckReceiptsTitle: 'Qué pasó',
+  stuckErrorLine: d => `Error: ${d}`,
+  stuckExpiredLine: at => `Venció a las ${at} - ya nada puede moverse.`,
+  stuckExpiredBody:
+    'El intercambio firmado ya no puede ejecutarse. dpay lo cierra con la evidencia de arriba: el dinero que sigue en esta billetera se queda; el que se movió se ve en tu saldo.',
+  stuckLastCheckedLine: at => `Última comprobación ${at}`,
+  failedWindowClosedBody: sym =>
+    `El intercambio no pudo confirmarse antes de que cerrara su ventana - tu ${sym} nunca salió de tu billetera.`,
+
   evm: {
     heading: (inSym, outSym, chain) => `Convertir ${inSym} a ${outSym} (${chain})`,
     feeLabel: unit => `Tarifa de red (${unit}, estimación)`,

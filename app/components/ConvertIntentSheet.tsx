@@ -2270,6 +2270,8 @@ function fromBaseUnitsWei(wei: string): string {
 import {venueEndpointOf} from '../config/venues';
 import {convertAbortFlavor, convertRecordMinOut} from '../convert';
 import {abortConvertRecord, acknowledgeStuckRecord} from '../convertResume';
+import {ConvertStuckReceipts, stuckWindowExpired} from './ConvertStuckEvidence';
+import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 import {formatClock} from '../i18n/intl';
 import {IconChevronLeft} from './icons';
 import {gasPreFundedAborted, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
@@ -2588,6 +2590,15 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
             <Text style={S.fieldBody}>{M.convert.failedApproveBody(record.inSymbol)}</Text>
           ) : record.failureCode === 'swap_refused' ? (
             <Text style={S.fieldBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol, venueName)}</Text>
+          ) : record.failureCode === 'window_closed' ? (
+            // The stuck-expiry resolution (2026-10-02): unconfirmed past the deadline,
+            // nothing left the wallet — never a phantom "the pool returned it".
+            <>
+              <Text style={S.fieldBody}>{M.convert.failedWindowClosedBody(record.inSymbol)}</Text>
+              {record.failureDetail != null && record.failureDetail !== '' ? (
+                <Text style={S.fieldBody} selectable>{M.convert.stuckErrorLine(record.failureDetail)}</Text>
+              ) : null}
+            </>
           ) : (
             <Text style={S.fieldBody}>{M.convert.refundedBody(record.inSymbol)}</Text>
           )}
@@ -2666,11 +2677,31 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
               carries. The chain's venue window sits in the block above; a Solana leg dies
               at its own blockhash height, not at a wall clock. */}
           {record.legs.length > 0 ? (
-            <Text testID="convert-expiry" style={S.fieldBody}>
-              {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
-            </Text>
+            stuckWindowExpired(record) ? (
+              <View testID="convert-stuck-expired">
+                <Text testID="convert-expiry" style={S.fieldBody}>
+                  {M.convert.stuckExpiredLine(formatClock(new Date(legExpiryMs)))}
+                </Text>
+                <Text style={S.fieldBody}>{M.convert.stuckExpiredBody}</Text>
+              </View>
+            ) : (
+              <Text testID="convert-expiry" style={S.fieldBody}>
+                {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+              </Text>
+            )
           ) : null}
-          <Text style={S.fieldBody}>{M.convert.stuckWatching}</Text>
+          {/* The receipts block (2026-10-02 POCO P0): WHAT happened per leg + every tx
+              identity the record carries + the failure cause verbatim. */}
+          <ConvertStuckReceipts record={record} />
+          {(() => {
+            const at = stuckLastCheckedAtMs(record.id);
+            return at != null ? (
+              <Text testID="convert-stuck-last-checked" style={S.fieldBody}>
+                {M.convert.stuckLastCheckedLine(formatClock(new Date(at)))}
+              </Text>
+            ) : null;
+          })()}
+          {!stuckWindowExpired(record) ? <Text style={S.fieldBody}>{M.convert.stuckWatching}</Text> : null}
           {record.acknowledgedStuckAtMs == null ? (
             <Pressable
               testID="btn-convert-stuck-ack"

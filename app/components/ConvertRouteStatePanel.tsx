@@ -19,6 +19,8 @@ import {
   plannedLegLabel,
   routeTitleOf,
 } from './ConvertShared';
+import {ConvertStuckReceipts, stuckWindowExpired} from './ConvertStuckEvidence';
+import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 
 /** The planned-record state surface (2026-09-14 spec §7): the leg list IS the progress UI —
  *  every leg carries its own pending/sent/confirmed/refused state and its own fee, and the
@@ -131,6 +133,15 @@ export function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack
           <Text style={S.convertStateTitle}>{M.convert.failedTitle}</Text>
           {record.failureCode === 'approve_refused' ? (
             <Text style={S.convertStateBody}>{M.convert.failedApproveBody(record.inSymbol)}</Text>
+          ) : record.failureCode === 'window_closed' ? (
+            // The stuck-expiry resolution (2026-10-02): unconfirmed past the deadline,
+            // nothing left the wallet — never a phantom "the pool returned it".
+            <>
+              <Text style={S.convertStateBody}>{M.convert.failedWindowClosedBody(record.inSymbol)}</Text>
+              {record.failureDetail != null && record.failureDetail !== '' ? (
+                <Text style={S.convertStateMeta} selectable>{M.convert.stuckErrorLine(record.failureDetail)}</Text>
+              ) : null}
+            </>
           ) : (
             <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol, venueName)}</Text>
           )}
@@ -172,11 +183,32 @@ export function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack
           {record.venue2Id != null ? (
             <Text style={S.convertStateMeta}>{M.convert.multihop.stuckHoldsLine(hopSymbol)}</Text>
           ) : null}
-          <Text testID="convert-expiry" style={S.convertStateMeta}>
-            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
-          </Text>
+          {/* The receipts block + the expiry flip + the last-checked fact (2026-10-02
+              POCO P0): per-leg evidence, the honest dead-window copy, the verifiable watch. */}
+          <ConvertStuckReceipts record={record} />
+          {stuckWindowExpired(record) ? (
+            <View testID="convert-stuck-expired">
+              <Text testID="convert-expiry" style={S.convertStateMeta}>
+                {M.convert.stuckExpiredLine(formatClock(new Date(legExpiryMs)))}
+              </Text>
+              <Text style={S.convertStateMeta}>{M.convert.stuckExpiredBody}</Text>
+            </View>
+          ) : (
+            <Text testID="convert-expiry" style={S.convertStateMeta}>
+              {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+            </Text>
+          )}
+          {(() => {
+            const at = stuckLastCheckedAtMs(record.id);
+            return at != null ? (
+              <Text testID="convert-stuck-last-checked" style={S.convertStateMeta}>
+                {M.convert.stuckLastCheckedLine(formatClock(new Date(at)))}
+              </Text>
+            ) : null;
+          })()}
           {record.acknowledgedStuckAtMs == null ? (
             <>
+              {!stuckWindowExpired(record) ? <Text style={S.convertStateMeta}>{M.convert.stuckWatching}</Text> : null}
               <Pressable
                 testID="btn-convert-stuck-ack"
                 style={S.linkBtn}

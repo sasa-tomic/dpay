@@ -146,6 +146,15 @@ export const convertDe: ConvertMessages = {
   stuckAcknowledge: 'Verstanden — nicht mehr beobachten',
   stuckAcknowledged: 'Beobachtung gestoppt — später bewegte Mittel landen weiterhin an der Adresse dieser Wallet.',
 
+  stuckReceiptsTitle: 'Was passiert ist',
+  stuckErrorLine: d => `Fehler: ${d}`,
+  stuckExpiredLine: at => `Abgelaufen um ${at} - nichts kann sich mehr bewegen.`,
+  stuckExpiredBody:
+    'Der signierte Tausch kann nicht mehr ausgeführt werden. dpay klärt dies anhand der Belege oben: Geld, das noch in dieser Wallet liegt, bleibt liegen; bewegtes Geld zeigt dein Guthaben.',
+  stuckLastCheckedLine: at => `Zuletzt geprüft ${at}`,
+  failedWindowClosedBody: sym =>
+    `Der Tausch konnte vor Ablauf seines Zeitfensters nicht bestätigt werden - dein ${sym} hat deine Wallet nie verlassen.`,
+
   evm: {
     heading: (inSym, outSym, chain) => `${inSym} zu ${outSym} tauschen (${chain})`,
     feeLabel: unit => `Netzwerkgebühr (${unit}, Schätzung)`,

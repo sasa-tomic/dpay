@@ -215,6 +215,22 @@ export type ConvertMessages = {
   stuckAcknowledge: string;
   stuckAcknowledged: string;
 
+  // --- stuck evidence + expiry honesty (2026-10-02 POCO P0: the founder's screen showed no
+  // --- error, no per-step facts, and a "keeps watching" claim on a dead window) ------------
+  /** The stuck receipts block: per-leg what happened + the record's own tx evidence. */
+  stuckReceiptsTitle: string;
+  /** A record-carried failure cause, rendered verbatim — never hidden (founder hard rule). */
+  stuckErrorLine: (d: string) => string;
+  /** The window is CLOSED: the honest flip of expiryLine ("after that nothing can move"). */
+  stuckExpiredLine: (at: string) => string;
+  /** What the closed window means for the money: resolution comes from the evidence. */
+  stuckExpiredBody: string;
+  /** The engine's last completed probe of this record — the "keeps watching" claim, verifiable. */
+  stuckLastCheckedLine: (at: string) => string;
+  /** failed_refunded + window_closed: the swap could not be confirmed in its window and
+   *  nothing left the wallet — the honest body, never a phantom "the pool returned it". */
+  failedWindowClosedBody: (sym: string) => string;
+
   // --- the Solana convert surface (solana_amm venues — Jupiter, 2026-09-15) -----------------------
   /** The rail-local pair SOL ↔ USDC(Solana), device-signed end to end. Where a fact is the SAME
    *  fact as the IC surface — quote attribution, rate, slippage chips, the stuck discipline, the
@@ -718,6 +734,15 @@ export const convertEn: ConvertMessages = {
   stuckWatching: 'dpay keeps watching \u2014 this screen flips on its own when funds move.',
   stuckAcknowledge: 'Understood \u2014 stop watching',
   stuckAcknowledged: 'Watch stopped \u2014 funds moving later still land at this wallet\u2019s address.',
+
+  stuckReceiptsTitle: 'What happened',
+  stuckErrorLine: d => `Error: ${d}`,
+  stuckExpiredLine: at => `Expired at ${at} - nothing can move anymore.`,
+  stuckExpiredBody:
+    'The signed swap can no longer execute. dpay settles this from the evidence above: money still in this wallet stays put; money that moved shows in your balance.',
+  stuckLastCheckedLine: at => `Last checked ${at}`,
+  failedWindowClosedBody: sym =>
+    `The swap could not be confirmed before its window closed - your ${sym} never left your wallet.`,
 
   evm: {
     heading: (inSym, outSym, chain) => `Convert ${inSym} to ${outSym} (${chain})`,

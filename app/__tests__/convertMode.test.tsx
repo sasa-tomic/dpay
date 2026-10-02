@@ -741,6 +741,36 @@ describe('V6 — engine view', () => {
     expect(textOf(tree, 'convert-stuck')).toContain(convertEn.stuckAcknowledged);
     expect(present(tree, 'btn-convert-stuck-ack')).toBe(false);
   });
+
+  // --- 2026-10-02 POCO P0: the sheet's stuck block carries the evidence, the error, and
+  // --- the honest dead-window flip — never a bare "unknown" with a false watching claim.
+  test('the stuck block renders the per-leg receipts (what happened, not just "unknown")', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[stuckRecord.id]: stuckRecord});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-stuck-receipts')).toBe(true);
+    expect(present(tree, 'convert-stuck-leg-0')).toBe(true);
+    expect(present(tree, 'convert-stuck-leg-1')).toBe(true);
+  });
+
+  test('a carried failureDetail renders verbatim in the stuck block — never hidden', async () => {
+    const rec = {...stuckRecord, failureDetail: 'icp poll answered unknown'};
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[rec.id]: rec});
+    const tree = await mountConvert('250000000', null);
+    expect(textOf(tree, 'convert-stuck-error')).toContain('icp poll answered unknown');
+  });
+
+  test('an EXPIRED window flips the expiry line to the honest nothing-can-move copy', async () => {
+    const passed = Date.now() - 90 * 60_000; // the founder's shape: expired 1.5 h ago
+    const rec: ConvertRecord = {
+      ...stuckRecord,
+      legs: LEGS.map(l => ({...l, expiresAtMs: passed})),
+    };
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[rec.id]: rec});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-stuck-expired')).toBe(true);
+    expect(textOf(tree, 'convert-stuck')).not.toContain(convertEn.stuckWatching); // the false claim is gone
+    expect(textOf(tree, 'convert-stuck')).toContain(convertEn.stuckExpiredBody);
+  });
 });
 
 // --- the pre-broadcast invariant + the CeFi panel lines (carried over; StatePanel untouched) ------

@@ -8,11 +8,14 @@ import type {ConvertRecord} from '../convert';
 import {acknowledgeStuckRecord} from '../convertResume';
 import {SOLANA_TOKENS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {M} from '../i18n';
+import {formatClock} from '../i18n/intl';
 import {fmtAssetCompact} from '../lib/format';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconSwap} from './icons';
 import {ConvertHeader} from './ConvertShared';
+import {ConvertStuckReceipts} from './ConvertStuckEvidence';
+import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 
 /** The Solana record view: the §4 machine's Solana-shaped states only (swapping → settling →
  *  done, with pending_withdrawal/failed_refunded/stuck for the honest edges). Same rules as
@@ -85,7 +88,19 @@ export function SolStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
           {/* What was signed, restated: the amount in and the VENUE'S own floor (expectedNet is
               Jupiter's otherAmountThreshold frozen at prepare — not a re-derived figure). */}
           <Text style={S.convertStateBody}>{M.convert.stuckSigned(fmtIn(record.amountIn), fmtOut(record.expectedNet), venueName)}</Text>
+          {/* The receipts block (2026-10-02 POCO P0): the signed tx's own identity + any
+              failure cause, verbatim — never a bare "unknown". (No wall-clock expiry line:
+              a Solana leg dies at its blockhash height, not at a clock.) */}
+          <ConvertStuckReceipts record={record} />
           <Text style={S.convertStateMeta}>{M.convert.stuckWatching}</Text>
+          {(() => {
+            const at = stuckLastCheckedAtMs(record.id);
+            return at != null ? (
+              <Text testID="convert-stuck-last-checked" style={S.convertStateMeta}>
+                {M.convert.stuckLastCheckedLine(formatClock(new Date(at)))}
+              </Text>
+            ) : null;
+          })()}
           {record.acknowledgedStuckAtMs == null ? (
             <Pressable
                 testID="btn-convert-stuck-ack"
