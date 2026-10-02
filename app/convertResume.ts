@@ -17,10 +17,13 @@
  * (pending ledger watch: CONVERT_ENGINE_REARM_MS; provider poll: one request per
  * CONVERT_ENGINE_PROVIDER_POLL_MS; unacknowledged stuck watch: one probe per
  * CONVERT_ENGINE_STUCK_WATCH_MS). Terminal steps stop their record's timer for good — with
- * TWO honest exceptions that keep a SLOW watch: `stuck`, which the engine keeps slow-probing
- * (the submitted update may still have executed) until it resolves done/refunded or the USER
- * acknowledges the stuck state (`acknowledgeStuckRecord` → `acknowledgedStuckAtMs`), and a
- * CeFi `quote_expired`, which the engine keeps slow-polling until the venue answers for a
+ * THREE honest exceptions that keep a SLOW watch: `stuck`, which the engine keeps slow-probing
+ * (the submitted update may still have executed) until it resolves done/refunded, the window
+ * EXPIRES (an expired unknown is RESOLVABLE — stuckExpiry.ts lands the honest terminal from
+ * the input balance: present → failed_refunded/window_closed, gone → failed_leg), or the USER
+ * acknowledges the stuck state (`acknowledgeStuckRecord` → `acknowledgedStuckAtMs`; an
+ * EXPIRED record resolves even so — the deadline, not the ack, ends it). And a CeFi
+ * `quote_expired`, which the engine keeps slow-polling until the venue answers for a
  * LATE deposit (refunded/processing/completed) — an expired quote does not un-see a deposit
  * that lands afterwards. Both are honest unknowns: watchable, not dismissable.
  *
