@@ -21,20 +21,21 @@ export type AtaSetupViewModel = {
    *  card renders the LIVE state - progress + honesty copy, NO button - and the money
    *  actions stand down, whatever the run's own busy flag says. */
   live: boolean;
-  /** The live progress sentence (the movement with its currency + the creation promise). */
-  liveLine: string | null;
-  /** The honesty line: the run keeps going, also off this screen. */
-  liveNote: string | null;
   confirming: boolean;
   confirmLine: string | null;
   busy: boolean;
-  /** Overrides the creating-all busy line while a fund-ic venue swap is still in flight (the
-   *  card says so honestly). Null = the default line. */
-  busyLine: string | null;
   /** The device's SOL receive address for the refuse panel's copy affordance (null when the
    *  rail is unavailable - the panel then falls back to the deposit-sheet escape). */
   solAddress: string | null;
   err: string | null;
+  /** The failure NEXT STEPS (founder spec 2026-10-02): set ONLY when the error is a run's
+   *  terminal ending (expiry/failure of the setup's own record). The card then renders the
+   *  failed panel: the error first, then this line. Null = the error is a transient pre-run
+   *  failure and the idle card carries it. */
+  errNext: string | null;
+  /** False ONLY while the failed run's funds are not verifiably accounted for: the card
+   *  then stands the repeat button DOWN (no repeat affordance while funds are unaccounted). */
+  errCanRetry: boolean;
 };
 
 /**
@@ -44,13 +45,22 @@ export type AtaSetupViewModel = {
  * primary button; the idle state states the required minimum UP FRONT (the measured min line,
  * else the exact SOL rent) - no number the user has to fail a swap to learn.
  *
- * Five states, driven entirely by props (the parent owns the plan + the run):
+ * Six states, driven entirely by props (the parent owns the plan + the run):
  *   live    - a non-terminal convert record is still working toward THIS setup (2026-10-02
- *             P0): the progress line + the honesty copy, NO button, NO idle minimum line.
+ *             P0): the ONE founder-specified busy line, NO button, NO idle minimum line.
  *             It outranks EVERY other state - a live record must never be pasted over by
  *             idle (a re-armed button is a second-spend invitation), confirm, busy or refuse.
- *   busy    - the run is on chain: spinner + one honest line (what is being created, or the
- *             still-in-flight venue swap when the parent says so via `busyLine`).
+ *   busy    - the run works (confirm pressed, on-chain, or a venue swap in flight): spinner
+ *             + the SAME single founder line (2026-10-02). Nothing else competes with it.
+ *   confirm - a swap run's ONE confirmation, stating the total: the sized swap, its source,
+ *             what it creates, what it costs. Confirm executes; cancel returns.
+ *   refuse  - the honest dead end: what is missing, what it costs, the needSol copy and the
+ *             device's SOL receive address with a copy affordance (the deposit-sheet escape
+ *             when the parent cannot show one). NO button - never a fake one.
+ *   failed  - a terminal run ending with next steps (founder spec 2026-10-02): the error
+ *             FIRST, then what happens to the money and what to do now. `errCanRetry` false
+ *             (funds unaccounted) stands the repeat button DOWN; the wallet only sets
+ *             `errNext` for these terminal endings, so transient pre-run errors stay idle.
  *   confirm - a swap run's ONE confirmation, stating the total: the sized swap, its source,
  *             what it creates, what it costs. Confirm executes; cancel returns.
  *   refuse  - the honest dead end: what is missing, what it costs, the needSol copy and the
@@ -78,13 +88,12 @@ export function AtaSetupCard({
   minLine = null,
   fundFromLine = null,
   live = false,
-  liveLine = null,
-  liveNote = null,
   confirming = false,
   confirmLine = null,
   busy = false,
-  busyLine = null,
   err = null,
+  errNext = null,
+  errCanRetry = true,
   solAddress = null,
   solCopied = false,
   onStart,
@@ -109,18 +118,17 @@ export function AtaSetupCard({
   /** True while ANY non-terminal convert record intersects the plan's targets: the run
    *  stands, the card must never render idle-with-button (2026-10-02 P0). */
   live?: boolean;
-  /** The live progress sentence (the movement + the account-creation promise). */
-  liveLine?: string | null;
-  /** The honesty line: the run keeps going, also if the user leaves this view. */
-  liveNote?: string | null;
   /** True once the parent has sized the swap and is waiting for the confirm press. */
   confirming?: boolean;
   /** The sized confirm sentence (shown while `confirming`). */
   confirmLine?: string | null;
   busy?: boolean;
-  /** Overrides the default creating-all line while a fund-ic venue swap is in flight. */
-  busyLine?: string | null;
   err?: string | null;
+  /** The failure next-steps line (founder spec 2026-10-02): present ONLY for a run's
+   *  terminal ending - the card then renders the failed panel (error first, then this). */
+  errNext?: string | null;
+  /** False while the failed run's funds are unaccounted: no repeat affordance re-arms. */
+  errCanRetry?: boolean;
   /** The refuse panel's receive address (the device's SOL address, when the parent has it). */
   solAddress?: string | null;
   /** True for the beat after the copy tap - the button says so. */
@@ -135,12 +143,15 @@ export function AtaSetupCard({
 }) {
   const targetsPhrase = M.deposit.ata.targetsLabel(targets);
   if (live) {
+    // The founder's busy contract (2026-10-02): ONE line next to the spinner, nothing else
+    // competing, no button - from the confirm press until the record resolves. A carried
+    // error (money-critical) still renders, with its next steps under it.
     return (
       <View testID={`${testIDPrefix}-live`} style={S.ataBanner}>
         <ActivityIndicator color={C.brandText} />
-        <Text testID={`${testIDPrefix}-live-line`} style={S.dim2}>{liveLine ?? M.deposit.ata.swapPending(targetsPhrase)}</Text>
-        <Text testID={`${testIDPrefix}-live-note`} style={S.dim2}>{liveNote ?? M.deposit.ata.liveKeepsRunning}</Text>
+        <Text testID={`${testIDPrefix}-live-line`} style={S.dim2}>{M.deposit.ata.settingUp}</Text>
         {err ? <Text testID={`${testIDPrefix}-err`} style={S.err}>{err}</Text> : null}
+        {err && errNext != null ? <Text testID={`${testIDPrefix}-err-next`} style={S.dim2}>{errNext}</Text> : null}
       </View>
     );
   }
@@ -148,7 +159,7 @@ export function AtaSetupCard({
     return (
       <View testID={`${testIDPrefix}-busy`} style={S.ataBanner}>
         <ActivityIndicator color={C.brandText} />
-        <Text style={S.dim2}>{busyLine ?? M.deposit.ata.creatingAll(targetsPhrase)}</Text>
+        <Text testID={`${testIDPrefix}-busy-line`} style={S.dim2}>{M.deposit.ata.settingUp}</Text>
       </View>
     );
   }
@@ -187,6 +198,7 @@ export function AtaSetupCard({
         {/* The run's REAL cause (2026-10-02): a refusal reached from a confirm-time failure
             carries its actual message - never a cause-less dead end. */}
         {err ? <Text testID={`${testIDPrefix}-err`} style={S.err}>{err}</Text> : null}
+        {err && errNext != null ? <Text testID={`${testIDPrefix}-err-next`} style={S.dim2}>{errNext}</Text> : null}
         {solAddress != null && onCopySolAddress != null ? (
           <View testID={`${testIDPrefix}-sol-addr`} style={S.ataAddrRow}>
             <Text style={S.ataAddrText}>{solAddress}</Text>
@@ -208,6 +220,54 @@ export function AtaSetupCard({
             accessibilityRole="button"
             accessibilityLabel={M.deposit.ata.showSolAddress}>
             <Text style={S.linkText}>{M.deposit.ata.showSolAddress}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  }
+  // The terminal FAILURE (founder spec 2026-10-02): the error FIRST, then the next steps -
+  // what happens to the money and what to do now. The wallet sets `errNext` ONLY for a run's
+  // terminal ending, so a transient pre-run error stays on the idle card below. When the
+  // funds are NOT verifiably accounted for (`errCanRetry: false`) the repeat button STANDS
+  // DOWN - never a second spend while money is unaccounted.
+  if (err != null && errNext != null) {
+    return (
+      <View testID={`${testIDPrefix}-failed`} style={S.ataBanner}>
+        <Text testID={`${testIDPrefix}-err`} style={S.err}>{err}</Text>
+        <Text testID={`${testIDPrefix}-err-next`} style={S.dim2}>{errNext}</Text>
+        {errCanRetry ? (
+          <Pressable
+            testID={`${testIDPrefix}-complete`}
+            style={S.primaryWide}
+            onPress={onStart}
+            accessibilityRole="button"
+            accessibilityLabel={M.deposit.ata.completeSetup}
+            accessibilityState={{disabled: false}}>
+            <Text style={S.primaryText}>{M.deposit.ata.completeSetup}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  }
+  // The terminal failure (founder spec 2026-10-02): the error FIRST, then the next steps -
+  // what happens to the money and what to do now. Only a run's terminal ending reaches this
+  // branch (the wallet sets `errNext` for exactly those); when the funds are NOT verifiably
+  // accounted for (`errCanRetry` false) the repeat button STANDS DOWN - no second spend
+  // while money is unaccounted.
+  if (err != null && errNext != null) {
+    return (
+      <View testID={`${testIDPrefix}-failed`} style={S.ataBanner}>
+        <Text testID={`${testIDPrefix}-err`} style={S.err}>{err}</Text>
+        <Text testID={`${testIDPrefix}-err-next`} style={S.dim2}>{errNext}</Text>
+        {errCanRetry ? (
+          <Pressable
+            testID={`${testIDPrefix}-complete`}
+            style={S.primaryWide}
+            onPress={onStart}
+            accessibilityRole="button"
+            accessibilityLabel={M.deposit.ata.completeSetup}
+            accessibilityState={{disabled: false}}>
+            <Text style={S.primaryText}>{M.deposit.ata.completeSetup}</Text>
           </Pressable>
         ) : null}
       </View>

@@ -43,7 +43,6 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       expect(need).toContain(COST);
       expect(occurrences(need, 'SOL')).toBe(1);
       expect(d.ata.confirmAction.length).toBeGreaterThan(0);
-      expect(d.ata.creatingAll(two)).toContain('EURC');
       // The pre-existing per-asset keys the card shares keep their register.
       expect(d.ata.absent('EURC')).toContain('EURC');
       expect(d.ata.cost(COST, two)).toContain(COST);
@@ -57,7 +56,6 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       expect(occurrences(icConfirm, SWAP)).toBe(1);
       expect(occurrences(icConfirm, COST)).toBe(1);
       expect(icConfirm).toContain('USDC');
-      expect(d.ata.swapPending(two)).toContain('EURC');
       // The up-front minimum line (2026-10-01): the idle card states the measured swap minimum
       // BEFORE the user initiates anything - one line, amount once, source named. The amount
       // arrives PRE-FORMATTED with its symbol; the 2026-10-02 live trip rendered the symbol
@@ -81,20 +79,37 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
         for (const b of banned) expect(f.toLowerCase()).not.toContain(b);
       }
       // The house style: plain hyphens in the setup copy, never em-dashes.
-      const surfaces = [short, icConfirm, min, d.ata.needSol(COST), d.ata.creatingAll(two), d.ata.creating('EURC'), d.ata.swapFailed];
+      const surfaces = [short, icConfirm, min, d.ata.needSol(COST), d.ata.settingUp, d.ata.creating('EURC'), d.ata.swapFailed];
       expect(surfaces.join('\n')).not.toContain('—');
-      // The LIVE state copy (2026-10-02 P0): the progress line carries the movement (pre-
-      // formatted WITH its currency - the template adds no unit and never drops it), the
-      // targets, and the honesty line promises the run survives leaving the view. No jargon.
-      const live = d.ata.liveProgress(SWAP, two);
-      expect(live).toContain(SWAP);
-      expect(live).toContain('EURC');
-      expect(live).not.toContain('undefined');
-      expect(occurrences(live, SWAP)).toBe(1);
-      expect(d.ata.liveKeepsRunning).toMatch(/view|Ansicht|vista|vue/);
-      expect(d.ata.liveKeepsRunning).not.toContain('undefined');
-      expect(`${live}\n${d.ata.liveKeepsRunning}`).not.toContain('—');
-      expect(live).not.toMatch(JARGON);
+      // THE BUSY LINE (founder spec 2026-10-02, verbatim intent): ONE line, simple, active
+      // tense, with the 1-2-minute expectation. No targets interpolation, no second sentence
+      // beyond the timing - the busy card renders this and NOTHING else.
+      const busy = d.ata.settingUp;
+      expect(busy.length).toBeGreaterThan(0);
+      expect(busy).toMatch(/1-2|1 a 2|1 à 2/);
+      expect(busy).not.toContain('undefined');
+      expect(busy).not.toMatch(JARGON);
+      // The failure guidance (founder spec: after the error, the NEXT STEPS - what happens to
+      // the money and what to do now, 1-2 sentences). `errNextSafe` = money verifiably
+      // untouched (retry is legal); `errNextUnknown` = unaccounted funds (check the balance
+      // first, never a blind retry) and must name where to look (SOL).
+      for (const next of [d.ata.errNextSafe, d.ata.errNextUnknown]) {
+        expect(next.length).toBeGreaterThan(0);
+        expect(next).not.toContain('undefined');
+        expect(next).not.toContain('—');
+        expect(next).not.toMatch(JARGON);
+        const sentences = next.split(/[.!?]\s/).filter(s => s.trim().length > 0).length;
+        expect(sentences).toBeLessThanOrEqual(3);
+      }
+      expect(d.ata.errNextUnknown).toMatch(/SOL/);
+      // Register per locale: de uses du, es uses tu, fr uses vous (the surrounding card).
+      if (locale === 'de') {
+        expect(`${busy}\n${d.ata.errNextSafe}`).toMatch(/dein|warte/i);
+      } else if (locale === 'es') {
+        expect(`${busy}\n${d.ata.errNextSafe}`).toMatch(/\btu\b|\bespera\b/i);
+      } else if (locale === 'fr') {
+        expect(`${busy}\n${d.ata.errNextSafe}`).toMatch(/votre|patientez|attendez/i);
+      }
     });
   }
 });
@@ -118,9 +133,21 @@ describe('the audit copy rules (2026-10-02): one name per fact, no middleman jar
 
     test(`${locale}: no middleman jargon - the timing line speaks plainly`, () => {
       const two = d.ata.targetsLabel(['EURC', 'USDC']);
-      expect(d.ata.fundConfirm(SWAP, two, COST)).not.toMatch(JARGON);
       expect(d.ata.fundIcConfirm(SWAP, two, COST)).not.toMatch(JARGON);
       expect(d.ata.fundFrom('USDC')).not.toMatch(JARGON);
+      // THE busy line (2026-10-02 founder spec, verbatim intent): while a run or a live
+      // record holds the card, the user gets exactly ONE line - simple, active tense, with
+      // the honest 1-2 minute window. No target list, no second sentence of progress detail.
+      const busy = d.ata.settingUp;
+      expect(busy).not.toContain('undefined');
+      expect(busy).not.toContain('—');
+      expect(busy).toMatch(/1-2/);
+      expect(busy).not.toMatch(JARGON);
+      if (locale === 'en') expect(busy).toBe('Please wait, your account is being set up. This should take 1-2 minutes.');
+      // Register consistency per locale card (de du, es tu, fr vous).
+      if (locale === 'de') expect(busy).toMatch(/dein|warte/i);
+      if (locale === 'es') expect(busy).toMatch(/\btu\b/i);
+      if (locale === 'fr') expect(busy).toMatch(/\bvous\b|\bvotre/i);
     });
 
     test(`${locale}: the create-kind card states what pays (the SOL balance)`, () => {

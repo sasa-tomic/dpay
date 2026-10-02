@@ -299,19 +299,17 @@ export type DepositMessages = {
     /** The confirm's two controls. */
     confirmAction: string;
     cancelAction: string;
-    /** The busy line for the whole run (one or more accounts). */
-    creatingAll: (targets: string) => string;
-    /** The busy line while a fund-ic venue swap is still in flight (the accounts are created
-     *  the moment the SOL lands - the watcher runs the same create step). */
-    swapPending: (targets: string) => string;
-    /** The LIVE-record progress line (2026-10-02 P0): while a non-terminal convert record is
-     *  still working toward the setup, the card renders THIS - the movement (pre-formatted
-     *  WITH its currency; the template adds no unit) and the account-creation promise. The
-     *  state renders NO button: a live record must never be pasted over by an idle one. */
-    liveProgress: (moving: string, targets: string) => string;
-    /** The honesty line under it: the run continues in the background engine, also off this
-     *  screen - the user may leave the view without stranding the setup. */
-    liveKeepsRunning: string;
+    /** THE busy line (2026-10-02 founder spec, verbatim): ONE line, active tense, with the
+     *  honest timing window. The card renders THIS and nothing else while a run or a live
+     *  record holds it - no target list, no competing copy, no button. */
+    settingUp: string;
+    /** The failure NEXT STEPS (the error itself renders from the record verbatim above
+     *  them). `errNextSafe` = the money is verifiably still in the wallet: say so and make
+     *  the retry legal. 1-2 sentences. */
+    errNextSafe: string;
+    /** The unaccounted-funds twin: the outcome is unknown, so the next step is CHECK the
+     *  balance first (never a blind retry). Must name where to look (SOL). 1-2 sentences. */
+    errNextUnknown: string;
     /** The funding swap's two honest endings. `swapFailed` = the chain refused the swap (the
      *  input never left the wallet); `swapUnknown` = accepted, confirmation missed (check the
      *  SOL balance before retrying). Both state FACTS only - the card never promises a hollow
@@ -585,10 +583,13 @@ export const depositEn: DepositMessages = {
     fundShort: source => `Even all your ${source} doesn't cover it - receive a little SOL at your address instead.`,
     confirmAction: 'Confirm',
     cancelAction: 'Cancel',
-    creatingAll: targets => `Creating your ${targets} - confirming on Solana…`,
-    swapPending: targets => `Swapping into SOL. Your ${targets} are created as soon as it lands.`,
-    liveProgress: (moving, targets) => `Converting ${moving}. Your ${targets} are created as soon as it lands.`,
-    liveKeepsRunning: 'This keeps running on its own, also if you leave this view.',
+    // The founder's verbatim line (2026-10-02): ONE sentence while the setup runs, no other
+    // competing copy, no button.
+    settingUp: 'Please wait, your account is being set up. This should take 1-2 minutes.',
+    // The failure guidance pair: the error renders from the record verbatim, these carry the
+    // next steps (what happens to the money, what to do now).
+    errNextSafe: 'Nothing left your wallet. Complete the setup again when you are ready.',
+    errNextUnknown: 'Check your SOL balance in a moment: if the SOL arrived, complete the setup again to create the accounts; if not, your balance shows where your money is.',
     swapFailed: 'The swap did not go through - nothing was created and the swapped token is still in your wallet.',
     swapUnknown: 'The swap was accepted but not confirmed yet. Check your SOL balance in a moment, then complete the setup again.',
   },

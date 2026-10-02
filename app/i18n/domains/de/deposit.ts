@@ -200,10 +200,11 @@ export const depositDe: DepositMessages = {
     fundShort: source => `Nicht mal deine ganzen ${source} reichen - empfange etwas SOL an deiner Adresse.`,
     confirmAction: 'Bestätigen',
     cancelAction: 'Abbrechen',
-    creatingAll: targets => `Deine ${targets} werden erstellt - Bestätigung auf Solana…`,
-    swapPending: targets => `Tausch in SOL läuft. Deine ${targets} werden erstellt, sobald er ankommt.`,
-    liveProgress: (moving, targets) => `Konvertiert ${moving}. Deine ${targets} werden erstellt, sobald er ankommt.`,
-    liveKeepsRunning: 'Das läuft von allein weiter, auch wenn du diese Ansicht verlässt.',
+    // Die eine Wartezeile (2026-10-02, Founder-Vorgabe): ein Satz, aktiv, mit dem ehrlichen
+    // Zeitfenster - die Karte zeigt during des Laufs NICHTS anderes.
+    settingUp: 'Bitte warte, dein Konto wird eingerichtet. Das dauert 1-2 Minuten.',
+    errNextSafe: 'Es ist nichts aus deiner Wallet gegangen. Du kannst die Einrichtung jederzeit erneut abschließen.',
+    errNextUnknown: 'Prüfe gleich dein SOL-Guthaben: Ist das SOL angekommen, schließe die Einrichtung erneut ab, um die Konten zu erstellen; wenn nicht, zeigt dir dein Guthaben, wo dein Geld ist.',
     swapFailed: 'Der Tausch ist nicht durchgegangen - nichts wurde erstellt, der getauschte Token ist noch in deiner Wallet.',
     swapUnknown: 'Der Tausch wurde angenommen, aber noch nicht bestätigt. Prüfe gleich dein SOL-Guthaben und schließe die Einrichtung dann erneut ab.',
   },

@@ -150,8 +150,8 @@ describe('HomeTab - the per-currency setup card (2026-10-01 founder directive)',
   /** The view model Wallet hands over when the MAIN currency's SPL accounts are absent. */
   const ataVm = (over: Partial<Parameters<typeof AtaSetupCard>[0]> = {}) => ({
     targets: ['EURC'], kind: 'create' as const, costLine: '0.00204428 SOL', fundFromLine: null,
-    minLine: null as string | null, confirming: false, confirmLine: null, busy: false, busyLine: null,
-    live: false, liveLine: null as string | null, liveNote: null as string | null,
+    minLine: null as string | null, confirming: false, confirmLine: null, busy: false,
+    live: false, errNext: null as string | null, errCanRetry: true,
     solAddress: null as string | null, err: null as string | null, ...over,
   });
 
@@ -172,7 +172,7 @@ describe('HomeTab - the per-currency setup card (2026-10-01 founder directive)',
   test('a running setup masks the money actions; navigation stays live', () => {
     const tree = mountHome({
       homeCurrency: 'EUR', homeAsset: preferredRail('EUR', ASSETS),
-      ataSetup: ataVm({kind: 'fund-ic', busy: true, busyLine: 'Working.'}),
+      ataSetup: ataVm({kind: 'fund-ic', busy: true}),
     });
     expect(pressable(tree, 'btn-home-convert').props.disabled).toBe(true);
     expect(pressable(tree, 'btn-home-add-funds').props.disabled).toBe(true);
@@ -186,7 +186,7 @@ describe('HomeTab - the per-currency setup card (2026-10-01 founder directive)',
     // the run from then on, so the action row must stand down on it too.
     const tree = mountHome({
       homeCurrency: 'EUR', homeAsset: preferredRail('EUR', ASSETS),
-      ataSetup: ataVm({kind: 'fund-ic', live: true, liveLine: 'Converting 0.91 ICP. Your EURC account are created as soon as it lands.', liveNote: 'This keeps running on its own, also if you leave this view.'}),
+      ataSetup: ataVm({kind: 'fund-ic', live: true}),
     });
     expect(pressable(tree, 'btn-home-convert').props.disabled).toBe(true);
     expect(pressable(tree, 'btn-home-add-funds').props.disabled).toBe(true);

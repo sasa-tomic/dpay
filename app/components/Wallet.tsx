@@ -624,6 +624,13 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // (status flips 'absent' → 'balance' with amount 0, which unhides the address QR).
   const [ataSetupBusy, setAtaSetupBusy] = useState(false);
   const [ataSetupErr, setAtaSetupErr] = useState<string | null>(null);
+  // The terminal-failure CLASS of ataSetupErr (2026-10-02 founder spec): 'held' = the money
+  // is verifiably still in the wallet (the retry stays legal); 'unknown' = unaccounted (the
+  // card stands the repeat button down). Null = a transient pre-run error - no next-steps
+  // line, the idle card's bottom error carries it. Only the record-lifecycle watcher (the
+  // expiry/failure endings) sets a class; every run start clears it.
+  const [ataSetupErrKind, setAtaSetupErrKind] = useState<'held' | 'unknown' | null>(null);
+  const clearAtaSetupErr = useCallback(() => { setAtaSetupErr(null); setAtaSetupErrKind(null); }, []);
 
   // --- Phase 3 selection layer --------------------------------------------------------------
   // The ONE complete visible asset list, rebuilt from the catalog + Solana config. Pure; rebuilt on
@@ -750,7 +757,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     const mint = activeSolAsset?.mint ?? null;
     if (mint == null) return; // native SOL (or no solana selection) — no token account to create
     setAtaSetupBusy(true);
-    setAtaSetupErr(null);
+    clearAtaSetupErr();
     try {
       await createAtaForMint(mint);
       refreshSol();
@@ -1146,7 +1153,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     if (ataSetupBusy || plan.kind === 'none' || plan.kind === 'refuse') return;
     if (solAddress == null) { setAtaSetupErr(M.errors.solana.offline); return; }
     setAtaSetupBusy(true);
-    setAtaSetupErr(null);
+    clearAtaSetupErr();
     try {
       if (sized != null && plan.kind === 'fund') {
         // The fund leg — a REAL user spend, consented one press ago. The sizing quote is
@@ -1206,12 +1213,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         setAtaSetupErr(M.deposit.ata.fundShort(plan.candidates[0]?.symbol ?? ''));
         return;
       }
-      setAtaSetupErr(null);
+      clearAtaSetupErr();
       if (plan.kind === 'fund-ic') { setAtaIcConfirm(measured as SizedAtaIcFund); return; }
       setAtaSetupConfirm(measured as SizedAtaFund);
       return;
     }
-    setAtaSetupErr(null);
+    clearAtaSetupErr();
     setAtaSetupBusy(true);
     try {
       if (plan.kind === 'fund-ic') {
@@ -1249,7 +1256,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     if (ataSetupBusy) return;
     if (solAddress == null) { setAtaSetupErr(M.errors.solana.offline); return; }
     setAtaSetupBusy(true);
-    setAtaSetupErr(null);
+    clearAtaSetupErr();
     try {
       const rec = await prepareAtaIcSwap(sized);
       // Freeze the setup's OWN targets on the record (2026-10-02 P0): the live-card link.
@@ -1368,6 +1375,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         // The record's REAL cause reaches the card (2026-10-01 founder directive): the engine's
         // failureDetail verbatim, the step-mapped honest line only when the engine recorded none.
         setAtaSetupErr(ataRecordErrLine(rec));
+        // AND the founder's next-steps class (2026-10-02): failed_refunded = the input
+        // verifiably stayed in the wallet (retry legal); every other terminal ending leaves
+        // the funds unaccounted - the card stands the repeat button down and says CHECK.
+        setAtaSetupErrKind(rec.step === 'failed_refunded' ? 'held' : 'unknown');
       }
       }
     }
@@ -1452,20 +1463,20 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       confirming: ataSetupConfirm != null || ataIcConfirm != null,
       confirmLine,
       live: ataLiveRecord != null,
-      liveLine: ataLiveRecord != null
-        ? M.deposit.ata.liveProgress(
-            // Record decimals fell back to 8 on legacy records (types.ts: the e8s world).
-            fmtAssetCompact(ataLiveRecord.amountIn, ataLiveRecord.inDecimals ?? 8, ataLiveRecord.inSymbol),
-            targetsPhrase,
-          )
-        : null,
-      liveNote: M.deposit.ata.liveKeepsRunning,
-      busy: ataSetupBusy,
-      busyLine: ataSwapPending ? M.deposit.ata.swapPending(targetsPhrase) : null,
+      // The founder's ONE busy line (2026-10-02): while a run or a live record holds the card
+      // it renders `settingUp` and nothing else. `busy` also covers the adopt→notify window
+      // (the venue swap is pending but the record store has not notified yet): no idle flash
+      // between the confirm press and the live-record handover - the reappearance loop the
+      // founder saw stays closed on every path.
+      busy: ataSetupBusy || ataSwapPending,
       solAddress: solAddress,
       err: ataSetupErr,
+      errNext: ataSetupErrKind == null ? null
+        : ataSetupErrKind === 'held' ? M.deposit.ata.errNextSafe : M.deposit.ata.errNextUnknown,
+      // 'unknown' = the outcome is unaccounted: no repeat affordance until the balance says.
+      errCanRetry: ataSetupErrKind !== 'unknown',
     };
-  }, [ataSetupModel, ataPlanSig, ataSetupConfirm, ataIcConfirm, ataSetupBusy, ataSwapPending, ataSetupErr, solAddress, icFundShort, ataSized, ataLiveRecord]);
+  }, [ataSetupModel, ataPlanSig, ataSetupConfirm, ataIcConfirm, ataSetupBusy, ataSwapPending, ataSetupErr, ataSetupErrKind, solAddress, icFundShort, ataSized, ataLiveRecord]);
   // Any re-plan (a balance or token refresh moved the inputs) re-answers honestly: the flip
   // is only ever as old as the evidence behind it.
   // The refuse latch's reset keys on the plan's VALUE signature, never the model's identity:

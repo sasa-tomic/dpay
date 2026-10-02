@@ -154,13 +154,12 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
           minLine={ataSetup.minLine}
           fundFromLine={ataSetup.fundFromLine}
           live={ataSetup.live}
-          liveLine={ataSetup.liveLine}
-          liveNote={ataSetup.liveNote}
           confirming={ataSetup.confirming}
           confirmLine={ataSetup.confirmLine}
           busy={ataSetup.busy}
-          busyLine={ataSetup.busyLine}
           err={ataSetup.err}
+          errNext={ataSetup.errNext}
+          errCanRetry={ataSetup.errCanRetry}
           solAddress={ataSetup.solAddress}
           solCopied={copied != null}
           onStart={onAtaSetupStart}

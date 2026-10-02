@@ -15,6 +15,7 @@ import {describe, test, expect, jest} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {AtaSetupCard} from '../components/AtaSetupCard';
+import {M} from '../i18n';
 
 const COST = '0.00204428 SOL';
 
@@ -173,40 +174,41 @@ describe('AtaSetupCard - the honest refusal and the busy runs', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('busy: the spinner state replaces every control (the default creating line)', () => {
+  test('busy: the founder-specified SINGLE line and nothing else (2026-10-02)', () => {
     const onStart = jest.fn();
-    const tree = mount({kind: 'create', busy: true, onStart});
+    const tree = mount({kind: 'fund-ic', busy: true, onStart});
     expect(has(tree, 'ata-setup-EUR-busy')).toBe(true);
     expect(has(tree, 'ata-setup-EUR-complete')).toBe(false);
     expect(has(tree, 'ata-setup-EUR-confirm-btn')).toBe(false);
-    expect(textOf(tree, 'ata-setup-EUR-busy')).toContain('EURC');
+    // The founder's verbatim contract: ONE line next to the spinner, simple, active tense.
+    expect([...new Set(textOf(tree, 'ata-setup-EUR-busy-line').split('\n').filter(Boolean))]).toEqual([M.deposit.ata.settingUp]);
+    // NO other copy competes with it, and nothing inside the busy view is actionable.
+    const busyView = tree.root.findAll(n => n.props && n.props.testID === 'ata-setup-EUR-busy')[0]!;
+    expect(busyView.findAll(n => typeof n.props.onPress === 'function').length).toBe(0);
     act(() => { tree.unmount(); });
   });
 
-  test('busy + a fund-ic venue swap in flight: the honest swap-pending line replaces creating', () => {
-    const tree = mount({kind: 'fund-ic', busy: true, busyLine: 'Swapping into SOL. Your EURC account are created as soon as it lands.'});
-    const line = textOf(tree, 'ata-setup-EUR-busy');
-    expect(line).toContain('Swapping into SOL');
-    expect(line).not.toContain('Creating');
+  test('busy during a still-in-flight venue swap shows the SAME one line (no swap-pending override)', () => {
+    const tree = mount({kind: 'fund-ic', busy: true});
+    expect([...new Set(textOf(tree, 'ata-setup-EUR-busy-line').split('\n').filter(Boolean))]).toEqual([M.deposit.ata.settingUp]);
+    expect(textOf(tree, 'ata-setup-EUR-busy-line')).not.toContain('Creating');
     act(() => { tree.unmount(); });
   });
 });
 
 describe('AtaSetupCard - the LIVE state (2026-10-02 P0: a non-terminal record owns the card)', () => {
   // The silent-strand defect: the card fell back to idle (button re-armed) while a convert
-  // record was still live - a second-spend invitation. The live state renders progress plus
-  // the honesty line, and NO button, NO idle probe minimum line - and it outranks every
+  // record was still live - a second-spend invitation. The live state renders the SAME single
+  // founder line as busy (2026-10-02 spec: one line, continuously, from confirm until
+  // terminal) and NO button, NO note line, NO idle probe minimum line. It outranks every
   // other state, because a live record must never be pasted over by idle/confirm/busy.
-  const LIVE_LINE = 'Converting 0.91 ICP. Your EURC account are created as soon as it lands.';
-  const LIVE_NOTE = 'This keeps running on its own, also if you leave this view.';
 
-  test('live: the progress line + the honesty copy render, there is NO button and NO minimum line', () => {
+  test('live: the single setting-up line renders, no note line, no button, no minimum line', () => {
     const onStart = jest.fn();
-    const tree = mount({kind: 'fund-ic', live: true, liveLine: LIVE_LINE, liveNote: LIVE_NOTE, minLine: 'Needs at least 0.09 VCHF.', onStart});
+    const tree = mount({kind: 'fund-ic', live: true, minLine: 'Needs at least 0.09 VCHF.', onStart});
     expect(has(tree, 'ata-setup-EUR-live')).toBe(true);
-    expect(textOf(tree, 'ata-setup-EUR-live-line')).toContain('0.91 ICP');
-    expect(has(tree, 'ata-setup-EUR-live-note')).toBe(true);
-    expect(textOf(tree, 'ata-setup-EUR-live-note')).toContain('leave this view');
+    expect([...new Set(textOf(tree, 'ata-setup-EUR-live-line').split('\n').filter(Boolean))]).toEqual([M.deposit.ata.settingUp]);
+    expect(has(tree, 'ata-setup-EUR-live-note')).toBe(false); // ONE line - no competing copy
     expect(has(tree, 'ata-setup-EUR-complete')).toBe(false); // never a second spend
     expect(has(tree, 'ata-setup-EUR-confirm-btn')).toBe(false);
     expect(has(tree, 'ata-setup-EUR-banner')).toBe(false);
@@ -214,8 +216,15 @@ describe('AtaSetupCard - the LIVE state (2026-10-02 P0: a non-terminal record ow
     act(() => { tree.unmount(); });
   });
 
+  test('live + err: the error renders under the single line (money-critical, not competing copy)', () => {
+    const tree = mount({kind: 'fund-ic', live: true, err: 'The deposit was refused.'});
+    expect(has(tree, 'ata-setup-EUR-err')).toBe(true);
+    expect(textOf(tree, 'ata-setup-EUR-err')).toContain('refused');
+    act(() => { tree.unmount(); });
+  });
+
   test('live outranks busy and confirm: a record standing while a run (or a stale confirm) is up still hides every control', () => {
-    const tree = mount({kind: 'fund-ic', live: true, liveLine: LIVE_LINE, liveNote: LIVE_NOTE, busy: true, confirming: true, confirmLine: 'Swaps about 5 VCHF'});
+    const tree = mount({kind: 'fund-ic', live: true, busy: true, confirming: true, confirmLine: 'Swaps about 5 VCHF'});
     expect(has(tree, 'ata-setup-EUR-live')).toBe(true);
     expect(has(tree, 'ata-setup-EUR-busy')).toBe(false);
     expect(has(tree, 'ata-setup-EUR-confirm-btn')).toBe(false);
@@ -223,7 +232,7 @@ describe('AtaSetupCard - the LIVE state (2026-10-02 P0: a non-terminal record ow
   });
 
   test('live outranks refuse: the honest dead end waits until the record resolves', () => {
-    const tree = mount({kind: 'refuse', live: true, liveLine: LIVE_LINE, liveNote: LIVE_NOTE});
+    const tree = mount({kind: 'refuse', live: true});
     expect(has(tree, 'ata-setup-EUR-live')).toBe(true);
     expect(has(tree, 'ata-setup-EUR-refuse')).toBe(false);
     act(() => { tree.unmount(); });
@@ -233,6 +242,49 @@ describe('AtaSetupCard - the LIVE state (2026-10-02 P0: a non-terminal record ow
     const tree = mount({kind: 'create'});
     expect(has(tree, 'ata-setup-EUR-live')).toBe(false);
     expect(has(tree, 'ata-setup-EUR-banner')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('AtaSetupCard - the terminal failure (founder spec 2026-10-02: error first, then next steps)', () => {
+  // After a run fails or its window expires the user must see the error (what went wrong,
+  // one honest line) AND the next steps (what happens to the money, what to do now). When
+  // the funds are NOT verifiably accounted for, the card must NOT re-arm a repeat affordance.
+  const ERR = 'swap unconfirmed when its signed window expired - nothing left the wallet';
+  const NEXT = 'Nothing left your wallet. Complete the setup again when you are ready.';
+
+  test('the failed panel: error first, then the next-steps line, then the retry action', () => {
+    const onStart = jest.fn();
+    const tree = mount({kind: 'fund-ic', err: ERR, errNext: NEXT, onStart});
+    expect(has(tree, 'ata-setup-EUR-failed')).toBe(true);
+    const failedText = textOf(tree, 'ata-setup-EUR-failed');
+    expect(failedText.indexOf(ERR)).toBeGreaterThanOrEqual(0);
+    expect(failedText.indexOf(ERR)).toBeLessThan(failedText.indexOf(NEXT)); // error BEFORE next steps
+    expect(has(tree, 'ata-setup-EUR-complete')).toBe(true); // funds accounted: retry is legal
+    act(() => { tree.unmount(); });
+  });
+
+  test('unaccounted funds: error + next steps render, but NO repeat affordance re-arms', () => {
+    const onStart = jest.fn();
+    const tree = mount({
+      kind: 'fund-ic',
+      err: 'swap unconfirmed when its signed window expired - your balance is the source of truth',
+      errNext: 'Check your SOL balance in a moment: if the money is still there, complete the setup again.',
+      errCanRetry: false,
+      onStart,
+    });
+    expect(has(tree, 'ata-setup-EUR-failed')).toBe(true);
+    expect(has(tree, 'ata-setup-EUR-err-next')).toBe(true);
+    expect(has(tree, 'ata-setup-EUR-complete')).toBe(false); // no repeat while funds unaccounted
+    act(() => { tree.unmount(); });
+  });
+
+  test('without next steps (a transient pre-run error) the idle card keeps its bottom error line', () => {
+    const onStart = jest.fn();
+    const tree = mount({kind: 'create', err: 'The network refused the request.', onStart});
+    expect(has(tree, 'ata-setup-EUR-failed')).toBe(false); // idle carries it (existing contract)
+    expect(has(tree, 'ata-setup-EUR-err')).toBe(true);
+    expect(has(tree, 'ata-setup-EUR-complete')).toBe(true);
     act(() => { tree.unmount(); });
   });
 });
