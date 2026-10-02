@@ -53,6 +53,8 @@ export const SMOKE_FILES: readonly string[] = [
   'solana-settle-verify.test.ts',
   'pendingPays.test.ts',
   'solana-account-decode.test.ts',
+  // the record-lifecycle cefi-deposit once-only gate (2026-10-02 P0)
+  'cefiDepositGate.test.ts',
   // destination validation + transport pins that keep bytes off dpay origins
   'destination.test.ts',
   'icpBoundary.test.ts',
