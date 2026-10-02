@@ -1395,14 +1395,18 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   const [convertRecords, setConvertRecords] = useState(() => convertResumeSnapshot());
   useEffect(() => subscribeConvertRecords(setConvertRecords), []);
   // The LIVE record for the setup card: any NON-terminal convert record this setup OWNS
-  // (`ataTargetMints`, frozen on adopt) whose targets still intersect the CURRENT plan's.
-  // While one exists, the card renders live (progress + honesty, NO button) - never the idle
-  // probe with its re-armed one-tap button (the P0's second-spend invitation), never a stale
+  // (`ataTargetMints`, frozen on adopt) whose targets still intersect the ABSENT accounts.
+  // The target set is the absent mints themselves - the card's own existence condition -
+  // never the plan's verdict: a wallet with no fuel plans `refuse` and its live record must
+  // STILL hold the card (the honest state), exactly as a fund-ic plan would. While a live
+  // record exists the card renders live (progress + honesty, NO button) - never the idle
+  // probe with its re-armed one-tap button (the second-spend invitation), never a stale
   // confirm or the refuse panel pasted over it. A plain convert (no ownership link) never
   // holds the card: its landing creates no accounts, so promising any would be a lie.
   const ataLiveRecord = useMemo(() => {
-    const plan = ataSetupModel.plan;
-    const mints = plan.kind === 'none' || plan.kind === 'refuse' ? [] : plan.mints;
+    const mints = assets
+      .filter((a): a is Extract<typeof a, {mint: string | null}> => a.protocol === 'solana' && a.mint != null && tokenStates[a.mint]?.status === 'absent')
+      .map(a => a.mint!);
     if (mints.length === 0) return null;
     for (const rec of Object.values(convertRecords)) {
       if (isTerminalConvertStep(rec.step)) continue;
@@ -1411,7 +1415,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       return rec;
     }
     return null;
-  }, [convertRecords, ataSetupModel]);
+  }, [convertRecords, assets, tokenStates]);
   const ataSetupView = useMemo(() => {
     const plan = ataSetupModel.plan;
     const targetsPhrase = M.deposit.ata.targetsLabel(ataSetupModel.targets);
