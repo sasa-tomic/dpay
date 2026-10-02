@@ -14,8 +14,9 @@
  * and adopts it; the engine runs the IC legs to awaiting_deposit; the venue's settle completes
  * the record; the watcher then creates the absent accounts (real broadcasts); the card clears.
  */
-import {it, expect, afterEach} from '@jest/globals';
+import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {accountOf, onboardSeededUnfunded, openBalances, faucetAccount} from '../harness/lib';
+import type {Mount} from '../harness/mount';
 import {deadline as budgetDeadline} from '../harness/budget';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -147,12 +148,117 @@ function installAtaSolStub(mints: string[]): {state: {lamports: number; funded: 
 }
 
 hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL accounts', () => {
-  let restoreQuote: (() => void) | null = null;
+  // Every fetch wrapper's restore goes on THIS stack and is undone in REVERSE install order
+  // - two independent restore slots restored in a fixed order let one test's armed knob
+  // survive into the next test's fetch chain (the 2026-10-02 floated-case flake).
+  const restores: Array<() => void> = [];
   afterEach(() => {
-    if (restoreQuote != null) { restoreQuote(); restoreQuote = null; }
+    while (restores.length > 0) restores.pop()!();
     disposeConvertStubs();
     delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;
   });
+
+  /** The confirm-time venue knob (2026-10-02 live-trip fix): ONE wrapper for the whole file
+   *  (installed ONCE in beforeAll, mode 'off' unless a test says otherwise, reset after every
+   *  test) - stacking per-test fetch wrappers restored out of install order let one test's
+   *  armed knob hijack the next test's quotes. When the mode is set, every cefi venue quote
+   *  answers with that verdict - the exact live-trip failure class (the venue refused at
+   *  confirm time that had quoted fine at sizing time), so the sizing/probe phase stays
+   *  honest and only the CONFIRM press walks into the refusal. mode 'dead' = hard-
+   *  unavailable (no minimum named, every route dies); mode 'floated' = the venue's own
+   *  below-minimum verdict naming 0.5 (ICP units) for anything under it - a fresh minimum
+   *  the 20-VCHF wallet still covers (the fixture's stub pool cannot carry more), so the
+   *  runner must RE-CONFIRM. A REAL venue refuses only deposits BELOW its minimum and
+   *  quotes everything at or above it - the knob must too, or the fresh sizing after a
+   *  re-confirm can never deliver. */
+  let knobMode: 'off' | 'dead' | 'floated' = 'off';
+  /** The local venue answer (both families' quote shapes), fixed rate 0.02475 SOL per unit.
+   *  The services parse STRICTLY (quotes.ts shape gate): venue_id MUST equal the catalog id
+   *  and each family's quote carries its own identity fields (sideshift quote.id, trocador
+   *  quote.trade_id + provider) - anything less throws 'shape' and every route reads dead. */
+  const fixedVenueAnswer = (isSideshift: boolean, deposit: number): Response => {
+    const settle = (deposit * 0.02475).toFixed(8);
+    const j = isSideshift
+      ? {venue_id: 'sideshift', quote: {id: `q-${deposit}`, settleAmount: settle, rate: '0.02475'}}
+      : {venue_id: 'trocador', quote: {trade_id: `t-${deposit}`, amount_to: settle, provider: 'test'}};
+    return new Response(JSON.stringify(j), {status: 200, headers: {'content-type': 'application/json'}});
+  };
+  beforeAll(() => {
+    const prev = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      let parsed: URL;
+      try {
+        parsed = new URL(url, 'http://localhost');
+      } catch {
+        return prev(input, init);
+      }
+      const isVenueQuote = (parsed.pathname === '/api/v1/sideshift/quotes' || parsed.pathname === '/api/v1/trocador/rate') && init?.method === 'POST';
+      // The venue ORDER endpoints answer locally too: the order must price the SAME deposit
+      // the quote carried (prepare.ts twin check, quoteUnavailable('deposit') otherwise), and
+      // the shared relay's own harness would invent its own figure over a quoteId it never
+      // issued. sideshift orders carry only the quoteId, so the deposit is recovered from the
+      // 'q-<deposit>' id this knob minted; trocador trades carry depositAmount explicitly.
+      const isSideshiftOrder = parsed.pathname === '/api/v1/sideshift/shifts/fixed' && init?.method === 'POST';
+      const isTrocadorTrade = parsed.pathname === '/api/v1/trocador/trade' && init?.method === 'POST';
+      if (isSideshiftOrder || isTrocadorTrade) {
+        const req = JSON.parse(String(init?.body ?? '{}')) as {quoteId?: string; depositAmount?: string};
+        const deposit = isSideshiftOrder ? Number((req.quoteId ?? '').slice(2)) || 0 : Number(req.depositAmount ?? '0') || 0;
+        const settle = (deposit * 0.02475).toFixed(8);
+        // The venue's deposit address is the destination of an ICRC-1 transfer the IC chain
+        // signs (prepare's step 7 validates it through the core: ICRC-1 account text or
+        // 64-hex account id, never a canister, never the user's own principal) - so the stub
+        // mints a REAL principal text, '2vxsx-fae' (the anonymous principal, valid checksum,
+        // in no guard list).
+        const depositAddress = '2vxsx-fae';
+        const j = isSideshiftOrder
+          ? {id: `s-${req.quoteId ?? 'x'}`, depositAddress, depositAmount: String(deposit), settleAmount: settle, expiresAt: new Date(Date.now() + 600_000).toISOString(), status: 'waiting'}
+          : {trade_id: `st-${req.quoteId ?? 'x'}`, address_provider: depositAddress, amount_from: String(deposit), amount_to: settle};
+        return new Response(JSON.stringify(j), {status: 200, headers: {'content-type': 'application/json'}});
+      }
+      if (isVenueQuote) {
+        // eslint-disable-next-line no-console
+        let deposit = Number(JSON.parse(String(init?.body ?? '{}') as string).depositAmount ?? '0');
+        if (!Number.isFinite(deposit)) deposit = 0;
+        if (knobMode === 'floated' && deposit >= 0.5) return fixedVenueAnswer(isVenueQuote && parsed.pathname === '/api/v1/sideshift/quotes', deposit);
+        const body = knobMode === 'floated'
+          ? {error: {message: 'Minimum deposit amount: 0.5.', depositRangeMin: '0.5'}}
+          : {};
+        if (knobMode !== 'off') return new Response(JSON.stringify(body), {status: 500, headers: {'content-type': 'application/json'}});
+        // knob off: the honest deterministic venue - a LOCAL fixed-rate answer (settle =
+        // deposit x 0.02475, both settle families' shapes), never the shared relay: its
+        // stub state drifts across tests in this file and the sizing walk must not inherit
+        // another test's rate history.
+        return fixedVenueAnswer(isVenueQuote && parsed.pathname === '/api/v1/sideshift/quotes', deposit);
+      }
+      return prev(input, init);
+    }) as typeof fetch;
+  });
+  afterEach(() => { knobMode = 'off'; });
+  /** The shared drive: stubs in, a 20-VCHF wallet on the IC, the EUR view's card at the ONE
+   *  confirm (the sizing/probe phase completed honestly). Returns the mount. */
+  async function driveToConfirm(alias: string): Promise<Mount> {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {SOLANA_TOKENS} = require('../../../solana/tokens') as {SOLANA_TOKENS: Record<string, {mint: string; decimals: number}>};
+    const tokenMints = Object.entries(SOLANA_TOKENS).filter(([k]) => k === 'EURC' || k === 'USDC').map(([, v]) => v.mint);
+    installAtaSolStub(tokenMints);
+    await enableSolRail();
+    installSideShiftStub({initialStatus: 'waiting'});
+    restores.push(installProportionalSideShiftQuote());
+
+    const m = await onboardSeededUnfunded(alias);
+    const account = await accountOf(m);
+    expect(account).not.toBeNull();
+    const fund = await faucetAccount(account!.publicHex, 2000000000, {currency: 7});
+    expect(fund.ok).toBe(true);
+
+    await openBalances(m, {timeoutMs: 15_000});
+    await m.driver.click('btn-accounts-currency-EUR', {timeoutMs: 10_000});
+    await m.driver.findByTestID('ata-setup-EUR-banner', {timeoutMs: 20_000});
+    await m.driver.click('ata-setup-EUR-complete', {timeoutMs: 10_000});
+    await m.driver.findByTestID('ata-setup-EUR-confirm-btn', {timeoutMs: 20_000});
+    return m;
+  }
 
   it('sizes honestly, confirms once, adopts the composed record, and creates the accounts on settle', async () => {
     // The SOL rail configured BEFORE boot; zero lamports + absent ATAs until the venue pays.
@@ -163,7 +269,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
     const {state: stubState, sent: solSends} = installAtaSolStub(tokenMints);
     await enableSolRail();
     installSideShiftStub({initialStatus: 'waiting'});
-    restoreQuote = installProportionalSideShiftQuote();
+    restores.push(installProportionalSideShiftQuote());
 
     const m = await onboardSeededUnfunded('jest-ata-fund-ic');
     try {
@@ -185,7 +291,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       // swap input (a VCHF figure) BEFORE anything is initiated - no number that requires a
       // failed swap to learn.
       await m.driver.waitForFunction(
-        () => /[\d.]+ VCHF/.test(m!.driver.readText('ata-setup-EUR-banner')),
+        () => { try { return /[\d.]+ VCHF/.test(m!.driver.readText('ata-setup-EUR-banner')); } catch { return false; } },
         {timeoutMs: 30_000, label: 'the idle card states the measured minimum swap input'},
       );
       expect(m.driver.readText('ata-setup-EUR-banner')).not.toContain('at least 0 VCHF');
@@ -240,7 +346,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
     installAtaSolStub(tokenMints);
     await enableSolRail();
     installSideShiftStub({initialStatus: 'waiting'});
-    restoreQuote = installProportionalSideShiftQuote();
+    restores.push(installProportionalSideShiftQuote());
 
     const m = await onboardSeededUnfunded('jest-ata-fund-ic-churn');
     try {
@@ -283,4 +389,59 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       await m.unmount().catch(() => undefined);
     }
   }, budgetScaled(300_000));
+
+  it('a confirm-time venue refusal renders the REAL cause and never the un-probed idle (2026-10-02 trip fix)', async () => {
+    // eslint-disable-next-line no-console
+    // The live trip: the venue quoted fine at sizing, then refused at CONFIRM - and the card
+    // fell back to the un-probed idle (rent line only, no cause) while logcat named a foreign
+    // symbol. Pinned: every route dead at confirm time leaves the refuse panel WITH the real
+    // cause line, the cause names the CONFIRMED source (VCHF, never ICP), and the idle card
+    // never returns.
+    const m = await driveToConfirm('jest-ata-confirm-refuse');
+    try {
+      knobMode = 'dead'; // the venue turns hostile AT CONFIRM TIME - the sizing stayed honest
+      await m.driver.click('ata-setup-EUR-confirm-btn', {timeoutMs: 10_000});
+      // The honest dead end, carrying the cause:
+      await m.driver.findByTestID('ata-setup-EUR-refuse', {timeoutMs: 20_000});
+      await m.driver.findByTestID('ata-setup-EUR-err', {timeoutMs: 10_000});
+      const errLine = m.driver.readText('ata-setup-EUR-err');
+      expect(errLine.length).toBeGreaterThan(0);
+      expect(errLine).toContain('VCHF'); // the CONFIRMED source - never a foreign candidate
+      expect(errLine).not.toContain('ICP');
+      // Never the un-probed idle again: the banner (rent-line card) stays gone.
+      await m.driver.waitForFunction(
+        () => !m!.driver.isPresent('ata-setup-EUR-banner'),
+        {timeoutMs: 15_000, label: 'the card never silently falls back to the un-probed idle'},
+      );
+      expect(m.driver.isPresent('ata-setup-EUR-banner')).toBe(false);
+    } finally {
+      await m.unmount().catch(() => undefined);
+    }
+  }, budgetScaled(180_000));
+
+  it('a floated venue minimum at confirm time goes to RE-CONFIRM with a fresh sized plan (2026-10-02 trip fix)', async () => {
+    // eslint-disable-next-line no-console
+    // The venue's own below-minimum verdict at confirm time, naming 2.7 (ICP units) - above
+    // the confirmed leg floor, below the wallet's 3 VCHF: the runner must RE-SIZE fresh and
+    // show the fresh plan for a second confirm - never fundShort, never idle, and nothing
+    // adopted (no order behind the user's back).
+    const m = await driveToConfirm('jest-ata-confirm-floated');
+    try {
+      const account = await accountOf(m);
+      const firstLine = m.driver.readText('ata-setup-EUR-confirm-line');
+      knobMode = 'floated'; // the venue's minimum floats up AT CONFIRM TIME
+      await m.driver.click('ata-setup-EUR-confirm-btn', {timeoutMs: 10_000});
+      // The RE-CONFIRM: a fresh sized plan, user-gated.
+      await m.driver.findByTestID('ata-setup-EUR-confirm-btn', {timeoutMs: 30_000});
+      const secondLine = m.driver.readText('ata-setup-EUR-confirm-line');
+      expect(secondLine).toContain('VCHF');
+      expect(secondLine).not.toBe(firstLine); // the fresh numbers, not a replay
+      expect(m.driver.isPresent('ata-setup-EUR-err')).toBe(false);
+      // NOTHING was adopted by any of it: the store stays empty until the user confirms again.
+      const store = await storeRecords(account!.publicHex);
+      expect(Object.keys(store).length).toBe(0);
+    } finally {
+      await m.unmount().catch(() => undefined);
+    }
+  }, budgetScaled(180_000));
 });

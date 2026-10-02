@@ -154,6 +154,14 @@ describe('AtaSetupCard - the honest refusal and the busy runs', () => {
     act(() => { tree.unmount(); });
   });
 
+  test('refuse renders the REAL cause line (2026-10-02: a confirm-time failure may never render cause-less)', () => {
+    const tree = mount({kind: 'refuse', err: 'Even all your VCHF doesn\'t cover it - receive a little SOL at your address instead.'});
+    expect(has(tree, 'ata-setup-EUR-refuse')).toBe(true);
+    expect(has(tree, 'ata-setup-EUR-err')).toBe(true);
+    expect(textOf(tree, 'ata-setup-EUR-err')).toContain('VCHF');
+    act(() => { tree.unmount(); });
+  });
+
   test('refuse + copied: the copy control speaks its state', () => {
     const tree = mount({kind: 'refuse', solAddress: 'Addr', onCopySolAddress: jest.fn(), solCopied: true});
     expect(textOf(tree, 'ata-setup-EUR-copy-sol')).toContain('Copied');

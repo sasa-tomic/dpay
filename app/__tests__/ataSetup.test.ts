@@ -18,7 +18,7 @@
 import {describe, test, expect} from '@jest/globals';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS} from '../solana/tokens';
-import {planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
+import {ataConfirmPlan, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
 
 const EURC = EURC_MINT_ADDRESS;
 const USDC = USDC_MINT_ADDRESS;
@@ -516,6 +516,52 @@ describe('ataRecordErrLine - the real cause reaches the card, ONE line (2026-10-
 
   test('no detail, any other terminal step: the honest swap-failed fallback', () => {
     expect(ataRecordErrLine({step: 'failed_refunded'})).toContain('did not go through');
+  });
+});
+
+describe('ataConfirmPlan - the confirm-time re-verify verdict (2026-10-02 trip fix)', () => {
+  // The live-trip defect: the confirm-time fresh re-quote threw fundShort naming a symbol the
+  // user never confirmed (ICP while VCHF was confirmed) and the card silently fell back to the
+  // un-probed idle. The verdict is now a PURE decision over the confirmed candidate's fresh
+  // route answers: sign the best covering route, RE-CONFIRM on a floated minimum the balance
+  // still covers, refuse honestly otherwise - never a throw naming a foreign symbol.
+  const target = '4098560';
+
+  test('a covering route signs: the highest settle wins, registry order breaks ties', () => {
+    const v = ataConfirmPlan({answers: [{kind: 'quoted', settleRaw: '681770'}, {kind: 'quoted', settleRaw: '4303480'}], targetLamports: target, solKnown: '0', balanceRaw: '300000000'});
+    expect(v).toEqual({kind: 'sign', routeIndex: 1});
+    const tied = ataConfirmPlan({answers: [{kind: 'quoted', settleRaw: '4303480'}, {kind: 'quoted', settleRaw: '4303480'}], targetLamports: target, solKnown: '0', balanceRaw: '300000000'});
+    expect(tied).toEqual({kind: 'sign', routeIndex: 0});
+  });
+
+  test('the best settle below the target refuses (cannot-cover) - never signs a doomed order', () => {
+    const v = ataConfirmPlan({answers: [{kind: 'quoted', settleRaw: '4098559'}], targetLamports: target, solKnown: '0', balanceRaw: '300000000'});
+    expect(v).toEqual({kind: 'refuse', reason: 'cannot-cover'});
+  });
+
+  test('SOL already held counts toward the cover check', () => {
+    const v = ataConfirmPlan({answers: [{kind: 'quoted', settleRaw: '1'}], targetLamports: target, solKnown: (Number(target) - 1).toString(), balanceRaw: '300000000'});
+    expect(v).toEqual({kind: 'sign', routeIndex: 0});
+  });
+
+  test('every route refused below-minimum and the balance covers the fresh minimum: RE-CONFIRM', () => {
+    const v = ataConfirmPlan({answers: [{kind: 'belowMin', minInRaw: '270000000'}, {kind: 'belowMin', minInRaw: '262487136'}], targetLamports: target, solKnown: '0', balanceRaw: '300000000'});
+    expect(v).toEqual({kind: 'reconfirm', minInRaw: '262487136'}); // the MOST PERMISSIVE minimum
+  });
+
+  test('every route refused below-minimum and the balance cannot reach it: refuse (below-min)', () => {
+    const v = ataConfirmPlan({answers: [{kind: 'belowMin', minInRaw: '92000000'}], targetLamports: target, solKnown: '0', balanceRaw: '100000'});
+    expect(v).toEqual({kind: 'refuse', reason: 'below-min'});
+  });
+
+  test('all routes dead: refuse (no-route) - nothing was quoted, nothing signs', () => {
+    const v = ataConfirmPlan({answers: [{kind: 'dead'}, {kind: 'dead'}], targetLamports: target, solKnown: '0', balanceRaw: '300000000'});
+    expect(v).toEqual({kind: 'refuse', reason: 'no-route'});
+  });
+
+  test('a quoting route outranks refusals: one live answer is enough to sign', () => {
+    const v = ataConfirmPlan({answers: [{kind: 'belowMin', minInRaw: '270000000'}, {kind: 'quoted', settleRaw: '4303480'}], targetLamports: target, solKnown: '0', balanceRaw: '300000000'});
+    expect(v).toEqual({kind: 'sign', routeIndex: 1});
   });
 });
 

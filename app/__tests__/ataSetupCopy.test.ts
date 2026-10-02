@@ -57,12 +57,16 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       expect(icConfirm).toContain('USDC');
       expect(d.ata.swapPending(two)).toContain('EURC');
       // The up-front minimum line (2026-10-01): the idle card states the measured swap minimum
-      // BEFORE the user initiates anything - one line, amount once, source named.
-      const min = d.ata.minSwap(SWAP, 'USDC');
+      // BEFORE the user initiates anything - one line, amount once, source named. The amount
+      // arrives PRE-FORMATTED with its symbol; the 2026-10-02 live trip rendered the symbol
+      // TWICE ('Needs at least 2.62487136 VCHF VCHF.') - the template takes the amount only
+      // and the source name must appear EXACTLY once.
+      const min = d.ata.minSwap(SWAP);
       expect(min).toContain(SWAP);
       expect(min).toContain('USDC');
       expect(min).not.toContain('undefined');
       expect(occurrences(min, SWAP)).toBe(1);
+      expect(occurrences(min, 'USDC')).toBe(1);
       // The card's OWN fallback copy never invites a hollow retry (2026-10-01): state facts,
       // full stop. The banned family is the empty retry promise - a venue-verbatim
       // failureDetail pass-through is exempt by design (ataRecordErrLine returns it
