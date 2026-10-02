@@ -68,6 +68,7 @@ import {
   confirmCrossRailSolLeg,
   convertResumeSnapshot,
   fetchProviderStatus,
+  markConvertDepositSent,
   providerLastCheckedAtMs,
   startConvertResumeEngine,
   subscribeConvertRecords,
@@ -563,6 +564,58 @@ describe('the engine — every live record driven from wallet load, mounted scre
       stopA();
       stopB();
     }
+  });
+});
+
+describe('markConvertDepositSent — the once-only cefi-deposit handoff marker (2026-10-02 P0)', () => {
+  test('persists the marker on the engine copy AND the store, and notifies subscribers', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'cef-1': providerRecord()});
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(20);
+      const seen: ConvertRecord[] = [];
+      const unsub = subscribeConvertRecords(records => {
+        const r = records['cef-1'];
+        if (r?.depositSentAtMs != null) seen.push(r);
+      });
+      const ok = await markConvertDepositSent('cef-1', 1727870400000);
+      unsub();
+      expect(ok).toBe(true);
+      expect(saveConvertRecord).toHaveBeenCalledWith('pub', expect.objectContaining({id: 'cef-1', depositSentAtMs: 1727870400000}));
+      expect(convertResumeSnapshot()['cef-1']?.depositSentAtMs).toBe(1727870400000);
+      expect(seen.length).toBeGreaterThan(0);
+    } finally {
+      stop();
+    }
+  });
+
+  test('a SECOND mark is a no-op — exactly once per record, whatever fires the handoff', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'cef-1': providerRecord()});
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(20);
+      expect(await markConvertDepositSent('cef-1', 1111)).toBe(true);
+      const savesAfterFirst = jest.mocked(saveConvertRecord).mock.calls.length;
+      expect(await markConvertDepositSent('cef-1', 2222)).toBe(false);
+      expect(jest.mocked(saveConvertRecord).mock.calls.length).toBe(savesAfterFirst);
+      // The FIRST marker stands (never overwritten by a second taker).
+      expect(convertResumeSnapshot()['cef-1']?.depositSentAtMs).toBe(1111);
+    } finally {
+      stop();
+    }
+  });
+
+  test('an unknown record id (or a stopped engine) marks nothing', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({});
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(10);
+      expect(await markConvertDepositSent('nope', 1111)).toBe(false);
+      expect(saveConvertRecord).not.toHaveBeenCalled();
+    } finally {
+      stop();
+    }
+    expect(await markConvertDepositSent('nope', 1111)).toBe(false);
   });
 });
 

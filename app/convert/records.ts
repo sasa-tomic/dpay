@@ -156,6 +156,9 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   if (!CONVERT_STEPS.includes(r.step as ConvertStep)) return null;
   rec.step = r.step as ConvertStep;
   if (typeof r.acknowledgedStuckAtMs === 'number') rec.acknowledgedStuckAtMs = r.acknowledgedStuckAtMs;
+  // The cefi-deposit handoff marker (2026-10-02 P0): parsed so the once-only deposit gate
+  // survives a restart. Absent on every record this build wrote before it — byte-identical.
+  if (typeof r.depositSentAtMs === 'number') rec.depositSentAtMs = r.depositSentAtMs;
   // The COMPOSED IC→CeFi block (2026-09-26, brief §5.4 item 2): parsed BEFORE the plan so
   // the plan-shape checks below can key on it. Every venue-issued string must be present
   // and well-formed — a half-written deposit block on a record the engine signs against is

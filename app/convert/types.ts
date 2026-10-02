@@ -401,6 +401,12 @@ export type ConvertRecord = {
    *  carry no legPlan states — convertAbortFlavor reads this instead). Planned and Solana
    *  records never need it: their flavor reads survive the rewrite untouched. */
   abortedFromStep?: ConvertStep;
+  /** The cefi-deposit handoff marker (2026-10-02 P0): set when the record-lifecycle deposit
+   *  sender TOOK this record's IC-source deposit — persisted BEFORE the transfer envelope
+   *  leaves, so a kill mid-send can never double-send after a restart (a rebuilt envelope is
+   *  a fresh transfer, and a fresh transfer is a second spend). Additive and optional: every
+   *  record prepared before it existed hydrates byte-identically. */
+  depositSentAtMs?: number;
   /** The cross-rail block (Routes B/C): present iff the record was prepared on a route with
    *  a CCTP leg; extends the five IC legs with the external-signature burn and (Route C)
    *  the final Jupiter leg. */

@@ -559,6 +559,27 @@ describe('hydrateConvertStore — the dpay.convert.v3 record round-trip', () => 
     // that used to be unscoped).
     expect(await loadConvertRecords('bb'.repeat(32))).toEqual({});
   });
+  test('the deposit-sent marker round-trips through hydration (the once-only deposit gate, 2026-10-02 P0)', async () => {
+    // The marker is what makes the watcher's deposit send exactly-once across restarts: a
+    // record persisted with it must hydrate WITH it (not drop the field and re-arm the send).
+    const PUB = 'cc'.repeat(32);
+    // The shape that actually carries the marker: a legless cefi record parked at
+    // awaiting_deposit (the direct-cefi family the watcher recovers).
+    const cefiShape = {
+      step: 'awaiting_deposit' as const,
+      legs: [],
+      providerRef: {orderId: 'o-depin', statusUrl: 'https://p.example/s/o-depin'},
+    };
+    const marked = record({...cefiShape, depositSentAtMs: 1727870400000});
+    const {saveConvertRecord} = await import('../convert');
+    await saveConvertRecord(PUB, marked);
+    const loaded = await loadConvertRecords(PUB);
+    expect(loaded.abc123?.step).toBe('awaiting_deposit');
+    expect(loaded.abc123?.depositSentAtMs).toBe(1727870400000);
+    // An UNmarked record stays unmarked (absent-field hydration tolerated, like inCurrency).
+    await saveConvertRecord(PUB, record(cefiShape));
+    expect((await loadConvertRecords(PUB)).abc123?.depositSentAtMs).toBeUndefined();
+  });
   test('loadConvertRecords migrates a legacy v1 store: persisted as scoped v2, v1 key removed', async () => {
     const PUB = 'aa'.repeat(32);
     const legacy = {

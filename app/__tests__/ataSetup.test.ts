@@ -18,7 +18,7 @@
 import {describe, test, expect} from '@jest/globals';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS} from '../solana/tokens';
-import {ataConfirmPlan, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, sendCefiDepositForRecord, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
+import {ataConfirmPlan, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, cefiDepositOutstanding, sendCefiDepositForRecord, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
 
 const EURC = EURC_MINT_ADDRESS;
 const USDC = USDC_MINT_ADDRESS;
@@ -706,5 +706,47 @@ describe('sendCefiDepositForRecord - the fund-ic deposit the venue order needs (
       {...rec, providerDeposit: {depositAddress: 'a4ef38803ebbab5595d1afb8a7a136f8b75167d5693579df60651f96829f4ac9'}},
       deps,
     )).rejects.toMatchObject({ataDepositRefused: expect.any(String)});
+  });
+});
+
+describe('cefiDepositOutstanding - the record-lifecycle deposit predicate (2026-10-02 P0)', () => {
+  // The P0 (composed fund-ic run stranded silently): the deposit send moved OUT of the
+  // synchronous run into the record lifecycle. This predicate is the watcher's exact test
+  // for "this record's cefi deposit still needs taking" - the once-only gate keys on the
+  // persisted marker, so restarts and resume handoffs recover instead of stranding.
+  const outstanding = {
+    step: 'awaiting_deposit' as const,
+    inCurrency: 8,
+    amountIn: '90000000',
+    providerDeposit: {depositAddress: '2vxsx-fae'},
+  };
+
+  test('a non-terminal awaiting_deposit record with an IC source and a deposit target is outstanding', () => {
+    expect(cefiDepositOutstanding(outstanding)).toBe(true);
+  });
+
+  test('a taken deposit (the persisted marker) is never outstanding again - the once-only gate', () => {
+    expect(cefiDepositOutstanding({...outstanding, depositSentAtMs: 1727870400000})).toBe(false);
+  });
+
+  test('a record whose deposit lives on another rail (inCurrency absent/null) is not ours to send', () => {
+    expect(cefiDepositOutstanding({...outstanding, inCurrency: undefined})).toBe(false);
+    expect(cefiDepositOutstanding({...outstanding, inCurrency: null})).toBe(false);
+  });
+
+  test('a record with no deposit target (or an empty one) is not outstanding', () => {
+    expect(cefiDepositOutstanding({...outstanding, providerDeposit: null})).toBe(false);
+    expect(cefiDepositOutstanding({...outstanding, providerDeposit: {depositAddress: ''}})).toBe(false);
+    expect(cefiDepositOutstanding({...outstanding, providerDeposit: {}})).toBe(false);
+  });
+
+  test('a terminal record is never outstanding - the venue poll owns it or it is over', () => {
+    for (const step of ['done', 'quote_expired', 'provider_refunded', 'failed_leg', 'aborted', 'stuck'] as const) {
+      expect(cefiDepositOutstanding({...outstanding, step})).toBe(false);
+    }
+  });
+
+  test('only awaiting_deposit is the deposit-handoff step (provider_processing means the venue owns the wait)', () => {
+    expect(cefiDepositOutstanding({...outstanding, step: 'provider_processing'})).toBe(false);
   });
 });
