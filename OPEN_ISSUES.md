@@ -56,13 +56,23 @@ the venue is labeled UNPROVEN in-app.
 - **Setup follow-ups from the 2026-10-01 audit (value 5 / effort M total; founder-invisible
   polish, no money risk left).** F4: ConvertMode/SolPayMode read raw SOL states where the
   balances map shows offline-adjusted - one screen, two truths (`Wallet.tsx` ~2194/2337 vs
-  ~1613-1627). F5+F7 residual: hidden-currency money should be excluded from funding walks
-  and the source line must always render. F6: `chooseRail`'s FUNDED step ignores balance
+  ~1613-1627). F6: `chooseRail`'s FUNDED step ignores balance
   magnitude (dust ckUSDC can beat a funded USDC-SOL row). F8-F15 (latent): first-venue
   fallbacks in `quoteAtaFund`/`icAmmVenueForPair`, dead `resolveConvertDirection`, float
   compares in money ranking, hardcoded catalog ids. One card implementation: merge
   `SolanaAtaSetupCard.tsx` into `AtaSetupCard.tsx` (4 sheet callers keep their testIDs).
-  Full 15-finding report: ses_f068eb67dffeadjrElCVm5z8d9.
+  DONE from this list 2026-10-02 (`2060259c`): the source line always renders
+  (createSource payer line for create-kind), hidden-source gone, money actions mask while
+  a setup runs, dead expander machinery deleted. Full 15-finding report:
+  ses_f068eb67dffeadjrElCVm5z8d9.
+- **Setup copy/pixel residuals from the 2026-10-02 brutal UX audit (value 4 / effort M;
+  all founder-invisible polish, none money-affecting).** ICP row title wrap/clip in the
+  accounts list; money-format sweep (mixed decimal/comma styles across surfaces); display
+  rounding consistency; stale readiness pill after balances change; hash third-lines in
+  activity rows crowd narrow screens; demo-funds rows could read as real money at a
+  glance; the convert path has no in-app confirmation for swap executions (evidence note
+  from the trip, founder call whether to add one). Full report in
+  ses_f0313186dffeELTHeV3XHqUDWM.
 - **Residual CeFi papercut (value 4 / effort S).** Plain-IC-source CeFi convert rows
   (`app/convert/prepare.ts` ~127-140) still hand the user a manual deposit send;
   composed/chain kinds already auto-sign. Route them through the same auto-flow or state why
@@ -289,9 +299,20 @@ until the blockers land. THE thing that unblocks it:**
   found 15 findings (ses_f068eb67dffeadjrElCVm5z8d9 report); the money-affecting trio
   (F1 fund-ic walk, F2 SPL fund walk, F3 first-venue pick) is FIXED; F4-F15 filed below.
   All 8 gate rows green on `4487fbd6` (verify/e2e/e2e-visual/flow/test-app/smoke/core/
-  typecheck), dirty=no. DEVICE RE-DRIVE PENDING: the POCO was unplugged; reinstall the
-  staged APK and re-drive (founder keeps it unlocked), then the D31 positive trip needs
-  real funds (~0.92 ICP direct or ≥ venue minimums).
+  typecheck), dirty=no. LIVE GOOD-PATH TRIP DONE 2026-10-02 on the emulator with the
+  float's play money (founder-sanctioned): trip2 (3 VCHF, 0 SOL, absent ATAs) -> card
+  named ICP as source at the floating venue minimum -> the device itself sent the
+  0.89848158 ICP deposit to the venue's LEGACY 64-hex account id (dispatch +
+  `prepareLegacyTransfer`, `3596cee1`) -> SideShift settled 0.02402112 SOL to the rail ->
+  the legacy reply decoder no longer aborts on moved money (terminal-but-opaque,
+  `bda6d8a0`) -> one tap created both ATAs (rent 0.00149344) -> card and badges cleared,
+  ATAs verified on-chain (USDC `8g1Qxk...`, EURC `3uRDom...`). Audit-copy wave
+  (`2060259c`): the confirm sentence names each fact once (no "0.90 ICP of your ICP"), no
+  venue/Anbieter jargon, the create card names its payer, a running setup masks the money
+  actions, the dead expander machinery deleted; flow 212 waits for the settled headline
+  (`67e2e854`). Final gates: all 8 rows green on `67e2e854`, dirty=no, overall VERIFIED.
+  D31 note: this trip ran on the emulator with float funds via the prod relay; the
+  founder's physical POCO re-drive stays available whenever the device is plugged in.
 
 - **CHAIN route deposit broadcast** — RESOLVED 2026-09-29 same day (`dfde0468`, live-proven D33):
   `submitRawSolTx` adopts `skipPreflight: true, maxRetries: 0` and the rpcFetch walk widens to
