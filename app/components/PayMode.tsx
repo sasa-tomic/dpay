@@ -228,20 +228,24 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     setFeeRaw(null);
     feePromiseRef.current = null;
   }, [intent]);
+  // The intent's ledger, resolved to a PRIMITIVE: the effect below keys on this string, never on
+  // the catalog object - a mid-journey catalog refetch (new array, same content) must NOT re-run
+  // the effect, whose cleanup would kill an in-flight fee delivery that reviewBlocked then keeps
+  // from restarting (live failure 2026-10-02: flow 31's paid total regressed to the bare wire).
+  const intentLedger = intent == null ? null : (catalog.find(c => c.currency === intent.currency)?.ledger ?? null);
   useEffect(() => {
     const cur = intent?.currency ?? null;
     if (cur == null || cur === 0) return; // DEMO is play money — no honest fee to add
-    const ledger = catalog.find(c => c.currency === cur)?.ledger;
-    if (!ledger) return;
+    if (!intentLedger) return;
     // Keep any fee this journey already fetched: `reviewBlocked` flips true AFTER a payment
     // lands (the account just moved) and the paid screen still needs the fee for its total.
     if (reviewBlocked) return;
     let alive = true;
     // Promise.resolve: the boundary is also a jest mock — an un-configured one returns undefined,
     // and the displays' honesty must not depend on the mock's return shape.
-    const query = Promise.resolve(fetchLedgerFee(identity.secretHex, ledger)).catch((e: unknown) => {
+    const query = Promise.resolve(fetchLedgerFee(identity.secretHex, intentLedger)).catch((e: unknown) => {
       console.warn('review fee fetch failed (total falls back to the local fee answers):', e instanceof Error ? e.message : String(e));
-      return fallbackLedgerFee(ledger, catalog, cur);
+      return fallbackLedgerFee(intentLedger, catalog, cur);
     });
     feePromiseRef.current = query;
     void query.then(fee => {
@@ -253,8 +257,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     // the paid screen's total then falls back to the wire-only amount forever (observed in-run:
     // flow 31's "0.05 USDC" total never rendered; the wire is 0.04 and the poll beat the fee).
     // The flip only ever needs to STOP a new query from starting, which the guard above does at
-    // every run this effect actually gets.
-  }, [intent, catalog, identity.secretHex]);
+    // every run this effect actually gets. `catalog` is also deliberately not a dep: the intent's
+    // ledger above is the primitive this effect truly depends on (see intentLedger).
+  }, [intent, intentLedger, identity.secretHex]);
   // The total debit a payer-facing amount on this journey renders: amount + fee when the fee is
   // known, the amount alone when it is not. The signed envelope is NEVER built from this — it stays
   // display-side only (`intent.amount` remains the wire amount everywhere money moves).

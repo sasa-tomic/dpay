@@ -336,6 +336,37 @@ describe('PayMode — the payer reads the TOTAL DEBIT, never the bare wire (foun
     });
   });
 
+  test('a catalog refetch mid-journey never cancels the in-flight fee delivery (paid total keeps its fee)', async () => {
+    // The live failure (flow 31, full-suite 2026-10-02): the settle depleted the balance AND a
+    // catalog refetch churned the catalog object's identity; the fee effect re-ran, its cleanup
+    // killed the in-flight query, and the reviewBlocked guard blocked the replacement - the
+    // payer's total regressed to the bare wire and never recovered. The effect must key on the
+    // RESOLVED LEDGER (a primitive), never on the catalog object's identity.
+    const resolvers: Array<(v: string) => void> = [];
+    jest.mocked(fetchLedgerFee).mockImplementation(() => new Promise<string>(r => { resolvers.push(r); }));
+    jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {})); // keep the signing surface put
+    const mounted = {online: true, catalog: CATALOG_V, assets: VCHF_ASSET, assetBalances: {7: '200000000'}};
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(payElement(mounted));
+    });
+    await scanToSign(tree, REQ_VCHF);
+    await act(async () => {}); // the review-fee effect (and the note) started their deferred queries
+    // One balance poll + one catalog refetch land mid-journey: the wire has left (the balance
+    // drops below the requested amount, reviewBlocked flips true) and the catalog is a NEW array
+    // with the SAME content.
+    act(() => {
+      tree.update(payElement({...mounted, assetBalances: {7: '50000000'}, catalog: [...CATALOG_V]}));
+    });
+    for (const r of resolvers) r('10000'); // the ledger's answer lands AFTER the churn
+    await act(async () => {});
+    expect(textByTestID(tree, 'pay-amount')).toBe(M.pay.payAmount(fmtCurrencyAmountCompact(CATALOG_V, 7, '100000000')));
+    expect(textByTestID(tree, 'pay-amount')).not.toContain('0.9999'); // never the bare wire
+    act(() => {
+      tree.unmount();
+    });
+  });
+
   test('unknown fee (DEMO, no ledger): the review falls back to the wire alone — no guessed total', async () => {
     jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {}));
     const tree = mountPay(); // DEMO (currency 0) is the default fixture; its fee never fetches
