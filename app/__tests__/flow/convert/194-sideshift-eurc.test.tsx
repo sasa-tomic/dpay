@@ -155,7 +155,10 @@ hermeticDescribe('flow 194 — ICP → EURC via sideshift-eurc (the EUR→IC bri
       hits = await sideshiftRelayHits();
       expect(hits.bareCalls).toBe(0);
       expect(hits.shiftCalls).toBe(1);
-      expect(BigInt(await getBalance(account!.publicHex, 8))).toBe(BigInt(SEED_ICP));
+      // The auto-deposit (2026-10-02): dpay sends the venue deposit from the wallet the moment
+      // the record reaches awaiting_deposit - ONE order ran, so the ledger holds the seed minus
+      // that deposit (3 ICP) and its transfer fee (the ICP ledger's 10000 e8s).
+      expect(BigInt(await getBalance(account!.publicHex, 8))).toBe(BigInt(SEED_ICP) - 300000000n - 10000n);
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }

@@ -173,7 +173,10 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
       assertIncludes(providerAborted, 'may still settle', 'the aborted card carries the deposit-already-sent truth');
       assertIncludes(providerAborted, SHIFT_ID, 'the venue shift id renders');
       expect(m.driver.isPresent('btn-convert-stop')).toBe(false);
-      expect(BigInt(await getBalance(account!.publicHex, 8))).toBe(icpBeforeCefi);
+      // The auto-deposit (2026-10-02) fired when this record reached awaiting_deposit: the
+      // deposit (3 ICP + the 10000 e8s transfer fee) left before the Stop - the stop retires
+      // the watch, it cannot unsend what the venue may still settle.
+      expect(BigInt(await getBalance(account!.publicHex, 8))).toBe(icpBeforeCefi - 300010000n);
 
       // Reload: the records STAY aborted, the watch never comes back, the order is not re-created.
       await m.remount();

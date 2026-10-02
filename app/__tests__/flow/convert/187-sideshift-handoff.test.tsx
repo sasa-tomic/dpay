@@ -181,7 +181,10 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
       hits = await sideshiftRelayHits();
       expect(hits.bareCalls).toBe(0);
       expect(hits.shiftCalls).toBe(3);
-      expect(BigInt(await getBalance(account!.publicHex, 8))).toBe(BigInt(SEED_ICP));
+      // The auto-deposit (2026-10-02): every confirmed order's deposit leaves from the wallet
+      // when the record reaches awaiting_deposit - THREE orders ran (settled, expired,
+      // refunded), each debiting 3 ICP plus its 10000 e8s transfer fee.
+      expect(BigInt(await getBalance(account!.publicHex, 8))).toBe(BigInt(SEED_ICP) - 3n * (300000000n + 10000n));
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }
