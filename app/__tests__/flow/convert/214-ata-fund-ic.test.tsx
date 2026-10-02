@@ -322,7 +322,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       stubState.lamports = 49500000; // 0.0495 SOL, the stub's locked settle figure // 0.0495 SOL, the stub's locked settle figure
       setSideShiftStatus('settled', {settleAmount: '0.0495', settleHash: 'sol-fund-ic-214'});
       await m.driver.waitForFunction(
-        () => !m!.driver.isPresent('ata-setup-EUR-banner') && !m!.driver.isPresent('ata-setup-EUR-busy'),
+        () => !m!.driver.isPresent('ata-setup-EUR-live') && !m!.driver.isPresent('ata-setup-EUR-banner') && !m!.driver.isPresent('ata-setup-EUR-busy'),
         {timeoutMs: 60_000, label: 'the setup completed and the card cleared'},
       );
       // The watcher's create leg broadcast REAL device-signed ATA creates (one per mint).
@@ -405,7 +405,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       stubState.lamports = 49500000; // 0.0495 SOL - comfortably past the rent target
       setSideShiftStatus('settled', {settleAmount: '0.012375', settleHash: 'sol-fund-ic-214-direct'});
       await m.driver.waitForFunction(
-        () => !m!.driver.isPresent('ata-setup-EUR-banner') && !m!.driver.isPresent('ata-setup-EUR-busy'),
+        () => !m!.driver.isPresent('ata-setup-EUR-live') && !m!.driver.isPresent('ata-setup-EUR-banner') && !m!.driver.isPresent('ata-setup-EUR-busy'),
         {timeoutMs: 60_000, label: 'the setup completed and the card cleared'},
       );
       expect(solSends.length).toBe(tokenMints.length);
@@ -524,4 +524,192 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       await m.unmount().catch(() => undefined);
     }
   }, budgetScaled(180_000));
+
+  it('a KILL after the record is persisted strands NOTHING - the engine sends the deposit and the card stays LIVE (2026-10-02 P0)', async () => {
+    // The exact silent-strand shape, replayed: the composed run dies after the record is
+    // persisted (a remount kills the run function with the mount) - the old build's card
+    // fell back to IDLE with the one-tap button re-armed while the record stood live, and
+    // nobody owned the deposit. Now: the resume engine drives the frozen legs (the deposit
+    // transfer goes out on the engine's re-arm), the card renders the LIVE state the whole
+    // way, and the idle button NEVER comes back while the record is non-terminal.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {SOLANA_TOKENS} = require('../../../solana/tokens') as {SOLANA_TOKENS: Record<string, {mint: string; decimals: number}>};
+    const tokenMints = Object.entries(SOLANA_TOKENS).filter(([k]) => k === 'EURC' || k === 'USDC').map(([, v]) => v.mint);
+    const {state: stubState} = installAtaSolStub(tokenMints);
+    await enableSolRail();
+    installSideShiftStub({initialStatus: 'waiting'});
+    restores.push(installProportionalSideShiftQuote());
+
+    const m = await onboardSeededUnfunded('jest-ata-composed-kill');
+    try {
+      const account = await accountOf(m);
+      expect(account).not.toBeNull();
+      // ONLY IC-side money: 20 VCHF, nothing on Solana - the composed pick.
+      const fund = await faucetAccount(account!.publicHex, 2000000000, {currency: 7});
+      expect(fund.ok).toBe(true);
+
+      await openBalances(m, {timeoutMs: 15_000});
+      await m.driver.click('btn-accounts-currency-EUR', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-EUR-banner', {timeoutMs: 20_000});
+      await m.driver.click('ata-setup-EUR-complete', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-EUR-confirm-btn', {timeoutMs: 20_000});
+      await m.driver.click('ata-setup-EUR-confirm-btn', {timeoutMs: 10_000});
+
+      // THE KILL: the moment the record is PERSISTED (any live step), the run dies with the
+      // mount - exactly the async handoff (slow poll, resume, restart) that stranded it.
+      const deadline = budgetDeadline(STORE_TIMEOUT_MS);
+      for (;;) {
+        const store = await storeRecords(account!.publicHex);
+        if (Object.values(store).some(r => r.composedDeposit != null)) break;
+        if (Date.now() > deadline) throw new Error('the composed record never persisted before the kill');
+        await new Promise(r => setTimeout(r, 250));
+      }
+      await m.remount();
+
+      // Back into the EUR view: the card must show LIVE - never the idle probe, never a
+      // re-armed button - while the record works.
+      await openBalances(m, {timeoutMs: 15_000});
+      await m.driver.click('btn-accounts-currency-EUR', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-EUR-live', {timeoutMs: 30_000});
+      expect(m.driver.isPresent('ata-setup-EUR-complete')).toBe(false);
+      expect(m.driver.isPresent('ata-setup-EUR-banner')).toBe(false);
+
+      // The engine finishes the frozen legs: the deposit STILL gets sent (the deposit
+      // transfer leg submits from the record's own bytes), and the record parks at
+      // awaiting_deposit with the sent evidence frozen on it.
+      let rec: StoreRecord | null = null;
+      for (;;) {
+        const store = await storeRecords(account!.publicHex);
+        rec = Object.values(store).find(r => r.composedDeposit != null) ?? null;
+        if (rec?.step === 'awaiting_deposit') break;
+        if (Date.now() > deadline) throw new Error(`the killed record never reached awaiting_deposit (steps: ${Object.values(store).map(r => r.step).join(',')})`);
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect(rec!.composedDeposit!.venueId).toBe('sideshift');
+
+      // THE never-idle pin: for a full window on the live record, the one-tap button must
+      // never re-appear (the old build re-armed it within seconds).
+      const hold = budgetDeadline(12_000);
+      while (Date.now() < hold) {
+        if (m.driver.isPresent('ata-setup-EUR-complete') || m.driver.isPresent('ata-setup-EUR-banner')) {
+          throw new Error('the card silently re-armed the idle button over a LIVE record - the P0 is back');
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      // The venue settles SOL at the device's own address: the record completes on the
+      // engine's own poll - the killed run never strands. (The create leg stays with the
+      // LIVE session's watcher; after a kill + settle the honest idle card returns with the
+      // SOL landed - the plan re-plans to `create`, one tap, no strand, no silent loss.)
+      stubState.lamports = 49500000;
+      setSideShiftStatus('settled', {settleAmount: '0.0495', settleHash: 'sol-fund-ic-214-kill'});
+      for (;;) {
+        const store = await storeRecords(account!.publicHex);
+        rec = Object.values(store).find(r => r.composedDeposit != null) ?? null;
+        if (rec?.step === 'done') break;
+        if (Date.now() > deadline) throw new Error(`the killed record never completed on the settle (steps: ${Object.values(store).map(r => r.step).join(',')})`);
+        await new Promise(r => setTimeout(r, 500));
+      }
+    } finally {
+      await m.unmount().catch(() => undefined);
+    }
+  }, budgetScaled(300_000));
+
+  it('an UNKNOWN deposit poll never returns the run silently - the card stays LIVE and the venue settle completes it (2026-10-02 P0)', async () => {
+    // The direct-cefi family's honest unknown: the deposit envelope is submitted but the
+    // read_state polls exhaust (every read answers 500). The old shape would have returned
+    // the run to an idle card with the record standing. Now: the deposit is marked TAKEN
+    // before the envelope leaves (exactly once, restart-safe), the card holds the LIVE
+    // state past the whole poll budget, and the venue - the source of truth - completes
+    // the record through the engine's poll; the watcher then creates the accounts.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {SOLANA_TOKENS} = require('../../../solana/tokens') as {SOLANA_TOKENS: Record<string, {mint: string; decimals: number}>};
+    const tokenMints = Object.entries(SOLANA_TOKENS).filter(([k]) => k === 'EURC' || k === 'USDC').map(([, v]) => v.mint);
+    const {state: stubState, sent: solSends} = installAtaSolStub(tokenMints);
+    await enableSolRail();
+    installSideShiftStub({initialStatus: 'waiting'});
+    restores.push(installProportionalSideShiftQuote());
+
+    // The blind poll: every read_state on the ICP ledger answers 500 - the submit's fate is
+    // unprovable to THIS wallet (the /call itself still passes: the bytes DID go out).
+    const icCalls: string[] = [];
+    const prevFetch = global.fetch;
+    global.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : String((input as {url?: string})?.url ?? input);
+      let parsed: URL;
+      try {
+        parsed = new URL(url, 'http://localhost');
+      } catch {
+        return prevFetch(input as Parameters<typeof fetch>[0], init);
+      }
+      if (parsed.pathname.startsWith('/api/v2/canister/')) icCalls.push(parsed.pathname);
+      if (parsed.pathname === '/api/v2/canister/ryjl3-tyaaa-aaaaa-aaaba-cai/read_state') {
+        return new Response('poll blind', {status: 500});
+      }
+      return prevFetch(input as Parameters<typeof fetch>[0], init);
+    };
+    restores.push(() => { global.fetch = prevFetch; });
+
+    const m = await onboardSeededUnfunded('jest-ata-deposit-unknown');
+    try {
+      const account = await accountOf(m);
+      expect(account).not.toBeNull();
+      // ONLY IC-side money: 5 ICP, nothing on Solana - the direct-cefi pick.
+      const fund = await faucetAccount(account!.publicHex, 500000000, {currency: 8});
+      expect(fund.ok).toBe(true);
+
+      await openBalances(m, {timeoutMs: 15_000});
+      await m.driver.click('btn-accounts-currency-EUR', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-EUR-banner', {timeoutMs: 20_000});
+      await m.driver.click('ata-setup-EUR-complete', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-EUR-confirm-btn', {timeoutMs: 20_000});
+      await m.driver.click('ata-setup-EUR-confirm-btn', {timeoutMs: 10_000});
+
+      // The legless record lands at awaiting_deposit and the deposit is TAKEN exactly once:
+      // the persisted marker (set BEFORE the envelope leaves) is on the stored record.
+      const deadline = budgetDeadline(STORE_TIMEOUT_MS);
+      let rec: (StoreRecord & {depositSentAtMs?: number; inCurrency?: number; providerDeposit?: {depositAddress?: string}}) | null = null;
+      for (;;) {
+        const store = await storeRecords(account!.publicHex);
+        rec = Object.values(store).find(r => (r as {providerRef?: unknown}).providerRef != null) ?? null;
+        if (rec?.step === 'awaiting_deposit' && rec.depositSentAtMs != null) break;
+        if (Date.now() > deadline) throw new Error(`the cefi record never got its deposit taken (steps: ${Object.values(store).map(r => r.step).join(',')})`);
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect(rec!.inCurrency).toBe(8);
+      expect(rec!.providerDeposit!.depositAddress!.length).toBeGreaterThan(0);
+
+      // The envelope went out EXACTLY once (one /call; the blind poll never provokes a
+      // second submit - the only safe retry is identical bytes and none is attempted).
+      const callsNow = icCalls.filter(p => p.endsWith('/call')).length;
+      expect(callsNow).toBe(1);
+
+      // The card holds LIVE past the whole poll budget (6 reads x 2.5 s): never idle, never
+      // a re-armed button, while the record stands unknown.
+      const hold = budgetDeadline(20_000);
+      while (Date.now() < hold) {
+        if (!m.driver.isPresent('ata-setup-EUR-live')) {
+          if (m.driver.isPresent('ata-setup-EUR-complete') || m.driver.isPresent('ata-setup-EUR-banner')) {
+            throw new Error('the unknown poll returned the card to IDLE with the button armed - the P0 is back');
+          }
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect(m.driver.isPresent('ata-setup-EUR-live')).toBe(true);
+      expect(m.driver.isPresent('ata-setup-EUR-complete')).toBe(false);
+
+      // The venue settles; the record completes on the engine's own poll; the watcher
+      // creates the accounts; the card clears. Still exactly one deposit submit.
+      stubState.lamports = 49500000;
+      setSideShiftStatus('settled', {settleAmount: '0.012375', settleHash: 'sol-fund-ic-214-unknown'});
+      await m.driver.waitForFunction(
+        () => !m!.driver.isPresent('ata-setup-EUR-live') && !m!.driver.isPresent('ata-setup-EUR-banner') && !m!.driver.isPresent('ata-setup-EUR-busy'),
+        {timeoutMs: 60_000, label: 'the unknown-poll run completed on the venue settle and the card cleared'},
+      );
+      expect(solSends.length).toBe(tokenMints.length);
+      expect(icCalls.filter(p => p.endsWith('/call')).length).toBe(1);
+    } finally {
+      await m.unmount().catch(() => undefined);
+    }
+  }, budgetScaled(300_000));
 });
