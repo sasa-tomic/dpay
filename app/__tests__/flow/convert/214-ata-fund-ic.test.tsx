@@ -334,6 +334,86 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
     }
   }, budgetScaled(300_000));
 
+  it('a DIRECT-cefi verdict sends the user-side deposit itself and never strands the order (2026-10-02 live-trip fix)', async () => {
+    // The founder's exact trip: ICP money, no SOL, absent accounts - the fitness pick is the
+    // direct ICP->SOL cefi route. The venue order lands at awaiting_deposit and the RUNNER
+    // must send the IC-side deposit with the device key (the old build waited for a user
+    // hand-off that the setup flow never shows: the order expired unused).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {SOLANA_TOKENS} = require('../../../solana/tokens') as {SOLANA_TOKENS: Record<string, {mint: string; decimals: number}>};
+    const tokenMints = Object.entries(SOLANA_TOKENS).filter(([k]) => k === 'EURC' || k === 'USDC').map(([, v]) => v.mint);
+    const {state: stubState, sent: solSends} = installAtaSolStub(tokenMints);
+    await enableSolRail();
+    installSideShiftStub({initialStatus: 'waiting'});
+    restores.push(installProportionalSideShiftQuote());
+
+    // Count the IC-side canister CALLS: the deposit transfer is a real wasm-signed
+    // icrc1_transfer through the fake-IC gateway.
+    const icCalls: string[] = [];
+    const prevFetch = global.fetch;
+    global.fetch = async (input, init) => {
+      const url = typeof input === 'string' ? input : String((input as {url?: string})?.url ?? input);
+      if (url.includes('/api/v2/canister/')) icCalls.push(url);
+      return prevFetch(input as Parameters<typeof fetch>[0], init);
+    };
+    restores.push(() => { global.fetch = prevFetch; });
+
+    const m = await onboardSeededUnfunded('jest-ata-direct-cefi');
+    try {
+      const account = await accountOf(m);
+      expect(account).not.toBeNull();
+      // ONLY IC-side money: 5 ICP, nothing on Solana. 5 >= the fixture venue minimum (0.5)
+      // whose settle at the fixture rate covers the two accounts' rent.
+      const fund = await faucetAccount(account!.publicHex, 500000000, {currency: 8});
+      expect(fund.ok).toBe(true);
+
+      await openBalances(m, {timeoutMs: 15_000});
+      await m.driver.click('btn-accounts-currency-EUR', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-EUR-banner', {timeoutMs: 20_000});
+      expect(m.driver.isPresent('ata-setup-EUR-refuse')).toBe(false);
+      // The source is named UP FRONT: ICP, never a foreign symbol (the trip's lesson).
+      await m.driver.waitForFunction(
+        () => { try { return /ICP/.test(m!.driver.readText('ata-setup-EUR-banner')); } catch { return false; } },
+        {timeoutMs: 30_000, label: 'the idle card names ICP as the funding source'},
+      );
+
+      await m.driver.click('ata-setup-EUR-complete', {timeoutMs: 10_000});
+      await m.driver.findByTestID('ata-setup-EUR-confirm-btn', {timeoutMs: 20_000});
+      const confirmLine = m.driver.readText('ata-setup-EUR-confirm-line');
+      expect(confirmLine).toContain('ICP');
+      expect(confirmLine).toContain('SOL');
+
+      await m.driver.click('ata-setup-EUR-confirm-btn', {timeoutMs: 10_000});
+      // The legless cefi record reaches awaiting_deposit AND the runner transfers the deposit
+      // through the real rail (an IC canister call issued while the card is busy).
+      const deadline = budgetDeadline(STORE_TIMEOUT_MS);
+      let rec: StoreRecord | null = null;
+      for (;;) {
+        const store = await storeRecords(account!.publicHex);
+        rec = Object.values(store).find(r => (r as {providerRef?: unknown}).providerRef != null) ?? null;
+        if (rec?.step === 'awaiting_deposit') break;
+        if (Date.now() > deadline) throw new Error(`the cefi record never reached awaiting_deposit (steps: ${Object.values(store).map(r => r.step).join(',')})`);
+        await new Promise(r => setTimeout(r, 500));
+      }
+      expect((rec as {inCurrency?: number}).inCurrency).toBe(8);
+      await m.driver.waitForFunction(
+        () => icCalls.length > 0,
+        {timeoutMs: 30_000, label: 'the runner sent the IC-side deposit transfer'},
+      );
+
+      // The venue settles at the device's own address; the watcher finishes the setup.
+      stubState.lamports = 49500000; // 0.0495 SOL - comfortably past the rent target
+      setSideShiftStatus('settled', {settleAmount: '0.012375', settleHash: 'sol-fund-ic-214-direct'});
+      await m.driver.waitForFunction(
+        () => !m!.driver.isPresent('ata-setup-EUR-banner') && !m!.driver.isPresent('ata-setup-EUR-busy'),
+        {timeoutMs: 60_000, label: 'the setup completed and the card cleared'},
+      );
+      expect(solSends.length).toBe(tokenMints.length);
+    } finally {
+      await m.unmount().catch(() => undefined);
+    }
+  }, budgetScaled(300_000));
+
   it('the refuse verdict SURVIVES balance-poll churn - a re-render never un-answers it', async () => {
     // The live-device bug this pins: the model is a useMemo over polled data, so every real
     // balance write re-creates it; the old identity-keyed reset effect then silently cleared

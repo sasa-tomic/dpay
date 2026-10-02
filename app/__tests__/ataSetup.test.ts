@@ -18,7 +18,7 @@
 import {describe, test, expect} from '@jest/globals';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS} from '../solana/tokens';
-import {ataConfirmPlan, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
+import {ataConfirmPlan, planAtaSetup, sizeAtaFundPlan, sizeAtaIcFundPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, sendCefiDepositForRecord, type AtaIcFundSource, type AtaSetupTokenInput} from '../lib/ataSetup';
 
 const EURC = EURC_MINT_ADDRESS;
 const USDC = USDC_MINT_ADDRESS;
@@ -596,5 +596,58 @@ describe('ataPlanSignature - the latch key that survives poll churn', () => {
     const a = fundIcModel('450000000');
     const b = fundIcModel('450000000');
     expect(ataPlanSignature({...a, targets: ['EURC', 'USDC']})).not.toBe(ataPlanSignature(b));
+  });
+});
+
+describe('sendCefiDepositForRecord - the fund-ic deposit the venue order needs (2026-10-02 live-trip fix)', () => {
+  const catalog = {currencies: [{currency: 8, ledger: 'ryjl3-tyaaa-aaaaa-aaaba-cai', fee: '10000'}]};
+  const prepared = {ledger: 'ryjl3-tyaaa-aaaaa-aaaba-cai', envelopeHex: 'ee', requestIdHex: 'aa'};
+  const rec = {
+    inCurrency: 8,
+    amountIn: '0.89848158',
+    providerDeposit: {depositAddress: '2vxsx-fae', depositMemo: 'm-42'},
+  };
+  const baseDeps = (over: Partial<Parameters<typeof sendCefiDepositForRecord>[1]> = {}): Parameters<typeof sendCefiDepositForRecord>[1] => ({
+    catalog,
+    secretHex: 'ab',
+    prepareTransfer: async (_s, _c, req) => {
+      expect(req.toAccount).toBe('2vxsx-fae');
+      expect(req.amount).toBe('0.89848158');
+      expect(req.currency).toBe(8);
+      expect(req.nonceHex).toBe(Buffer.from('m-42', 'utf8').toString('hex'));
+      return prepared;
+    },
+    submitTransfer: async () => ({kind: 'settled' as const, blockIndex: '4242'}),
+    ...over,
+  });
+
+  test('sends the exact deposit with the venue memo and reports the block', async () => {
+    await expect(sendCefiDepositForRecord(rec, baseDeps())).resolves.toEqual({kind: 'sent', blockIndex: '4242'});
+  });
+
+  test('a record with no IC-side input is not-applicable (SOL-source, other-rail)', async () => {
+    const deps = baseDeps({prepareTransfer: () => { throw new Error('must not prepare'); }});
+    await expect(sendCefiDepositForRecord({...rec, inCurrency: null}, deps)).resolves.toEqual({kind: 'not-applicable'});
+    await expect(sendCefiDepositForRecord({...rec, providerDeposit: {depositAddress: ''}}, baseDeps())).resolves.toEqual({kind: 'not-applicable'});
+  });
+
+  test('an unknown submit leaves the record standing (venue is the source of truth, no resubmit)', async () => {
+    const deps = baseDeps({submitTransfer: async () => ({kind: 'unknown' as const})});
+    await expect(sendCefiDepositForRecord(rec, deps)).resolves.toEqual({kind: 'unknown'});
+  });
+
+  test('a rejected transfer throws the venue reason tagged for the card', async () => {
+    const deps = baseDeps({submitTransfer: async () => ({kind: 'rejected' as const, reason: 'insufficient balance'})});
+    await expect(sendCefiDepositForRecord(rec, deps)).rejects.toMatchObject({ataDepositRefused: 'insufficient balance', message: 'insufficient balance'});
+  });
+
+  test('a missing memo sends an empty nonce (the no-memo case, never a dropped one)', async () => {
+    let seen = '';
+    const deps = baseDeps({prepareTransfer: async (_s, _c, req) => {
+      seen = req.nonceHex;
+      return prepared;
+    }});
+    await sendCefiDepositForRecord({...rec, providerDeposit: {depositAddress: '2vxsx-fae'}}, deps);
+    expect(seen).toBe('');
   });
 });
