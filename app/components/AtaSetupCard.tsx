@@ -69,8 +69,6 @@ export function AtaSetupCard({
   busy = false,
   busyLine = null,
   err = null,
-  expanded = true,
-  onToggleExpanded,
   solAddress = null,
   solCopied = false,
   onStart,
@@ -100,10 +98,6 @@ export function AtaSetupCard({
   /** Overrides the default creating-all line while a fund-ic venue swap is in flight. */
   busyLine?: string | null;
   err?: string | null;
-  /** Expanded shows the per-asset detail lines under the summary row (the auto-surface sets
-   *  it once per session; tapping the summary row toggles). */
-  expanded?: boolean;
-  onToggleExpanded?: () => void;
   /** The refuse panel's receive address (the device's SOL address, when the parent has it). */
   solAddress?: string | null;
   /** True for the beat after the copy tap - the button says so. */
@@ -156,9 +150,6 @@ export function AtaSetupCard({
     // unreachable there - if both props are ever missing, fix the parent, not this branch.
     return (
       <View testID={`${testIDPrefix}-refuse`} style={S.ataBanner}>
-        {targets.map(t => (
-          <Text key={t} style={S.ataBannerLine}>{M.deposit.ata.absent(t)}</Text>
-        ))}
         <Text testID={`${testIDPrefix}-need-sol`} style={S.warnNote}>{M.deposit.ata.needSol(costLine)}</Text>
         {/* The run's REAL cause (2026-10-02): a refusal reached from a confirm-time failure
             carries its actual message - never a cause-less dead end. */}
@@ -189,33 +180,20 @@ export function AtaSetupCard({
       </View>
     );
   }
-  // Idle: the compact banner - one-line summary row (title + cost) and the ONE button. The
-  // summary row expands to the per-asset detail lines (toggled by tap, auto-set once per
-  // session by the parent's refuse-to-actionable auto-surface).
+  // Idle: the compact banner - one-line summary row (title + cost), the payer line and the
+  // ONE button. 2026-10-02 audit: the per-asset 'No X account yet.' prose restated the title
+  // line for line - deleted, and with it the never-wired expander machinery.
   return (
     <View testID={`${testIDPrefix}-banner`} style={S.ataBanner}>
-      {onToggleExpanded != null ? (
-        <Pressable
-          testID={`${testIDPrefix}-summary`}
-          style={S.ataBannerRow}
-          onPress={onToggleExpanded}
-          accessibilityRole="button"
-          accessibilityLabel={M.deposit.ata.finishSetup(M.deposit.ata.targetsLabel(targets))}
-          accessibilityState={{disabled: false}}>
-          <Text style={S.ataBannerTitle}>{M.deposit.ata.finishSetup(targetsPhrase)}</Text>
-        </Pressable>
-      ) : (
-        <View style={S.ataBannerRow}>
-          <Text style={S.ataBannerTitle}>{M.deposit.ata.finishSetup(targetsPhrase)}</Text>
-        </View>
-      )}
+      <View style={S.ataBannerRow}>
+        <Text style={S.ataBannerTitle}>{M.deposit.ata.finishSetup(targetsPhrase)}</Text>
+      </View>
       {/* THE cost line, stated up front: the measured minimum for a swap plan, else the exact
           SOL rent. One line - the founder rule is no number the user must fail a swap to learn. */}
       <Text style={S.ataBannerCost}>{minLine ?? M.deposit.ata.costShort(costLine)}</Text>
-      {expanded ? targets.map(t => (
-        <Text key={t} style={S.ataBannerLine}>{M.deposit.ata.absent(t)}</Text>
-      )) : null}
-      {fundFromLine != null ? <Text style={S.ataBannerNote}>{fundFromLine}</Text> : null}
+      {fundFromLine != null
+        ? <Text style={S.ataBannerNote}>{fundFromLine}</Text>
+        : kind === 'create' ? <Text style={S.ataBannerNote}>{M.deposit.ata.createSource}</Text> : null}
       <Pressable
         testID={`${testIDPrefix}-complete`}
         style={S.primaryWide}

@@ -285,11 +285,15 @@ export type DepositMessages = {
     minSwap: (swap: string) => string;
     /** The fund-branch line naming the (unique) token the swap draws from. */
     fundFrom: (source: string) => string;
-    /** The fund confirm, stating the total: the sized swap, its source, what it creates, the cost. */
-    fundConfirm: (swap: string, source: string, targets: string, setupCost: string) => string;
+    /** The fund confirm, stating the total: the sized swap (which carries its own symbol),
+     *  what it creates, the cost. The 2026-10-02 audit killed the re-possession ('of your ICP'). */
+    fundConfirm: (swap: string, targets: string, setupCost: string) => string;
     /** The fund-ic confirm (a cross-rail venue swap): the same total, plus the honest timing
-     *  (a venue settles in minutes, not seconds) and that surplus SOL stays spendable. */
-    fundIcConfirm: (swap: string, source: string, targets: string, setupCost: string) => string;
+     *  (minutes, not seconds) and that surplus SOL stays spendable. */
+    fundIcConfirm: (swap: string, targets: string, setupCost: string) => string;
+    /** The create-kind card's payer line (2026-10-02 audit): when SOL covers the rent with no
+     *  swap, the card still states what pays. */
+    createSource: string;
     /** Sizing refused: even the whole named balance cannot reach the SOL target. */
     fundShort: (source: string) => string;
     /** The confirm's two controls. */
@@ -565,10 +569,11 @@ export const depositEn: DepositMessages = {
     costShort: setupCost => `Costs ${setupCost}`,
     minSwap: swap => `Needs at least ${swap}.`,
     fundFrom: source => `A small swap of your ${source} into SOL pays for it.`,
-    fundConfirm: (swap, source, targets, setupCost) =>
-      `Swaps about ${swap} of your ${source} into SOL and creates your ${targets} (${setupCost}).`,
-    fundIcConfirm: (swap, source, targets, setupCost) =>
-      `Swaps about ${swap} of your ${source} into SOL and creates your ${targets} (${setupCost}). The venue can take a minute or two; surplus SOL stays spendable in your wallet.`,
+    fundConfirm: (swap, targets, setupCost) =>
+      `Swaps about ${swap} into SOL and creates your ${targets} (${setupCost}).`,
+    fundIcConfirm: (swap, targets, setupCost) =>
+      `Swaps about ${swap} into SOL and creates your ${targets} (${setupCost}). This can take a minute or two; surplus SOL stays spendable in your wallet.`,
+    createSource: 'Paid from your SOL balance.',
     fundShort: source => `Even all your ${source} doesn't cover it - receive a little SOL at your address instead.`,
     confirmAction: 'Confirm',
     cancelAction: 'Cancel',

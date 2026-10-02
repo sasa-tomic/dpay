@@ -194,10 +194,11 @@ export const depositFr: DepositMessages = {
     costShort: setupCost => `Coûte ${setupCost}`,
     minSwap: swap => `Nécessite au moins ${swap}.`,
     fundFrom: source => `Un petit échange de vos ${source} contre du SOL le paie.`,
-    fundConfirm: (swap, source, targets, setupCost) =>
-      `Échange environ ${swap} de vos ${source} contre du SOL et crée vos ${targets} (${setupCost}).`,
-    fundIcConfirm: (swap, source, targets, setupCost) =>
-      `Échange environ ${swap} de vos ${source} contre du SOL et crée vos ${targets} (${setupCost}). Le service peut prendre une à deux minutes ; le SOL en surplus reste utilisable dans votre wallet.`,
+    fundConfirm: (swap, targets, setupCost) =>
+      `Échange environ ${swap} contre du SOL et crée vos ${targets} (${setupCost}).`,
+    fundIcConfirm: (swap, targets, setupCost) =>
+      `Échange environ ${swap} contre du SOL et crée vos ${targets} (${setupCost}). Cela peut prendre une à deux minutes ; le SOL en surplus reste utilisable dans votre wallet.`,
+    createSource: 'Payé depuis votre solde SOL.',
     fundShort: source => `Même tous vos ${source} ne suffisent pas - recevez un peu de SOL à votre adresse.`,
     confirmAction: 'Confirmer',
     cancelAction: 'Annuler',

@@ -168,6 +168,18 @@ describe('HomeTab - the per-currency setup card (2026-10-01 founder directive)',
     act(() => { tree.unmount(); });
   });
 
+  test('a running setup masks the money actions; navigation stays live', () => {
+    const tree = mountHome({
+      homeCurrency: 'EUR', homeAsset: preferredRail('EUR', ASSETS),
+      ataSetup: ataVm({kind: 'fund-ic', busy: true, busyLine: 'Working.'}),
+    });
+    expect(pressable(tree, 'btn-home-convert').props.disabled).toBe(true);
+    expect(pressable(tree, 'btn-home-add-funds').props.disabled).toBe(true);
+    expect(pressable(tree, 'btn-home-withdraw').props.disabled).toBe(true);
+    expect(pressable(tree, 'btn-home-more').props.disabled).toBeFalsy();
+    act(() => { tree.unmount(); });
+  });
+
   test('no view model, no card - a currency whose accounts exist renders nothing extra', () => {
     const tree = mountHome();
     expect(has(tree, 'ata-setup-EUR-banner')).toBe(false);

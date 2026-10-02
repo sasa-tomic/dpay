@@ -63,20 +63,18 @@ describe('AtaSetupCard — the ONE button (create: SOL already covers)', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('expanded shows the per-asset detail lines; collapsed does not', () => {
-    const tree = mount({kind: 'create', targets: ['EURC', 'USDC'], expanded: false});
+  test('the per-asset detail lines are gone: the title and the cost carry the facts', () => {
+    // 2026-10-02 audit: 'No EURC account on this device yet.' restated the title's target list
+    // line for line. The card states WHO and WHAT IT COSTS; the per-asset prose is deleted.
+    const tree = mount({kind: 'create', targets: ['EURC', 'USDC'], costLine: '0.00408856 SOL'});
     expect(textOf(tree, 'ata-setup-EUR-banner')).not.toContain('No EURC account');
+    expect(textOf(tree, 'ata-setup-EUR-banner')).not.toContain('No USDC account');
     act(() => { tree.unmount(); });
-    const open = mount({kind: 'create', targets: ['EURC', 'USDC'], expanded: true});
-    expect(textOf(open, 'ata-setup-EUR-banner')).toContain('No EURC account');
-    act(() => { open.unmount(); });
   });
 
-  test('tapping the summary row toggles expansion (the parent owns the state)', () => {
-    const onToggleExpanded = jest.fn();
-    const tree = mount({kind: 'create', expanded: false, onToggleExpanded});
-    press(tree, 'ata-setup-EUR-summary');
-    expect(onToggleExpanded).toHaveBeenCalledTimes(1);
+  test('the create-kind card names its payer (the SOL balance)', () => {
+    const tree = mount({kind: 'create', targets: ['EURC', 'USDC'], costLine: '0.00408856 SOL'});
+    expect(textOf(tree, 'ata-setup-EUR-banner')).toContain('SOL');
     act(() => { tree.unmount(); });
   });
 });

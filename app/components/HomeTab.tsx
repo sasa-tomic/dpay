@@ -101,6 +101,9 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   // are cells of ONE panel (S.homeActionRow) — a disabled cell dims its icon+label in place
   // (sub2 ink), it does not grow a second box inside the panel.
   const noRail = homeAsset === null;
+  // A setup run owns the money movement: the row's actions stand down until it settles
+  // (2026-10-02 audit - the action row stayed live while the card ran a venue swap).
+  const actionDisabled = noRail || ataSetup?.busy === true;
   const actionIcon = noRail ? C.sub2 : C.brandText;
   // The refuse panel's copy affordance: the device's SOL receive address, copied in place.
   const {copied, copy} = useCopyFeedback();
@@ -168,19 +171,19 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
           so no cell carries a radius of its own. */}
       <View style={S.homeActionRow}>
         {/* Add funds — on-ramp for the account the headline is showing. */}
-        <Pressable testID="btn-home-add-funds" style={S.homeActionBtn} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={noRail} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addFunds} accessibilityState={{disabled: noRail}}>
+        <Pressable testID="btn-home-add-funds" style={S.homeActionBtn} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={actionDisabled} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addFunds} accessibilityState={{disabled: actionDisabled}}>
           <IconPlus size={20} color={actionIcon} />
-          <Text style={[S.homeActionLabel, noRail && S.disabledText]}>{M.wallet.home.actions.addFunds}</Text>
+          <Text style={[S.homeActionLabel, actionDisabled && S.disabledText]}>{M.wallet.home.actions.addFunds}</Text>
         </Pressable>
         {/* Convert — the swap surface, this currency as the source. */}
-        <Pressable testID="btn-home-convert" style={[S.homeActionBtn, S.homeActionCell]} onPress={onConvert} disabled={noRail} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.convert} accessibilityState={{disabled: noRail}}>
+        <Pressable testID="btn-home-convert" style={[S.homeActionBtn, S.homeActionCell]} onPress={onConvert} disabled={actionDisabled} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.convert} accessibilityState={{disabled: actionDisabled}}>
           <IconSwap size={20} color={actionIcon} />
-          <Text style={[S.homeActionLabel, noRail && S.disabledText]}>{M.wallet.home.actions.convert}</Text>
+          <Text style={[S.homeActionLabel, actionDisabled && S.disabledText]}>{M.wallet.home.actions.convert}</Text>
         </Pressable>
         {/* Withdraw funds — off-ramp for the main rail. */}
-        <Pressable testID="btn-home-withdraw" style={[S.homeActionBtn, S.homeActionCell]} onPress={onWithdraw} disabled={noRail} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.withdraw} accessibilityState={{disabled: noRail}}>
+        <Pressable testID="btn-home-withdraw" style={[S.homeActionBtn, S.homeActionCell]} onPress={onWithdraw} disabled={actionDisabled} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.withdraw} accessibilityState={{disabled: actionDisabled}}>
           <IconArrowUpRight size={20} color={actionIcon} />
-          <Text style={[S.homeActionLabel, noRail && S.disabledText]}>{M.wallet.home.actions.withdraw}</Text>
+          <Text style={[S.homeActionLabel, actionDisabled && S.disabledText]}>{M.wallet.home.actions.withdraw}</Text>
         </Pressable>
         {/* [...] — the overflow menu (Transaction list, Remove). */}
         <Pressable testID="btn-home-more" style={[S.homeActionBtn, S.homeActionCell]} onPress={onOpenMenu} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.more} accessibilityState={{disabled: false}}>

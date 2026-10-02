@@ -1357,14 +1357,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     const confirmLine = ataSetupConfirm != null
       ? M.deposit.ata.fundConfirm(
           fmtAssetCompact(ataSetupConfirm.inAmount, ataSetupConfirm.source.decimals, ataSetupConfirm.source.symbol),
-          ataSetupConfirm.source.symbol,
           targetsPhrase,
           ataSetupModel.costLine,
         )
       : ataIcConfirm != null
         ? M.deposit.ata.fundIcConfirm(
             fmtAssetCompact(ataIcConfirm.inAmount, ataIcConfirm.source.decimals, ataIcConfirm.source.symbol),
-            ataIcConfirm.source.symbol,
             targetsPhrase,
             ataSetupModel.costLine,
           )

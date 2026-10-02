@@ -28,7 +28,7 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       expect(two).toContain('EURC');
       expect(two).toContain('USDC');
       expect(d.ata.fundFrom('USDC')).toContain('USDC');
-      const confirm = d.ata.fundConfirm(SWAP, 'USDC', two, COST);
+      const confirm = d.ata.fundConfirm(SWAP, two, COST);
       expect(confirm).not.toContain('undefined');
       expect(occurrences(confirm, SWAP)).toBe(1);
       expect(occurrences(confirm, COST)).toBe(1);
@@ -50,7 +50,7 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       expect(banner).toContain('EURC');
       expect(banner).toContain('USDC');
       expect(d.ata.costShort(COST)).toContain(COST);
-      const icConfirm = d.ata.fundIcConfirm(SWAP, 'USDC', two, COST);
+      const icConfirm = d.ata.fundIcConfirm(SWAP, two, COST);
       expect(icConfirm).not.toContain('undefined');
       expect(occurrences(icConfirm, SWAP)).toBe(1);
       expect(occurrences(icConfirm, COST)).toBe(1);
@@ -81,6 +81,38 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       // The house style: plain hyphens in the setup copy, never em-dashes.
       const surfaces = [short, icConfirm, min, d.ata.needSol(COST), d.ata.creatingAll(two), d.ata.creating('EURC'), d.ata.swapFailed];
       expect(surfaces.join('\n')).not.toContain('—');
+    });
+  }
+});
+
+describe('the audit copy rules (2026-10-02): one name per fact, no middleman jargon, the create card names its payer', () => {
+  for (const [locale, d] of Object.entries(LOCALES)) {
+    test(`${locale}: the confirm sentence names the swap amount once and never re-names the source`, () => {
+      const two = d.ata.targetsLabel(['EURC', 'USDC']);
+      // The 2026-10-02 live trip rendered 'about 0.90 ICP of your ICP' - a source whose
+      // symbol the swap amount already carries must never be re-possessed. When the source
+      // IS a created account (fund a USDC balance), the token may appear twice: once as the
+      // input amount, once as the account being created - two facts, each named once.
+      const c = d.ata.fundConfirm(SWAP, two, COST);
+      expect(occurrences(c, SWAP)).toBe(1);
+      expect(c).not.toMatch(/of your (USDC|ICP|VCHF|EURC)\b/);
+      const ic = d.ata.fundIcConfirm(SWAP, two, COST);
+      expect(occurrences(ic, SWAP)).toBe(1);
+      expect(ic).not.toMatch(/of your (USDC|ICP|VCHF|EURC)\b/);
+      expect(occurrences(ic, COST)).toBe(1);
+    });
+
+    test(`${locale}: no middleman jargon - the timing line speaks plainly`, () => {
+      const two = d.ata.targetsLabel(['EURC', 'USDC']);
+      const jargon = /venue|Anbieter|proveedor|prestataire/i;
+      expect(d.ata.fundConfirm(SWAP, two, COST)).not.toMatch(jargon);
+      expect(d.ata.fundIcConfirm(SWAP, two, COST)).not.toMatch(jargon);
+      expect(d.ata.fundFrom('USDC')).not.toMatch(jargon);
+    });
+
+    test(`${locale}: the create-kind card states what pays (the SOL balance)`, () => {
+      expect(d.ata.createSource).toContain('SOL');
+      expect(d.ata.createSource).not.toContain('undefined');
     });
   }
 });
