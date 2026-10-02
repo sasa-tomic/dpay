@@ -650,4 +650,42 @@ describe('sendCefiDepositForRecord - the fund-ic deposit the venue order needs (
     await sendCefiDepositForRecord({...rec, providerDeposit: {depositAddress: '2vxsx-fae'}}, deps);
     expect(seen).toBe('');
   });
+
+  test('a 64-hex venue deposit rides the LEGACY ICP transfer (exact amount, catalog fee, empty memo)', async () => {
+    let seen: unknown = null;
+    const deps = baseDeps({
+      prepareTransfer: () => { throw new Error('must not take the ICRC-1 path'); },
+      prepareLegacyTransfer: async (_s, req) => { seen = req; return prepared; },
+    });
+    const out = await sendCefiDepositForRecord(
+      {...rec, providerDeposit: {depositAddress: 'a4ef38803ebbab5595d1afb8a7a136f8b75167d5693579df60651f96829f4ac9'}},
+      deps,
+    );
+    expect(out).toEqual({kind: 'sent', blockIndex: '4242'});
+    expect(seen).toEqual({
+      ledger: 'ryjl3-tyaaa-aaaaa-aaaba-cai',
+      toAccountId: 'a4ef38803ebbab5595d1afb8a7a136f8b75167d5693579df60651f96829f4ac9',
+      amountE8s: '0.89848158',
+      feeE8s: '10000',
+    });
+  });
+
+  test('a legacy deposit carrying a venue memo is refused honestly (the legacy ledger cannot carry it)', async () => {
+    const deps = baseDeps({prepareLegacyTransfer: () => { throw new Error('must not prepare'); }});
+    await expect(sendCefiDepositForRecord(
+      {...rec, providerDeposit: {depositAddress: 'a4ef38803ebbab5595d1afb8a7a136f8b75167d5693579df60651f96829f4ac9', depositMemo: 'm-42'}},
+      deps,
+    )).rejects.toMatchObject({ataDepositRefused: expect.any(String)});
+  });
+
+  test('a 64-hex deposit on a ledger that is not the ICP mainnet ledger is refused (legacy is ICP-mainnet-only)', async () => {
+    const deps = baseDeps({
+      catalog: {currencies: [{currency: 8, ledger: 'some-other-ledger-canister', fee: '10000'}]},
+      prepareLegacyTransfer: () => { throw new Error('must not prepare'); },
+    });
+    await expect(sendCefiDepositForRecord(
+      {...rec, providerDeposit: {depositAddress: 'a4ef38803ebbab5595d1afb8a7a136f8b75167d5693579df60651f96829f4ac9'}},
+      deps,
+    )).rejects.toMatchObject({ataDepositRefused: expect.any(String)});
+  });
 });
