@@ -46,6 +46,10 @@ jest.mock('../services/relay', () => ({
   fetchWithTimeout: jest.fn(),
 }));
 
+jest.mock('../services/rail', () => ({
+  railBalanceOf: jest.fn(async () => null),
+}));
+
 import {
   prepareCrossRailSolLeg,
   requestConvertAbort,
@@ -59,7 +63,9 @@ import {
 } from '../convert';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout} from '../services/relay';
+import {railBalanceOf} from '../services/rail';
 import {providerRateLimitedUntilMs} from '../convert/providerStatus';
+import {noteStuckProbeDone, stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 import {
   __resetConvertResumeEngineForTest,
   abortConvertRecord,
@@ -791,6 +797,146 @@ describe('C4 — aborted records are skipped by every driver (parametric over re
       expect(callsFor(jest.mocked(executeCrossRailSolSwap))).toHaveLength(0);
       expect(probeConvertSettlement).not.toHaveBeenCalled(); // no stuck probe either
       expect(fetchWithTimeout).not.toHaveBeenCalled(); // and no provider poll
+    } finally {
+      stop();
+    }
+  });
+});
+
+// --- the stuck expiry resolution (2026-10-02 POCO P0) ----------------------------------------------
+// A stuck record whose leg window has PASSED and whose probe still answers unknown must
+// RESOLVE to its honest terminal state — the engine never slow-probes a dead window forever.
+describe('the stuck expiry resolution — an expired unknown resolves, it never probes forever', () => {
+  const expiredLegs = () => [
+    {canister: ICP_LEDGER, method: 'icrc2_approve', argHex: 'a', envelopeHex: 'aa', requestIdHex: 'r1', expiresAtMs: Date.now() - 60_000},
+    {canister: POOL, method: 'depositFromAndSwap', argHex: 'b', envelopeHex: 'bb', requestIdHex: 'r2', expiresAtMs: Date.now() - 60_000},
+  ];
+  // The founder's canonical shape (2026-10-02 POCO): a COMPOSED record — the IC pool swap
+  // (leg-1: approve+swap) settled on-chain, the venue deposit leg sent, outcome unknown.
+  const expiredComposed = (): ConvertRecord => legRecord({
+    id: 'comp-1',
+    step: 'stuck',
+    failureCode: 'unknown',
+    legs: [
+      {canister: VCHF_LEDGER, method: 'icrc2_approve', argHex: 'a', envelopeHex: 'aa', requestIdHex: 'c1', expiresAtMs: Date.now() - 60_000},
+      {canister: POOL, method: 'depositFromAndSwap', argHex: 'b', envelopeHex: 'bb', requestIdHex: 'c2', expiresAtMs: Date.now() - 60_000},
+      {canister: ICP_LEDGER, method: 'icrc1_transfer', argHex: 'c', envelopeHex: 'cc', requestIdHex: 'c3', expiresAtMs: Date.now() - 60_000},
+    ],
+    legPlan: [
+      {kind: 'approve', canister: VCHF_LEDGER, fee: '10000', state: 'confirmed'},
+      {kind: 'swap', canister: POOL, fee: '', state: 'confirmed'},
+      {kind: 'deposit_transfer', canister: ICP_LEDGER, fee: '10000', state: 'sent'},
+    ],
+    hopLedger: ICP_LEDGER,
+    hopSymbol: 'ICP',
+    hopCurrency: 7,
+    composedDeposit: {
+      venueId: 'sideshift', orderId: 'ord-9', depositAddress: 'venue-acct', depositOwner: 'venue-p',
+      amountDecimal: '0.9', amountRaw: '90000000', fee: '10000',
+      settleSymbol: 'SOL', settleDecimals: 9,
+    },
+    providerRef: {orderId: 'ord-9'},
+  });
+
+  test('window OPEN: the record stays stuck, keeps probing, and never reads a balance', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'leg-1': legRecord({step: 'stuck', failureCode: 'unknown'})});
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      expect(probeConvertSettlement).toHaveBeenCalled(); // the slow watch is live while the window is open
+      expect(railBalanceOf).not.toHaveBeenCalled(); // no expiry resolution while the window can still land
+      expect(convertResumeSnapshot()['leg-1']?.step).toBe('stuck');
+      const probes = jest.mocked(probeConvertSettlement).mock.calls.length;
+      await sleep(15);
+      expect(jest.mocked(probeConvertSettlement).mock.calls.length).toBeGreaterThan(probes); // still probing
+    } finally {
+      stop();
+    }
+  });
+
+  test('expired + unknown + input still in wallet → failed_refunded (window_closed) with the cause', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'leg-1': legRecord({step: 'stuck', failureCode: 'unknown', legs: expiredLegs()})});
+    jest.mocked(railBalanceOf).mockResolvedValue('100000000' as never); // == amountIn: the swap never pulled
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      const rec = convertResumeSnapshot()['leg-1'];
+      expect(rec?.step).toBe('failed_refunded');
+      expect(rec?.failureCode).toBe('window_closed');
+      expect(rec?.failureDetail ?? '').toContain('window');
+      expect(saveConvertRecord).toHaveBeenCalledWith('pub', expect.objectContaining({step: 'failed_refunded', failureCode: 'window_closed'}));
+    } finally {
+      stop();
+    }
+  });
+
+  test('the founder shape: expired + unknown + the leg-1 output spent elsewhere → failed_leg, balance is the truth', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'comp-1': expiredComposed()});
+    jest.mocked(railBalanceOf).mockResolvedValue('0' as never); // the ICP is gone (moved by another route)
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      const rec = convertResumeSnapshot()['comp-1'];
+      expect(rec?.step).toBe('failed_leg');
+      expect(rec?.failureDetail ?? '').toContain('window');
+      expect(saveConvertRecord).toHaveBeenCalledWith('pub', expect.objectContaining({step: 'failed_leg'}));
+    } finally {
+      stop();
+    }
+  });
+
+  test('expired + unknown + balance UNREADABLE → failed_leg (not verifiable is not "still there")', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'leg-1': legRecord({step: 'stuck', failureCode: 'unknown', legs: expiredLegs()})});
+    jest.mocked(railBalanceOf).mockResolvedValue(null as never);
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      expect(convertResumeSnapshot()['leg-1']?.step).toBe('failed_leg');
+    } finally {
+      stop();
+    }
+  });
+
+  test('expired + probe finds the payout → done (on-chain evidence outranks the expiry)', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'leg-1': legRecord({step: 'stuck', failureCode: 'unknown', legs: expiredLegs()})});
+    jest.mocked(probeConvertSettlement).mockResolvedValue({kind: 'output', amount: '190000000', tx: '77'} as never);
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      const rec = convertResumeSnapshot()['leg-1'];
+      expect(rec?.step).toBe('done');
+      expect(rec?.outTx).toBe('77');
+      expect(railBalanceOf).not.toHaveBeenCalled(); // resolved by evidence, no balance read needed
+    } finally {
+      stop();
+    }
+  });
+
+  test('an ACKNOWLEDGED expired stuck record still resolves (the deadline, not the ack, ends it)', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'leg-1': legRecord({step: 'stuck', failureCode: 'unknown', legs: expiredLegs()})});
+    jest.mocked(railBalanceOf).mockResolvedValue('100000000' as never);
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(20);
+      await acknowledgeStuckRecord('leg-1'); // the user read the screen — the record must STILL resolve
+      await sleep(20);
+      expect(convertResumeSnapshot()['leg-1']?.step).toBe('failed_refunded');
+    } finally {
+      stop();
+    }
+  });
+
+  test('each completed probe records the last-checked fact the panels render', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'leg-1': legRecord({step: 'stuck', failureCode: 'unknown'})});
+    expect(stuckLastCheckedAtMs('leg-1')).toBeNull();
+    noteStuckProbeDone('leg-1', 1234);
+    expect(stuckLastCheckedAtMs('leg-1')).toBe(1234);
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      const at = stuckLastCheckedAtMs('leg-1');
+      expect(at).not.toBe(1234); // the engine's own probes re-record it
+      expect(at!).toBeLessThanOrEqual(Date.now());
     } finally {
       stop();
     }

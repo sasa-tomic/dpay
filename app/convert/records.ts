@@ -226,7 +226,12 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   }
   if (typeof r.inDecimals === 'number') rec.inDecimals = r.inDecimals;
   if (typeof r.outDecimals === 'number') rec.outDecimals = r.outDecimals;
-  if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'withdraw_refused', 'unknown', 'external_declined', 'gas_short'].includes(r.failureCode as string)) return null;
+  // The allowlist MUST cover every failureCode the executors and the stuck-expiry
+  // resolution can freeze onto a persisted record — a missing member makes hydration
+  // REFUSE the record (it vanishes from the store on reload). 'deposit_refused' was
+  // missing here since the composed wave (founder "pre-existing is not a reason" rule);
+  // 'window_closed' arrives with the 2026-10-02 stuck-expiry resolution.
+  if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'withdraw_refused', 'unknown', 'external_declined', 'gas_short', 'deposit_refused', 'window_closed'].includes(r.failureCode as string)) return null;
   if (r.failureCode != null) rec.failureCode = r.failureCode as ConvertRecord['failureCode'];
   // The legs: every signed update must be complete. An EMPTY legs list is the CeFi shape and
   // requires a providerRef with an orderId — a legless, providerless record is meaningless.

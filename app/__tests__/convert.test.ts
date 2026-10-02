@@ -407,6 +407,15 @@ describe('hydrateConvertStore — the dpay.convert.v3 record round-trip', () => 
     expect(await loadConvertRecords(PUB)).toEqual({});
     expect(await AsyncStorage.getItem(`dpay.convert.v3.${PUB}`)).toBe(poisoned);
   });
+  test('every failureCode the engine can freeze round-trips — an allowlist gap makes a record VANISH on reload', () => {
+    // 2026-10-02: hydration's allowlist had missed 'deposit_refused' since the composed wave
+    // (a deposit_refused record silently disappeared on every reload) — the stuck-expiry
+    // resolution's 'window_closed' would have repeated the class. Pinned for ALL members.
+    for (const failureCode of ['approve_refused', 'swap_refused', 'refunded', 'withdraw_refused', 'unknown', 'external_declined', 'gas_short', 'deposit_refused', 'window_closed'] as const) {
+      const rec = record({step: failureCode === 'window_closed' ? 'failed_refunded' : 'failed_leg', failureCode});
+      expect(hydrateConvertStore(JSON.parse(JSON.stringify({abc123: rec})))).toEqual({abc123: rec});
+    }
+  });
   test('a legs==0 record at an IC-driver step is REJECTED — the provider driver can never advance it', () => {
     // The mirror hole of the quadrant above: a legless record parked at approving/swapping/
     // settling (…) carries only a providerRef, but the provider driver's transition matrix

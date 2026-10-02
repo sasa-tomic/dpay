@@ -72,6 +72,10 @@ import {
   isTrocadorProviderRecord,
   providerRateLimitedUntilMs,
 } from './convert/providerStatus';
+import {clearStuckProbes, noteStuckProbeDone} from './convert/stuckProbeLog';
+import {readLedgerBalance, resolveExpiredStuck, stuckExpiryDue} from './convert/stuckExpiry';
+export {stuckLastCheckedAtMs} from './convert/stuckProbeLog';
+export {recordLegExpiryMs} from './convert/stuckExpiry';
 export type {ProviderStatusReading} from './convert/providerStatus';
 export {fetchProviderStatus} from './convert/providerStatus';
 
@@ -203,7 +207,15 @@ async function commit(next: ConvertRecord): Promise<ConvertRecord> {
 /** One probe of an unacknowledged `stuck` record: the submitted update may STILL have executed
  *  (trichotomy arm (b)) — if the payout or refund is on a ledger now, the record resolves.
  *  `ctx` is the DRIVE's OWN captured context (D2): the probes await, so the engine may have
- *  re-keyed underneath — a stale probe resolves nothing (no map write, no persist, no re-arm). */
+ *  re-keyed underneath — a stale probe resolves nothing (no map write, no persist, no re-arm).
+ *
+ *  THE EXPIRY RESOLUTION (2026-10-02 POCO P0): once the record's signed window has passed,
+ *  an unknown outcome is RESOLVABLE — the app's own copy says nothing can move past the
+ *  deadline. After every probe answers unknown past the deadline, `resolveExpiredStuck`
+ *  reads the unknown leg's input balance and lands the honest terminal:
+ *  funds verifiably present → failed_refunded/window_closed (nothing left the wallet);
+ *  funds gone or unreadable → failed_leg (balance display is the source of truth).
+ *  On-chain evidence seen by the probe itself still resolves FIRST (arm (a), unchanged). */
 async function probeStuckOnce(rec: ConvertRecord, ctx: EngineCtx): Promise<ConvertRecord> {
   // A stuck PLANNED (multi-hop) record resolves differently (2026-09-14 spec §8): the probe
   // that can resolve it is the HOP payout, and a seen hop row means the swap ran while the
@@ -213,7 +225,8 @@ async function probeStuckOnce(rec: ConvertRecord, ctx: EngineCtx): Promise<Conve
   // The HUB record's slow watch (2026-09-18, spec §11) resolves by the same trichotomy as
   // its expiry arm: DEST payout seen → done (the final swap executed — the dest asset IS in
   // the wallet, the SEEN amount); else HUB payout seen → failed_leg (swap1 ran, swap2's
-  // bytes are dead); else it stays stuck, still unknown.
+  // bytes are dead); else it stays stuck, still unknown — until the window closes (below).
+  const readBal = readLedgerBalance(ctx.secretHex);
   if (rec.legPlan != null) {
     const myPrincipal = (await DpayCore.icpPrincipalFromPubkey(ctx.publicHex)).toLowerCase();
     const probe = (swapLeg: 1 | 2) => probeHopPayout({
@@ -232,33 +245,42 @@ async function probeStuckOnce(rec: ConvertRecord, ctx: EngineCtx): Promise<Conve
       }
       const hub = await probe(1);
       if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
+      noteStuckProbeDone(rec.id, Date.now());
       if (hub != null) {
         return commit({...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: hub.tx});
       }
-      return rec;
+    } else {
+      const seen = await probe(1);
+      if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
+      noteStuckProbeDone(rec.id, Date.now());
+      if (seen != null) {
+        return commit({...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: seen.tx});
+      }
     }
-    const seen = await probe(1);
+  } else {
+    const myPrincipal = (await DpayCore.icpPrincipalFromPubkey(ctx.publicHex)).toLowerCase();
+    const seen = await probeConvertSettlement({
+      relayUrl: ctx.relayUrl,
+      publicHex: ctx.publicHex,
+      myPrincipalLower: myPrincipal,
+      record: rec,
+      excludeOutTx: claimedOutTxFor(rec.id),
+      excludeRefundTx: claimedRefundTxFor(rec.id),
+    });
     if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
-    if (seen != null) {
-      return commit({...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: seen.tx});
+    noteStuckProbeDone(rec.id, Date.now());
+    if (seen?.kind === 'output') {
+      return commit({...rec, step: 'done', outAmountNet: seen.amount, outTx: seen.tx});
     }
-    return rec;
+    if (seen?.kind === 'refund') {
+      return commit({...rec, step: 'failed_refunded', failureCode: 'refunded', refundTx: seen.tx});
+    }
   }
-  const myPrincipal = (await DpayCore.icpPrincipalFromPubkey(ctx.publicHex)).toLowerCase();
-  const seen = await probeConvertSettlement({
-    relayUrl: ctx.relayUrl,
-    publicHex: ctx.publicHex,
-    myPrincipalLower: myPrincipal,
-    record: rec,
-    excludeOutTx: claimedOutTxFor(rec.id),
-    excludeRefundTx: claimedRefundTxFor(rec.id),
-  });
-  if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
-  if (seen?.kind === 'output') {
-    return commit({...rec, step: 'done', outAmountNet: seen.amount, outTx: seen.tx});
-  }
-  if (seen?.kind === 'refund') {
-    return commit({...rec, step: 'failed_refunded', failureCode: 'refunded', refundTx: seen.tx});
+  // Still unknown past the deadline: the honest terminal resolution (money-safety rules in
+  // stuckExpiry.ts). A stale drive resolves nothing.
+  const resolved = await resolveExpiredStuck(rec, Date.now(), readBal);
+  if (resolved != null && state.ctx === ctx) {
+    return commit(resolved);
   }
   return rec;
 }
@@ -575,7 +597,10 @@ async function driveOne(id: string): Promise<void> {
     } else if (
       rec.step === 'stuck'
       && (rec.legs.length > 0 || rec.solanaLeg != null)
-      && rec.acknowledgedStuckAtMs == null
+      // The watch stops when the user acknowledges it — EXCEPT once the signed window has
+      // passed: an expired unknown is resolvable (stuckExpiry.ts), acknowledged or not,
+      // and the next drive lands the honest terminal (2026-10-02 POCO P0).
+      && (rec.acknowledgedStuckAtMs == null || stuckExpiryDue(rec))
     ) {
       // The honest unknown stays watchable until the user reads it: one slow probe per window.
       // (A Solana stuck record re-reads its signature status the same way — inside the
@@ -652,7 +677,9 @@ function scheduleNext(id: string, rec: ConvertRecord): void {
   } else if (
     rec.step === 'stuck'
     && (rec.legs.length > 0 || rec.solanaLeg != null)
-    && rec.acknowledgedStuckAtMs == null
+    // Acknowledged records retire the watch — unless the window has passed, where the next
+    // drive is the expiry resolution itself and must still be armed (2026-10-02 POCO P0).
+    && (rec.acknowledgedStuckAtMs == null || stuckExpiryDue(rec))
   ) {
     delay = state.opts.stuckWatchMs;
   } else if (
@@ -691,6 +718,7 @@ function stopEngine(): void {
   // the same shape of honesty — the next session reports only its own reads.
   clearAllProviderRateLimits();
   PROVIDER_LAST_CHECKED_MS.clear();
+  clearStuckProbes(); // the stuck probes' "last checked" facts die with the same session
   // subscribers survive a stop: a still-mounted screen keeps reading the last snapshot until a
   // new engine starts (identity switch / wallet reload).
 }
@@ -770,12 +798,20 @@ export async function markConvertDepositSent(id: string, atMs: number): Promise<
 }
 
 /** The user's acknowledge of a `stuck` record: the instructions were read, the background watch
- *  may stop. Idempotent; refuses non-stuck records. */
+ *  may stop. Idempotent; refuses non-stuck records. ONE exception (2026-10-02 POCO P0): a
+ *  record whose signed window has already passed is resolvable — the ack drives the expiry
+ *  resolution immediately instead of retiring the watch, so the record lands its honest
+ *  terminal even though the user has read it. */
 export async function acknowledgeStuckRecord(id: string): Promise<void> {
   const rec = state.records.get(id);
   if (rec == null || rec.step !== 'stuck' || rec.acknowledgedStuckAtMs != null) return;
-  await commit({...rec, step: 'stuck', acknowledgedStuckAtMs: Date.now()});
-  clearTimer(id); // the honest unknown has been read; nothing advances it but the user now
+  const acked = {...rec, step: 'stuck' as const, acknowledgedStuckAtMs: Date.now()};
+  await commit(acked);
+  if (stuckExpiryDue(acked)) {
+    void driveOne(id); // the deadline, not the ack, ends this record
+  } else {
+    clearTimer(id); // the honest unknown has been read; nothing advances it but the user now
+  }
 }
 
 /** The user's Stop tap on a live record (2026-09-19): set the shared flag (the confirm-flow
@@ -829,5 +865,6 @@ export function __resetConvertResumeEngineForTest(): void {
   stopEngine();
   state.subscribers.clear();
   state.records.clear();
+  clearStuckProbes();
   state.opts = {rearmMs: CONVERT_ENGINE_REARM_MS, stuckWatchMs: CONVERT_ENGINE_STUCK_WATCH_MS, providerPollMs: CONVERT_ENGINE_PROVIDER_POLL_MS, providerPollFloorMs: CONVERT_ENGINE_PROVIDER_POLL_FLOOR_MS, executorOpts: ENGINE_EXECUTOR_OPTS};
 }

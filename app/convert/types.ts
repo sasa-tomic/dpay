@@ -445,7 +445,11 @@ export type ConvertRecord = {
     // The composed-deposit addition (2026-09-26): the deposit transfer was refused at a
     // gate or by the ledger, ONCE, and was never retried — the swap payout (the hub
     // asset) is still in the wallet and the failure names that exit.
-    | 'deposit_refused';
+    | 'deposit_refused'
+    // The stuck-expiry resolution (2026-10-02 POCO P0): the swap could not be confirmed
+    // before its signed window closed and the input is verifiably still in the wallet —
+    // nothing left, there was nothing to refund, and the body says exactly that.
+    | 'window_closed';
   failureDetail?: string;
 };
 
