@@ -83,7 +83,18 @@ hermeticDescribe('flow 118 — home-currency', () => {
     await chooseHomeCurrencyIfPresent(m); // must NOT appear — a currency is stored
     await waitForWallet(m, {timeoutMs: 10_000});
     await m.driver.click('tab-pay', {timeoutMs: 5000});
-    const afterReload = m.driver.readText('active-asset-label').replace(/^~\s*/, '');
+    // The fresh mount hydrates the balance CACHE first (marked approx. until the first live
+    // poll lands). Under box load that poll can outrun any one-shot read — poll until the
+    // settled chip appears (the same budget-scaling discipline as the other waits).
+    let afterReload = '';
+    {
+      const deadline = Date.now() + 20_000;
+      for (; ;) {
+        afterReload = m.driver.readText('active-asset-label').replace(/^~\s*/, '');
+        if (afterReload === 'Balance USD' || Date.now() > deadline) break;
+        await new Promise<void>((r) => setTimeout(r, 250));
+      }
+    }
     assertEq(afterReload, 'Balance USD', 'the chip headlines the NEW main currency after the reload');
 
     // 5. The NEW main currency is what the accounts route marks Main.
