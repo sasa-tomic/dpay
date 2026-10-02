@@ -17,6 +17,14 @@ export type AtaSetupViewModel = {
    *  probe has landed. Null until then - the exact SOL rent line speaks instead. */
   minLine: string | null;
   fundFromLine: string | null;
+  /** A non-terminal convert record is still working toward THIS setup (2026-10-02 P0): the
+   *  card renders the LIVE state - progress + honesty copy, NO button - and the money
+   *  actions stand down, whatever the run's own busy flag says. */
+  live: boolean;
+  /** The live progress sentence (the movement with its currency + the creation promise). */
+  liveLine: string | null;
+  /** The honesty line: the run keeps going, also off this screen. */
+  liveNote: string | null;
   confirming: boolean;
   confirmLine: string | null;
   busy: boolean;
@@ -36,7 +44,11 @@ export type AtaSetupViewModel = {
  * primary button; the idle state states the required minimum UP FRONT (the measured min line,
  * else the exact SOL rent) - no number the user has to fail a swap to learn.
  *
- * Four states, driven entirely by props (the parent owns the plan + the run):
+ * Five states, driven entirely by props (the parent owns the plan + the run):
+ *   live    - a non-terminal convert record is still working toward THIS setup (2026-10-02
+ *             P0): the progress line + the honesty copy, NO button, NO idle minimum line.
+ *             It outranks EVERY other state - a live record must never be pasted over by
+ *             idle (a re-armed button is a second-spend invitation), confirm, busy or refuse.
  *   busy    - the run is on chain: spinner + one honest line (what is being created, or the
  *             still-in-flight venue swap when the parent says so via `busyLine`).
  *   confirm - a swap run's ONE confirmation, stating the total: the sized swap, its source,
@@ -49,7 +61,8 @@ export type AtaSetupViewModel = {
  * step. The v1 card shipped a refuse state that ONLY explained steps with no affordance at all
  * (and the idle button above it stayed a doomed retry). Refuse must always render one of its
  * two escapes below; idle/confirm/busy own the ONE button. Pinned by AtaSetupCard.test.tsx
- * and HomeTab.test.tsx.
+ * and HomeTab.test.tsx. (The live state's actionable next step is the run itself: it keeps
+ * going without a press - the honesty line says so, and the record's own panel can stop it.)
  *   idle    - create (SOL covers), fund (a SPL swap pays) or fund-ic (a cross-rail venue swap
  *             pays): the ONE "Complete setup" button. A fund/fund-ic run presses through to
  *             the confirm; create runs straight away (the button itself is the consent, cost
@@ -64,6 +77,9 @@ export function AtaSetupCard({
   costLine,
   minLine = null,
   fundFromLine = null,
+  live = false,
+  liveLine = null,
+  liveNote = null,
   confirming = false,
   confirmLine = null,
   busy = false,
@@ -90,6 +106,13 @@ export function AtaSetupCard({
   minLine?: string | null;
   /** The swap card's source line - set only when the funding token is unambiguous. */
   fundFromLine?: string | null;
+  /** True while ANY non-terminal convert record intersects the plan's targets: the run
+   *  stands, the card must never render idle-with-button (2026-10-02 P0). */
+  live?: boolean;
+  /** The live progress sentence (the movement + the account-creation promise). */
+  liveLine?: string | null;
+  /** The honesty line: the run keeps going, also if the user leaves this view. */
+  liveNote?: string | null;
   /** True once the parent has sized the swap and is waiting for the confirm press. */
   confirming?: boolean;
   /** The sized confirm sentence (shown while `confirming`). */
@@ -111,6 +134,16 @@ export function AtaSetupCard({
   testIDPrefix: string;
 }) {
   const targetsPhrase = M.deposit.ata.targetsLabel(targets);
+  if (live) {
+    return (
+      <View testID={`${testIDPrefix}-live`} style={S.ataBanner}>
+        <ActivityIndicator color={C.brandText} />
+        <Text testID={`${testIDPrefix}-live-line`} style={S.dim2}>{liveLine ?? M.deposit.ata.swapPending(targetsPhrase)}</Text>
+        <Text testID={`${testIDPrefix}-live-note`} style={S.dim2}>{liveNote ?? M.deposit.ata.liveKeepsRunning}</Text>
+        {err ? <Text testID={`${testIDPrefix}-err`} style={S.err}>{err}</Text> : null}
+      </View>
+    );
+  }
   if (busy) {
     return (
       <View testID={`${testIDPrefix}-busy`} style={S.ataBanner}>

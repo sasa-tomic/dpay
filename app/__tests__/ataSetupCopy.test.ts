@@ -15,6 +15,8 @@ import {depositFr} from '../i18n/domains/fr/deposit';
 const LOCALES = {en: depositEn, de: depositDe, es: depositEs, fr: depositFr};
 const COST = '0.00204428 SOL';
 const SWAP = '0.0021 USDC';
+// No middleman jargon anywhere on the card: the copy speaks in movements, never venues.
+const JARGON = /venue|Anbieter|proveedor|prestataire/i;
 
 const occurrences = (h: string, n: string): number => h.split(n).length - 1;
 
@@ -81,6 +83,18 @@ describe('the wallet-level setup copy exists and stays clean, in every locale', 
       // The house style: plain hyphens in the setup copy, never em-dashes.
       const surfaces = [short, icConfirm, min, d.ata.needSol(COST), d.ata.creatingAll(two), d.ata.creating('EURC'), d.ata.swapFailed];
       expect(surfaces.join('\n')).not.toContain('—');
+      // The LIVE state copy (2026-10-02 P0): the progress line carries the movement (pre-
+      // formatted WITH its currency - the template adds no unit and never drops it), the
+      // targets, and the honesty line promises the run survives leaving the view. No jargon.
+      const live = d.ata.liveProgress(SWAP, two);
+      expect(live).toContain(SWAP);
+      expect(live).toContain('EURC');
+      expect(live).not.toContain('undefined');
+      expect(occurrences(live, SWAP)).toBe(1);
+      expect(d.ata.liveKeepsRunning).toMatch(/view|Ansicht|vista|vue/);
+      expect(d.ata.liveKeepsRunning).not.toContain('undefined');
+      expect(`${live}\n${d.ata.liveKeepsRunning}`).not.toContain('—');
+      expect(live).not.toMatch(JARGON);
     });
   }
 });
@@ -104,10 +118,9 @@ describe('the audit copy rules (2026-10-02): one name per fact, no middleman jar
 
     test(`${locale}: no middleman jargon - the timing line speaks plainly`, () => {
       const two = d.ata.targetsLabel(['EURC', 'USDC']);
-      const jargon = /venue|Anbieter|proveedor|prestataire/i;
-      expect(d.ata.fundConfirm(SWAP, two, COST)).not.toMatch(jargon);
-      expect(d.ata.fundIcConfirm(SWAP, two, COST)).not.toMatch(jargon);
-      expect(d.ata.fundFrom('USDC')).not.toMatch(jargon);
+      expect(d.ata.fundConfirm(SWAP, two, COST)).not.toMatch(JARGON);
+      expect(d.ata.fundIcConfirm(SWAP, two, COST)).not.toMatch(JARGON);
+      expect(d.ata.fundFrom('USDC')).not.toMatch(JARGON);
     });
 
     test(`${locale}: the create-kind card states what pays (the SOL balance)`, () => {

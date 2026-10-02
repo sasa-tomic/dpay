@@ -1384,6 +1384,24 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   }, [ataIcConfirm, ataSetupConfirm, ataSetupBusy, ataSetupModel.plan, runAtaSetup, runAtaIcSetup]);
   const cancelAtaSetup = useCallback(() => { setAtaSetupConfirm(null); setAtaIcConfirm(null); }, []);
   // The AccountsTab view model: the shared plan, rendered by the ONE banner above the list.
+  // The engine's records ride along (2026-10-02 P0): the card must SEE a live record - the
+  // silent-strand defect was exactly a card blind to one.
+  const [convertRecords, setConvertRecords] = useState(() => convertResumeSnapshot());
+  useEffect(() => subscribeConvertRecords(setConvertRecords), []);
+  // The LIVE record for the setup card: any NON-terminal convert record whose settle side is
+  // one of the plan's target mints. While one exists, the card renders live (progress +
+  // honesty, NO button) - never the idle probe with its re-armed one-tap button (the P0's
+  // second-spend invitation), never a stale confirm or the refuse panel pasted over it.
+  const ataLiveRecord = useMemo(() => {
+    const plan = ataSetupModel.plan;
+    const mints = plan.kind === 'none' || plan.kind === 'refuse' ? [] : plan.mints;
+    if (mints.length === 0) return null;
+    for (const rec of Object.values(convertRecords)) {
+      if (isTerminalConvertStep(rec.step)) continue;
+      if (mints.includes(rec.outLedger)) return rec;
+    }
+    return null;
+  }, [convertRecords, ataSetupModel]);
   const ataSetupView = useMemo(() => {
     const plan = ataSetupModel.plan;
     const targetsPhrase = M.deposit.ata.targetsLabel(ataSetupModel.targets);
@@ -1419,12 +1437,21 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         : null,
       confirming: ataSetupConfirm != null || ataIcConfirm != null,
       confirmLine,
+      live: ataLiveRecord != null,
+      liveLine: ataLiveRecord != null
+        ? M.deposit.ata.liveProgress(
+            // Record decimals fell back to 8 on legacy records (types.ts: the e8s world).
+            fmtAssetCompact(ataLiveRecord.amountIn, ataLiveRecord.inDecimals ?? 8, ataLiveRecord.inSymbol),
+            targetsPhrase,
+          )
+        : null,
+      liveNote: M.deposit.ata.liveKeepsRunning,
       busy: ataSetupBusy,
       busyLine: ataSwapPending ? M.deposit.ata.swapPending(targetsPhrase) : null,
       solAddress: solAddress,
       err: ataSetupErr,
     };
-  }, [ataSetupModel, ataPlanSig, ataSetupConfirm, ataIcConfirm, ataSetupBusy, ataSwapPending, ataSetupErr, solAddress, icFundShort, ataSized]);
+  }, [ataSetupModel, ataPlanSig, ataSetupConfirm, ataIcConfirm, ataSetupBusy, ataSwapPending, ataSetupErr, solAddress, icFundShort, ataSized, ataLiveRecord]);
   // Any re-plan (a balance or token refresh moved the inputs) re-answers honestly: the flip
   // is only ever as old as the evidence behind it.
   // The refuse latch's reset keys on the plan's VALUE signature, never the model's identity:
@@ -1767,9 +1794,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // renders as bare principals. Each leg's owning venue is resolved ONCE here and pushed into
   // the venue module's display overlay, so history rows + receipts name the venue — and a pool
   // whose venue row has since left the registry degrades to the neutral pool wording, never a
-  // principal styled as a counterparty.
-  const [convertRecords, setConvertRecords] = useState(() => convertResumeSnapshot());
-  useEffect(() => subscribeConvertRecords(setConvertRecords), []);
+  // principal styled as a counterparty. (The records state itself lives with the setup card's
+  // live-record read above - ONE subscription per purpose, one source of truth.)
   useEffect(() => {
     const names = new Map<string, string>();
     const venueNameOf = (venueId: string | undefined): string | null => {

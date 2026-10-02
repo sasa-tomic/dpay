@@ -304,6 +304,14 @@ export type DepositMessages = {
     /** The busy line while a fund-ic venue swap is still in flight (the accounts are created
      *  the moment the SOL lands - the watcher runs the same create step). */
     swapPending: (targets: string) => string;
+    /** The LIVE-record progress line (2026-10-02 P0): while a non-terminal convert record is
+     *  still working toward the setup, the card renders THIS - the movement (pre-formatted
+     *  WITH its currency; the template adds no unit) and the account-creation promise. The
+     *  state renders NO button: a live record must never be pasted over by an idle one. */
+    liveProgress: (moving: string, targets: string) => string;
+    /** The honesty line under it: the run continues in the background engine, also off this
+     *  screen - the user may leave the view without stranding the setup. */
+    liveKeepsRunning: string;
     /** The funding swap's two honest endings. `swapFailed` = the chain refused the swap (the
      *  input never left the wallet); `swapUnknown` = accepted, confirmation missed (check the
      *  SOL balance before retrying). Both state FACTS only - the card never promises a hollow
@@ -579,6 +587,8 @@ export const depositEn: DepositMessages = {
     cancelAction: 'Cancel',
     creatingAll: targets => `Creating your ${targets} - confirming on Solana…`,
     swapPending: targets => `Swapping into SOL. Your ${targets} are created as soon as it lands.`,
+    liveProgress: (moving, targets) => `Converting ${moving}. Your ${targets} are created as soon as it lands.`,
+    liveKeepsRunning: 'This keeps running on its own, also if you leave this view.',
     swapFailed: 'The swap did not go through - nothing was created and the swapped token is still in your wallet.',
     swapUnknown: 'The swap was accepted but not confirmed yet. Check your SOL balance in a moment, then complete the setup again.',
   },
