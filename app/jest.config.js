@@ -60,6 +60,9 @@ module.exports = {
       // (In projects mode, root-level setupFiles do NOT cascade — every project names its own.)
       displayName: 'domain',
       ...common,
+      // The BigInt-safe worker IPC net (the masked-failure class, see jest.bigint-ipc-env.js):
+      // a failing BigInt matcher must report HONESTLY, never kill the suite opaquely.
+      testEnvironment: '<rootDir>/jest.bigint-ipc-env.js',
       setupFiles: ['<rootDir>/jest.setup.js'],
       testPathIgnorePatterns: [...testPathIgnorePatterns, '<rootDir>/__tests__/flow/', '<rootDir>/__tests__/node-anvil/'],
     },
@@ -71,6 +74,8 @@ module.exports = {
       // which babel's CJS transform breaks — never import those from test code).
       displayName: 'flow',
       ...common,
+      // The BigInt-safe worker IPC net (the masked-failure class, see jest.bigint-ipc-env.js).
+      testEnvironment: '<rootDir>/jest.bigint-ipc-env.js',
       testMatch: ['<rootDir>/__tests__/flow/**/*.test.@(ts|tsx)'],
       // HERMETIC EXECUTION MODEL: files are self-contained (one private relay + fresh seams per
       // file, harness/hermetic.ts) — high worker counts are safe, and a worker recycle (the
