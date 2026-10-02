@@ -180,6 +180,13 @@ hermeticDescribe('flow 212 — currency-row-tap-sets-main', () => {
     // §3 the tap survives a reload.
     await m.remount({url: '/'});
     await waitForWallet(m, {timeoutMs: 8000});
+    // The headline rehydrates through the balance poll; under load the FIRST paint can
+    // still carry the approximate form ('~ Balance ICP approx.'). Wait for the approx
+    // marker to clear, then the exact-string assert stands (the flow-27 row-wait idiom).
+    await m.driver.waitForFunction(
+      () => !m.driver.readText('home-headline-label').includes('approx.'),
+      {timeoutMs: 15_000},
+    );
     assertEq(m.driver.readText('home-headline-label'), 'Balance ICP', 'the reload resumes with ICP main (persisted)');
 
     await m.unmount();
