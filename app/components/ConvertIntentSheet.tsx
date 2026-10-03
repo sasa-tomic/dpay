@@ -39,6 +39,7 @@ import type {SelectableAsset} from '../config/assets';
 import {CONVERT_SLIPPAGE_BPS_DEFAULT} from '../config/convert';
 import {currencyName, currencyOfAsset, currencyOfCatalogRow, currencyOfLinkToken, isStableCurrency, STABLE_TWIN, type HomeCurrency} from '../config/currency';
 import {standingTarget, type SwapRow, type SwapTarget} from '../config/swap';
+import {evmAmmFamilyOf} from '../config/evmAmm';
 import {venueDisplayName, venueOfId} from '../config/venues';
 import {
   CeFiNoQuoteError,
@@ -56,6 +57,7 @@ import {
   prepareChainConvertRecord,
   prepareComposedConvertRecord,
   prepareConvertRecord,
+  prepareCowConvertRecord,
   prepareEvmConvertRecord,
   prepareHubConvertRecord,
   prepareMultihopConvertRecord,
@@ -70,7 +72,7 @@ import {DpayCore} from '../services/native';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
 import {USDC_MINT_ADDRESS} from '../solana/tokens';
 import {deriveSolanaAddress} from '../solana/identity';
-import {deriveEvmAddress, estimateUniswapSequenceFee, quoteUniswapSwap, type UniswapQuote} from '../evm';
+import {deriveEvmAddress, estimateCowSequenceFee, estimateUniswapSequenceFee, quoteCowSwap, quoteUniswapSwap, type CowQuote, type UniswapQuote} from '../evm';
 import {toChecksumAddress} from '../evm/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {gasFundRoutes} from '../routes';
@@ -128,7 +130,7 @@ type HubBundle = {q1: ConvertQuote; m1: ConvertMath; q2: ConvertQuote; m2: Conve
 
 /** One evmamm row's quote bundle: the venue's own quote (best fee tier) + the slippage floor
  *  derived off it (the number the swap leg signs) — both frozen facts the confirm re-quotes. */
-type EvmBundle = {quote: UniswapQuote; minOut: string};
+type EvmBundle = {quote: UniswapQuote | (CowQuote & {amountOut: string}); minOut: string};
 
 /** The mechanical venue pick: the row + how many live quotes the pick compared. */
 type AutoPick = {rowId: string; compared: number} | null;
@@ -578,9 +580,14 @@ export function ConvertIntentSheet({
             chains[r.rowId] = await fetchChainQuotes(relayUrl, r.route, parsed.raw, slippageBps);
             chainAmts[r.rowId] = parsed.raw;
           } else if (r.kind === 'evmamm') {
-            const q = r.out.kind === 'native'
-              ? await quoteUniswapSwap({kind: 'exact-input', chainId: r.chainId, tokenIn: r.inAddress, tokenOut: '', amountIn: BigInt(parsed.raw)})
-              : await quoteUniswapSwap({kind: 'exact-input', chainId: r.chainId, tokenIn: r.inAddress, tokenOut: r.out.address, amountIn: BigInt(parsed.raw)});
+            // The venue FAMILY decides the quote call (never the row): the Uniswap walk
+            // asks the quoter contract; CoW asks its order API through the relay pipes.
+            // Both answers are the venue's own figures, read through ONE field name.
+            const q = evmAmmFamilyOf(r.venue.venue_id) === 'cowswap'
+              ? await quoteCowSwap({relayUrl, chainId: r.chainId, secretHex: identity.secretHex, tokenIn: r.inAddress, tokenOut: r.out.kind === 'native' ? '' : r.out.address, amountIn: BigInt(parsed.raw)})
+              : r.out.kind === 'native'
+                ? await quoteUniswapSwap({kind: 'exact-input', chainId: r.chainId, tokenIn: r.inAddress, tokenOut: '', amountIn: BigInt(parsed.raw)})
+                : await quoteUniswapSwap({kind: 'exact-input', chainId: r.chainId, tokenIn: r.inAddress, tokenOut: r.out.address, amountIn: BigInt(parsed.raw)});
             const minOut = await DpayCore.icpSwapMinOut(q.amountOut, slippageBps);
             evms[r.rowId] = {quote: q, minOut};
             evmAmts[r.rowId] = parsed.raw;
@@ -676,7 +683,9 @@ export function ConvertIntentSheet({
             const amt = evmQuoteAmts.current[r.rowId];
             if (amt == null || liveAmtRef.current !== amt) continue; // superseded amount
             const tokenOut = r.out.kind === 'native' ? '' : r.out.address;
-            const fresh = await quoteUniswapSwap({kind: 'exact-input', chainId: r.chainId, tokenIn: r.inAddress, tokenOut, amountIn: BigInt(amt)});
+            const fresh = evmAmmFamilyOf(r.venue.venue_id) === 'cowswap'
+              ? await quoteCowSwap({relayUrl, chainId: r.chainId, secretHex: identity.secretHex, tokenIn: r.inAddress, tokenOut, amountIn: BigInt(amt)})
+              : await quoteUniswapSwap({kind: 'exact-input', chainId: r.chainId, tokenIn: r.inAddress, tokenOut, amountIn: BigInt(amt)});
             if (!mountedRef.current) return;
             if (evmQuoteAmts.current[r.rowId] !== amt) continue; // re-typed mid-refresh
             const minOut = await DpayCore.icpSwapMinOut(fresh.amountOut, slippageBps);
@@ -1033,10 +1042,25 @@ export function ConvertIntentSheet({
     void (async () => {
       try {
         const tokenOut = evmRow.out.kind === 'native' ? '' : evmRow.out.address;
-        const {planTokenToNative, planTokenToToken} = await import('../evm/uniswapPlan');
-        const {evmAmmChainOf} = await import('../config/evmAmm');
+        const {evmAmmChainOf, evmAmmFamilyOf} = await import('../config/evmAmm');
         const chain = evmAmmChainOf(evmRow.venue.venue_id);
         if (chain == null) throw new Error('chain');
+        if (evmAmmFamilyOf(evmRow.venue.venue_id) === 'cowswap') {
+          // The CoW legs: the approve to the VaultRelayer + the native-out unwrap. The
+          // ORDER is gasless (the venue's own fee figure is the review's fee line).
+          const fee = await estimateCowSequenceFee(identity.secretHex, {
+            chainId: evmRow.chainId,
+            tokenIn: evmRow.inAddress,
+            weth: chain.weth,
+            pullAmount: BigInt(amountRaw!),
+            nativeOut: tokenOut === '',
+            unwrapAmount: 1n,
+            recipient: deriveEvmAddress(identity.secretHex),
+          });
+          if (!cancelled) setEvmFeeWei(fee.maxFeeWei);
+          return;
+        }
+        const {planTokenToNative, planTokenToToken} = await import('../evm/uniswapPlan');
         const plan = tokenOut === ''
           ? planTokenToNative({chain, tokenIn: evmRow.inAddress, amountIn: BigInt(amountRaw!), minOut: 1n, feeTier: 3000, deadlineSecs: 1n})
           : planTokenToToken({chain, tokenIn: evmRow.inAddress, tokenOut, amountIn: BigInt(amountRaw!), minOut: 1n, feeTier: 3000, deadlineSecs: 1n});
@@ -1262,7 +1286,10 @@ export function ConvertIntentSheet({
         // with old/new inline, nothing signed, nothing created. A held market prepares the
         // record (the dry gas gate runs inside prepare) and adopts it — the executor signs.
         const tokenOut = activeRow.out.kind === 'native' ? '' : activeRow.out.address;
-        const fresh = await quoteUniswapSwap({kind: 'exact-input', chainId: activeRow.chainId, tokenIn: activeRow.inAddress, tokenOut, amountIn: BigInt(amountRaw)});
+        const isCow = evmAmmFamilyOf(activeRow.venue.venue_id) === 'cowswap';
+        const fresh = isCow
+          ? await quoteCowSwap({relayUrl, chainId: activeRow.chainId, secretHex: identity.secretHex, tokenIn: activeRow.inAddress, tokenOut, amountIn: BigInt(amountRaw)})
+          : await quoteUniswapSwap({kind: 'exact-input', chainId: activeRow.chainId, tokenIn: activeRow.inAddress, tokenOut, amountIn: BigInt(amountRaw)});
         if (fresh.amountOut !== b.quote.amountOut) {
           if (mountedRef.current) {
             const minOut = await DpayCore.icpSwapMinOut(fresh.amountOut, slippageBps);
@@ -1272,24 +1299,44 @@ export function ConvertIntentSheet({
           }
           return;
         }
-        const {record} = await prepareEvmConvertRecord({
-          secretHex: identity.secretHex,
-          quote: {
-            venueId: activeRow.venue.venue_id,
-            feeTier: fresh.feeTier,
-            amountIn: fresh.amountIn,
-            amountOut: fresh.amountOut,
-            tokenIn: activeRow.inAddress,
-            tokenOut,
-            outRailId: activeRow.out.railId,
-            ...(b.quote.hub != null ? {hub: b.quote.hub} : {}),
-          },
-          inSymbol: activeRow.inSymbol,
-          outSymbol: activeRow.out.symbol,
-          inDecimals: activeRow.inDecimals,
-          outDecimals: activeRow.out.decimals,
-          slippageBps,
-        });
+        const record = isCow
+          ? (await prepareCowConvertRecord({
+              secretHex: identity.secretHex,
+              quote: {
+                venueId: activeRow.venue.venue_id,
+                amountIn: fresh.amountIn,
+                buyAmount: (fresh as CowQuote & {amountOut: string}).buyAmount,
+                feeAmount: (fresh as CowQuote & {amountOut: string}).feeAmount,
+                protocolFeeBps: (fresh as CowQuote & {amountOut: string}).protocolFeeBps,
+                validTo: (fresh as CowQuote & {amountOut: string}).validTo,
+                tokenIn: activeRow.inAddress,
+                tokenOut,
+                outRailId: activeRow.out.railId,
+              },
+              inSymbol: activeRow.inSymbol,
+              outSymbol: activeRow.out.symbol,
+              inDecimals: activeRow.inDecimals,
+              outDecimals: activeRow.out.decimals,
+              slippageBps,
+            })).record
+          : (await prepareEvmConvertRecord({
+              secretHex: identity.secretHex,
+              quote: {
+                venueId: activeRow.venue.venue_id,
+                feeTier: (fresh as UniswapQuote).feeTier,
+                amountIn: fresh.amountIn,
+                amountOut: fresh.amountOut,
+                tokenIn: activeRow.inAddress,
+                tokenOut,
+                outRailId: activeRow.out.railId,
+                ...((b.quote as UniswapQuote).hub != null ? {hub: (b.quote as UniswapQuote).hub} : {}),
+              },
+              inSymbol: activeRow.inSymbol,
+              outSymbol: activeRow.out.symbol,
+              inDecimals: activeRow.inDecimals,
+              outDecimals: activeRow.out.decimals,
+              slippageBps,
+            })).record;
         if (!mountedRef.current) return;
         onPrepared(record);
         return;
@@ -1744,6 +1791,21 @@ export function ConvertIntentSheet({
                 <View testID="convert-evm-fee" style={S.convertRateRow}>
                   <Text style={S.convertRateLabel}>{M.convert.evm.feeLabel(evmRow.out.kind === 'native' ? evmRow.out.symbol : 'ETH')}</Text>
                   <Text style={S.convertRateValue}>{evmFeeWei != null ? fromBaseUnitsWei(evmFeeWei) + ' ETH' : '—'}</Text>
+                </View>
+              ) : null}
+              {/* The CoW venue's own fee, carried verbatim (the venue prices the trade and
+                  names its cost - the gasless order's honesty line, the swap-minimum
+                  honesty's twin). Rides ONLY the CoW family's own quote. */}
+              {evmMode && evmRow != null && activeEvm != null
+                && evmAmmFamilyOf(evmRow.venue.venue_id) === 'cowswap'
+                && (activeEvm.quote as CowQuote & {amountOut: string}).feeAmount != null ? (
+                <View testID="convert-cow-fee" style={S.convertRateRow}>
+                  <Text style={S.convertRateLabel}>{M.convert.cow.feeLine(fmtAssetCompact((activeEvm.quote as CowQuote & {amountOut: string}).feeAmount, evmRow.inDecimals, evmRow.inSymbol))}</Text>
+                  <Text style={S.convertRateValue}>
+                    {(activeEvm.quote as CowQuote & {amountOut: string}).protocolFeeBps != null
+                      ? M.convert.cow.protocolFeeLine((activeEvm.quote as CowQuote & {amountOut: string}).protocolFeeBps!)
+                      : ''}
+                  </Text>
                 </View>
               ) : null}
               {/* Composed: the combined rate across the IC chain INTO the settle leg's own

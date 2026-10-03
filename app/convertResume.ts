@@ -562,10 +562,12 @@ async function driveOne(id: string): Promise<void> {
         // EVM driver (2026-09-28, the any-pair mandate): the legs are SIGNED here at drive
         // time from the record's frozen facts (nonces move), every broadcast hash persisted
         // as durable identity, receipts watched to the done line. Never re-signs past a
-        // broadcast; the aggregate gas gate refuses before any signature.
+        // broadcast; the aggregate gas gate refuses before any signature. The CoW family
+        // branches inside to its own lifecycle (the venue's order poll rides the relay).
         next = await executeEvmConvert(rec, {
           publicHex: ctx.publicHex,
           secretHex: ctx.secretHex,
+          relayUrl: ctx.relayUrl,
           onUpdate: (r) => {
             if (!mine()) return;
             fireOnTerminalIfEnteredListed(state.records.get(r.id)?.step, r);

@@ -644,6 +644,36 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
         ? {txHashes: e.txHashes as string[]}
         : {}),
     };
+    // The COW SWAP widening (2026-10-03): optional, but when present it must be the whole
+    // truth — every field the driver signs or polls with is required and shape-checked, so
+    // a half-written block refuses the record like any other corrupt money fact.
+    if (e.cow != null) {
+      const c = e.cow as Record<string, unknown>;
+      if (!c || typeof c !== 'object') return null;
+      for (const k of ['buyAmount', 'feeAmount'] as const) {
+        if (typeof c[k] !== 'string' || !/^\d+$/.test(c[k] as string)) return null;
+      }
+      if (typeof c.appData !== 'string' || !/^0x[0-9a-f]{64}$/.test(c.appData as string)) return null;
+      if (c.protocolFeeBps != null && (typeof c.protocolFeeBps !== 'string' || !/^\d+$/.test(c.protocolFeeBps as string))) return null;
+      if (c.uid != null && (typeof c.uid !== 'string' || !/^0x[0-9a-f]{112}$/i.test(c.uid as string))) return null;
+      if (c.approveTxHash != null && (typeof c.approveTxHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(c.approveTxHash as string))) return null;
+      for (const k of ['sold', 'bought'] as const) {
+        if (c[k] != null && (typeof c[k] !== 'string' || !/^\d+$/.test(c[k] as string))) return null;
+      }
+      evmSwap = {
+        ...evmSwap,
+        cow: {
+          buyAmount: c.buyAmount as string,
+          feeAmount: c.feeAmount as string,
+          ...(c.protocolFeeBps != null ? {protocolFeeBps: c.protocolFeeBps as string} : {}),
+          appData: c.appData as string,
+          ...(c.uid != null ? {uid: c.uid as string} : {}),
+          ...(c.approveTxHash != null ? {approveTxHash: c.approveTxHash as string} : {}),
+          ...(c.sold != null ? {sold: c.sold as string} : {}),
+          ...(c.bought != null ? {bought: c.bought as string} : {}),
+        },
+      };
+    }
     rec.evmSwap = evmSwap;
   }
   if (evmSwap != null && solanaLeg != null) return null; // one leg protocol per record

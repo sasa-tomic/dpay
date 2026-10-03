@@ -11,8 +11,9 @@
 //                  failure copy (it can only ever pull what the swap would have pulled);
 //   receipt never landed → stuck (honest unknown; the hashes stay watchable).
 import {executeUniswapSequence, readEvmRailBalance} from '../evm';
+import {executeCowConvert} from './executeCow';
 import {venueOfId, venueDisplayName} from '../config/venues';
-import {evmAmmChainOf} from '../config/evmAmm';
+import {evmAmmChainOf, evmAmmFamilyOf} from '../config/evmAmm';
 import {planTokenToNative, planTokenToToken, planTokenViaWethHub} from '../evm/uniswapPlan';
 import {saveTxNote} from '../services/txNotes';
 import {type ConvertRecord} from './types';
@@ -21,6 +22,9 @@ import {saveConvertRecord} from './records';
 export type EvmExecutorDeps = {
   publicHex: string; // the IC identity (store scope + annotations)
   secretHex: string; // the device key (the EVM rail's signing key, SLIP-10 m/44'/60'/…)
+  /** The active relay base — the CoW family's order API rides it (the Uniswap family never
+   *  touches it: its RPC walks evmRpcUrls). Optional so existing callers stay valid. */
+  relayUrl?: string;
   onUpdate: (record: ConvertRecord) => void | Promise<void>;
 };
 
@@ -30,7 +34,8 @@ export type EvmExecutorOpts = {
   pollIntervalMs?: number;
 };
 
-/** Drive an EVM-shaped record one state forward (or to its honest park). */
+/** Drive an EVM-shaped record one state forward (or to its honest park). The `cowswap`
+ *  family branches to its own driver (the venue's order lifecycle; the same record shape). */
 export async function executeEvmConvert(
   start: ConvertRecord,
   deps: EvmExecutorDeps,
@@ -38,6 +43,14 @@ export async function executeEvmConvert(
 ): Promise<ConvertRecord> {
   const leg = start.evmSwap;
   if (leg == null) return start; // not an EVM record — nothing to drive (hydration prevents this)
+  if (evmAmmFamilyOf(leg.venueId) === 'cowswap') {
+    return executeCowConvert(start, {
+      publicHex: deps.publicHex,
+      secretHex: deps.secretHex,
+      relayUrl: deps.relayUrl ?? '',
+      onUpdate: deps.onUpdate,
+    }, opts);
+  }
   let rec = start;
   const advance = async (patch: Partial<ConvertRecord>): Promise<ConvertRecord> => {
     rec = {...rec, ...patch};

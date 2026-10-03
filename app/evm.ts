@@ -105,6 +105,8 @@ import {
 export type {EvmHistory, EvmHistoryRow};
 import type {UniswapQuote, UniswapSwapPlan} from './evm/uniswapPlan';
 export type {UniswapQuote, UniswapSwapPlan};
+export type {CowQuote} from './evm/cow';
+export type {CowOrderParams, CowOrderStatusBody, SignedCowOrder} from './evm/cowPlan';
 export type {
   EvmBalancesRead,
   EvmFeeQuote,
@@ -569,4 +571,60 @@ export async function readEvmRailBalance(
   const {readEvmTokenRaw, readEvmNativeRaw} = await import('./evm/uniswap');
   const owner = deriveEvmAddress(secretHex);
   return token != null ? readEvmTokenRaw(chainId, token, owner, signal) : readEvmNativeRaw(chainId, owner, signal);
+}
+
+// ── The CoW Swap family (the SECOND EVM venue, 2026-10-03) — same seam discipline: gated
+// on the rail being configured, the network module loaded lazily, the caller's signal
+// honored end to end. The order API rides dpay's relay pipes (`/api/v1/cow/mainnet/*`),
+// never the device; the chain legs walk the EVM RPC pipe like every other read.
+
+/** The venue's own quote for one EVM pair (the venue's figures verbatim; the WETH rule for
+ *  a native destination matches the V3 adapter's). The CowQuote rides with `amountOut`
+ *  carrying its `buyAmount` - the sheet's display math reads one field name across both
+ *  venue families, the venue's own figure either way. */
+export async function quoteCowSwap(
+  args: Omit<Parameters<typeof import('./evm/cow')['quoteCow']>[0], 'secretHex'> & {secretHex: string},
+  signal?: AbortSignal,
+): Promise<import('./evm/cow').CowQuote & {amountOut: string}> {
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  const {quoteCow} = await import('./evm/cow');
+  const q = await quoteCow(args, signal);
+  return {...q, amountOut: q.buyAmount};
+}
+
+/** The chain legs' (approve + native-out unwrap) aggregate worst-case fee, before anything
+ *  is signed — the review's fee line and prepare's dry gate. */
+export async function estimateCowSequenceFee(
+  secretHex: string,
+  args: Parameters<typeof import('./evm/cow')['estimateCowSequenceFee']>[1],
+  signal?: AbortSignal,
+): Promise<{maxFeeWei: string}> {
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  const {estimateCowSequenceFee: run} = await import('./evm/cow');
+  return run(secretHex, args, signal);
+}
+
+/** The full CoW sequence: approve → sign+submit → per-drive poll, milestones handed back
+ *  for the record to freeze (approveTxHash, uid). Terminal outcomes return; a still-open
+ *  order returns null (the engine re-arms). */
+export async function driveCowSequence(
+  secretHex: string,
+  args: Parameters<typeof import('./evm/cow')['driveCowSequence']>[1],
+  signal?: AbortSignal,
+  onProgress?: Parameters<typeof import('./evm/cow')['driveCowSequence']>[3],
+): Promise<ReturnType<typeof import('./evm/cow')['driveCowSequence']>> {
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  const {driveCowSequence: run} = await import('./evm/cow');
+  return run(secretHex, args, signal, onProgress as Parameters<typeof run>[3]);
+}
+
+/** The post-fulfillment unwrap: the settlement's WETH credit withdrawn to native. */
+export async function unwrapCowWeth(
+  secretHex: string,
+  args: {chainId: number; amount: bigint},
+  signal?: AbortSignal,
+): Promise<string> {
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  const {unwrapCowWeth: run} = await import('./evm/cow');
+  return run(secretHex, args, signal);
 }

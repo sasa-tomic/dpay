@@ -6,7 +6,7 @@
 import {useEffect, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, View} from 'react-native';
 import {venueDisplayName} from '../config/venues';
-import {evmAmmChainOf} from '../config/evmAmm';
+import {evmAmmChainOf, evmAmmFamilyOf} from '../config/evmAmm';
 import type {ConvertRecord} from '../convert';
 import {acknowledgeStuckRecord} from '../convertResume';
 import {M} from '../i18n';
@@ -32,6 +32,7 @@ export function EvmStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
 
   const venueName = venueDisplayName(record.venueId);
   const chainName = evmAmmChainOf(record.venueId)?.name ?? `chain ${record.evmSwap?.chainId ?? ''}`;
+  const isCow = evmAmmFamilyOf(record.venueId) === 'cowswap';
   const outDec = record.outDecimals ?? 18;
   const fmtOut = (raw: string) => fmtAssetCompact(raw, outDec, record.outSymbol);
   const fmtIn = (raw: string) => fmtAssetCompact(raw, record.inDecimals ?? 18, record.inSymbol);
@@ -54,7 +55,8 @@ export function EvmStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
         <View testID="convert-settling">
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.settlingTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.settlingBody(record.outSymbol)}</Text>
+          <Text style={S.convertStateBody}>{isCow ? M.convert.cow.settlingBody : M.convert.settlingBody(record.outSymbol)}</Text>
+          {record.evmSwap?.cow?.uid != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.evmSwap.cow.uid)}</Text> : null}
         </View>
       ) : null}
       {record.step === 'done' ? (
@@ -67,7 +69,7 @@ export function EvmStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
       {record.step === 'failed_refunded' ? (
         <View testID="convert-failed">
           <Text style={S.convertStateTitle}>{M.convert.failedTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.evm.failedBody(record.inSymbol, detail)}</Text>
+          <Text style={S.convertStateBody}>{isCow ? M.convert.cow.failedBody(record.inSymbol, detail) : M.convert.evm.failedBody(record.inSymbol, detail)}</Text>
           {legs.length > 0 ? <Text style={S.convertStateMeta}>{M.convert.doneTx(legs[0]!)}</Text> : null}
         </View>
       ) : null}

@@ -34,6 +34,8 @@ export const convertFr: ConvertMessages = {
         `${venue} est un service d'échange automatisé — ni un prestataire agréé, ni une banque. Il détient vos fonds pendant l'échange, puis paie vers votre propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité selon sa politique, sont sur sideshift.ai/terms. Ce portefeuille affiche le devis propre de ${venue} et l'adresse de dépôt — dpay ne signe rien, n'est pas partie et ne touche rien.`,
       trocador: venue =>
         `${venue} est un agrégateur d'échange automatisé — il dirige votre échange vers l'un de ses propres services et détient vos fonds pendant l'échange, puis paie vers votre propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité d'un service, sont sur trocador.app/terms. dpay demande à ${venue} uniquement des services sans vérification d'identité. Ce portefeuille affiche le devis propre de ${venue} et l'adresse de dépôt — dpay ne signe rien, n'est pas partie et ne touche rien.`,
+      cowswap: venue =>
+        `${venue} exécute des ordres signés hors chaîne avec des solvers concurrents, généralement en secondes ou minutes. La revue affiche les frais propres de ${venue}. dpay signe votre ordre, n’est pas partie et ne reçoit rien.`,
     },
     generic: venue => `Exécuté par ${venue}.`,
   },
@@ -162,6 +164,12 @@ export const convertFr: ConvertMessages = {
       ? `L’échange a échoué après l’approbation. Vos ${inSym} sont toujours dans votre portefeuille ; l’approbation inutilisée ne couvre que le montant exact de l’échange.`
       : `Rien n’a été envoyé. Vos ${inSym} sont toujours dans votre portefeuille.`,
     stuckBody: outSym => `L’échange a pu aboutir ou non. Votre solde de ${outSym} se résoudra de lui-même ; ne lancez pas un second échange.`,
+  },
+  cow: {
+    feeLine: fee => `Frais CoW (estimation) : ${fee}`,
+    protocolFeeLine: bps => `plus les frais de volume du site (${bps} bps)`,
+    settlingBody: 'L’ordre est chez les solvers CoW - il s’exécute en secondes ou minutes. Cet écran se résout de lui-même ; ne lancez pas un second échange.',
+    failedBody: (inSym, detail) => `L’ordre n’a pas été exécuté (${detail}). Rien n’a quitté votre portefeuille - vos ${inSym} y sont toujours ; seule l’approbation exacte reste, et elle expire sans être utilisée.`,
   },
   multihop: {
     destLabel: 'Destination',

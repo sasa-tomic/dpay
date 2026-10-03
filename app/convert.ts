@@ -126,6 +126,8 @@ export {executeSolanaConvert, prepareSolanaConvertRecord} from './convert/execut
 
 export type {EvmConvertPrepareArgs} from './convert/prepareEvm';
 export {prepareEvmConvertRecord} from './convert/prepareEvm';
+export type {CowConvertPrepareArgs} from './convert/prepareCow';
+export {prepareCowConvertRecord} from './convert/prepareCow';
 export type {EvmExecutorDeps, EvmExecutorOpts} from './convert/executeEvm';
 export {executeEvmConvert} from './convert/executeEvm';
 

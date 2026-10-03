@@ -35,6 +35,8 @@ export const convertDe: ConvertMessages = {
         `${venue} ist ein automatisierter Tauschdienst — kein lizenzierter Anbieter, keine Bank. Er hält deine Mittel während des Tauschs und zahlt dann an deine eigene Adresse aus; seine Bedingungen, einschließlich etwaiger Identitätsprüfungen nach seiner Policy, stehen unter sideshift.ai/terms. Diese Wallet zeigt ${venue}s eigenen Kurs und die Einzahlungs-Adresse — dpay signiert nichts, ist nicht Partei und wird nicht bezahlt.`,
       trocador: venue =>
         `${venue} ist ein automatisierter Tausch-Aggregator — er leitet deinen Tausch an einen seiner eigenen Anbieter weiter und hält deine Mittel während des Tauschs, zahlt dann an deine eigene Adresse aus; seine Bedingungen, einschließlich etwaiger Identitätsprüfungen eines Anbieters, stehen unter trocador.app/terms. dpay bittet ${venue} nur um Anbieter ohne Identitätsprüfung. Diese Wallet zeigt ${venue}s eigenen Kurs und die Einzahlungs-Adresse — dpay signiert nichts, ist nicht Partei und wird nicht bezahlt.`,
+      cowswap: venue =>
+        `${venue} erfüllt signierte Off-Chain-Aufträge mit konkurrierenden Solvern, meist in Sekunden bis Minuten. Die Übersicht zeigt ${venue}s eigene Gebühr. dpay signiert Ihren Auftrag, ist nicht Partei und wird nicht bezahlt.`,
     },
     generic: venue => `Ausgeführt von ${venue}.`,
   },
@@ -163,6 +165,12 @@ export const convertDe: ConvertMessages = {
       ? `Der Tausch scheiterte nach der Freigabe. Ihre ${inSym} sind noch in Ihrer Wallet; die ungenutzte Freigabe gilt nur für den exakten Tauschbetrag.`
       : `Es wurde nichts gesendet. Ihre ${inSym} sind noch in Ihrer Wallet.`,
     stuckBody: outSym => `Der Tausch ist vielleicht gelandet. Ihr ${outSym}-Guthaben klärt sich von selbst; starten Sie keinen zweiten Tausch.`,
+  },
+  cow: {
+    feeLine: fee => `CoW-Gebühr (Schätzung): ${fee}`,
+    protocolFeeLine: bps => `zuzüglich der Volumengebühr des Anbieters (${bps} bps)`,
+    settlingBody: 'Der Auftrag liegt bei den CoW-Solvern - er füllt in Sekunden bis Minuten. Diese Ansicht klärt sich von selbst; starten Sie keinen zweiten Tausch.',
+    failedBody: (inSym, detail) => `Der Auftrag wurde nicht ausgeführt (${detail}). Es hat nichts Ihre Wallet verlassen - Ihre ${inSym} sind noch da; nur die exakte Freigabe bleibt und läuft ungenutzt ab.`,
   },
   multihop: {
     destLabel: 'Ziel',

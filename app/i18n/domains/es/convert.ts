@@ -34,6 +34,8 @@ export const convertEs: ConvertMessages = {
         `${venue} es un servicio de intercambio automatizado — ni un proveedor con licencia ni un banco. Retiene tus fondos durante el intercambio y luego paga a tu propia dirección; sus términos, incluidas las verificaciones de identidad según su política, están en sideshift.ai/terms. Esta billetera muestra la cotización propia de ${venue} y la dirección de depósito — dpay no firma nada, no es parte y no cobra nada.`,
       trocador: venue =>
         `${venue} es un agregador de intercambio automatizado — dirige tu intercambio a uno de sus propios servicios y retiene tus fondos durante el intercambio, luego paga a tu propia dirección; sus términos, incluidas las verificaciones de identidad que un servicio pueda aplicar, están en trocador.app/terms. dpay pide a ${venue} solo servicios sin verificación de identidad. Esta billetera muestra la cotización propia de ${venue} y la dirección de depósito — dpay no firma nada, no es parte y no cobra nada.`,
+      cowswap: venue =>
+        `${venue} ejecuta órdenes firmadas fuera de la cadena con solvers competidores, normalmente en segundos a minutos. La revisión muestra la comisión propia de ${venue}. dpay firma su orden, no es parte y no recibe nada.`,
     },
     generic: venue => `Ejecutado por ${venue}.`,
   },
@@ -162,6 +164,12 @@ export const convertEs: ConvertMessages = {
       ? `El intercambio falló tras la aprobación. Su ${inSym} sigue en su cartera; la aprobación sin usar cubre solo el monto exacto del intercambio.`
       : `No se envió nada. Su ${inSym} sigue en su cartera.`,
     stuckBody: outSym => `El intercambio puede haber llegado o no. Su saldo de ${outSym} se resolverá solo; no inicie un segundo intercambio.`,
+  },
+  cow: {
+    feeLine: fee => `Comisión de CoW (estimada): ${fee}`,
+    protocolFeeLine: bps => `más la comisión de volumen del sitio (${bps} pbs)`,
+    settlingBody: 'La orden está con los solvers de CoW - se completa en segundos a minutos. Esta pantalla se resuelve sola; no inicie un segundo intercambio.',
+    failedBody: (inSym, detail) => `La orden no se ejecutó (${detail}). Nada salió de su cartera - su ${inSym} sigue ahí; solo queda la aprobación exacta, que expira sin usarse.`,
   },
   multihop: {
     destLabel: 'Destino',

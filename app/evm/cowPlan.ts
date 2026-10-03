@@ -15,8 +15,9 @@
 // figure, and the order trades from the user's own wallet through the settlement contract.
 import {secp256k1} from '@noble/curves/secp256k1';
 import {utf8ToBytes} from '../lib/base64url';
+import {addressWord, uint256Word} from './abi';
 import {keccak256} from './keccak';
-import {addrWord, hex, word32} from './uniswapPlan';
+import {hex, word32} from './uniswapPlan';
 
 // ── The contract's own constants (GPv2Order.sol, byte-copied from the source) ───────────────
 
@@ -76,10 +77,6 @@ function concat(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-function word32Hex(s: string): string {
-  return word32(BigInt(s));
-}
-
 function bytes32Word(hex0x: string): string {
   const h = hex0x.toLowerCase().replace(/^0x/, '');
   if (!/^[0-9a-f]{64}$/.test(h)) throw new Error(`not a bytes32: ${hex0x}`);
@@ -98,8 +95,8 @@ export function cowDomainSeparator(chainId: number): Uint8Array {
     hexToBytes(EIP712_DOMAIN_TYPEHASH),
     keccak256(utf8ToBytes(COW_DOMAIN_NAME)),
     keccak256(utf8ToBytes(COW_DOMAIN_VERSION)),
-    word32(BigInt(chainId)),
-    addrWord(settlement),
+    uint256Word(BigInt(chainId)),
+    addressWord(settlement),
   ));
 }
 
@@ -108,16 +105,16 @@ export function cowDomainSeparator(chainId: number): Uint8Array {
 export function cowOrderStructHash(o: CowOrderParams): Uint8Array {
   return keccak256(concat(
     hexToBytes(COW_ORDER_TYPEHASH),
-    addrWord(o.sellToken),
-    addrWord(o.buyToken),
-    addrWord(o.receiver ?? '0x0000000000000000000000000000000000000000'),
-    word32Hex(o.sellAmount),
-    word32Hex(o.buyAmount),
-    word32(BigInt(o.validTo)),
+    addressWord(o.sellToken),
+    addressWord(o.buyToken),
+    addressWord(o.receiver ?? '0x0000000000000000000000000000000000000000'),
+    uint256Word(BigInt(o.sellAmount)),
+    uint256Word(BigInt(o.buyAmount)),
+    uint256Word(BigInt(o.validTo)),
     hexToBytes(bytes32Word(o.appData)),
-    word32Hex(o.feeAmount),
+    uint256Word(BigInt(o.feeAmount)),
     hexToBytes(COW_KIND_SELL),
-    word32(0n), // partiallyFillable: false
+    uint256Word(0n), // partiallyFillable: false
     hexToBytes(COW_BALANCE_ERC20),
     hexToBytes(COW_BALANCE_ERC20),
   ));
@@ -150,7 +147,7 @@ export function cowOrderUid(chainId: number, o: CowOrderParams, owner: string): 
   }
   const out = new Uint8Array(56);
   out.set(digest, 0);
-  out.set(hexToBytes(addrWord(owner).slice(24)), 32);
+  out.set(addressWord(owner).subarray(12), 32);
   out[52] = (validTo >>> 24) & 0xff;
   out[53] = (validTo >>> 16) & 0xff;
   out[54] = (validTo >>> 8) & 0xff;
@@ -391,4 +388,4 @@ export function parseCowOrderStatus(body: unknown): CowOrderStatusBody {
 }
 
 // ── re-exports (the encoders the approve/unwrap legs share with the V3 adapter) ─────────────
-export {addrWord, hex, word32};
+export {hex, word32};

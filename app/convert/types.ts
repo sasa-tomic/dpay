@@ -63,6 +63,38 @@ export type EvmSwapLeg = {
   /** The WETH-hub composition's frozen facts (present iff the quote was the hub fallback —
    *  no direct pool answered). The executor builds the 2-leg plan from them. */
   hub?: {feeTierLeg1: number; feeTierLeg2: number; minOutLeg1: string};
+  /** The COW SWAP widening (2026-10-03, the second EVM venue): present iff the venue is a
+   *  `cowswap` family row — the order facts the venue settles, frozen at prepare. The
+   *  chain legs (approve, plus the native-out unwrap) still sign AT EXECUTION from the
+   *  frozen facts (nonces move); the ORDER is re-signed deterministically (RFC 6979) from
+   *  THESE bytes, so a resume re-derives the identical signature and UID. `amountIn` is
+   *  the order's sellAmount exactly (the total debited; the modern order signs feeAmount
+   *  '0'), `minOut` is the signed buyAmount floor, `deadlineSecs` carries the venue's own
+   *  validTo (the UID input + the poll window's honest bound). */
+  cow?: {
+    /** The venue's own quoted buy figure (raw buy units) — the review card's receive
+     *  figure; the SIGNED floor is the record's `minOut` (slippage-bitten). */
+    buyAmount: string;
+    /** The venue's own fee estimate (raw sell units), displayed verbatim — never hidden,
+     *  never signed (the orderbook's NonZeroFee rule). */
+    feeAmount: string;
+    /** The venue's own volume-fee policy in bps when the quote named one. */
+    protocolFeeBps?: string;
+    /** The signed appData word (bytes32 hex) — dpay's fixed document hash; part of the
+     *  UID derivation. */
+    appData: string;
+    /** The venue's order UID (56-byte packed hex), frozen the moment the submit answers —
+     *  the crash-safe poll key. A resume can also RE-DERIVE it from the frozen facts, so
+     *  a kill between submit and persist recovers by derivation. */
+    uid?: string;
+    /** The approve leg's tx hash once its receipt landed — the resume skips a landed
+     *  approve (re-approving the same amount is harmless, but watching the original hash
+     *  is the honest identity). */
+    approveTxHash?: string;
+    /** The realized figures at fulfillment (the venue's own executed amounts, raw). */
+    sold?: string;
+    bought?: string;
+  };
   /** The OUT rail's pre-trade raw balance (the realized-credit baseline; null fails open). */
   preOutRaw?: string;
   /** Durable identity per broadcast leg, in order (approve, swap, …) — the crash-safe

@@ -271,6 +271,20 @@ export type ConvertMessages = {
     stuckBody: (outSym: string) => string;
   };
 
+  // --- the EVM rail's CoW Swap venue (2026-10-03, the second EVM venue) -------------------------
+  cow: {
+    /** The venue's own fee estimate, carried verbatim on the review card: never hidden,
+     *  never signed (the venue prices the trade and names its cost; dpay adds nothing). */
+    feeLine: (fee: string) => string;
+    /** The volume-fee policy note when the venue names one (bps, its own figure). */
+    protocolFeeLine: (bps: string) => string;
+    /** Submitted-and-watching: the solvers settle off-chain, seconds to minutes. */
+    settlingBody: string;
+    /** The failure body: the order was OFF-CHAIN - nothing left the wallet but the
+     *  exact-amount approval the copy names. `detail` is the venue's own status/errorType. */
+    failedBody: (inSym: string, detail: string) => string;
+  };
+
   // --- multi-hop routes (docs/specs/2026-09-14-multihop-conversion-spec.md §5–§7) ----------------
   multihop: {
     /** Destination picker rows: the direct pair standing default, plus each composed route. */
@@ -629,6 +643,11 @@ export const convertEn: ConvertMessages = {
       // for non-KYC backends only.
       trocador: venue =>
         `${venue} is an automated exchange aggregator — it routes your trade to one of its own backends and holds your funds mid-trade, then pays to your own address; its terms, including any backend identity checks, are at trocador.app/terms. dpay asks ${venue} for no-KYC backends only. This wallet shows ${venue}'s own quote and deposit address — dpay signs nothing, is not a party, and is paid nothing.`,
+      // disclosure_key 'cowswap': the second EVM venue - the intent/settlement fact is
+      // WHAT happens after the signature (off-chain solvers, no gas for the trader), and
+      // the same no-party/no-cut truths.
+      cowswap: venue =>
+        `${venue} fills signed off-chain orders with competing solvers, usually in seconds to minutes. The review shows ${venue}'s own fee. dpay signs your order, is not a party, and is paid nothing.`,
     },
     generic: venue => `Executed by ${venue}.`,
   },
@@ -762,6 +781,12 @@ export const convertEn: ConvertMessages = {
       ? `The swap failed after the approval. Your ${inSym} is still in your wallet; the unused approval is for the exact swap amount only.`
       : `Nothing was sent. Your ${inSym} is still in your wallet.`,
     stuckBody: outSym => `The swap may or may not have landed. Your ${outSym} balance will resolve on its own; do not start a second swap.`,
+  },
+  cow: {
+    feeLine: fee => `CoW fee (estimate): ${fee}`,
+    protocolFeeLine: bps => `plus the venue's volume fee (${bps} bps)`,
+    settlingBody: 'The order is with the CoW solvers - it fills in seconds to minutes. This screen resolves on its own; do not start a second swap.',
+    failedBody: (inSym, detail) => `The order did not fill (${detail}). Nothing left your wallet - your ${inSym} is still there; only the exact-amount approval remains, and it expires unused.`,
   },
   multihop: {
     destLabel: 'Destination',
