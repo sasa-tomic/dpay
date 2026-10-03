@@ -152,7 +152,10 @@ export function AccountsTab({
                     <AssetGlyph asset={rail} />
                     <View style={S.pickTextCol}>
                       <View style={S.assetTitleRow}>
-                        <Text style={S.assetLabel}>{currencyName(currency)}</Text>
+                        {/* ONE line, always (2026-10-02 audit): "Internet Computer" beside a wide
+                            balance wrapped to two lines. The clamp yields to the amount (the
+                            non-wrapping money column); the full name sits in the subtitle below. */}
+                        <Text style={S.assetLabel} numberOfLines={1}>{currencyName(currency)}</Text>
                         <Text style={[S.assetAmt, view != null && view.status !== 'ok' && S.assetCardZero]}>{view?.displayText ?? '—'}</Text>
                       </View>
                       <View style={S.assetTitleRow}>

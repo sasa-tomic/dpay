@@ -99,7 +99,9 @@ export function CurrencyRow({testId, asset, label, amount, active, onPress, acce
             <AssetGlyph asset={asset} />
             <View style={S.pickTextCol}>
               <View style={S.assetTitleRow}>
-                <Text style={S.assetLabel}>{title}</Text>
+                {/* ONE line, always (2026-10-02 audit): the title yields to the amount (the
+                    non-wrapping money column); the subtitle carries the full rail name. */}
+                <Text style={S.assetLabel} numberOfLines={1}>{title}</Text>
                 {amount != null ? <Text style={[S.assetAmt, zero && S.assetCardZero]}>{amount}</Text> : null}
                 {check}
               </View>

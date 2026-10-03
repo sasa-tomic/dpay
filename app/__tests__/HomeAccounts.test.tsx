@@ -140,6 +140,23 @@ describe('AccountsTab — one row per VISIBLE currency, stables then Other', () 
     act(() => { tree.unmount(); });
   });
 
+  test('a row title holds ONE line beside its amount (the ICP row never wraps, 2026-10-02 audit)', () => {
+    // "Internet Computer" + a wide balance overflowed the title row and wrapped to two lines.
+    // The clamp keeps the title single-line (the full name sits in the subtitle right below);
+    // the amount stays the non-wrapping money column it has been since 2026-09-28.
+    const tree = mount(views, sums);
+    const icpRow = tree.root.findAll(n => n.props?.testID === 'accounts-currency-ICP')[0]!;
+    const titles = icpRow.findAllByType(Text).filter(n => n.props.children === 'Internet Computer');
+    expect(titles.length).toBeGreaterThan(0);
+    for (const t of titles) expect(t.props.numberOfLines).toBe(1);
+    // The shared CurrencyRow card (the practice row here) carries the same clamp.
+    const demoRow = tree.root.findAll(n => n.props?.testID === 'asset-demo')[0]!;
+    const demoTitles = demoRow.findAllByType(Text).filter(n => n.props.children === 'DEMO');
+    expect(demoTitles.length).toBeGreaterThan(0);
+    for (const t of demoTitles) expect(t.props.numberOfLines).toBe(1);
+    act(() => { tree.unmount(); });
+  });
+
   test('the practice row keeps the faucet and its select — and never a set-main gesture', () => {
     const onSelect = jest.fn();
     const tree = mount(views, sums, {onSelect});
