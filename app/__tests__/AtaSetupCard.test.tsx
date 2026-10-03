@@ -98,7 +98,7 @@ describe('AtaSetupCard - the swap runs (fund and fund-ic: confirm is REQUIRED)',
     const tree = mount({
       kind: 'fund-ic',
       confirming: true,
-      confirmLine: 'Swaps about 5 USDC of your ckUSDC into SOL and creates your EURC account (0.00204428 SOL).',
+      confirmLine: 'Swaps ≈ 5 USDC into SOL and creates your EURC account (0.00204428 SOL).',
       onConfirm,
       onCancel,
     });
@@ -115,9 +115,9 @@ describe('AtaSetupCard - the swap runs (fund and fund-ic: confirm is REQUIRED)',
 
 describe('AtaSetupCard - the up-front minimum line (2026-10-01 founder directive)', () => {
   test('a measured minimum REPLACES the rent line - ONE cost line, stated before anything runs', () => {
-    const tree = mount({kind: 'fund-ic', minLine: 'Needs at least 0.09 VCHF.'});
+    const tree = mount({kind: 'fund-ic', minLine: 'Needs ≈ 0.09 VCHF.'});
     const banner = textOf(tree, 'ata-setup-EUR-banner');
-    expect(banner).toContain('at least 0.09 VCHF');
+    expect(banner).toContain('0.09 VCHF');
     expect(banner).not.toContain('Costs 0.00204428 SOL');
     act(() => { tree.unmount(); });
   });
@@ -204,14 +204,14 @@ describe('AtaSetupCard - the LIVE state (2026-10-02 P0: a non-terminal record ow
 
   test('live: the single setting-up line renders, no note line, no button, no minimum line', () => {
     const onStart = jest.fn();
-    const tree = mount({kind: 'fund-ic', live: true, minLine: 'Needs at least 0.09 VCHF.', onStart});
+    const tree = mount({kind: 'fund-ic', live: true, minLine: 'Needs ≈ 0.09 VCHF.', onStart});
     expect(has(tree, 'ata-setup-EUR-live')).toBe(true);
     expect([...new Set(textOf(tree, 'ata-setup-EUR-live-line').split('\n').filter(Boolean))]).toEqual([M.deposit.ata.settingUp]);
     expect(has(tree, 'ata-setup-EUR-live-note')).toBe(false); // ONE line - no competing copy
     expect(has(tree, 'ata-setup-EUR-complete')).toBe(false); // never a second spend
     expect(has(tree, 'ata-setup-EUR-confirm-btn')).toBe(false);
     expect(has(tree, 'ata-setup-EUR-banner')).toBe(false);
-    expect(textOf(tree, 'ata-setup-EUR-live')).not.toContain('at least 0.09 VCHF'); // no idle probe line
+    expect(textOf(tree, 'ata-setup-EUR-live')).not.toContain('0.09 VCHF'); // no idle probe line
     act(() => { tree.unmount(); });
   });
 
@@ -223,7 +223,7 @@ describe('AtaSetupCard - the LIVE state (2026-10-02 P0: a non-terminal record ow
   });
 
   test('live outranks busy and confirm: a record standing while a run (or a stale confirm) is up still hides every control', () => {
-    const tree = mount({kind: 'fund-ic', live: true, busy: true, confirming: true, confirmLine: 'Swaps about 5 VCHF'});
+    const tree = mount({kind: 'fund-ic', live: true, busy: true, confirming: true, confirmLine: 'Swaps ≈ 5 VCHF'});
     expect(has(tree, 'ata-setup-EUR-live')).toBe(true);
     expect(has(tree, 'ata-setup-EUR-busy')).toBe(false);
     expect(has(tree, 'ata-setup-EUR-confirm-btn')).toBe(false);

@@ -204,10 +204,10 @@ describe('HomeTab - the per-currency setup card (2026-10-01 founder directive)',
   test('the idle card states the measured minimum up front, ONE cost line', () => {
     const tree = mountHome({
       homeCurrency: 'EUR', homeAsset: preferredRail('EUR', ASSETS),
-      ataSetup: ataVm({kind: 'fund-ic', minLine: 'Needs at least 0.09 VCHF.'}),
+      ataSetup: ataVm({kind: 'fund-ic', minLine: 'Needs ≈ 0.09 VCHF.'}),
     });
     const banner = textUnder(tree, 'ata-setup-EUR-banner');
-    expect(banner).toContain('at least 0.09 VCHF');
+    expect(banner).toContain('0.09 VCHF');
     expect(banner).not.toContain('Costs 0.00204428 SOL');
     act(() => { tree.unmount(); });
   });
@@ -216,7 +216,7 @@ describe('HomeTab - the per-currency setup card (2026-10-01 founder directive)',
     const onConfirm = jest.fn();
     const confirmTree = mountHome({
       homeCurrency: 'EUR', homeAsset: preferredRail('EUR', ASSETS),
-      ataSetup: ataVm({kind: 'fund-ic', confirming: true, confirmLine: 'Swaps about 0.09 VCHF.'}),
+      ataSetup: ataVm({kind: 'fund-ic', confirming: true, confirmLine: 'Swaps ≈ 0.09 VCHF.'}),
       onAtaSetupConfirm: onConfirm,
     });
     expect(has(confirmTree, 'ata-setup-EUR-confirm-btn')).toBe(true);

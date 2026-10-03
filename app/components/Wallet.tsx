@@ -7,7 +7,7 @@ import {M} from '../i18n';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, HIDDEN_CURRENCIES_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY, PRACTICE_CURRENCY} from '../config/constants';
 import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog';
 import {setIcClockRoutingCanister} from '../services/icp';
-import {base, randNonceHex, fmtTime, fmtAssetCompact, rawToDecimal, toUnits} from '../lib/format';
+import {base, randNonceHex, fmtTime, fmtAssetCompact, fmtEstimate, rawToDecimal, toUnits} from '../lib/format';
 import {applyOffline} from '../lib/amount';import {withTimeout} from '../lib/timeout';
 import {applySolDeduction, pendingSolDeduction} from '../lib/solRailShown';
 import {buildSelectableAssets, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
@@ -1440,13 +1440,15 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     const targetsPhrase = M.deposit.ata.targetsLabel(ataSetupModel.targets);
     const confirmLine = ataSetupConfirm != null
       ? M.deposit.ata.fundConfirm(
-          fmtAssetCompact(ataSetupConfirm.inAmount, ataSetupConfirm.source.decimals, ataSetupConfirm.source.symbol),
+          // The sized swap input is a QUOTE-DERIVED estimate: capped + "≈"-marked (2026-10-02
+          // audit), never the wobbling full-precision figure. The exact raw rides the record.
+          fmtEstimate(ataSetupConfirm.inAmount, ataSetupConfirm.source.decimals, ataSetupConfirm.source.symbol),
           targetsPhrase,
           ataSetupModel.costLine,
         )
       : ataIcConfirm != null
         ? M.deposit.ata.fundIcConfirm(
-            fmtAssetCompact(ataIcConfirm.inAmount, ataIcConfirm.source.decimals, ataIcConfirm.source.symbol),
+            fmtEstimate(ataIcConfirm.inAmount, ataIcConfirm.source.decimals, ataIcConfirm.source.symbol),
             targetsPhrase,
             ataSetupModel.costLine,
           )
@@ -1461,7 +1463,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       // swap plan, the idle card states it INSTEAD of the rent line - one cost line, known
       // before anything is initiated. Null until measured (the exact rent line speaks then).
       minLine: (plan.kind === 'fund' || plan.kind === 'fund-ic') && ataSized?.sig === ataPlanSig && ataSized.sized != null
-        ? M.deposit.ata.minSwap(fmtAssetCompact(ataSized.sized.inAmount, ataSized.sized.source.decimals, ataSized.sized.source.symbol))
+        ? M.deposit.ata.minSwap(fmtEstimate(ataSized.sized.inAmount, ataSized.sized.source.decimals, ataSized.sized.source.symbol))
         : null,
       // Always names a source (2026-10-01 audit F7): the measured winner once the probe
       // landed, the prospective first candidate before that.

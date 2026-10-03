@@ -1,5 +1,23 @@
 import { describe, test, expect } from '@jest/globals';
-import { parseRequestQR, usd, short, fmtTime } from '../lib/format';
+import { parseRequestQR, usd, short, fmtTime, fmtEstimate, ESTIMATE_DISPLAY_DECIMALS } from '../lib/format';
+
+// The 2026-10-02 audit (fake-precision amounts that wobble): quote-derived estimates render
+// CAPPED and marked, exact values stay internal. One formatter, one cap, the compact core's
+// own truncate-toward-zero + "≈" honesty contract.
+describe('fmtEstimate — the capped display for quote-derived amounts', () => {
+  test('caps at ESTIMATE_DISPLAY_DECIMALS places and marks what it hides', () => {
+    expect(ESTIMATE_DISPLAY_DECIMALS).toBe(4);
+    // The audit's exact shape: 0.90211547 ICP measured at 8 decimals.
+    expect(fmtEstimate('90211547', 8, 'ICP')).toBe('≈ 0.9021 ICP');
+  });
+  test('a value the cap does not cut renders clean, no marker', () => {
+    expect(fmtEstimate('2100', 6, 'USDC')).toBe('0.0021 USDC');
+  });
+  test('trailing zeros trim; a sub-resolution estimate names the threshold, never a fake zero', () => {
+    expect(fmtEstimate('4088560', 9, 'SOL')).toBe('≈ 0.004 SOL');
+    expect(fmtEstimate('1', 8, 'ICP')).toBe('< 0.0001 ICP');
+  });
+});
 
 describe('parseRequestQR', () => {
   test('plain base64url passes through (no |name suffix anymore)', () => {

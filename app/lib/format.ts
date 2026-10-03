@@ -207,6 +207,17 @@ export function fmtMoneyCompact(
   return `${/[1-9]/.test(fracAll.slice(dd)) ? '≈ ' : ''}${sign}${placed(num)}`;
 }
 
+// The ESTIMATE display cap (2026-10-02 audit, "fake-precision amounts that wobble"): a
+// quote-derived amount (a venue minimum, a sized swap input) is an estimate, and rendering it
+// at the asset's full precision made the same figure drift digit-to-digit across refreshes.
+// Estimates render at this many decimal places through `fmtEstimate` - the compact core's
+// truncate-toward-zero + "≈" contract marks every hidden digit; EXACT amounts (a rent cost,
+// the user's balance) keep their own formatters.
+export const ESTIMATE_DISPLAY_DECIMALS = 4;
+export function fmtEstimate(raw: string, decimals: number, unit: string, minFractionDigits = 0): string {
+  return fmtAssetCompact(raw, decimals, unit, ESTIMATE_DISPLAY_DECIMALS, minFractionDigits);
+}
+
 // Parse a user-entered amount (decimal string) into integer smallest-units at the given decimal
 // count, as a decimal-digit STRING. Drives the merchant's currency-aware request encoder (ReceiveMode
 // encodes the runtime currency id's raw units: 2 for DEMO, 8 for ckBTC, 6 for ckUSDC) and the

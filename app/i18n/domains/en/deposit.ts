@@ -279,7 +279,7 @@ export type DepositMessages = {
     /** The compact banner's one-line cost ("Costs 0.00204428 SOL"). */
     costShort: (setupCost: string) => string;
     /** The idle card's up-front minimum (2026-10-01): the measured swap input that covers the
-     *  setup, stated BEFORE the user initiates anything ("Needs at least 0.09 VCHF."). The
+     *  setup, stated BEFORE the user initiates anything ("Needs ≈ 0.09 VCHF."). The
      *  amount arrives PRE-FORMATTED WITH its symbol - the template adds nothing (2026-10-02:
      *  the live trip rendered 'VCHF VCHF'). */
     minSwap: (swap: string) => string;
@@ -573,12 +573,12 @@ export const depositEn: DepositMessages = {
     },
     finishSetup: targets => `Still to set up: ${targets}`,
     costShort: setupCost => `Costs ${setupCost}`,
-    minSwap: swap => `Needs at least ${swap}.`,
+    minSwap: swap => `Needs ${swap}.`,
     fundFrom: source => `A small swap of your ${source} into SOL pays for it.`,
     fundConfirm: (swap, targets, setupCost) =>
-      `Swaps about ${swap} into SOL and creates your ${targets} (${setupCost}).`,
+      `Swaps ${swap} into SOL and creates your ${targets} (${setupCost}).`,
     fundIcConfirm: (swap, targets, setupCost) =>
-      `Swaps about ${swap} into SOL and creates your ${targets} (${setupCost}). This can take a minute or two; surplus SOL stays spendable in your wallet.`,
+      `Swaps ${swap} into SOL and creates your ${targets} (${setupCost}). This can take a minute or two; surplus SOL stays spendable in your wallet.`,
     createSource: 'Paid from your SOL balance.',
     fundShort: source => `Even all your ${source} doesn't cover it - receive a little SOL at your address instead.`,
     confirmAction: 'Confirm',
