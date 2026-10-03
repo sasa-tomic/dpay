@@ -22,6 +22,7 @@
 pub mod addrcheck;
 pub mod app;
 pub mod catalog;
+pub mod cow;
 pub mod jupiter;
 pub mod ledger;
 pub mod sideshift;

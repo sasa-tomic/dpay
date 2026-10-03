@@ -215,6 +215,13 @@ pub struct AppState {
     /// would degrade the routes. `main` may re-point the upstream via
     /// [`AppState::with_jupiter`] from `DPAY_JUPITER_API_BASE`.
     pub jupiter: Arc<crate::jupiter::JupiterProxy>,
+    /// The CoW Protocol order-API proxy (`crate::cow`) — the second EVM venue's three
+    /// routes (quote, order submit, order status). Same always-registered keyless contract
+    /// as Jupiter: no credential exists, the base has a constant default, and there is no
+    /// unconfigured state. `main` may re-point the upstream via [`AppState::with_cow`]
+    /// from `DPAY_COW_API_BASE`; the offline test build points it at this relay's own
+    /// `/api/v1/test/cow-upstream` stub.
+    pub cow: Arc<crate::cow::CowProxy>,
 }
 
 impl AppState {
@@ -268,6 +275,14 @@ impl AppState {
             jupiter: Arc::new(crate::jupiter::JupiterProxy::new(
                 crate::jupiter::DEFAULT_API_BASE.to_string(),
                 crate::jupiter::DEFAULT_TIMEOUT,
+            )),
+            // The CoW order-API proxy, ALWAYS serving (keyless — the jupiter contract
+            // verbatim): the default state carries the venue's documented mainnet base;
+            // `main` re-points it via `with_cow` when DPAY_COW_API_BASE is set (see
+            // `crate::cow`).
+            cow: Arc::new(crate::cow::CowProxy::new(
+                crate::cow::DEFAULT_API_BASE.to_string(),
+                crate::cow::DEFAULT_TIMEOUT,
             )),
             #[cfg(feature = "test-helpers")]
             fake_ic: None,
@@ -342,6 +357,15 @@ impl AppState {
     /// venue is keyless — no credential exists to leak), but it still never needs logging.
     pub fn with_jupiter(mut self, proxy: crate::jupiter::JupiterProxy) -> Self {
         self.jupiter = Arc::new(proxy);
+        self
+    }
+
+    /// Point the CoW proxy at its upstream (`crate::cow::CowProxy`). `main` builds it from
+    /// `DPAY_COW_API_BASE` (default the venue's own mainnet base); the offline test build
+    /// points it at the local `/api/v1/test/cow-upstream` stub. The base is NOT a secret
+    /// (the venue is keyless — no credential exists to leak), but it still never needs logging.
+    pub fn with_cow(mut self, proxy: crate::cow::CowProxy) -> Self {
+        self.cow = Arc::new(proxy);
         self
     }
 
@@ -476,6 +500,23 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/jupiter/swap",
             axum::routing::post(crate::jupiter::swap_proxy),
+        )
+        // The CoW Protocol order-API proxy (2026-10-03, the second EVM venue) — registered
+        // ALWAYS, the jupiter keyless contract verbatim: no credential exists, so there is
+        // no unconfigured 503 branch at all. All three routes are byte-faithful never-cached
+        // pipes (the quote prices one wallet's exact order; the POST is a write; the status
+        // poll feeds a settle decision). See `crate::cow`.
+        .route(
+            "/cow/mainnet/quote",
+            axum::routing::post(crate::cow::quote_proxy),
+        )
+        .route(
+            "/cow/mainnet/orders",
+            axum::routing::post(crate::cow::orders_proxy),
+        )
+        .route(
+            "/cow/mainnet/orders/{uid}",
+            axum::routing::get(crate::cow::order_status_proxy),
         );
 
     // --- the OpenCryptoPay checkout, ON unless the operator refuses it --------------------------------
@@ -648,6 +689,36 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/test/jupiter-upstream/hits",
             axum::routing::get(jupiter_stub_hits),
+        );
+    // Test-only COW UPSTREAM (the second EVM venue's flow pin, 2026-10-03): the harness
+    // points the cow proxy (src/cow.rs, DPAY_COW_API_BASE set explicitly in
+    // harness/relay.mjs + flowRelay.ts) at these routes ON THE SAME SERVER, so the flow
+    // drives the REAL client path — app → POST /api/v1/cow/mainnet/quote → THIS stub —
+    // offline, with no venue round trip. The stub replays the order-API wire shapes the
+    // app's adapter reads (quote / order-UID / status enums), scripts the status sequence
+    // a lifecycle needs (`POST …/config`), and the `/hits` twin counts quote/order/status
+    // arrivals (the flow's proof the requests went THROUGH the relay proxy).
+    #[cfg(feature = "test-helpers")]
+    let api = api
+        .route(
+            "/test/cow-upstream/quote",
+            axum::routing::post(cow_stub_quote),
+        )
+        .route(
+            "/test/cow-upstream/orders",
+            axum::routing::post(cow_stub_orders),
+        )
+        .route(
+            "/test/cow-upstream/orders/{uid}",
+            axum::routing::get(cow_stub_status),
+        )
+        .route(
+            "/test/cow-upstream/config",
+            axum::routing::post(cow_stub_configure),
+        )
+        .route(
+            "/test/cow-upstream/hits",
+            axum::routing::get(cow_stub_hits),
         );
 
     // `GET /api/v1/swap_quote` — the delegated-conversion PoC's venue quote (spec 2026-09-07
@@ -2022,6 +2093,289 @@ async fn jupiter_stub_hits() -> Response {
             "lastQuoteResponse": last_quote_response,
             "userMismatch": user_mismatch,
             "unexpected": [],
+        })),
+    )
+        .into_response()
+}
+
+// ── the COW upstream stub (test-helpers only) ────────────────────────────────────────────────
+
+/// The canned order-API answers a flow arms via `POST /api/v1/test/cow-upstream/config`:
+/// the quote figures (the venue's own wire, values the flow scripts), the order UID the
+/// POST answers, and the STATUS SEQUENCE the polls pop (last entry sticky — a fulfilled
+/// order stays fulfilled).
+#[cfg(feature = "test-helpers")]
+struct CowStubConfig {
+    sell_amount: String,
+    buy_amount: String,
+    fee_amount: String,
+    valid_to: u64,
+    protocol_fee_bps: Option<String>,
+    order_uid: String,
+    statuses: Vec<String>,
+    executed_sell_amount: String,
+    executed_buy_amount: String,
+}
+
+#[cfg(feature = "test-helpers")]
+static COW_STUB_CONFIG: std::sync::Mutex<Option<CowStubConfig>> = std::sync::Mutex::new(None);
+#[cfg(feature = "test-helpers")]
+static COW_STUB_QUOTE_CALLS: std::sync::Mutex<Vec<serde_json::Value>> = std::sync::Mutex::new(Vec::new());
+#[cfg(feature = "test-helpers")]
+static COW_STUB_ORDER_CALLS: std::sync::Mutex<Vec<serde_json::Value>> = std::sync::Mutex::new(Vec::new());
+#[cfg(feature = "test-helpers")]
+static COW_STUB_STATUS_CALLS: std::sync::Mutex<Vec<serde_json::Value>> = std::sync::Mutex::new(Vec::new());
+
+/// `POST /api/v1/test/cow-upstream/config` — arm the canned answers. Required: `orderUid`
+/// (a well-formed 56-byte order UID) and `statuses` (non-empty; the venue's own enum).
+/// Optional: `sellAmount`/`buyAmount`/`feeAmount` (quote figures), `validTo`,
+/// `protocolFeeBps`, `executedSellAmount`/`executedBuyAmount` (the fulfilled poll's
+/// realized figures).
+#[cfg(feature = "test-helpers")]
+async fn cow_stub_configure(Json(req): Json<serde_json::Value>) -> Response {
+    let Some(uid) = req.get("orderUid").and_then(|v| v.as_str()) else {
+        return err(StatusCode::BAD_REQUEST, "stub config needs `orderUid`");
+    };
+    if !crate::cow::is_valid_order_uid(uid) {
+        return err(StatusCode::BAD_REQUEST, "stub config orderUid is not a 0x + 112-hex order UID");
+    }
+    let statuses: Vec<String> = match req.get("statuses").and_then(|v| v.as_array()) {
+        Some(a) if !a.is_empty() => a
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect(),
+        _ => return err(StatusCode::BAD_REQUEST, "stub config needs a non-empty `statuses` array"),
+    };
+    let str_field = |name: &str, dflt: &str| -> String {
+        req.get(name)
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| dflt.to_string())
+    };
+    *COW_STUB_CONFIG.lock().unwrap_or_else(|p| p.into_inner()) = Some(CowStubConfig {
+        sell_amount: str_field("sellAmount", "864481975810619728"),
+        buy_amount: str_field("buyAmount", "387018342251672"),
+        fee_amount: str_field("feeAmount", "135518024189380272"),
+        valid_to: req.get("validTo").and_then(|v| v.as_u64()).unwrap_or(4_100_000_000),
+        protocol_fee_bps: req.get("protocolFeeBps").and_then(|v| v.as_str()).map(str::to_owned),
+        order_uid: uid.to_string(),
+        statuses,
+        executed_sell_amount: str_field("executedSellAmount", "864481975810619728"),
+        executed_buy_amount: str_field("executedBuyAmount", "387018342251672"),
+    });
+    (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response()
+}
+
+/// `POST /api/v1/test/cow-upstream/quote` — the venue's quote shape (the live-measured
+/// 2026-10-03 mainnet answer, figures scripted), echoing the request's own addresses.
+#[cfg(feature = "test-helpers")]
+async fn cow_stub_quote(body: axum::body::Bytes) -> Response {
+    let req: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return err(StatusCode::BAD_REQUEST, "stub upstream: body is not JSON"),
+    };
+    COW_STUB_QUOTE_CALLS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push(serde_json::json!({
+            "atMs": crate::now_millis(),
+            "sellToken": req.get("sellToken").cloned().unwrap_or(serde_json::Value::Null),
+            "buyToken": req.get("buyToken").cloned().unwrap_or(serde_json::Value::Null),
+            "from": req.get("from").cloned().unwrap_or(serde_json::Value::Null),
+            "kind": req.get("kind").cloned().unwrap_or(serde_json::Value::Null),
+        }));
+    let cfg = COW_STUB_CONFIG.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(cfg) = cfg.as_ref() else {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "stub upstream not configured: POST /api/v1/test/cow-upstream/config first",
+        );
+    };
+    let sell_token = req.get("sellToken").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+    let buy_token = req.get("buyToken").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+    let from = req.get("from").and_then(|v| v.as_str()).unwrap_or("");
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "quote": {
+                "sellToken": sell_token,
+                "buyToken": buy_token,
+                "receiver": serde_json::Value::Null,
+                "sellAmount": cfg.sell_amount,
+                "buyAmount": cfg.buy_amount,
+                "validTo": cfg.valid_to,
+                "appData": req.get("appData").cloned().unwrap_or(serde_json::Value::Null),
+                "feeAmount": cfg.fee_amount,
+                "gasAmount": "208992",
+                "gasPrice": "290618060",
+                "sellTokenPrice": "0.000448182815229382467032970271958447483484633266925811767578125",
+                "kind": "sell",
+                "partiallyFillable": false,
+                "sellTokenBalance": "erc20",
+                "buyTokenBalance": "erc20",
+                "signingScheme": "eip712",
+            },
+            "from": from,
+            "expiration": "2026-10-03T09:46:20.658106402Z",
+            "id": 1_372_865_i64,
+            "verified": true,
+            "protocolFeeBps": cfg.protocol_fee_bps.clone(),
+        })),
+    )
+        .into_response()
+}
+
+/// `POST /api/v1/test/cow-upstream/orders` — the venue's 201 UID answer, bound to the
+/// configured order UID. The stub TEACHES the venue's own submission contract: a body
+/// without the required fields, a malformed signature, a nonzero `feeAmount` (the
+/// orderbook's `NonZeroFee` rule, crates/orderbook/src/order_validation.rs), or a
+/// non-eip712 signing scheme is the venue's own 400 `{"errorType", "description"}`.
+#[cfg(feature = "test-helpers")]
+async fn cow_stub_orders(body: axum::body::Bytes) -> Response {
+    let req: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return err(StatusCode::BAD_REQUEST, "stub upstream: body is not JSON"),
+    };
+    COW_STUB_ORDER_CALLS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push(serde_json::json!({
+            "atMs": crate::now_millis(),
+            "sellToken": req.get("sellToken").cloned().unwrap_or(serde_json::Value::Null),
+            "buyToken": req.get("buyToken").cloned().unwrap_or(serde_json::Value::Null),
+            "from": req.get("from").cloned().unwrap_or(serde_json::Value::Null),
+            "sellAmount": req.get("sellAmount").cloned().unwrap_or(serde_json::Value::Null),
+            "buyAmount": req.get("buyAmount").cloned().unwrap_or(serde_json::Value::Null),
+            "feeAmount": req.get("feeAmount").cloned().unwrap_or(serde_json::Value::Null),
+        }));
+    let cfg = COW_STUB_CONFIG.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(cfg) = cfg.as_ref() else {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "stub upstream not configured: POST /api/v1/test/cow-upstream/config first",
+        );
+    };
+    let sig = req.get("signature").and_then(|v| v.as_str()).unwrap_or("");
+    let sig_ok = sig.len() == 132
+        && sig.starts_with("0x")
+        && sig[2..].bytes().all(|b| b.is_ascii_hexdigit());
+    let fee_zero = req.get("feeAmount").and_then(|v| v.as_str()) == Some("0");
+    let scheme = req.get("signingScheme").and_then(|v| v.as_str()) == Some("eip712");
+    let required = ["sellToken", "buyToken", "sellAmount", "buyAmount", "from", "appData"]
+        .iter()
+        .all(|k| req.get(k).and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()));
+    if !required || !sig_ok || !scheme {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "errorType": "InvalidSignature",
+                "description": "stub upstream: order body missing a required field or carrying a malformed eip712 signature",
+            })),
+        )
+            .into_response();
+    }
+    if !fee_zero {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "errorType": "NonZeroFee",
+                "description": "Orders with positive signed fee amount are deprecated",
+            })),
+        )
+            .into_response();
+    }
+    if req.get("validTo").and_then(|v| v.as_u64()) != Some(cfg.valid_to) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "errorType": "InvalidQuote",
+                "description": "stub upstream: order validTo does not match the quoted one",
+            })),
+        )
+            .into_response();
+    }
+    (StatusCode::CREATED, Json(serde_json::json!(cfg.order_uid.clone()))).into_response()
+}
+
+/// `GET /api/v1/test/cow-upstream/orders/{uid}` — the venue's order-status shape, popping
+/// the configured status sequence (last entry sticky). A fulfilled answer carries the
+/// configured executed figures; every answer echoes the asked uid.
+#[cfg(feature = "test-helpers")]
+async fn cow_stub_status(axum::extract::Path(uid): axum::extract::Path<String>) -> Response {
+    COW_STUB_STATUS_CALLS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push(serde_json::json!({"atMs": crate::now_millis(), "uid": uid.clone()}));
+    // Pop the sequence head under its own lock (when more than one is armed); the head
+    // then answers, and it stays sticky once alone. Configured-absent is the honest 503.
+    {
+        let mut guard = COW_STUB_CONFIG.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(cfg) = guard.as_mut() else {
+            return err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "stub upstream not configured: POST /api/v1/test/cow-upstream/config first",
+            );
+        };
+        if cfg.statuses.len() > 1 {
+            cfg.statuses.remove(0);
+        }
+    }
+    let guard = COW_STUB_CONFIG.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(cfg) = guard.as_ref() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "stub upstream lost its config");
+    };
+    let status = cfg.statuses.first().map(String::as_str).unwrap_or("open").to_string();
+    let fulfilled = status == "fulfilled";
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "creationDate": "2026-10-03T09:30:00.000000Z",
+            "owner": cfg.order_uid.get(66..86).unwrap_or(""),
+            "uid": uid,
+            "status": status,
+            "sellToken": "0xb58e61c3098d85632df34eecfb899a1ed80921cb",
+            "buyToken": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            "sellAmount": cfg.sell_amount,
+            "buyAmount": cfg.buy_amount,
+            "executedSellAmount": if fulfilled { cfg.executed_sell_amount.clone() } else { "0".to_string() },
+            "executedSellAmountBeforeFees": if fulfilled { cfg.executed_sell_amount.clone() } else { "0".to_string() },
+            "executedBuyAmount": if fulfilled { cfg.executed_buy_amount.clone() } else { "0".to_string() },
+            "executedBuyAmountBeforeFees": if fulfilled { cfg.executed_buy_amount.clone() } else { "0".to_string() },
+            "executedFeeAmount": "0",
+            "invalidated": false,
+            "kind": "sell",
+            "partiallyFillable": false,
+            "signature": format!("0x{}", "cd".repeat(65)),
+            "receiver": serde_json::Value::Null,
+            "from": cfg.order_uid.get(66..86).unwrap_or(""),
+            "appData": format!("0x{}", "00".repeat(32)),
+        })),
+    )
+        .into_response()
+}
+
+/// `GET /api/v1/test/cow-upstream/hits` — every arrival per method, for the flows'
+/// assertions (the proof the requests went THROUGH the relay proxy).
+#[cfg(feature = "test-helpers")]
+async fn cow_stub_hits() -> Response {
+    let quote_calls = COW_STUB_QUOTE_CALLS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let order_calls = COW_STUB_ORDER_CALLS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let status_calls = COW_STUB_STATUS_CALLS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "quoteCalls": quote_calls,
+            "orderCalls": order_calls,
+            "statusCalls": status_calls,
         })),
     )
         .into_response()

@@ -111,6 +111,8 @@ export async function startFlowRelay(opts: {port?: number; checkout?: boolean; f
     DPAY_TROCADOR_API_KEY: 'e2e-stub-trocador-key',
     DPAY_TROCADOR_API_BASE: `${baseURL}/api/v1/test/trocador-upstream`,
     DPAY_JUPITER_API_BASE: `${baseURL}/api/v1/test/jupiter-upstream`,
+    // The second EVM venue's proxy upstream — the CoW order-API stub on this same server.
+    DPAY_COW_API_BASE: `${baseURL}/api/v1/test/cow-upstream`,
     ...(opts.env ?? {}),
     RUST_LOG: process.env.RUST_LOG ?? 'warn',
   };

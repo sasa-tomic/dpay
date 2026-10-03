@@ -120,6 +120,12 @@
 //!                           state — the routes serve on every build. The offline loop points
 //!                           it at the relay's own test stub. A set-but-malformed URL
 //!                           refuses startup (EXIT_CONFIG).
+//!   DPAY_COW_API_BASE       the CoW Protocol order-API base the quote/order/status pipes
+//!                           call (default `https://api.cow.fi/mainnet` — the venue's
+//!                           keyless mainnet host; see src/cow.rs, 2026-10-03, the second
+//!                           EVM venue). Keyless, so not a secret and no unconfigured state;
+//!                           the offline loop points it at the relay's own test stub. A
+//!                           set-but-malformed URL refuses startup (EXIT_CONFIG).
 //!   DPAY_TROCADOR_API_KEY   the Trocador partner API key for the aggregator proxy
 //!                           (registered 2026-09-20 — POST+GET /api/v1/trocador/*; see
 //!                           src/trocador.rs; tracked credential: `secrets/trocador.sops.json`
@@ -350,6 +356,14 @@ async fn main() {
         cfg.jupiter_api_base.clone(),
         dpay_relay::jupiter::DEFAULT_TIMEOUT,
     ));
+    // The CoW Protocol order-API proxy (2026-10-03, the second EVM venue). ALWAYS serving —
+    // the venue is keyless and the base has a constant default, so there is no unconfigured
+    // branch and no secret: the base may be named plainly (it carries no credential). See
+    // src/cow.rs.
+    let state = state.with_cow(dpay_relay::cow::CowProxy::new(
+        cfg.cow_api_base.clone(),
+        dpay_relay::cow::DEFAULT_TIMEOUT,
+    ));
     // IC-rail cutover (test-helpers / memory mode only): attach the fake-IC `/api/v2` gateway.
     // The app signs envelopes and POSTs them HERE instead of icp-api.io; the gateway verifies the
     // real envelope signature and moves principal-keyed balances. Prod (`agent` mode) never builds
@@ -548,6 +562,14 @@ async fn main() {
         cfg.jupiter_api_base
     );
 
+    println!(
+        "POST+GET /api/v1/cow/mainnet/*: ENABLED — the CoW order-API pipes against {} \
+         (DPAY_COW_API_BASE, default the venue's keyless mainnet host). Upstream error \
+         statuses pass through verbatim; transport death answers 504 \
+         cow-upstream-unreachable.",
+        cfg.cow_api_base
+    );
+
     let listener = tokio::net::TcpListener::bind(cfg.addr)
         .await
         .unwrap_or_else(|e| {
@@ -661,6 +683,9 @@ struct Config {
     /// The Jupiter API base (`DPAY_JUPITER_API_BASE`); default the venue's keyless lite
     /// host. Not a secret (no credential exists for this venue).
     jupiter_api_base: String,
+    /// The CoW order-API base (`DPAY_COW_API_BASE`); default the venue's keyless mainnet
+    /// host. Not a secret (no credential exists for this venue).
+    cow_api_base: String,
     /// The Trocador partner API key (`DPAY_TROCADOR_API_KEY`) — the SECOND relay-held
     /// partner credential. SECRET: never logged, never echoed, never committed. Unset is
     /// legal (503 naming the variable).
@@ -900,6 +925,20 @@ impl Config {
             None => dpay_relay::jupiter::DEFAULT_API_BASE.to_string(),
         };
 
+        // The CoW proxy's upstream (2026-10-03, the second EVM venue). There is no "unset"
+        // branch to reason about — the base always exists (the constant default; src/cow.rs)
+        // — but a SET-but-malformed URL still refuses startup here rather than surfacing as
+        // a mystery 504 per request. Same ParseError discipline as the other bases: the text
+        // names the defect, never the value.
+        let cow_api_base = match non_empty("DPAY_COW_API_BASE") {
+            Some(base) => {
+                reqwest::Url::parse(&base)
+                    .map_err(|e| format!("DPAY_COW_API_BASE is not a valid URL: {e}"))?;
+                base
+            }
+            None => dpay_relay::cow::DEFAULT_API_BASE.to_string(),
+        };
+
         // The Trocador partner key (2026-09-20). UNSET is a legal state — the routes still
         // register and answer 503 naming the variable (the founder's key request to
         // commercial@trocador.app is outstanding). There is deliberately no shape
@@ -999,6 +1038,7 @@ impl Config {
             sideshift_affiliate_id,
             sideshift_api_base,
             jupiter_api_base,
+            cow_api_base,
             trocador_api_key,
             trocador_api_base,
             public_origin,
