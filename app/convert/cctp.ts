@@ -90,29 +90,32 @@ export type CctpHandoff = {
   minFinalityThreshold: number;
 };
 
-/** Build the handoff for a record parked at `awaiting_external`. Refuses (never renders a
- *  stale screen) if the record is not in the handoff phase, or if the re-derived mint
- *  recipient does not match the one frozen at prepare — the derivation changing is a
- *  refuse-and-rebuild situation, not a render-what-we-can. */
-export async function buildCctpHandoff(secretHex: string, rec: ConvertRecord): Promise<CctpHandoff> {
-  if (rec.crossRail == null || rec.step !== 'awaiting_external') {
-    throw new Error('record is not awaiting the external signature');
-  }
-  if (rec.crossRail.burnSigner === 'device') {
-    // Stage 2: a device-signed record's burn is the executor's job, never a handoff — this
-    // surface asking an external wallet to sign would misdirect the user's funds' custody.
-    throw new Error('record is device-signed — the handoff is not its signing surface');
-  }
+/** The two exact transactions the CCTP burn IS — approve (USDC → TokenMessengerV2) then
+ *  depositForBurnWithHook — built from the record's frozen facts and a maxFee. The bytes are
+ *  IDENTICAL whichever key signs them: the external handoff renders them for the user's
+ *  wallet, the stage-2 device path signs them itself. `maxFeeOverride` absent → Circle's
+ *  LIVE census (the confirm-time numbers are display history; what is signed is what Circle
+ *  charges now); the device path passes the FROZEN maxFee instead (crash-safety: identical
+ *  bytes on every re-drive — EVM nodes dedup by hash). Refuses when the re-derived mint
+ *  recipient no longer matches the frozen facts — a derivation drift is a
+ *  refuse-and-reprepare, never a re-target. */
+export async function buildCctpBurnTxs(secretHex: string, rec: ConvertRecord, maxFeeOverride?: bigint): Promise<CctpHandoff> {
+  const cross = rec.crossRail!;
   const burnAmount = BigInt(await convertRecordMinOut(rec));
   const kp = deriveSolanaKeypair(secretHex);
   const ata = deriveAta(kp.address, USDC_MINT_ADDRESS);
-  if (bs58.encode(ata) !== rec.crossRail.mintRecipientAta || kp.address !== rec.crossRail.solAddress) {
+  if (bs58.encode(ata) !== cross.mintRecipientAta || kp.address !== cross.solAddress) {
     // Deterministic derivation drifted from the frozen facts — do not offer a burn whose
     // recipient this build cannot vouch for. Honest refusal; the user re-prepares.
     throw new Error('cross-rail destination derivation mismatch');
   }
-  const fee = await fetchCctpBurnFee();
-  const maxFee = cctpMaxFee(burnAmount, fee);
+  let minimumFeeBps = '0'; // the device path (frozen maxFee) does not re-read Circle's census
+  let maxFee = maxFeeOverride;
+  if (maxFee == null) {
+    const fee = await fetchCctpBurnFee();
+    maxFee = cctpMaxFee(burnAmount, fee);
+    minimumFeeBps = fee.minimumFeeBps.toString();
+  }
   return {
     burnToken: USDC_ERC20_ADDRESS,
     tokenMessenger: TOKEN_MESSENGER_V2_ADDRESS,
@@ -127,13 +130,29 @@ export async function buildCctpHandoff(secretHex: string, rec: ConvertRecord): P
       hookDataHex: buildForwardHookData(bytesToHex(kp.publicKey)),
     }),
     amountSubunits: burnAmount.toString(),
-    minimumFeeBps: fee.minimumFeeBps.toString(),
+    minimumFeeBps,
     maxFeeSubunits: maxFee.toString(),
     mintFloorSubunits: cctpMintFloor(burnAmount, maxFee).toString(),
     mintRecipientAta: bs58.encode(ata),
     destinationDomain: CCTP_DOMAIN_SOLANA,
     minFinalityThreshold: CCTP_FINALITY_FAST,
   };
+}
+
+/** Build the handoff for a record parked at `awaiting_external`. Refuses (never renders a
+ *  stale screen) if the record is not in the handoff phase, or if the re-derived mint
+ *  recipient does not match the one frozen at prepare — the derivation changing is a
+ *  refuse-and-rebuild situation, not a render-what-we-can. */
+export async function buildCctpHandoff(secretHex: string, rec: ConvertRecord): Promise<CctpHandoff> {
+  if (rec.crossRail == null || rec.step !== 'awaiting_external') {
+    throw new Error('record is not awaiting the external signature');
+  }
+  if (rec.crossRail.burnSigner === 'device') {
+    // Stage 2: a device-signed record's burn is the executor's job, never a handoff — this
+    // surface asking an external wallet to sign would misdirect the user's funds' custody.
+    throw new Error('record is device-signed — the handoff is not its signing surface');
+  }
+  return buildCctpBurnTxs(secretHex, rec);
 }
 
 /** The user's wallet signed and reported the burn tx hash: freeze it, mark the cctp_burn

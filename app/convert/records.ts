@@ -289,6 +289,13 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
       ? undefined
       : c.burnSigner === 'device' || c.burnSigner === 'external' ? c.burnSigner : null;
     if (burnSigner === null) return null;
+    // Stage 2's frozen burn maxFee (the device path's crash-safety figure): absent is every
+    // record before the burn started; present must be a decimal string — garbage is a shape
+    // this build never wrote, so the record drops rather than re-deriving from it.
+    const burnMaxFeeSubunits = c.burnMaxFeeSubunits === undefined
+      ? undefined
+      : typeof c.burnMaxFeeSubunits === 'string' && /^\d+$/.test(c.burnMaxFeeSubunits) ? c.burnMaxFeeSubunits : null;
+    if (burnMaxFeeSubunits === null) return null;
     crossRail = {
       kind: c.kind,
       solAddress: c.solAddress,
@@ -301,6 +308,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
       solVenueId: optStr('solVenueId'),
       solExpectedLamports,
       ...(burnSigner != null ? {burnSigner} : {}),
+      ...(burnMaxFeeSubunits != null ? {burnMaxFeeSubunits} : {}),
       ...(solOutMint != null && solOutDecimals != null ? {solOutMint, solOutDecimals} : {}),
       ...(solExpectedSubunits != null ? {solExpectedSubunits} : {}),
     };

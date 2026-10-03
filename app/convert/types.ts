@@ -152,6 +152,13 @@ export type CrossRailInfo = {
    *  Optional + additive: every record written before stage 2 hydrates byte-identically and
    *  reads as 'external' (the handoff is the legacy behavior). */
   burnSigner?: 'device' | 'external';
+  /** Stage 2: the maxFee the DEVICE-signed burn signs (USDC subunits), frozen by the executor
+   *  BEFORE the first signature. A resume re-derives the burn calldata from this figure alone,
+   *  so the bytes are identical to the first drive's — EVM nodes dedup by hash, which is what
+   *  makes a crash between broadcast and persist unable to double-burn. Absent on external
+   *  records (their fee is fetched live at handoff render) and on any device record that has
+   *  not started its burn yet. */
+  burnMaxFeeSubunits?: string;
   /** The device-derived Solana address — the owner whose USDC ATA receives the mint. */
   solAddress: string;
   /** The USDC ATA (base58) the burn names as its mint recipient (display + the credit
@@ -445,6 +452,10 @@ export type ConvertRecord = {
     // The cross-rail additions: the user declined/abandoned the external signing step
     // (funds sit as USDC at their OWN EVM address — the copy names it).
     | 'external_declined'
+    // Stage 2's device-signed burn refused at its own gate (gas short, a reverted leg,
+    // a refused broadcast): the five IC legs DID run, so the USDC sits at the device's
+    // EVM address — the failed card names that address, never "in this wallet".
+    | 'burn_refused'
     // The gas-fund addition: the funding did not deliver (a pre-leg refused, or the
     // post-pre-leg balance re-check came up short) — the MAIN conversion has not started
     // and every source value sits in-wallet. The failed card names the shortfall.

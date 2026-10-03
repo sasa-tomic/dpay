@@ -652,13 +652,16 @@ async function executePlannedConvert(
     if (plan.kind === 'withdraw_erc20') {
       if (rec.crossRail != null) {
         // The CROSS-RAIL fork (2026-09-16, Routes B/C): the minter accepted the burn, so
-        // USDC is on its way to the user's EVM address — but the intent does NOT end here.
-        // The record parks on `awaiting_external`: the CCTP burn transaction must be signed
-        // BY THE USER'S OWN EVM WALLET (dpay never holds EVM keys — the module header's
-        // red line). outAmountNet stays unset until the Solana mint is verified; outTx
-        // records the minter's #ok block index as the IC-side evidence.
+        // USDC is on its way to the record's EVM address — but the intent does NOT end here.
+        // Stage 2 (2026-10-03) splits the parking by the frozen signer: a DEVICE-signed
+        // record (the destination IS the device's own EVM address) walks straight to
+        // `crossing` — the burn is the crossing drive's FIRST act, signed by the device key.
+        // An external destination parks on `awaiting_external`: the CCTP burn transaction
+        // must be signed BY THE USER'S OWN EVM WALLET (dpay never signs for a wallet it
+        // does not hold the key to). outAmountNet stays unset until the Solana mint is
+        // verified; outTx records the minter's #ok block index as the IC-side evidence.
         return tools.advance(withLegState(rec, i, 'confirmed', {
-          step: 'awaiting_external',
+          step: rec.crossRail.burnSigner === 'device' ? 'crossing' : 'awaiting_external',
           outTx: legBlockIndex ?? undefined,
         }));
       }

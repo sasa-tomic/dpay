@@ -61,6 +61,12 @@ jest.mock('../services/jupiter', () => ({
   fetchJupiterQuote: jest.fn(),
   fetchJupiterSwapTx: jest.fn(),
 }));
+// The device-signed burn (stage 2) drives the EVM rail through the same endpoints module the
+// send path uses — the unit tier re-points it at a stub URL the per-test fetch router serves.
+jest.mock('../evm/endpoints', () => {
+  const actual = jest.requireActual('../evm/endpoints') as Record<string, unknown>;
+  return {...actual, evmRpcUrls: () => ['https://evm-stub.test/rpc'], evmRpcUrl: () => 'https://evm-stub.test/rpc'};
+});
 
 import {DpayCore} from '../services/native';
 import {icStampExpiry} from '../services/icp';
@@ -295,6 +301,16 @@ describe('hydration — the cross-rail matrix', () => {
     expect(hydrateConvertStore({[rec.id]: bad})).toEqual({});
   });
 
+  test('stage 2: the frozen burn maxFee round-trips on the device path; garbage drops the record', async () => {
+    const rec = await plannedCrossRecord();
+    const withFee = JSON.parse(JSON.stringify({...rec, crossRail: {...rec.crossRail, burnMaxFeeSubunits: MAX_FEE}}));
+    const h = hydrateConvertStore({[rec.id]: withFee})[rec.id]!;
+    expect(h.crossRail!.burnMaxFeeSubunits).toBe(MAX_FEE);
+    const bad = JSON.parse(JSON.stringify(withFee));
+    bad.crossRail.burnMaxFeeSubunits = 'lots';
+    expect(hydrateConvertStore({[rec.id]: bad})).toEqual({});
+  });
+
   test('the solanaLeg coexists with legs+legPlan ONLY on a cross-rail record', async () => {
     const rec = await plannedCrossRecord({step: 'swapping'});
     const withLeg = {
@@ -399,6 +415,220 @@ describe('buildCctpHandoff — the exact bytes the user\'s wallet signs', () => 
     });
     const parked = {...rec, step: 'awaiting_external' as const};
     await expect(buildCctpHandoff(SECRET, parked)).rejects.toThrow('device-signed');
+  });
+});
+
+// ── stage 2: the DEVICE-signed burn (swap-typing, 2026-10-03) ──────────────────────────────────
+// A record whose frozen destination IS the device's own derived EVM address never parks at
+// `awaiting_external`: the executor signs approve + depositForBurnWithHook ITSELF (the device
+// has held its EVM key since D31) and the record walks straight to `crossing`. The safety
+// order is the mission's order: Circle's live fee first (unreachable → nothing signed, the
+// engine re-arms), the maxFee FROZEN on the record before any signature (a resume re-derives
+// IDENTICAL burn bytes — EVM dedups by hash, so a crash between broadcast and persist can
+// never double-burn), then the aggregate gas gate, then sign/broadcast/receipt per leg.
+describe('the DEVICE-signed burn — the executor signs the crossing itself (stage 2)', () => {
+  const deps = {secretHex: SECRET, publicHex: 'aabb', onUpdate: () => {}};
+  const APPROVE_HASH = '0x' + '11'.repeat(32);
+  const BURN_HASH = '0x' + '22'.repeat(32);
+  const ETH_BAL = '0x56bc75e2d63100000'; // 100 ETH
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let evmRpcCalls: Array<{method: string; params: unknown[]}> = [];
+  let sentKinds: string[] = [];
+
+  /** Install a fetch mock that routes JSON-RPC POSTs (the EVM rail, module-mocked onto the
+   *  stub URL) by method and serves Circle's two GETs verbatim. Receipt answers are seeded
+   *  per broadcast (kind → the test's verdict) so the executor's hash-keyed polls resolve;
+   *  `receiptForAny` pre-seeds EVERY hash (the resume-adoption shape) and `circleFail`
+   *  refuses the fee census. */
+  function installEvmRpc(opts: {
+    receipts?: {approve?: {status: string} | null; burn?: {status: string} | null};
+    receiptForAny?: {status: string};
+    balance?: string;
+    circleFail?: boolean;
+  } = {}): void {
+    const {receipts = {}, receiptForAny, balance = ETH_BAL, circleFail = false} = opts;
+    evmRpcCalls = [];
+    sentKinds = [];
+    // Receipt verdicts bind to the hash ASKED after each kind's broadcast (the executor
+    // polls the LOCALLY signed hash, which the stub cannot precompute): an unbound entry
+    // binds to the next hash asked; a bound entry answers only its own hash.
+    const pending: Array<{hash: string | null; verdict: {status: string} | null}> = [];
+    fetchMock = jest.fn(async (url: unknown, init?: {body?: string; method?: string}) => {
+      const raw = init?.body;
+      if (raw != null && typeof raw === 'string' && raw.includes('"method"')) {
+        const body = JSON.parse(raw) as {method?: string; params?: unknown[]; id?: number};
+        if (body.method != null) {
+          evmRpcCalls.push({method: body.method, params: body.params ?? []});
+          if (body.method === 'eth_sendRawTransaction') {
+            const hex = String(body.params?.[0] ?? '');
+            const kind = hex.includes('095ea7b3') ? 'approve' : 'burn';
+            sentKinds.push(kind);
+            const verdict = receipts[kind] !== undefined ? receipts[kind] : {status: '0x1'};
+            pending.push({hash: null, verdict});
+            return fakeRes({jsonrpc: '2.0', id: body.id ?? 1, result: kind === 'approve' ? APPROVE_HASH : BURN_HASH});
+          }
+          if (body.method === 'eth_getTransactionReceipt') {
+            if (receiptForAny != null) return fakeRes({jsonrpc: '2.0', id: body.id ?? 1, result: receiptForAny});
+            const asked = String(body.params?.[0]);
+            for (const entry of pending) {
+              if (entry.hash === null) {
+                entry.hash = asked;
+                return fakeRes({jsonrpc: '2.0', id: body.id ?? 1, result: entry.verdict});
+              }
+              if (entry.hash === asked) return fakeRes({jsonrpc: '2.0', id: body.id ?? 1, result: entry.verdict});
+            }
+            return fakeRes({jsonrpc: '2.0', id: body.id ?? 1, result: null});
+          }
+          if (body.method === 'eth_getBalance') {
+            return fakeRes({jsonrpc: '2.0', id: body.id ?? 1, result: balance});
+          }
+          const defaults: Record<string, unknown> = {
+            eth_chainId: '0x1',
+            eth_gasPrice: '0x77359400', // 2 gwei
+            eth_maxPriorityFeePerGas: '0x0',
+            eth_estimateGas: '0xc350', // 50k units
+            eth_getTransactionCount: '0x7',
+          };
+          if (!(body.method in defaults)) {
+            return fakeRes({jsonrpc: '2.0', id: body.id ?? 1, error: {code: -32000, message: `unrouted: ${body.method}`}});
+          }
+          return fakeRes({jsonrpc: '2.0', id: body.id ?? 1, result: defaults[body.method]});
+        }
+      }
+      if (circleFail && String(url).includes('/v2/burn/USDC/fees')) return fakeRes({}, false, 500);
+      if (String(url).includes('/v2/messages/')) return fakeRes({error: 'Message not found for provided parameters'}, false, 404);
+      return fakeRes(FEES_BODY);
+    });
+    (globalThis as {fetch?: unknown}).fetch = fetchMock;
+  }
+
+  /** A Route C record whose destination IS the device's own derived EVM address. */
+  async function plannedDeviceRecord(): Promise<ConvertRecord> {
+    const {deriveEvmKeypair} = await import('../evm/identity');
+    const route = multihopRoutesFrom(BUNDLED, 8)[2];
+    return prepareMultihopConvertRecord({
+      secretHex: SECRET, quote: hopQuote(), math: hopMath(), route, destAddress: deriveEvmKeypair(SECRET).address,
+    });
+  }
+
+  const burnOpts = {watchAttempts: 1, watchIntervalMs: 0, burnReceiptAttempts: 1, burnReceiptIntervalMs: 0};
+
+  test('the withdraw lands a device record on CROSSING (never the external park)', async () => {
+    const rec = await runIcLegs(await plannedDeviceRecord());
+    expect(rec.crossRail!.burnSigner).toBe('device');
+    expect(rec.step).toBe('crossing'); // NOT awaiting_external — no external wallet exists here
+    expect(rec.crossRail!.burnTxHash).toBeUndefined();
+    expect(rec.legPlan![5].state).toBe('pending'); // the burn is the crossing drive's job now
+    expect(rec.outTx).toBe('77'); // the minter's block index, same evidence as Route A
+  });
+
+  test('the crossing drive signs approve + depositForBurnWithHook with the DEVICE key and parks back on crossing', async () => {
+    const rec = await runIcLegs(await plannedDeviceRecord());
+    installEvmRpc();
+    const out = await executeCrossRailConvert(rec, deps, burnOpts);
+    expect(out.step).toBe('crossing');
+    expect(out.crossRail!.burnTxHash).toMatch(/^0x[0-9a-f]{64}$/); // the locally signed bytes' hash — durable identity
+    expect(out.crossRail!.burnMaxFeeSubunits).toBe(MAX_FEE); // frozen at the Census arithmetic
+    expect(out.legPlan![5].state).toBe('sent');
+    // Gate order: chain proof → fee probe → gas gate → ONE nonce read → two broadcasts.
+    expect(evmRpcCalls[0]!.method).toBe('eth_chainId');
+    const sendIdx = evmRpcCalls.findIndex(c => c.method === 'eth_sendRawTransaction');
+    const gateIdx = evmRpcCalls.findIndex(c => c.method === 'eth_getBalance');
+    expect(gateIdx).toBeGreaterThan(0);
+    expect(gateIdx).toBeLessThan(sendIdx);
+    expect(evmRpcCalls.filter(c => c.method === 'eth_getTransactionCount')).toHaveLength(1);
+    expect(sentKinds).toEqual(['approve', 'burn']);
+  });
+
+  test('the device signs the EXACT bytes the handoff would have rendered (one signer, one calldata)', async () => {
+    const ext = await runIcLegs(await plannedCrossRecord()); // external record, same device key
+    const handoff = await buildCctpHandoff(SECRET, ext);
+    const rec = await runIcLegs(await plannedDeviceRecord());
+    installEvmRpc();
+
+    await executeCrossRailConvert(rec, deps, burnOpts);
+    const estimates = evmRpcCalls.filter(c => c.method === 'eth_estimateGas').map(c => c.params[0] as {to: string; data: string});
+    expect(estimates).toHaveLength(2);
+    expect(estimates[0]!.data).toBe(handoff.approveCalldata);
+    expect(estimates[0]!.to.toLowerCase()).toBe(handoff.burnToken.toLowerCase());
+    expect(estimates[1]!.data).toBe(handoff.burnCalldata);
+    expect(estimates[1]!.to.toLowerCase()).toBe(handoff.tokenMessenger.toLowerCase());
+  });
+
+  test('the gas gate refuses BEFORE any signature when the device address cannot cover both legs', async () => {
+    const rec = await runIcLegs(await plannedDeviceRecord());
+    installEvmRpc({balance: '0x01'}); // 1 wei
+    const out = await executeCrossRailConvert(rec, deps, burnOpts);
+    expect(out.step).toBe('failed_leg');
+    expect(out.failureCode).toBe('burn_refused');
+    expect(out.failureDetail).toMatch(/wei/); // the instructive gate copy, numbers included
+    expect(sentKinds).toEqual([]); // nothing signed, nothing broadcast
+    expect(out.legPlan![5].state).toBe('failed');
+  });
+
+  test('a reverted APPROVE stops dead: failed_leg, the burn never signs', async () => {
+    const rec = await runIcLegs(await plannedDeviceRecord());
+    installEvmRpc({receipts: {approve: {status: '0x0'}}});
+    const out = await executeCrossRailConvert(rec, deps, burnOpts);
+    expect(out.step).toBe('failed_leg');
+    expect(out.failureCode).toBe('burn_refused');
+    expect(sentKinds).toEqual(['approve']);
+  });
+
+  test('a reverted BURN is an honest dead end: failed_leg with the hash in the detail', async () => {
+    const rec = await runIcLegs(await plannedDeviceRecord());
+    installEvmRpc({receipts: {burn: {status: '0x0'}}});
+    const out = await executeCrossRailConvert(rec, deps, burnOpts);
+    expect(out.step).toBe('failed_leg');
+    expect(out.failureCode).toBe('burn_refused');
+    expect(sentKinds).toEqual(['approve', 'burn']);
+  });
+
+  test('a burn whose receipt never lands still freezes the hash and parks on crossing (never a false failure)', async () => {
+    const rec = await runIcLegs(await plannedDeviceRecord());
+    installEvmRpc({receipts: {burn: null}});
+    const out = await executeCrossRailConvert(rec, deps, burnOpts);
+    expect(out.step).toBe('crossing'); // the Circle watch continues by the frozen hash
+    expect(out.crossRail!.burnTxHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(out.legPlan![5].state).toBe('sent');
+  });
+
+  test('Circle unreachable at burn time → THROWS (nothing signed; the engine re-arms)', async () => {
+    const rec = await runIcLegs(await plannedDeviceRecord());
+    installEvmRpc({circleFail: true});
+    await expect(executeCrossRailConvert(rec, deps, burnOpts)).rejects.toThrow();
+    expect(evmRpcCalls).toHaveLength(0); // not even the chain proof ran — fee honesty comes first
+  });
+
+  test('resume after a crash mid-burn: mined txs are ADOPTED by receipt, never re-broadcast', async () => {
+    const rec = await runIcLegs(await plannedDeviceRecord());
+    installEvmRpc({receiptForAny: {status: '0x1'}}); // both legs already mined (the crash happened post-broadcast)
+    const out = await executeCrossRailConvert(rec, deps, burnOpts);
+    expect(out.step).toBe('crossing');
+    expect(out.crossRail!.burnTxHash).toMatch(/^0x[0-9a-f]{64}$/); // the LOCALLY signed hash, adopted via receipt
+    expect(sentKinds).toEqual([]); // ZERO broadcasts — the receipt probe adopted what mined
+    expect(out.legPlan![5].state).toBe('sent');
+  });
+
+  test('resume byte-identity: a frozen maxFee re-derives the IDENTICAL burn calldata', async () => {
+    const rec = await runIcLegs(await plannedDeviceRecord());
+    installEvmRpc();
+
+    const first = await executeCrossRailConvert(rec, deps, burnOpts);
+    const firstBurn = evmRpcCalls.filter(c => c.method === 'eth_estimateGas').map(c => (c.params[0] as {data: string}).data)[1];
+    // Simulate the crash-after-freeze state: hash unknown again, freeze intact.
+    const crashed: ConvertRecord = {
+      ...first,
+      crossRail: {...first.crossRail!, burnTxHash: undefined},
+      legPlan: first.legPlan!.map((p, i) => (i === 5 ? {...p, state: 'pending' as const} : p)),
+    };
+    installEvmRpc();
+
+    const second = await executeCrossRailConvert(crashed, deps, burnOpts);
+    const secondBurn = evmRpcCalls.filter(c => c.method === 'eth_estimateGas').map(c => (c.params[0] as {data: string}).data)[1];
+    expect(second.crossRail!.burnTxHash).toBe(first.crossRail!.burnTxHash); // identical bytes → identical hash
+    expect(secondBurn).toBe(firstBurn); // identical bytes — EVM dedup makes the re-drive safe
   });
 });
 

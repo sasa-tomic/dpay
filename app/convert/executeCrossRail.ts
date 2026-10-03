@@ -17,21 +17,46 @@ import {
 import {USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 import {venueDisplayName, venueOfId} from '../config/venues';
 import {saveTxNote} from '../services/txNotes';
-import {type CctpMessageStatus} from '../cctp';
+import {type CctpMessageStatus, cctpMaxFee} from '../cctp';
+import {deriveEvmKeypair} from '../evm/identity';
+import {signEip1559Tx, toHex0x} from '../evm/tx';
+import {ensureChain} from '../evm/service';
+import {
+  ethEstimateGas,
+  ethGasPrice,
+  ethGetBalance,
+  ethGetTransactionCount,
+  ethGetTransactionReceipt,
+  ethMaxPriorityFeePerGas,
+  ethSendRawTransaction,
+  type EvmReceipt,
+} from '../evm/rpc';
+import {evmRpcUrls} from '../evm/endpoints';
 import {M} from '../i18n';
 import {type ConvertRecord, type CrossRailInfo} from './types';
-import {saveConvertRecord} from './records';
-import {fetchCctpMessageStatus} from './cctp';
+import {convertRecordMinOut, saveConvertRecord} from './records';
+import {buildCctpBurnTxs, fetchCctpBurnFee, fetchCctpMessageStatus} from './cctp';
 import {type SolanaExecutorOpts, watchSolTx} from './executeSolana';
 // --- the cross-rail drivers (Routes B/C, 2026-09-16) -------------------------------------------------
 //
-// Everything past the five IC legs. The signing boundary is the design: the CCTP burn is
-// the USER's own EVM wallet's transaction (dpay builds the calldata, renders it, and never
-// holds an EVM key), so `awaiting_external` advances only on USER action (attach or
-// decline); the mint watch keys on Circle's own status API by the burn hash and NEVER
-// manufactures a failure (a stall stays a pending with the Circle/Etherscan links); and
-// Route C's final Jupiter leg re-uses the wave-3a machine verbatim (fresh quote, verify
-// beneficiaries, device signature) — only its payout reads key on the cross-rail facts.
+// Everything past the five IC legs. The signing boundary SPLIT with swap-typing stage 2
+// (2026-10-03): a record whose frozen destination is the device's OWN derived EVM address
+// has the DEVICE sign the CCTP burn right here (the device has held its EVM key since D31
+// — approve + depositForBurnWithHook, the exact bytes the external handoff would have
+// rendered); a record pointed at a named external wallet still parks on `awaiting_external`
+// and advances only on USER action (attach or decline). Both paths share the mint watch:
+// Circle's own status API by the burn hash, never a manufactured failure (a stall stays a
+// pending with the Circle/Etherscan links); and Route C's final Jupiter leg re-uses the
+// wave-3a machine verbatim (fresh quote, verify beneficiaries, device signature) — only its
+// payout reads key on the cross-rail facts.
+
+/** The CCTP burn's EVM chain: the builder pins canonical USDC + TokenMessengerV2 on
+ *  Ethereum mainnet (CCTP domain 0's own chain) — the same rail the minter delivers into. */
+const CCTP_BURN_CHAIN_ID = 1;
+
+/** Per-leg gas floors for the device-signed burn (the uniswap executor's convention): an
+ *  estimate refusal falls back to these — the chain still enforces reality at inclusion. */
+const CCTP_BURN_GAS_FLOORS = {approve: 80_000n, burn: 200_000n} as const;
 
 export type CrossRailDeps = {
   secretHex: string;
@@ -43,12 +68,167 @@ export type CrossRailOpts = {
   /** How many status polls one drive performs before parking back on `crossing`. */
   watchAttempts?: number;
   watchIntervalMs?: number;
+  /** The device-signed burn's per-leg receipt budget (defaults ≈60 s at 1.5 s polls —
+   *  the EVM send path's own window). */
+  burnReceiptAttempts?: number;
+  burnReceiptIntervalMs?: number;
 };
 
-/** Drive the `crossing` phase: poll Circle's message status by the burn hash; when Circle
- *  says complete (the forward tx executed the Solana mint), corroborate the credit at the
- *  user's USDC ATA through the SOL rail before anything downstream is offered. A pending
- *  or attested-but-unminted message parks back on `crossing` — an attestation stall is a
+/** The DEVICE-signed burn (swap-typing stage 2, 2026-10-03): the executor signs the two
+ *  crossing transactions itself with the record's own key. The safety order is the point:
+ *  Circle's live fee FIRST (unreachable → this THROWS before anything — no signature, no
+ *  freeze, the engine re-arms); the maxFee FROZEN on the record before the first signature
+ *  (a re-drive re-derives IDENTICAL calldata, and EVM nodes dedup by hash — a crash between
+ *  broadcast and persist can never double-burn); the aggregate gas gate BEFORE any
+ *  signature; then one nonce read and sign/probe/broadcast/receipt per leg, where "probe"
+ *  means a receipt read for the locally signed hash BEFORE broadcasting — a leg that
+ *  already mined (the crash case) is ADOPTED, never re-sent. Every refusal is an honest
+ *  terminal: the five IC legs have run, so the USDC sits at the device's own EVM address
+ *  and the failure copy names exactly that. */
+async function executeDeviceCctpBurn(
+  start: ConvertRecord,
+  deps: CrossRailDeps,
+  advance: (patch: Partial<ConvertRecord>, crossPatch?: Partial<CrossRailInfo>) => Promise<ConvertRecord>,
+  budget: {attempts: number; intervalMs: number},
+): Promise<ConvertRecord> {
+  let rec = start;
+  const cross = rec.crossRail!;
+  const failLeg = async (detail: string): Promise<ConvertRecord> => {
+    const planIdx = rec.legPlan?.findIndex(p => p.kind === 'cctp_burn') ?? -1;
+    const legPlan = rec.legPlan?.map((p, i) => (i === planIdx ? {...p, state: 'failed' as const} : p));
+    return advance({step: 'failed_leg', failureCode: 'burn_refused', failureDetail: detail.slice(0, 300), legPlan});
+  };
+  const urls = evmRpcUrls(CCTP_BURN_CHAIN_ID);
+  if (urls[0] === '') return failLeg(`EVM is not configured on this device (chain ${CCTP_BURN_CHAIN_ID})`);
+  await ensureChain(CCTP_BURN_CHAIN_ID, urls); // the wrong-chain gate — a mismatch throws (engine re-arms)
+  const evm = deriveEvmKeypair(deps.secretHex);
+
+  // 1. The fee: frozen on the record (a resume) or live from Circle NOW. Fee honesty comes
+  // before every signature — an unreachable census leaves the record exactly as it is.
+  const frozen = cross.burnMaxFeeSubunits != null && /^\d+$/.test(cross.burnMaxFeeSubunits)
+    ? BigInt(cross.burnMaxFeeSubunits)
+    : null;
+  let maxFee = frozen;
+  if (maxFee == null) {
+    maxFee = cctpMaxFee(BigInt(await convertRecordMinOut(rec)), await fetchCctpBurnFee()); // throws when unreachable
+    rec = await advance({}, {burnMaxFeeSubunits: maxFee.toString()}); // the freeze precedes any signature
+  }
+  const txs = await buildCctpBurnTxs(deps.secretHex, rec, maxFee);
+  const legs = [
+    {label: 'approve' as const, to: txs.burnToken, data: txs.approveCalldata},
+    {label: 'burn' as const, to: txs.tokenMessenger, data: txs.burnCalldata},
+  ];
+
+  // 2. Fee probe + the AGGREGATE gas gate (both legs' worst case before ANY signature).
+  const baseFee = BigInt(await ethGasPrice(urls));
+  const priorityHex = await ethMaxPriorityFeePerGas(urls).catch(() => null);
+  const priority = priorityHex === null ? 0n : BigInt(priorityHex);
+  const maxFeePerGas = baseFee * 2n + priority;
+  const gasUnits: bigint[] = [];
+  for (const leg of legs) {
+    let units: bigint;
+    try {
+      units = BigInt(await ethEstimateGas(urls, {from: evm.address, to: leg.to, data: leg.data}));
+    } catch {
+      units = CCTP_BURN_GAS_FLOORS[leg.label]; // estimate refused — the chain enforces at inclusion
+    }
+    gasUnits.push(units + (units * 20n) / 100n + 1n > CCTP_BURN_GAS_FLOORS[leg.label]
+      ? units + (units * 20n) / 100n + 1n
+      : CCTP_BURN_GAS_FLOORS[leg.label]);
+  }
+  const worstWei = gasUnits.reduce((a, g) => a + g * maxFeePerGas, 0n);
+  const gasBalance = BigInt(await ethGetBalance(urls, evm.address));
+  if (gasBalance < worstWei) {
+    return failLeg(`the crossing needs about ${worstWei} wei of ETH for gas and ${evm.address} holds ${gasBalance} wei — receive ETH at that address and the burn runs on its own`);
+  }
+
+  // 3. One nonce read; per leg: sign → probe (adoption) → broadcast → budgeted receipt watch.
+  const nonce = Number(BigInt(await ethGetTransactionCount(urls, evm.address)));
+  const readReceipt = async (hash: string): Promise<EvmReceipt | null> => {
+    try {
+      return await ethGetTransactionReceipt(urls, hash);
+    } catch {
+      return null; // a transport-class read proves nothing either way
+    }
+  };
+  const runLeg = async (i: number): Promise<{hash: string; status: 'included' | 'failed' | 'pending'}> => {
+    const leg = legs[i]!;
+    const signed = signEip1559Tx({
+      chainId: CCTP_BURN_CHAIN_ID,
+      nonce: nonce + i,
+      maxPriorityFeePerGas: priority,
+      maxFeePerGas,
+      gasLimit: gasUnits[i]!,
+      to: leg.to,
+      value: 0n,
+      data: Uint8Array.from(Buffer.from(leg.data.replace(/^0x/, ''), 'hex')),
+    }, evm.privateKey);
+    const hash = toHex0x(signed.txHash);
+    let receipt = await readReceipt(hash); // adoption: the same bytes may already have mined
+    if (receipt == null) {
+      try {
+        await ethSendRawTransaction(urls, toHex0x(signed.raw));
+      } catch (e) {
+        // The broadcast answer died: probe ONCE before declaring anything — the identical
+        // bytes may have landed anyway (EVM dedup makes the same-hash walk safe).
+        receipt = await readReceipt(hash);
+        if (receipt == null) {
+          throw new Error(`the ${leg.label} tx could not be broadcast: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+    if (receipt == null) {
+      for (let k = 0; k < budget.attempts; k++) {
+        receipt = await readReceipt(hash);
+        if (receipt != null) break;
+        if (k < budget.attempts - 1 && budget.intervalMs > 0) await new Promise(r => setTimeout(r, budget.intervalMs));
+      }
+    }
+    return {hash, status: receipt == null ? 'pending' : receipt.status === '0x1' ? 'included' : 'failed'};
+  };
+
+  // The approve: reverted → the USDC is untouched; receipt never seen → the honest unknown
+  // (stuck, hash as the reconcile evidence, never re-signed past a broadcast).
+  const markBurnPending = (r: ConvertRecord): ConvertRecord => {
+    const planIdx = r.legPlan?.findIndex(p => p.kind === 'cctp_burn') ?? -1;
+    return {...r, legPlan: r.legPlan?.map((p, i) => (i === planIdx ? {...p, state: 'pending' as const} : p))};
+  };
+  let approveOutcome: {hash: string; status: 'included' | 'failed' | 'pending'};
+  try {
+    approveOutcome = await runLeg(0);
+  } catch (e) {
+    return failLeg(e instanceof Error ? e.message : String(e));
+  }
+  if (approveOutcome.status === 'failed') {
+    return failLeg(`the burn's approve reverted on-chain — the USDC is untouched at ${evm.address}`);
+  }
+  if (approveOutcome.status === 'pending') {
+    rec = await advance({step: 'stuck', failureCode: 'unknown', failureDetail: approveOutcome.hash});
+    return markBurnPending(rec);
+  }
+  // The burn: reverted → untouched USDC; refused broadcast → untouched USDC; receipt never
+  // seen → the hash is frozen anyway (crossing's Circle watch + Etherscan link take over —
+  // a late landing still resolves the record; the honest-pending rule, burn edition).
+  let burnOutcome: {hash: string; status: 'included' | 'failed' | 'pending'};
+  try {
+    burnOutcome = await runLeg(1);
+  } catch (e) {
+    return failLeg(`${e instanceof Error ? e.message : String(e)} — the USDC is untouched at ${evm.address}`);
+  }
+  if (burnOutcome.status === 'failed') {
+    return failLeg(`the burn reverted on-chain — the USDC is untouched at ${evm.address}`);
+  }
+  const planIdx = rec.legPlan?.findIndex(p => p.kind === 'cctp_burn') ?? -1;
+  const legPlan = rec.legPlan?.map((p, i) => (i === planIdx ? {...p, state: 'sent' as const} : p));
+  return advance({legPlan}, {burnTxHash: burnOutcome.hash});
+}
+
+/** Drive the `crossing` phase: for a DEVICE-signed record the drive BEGINS with the burn
+ *  itself (the executor signs approve + depositForBurnWithHook; no external wallet exists);
+ *  then poll Circle's message status by the burn hash; when Circle says complete (the
+ *  forward tx executed the Solana mint), corroborate the credit at the user's USDC ATA
+ *  through the SOL rail before anything downstream is offered. A pending or
+ *  attested-but-unminted message parks back on `crossing` — an attestation stall is a
  *  PENDING with links (the mission's rule: never a false failure). A transport error also
  *  parks: the engine re-arms at its cadence. */
 export async function executeCrossRailConvert(
@@ -60,7 +240,7 @@ export async function executeCrossRailConvert(
   const watchIntervalMs = opts.watchIntervalMs ?? 0;
   let rec = start;
   const cross = rec.crossRail;
-  if (cross == null || rec.step !== 'crossing' || cross.burnTxHash == null) return rec;
+  if (cross == null || rec.step !== 'crossing') return rec;
   const advance = async (patch: Partial<ConvertRecord>, crossPatch?: Partial<CrossRailInfo>): Promise<ConvertRecord> => {
     rec = {...rec, ...patch, ...(crossPatch != null ? {crossRail: {...(rec.crossRail as CrossRailInfo), ...crossPatch}} : {})};
     await saveConvertRecord(deps.publicHex, rec);
@@ -68,10 +248,24 @@ export async function executeCrossRailConvert(
     return rec;
   };
 
+  // The device-signed crossing: no hash yet means the burn has not run (or the drive died
+  // mid-burn) — sign it now. An EXTERNAL record can never be here hashless (attach freezes
+  // the hash in the same write that moves the step), so a hashless external record is a
+  // corrupt shape this build never wrote: park, never improvise a signer.
+  if (rec.crossRail!.burnTxHash == null) {
+    if (rec.crossRail!.burnSigner !== 'device') return rec;
+    rec = await executeDeviceCctpBurn(rec, deps, advance, {
+      attempts: opts.burnReceiptAttempts ?? 40,
+      intervalMs: opts.burnReceiptIntervalMs ?? 1500,
+    });
+    if (rec.step !== 'crossing' || rec.crossRail!.burnTxHash == null) return rec; // failed/stuck/still unsigned
+  }
+  const burnTxHash = rec.crossRail!.burnTxHash!;
+
   let status: CctpMessageStatus | null = null;
   for (let i = 0; i < watchAttempts; i++) {
     try {
-      status = await fetchCctpMessageStatus(cross.burnTxHash);
+      status = await fetchCctpMessageStatus(burnTxHash);
     } catch {
       status = null; // transport-class: proves nothing either way — park, retry next cadence
     }
