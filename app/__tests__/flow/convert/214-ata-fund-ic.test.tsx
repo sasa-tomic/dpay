@@ -576,13 +576,17 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
 
       // The engine finishes the frozen legs: the deposit STILL gets sent (the deposit
       // transfer leg submits from the record's own bytes), and the record parks at
-      // awaiting_deposit with the sent evidence frozen on it.
+      // awaiting_deposit with the sent evidence frozen on it. This phase gets its OWN
+      // budget-scaled window: the resumed engine re-sends the deposit (submit polls) and
+      // then parks the record, all on load-stretched timers - a window shared with the
+      // persist wait above left the later phases an empty budget under full-suite load.
+      const liveDeadline = budgetDeadline(STORE_TIMEOUT_MS);
       let rec: StoreRecord | null = null;
       for (;;) {
         const store = await storeRecords(account!.publicHex);
         rec = Object.values(store).find(r => r.composedDeposit != null) ?? null;
         if (rec?.step === 'awaiting_deposit') break;
-        if (Date.now() > deadline) throw new Error(`the killed record never reached awaiting_deposit (steps: ${Object.values(store).map(r => r.step).join(',')})`);
+        if (Date.now() > liveDeadline) throw new Error(`the killed record never reached awaiting_deposit (steps: ${Object.values(store).map(r => r.step).join(',')})`);
         await new Promise(r => setTimeout(r, 500));
       }
       expect(rec!.composedDeposit!.venueId).toBe('sideshift');
@@ -603,11 +607,15 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       // SOL landed - the plan re-plans to `create`, one tap, no strand, no silent loss.)
       stubState.lamports = 49500000;
       setSideShiftStatus('settled', {settleAmount: '0.0495', settleHash: 'sol-fund-ic-214-kill'});
+      // The settle gets its OWN budget-scaled window too: the venue poll re-arms on the
+      // engine cadence (10s base, load-stretched), so the completion legitimately needs a
+      // full window of its own - the record MUST still reach done.
+      const doneDeadline = budgetDeadline(STORE_TIMEOUT_MS);
       for (;;) {
         const store = await storeRecords(account!.publicHex);
         rec = Object.values(store).find(r => r.composedDeposit != null) ?? null;
         if (rec?.step === 'done') break;
-        if (Date.now() > deadline) throw new Error(`the killed record never completed on the settle (steps: ${Object.values(store).map(r => r.step).join(',')})`);
+        if (Date.now() > doneDeadline) throw new Error(`the killed record never completed on the settle (steps: ${Object.values(store).map(r => r.step).join(',')})`);
         await new Promise(r => setTimeout(r, 500));
       }
     } finally {
