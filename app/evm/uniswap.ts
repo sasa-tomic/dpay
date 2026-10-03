@@ -61,11 +61,16 @@ export async function quoteUniswap(args: UniswapQuoteArgs, signal?: AbortSignal)
   const evmAmm = await import('../config/evmAmm');
   const quoter = evmAmm.evmAmmChainById(args.chainId)?.quoter;
   if (quoter == null) throw new Error(`uniswap: no venue on chain ${args.chainId}`);
+  // A NATIVE destination arrives as tokenOut '' (the sheet's native marker). The quoter needs
+  // a real token: quote against the chain's WETH - the wrap target the token-to-native plan
+  // itself swaps into and then unwraps 1:1, so the WETH answer IS the native answer. The
+  // 2026-10-03 D31 live trip died here at addrWord('') ('not an address: ').
+  const tokenOut = args.tokenOut === '' ? evmAmm.evmAmmChainById(args.chainId)?.weth ?? '' : args.tokenOut;
   let best: {tier: number; amount: bigint} | null = null;
   for (const tier of UNISWAP_FEE_TIERS) {
     const data = args.kind === 'exact-input'
-      ? encodeQuoteExactInputSingle({tokenIn: args.tokenIn, tokenOut: args.tokenOut, amountIn: args.amountIn, fee: tier})
-      : encodeQuoteExactOutputSingle({tokenIn: args.tokenIn, tokenOut: args.tokenOut, amountOut: args.amountOut, fee: tier});
+      ? encodeQuoteExactInputSingle({tokenIn: args.tokenIn, tokenOut, amountIn: args.amountIn, fee: tier})
+      : encodeQuoteExactOutputSingle({tokenIn: args.tokenIn, tokenOut, amountOut: args.amountOut, fee: tier});
     let raw: string;
     try {
       raw = await ethCall(urls, quoter, data, {signal});
@@ -109,8 +114,8 @@ export async function quoteUniswap(args: UniswapQuoteArgs, signal?: AbortSignal)
   // Re-quote the WINNING tier for its gas estimate (one free read; the quote above carried
   // the same shape — decode it fully this round).
   const data = args.kind === 'exact-input'
-    ? encodeQuoteExactInputSingle({tokenIn: args.tokenIn, tokenOut: args.tokenOut, amountIn: args.amountIn, fee: best.tier})
-    : encodeQuoteExactOutputSingle({tokenIn: args.tokenIn, tokenOut: args.tokenOut, amountOut: args.amountOut, fee: best.tier});
+    ? encodeQuoteExactInputSingle({tokenIn: args.tokenIn, tokenOut, amountIn: args.amountIn, fee: best.tier})
+    : encodeQuoteExactOutputSingle({tokenIn: args.tokenIn, tokenOut, amountOut: args.amountOut, fee: best.tier});
   const full = decodeUniswapQuote(await ethCall(urls, quoter, data, {signal}));
   return {
     feeTier: best.tier,
