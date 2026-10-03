@@ -105,6 +105,9 @@ export async function executeCowConvert(
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      // The rail being OFF (the seam's empty URL — a mount reset, an operator switch) is
+      // not a verdict on the trade: the sweep re-arms and the drive retries once it is on.
+      if (/EVM is not configured/.test(msg)) return rec;
       const gasGate = (e as {name?: string}).name === 'EvmGasGateError'
         || (e as {requiredWei?: string}).requiredWei != null;
       if (gasGate) {

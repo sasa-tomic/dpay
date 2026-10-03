@@ -698,18 +698,21 @@ pub fn app(state: AppState) -> Router {
     // app's adapter reads (quote / order-UID / status enums), scripts the status sequence
     // a lifecycle needs (`POST …/config`), and the `/hits` twin counts quote/order/status
     // arrivals (the flow's proof the requests went THROUGH the relay proxy).
+    // The venue's OWN sub-paths ride under the stub base (the jupiter pattern): the proxy
+    // appends /api/v1/{quote,orders,orders/{uid}} to whatever base it was given, so the
+    // stub registers exactly those suffixes under /test/cow-upstream.
     #[cfg(feature = "test-helpers")]
     let api = api
         .route(
-            "/test/cow-upstream/quote",
+            "/test/cow-upstream/api/v1/quote",
             axum::routing::post(cow_stub_quote),
         )
         .route(
-            "/test/cow-upstream/orders",
+            "/test/cow-upstream/api/v1/orders",
             axum::routing::post(cow_stub_orders),
         )
         .route(
-            "/test/cow-upstream/orders/{uid}",
+            "/test/cow-upstream/api/v1/orders/{uid}",
             axum::routing::get(cow_stub_status),
         )
         .route(
