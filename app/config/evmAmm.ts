@@ -1,6 +1,8 @@
-// The UNISWAP V3 venue table (2026-09-28, the any-pair mandate): the adapter-owned `evm_amm`
-// rows — one per chain where the wallet's EVM catalog carries a token that trades on Uniswap
-// V3 (today: ZCHF on Ethereum and Arbitrum One).
+// The EVM AMM venue table (2026-09-28, the any-pair mandate; widened 2026-10-03): the
+// adapter-owned `evm_amm` rows — one per VENUE FAMILY per chain where the wallet's EVM
+// catalog carries a token that trades there (today: ZCHF on Ethereum trades Uniswap V3
+// AND CoW Swap; ZCHF on Arbitrum One trades Uniswap V3). Two venues on one pair is the
+// founder's 2+venues-per-currency directive — no single venue is a point of failure.
 //
 // Why a separate table and NOT rows in BUNDLED_VENUES (the `evmConvert.ts` precedent, verbatim):
 // the venue registry is drift-alarmed field-for-field against `dfx/catalog_truth.json`
@@ -11,8 +13,8 @@
 //
 // PURE module (no imports, no react-native, no network): safe to static-import anywhere and
 // to import from the generator scripts under plain node. Addresses are EIP-55-checksummed
-// public, permanent facts; the Ethereum set is D31-live-proven (funds/ledger.jsonl rows
-// 183-186: QuoterV2 quote + SwapRouter02 swap settled on mainnet through the relay pipe).
+// public, permanent facts; the Ethereum Uniswap set is D31-live-proven (funds/ledger.jsonl
+// rows 183-186: QuoterV2 quote + SwapRouter02 swap settled on mainnet through the relay pipe).
 //
 // The rail ids: a venue pair names RAIL-CANONICAL ids, same vocabulary family as the
 // registry's pair ids (IC ledger principals, SPL mints). An EVM token rail id is
@@ -70,9 +72,25 @@ export function evmNativeRailId(chainId: number): string {
   return `evm:native-eth:${chainId}`;
 }
 
-/** The Uniswap V3 rows — one per chain, derived from the chain table. `endpoint` is the
- *  venue's contract identity (the router the phone signs against — the ic_amm endpoint
- *  convention: the contract, not an https base). `venue_id` follows the registry's
+// ── The CoW Swap facts (the SECOND EVM venue, 2026-10-03) ───────────────────────────────────
+
+/** The v2 settlement contract — the venue row's `endpoint` (the contract identity the row
+ *  names, the ic_amm endpoint convention) and the EIP-712 verifyingContract (evm/cowPlan). */
+export const COWSWAP_SETTLEMENT = '0x9008D19f58AAbD9eD0D60971565AA8510560ab41';
+
+/** The venue families this table carries, keyed by the venue_id prefix (the registry's own
+ *  naming convention, the cefiFamilyOf precedent). Null for a foreign id. The consumers
+ *  dispatch on this: quote/prepare/execute branch per family, never per row. */
+export function evmAmmFamilyOf(venueId: string): 'uniswapv3' | 'cowswap' | null {
+  if (venueId === 'uniswapv3' || venueId.startsWith('uniswapv3-')) return 'uniswapv3';
+  if (venueId === 'cowswap' || venueId.startsWith('cowswap-')) return 'cowswap';
+  return null;
+}
+
+/** The Uniswap V3 rows + the CoW Swap row — derived from the chain table. `endpoint` is the
+ *  venue's contract identity (the contract the phone signs against — the ic_amm endpoint
+ *  convention: the contract, not an https base; CoW's row names the settlement contract,
+ *  the orders themselves ride the relay's CoW pipes). `venue_id` follows the registry's
  *  pair-scoped naming convention (`icpswap-ckusdc`, `sideshift-eth`, …). */
 export const EVM_AMM_VENUES = [
   {
@@ -93,11 +111,25 @@ export const EVM_AMM_VENUES = [
     testnet: false,
     disclosure_key: 'uniswapv3',
   },
+  {
+    // The SECOND EVM venue (2026-10-03, the founder's 2+ venues per currency): ZCHF on
+    // Ethereum trades CoW Swap too. EIP-712 signed off-chain orders, solver settlement in
+    // seconds-to-minutes (gasless for the trader — the venue's own fee rides the quote),
+    // the order polled by UID until fulfilled. Same pair as uniswapv3-eth: the user picks.
+    // LIVE ORDER TRIP: UNPROVEN (the D31 follow-up; the V3 row earned its proof 2026-10-03).
+    venue_id: 'cowswap-eth',
+    display_name: 'CoW Swap',
+    kind: 'evm_amm',
+    endpoint: COWSWAP_SETTLEMENT,
+    pair_ledgers: [evmAmmRailId(1, '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB'), evmNativeRailId(1)],
+    testnet: false,
+    disclosure_key: 'cowswap',
+  },
 ] as const;
 
 /** The chain a row trades on, from its venue_id suffix. Null for any other id. */
 export function evmAmmChainOf(venueId: string): EvmAmmChain | null {
-  if (venueId === 'uniswapv3-eth') return EVM_AMM_CHAINS[1] ?? null;
+  if (venueId === 'uniswapv3-eth' || venueId === 'cowswap-eth') return EVM_AMM_CHAINS[1] ?? null;
   if (venueId === 'uniswapv3-arb') return EVM_AMM_CHAINS[42161] ?? null;
   return null;
 }

@@ -38,7 +38,7 @@ markup/commission is zero, and dpay is never a party to a conversion.
 Every ordered pair across the mainnet rails (11 rails), DERIVED from the
 catalog × the per-venue capability walk — never a hand list. A pair with no executable
 route stays VISIBLE and refuses with its reason (honest unavailability, 2026-09-28):
-46 of 110 ordered pairs are routable today.
+44 of 110 ordered pairs are routable today.
 
 | from → to | route |
 |---|---|
@@ -119,7 +119,7 @@ route stays VISIBLE and refuses with its reason (honest unavailability, 2026-09-
 | ZCHF·Ethereum → ckETH | refused — no venue (honest unavailability) |
 | ZCHF·Ethereum → USDC | refused — no venue (honest unavailability) |
 | ZCHF·Ethereum → EURC | refused — no venue (honest unavailability) |
-| ZCHF·Ethereum → ETH (native) | Uniswap V3 (`uniswapv3-eth`) |
+| ZCHF·Ethereum → ETH (native) | via WETH: Uniswap V3 (`uniswapv3-eth`), CoW Swap (`cowswap-eth`) |
 | ZCHF·Ethereum → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
 | ZCHF·Ethereum → ETH (native)·Arb | refused — no venue (honest unavailability) |
 | ETH (native) → ICP | refused — no venue (honest unavailability) |
@@ -129,7 +129,7 @@ route stays VISIBLE and refuses with its reason (honest unavailability, 2026-09-
 | ETH (native) → ckETH | refused — no venue (honest unavailability) |
 | ETH (native) → USDC | refused — no venue (honest unavailability) |
 | ETH (native) → EURC | refused — no venue (honest unavailability) |
-| ETH (native) → ZCHF·Ethereum | Uniswap V3 (`uniswapv3-eth`) |
+| ETH (native) → ZCHF·Ethereum | refused — no venue (honest unavailability) |
 | ETH (native) → ZCHF·Arbitrum | refused — no venue (honest unavailability) |
 | ETH (native) → ETH (native)·Arb | refused — no venue (honest unavailability) |
 | ZCHF·Arbitrum → ICP | refused — no venue (honest unavailability) |
@@ -141,7 +141,7 @@ route stays VISIBLE and refuses with its reason (honest unavailability, 2026-09-
 | ZCHF·Arbitrum → EURC | refused — no venue (honest unavailability) |
 | ZCHF·Arbitrum → ZCHF·Ethereum | refused — no venue (honest unavailability) |
 | ZCHF·Arbitrum → ETH (native) | refused — no venue (honest unavailability) |
-| ZCHF·Arbitrum → ETH (native)·Arb | Uniswap V3 (`uniswapv3-arb`) |
+| ZCHF·Arbitrum → ETH (native)·Arb | via WETH: Uniswap V3 (`uniswapv3-arb`) |
 | ETH (native)·Arb → ICP | refused — no venue (honest unavailability) |
 | ETH (native)·Arb → VCHF | refused — no venue (honest unavailability) |
 | ETH (native)·Arb → ckUSDC | refused — no venue (honest unavailability) |
@@ -151,4 +151,4 @@ route stays VISIBLE and refuses with its reason (honest unavailability, 2026-09-
 | ETH (native)·Arb → EURC | refused — no venue (honest unavailability) |
 | ETH (native)·Arb → ZCHF·Ethereum | refused — no venue (honest unavailability) |
 | ETH (native)·Arb → ETH (native) | refused — no venue (honest unavailability) |
-| ETH (native)·Arb → ZCHF·Arbitrum | Uniswap V3 (`uniswapv3-arb`) |
+| ETH (native)·Arb → ZCHF·Arbitrum | refused — no venue (honest unavailability) |

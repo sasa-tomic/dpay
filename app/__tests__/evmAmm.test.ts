@@ -16,8 +16,10 @@ import {describe, expect, it} from '@jest/globals';
 import {
   EVM_AMM_VENUES,
   EVM_AMM_CHAINS,
+  COWSWAP_SETTLEMENT,
   UNISWAP_V3_ROUTER,
   UNISWAP_V3_QUOTER,
+  evmAmmFamilyOf,
   evmAmmRailId,
   evmNativeRailId,
   evmAmmVenuesForRail,
@@ -31,11 +33,17 @@ import {setRuntimeVenues} from '../config/venues';
 const ROOT = join(__dirname, '..', '..');
 
 describe('evm_amm venue rows — registry parity', () => {
-  it('carries one row per ZCHF deployment chain in the chain registry', () => {
+  it('carries a row per venue family on each ZCHF deployment chain in the chain registry', () => {
     const chains = Object.keys(ZCHF_TOKEN).map(Number) as EvmChainId[];
     expect(chains.length).toBeGreaterThan(0);
-    expect(EVM_AMM_VENUES.map(v => evmAmmChainOf(v.venue_id)!.id).sort((a, b) => a - b))
+    // Two venue families serve chain 1 (Uniswap V3 + CoW Swap — the founder's 2+ venues per
+    // currency); Arbitrum One carries one (Uniswap V3). The SET of chain ids is the pin.
+    expect([...new Set(EVM_AMM_VENUES.map(v => evmAmmChainOf(v.venue_id)!.id))].sort((a, b) => a - b))
       .toEqual([...chains].sort((a, b) => a - b));
+    // …and the family helper dispatches exactly the rows this table carries.
+    for (const v of EVM_AMM_VENUES) {
+      expect(evmAmmFamilyOf(v.venue_id)).not.toBeNull();
+    }
   });
 
   it('every row resolves through venueOfId even under a runtime overlay', () => {
@@ -97,11 +105,11 @@ describe('evm rail ids', () => {
 });
 
 describe('evmAmmVenuesForRail — the pair walk', () => {
-  it('finds the row by either side of the pair', () => {
+  it('finds every row family serving the pair, in table order', () => {
     const eth = evmAmmVenuesForRail(evmNativeRailId(1));
-    expect(eth.map(v => v.venue_id)).toEqual(['uniswapv3-eth']);
+    expect(eth.map(v => v.venue_id)).toEqual(['uniswapv3-eth', 'cowswap-eth']);
     const zchf = evmAmmVenuesForRail(evmAmmRailId(1, ZCHF_TOKEN[1]!.address));
-    expect(zchf.map(v => v.venue_id)).toEqual(['uniswapv3-eth']);
+    expect(zchf.map(v => v.venue_id)).toEqual(['uniswapv3-eth', 'cowswap-eth']);
   });
 
   it('never crosses chains: a chain-1 rail cannot reach the Arbitrum row', () => {
@@ -112,13 +120,15 @@ describe('evmAmmVenuesForRail — the pair walk', () => {
 });
 
 describe('row facts', () => {
-  it('rows are mainnet evm_amm cefi-style rows keyed to the router endpoint', () => {
+  it('rows are mainnet evm_amm registry-shaped rows keyed to their venue contract', () => {
     for (const v of EVM_AMM_VENUES) {
       expect(v.kind).toBe('evm_amm');
       expect(v.testnet).toBe(false);
-      expect(v.disclosure_key).toBe('uniswapv3');
       const c = evmAmmChainOf(v.venue_id)!;
-      expect(v.endpoint).toBe(c.router);
+      // The endpoint is the row's OWN venue contract: SwapRouter02 for the Uniswap
+      // families, the settlement contract for CoW (whose orders ride the relay pipes).
+      expect(v.endpoint).toBe(evmAmmFamilyOf(v.venue_id) === 'cowswap' ? COWSWAP_SETTLEMENT : c.router);
+      expect(v.disclosure_key).toBe(evmAmmFamilyOf(v.venue_id) === 'cowswap' ? 'cowswap' : 'uniswapv3');
     }
   });
 });

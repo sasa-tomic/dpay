@@ -26,7 +26,7 @@ import {SOLANA_TOKENS, WRAPPED_SOL_MINT_ADDRESS} from '../app/solana/tokens.ts';
 // the app's bundled twin). This module is dependency-free PURE by contract, so the generator
 // can import it: the doc stays a VIEW over the app's own registries.
 import {EVM_NATIVE_VENUES, ETH_NATIVE_RAIL_ID} from '../app/config/evmConvert.ts';
-import {EVM_AMM_VENUES, evmAmmRailId, evmNativeRailId, EVM_AMM_CHAINS} from '../app/config/evmAmm.ts';
+import {EVM_AMM_VENUES, evmAmmRailId, evmNativeRailId} from '../app/config/evmAmm.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TRUTH = JSON.parse(readFileSync(join(ROOT, 'dfx/catalog_truth.json'), 'utf8'));
@@ -195,7 +195,7 @@ export function generateConvertMatrix() {
   ];
   const venuePairs = [...TRUTH.venues, ...EVM_NATIVE_VENUES, ...EVM_AMM_VENUES]
     .filter((v) => !v.testnet)
-    .map((v) => ({kind: v.kind, pair: new Set(v.pair_ledgers), id: v.venue_id, endpoint: v.endpoint}));
+    .map((v) => ({kind: v.kind, pair: new Set(v.pair_ledgers), id: v.venue_id, endpoint: v.endpoint, display: v.display_name ?? v.venue_id}));
   const icPools = venuePairs.filter((v) => v.kind === 'ic_amm');
   const cefiRows = venuePairs.filter((v) => v.kind === 'cefi');
   const evmRows = venuePairs.filter((v) => v.kind === 'evm_amm');
@@ -218,8 +218,18 @@ export function generateConvertMatrix() {
     if (d != null) return `direct pool (\`${d.id}\`)`;
     const c = cefiPair(a.id, b.id);
     if (c != null) return `cefi order (\`${c.id}\`)`;
-    const e = evmRows.find((v) => v.pair.has(a.id) && v.pair.has(b.id));
-    if (e != null) return `Uniswap V3 (\`${e.id}\`)`;
+    // EVERY evm_amm row serving the pair, in table order — two venues on one pair is the
+    // founder's 2+ venues directive (2026-09-30), and the honest label names them all.
+    // DIRECTIONAL, like the walk that backs it (app/config/swap.ts): the SOURCE must be an
+    // evm-token rail (native-in is not derived yet), so unordered pair-set matching would
+    // label a native-source row routable that no walk can execute.
+    const evmServing = a.rail === 'evm-token'
+      ? evmRows.filter((v) => v.pair.has(a.id) && v.pair.has(b.id))
+      : [];
+    if (evmServing.length > 0) {
+      const venues = evmServing.map((v) => `${v.display} (\`${v.id}\`)`).join(', ');
+      return b.rail === 'evm-native' ? `via WETH: ${venues}` : venues;
+    }
     const hubs = icHubs(a.id, b.id);
     if (hubs.length > 0) return `hub 2-hop via ${hubs.map((mid) => symOf(mid)).join(', ')}`;
     if (a.rail === 'ic' && b.rail === 'sol') {
@@ -248,10 +258,8 @@ export function generateConvertMatrix() {
         if (v.pair.has(a.id) && v.pair.has('evm:native-eth')) return `cefi order (\`${v.id}\`)`;
       }
     }
-    if (a.rail === 'evm-token' && b.rail === 'evm-native') {
-      const chain = EVM_AMM_CHAINS[Number(a.id.split(':')[1])];
-      if (chain != null && b.id === evmNativeRailId(chain.id)) return `Uniswap V3 (via WETH, chain ${chain.id})`;
-    }
+    // evm-token → evm-native is covered by the directional evm_amm branch above (a row
+    // must serve it); evm-native → anything is honest refusal until native-in is derived.
     return null;
   };
   const idOf = {};
