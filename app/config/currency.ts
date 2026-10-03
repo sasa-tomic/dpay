@@ -419,10 +419,13 @@ export type RailChoice = {rail: SelectableAsset; reason: RailReason};
  *      other asset returns null, because this currency has nothing honest to say about that
  *      request. A merchant's settlement asset is never second-guessed, never "improved" onto a
  *      cheaper rail (CLAUDE.md boundary).
- *   2. FUNDED — the first rail in stated-preference order whose balance is a known non-zero
- *      (`status: 'ok'` — the ONE definition the whole app already renders by). Unknown is not
- *      funded: a loading, errored, absent or zero rail is skipped, so the wallet never "chooses"
- *      a rail it cannot see money on.
+ *   2. FUNDED — the rail of the funded class whose balance is LARGEST (the 2026-10-01 audit F6:
+ *      within the funded class the wallet goes where the money actually is — dust on the
+ *      preferred rail never beats a funded sibling). "Funded" stays `status: 'ok'` — the ONE
+ *      definition the whole app already renders by — and magnitude reads the view's
+ *      `amountRaw` (raw smallest units, never the display string). The comparison is within
+ *      ONE currency's own rails: same unit, same meaning, no FX quote anywhere. A tie (equal
+ *      raw, or no raw fact on any funded view) falls back to stated-preference order.
  *   3. PREFERENCE — CURRENCY_RAILS order: the stated product default (ckUSDC's offline tap is
  *      hardware-proven). This is also exactly `preferredRail`, which stays the one-line form of
  *      "no balances, no request — just the default".
@@ -442,8 +445,21 @@ export function chooseRail(
     return pinned == null ? null : {rail: pinned, reason: 'destination'};
   }
   if (balances != null) {
-    const funded = rails.find(r => balances[r.id]?.status === 'ok');
-    if (funded != null) return {rail: funded, reason: 'funded'};
+    // FUNDED, by magnitude: walk in preference order, keep the largest `amountRaw`; a strictly
+    // larger later rail replaces the champion (so an exact tie keeps the earlier — preferred —
+    // rail), and a view with no raw fact never displaces one that has a number.
+    let best: SelectableAsset | null = null;
+    let bestRaw: bigint | null = null;
+    for (const r of rails) {
+      const v = balances[r.id];
+      if (v?.status !== 'ok' || v.amountRaw == null || !/^\d+$/.test(v.amountRaw)) continue;
+      const raw = BigInt(v.amountRaw);
+      if (bestRaw == null || raw > bestRaw) {
+        best = r;
+        bestRaw = raw;
+      }
+    }
+    if (best != null) return {rail: best, reason: 'funded'};
   }
   return {rail: rails[0], reason: 'preference'};
 }

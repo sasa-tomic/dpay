@@ -49,19 +49,19 @@ function mapWith(icBalances: Record<number, string>, primaryBalance: string | nu
 
 describe('demoView — the DEMO rail is graded like every other asset', () => {
   it('a funded balance ⇒ ok, formatted with the ∂ unit', () => {
-    expect(mapFor('10000')['ic:0']).toEqual({displayText: '∂100.00', status: 'ok', failure: null});
+    expect(mapFor('10000')['ic:0']).toEqual({displayText: '∂100.00', status: 'ok', failure: null, amountRaw: '10000'});
   });
 
   it('a stale read (approx) ⇒ the "~" marker, and a funded approximation still reads ok', () => {
     // The marker says "best-known, not authoritative"; it does not make the money unknown, so the
     // status stays 'ok' and the header + the row read byte-identical text.
-    expect(mapFor('9100', true)['ic:0']).toEqual({displayText: '~∂91.00', status: 'ok', failure: null});
+    expect(mapFor('9100', true)['ic:0']).toEqual({displayText: '~∂91.00', status: 'ok', failure: null, amountRaw: '9100'});
   });
 
   it('D4: a ZERO balance ⇒ zero (dims) — the faucet button on the row is the top-up affordance, not a colour', () => {
-    expect(mapFor('0')['ic:0']).toEqual({displayText: '∂0.00', status: 'zero', failure: null});
+    expect(mapFor('0')['ic:0']).toEqual({displayText: '∂0.00', status: 'zero', failure: null, amountRaw: null});
     // …and stale the zero is still a zero: the marker never upgrades an empty wallet.
-    expect(mapFor('0', true)['ic:0']).toEqual({displayText: '~∂0.00', status: 'zero', failure: null});
+    expect(mapFor('0', true)['ic:0']).toEqual({displayText: '~∂0.00', status: 'zero', failure: null, amountRaw: null});
   });
 
   it('D4: an UNKNOWN balance (no poll returned yet) ⇒ loading + "—" — unknown is never a funded state', () => {

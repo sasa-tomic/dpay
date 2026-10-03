@@ -45,11 +45,18 @@ export type BalanceStatus = 'ok' | 'zero' | 'absent' | 'unavailable' | 'error' |
 // already includes any offline approximation marker for DEMO ("~∂91.00") so the header and the
 // sheet read byte-identical text.
 //
+// `amountRaw` is the SAME fact in raw smallest units ("124000000"), carried exactly when the
+// status is 'ok' (a known, positive balance) and null for every placeholder ('—'), known-zero,
+// absent and unknown view: `amountRaw != null` ⟺ `status === 'ok'`. It is the machine-readable
+// twin any LOGIC (ranking, gating) reads, so no money decision ever parses `displayText` — the
+// 2026-10-01 audit's "readiness keyed on displayText / float compares" class. Comparisons are
+// valid only within ONE asset unit (same currency, same decimals) — never across.
+//
 // `failure` is WHY an 'error' status has no fact (R3, spec 2026-09-09: three states never collapsed
 // into one). Set ONLY on status 'error' — null everywhere else — so the outage note can say the
 // right sentence: endpoint-refused vs phone-offline vs path-down-while-online vs untrustworthy
 // bytes. `import type` from the seam keeps this module pure (the type is erased; no network code).
-export type BalanceView = {displayText: string; status: BalanceStatus; failure: SolanaReadFailure | null};
+export type BalanceView = {displayText: string; status: BalanceStatus; failure: SolanaReadFailure | null; amountRaw?: string | null};
 
 // The SOL hook status union (mirrors `SolBalanceStatus` from hooks/useSolanaBalances.ts without a
 // React import — structural typing keeps this module pure/testable). `failure` mirrors the hook's
@@ -131,10 +138,12 @@ export function buildAssetBalances(args: {
 function demoView(primaryBalance: string | null, approx: boolean): BalanceView {
   if (primaryBalance == null) return {displayText: '—', status: 'loading', failure: null};
   const amount = usd(primaryBalance);
+  const positive = cmpRaw(primaryBalance, '0') > 0;
   return {
     displayText: approx ? M.wallet.balance.approxAmount(amount) : amount,
-    status: cmpRaw(primaryBalance, '0') > 0 ? 'ok' : 'zero',
+    status: positive ? 'ok' : 'zero',
     failure: null,
+    amountRaw: positive ? primaryBalance : null,
   };
 }
 
@@ -145,10 +154,12 @@ function demoView(primaryBalance: string | null, approx: boolean): BalanceView {
 // asset's last good read is stale (offline > 60 s, or hydrated from the cross-restart cache).
 function icAssetView(catalog: CurrencyDescriptor[], currency: number, balance: string, approx: boolean): BalanceView {
   const amount = fmtCurrencyAmountCompact(catalog, currency, balance);
+  const positive = cmpRaw(balance, '0') > 0;
   return {
     displayText: approx ? M.wallet.balance.approxAmount(amount) : amount,
-    status: cmpRaw(balance, '0') > 0 ? 'ok' : 'zero',
+    status: positive ? 'ok' : 'zero',
     failure: null,
+    amountRaw: positive ? balance : null,
   };
 }
 
@@ -168,7 +179,7 @@ function solView(solState: SolStateInput, minFractionDigits: number, approx: boo
     case 'ok':
       if (solState.balance == null) return {displayText: '—', status: 'unavailable', failure: null};
       if (cmpRaw(solState.balance, '0') === 0) return {displayText: mark(fmt()), status: 'zero', failure: null};
-      return {displayText: mark(fmt()), status: 'ok', failure: null};
+      return {displayText: mark(fmt()), status: 'ok', failure: null, amountRaw: solState.balance};
     case 'unavailable':
       return solState.balance == null
         ? {displayText: '—', status: 'unavailable', failure: null}
@@ -206,7 +217,7 @@ function tokenView(state: TokenStateInput, symbol: string, decimals: number, min
     case 'balance':
       if (state.amount == null) return {displayText: '—', status: 'zero', failure: null};
       if (cmpRaw(state.amount, '0') === 0) return {displayText: mark(fmt(state.amount)), status: 'zero', failure: null};
-      return {displayText: mark(fmt(state.amount)), status: 'ok', failure: null};
+      return {displayText: mark(fmt(state.amount)), status: 'ok', failure: null, amountRaw: state.amount};
     case 'absent':
       // D3: a missing token account is a KNOWN zero (the RPC answered — the account simply doesn't
       // exist), so render a real "0.00 <symbol>" with normal formatting. The '—' placeholder is
@@ -241,7 +252,7 @@ function evmView(state: EvmStateInput, symbol: string, decimals: number, minFrac
     case 'balance':
       if (state.amount == null) return {displayText: '—', status: 'zero', failure: null};
       if (cmpRaw(state.amount, '0') === 0) return {displayText: mark(fmt(state.amount)), status: 'zero', failure: null};
-      return {displayText: mark(fmt(state.amount)), status: 'ok', failure: null};
+      return {displayText: mark(fmt(state.amount)), status: 'ok', failure: null, amountRaw: state.amount};
     case 'unavailable':
       return state.amount == null
         ? {displayText: '—', status: 'unavailable', failure: null}
@@ -371,10 +382,12 @@ export function buildCurrencyBalances(args: {
       ? 2
       : railDisplayDecimals(catalog, preferred);
     const minFraction = isStableCurrency(currency) ? 2 : preferred.minFractionDigits;
+    const positive = cmpRaw(totalRaw, '0') > 0;
     out[currency] = {
       displayText: marked(fmtMoneyCompact(totalRaw, maxDec, unit, displayDecimals, minFraction)),
-      status: cmpRaw(totalRaw, '0') > 0 ? 'ok' : 'zero',
+      status: positive ? 'ok' : 'zero',
       failure: null,
+      amountRaw: positive ? totalRaw : null,
     };
   }
   return out;

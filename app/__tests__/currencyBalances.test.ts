@@ -69,7 +69,7 @@ describe('buildCurrencyBalances — the summed currency-unit figure (forks #2 + 
       icBalances: {2: '1500000'},            // 1.50 ckUSDC (6 dec)
       tokenAmounts: {'mint-usdc': '3040000'}, // 3.04 USDC@Solana (6 dec)
     });
-    expect(out.USD).toEqual({displayText: '$4.54', status: 'ok', failure: null});
+    expect(out.USD).toEqual({displayText: '$4.54', status: 'ok', failure: null, amountRaw: '4540000'});
   });
 
   test('a stable balance renders in the currency unit with money-style fixed 2 decimals', () => {
@@ -117,7 +117,7 @@ describe('buildCurrencyBalances — the summed currency-unit figure (forks #2 + 
       icBalances: {2: '0'},
       tokenAmounts: {'mint-usdc': null}, // 'absent' ATA — a KNOWN zero-by-absence
     });
-    expect(out.USD).toEqual({displayText: '$0.00', status: 'zero', failure: null});
+    expect(out.USD).toEqual({displayText: '$0.00', status: 'zero', failure: null, amountRaw: null});
   });
 
   test('a below-resolution balance names the threshold instead of rendering a fake zero', () => {

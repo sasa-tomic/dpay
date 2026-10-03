@@ -286,7 +286,11 @@ describe('chooseRail — which rail, and why', () => {
   const ckusdc = withSol.find(a => a.id === 'ic:2')!;
   const vchf = withSol.find(a => a.id === 'ic:7')!;
   const usdc = withSol.find(a => a.id === 'solana:USDC')!;
-  const bv = (status: BalanceView['status']): BalanceView => ({displayText: '1 X', status, failure: null});
+  const bv = (status: BalanceView['status']): BalanceView =>
+    // Mirror the real builders' invariant: `amountRaw != null` ⟺ status 'ok'. The wallet's map
+    // always carries the raw fact behind a funded view; a fixture that omits it tests the
+    // fail-closed arm (see the unmeasured-view test below).
+    ({displayText: '1 X', status, failure: null, amountRaw: status === 'ok' ? '1000' : null});
   const bal = (...entries: [AssetId, BalanceView['status']][]): RailBalances =>
     Object.fromEntries(entries.map(([id, status]) => [id, bv(status)])) as RailBalances;
 
@@ -326,6 +330,38 @@ describe('chooseRail — which rail, and why', () => {
     // A funded sibling is chosen over the unfunded default — "already holds" outranks "would default".
     expect(chooseRail('USD', withSol, bal(['solana:USDC', 'ok']))).toEqual({rail: usdc, reason: 'funded'});
     expect(chooseRail('CHF', withSol, bal(['ic:7', 'ok']))).toEqual({rail: vchf, reason: 'funded'});
+  });
+
+  it('prefers the LARGER funded balance within the funded class (2026-10-01 audit F6)', () => {
+    // Both USD rails funded: dust on the PREFERRED rail must not beat real money on the sibling.
+    // Within the funded class the wallet goes where the money actually is — same currency, same
+    // unit, so the raw comparison is a magnitude fact, never an FX quote.
+    const dustFirst: RailBalances = {
+      'ic:2': {...bv('ok'), amountRaw: '1'},            // 0.000001 ckUSDC — dust
+      'solana:USDC': {...bv('ok'), amountRaw: '4500000'}, // 4.50 USDC-SOL — funded
+    };
+    expect(chooseRail('USD', withSol, dustFirst)).toEqual({rail: usdc, reason: 'funded'});
+    // ...and the mirror: funded on the preferred rail beats a dustier sibling.
+    const fundedFirst: RailBalances = {
+      'ic:2': {...bv('ok'), amountRaw: '4500000'},
+      'solana:USDC': {...bv('ok'), amountRaw: '1'},
+    };
+    expect(chooseRail('USD', withSol, fundedFirst)).toEqual({rail: ckusdc, reason: 'funded'});
+  });
+
+  it('breaks a magnitude tie on preference order, and a view without a raw fact stays unfunded-adjacent', () => {
+    // Equal balances: the stated preference (ckUSDC) wins — position only decides exact ties.
+    const tied: RailBalances = {
+      'ic:2': {...bv('ok'), amountRaw: '4500000'},
+      'solana:USDC': {...bv('ok'), amountRaw: '4500000'},
+    };
+    expect(chooseRail('USD', withSol, tied)).toEqual({rail: ckusdc, reason: 'funded'});
+    // A 'ok' view with NO raw fact carries no comparable magnitude: it loses to one that does.
+    const unmeasured: RailBalances = {
+      'ic:2': bv('ok'),
+      'solana:USDC': {...bv('ok'), amountRaw: '4500000'},
+    };
+    expect(chooseRail('USD', withSol, unmeasured)).toEqual({rail: usdc, reason: 'funded'});
   });
 
   it('never treats an unknown or known-zero balance as funded', () => {

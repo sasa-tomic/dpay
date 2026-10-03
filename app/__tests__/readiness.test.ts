@@ -18,8 +18,8 @@ function journeyWith(...stamps: string[]): Journey {
   return {stamps, at: Object.fromEntries(stamps.map(s => [s, 1])), seen: []};
 }
 
-function view(displayText: string, status: BalanceView['status']): BalanceView {
-  return {displayText, status, failure: null};
+function view(displayText: string, status: BalanceView['status'], amountRaw: string | null = null): BalanceView {
+  return {displayText, status, failure: null, amountRaw};
 }
 
 describe('READINESS_STAMPS / passportStamps()', () => {
@@ -98,21 +98,32 @@ describe('decideFundsReady', () => {
 
   test('a real asset funded alongside DEMO IS funds-ready', () => {
     expect(decideFundsReady({
-      [DEMO_ASSET_ID]: view('∂100.00', 'ok'),
-      'ic:7': view('12.40 VCHF', 'ok'),
+      [DEMO_ASSET_ID]: view('∂100.00', 'ok', '10000'),
+      'ic:7': view('12.40 VCHF', 'ok', '1240000000'),
     })).toBe(true);
   });
 
   test('real funds (status ok, real text): ready', () => {
-    expect(decideFundsReady({'ic:7': view('12.40 VCHF', 'ok')})).toBe(true);
+    expect(decideFundsReady({'ic:7': view('12.40 VCHF', 'ok', '124000000')})).toBe(true);
+  });
+
+  test('the decision keys on the RAW amount, never the display string (2026-10-01 audit F13)', () => {
+    // displayText is COPY-adjacent formatting ("~"-marked, compact, locale-marked); a formatter
+    // change must never flip the stamp. The raw smallest-unit figure is the fact.
+    expect(decideFundsReady({'ic:7': view('~12.40 VCHF', 'ok', '124000000')})).toBe(true);
+    expect(decideFundsReady({'ic:7': view('anything at all', 'ok', '1')})).toBe(true);
   });
 
   test('null balance ("—" but status ok): NOT ready — no displayable money', () => {
     expect(decideFundsReady({'ic:7': view('—', 'ok')})).toBe(false);
   });
 
+  test('status ok with NO raw amount: NOT ready — fail closed on a view without the fact', () => {
+    expect(decideFundsReady({'ic:7': view('12.40 VCHF', 'ok')})).toBe(false);
+  });
+
   test('offline approx value (~2.50 USDC): ready — approximations come from funded reality', () => {
-    expect(decideFundsReady({'ic:3': view('~2.50 USDC', 'ok')})).toBe(true);
+    expect(decideFundsReady({'ic:3': view('~2.50 USDC', 'ok', '2500000')})).toBe(true);
   });
 
   test('zero / unavailable / error / loading / absent never count', () => {
@@ -127,7 +138,7 @@ describe('decideFundsReady', () => {
     const balances = {
       [DEMO_ASSET_ID]: view('—', 'ok'),
       'ic:1': view('—', 'unavailable'),
-      'ic:3': view('~2.50 USDC', 'ok'),
+      'ic:3': view('~2.50 USDC', 'ok', '2500000'),
       'solana:SOL': view('—', 'absent'),
     };
     expect(decideFundsReady(balances)).toBe(true);

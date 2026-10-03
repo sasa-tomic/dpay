@@ -74,9 +74,13 @@ export function computeReadiness(journey: Journey): Readiness {
   return {filled, missing, complete: false, next: {key: nextKey, hint, short}};
 }
 
-/** True iff any asset the user could actually SPEND ON A TRIP shows a balance: status 'ok' AND a
-  * real display value. Offline `~approx` values count (they are known balances); `—` nulls do NOT
-  * (unknown is not funds — offline-first honesty rule).
+/** True iff any asset the user could actually SPEND ON A TRIP shows a balance: status 'ok' with
+  * the raw amount fact behind it. Offline `~approx` values count (they are known balances); '—'
+  * nulls do NOT (unknown is not funds — offline-first honesty rule).
+  *
+  * The decision reads the RAW amount (`amountRaw`), never `displayText` (2026-10-01 audit F13):
+  * the display string is formatting (approx markers, compaction) and must never decide money
+  * state — a `BalanceView` without the raw fact behind an 'ok' status fails closed instead.
   *
   * The PRACTICE rail is excluded (X13, UX swarm 2026-09-08). It used to count "by design", and the
   * result was a wallet stamping FUNDS LOADED on a trip-readiness card while every real currency
@@ -87,7 +91,8 @@ export function decideFundsReady(balances: Partial<Record<AssetId, BalanceView>>
   // Keyed by AssetId so the practice rail can be named and skipped — the decision reads keys AND
   // values now, which is why callers must pass the real map rather than an arbitrary-keyed one.
   return Object.entries(balances).some(
-    ([id, v]) => id !== DEMO_ASSET_ID && v != null && v.status === 'ok' && v.displayText !== '—',
+    ([id, v]) => id !== DEMO_ASSET_ID && v != null && v.status === 'ok'
+      && v.amountRaw != null && v.amountRaw !== '0',
   );
 }
 
