@@ -49,7 +49,7 @@
 // the convert engine, never re-stated here.
 
 import {registeredVenues} from '../config/venues';
-import {icpCatalogOf, BUNDLED_NETWORKS} from '../config/catalog';
+import {ICP_MAINNET_LEDGER} from '../config/currency';
 import {M} from '../i18n';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
@@ -448,9 +448,8 @@ export type CefiDepositDeps = {
   submitTransfer: (prepared: {ledger: string; envelopeHex: string; requestIdHex: string}, pollerSecret: string, opts: {attempts: number; intervalMs: number}, decodeReply?: (replyArgHex: string) => Promise<{ok: boolean; blockIndex?: string | null; errVariant?: string | null; errDetail?: string | null}>) => Promise<{kind: 'settled'; blockIndex: string} | {kind: 'rejected'; reason: string; variant?: string} | {kind: 'unknown'}>;
 };
 
-// The legacy `transfer` (64-hex account identifiers) is ICP-mainnet-only - the same
-// single-truth derivation prepare.ts uses for its deposit leg.
-const ICP_MAINNET_LEDGER = icpCatalogOf(BUNDLED_NETWORKS).find(c => c.currency === 8 && !c.testnet)?.ledger ?? '';
+// The legacy `transfer` (64-hex account identifiers) is ICP-mainnet-only - the shared
+// catalog-derived constant (config/currency; audit F12) decides, never a row-id literal.
 const LEGACY_ACCOUNT_ID = /^[0-9a-fA-F]{64}$/;
 
 export async function sendCefiDepositForRecord(rec: CefiDepositRecord, deps: CefiDepositDeps): Promise<CefiDepositOutcome> {

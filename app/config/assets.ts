@@ -311,10 +311,10 @@ function icTestKey(desc: CurrencyDescriptor, isPrimary: boolean, _testnet: boole
  */
 export function parseAssetId(v: string | null | undefined): AssetId | null {
   if (typeof v !== 'string') return null;
-  if (v === 'solana:SOL' || v === 'solana:USDC') return v;
   // `solana:<TOKEN>` — an uppercase registry symbol ([A-Z0-9]{2,10}: SOL/USDC/EURC/…). Shape-checked
   // only; whether the token is selectable TODAY is `reconcileSelectedAsset`'s job (a vanished
-  // selection falls back like any other stale id).
+  // selection falls back like any other stale id). One shape rule covers every registry token —
+  // no per-token literal list to drift (2026-10-01 audit F12).
   const s = /^solana:([A-Z0-9]{2,10})$/.exec(v);
   if (s) return v as AssetId;
   const evm = parseEvmAssetId(v);

@@ -2,7 +2,8 @@ import {DpayCore} from '../services/native';
 import {icStampExpiry} from '../services/icp';
 import {bytesToHex, randNonceHex, rawToDecimal, toUnits} from '../lib/format';
 import {utf8ToBytes} from '../lib/base64url';
-import {type CurrencyDescriptor, BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {type CurrencyDescriptor} from '../config/catalog';
+import {ICP_MAINNET_LEDGER} from '../config/currency';
 import {CONVERT_APPROVE_LIFETIME_S, CONVERT_CEFI_CONFIRM_TIMEOUT_MS, type ChainConvertRoute, type ComposedConvertRoute} from '../config/convert';
 import {DPAY_CANISTER_PRINCIPALS, cefiFamilyOf, cefiOtherSide, venueOfId} from '../config/venues';
 import {CCTP_DESTINATION_NETWORK} from '../routes';
@@ -269,10 +270,6 @@ export class ComposedQuoteChangedError extends Error {
     this.freshGrossRaw = args.freshGrossRaw;
   }
 }
-
-/** The ICP ledger is the ONE IC ledger whose legacy `transfer` reaches a 64-hex account
- *  identifier — derived from the catalog row, never a literal here. */
-const ICP_MAINNET_LEDGER = icpCatalogOf(BUNDLED_NETWORKS).find(c => c.currency === 8 && !c.testnet)?.ledger ?? '';
 
 /**
  * Prepare ONE COMPOSED IC→CeFi intent as a single signed record (brief §5.4 item 2): the

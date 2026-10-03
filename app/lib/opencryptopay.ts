@@ -918,7 +918,14 @@ export function selectPayableOffers(
         refuse('method-unavailable');
         continue;
       }
-      if (rail === 'solana' && tokenEq('USDC', offered.asset)) {
+      // Every Solana TOKEN this wallet carries is refused wholesale (audit F12): the provider's
+      // URI carries no spl-token parameter, so the destination token account is ambiguous for the
+      // whole SPL class — a property of the rail, not of one asset. The refusal keys on the
+      // wallet's own solana rows with a mint (registry-derived), never an asset-id literal, so
+      // EURC — and any token the registry gains later — refuses for the same honest reason.
+      // Native SOL stays payable: it has no token account. ('solana-usdc-unsupported' keeps the
+      // PROVIDER's own reason spelling — the literal the live refusal was measured under.)
+      if (rail === 'solana' && assets.some(a => a.protocol === 'solana' && a.mint != null && tokenEq(a.linkToken, offered.asset))) {
         refuse('solana-usdc-unsupported');
         continue;
       }

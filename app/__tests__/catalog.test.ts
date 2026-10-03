@@ -27,6 +27,7 @@ import {
 import {SOL_DECIMALS} from '../solana/identity';
 import {eip55ChecksumBad} from '../lib/eip55';
 import {ICP_LEDGER_PRINCIPAL} from '../config/constants';
+import {ICP_MAINNET_LEDGER} from '../config/currency';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 import {MINT_HEX} from '../lib/format';
 import {BUNDLED_VENUES} from '../config/venues';
@@ -655,6 +656,13 @@ describe('ledgerToCurrency — ICRC ledger principal → currency id', () => {
   it('returns null for a ledger this wallet does not carry, and for an empty catalog', () => {
     expect(ledgerToCurrency(BUNDLED_CATALOG, 'aaaaa-aa')).toBeNull();
     expect(ledgerToCurrency([], ICP_LEDGER_PRINCIPAL)).toBeNull();
+  });
+
+  it('ICP_MAINNET_LEDGER derives from the bundled catalog by CURRENCY, not a hardcoded id (audit F12)', () => {
+    // The one derivation (config/currency): the bundled row whose link token settles the ICP
+    // currency, mainnet only. It must land on the drift-checked principal — a divergence here
+    // would point the composed-CeFi deposit leg and the cefi-deposit runner at the wrong ledger.
+    expect(ICP_MAINNET_LEDGER).toBe(ICP_LEDGER_PRINCIPAL);
   });
 
   it('matches the EXACT canonical text only — case, surrounding space and truncation all miss', () => {

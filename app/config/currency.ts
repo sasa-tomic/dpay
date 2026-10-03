@@ -41,7 +41,7 @@
 // arrives first; until then both numbers are shown side by side, in their own units, and the human
 // does the comparing.
 import {type SelectableAsset, linkNetworkOf, prettyNetwork, tokenEq} from './assets';
-import {type CurrencyDescriptor, assetLinkToken} from './catalog';
+import {type CurrencyDescriptor, assetLinkToken, icpCatalogOf, BUNDLED_NETWORKS} from './catalog';
 import {type BalanceView} from '../lib/assetBalances';
 import {fmtAssetCompact} from '../lib/format';
 import {type AssetId} from '../lib/types';
@@ -513,3 +513,16 @@ export function removeCurrencyGuard(args: {
   if (balance.status !== 'zero' && balance.status !== 'absent') return {ok: false, reason: 'unreadable'};
   return {ok: true};
 }
+
+// ── The ICP mainnet ledger, derived (2026-10-01 audit F12) ─────────────────────────────────────
+//
+// The legacy `transfer` (64-hex account identifiers) is ICP-mainnet-only, and exactly two places
+// need the ledger to decide that: convert/prepare's composed-CeFi deposit leg and lib/ataSetup's
+// cefi-deposit runner. Both used to derive it with a hardcoded `c.currency === 8` — a catalog
+// row-id literal (the audit's "registry position/id is policy" class). The one derivation lives
+// HERE, by the same currency resolution every other surface uses: the bundled row whose link
+// token settles the ICP currency, mainnet only. '' when the bundled catalog carries no ICP row —
+// the consumers compare against it fail-closed (nothing matches ''). Drift-alarm: catalog.test.ts
+// (smoke) pins it to the drift-checked `ICP_LEDGER_PRINCIPAL` (config/constants).
+export const ICP_MAINNET_LEDGER: string =
+  icpCatalogOf(BUNDLED_NETWORKS).find(c => !c.testnet && currencyOfCatalogRow(c) === 'ICP')?.ledger ?? '';

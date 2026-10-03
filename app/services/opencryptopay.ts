@@ -646,10 +646,13 @@ function unpayableMessage(
 ): string {
   // An expired quote refuses everything, so it is the whole story — say that, not "wrong asset".
   if (ctx.nowMs >= details.quoteExpiresAt) return M.pay.ocp.quoteExpired;
-  // The one asset this wallet CARRIES and the checkout TAKES but dpay will not pay: tokens on Solana
-  // ('solana-usdc-unsupported' is the provider's own reason literal — the refusal the relay still
-  // sends for the USDC case), whose destination token account is ambiguous in the provider's URI.
-  if (ctx.selected.id === 'solana:USDC' && refused.some(r => r.reason === 'solana-usdc-unsupported')) {
+  // The one asset this wallet CARRIES and the checkout TAKES but dpay will not pay: tokens on
+  // Solana (the provider's URI carries no spl-token parameter, so the destination token account
+  // is ambiguous for the whole SPL class). Matched on the DERIVED class (a solana rail with a
+  // mint — audit F12), never the 'solana:USDC' id literal, so the sentence names whichever token
+  // the payer selected and the branch cannot drift from the resolver's refusal rule above.
+  if (ctx.selected.protocol === 'solana' && ctx.selected.mint != null
+    && refused.some(r => r.reason === 'solana-usdc-unsupported' && offerNamesAsset(r, ctx.selected))) {
     return M.pay.ocp.solanaTokenUnsupported(ctx.selected.symbol);
   }
   // The checkout DOES take the selected asset, but the provider says it cannot settle that method right

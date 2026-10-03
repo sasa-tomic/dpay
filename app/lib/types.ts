@@ -273,9 +273,12 @@ export type NfcStatus = 'ready' | 'off' | 'unsupported' | 'unknown';
 // is a pure parse, never a catalog lookup. Solana ids are the literal device-key-rail tokens
 // (`solana:SOL`, `solana:USDC`, `solana:EURC`, … — the registry, `solana/tokens.ts`); they NEVER
 // enter the relay/canister catalog, the ICRC polling, or the IC wire currency-id space (SOL is a
-// device-key rail, not an ICRC catalog asset — CLAUDE.md non-negotiable). The template arm keeps
-// the known literals as named members so every existing literal keeps its narrowed type.
-export type AssetId = `ic:${number}` | `solana:${string}` | 'solana:SOL' | 'solana:USDC' | `evm:${number}:${string}`;
+// device-key rail, not an ICRC catalog asset — CLAUDE.md non-negotiable). One template arm covers
+// every registry token — the named per-token literal members were deleted (2026-10-01 audit F12):
+// nothing narrowed on them once the last id-literal decision (the OCP refusal) keyed on the
+// derived SPL class, and a literal roster here would shadow the registry as a second source of
+// "which solana tokens exist".
+export type AssetId = `ic:${number}` | `solana:${string}` | `evm:${number}:${string}`;
 
 // A reference into the asset domain: either an IC currency u32 or a Solana token. This is the
 // discriminated payload a `SelectableAsset` carries alongside its display fields, so a consumer

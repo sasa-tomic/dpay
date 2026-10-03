@@ -718,6 +718,22 @@ describe('selectPayableOffers', () => {
     expect(refused).toContainEqual({method: 'Solana', asset: 'USDC', reason: 'solana-usdc-unsupported'});
   });
 
+  it('refuses EVERY Solana TOKEN the wallet carries, not a USDC literal (audit F12)', () => {
+    // The provider's URI carries no spl-token parameter for ANY Solana token - the ambiguity is
+    // the token account, a property of the SPL class. The refusal must key on the derived class
+    // (a solana rail with a mint), so EURC - and any token the registry gains later - refuses
+    // for the same honest reason instead of surfacing as payable.
+    expect(WALLET_ASSETS.some(a => a.id === 'solana:EURC')).toBe(true);
+    const details = detailsOf({
+      transferAmounts: [
+        {method: 'Solana', available: true, assets: [{asset: 'EURC', amount: 1}]},
+      ],
+    });
+    const {payable, refused} = selectPayableOffers(details, WALLET_ASSETS, BEFORE_EXPIRY);
+    expect(payable.some(o => o.asset === 'EURC')).toBe(false);
+    expect(refused).toContainEqual({method: 'Solana', asset: 'EURC', reason: 'solana-usdc-unsupported'});
+  });
+
   it('names the offered assets this wallet does not carry', () => {
     // Since the 2026-09-19 VEUR retirement the wallet no longer carries every IC asset the
     // default checkout lists: the checkout's VEUR offer — its legacy row lives on until the founder's
