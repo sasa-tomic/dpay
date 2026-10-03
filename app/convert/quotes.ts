@@ -6,7 +6,6 @@ import {
   BUNDLED_VENUES,
   cefiFamilyOf,
   cefiOtherSide,
-  icAmmVenueForPair,
   registeredVenues,
   setRuntimeVenues,
   type VenueEntry,
@@ -94,26 +93,29 @@ async function getSwapQuote(
   return j;
 }
 
-/** Fetch the quote for `amountIn` from ONE named venue (default: the bundled registry's
- *  single venue for the pair). The venue's own numbers are displayed verbatim — dpay derives
- *  NOTHING here (V8 "display what the venue publishes, derive only what it does not"): the
- *  venue does not publish a price-impact figure, so none is fetched, computed, or shown.
- *  One venue, ONE call per keystroke, for every venue kind — the second reference quote the
- *  2026-09-07 build fired per ic_amm venue (doubling chooser traffic and presenting a
+/** Fetch the quote for `amountIn` from ONE NAMED venue. The venue's own numbers are displayed
+ *  verbatim — dpay derives NOTHING here (V8 "display what the venue publishes, derive only what
+ *  it does not"): the venue does not publish a price-impact figure, so none is fetched, computed,
+ *  or shown. One venue, ONE call per keystroke, for every venue kind — the second reference quote
+ *  the 2026-09-07 build fired per ic_amm venue (doubling chooser traffic and presenting a
  *  curve-slope estimate as venue fact) was removed 2026-09-11. The venue's own amounts and
- *  the signed minimum-you'll-receive remain the execution protection. */
+ *  the signed minimum-you'll-receive remain the execution protection.
+ *
+ *  The venue is REQUIRED (2026-10-01 audit F9): the caller resolves it from its own row/route
+ *  (`venuesForPair`/`venueOfId`), and a resolution miss fails closed AT THE CALLER — the old
+ *  bundled first-venue fallback silently asked a DIFFERENT venue than the route named, whose
+ *  answer could only die at the downstream venue-echo gates (a wasted venue round trip on the
+ *  way to the same refusal). */
 export async function fetchConvertQuote(
   relayUrl: string,
   tokenInLedger: string,
   tokenOutLedger: string,
   amountIn: string,
-  opts: {timeoutMs?: number; venue?: VenueEntry} = {},
+  opts: {venue: VenueEntry; timeoutMs?: number},
 ): Promise<ConvertQuote> {
   const timeoutMs = opts.timeoutMs ?? 8000;
-  // WHICH venue to ask is the caller's registry-informed decision (the chooser passes the
-  // user's pick, V5); the bundled single-venue fallback keeps honest the pre-chooser path.
-  const venue = opts.venue ?? icAmmVenueForPair(tokenInLedger, tokenOutLedger);
-  if (!venue) throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  const venue = opts.venue;
+  if (venue == null) throw new Error(M.convert.errors.quoteUnavailable('venue')); // runtime backstop for the required prop
   const trade = await getSwapQuote(venue, relayUrl, tokenInLedger, tokenOutLedger, amountIn, timeoutMs);
   return {
     venueId: trade.venue_id,

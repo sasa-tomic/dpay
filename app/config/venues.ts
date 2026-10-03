@@ -360,20 +360,25 @@ export function venuePartyOf(counterparty: string): {kind: 'venue'; name: string
 
 // Every ic_amm venue serving this pair, as an UNORDERED ledger set, in REGISTRY ORDER
 // (multi-venue readiness V5). This is the chooser's candidate list — what COULD execute the
-// pair — so it does NOT apply the enabled-gate's testnet filter: the offline two-venue test
-// world serves its fixture rows testnet-labelled, and prod's enabled-gate
-// (resolveConvertDirection, ./convert) is where "mainnet rows only" is decided against the
-// BUNDLED real registry. Rows render in the returned order, never ranked by output.
+// pair — so it does NOT filter testnet rows: the offline two-venue test world serves its
+// fixture rows testnet-labelled, and the real-wallet walks (resolveConvertDestinations in
+// ./convert, resolveSwapTargets in ./swap) decide "mainnet rows only" against the BUNDLED
+// real registry where enablement is actually computed. Rows render in the returned order,
+// never ranked by output.
 export function venuesForPair(a: string, b: string): readonly VenueEntry[] {
   return registeredVenues().filter(
     v => v.kind === 'ic_amm' && samePair(v.pair_ledgers, [a, b]),
   );
 }
 
-// The ic_amm venue trading this pair out of the BUNDLED registry, if any — the single place
-// "which venue serves this conversion" is decided for the ENABLED gate and legacy-record
-// migration (ONE venue per pair today; the chooser builds on venuesForPair instead). `a`/`b`
-// are ledger principals matched as an unordered set; testnet rows never have a venue.
+// The ic_amm venue trading this pair out of the BUNDLED registry, if any — the fail-closed
+// single lookup for the two places that must resolve ONE venue deterministically: the v1
+// legacy-record migration (convert/records — the founder's real v1 records name no venue, so
+// the pair decides) and the migration's BUNDLED_MAINNET_VENUE_ID fallback. QUOTE EXECUTION
+// never rides this lookup (2026-10-01 audit F8/F9): every fetchConvertQuote caller names its
+// venue explicitly, so a registry miss fails closed instead of silently asking whichever
+// venue happens to sit first in the bundled list. `a`/`b` are ledger principals matched as an
+// unordered set; testnet rows never have a venue.
 export function icAmmVenueForPair(a: string, b: string): VenueEntry | null {
   return (
     BUNDLED_VENUES.find(

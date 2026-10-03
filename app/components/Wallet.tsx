@@ -910,15 +910,19 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         const depEp = route.endpoints[legs.length]!;
         if (depEp.fee == null || depEp.decimals == null) continue;
         const leg1 = legs[0]!;
+        const v1 = venueOfId(leg1.venueId);
+        if (v1 == null) continue; // the route's venue is gone from the registry: one dead route, never a bundled fallback (audit F9)
         const q1 = await fetchConvertQuote(relayUrl, leg1.fromLedger, leg1.toLedger, inRaw,
-          {venue: venueOfId(leg1.venueId) ?? undefined});
+          {venue: v1});
         const m1 = await deriveConvertMath(q1, route.endpoints[0]!.fee, route.endpoints[1]!.fee, CONVERT_SLIPPAGE_BPS_DEFAULT);
         let floor = m1.minOut;
         if (!/^\d+$/.test(floor) || BigInt(floor) <= 0n) continue; // the leg priced nothing: the route is dead at this input - quoting a venue for zero is how a stub's constant settle becomes a phantom floor (2026-10-01 flow-214 find)
         if (legs.length === 2) {
           const leg2 = legs[1]!;
+          const v2 = venueOfId(leg2.venueId);
+          if (v2 == null) continue; // same registry-miss rule
           const q2 = await fetchConvertQuote(relayUrl, leg2.fromLedger, leg2.toLedger, m1.minOut,
-            {venue: venueOfId(leg2.venueId) ?? undefined});
+            {venue: v2});
           const m2 = await deriveConvertMath(q2, route.endpoints[1]!.fee, depEp.fee, CONVERT_SLIPPAGE_BPS_DEFAULT);
           floor = m2.minOut;
           if (!/^\d+$/.test(floor) || BigInt(floor) <= 0n) continue; // same zero-leg rule
@@ -1073,8 +1077,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           const depEp = route.endpoints[legs.length]!;
           if (depEp.fee == null || depEp.decimals == null) { answers.push({kind: 'dead'}); continue; }
           const leg1 = legs[0]!;
+          const v1 = venueOfId(leg1.venueId);
+          if (v1 == null) { answers.push({kind: 'dead'}); continue; } // registry miss = dead route (audit F9)
           const q1 = await fetchConvertQuote(relayUrl, leg1.fromLedger, leg1.toLedger, inRaw,
-            {venue: venueOfId(leg1.venueId) ?? undefined});
+            {venue: v1});
           const m1 = await deriveConvertMath(q1, route.endpoints[0]!.fee, route.endpoints[1]!.fee, CONVERT_SLIPPAGE_BPS_DEFAULT);
           let floor = m1.minOut;
           if (!/^\d+$/.test(floor) || BigInt(floor) <= 0n) { answers.push({kind: 'dead'}); continue; }
@@ -1082,8 +1088,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           let math2: Awaited<ReturnType<typeof deriveConvertMath>> | undefined;
           if (legs.length === 2) {
             const leg2 = legs[1]!;
+            const v2 = venueOfId(leg2.venueId);
+            if (v2 == null) { answers.push({kind: 'dead'}); continue; } // same registry-miss rule
             const q2 = await fetchConvertQuote(relayUrl, leg2.fromLedger, leg2.toLedger, m1.minOut,
-              {venue: venueOfId(leg2.venueId) ?? undefined});
+              {venue: v2});
             const m2 = await deriveConvertMath(q2, route.endpoints[1]!.fee, depEp.fee, CONVERT_SLIPPAGE_BPS_DEFAULT);
             floor = m2.minOut;
             if (!/^\d+$/.test(floor) || BigInt(floor) <= 0n) { answers.push({kind: 'dead'}); continue; }

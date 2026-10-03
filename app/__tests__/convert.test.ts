@@ -51,7 +51,6 @@ import {
   type LegState,
   type SolanaSwapLeg,
 } from '../convert';
-import {resolveConvertDirection} from '../config/convert';
 import {BUNDLED_VENUES, setRuntimeVenues, venueDisplayName, venueEndpointOf, venuesForPair, type VenueEntry} from '../config/venues';
 import {loadTxNotes} from '../services/txNotes';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
@@ -165,22 +164,6 @@ beforeEach(async () => {
   jest.clearAllMocks();
 });
 
-describe('resolveConvertDirection — venue resolution fails closed', () => {
-  test('either side of the pair resolves to the OTHER side, and to nothing else', () => {
-    expect(resolveConvertDirection(ICP_LEDGER, false)).toEqual({otherLedger: VCHF_LEDGER});
-    expect(resolveConvertDirection(VCHF_LEDGER, false)).toEqual({otherLedger: ICP_LEDGER});
-    // No direction flag is returned at all: `zero_for_one` is the POOL's fact and reaches the app
-    // only as the relay's echo on the quote. A pinned order here is what shipped a ~5.9×-wrong rate.
-    expect(Object.keys(resolveConvertDirection(ICP_LEDGER, false)!)).toEqual(['otherLedger']);
-    expect(VENUE.pair_ledgers).toHaveLength(2);
-  });
-  test('unknown ledger, missing ledger, or any testnet row → null (no venue today)', () => {
-    expect(resolveConvertDirection('ryjl3-tyaaa-aaaaa-aaaba-cax', false)).toBeNull();
-    expect(resolveConvertDirection(undefined, false)).toBeNull();
-    expect(resolveConvertDirection(ICP_LEDGER, true)).toBeNull();
-  });
-});
-
 describe('deriveConvertMath — every number the screen shows', () => {
   test('min-out comes from the compiled core; net = gross − output fee', async () => {
     jest.mocked(DpayCore.icpSwapMinOut).mockResolvedValue('188000000' as never);
@@ -223,7 +206,7 @@ describe('fetchConvertQuote — the venue verbatim, ONE call, nothing derived', 
   // the chooser and present a curve-slope estimate as venue fact) is RED on the call count.
   test('echoes the venue quote (attribution included) with exactly ONE relay call — no reference trade', async () => {
     jest.mocked(relayFetch).mockResolvedValueOnce(swapRes('1000000', '1900000') as never);
-    const q = await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1000000');
+    const q = await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1000000', {venue: VENUE});
     expect(q.venueId).toBe(VENUE.venue_id);
     expect(q.pool).toBe(POOL);
     expect(q.amountIn).toBe('1000000');
@@ -234,16 +217,20 @@ describe('fetchConvertQuote — the venue verbatim, ONE call, nothing derived', 
 
   test('unreachable relay → the localized quoteUnreachable error (venue named from the registry)', async () => {
     jest.mocked(relayFetch).mockRejectedValueOnce(new Error('boom') as never);
-    await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1')).rejects.toThrow(convertEn.errors.quoteUnreachable(VENUE.display_name));
+    await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1', {venue: VENUE})).rejects.toThrow(convertEn.errors.quoteUnreachable(VENUE.display_name));
   });
   test('pool refusal (422) and malformed (400) map to their own copy', async () => {
     jest.mocked(relayFetch).mockResolvedValueOnce(fakeRes({}, false, 422) as never);
-    await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1')).rejects.toThrow(convertEn.errors.quoteRefused(VENUE.display_name));
+    await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1', {venue: VENUE})).rejects.toThrow(convertEn.errors.quoteRefused(VENUE.display_name));
     jest.mocked(relayFetch).mockResolvedValueOnce(fakeRes({}, false, 400) as never);
-    await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1')).rejects.toThrow(convertEn.errors.quoteUnavailable('400'));
+    await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1', {venue: VENUE})).rejects.toThrow(convertEn.errors.quoteUnavailable('400'));
   });
-  test('a pair with no registered venue fails closed before the relay is asked', async () => {
-    await expect(fetchConvertQuote('http://relay', 'i', 'o', '1')).rejects.toThrow(convertEn.errors.quoteUnavailable('venue'));
+  test('the venue is REQUIRED — no bundled first-venue fallback (audit F9)', async () => {
+    // TypeScript rejects a venue-less call outright; at runtime a hostile `undefined` cast still
+    // fails closed before the relay is asked. The first-venue fallback this replaces silently
+    // asked a DIFFERENT venue than the route named when the registry missed.
+    await expect(fetchConvertQuote('http://relay', 'i', 'o', '1', {venue: undefined as unknown as VenueEntry}))
+      .rejects.toThrow();
     expect(relayFetch).not.toHaveBeenCalled();
   });
 
@@ -252,7 +239,7 @@ describe('fetchConvertQuote — the venue verbatim, ONE call, nothing derived', 
   test('V8: a reply without zero_for_one is valid (null, not malformed); fetchedAtMs is the relay fetched_at, not the device clock', async () => {
     const noDirection = fakeRes({venue_id: VENUE.venue_id, pool: POOL, token_in: 'a', token_out: 'b', amount_in: '100000000', amount_out: '190000000', fee_millionths: 3000, fetched_at: 1});
     jest.mocked(relayFetch).mockResolvedValueOnce(noDirection as never);
-    const q = await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '100000000');
+    const q = await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '100000000', {venue: VENUE});
     expect(q.zeroForOne).toBeNull(); // a venue without an AMM direction flag is not "malformed"
     expect(q.fetchedAtMs).toBe(1_000); // fetched_at seconds → ms, the venue-read instant
   });

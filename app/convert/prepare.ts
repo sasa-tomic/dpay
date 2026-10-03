@@ -691,8 +691,12 @@ export async function prepareChainConvertRecord(args: {
   const leg1In = chainLegInput(settleRaw, midEp.fee);
   if (leg1In == null) throw new Error(M.convert.errors.quoteUnavailable('pool'));
   const leg1 = icLegs[0]!;
+  // The plan leg's OWN venue, fail-closed (audit F9): a registry miss refuses here - never a
+  // bundled first-venue fallback whose answer could only die at the echo gate below.
+  const leg1Venue = venueOfId(leg1.venueId);
+  if (leg1Venue == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
   const quote1 = await fetchConvertQuote(args.relayUrl, leg1.fromLedger, leg1.toLedger, leg1In,
-    {venue: venueOfId(leg1.venueId) ?? undefined});
+    {venue: leg1Venue});
   // The quote must BE the plan leg's own trade (venue, pool, ordered pair) — a relay
   // answer naming anything else is not this route's leg, and the disclosure figure would
   // not be the plan's. Fail before the deposit signs.
@@ -713,8 +717,10 @@ export async function prepareChainConvertRecord(args: {
     const leg2In = chainLegInput(math1.minOut, hubEp.fee);
     if (leg2In == null) throw new Error(M.convert.errors.quoteUnavailable('pool'));
     if (leg2.toLedger !== destEp.ledger) throw new Error(M.convert.errors.quoteUnavailable('pool'));
+    const leg2Venue = venueOfId(leg2.venueId);
+    if (leg2Venue == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
     quote2 = await fetchConvertQuote(args.relayUrl, leg2.fromLedger, leg2.toLedger, leg2In,
-      {venue: venueOfId(leg2.venueId) ?? undefined});
+      {venue: leg2Venue});
     if (quote2.venueId !== leg2.venueId || quote2.pool !== leg2.pool
       || quote2.tokenInLedger !== leg2.fromLedger || quote2.tokenOutLedger !== leg2.toLedger) {
       throw new Error(M.convert.errors.quoteUnavailable('pool'));

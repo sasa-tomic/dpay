@@ -563,7 +563,10 @@ export function ConvertIntentSheet({
               errs[r.rowId] = res.code === 'refused' ? M.convert.errors.quoteRefused(name) : M.convert.errors.quoteUnreachable(name);
             }
           } else if (r.kind === 'crossrail') {
-            quotes[r.rowId] = await fetchConvertQuote(relayUrl, r.route.from.ledger, r.route.hop.ledger, parsed.raw, {venue: venueOfId(r.route.swapVenueId) ?? undefined});
+            // The route's named venue, fail-closed (audit F9 — never a bundled fallback).
+            const xVenue = venueOfId(r.route.swapVenueId);
+            if (xVenue == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
+            quotes[r.rowId] = await fetchConvertQuote(relayUrl, r.route.from.ledger, r.route.hop.ledger, parsed.raw, {venue: xVenue});
             amts[r.rowId] = parsed.raw;
           } else if (r.kind === 'hub') {
             hubs[r.rowId] = await fetchHubQuotes(relayUrl, r.route, parsed.raw, inFee, slippageBps);
@@ -655,8 +658,10 @@ export function ConvertIntentSheet({
             // late-echo). Skip; the next tick re-reads the live map.
             if (rowQuoteAmts.current[r.rowId] !== q.amountIn) continue;
             if (liveAmtRef.current !== q.amountIn) continue; // superseded amount — the typed effect owns it
+            const xVenue = r.kind === 'crossrail' ? venueOfId(r.route.swapVenueId) : null;
+            if (r.kind === 'crossrail' && xVenue == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
             const fresh = r.kind === 'crossrail'
-              ? await fetchConvertQuote(relayUrl, r.route.from.ledger, r.route.hop.ledger, q.amountIn, {venue: venueOfId(r.route.swapVenueId) ?? undefined})
+              ? await fetchConvertQuote(relayUrl, r.route.from.ledger, r.route.hop.ledger, q.amountIn, {venue: xVenue!})
               : await fetchConvertQuote(relayUrl, r.inLedger, r.outLedger, q.amountIn, {venue: r.venue});
             if (!mountedRef.current) return;
             if (rowQuoteAmts.current[r.rowId] !== q.amountIn) continue; // re-typed mid-refresh
@@ -1119,7 +1124,9 @@ export function ConvertIntentSheet({
       if (activeRow.kind === 'crossrail') {
         const q = rowQuotes[activeRow.rowId];
         if (q == null || math == null || !destValid) return;
-        const fresh = await fetchConvertQuote(relayUrl, activeRow.route.from.ledger, activeRow.route.hop.ledger, q.amountIn, {venue: venueOfId(activeRow.route.swapVenueId) ?? undefined});
+        const xVenue = venueOfId(activeRow.route.swapVenueId);
+        if (xVenue == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
+        const fresh = await fetchConvertQuote(relayUrl, activeRow.route.from.ledger, activeRow.route.hop.ledger, q.amountIn, {venue: xVenue});
         if (fresh.amountOutGross !== q.amountOutGross) {
           if (mountedRef.current) {
             setRowQuotes(prev => ({...prev, [activeRow.rowId]: fresh}));

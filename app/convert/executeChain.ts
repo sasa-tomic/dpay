@@ -220,8 +220,12 @@ export async function beginChainPhase2(rec: ConvertRecord, deps: ChainDriverDeps
       const outFee = k + 1 < cr.icLegs.length ? cr.icFromFees[k + 1]! : rec.outFee;
       const inRaw = chainLegInput(floor, fromFee);
       if (inRaw == null) throw new Error(`leg ${k + 1} floor cannot fund its own fees`);
+      // The plan leg's OWN venue, fail-closed (audit F9): a registry miss is not resolvable by
+      // asking a different bundled venue - that answer could only die at the plan-divergence gate.
+      const legVenue = venueOfId(planLeg.venueId);
+      if (legVenue == null) throw new Error('plan-divergence');
       const q = await fetchConvertQuote(deps.relayUrl, planLeg.fromLedger, planLeg.toLedger, inRaw,
-        {venue: venueOfId(planLeg.venueId) ?? undefined});
+        {venue: legVenue});
       // The venue's echo must BE the plan figure — anything else is a different trade
       // than the plan frozen at confirm (the composed hub's own amount-echo gate).
       if (q.amountIn !== inRaw) throw new Error('amount-echo');

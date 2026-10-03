@@ -135,31 +135,11 @@ export const CONVERT_CEFI_CONFIRM_TIMEOUT_MS = 20_000;
  *  unchanged: a row OUTSIDE the window is still unknown, never optimistically done. */
 export const CONVERT_PROBE_WINDOW_ROWS = 50;
 
-/** What the venue serves for a selected asset: the OTHER side of the pair, and nothing else.
- *  There is deliberately no `zeroForOne` here — the direction flag the swap arg carries comes
- *  from the relay's `zero_for_one` echo, which the relay derived from the pool's OWN metadata. */
-export type ConvertDirection = {
-  /** The OTHER side's ledger principal — looked up in the catalog for the destination descriptor. */
-  otherLedger: string;
-};
-
-/** Fail-closed venue resolution: given the selected asset's ledger principal (+ its testnet flag),
- *  return the counter-asset iff a registered venue serves the pair (`./venues` — looked up, never
- *  a module constant). Every asset gets the SAME Convert entry point (uniform-IA hard rule); this
- *  function decides enablement honestly. Testnet rows never have a venue — the registered IC
- *  pools are mainnet contracts. */
-export function resolveConvertDirection(
-  ledger: string | undefined,
-  isTestnet: boolean,
-): ConvertDirection | null {
-  if (!ledger || isTestnet) return null;
-  for (const venue of BUNDLED_VENUES) {
-    if (venue.kind !== 'ic_amm' || venue.testnet) continue;
-    const i = venue.pair_ledgers.indexOf(ledger);
-    if (i >= 0) return {otherLedger: venue.pair_ledgers[i === 0 ? 1 : 0]};
-  }
-  return null;
-}
+// (The old `resolveConvertDirection` / `ConvertDirection` pair was deleted 2026-10-01 audit F10:
+// dead since the swap-screen walk (resolveSwapTargets, ./swap) replaced it as the ONE enablement
+// resolution, and its only remaining callers were its own tests. "Which venue serves a pair" is
+// `venuesForPair` (every registered venue, unordered) / `icAmmVenueForPair` (the bundled
+// fail-closed single lookup legacy-record migration uses) in ./venues — never re-derived here.)
 
 // --- the IC hub 2-hop widening (2026-09-18, spec §11): destination enumeration ---------------------
 
@@ -235,9 +215,8 @@ export type ConvertDestination = {
  *  to "ANY route exists": an asset with no direct pool but a hub path (e.g. VCHF → ckETH via
  *  ICP) converts as ONE intent, and (2026-09-26) a pool/hub leg that lands on an asset a
  *  registered CeFi venue buys extends into a composed route (VCHF → ICP → EURC via
- *  SideShift's ICP order). Same posture as resolveConvertDirection (kept above, unchanged,
- *  for its existing callers): the BUNDLED registry is the truth, mainnet rows only, and the
- *  walk fails closed on any leg that cannot be priced or named. First-encounter destination
+ *  SideShift's ICP order). Posture: the BUNDLED registry is the truth, mainnet rows only, and
+ *  the walk fails closed on any leg that cannot be priced or named. First-encounter destination
  *  order.
  *
  *  `catalogArg` overrides the bundled IC catalog (jest only — the fail-closed gates are

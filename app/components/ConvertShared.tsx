@@ -40,14 +40,20 @@ export const fetchHubQuotes = async (
   inFee: string,
   slippageBps: number,
 ): Promise<{q1: ConvertQuote; m1: ConvertMath; q2: ConvertQuote; m2: ConvertMath}> => {
+  // Each leg asks ITS OWN named venue; a registry miss fails closed here (audit F9) instead of
+  // silently quoting a different bundled venue whose answer could only die at the echo gates.
+  const venue1 = venueOfId(route.legs[0].venueId);
+  if (venue1 == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  const venue2 = venueOfId(route.legs[1].venueId);
+  if (venue2 == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
   const q1 = await fetchConvertQuote(
     relayUrl, route.from.ledger, route.hub.ledger, amountIn,
-    {venue: venueOfId(route.legs[0].venueId) ?? undefined},
+    {venue: venue1},
   );
   const m1 = await deriveConvertMath(q1, inFee, route.hub.fee, slippageBps);
   const q2 = await fetchConvertQuote(
     relayUrl, route.hub.ledger, route.dest.ledger, m1.minOut,
-    {venue: venueOfId(route.legs[1].venueId) ?? undefined},
+    {venue: venue2},
   );
   const m2 = await deriveConvertMath(q2, route.hub.fee, route.dest.fee, slippageBps);
   return {q1, m1, q2, m2};
@@ -82,21 +88,26 @@ export const fetchComposedQuotes = async (
   let m1: ConvertMath;
   let q2: ConvertQuote | null = null;
   let m2: ConvertMath | null = null;
+  // The IC legs' named venues, resolved + fail-closed up front (audit F9 — never a bundled
+  // first-venue fallback behind a registry miss).
+  const legVenues = route.legs.map(l => venueOfId(l.venueId));
+  if (legVenues.some(v => v == null)) throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  const [legVenue1, legVenue2] = legVenues;
   if (route.legs.length === 1) {
     q1 = await fetchConvertQuote(
       relayUrl, route.endpoints[0]!.ledger, depEp.ledger, amountIn,
-      {venue: venueOfId(route.legs[0]!.venueId) ?? undefined},
+      {venue: legVenue1!},
     );
     m1 = await deriveConvertMath(q1, inFee, depEp.fee, slippageBps);
   } else {
     q1 = await fetchConvertQuote(
       relayUrl, route.endpoints[0]!.ledger, route.endpoints[1]!.ledger, amountIn,
-      {venue: venueOfId(route.legs[0]!.venueId) ?? undefined},
+      {venue: legVenue1!},
     );
     m1 = await deriveConvertMath(q1, inFee, route.endpoints[1]!.fee, slippageBps);
     q2 = await fetchConvertQuote(
       relayUrl, route.endpoints[1]!.ledger, depEp.ledger, m1.minOut,
-      {venue: venueOfId(route.legs[1]!.venueId) ?? undefined},
+      {venue: legVenue2!},
     );
     m2 = await deriveConvertMath(q2, route.endpoints[1]!.fee, depEp.fee, slippageBps);
   }
@@ -156,8 +167,10 @@ export const fetchChainQuotes = async (
   const leg1In = chainLegInput(cefi.amountOutGross, midEp.fee ?? '0');
   if (leg1In == null) throw new Error(M.convert.errors.quoteUnavailable('pool'));
   const leg1 = route.legs[0]!;
+  const leg1Venue = venueOfId(leg1.venueId);
+  if (leg1Venue == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
   const q1 = await fetchConvertQuote(relayUrl, leg1.fromLedger, leg1.toLedger, leg1In,
-    {venue: venueOfId(leg1.venueId) ?? undefined});
+    {venue: leg1Venue});
   const m1 = await deriveConvertMath(q1, midEp.fee ?? '0', route.endpoints[1]!.fee ?? '0', slippageBps);
   if (route.legs.length === 1) {
     return {cefi, q1, m1, q2: null, m2: null};
@@ -166,8 +179,10 @@ export const fetchChainQuotes = async (
   const leg2In = chainLegInput(m1.minOut, hubEp.fee ?? '0');
   if (leg2In == null) throw new Error(M.convert.errors.quoteUnavailable('pool'));
   const leg2 = route.legs[1]!;
+  const leg2Venue = venueOfId(leg2.venueId);
+  if (leg2Venue == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
   const q2 = await fetchConvertQuote(relayUrl, leg2.fromLedger, leg2.toLedger, leg2In,
-    {venue: venueOfId(leg2.venueId) ?? undefined});
+    {venue: leg2Venue});
   const m2 = await deriveConvertMath(q2, hubEp.fee ?? '0', route.endpoints[2]!.fee ?? '0', slippageBps);
   return {cefi, q1, m1, q2, m2};
 };
