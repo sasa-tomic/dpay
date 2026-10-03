@@ -9,6 +9,7 @@ import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog'
 import {setIcClockRoutingCanister} from '../services/icp';
 import {base, randNonceHex, fmtTime, fmtAssetCompact, rawToDecimal, toUnits} from '../lib/format';
 import {applyOffline} from '../lib/amount';import {withTimeout} from '../lib/timeout';
+import {applySolDeduction, pendingSolDeduction} from '../lib/solRailShown';
 import {buildSelectableAssets, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
 import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {mergeHistoryByTime, mergePendingByTime, settledJoinKey} from '../lib/ledger';
@@ -427,14 +428,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // (icp-api.io / __DPAY_TEST_IC_GATEWAY), NOT the relay — post-proxy the Solana rail path IS the
   // relay, so a relay outage must not read as "this phone is offline".
   const {sol: solState, tokens: tokenStates, freshAt: solFreshAt, refreshSol, refreshToken, refreshTokens} = useSolanaBalances(identity.secretHex, solAddress, solanaMints);
-  // The Convert surface's Solana side wants raw amounts keyed by MINT (its venue registry keys
-  // legs by mint); the hook's token states carry status+failure too, so flatten to the amount.
-  // null (unknown/absent/error) stays null — the fund gate and insufficient check fail soft.
-  const solTokenAmounts = useMemo(() => {
-    const next: Record<string, string | null> = {};
-    for (const [mint, state] of Object.entries(tokenStates)) next[mint] = state.amount;
-    return next;
-  }, [tokenStates]);
   // Defined AFTER the destructure (TDZ): manual re-poll for the fund-first "Check again" —
   // fire-and-forget polls get a self-clearing busy flag (UI affordance, not lifecycle tracking).
   const recheckSolBalances = useCallback(() => {
@@ -728,13 +721,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   const activeSolAsset = selectedAsset?.protocol === 'solana' ? selectedAsset : null;
   const selectedSolToken = activeSolAsset?.token ?? 'SOL';
   const selectedTokenState = activeSolAsset?.mint != null ? tokenStates[activeSolAsset.mint] : undefined;
-  // STALE-OK (2026-09-21 live EURC attempt #7): the amount is the LAST-KNOWN figure — it
-  // survives aborted/timing-out polls by hook contract (facts are never downgraded, and the
-  // persisted store re-seeds at mount). `?? null`, never `?? '0'`: coercing an unknown to a
-  // known-zero turned poll ill-health into "More than your available 0" and gated a funded
-  // wallet's rendered send review across four presses. Null reaches the sheet as an honest
-  // unknown, which gates the confirm WITHOUT claiming a zero balance.
-  const selectedTokenBalance = selectedTokenState?.amount ?? null;
   const selectedTokenAbsent = selectedTokenState?.status === 'absent';
   // One-tap account setup for the SELECTED token — the only one whose gates ever render the setup
   // card. Creates that token's ATA (device-key-signed createIdempotent tx); on success both rails
@@ -1908,27 +1894,15 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     }
     return map;
   }, [pendingPays, atByCurrency, online]);
-  // The SOL rail's twin: native records subtract from solState.balance, SPL records from their
-  // mint's token state (symbol → mint through the registry — the same table every other symbol
-  // consumer resolves through). One freshness clock for the whole rail (freshAt): a successful
-  // getMultipleAccounts postdating the hand-off retires the subtraction for native AND tokens.
-  const pendingSolDeduction = useMemo(() => {
-    if (solFreshAt === 0) return {sol: '0', tokens: {} as Record<string, string>};
-    const sol = {sol: '0', tokens: {} as Record<string, string>};
-    for (const p of pendingPays) {
-      if (p.currency != null || !p.assetId.startsWith('solana:')) continue;
-      if (p.ts <= solFreshAt) continue;
-      const amt = p.gross ?? p.wireAmount;
-      if (p.assetId === 'solana:SOL') {
-        sol.sol = (BigInt(sol.sol) + BigInt(amt)).toString();
-      } else {
-        const mint = solanaTokenInfo(p.assetId.slice(8))?.mint;
-        if (mint == null) continue; // unregistered symbol (no sign gate lets it happen; skip honestly)
-        sol.tokens[mint] = sol.tokens[mint] != null ? (BigInt(sol.tokens[mint]) + BigInt(amt)).toString() : amt;
-      }
-    }
-    return sol;
-  }, [pendingPays, solFreshAt]);
+  // The SOL rail's twin (extracted PURE to lib/solRailShown so the derivation is pinned, not
+  // just wired - the extraction's pin caught the slice(8) off-by-one that silently disabled
+  // every SPL-token offline deduction; native SOL was the only rail the old inline memo ever
+  // debited). One freshness clock for the whole rail (freshAt): a successful read postdating
+  // the hand-off retires the subtraction for native AND tokens.
+  const pendingSolDed = useMemo(
+    () => pendingSolDeduction(pendingPays, solFreshAt, solanaTokenInfo),
+    [pendingPays, solFreshAt],
+  );
   // The DEMO header balance (currency 0): when online the polled balance is authoritative (the
   // pending subtraction retires on every successful poll via the ts-vs-atByCurrency rule); when
   // offline we apply the per-currency deduction derived from the pending records above.
@@ -1949,21 +1923,25 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // The SOL rail's displayed states: the deduction applied to whatever balance the poll (or the
   // cross-restart cache) last established. Statuses untouched — 'unavailable'/'error' still
   // preserve their number (now the deducted one) and still render approx-marked when stale.
-  const solShownState = useMemo(
-    () => ({...solState, balance: applyOffline(solState.balance, pendingSolDeduction.sol === '0' ? {} : {0: pendingSolDeduction.sol}, 0)}),
-    [solState, pendingSolDeduction.sol],
+  const {sol: solShownState, tokens: tokenShownStates} = useMemo(
+    () => applySolDeduction(solState, tokenStates, pendingSolDed),
+    [solState, tokenStates, pendingSolDed],
   );
-  const tokenShownStates = useMemo(() => {
-    const dedup = Object.keys(pendingSolDeduction.tokens);
-    if (dedup.length === 0) return tokenStates;
-    const next: Record<string, typeof tokenStates[string]> = {...tokenStates};
-    for (const mint of dedup) {
-      const state = tokenStates[mint];
-      if (state == null || state.amount == null) continue; // no number to deduct against
-      next[mint] = {...state, amount: applyOffline(state.amount, {0: pendingSolDeduction.tokens[mint]}, 0) ?? state.amount};
-    }
-    return next;
-  }, [tokenStates, pendingSolDeduction]);
+  // The SELECTED Solana asset's SHOWN (offline-deducted) facts — the twins of the raw consts
+  // above (2026-10-01 audit F4): every money gate the Pay/Convert children render MUST read
+  // the same adjusted state the balances map shows, or one screen carries two truths (a pay
+  // form sizing against a balance the header has already debited). Statuses pass through
+  // untouched ('absent'/'unavailable' are facts, not amounts); only the numbers adjust.
+  const selectedTokenShownState = activeSolAsset?.mint != null ? tokenShownStates[activeSolAsset.mint] : undefined;
+  // STALE-OK (2026-09-21 live EURC attempt #7): the amount is the LAST-KNOWN figure — it
+  // survives aborted/timing-out polls by hook contract (facts are never downgraded, and the
+  // persisted store re-seeds at mount). `?? null`, never `?? '0'`: coercing an unknown to a
+  // known-zero turned poll ill-health into "More than your available 0" and gated a funded
+  // wallet's rendered send review across four presses. Null reaches the sheet as an honest
+  // unknown, which gates the confirm WITHOUT claiming a zero balance. This SHOWN twin is the
+  // one the Pay/Convert engines read (audit F4): the same adjusted number the balances map
+  // renders, never a rawer figure than the header's.
+  const selectedTokenShownBalance = selectedTokenShownState?.amount ?? null;
 
   // The per-asset balance map — the ONE source every balance-rendering surface reads (header + the
   // Balances sheet rows). Built pure from the IC poll + DEMO shownBalance + the SOL + per-mint
@@ -2525,7 +2503,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
             />
           : mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} tokenBalance={selectedTokenBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solState, selectedTokenState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} />
+              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solShownState.balance ?? '0'} tokenBalance={selectedTokenShownBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenShownStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solShownState, selectedTokenShownState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solShownState.status === 'ok' && solShownState.balance === '0'} solChecking={solShownState.status === 'loading' || solShownState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} />
               : activeEvm && activeEvmAsset != null
               ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckEvmBalances} recheckBusy={recheckBusy} />
               : <PayMode
@@ -2666,9 +2644,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               // a user gesture that respects the selection lock and leaves the tabs' sub-modes
               // alone. Withheld while locked, exactly as the Pay pointer's button is.
               onSwitchAsset={payRailSwitch}
-              // The Solana rail's own balances (the fund gate + insufficient check read the
-              // same strings the Balances tab shows).
-              solana={{sol: solState.balance, tokens: solTokenAmounts}}
+              // The Solana rail's SHOWN balances (the offline-deducted states the balances map
+              // renders — audit F4: the fund gate + insufficient check read the same strings
+              // the Balances tab shows, never a rawer number than the header's).
+              solana={{sol: solShownState.balance, tokens: solTokenAmountsForSum}}
               // The EVM rail: the catalog's token rows (the evm-token settle rails) + the
               // selected EVM asset's own balance (the fund gate + Max prefill).
               evmAssets={evmAssets}
