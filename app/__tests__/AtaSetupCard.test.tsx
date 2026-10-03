@@ -6,7 +6,7 @@
  * that sets up every absent token account; a swap run (a real user spend) presses through to
  * ONE confirm stating the total before anything executes (fund and fund-ic alike); a create run
  * executes on the single press (the disclosed cost + the button press are the consent, the same
- * contract the per-asset SolanaAtaSetupCard established); the refusal is the honest dead end
+ * contract the per-asset create surface established); the refusal is the honest dead end
  * (needSol copy, the SOL receive address with a copy affordance, NO button); busy states what
  * is happening (creating, or the still-in-flight venue swap). Copy is driven by the i18n - the
  * four-locale contract for the keys is pinned in ataSetupCopy.test.ts.
@@ -14,23 +14,22 @@
 import {describe, test, expect, jest} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
-import {AtaSetupCard} from '../components/AtaSetupCard';
+import {AtaSetupCard, type AtaSetupPlanProps} from '../components/AtaSetupCard';
 import {M} from '../i18n';
 
 const COST = '0.00204428 SOL';
 
-function mount(props: Partial<Parameters<typeof AtaSetupCard>[0]> = {}) {
+function mount(props: Partial<AtaSetupPlanProps> = {}) {
   let tree!: renderer.ReactTestRenderer;
+  const merged = {
+    targets: ['EURC'],
+    kind: 'create' as const,
+    costLine: COST,
+    testIDPrefix: 'ata-setup-EUR',
+    ...props,
+  };
   act(() => {
-    tree = renderer.create(
-      <AtaSetupCard
-        targets={['EURC']}
-        kind="create"
-        costLine={COST}
-        testIDPrefix="ata-setup-EUR"
-        {...props}
-      />,
-    );
+    tree = renderer.create(<AtaSetupCard surface="plan" {...merged} />);
   });
   return tree;
 }

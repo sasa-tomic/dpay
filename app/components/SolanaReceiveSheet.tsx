@@ -10,7 +10,7 @@ import {buildSolanaPayUri, createSolanaPayReference} from '../solana/payUri';
 import type {SolanaReadFailure} from '../solana';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
-import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
+import {AtaSetupCard} from './AtaSetupCard';
 import {TrustWalletFundButton} from './TrustWalletFundButton';
 import {IconCopy, IconRefresh} from './icons';
 import {InstrLine} from './InstrLine';
@@ -25,7 +25,7 @@ import {M} from '../i18n';
  * never a false claim):
  *
  *   - 'ready'      → the address + QR (the token account exists on-chain; tokens sent here land).
- *   - 'absent'     → the one-tap setup card (SolanaAtaSetupCard) INSTEAD of the QR — the user is
+ *   - 'absent'     → the one-tap setup card (AtaSetupCard, create surface) INSTEAD of the QR — the user is
  *                    not misled into sharing an address the Token program would reject.
  *   - 'checking'   → an honest in-progress state (M.deposit.sol.checkingAta) on the first poll;
  *                    never claims absence.
@@ -122,7 +122,8 @@ export function SolanaReceiveSheet({
     return (
       <View style={S.sheetBody}>
         {status === 'absent' ? (
-          <SolanaAtaSetupCard
+          <AtaSetupCard
+            surface="create"
             asset={assetLabel}
             instrTestID="sol-receive-instructions"
             btnTestID="btn-sol-ata-create"
@@ -173,7 +174,7 @@ export function SolanaReceiveSheet({
       <View testID="sol-receive-instructions" style={S.instrCard}>
         <InstrLine runs={M.deposit.sol.sendToAddress(assetLabel, isSpl ? `Solana ${assetLabel}` : 'Solana')} />
         {isSolanaDevnet() ? (
-          // P4 pattern — '⚠' text glyph is a leading IconAlert (mirrors SolanaAtaSetupCard's
+          // P4 pattern — '⚠' text glyph is a leading IconAlert (mirrors the setup card's
           // converted twin; testID on the wrapper).
           <View testID="sol-devnet-warning" style={S.warnRow}>
             <IconAlert size={14} color={C.warn} />

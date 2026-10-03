@@ -22,7 +22,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
 import {AddressField} from './AddressField';
-import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
+import {AtaSetupCard} from './AtaSetupCard';
 import {SendTerminal} from './SendTerminal';
 import {M} from '../i18n';
 
@@ -376,7 +376,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
   }
 
   // Phase 6 fail-closed + 2026-08-14 setup action: token send when the device's ATA is KNOWN
-  // absent → the shared one-tap setup card (SolanaAtaSetupCard — same surface as the Receive
+  // absent → the shared one-tap setup card (AtaSetupCard, create surface — same as the Receive
   // tab). You can't send tokens you don't have an account for; the card offers the REAL one-tap
   // create (device-key-signed createIdempotent tx) instead of a dead end. On success the parent's
   // ATA refresh flips `ataAbsent` and the form appears. Only 'absent' gates — loading/error/
@@ -386,7 +386,8 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
     const checkingSol = solBalance == null;
     return (
       <View style={S.sheetBody}>
-        <SolanaAtaSetupCard
+        <AtaSetupCard
+          surface="create"
           asset={unit}
           instrTestID="sol-send-instructions"
           btnTestID="btn-sol-send-ata-create"

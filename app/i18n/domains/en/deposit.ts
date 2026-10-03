@@ -252,7 +252,7 @@ export type DepositMessages = {
     copyAssetAddress: (asset: string) => string;
   };
 
-  /** The one-tap token-account setup card (SolanaAtaSetupCard), shared by receive AND send. Every
+  /** The one-tap token-account setup card (AtaSetupCard's create surface), shared by receive AND send. Every
    *  sentence names the asset it is about (USDC, EURC, …) — never a hard-coded token. */
   ata: {
     absent: (asset: string) => string;

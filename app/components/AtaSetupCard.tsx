@@ -2,6 +2,30 @@ import {View, Text, Pressable, ActivityIndicator} from 'react-native';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {M} from '../i18n';
+import {isSolanaDevnet} from '../config/constants';
+import {fmtAssetCompact} from '../lib/format';
+import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
+import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {IconAlert} from './icons';
+
+/**
+ * THE one-tap ATA setup card - ONE implementation for both surfaces (2026-10-01 audit: the
+ * per-asset SolanaAtaSetupCard was a second, drifting copy; merged here, prop-driven, each
+ * surface selected by `surface`):
+ *
+ *   surface='plan'    the wallet-level planner card (2026-09-30; per-currency since
+ *                     2026-10-01) - hosted by the tapped currency's own view (HomeTab), the
+ *                     single setup affordance. One compact card, ONE primary button.
+ *   surface='create'  the per-asset create card - the shared surface for every place the
+ *                     device's token account for a registered SPL token is KNOWN absent
+ *                     (2026-08-14; generalized per-token 2026-09-06). The four sheet callers
+ *                     (SolPayMode, SolReceiveMode, SolanaReceiveSheet, SolanaWithdrawSheet)
+ *                     keep their EXACT testIDs and behavior.
+ *
+ * All money figures arrive PRE-FORMATTED (the caller owns `fmtAssetCompact` - the i18n rule).
+ */
+
+// ── surface='plan' — the wallet-level planner card ─────────────────────────────────────────────
 
 /**
  * The per-currency setup view model (2026-10-01): computed by Wallet (the planner + the run
@@ -38,72 +62,8 @@ export type AtaSetupViewModel = {
   errCanRetry: boolean;
 };
 
-/**
- * The ONE-TAP setup card (2026-09-30; per-currency since 2026-10-01) - hosted by the tapped
- * currency's own view (HomeTab), the single setup affordance. One compact card, ONE primary
- * button. Visual grammar: the instruction card (S.instrCard's radius/padding) + the wide
- * primary button; the idle state states the required minimum UP FRONT (the measured min line,
- * else the exact SOL rent) - no number the user has to fail a swap to learn.
- *
- * Six states, driven entirely by props (the parent owns the plan + the run):
- *   live    - a non-terminal convert record is still working toward THIS setup (2026-10-02
- *             P0): the ONE founder-specified busy line, NO button, NO idle minimum line.
- *             It outranks EVERY other state - a live record must never be pasted over by
- *             idle (a re-armed button is a second-spend invitation), confirm, busy or refuse.
- *   busy    - the run works (confirm pressed, on-chain, or a venue swap in flight): spinner
- *             + the SAME single founder line (2026-10-02). Nothing else competes with it.
- *   confirm - a swap run's ONE confirmation, stating the total: the sized swap, its source,
- *             what it creates, what it costs. Confirm executes; cancel returns.
- *   refuse  - the honest dead end: what is missing, what it costs, the needSol copy and the
- *             device's SOL receive address with a copy affordance (the deposit-sheet escape
- *             when the parent cannot show one). NO button - never a fake one.
- *   failed  - a terminal run ending with next steps (founder spec 2026-10-02): the error
- *             FIRST, then what happens to the money and what to do now. `errCanRetry` false
- *             (funds unaccounted) stands the repeat button DOWN; the wallet only sets
- *             `errNext` for these terminal endings, so transient pre-run errors stay idle.
- *   confirm - a swap run's ONE confirmation, stating the total: the sized swap, its source,
- *             what it creates, what it costs. Confirm executes; cancel returns.
- *   refuse  - the honest dead end: what is missing, what it costs, the needSol copy and the
- *             device's SOL receive address with a copy affordance (the deposit-sheet escape
- *             when the parent cannot show one). NO button - never a fake one.
- *
- * HARD RULE (2026-09-30 defect, never again): every rendered state carries an ACTIONABLE next
- * step. The v1 card shipped a refuse state that ONLY explained steps with no affordance at all
- * (and the idle button above it stayed a doomed retry). Refuse must always render one of its
- * two escapes below; idle/confirm/busy own the ONE button. Pinned by AtaSetupCard.test.tsx
- * and HomeTab.test.tsx. (The live state's actionable next step is the run itself: it keeps
- * going without a press - the honesty line says so, and the record's own panel can stop it.)
- *   idle    - create (SOL covers), fund (a SPL swap pays) or fund-ic (a cross-rail venue swap
- *             pays): the ONE "Complete setup" button. A fund/fund-ic run presses through to
- *             the confirm; create runs straight away (the button itself is the consent, cost
- *             disclosed above - the same contract the per-asset setup card established).
- *
- * All money figures arrive PRE-FORMATTED (the caller owns `fmtAssetCompact` — the i18n rule);
- * `testIDPrefix` keeps parallel cards tellable (`ata-setup-EUR-complete`, `ata-setup-USD-…`).
- */
-export function AtaSetupCard({
-  targets,
-  kind,
-  costLine,
-  minLine = null,
-  fundFromLine = null,
-  live = false,
-  confirming = false,
-  confirmLine = null,
-  busy = false,
-  err = null,
-  errNext = null,
-  errCanRetry = true,
-  solAddress = null,
-  solCopied = false,
-  onStart,
-  onConfirm,
-  onCancel,
-  onCopySolAddress,
-  onShowSolAddress,
-  testIDPrefix,
-}: {
-  /** Every absent account's display symbol, wallet-wide ('EURC' / ['EURC', 'USDC']). */
+export type AtaSetupPlanProps = {
+  surface: 'plan';
   targets: string[];
   /** The planner's verdict for THIS wallet: create (no swap) | fund (a SPL swap pays) |
    *  fund-ic (a cross-rail venue swap pays) | refuse. */
@@ -140,7 +100,99 @@ export function AtaSetupCard({
   /** The refuse escape when no address can be shown inline: open the deposit sheet. */
   onShowSolAddress?: () => void;
   testIDPrefix: string;
-}) {
+};
+
+// ── surface='create' — the per-asset create card (the four sheet callers) ──────────────────────
+
+export type AtaSetupCreateProps = {
+  surface: 'create';
+  /** The token's display symbol — names the account in every sentence ('USDC', 'EURC', …). */
+  asset: string;
+  instrTestID: string;
+  btnTestID: string;
+  buttonLabel: string;
+  hasSol: boolean;
+  /** SOL balance not confirmed yet (loading/unavailable) — say "checking", never claim insufficiency. */
+  checkingSol?: boolean;
+  busy?: boolean;
+  err?: string | null;
+  onCreateAta?: () => void;
+  onShowSolAddress?: () => void;
+};
+
+export type AtaSetupCardProps = AtaSetupPlanProps | AtaSetupCreateProps;
+
+/**
+ * The planner card's states, driven entirely by props (the parent owns the plan + the run):
+ *   live    - a non-terminal convert record is still working toward THIS setup (2026-10-02
+ *             P0): the ONE founder-specified busy line, NO button, NO idle minimum line.
+ *             It outranks EVERY other state - a live record must never be pasted over by
+ *             idle (a re-armed button is a second-spend invitation), confirm, busy or refuse.
+ *   busy    - the run works (confirm pressed, on-chain, or a venue swap in flight): spinner
+ *             + the SAME single founder line (2026-10-02). Nothing else competes with it.
+ *   confirm - a swap run's ONE confirmation, stating the total: the sized swap, its source,
+ *             what it creates, what it costs. Confirm executes; cancel returns.
+ *   refuse  - the honest dead end: what is missing, what it costs, the needSol copy and the
+ *             device's SOL receive address with a copy affordance (the deposit-sheet escape
+ *             when the parent cannot show one). NO button - never a fake one.
+ *   failed  - a terminal run ending with next steps (founder spec 2026-10-02): the error
+ *             FIRST, then what happens to the money and what to do now. `errCanRetry` false
+ *             (funds unaccounted) stands the repeat button DOWN; the wallet only sets
+ *             `errNext` for these terminal endings, so transient pre-run errors stay idle.
+ *   idle    - create (SOL covers), fund (a SPL swap pays) or fund-ic (a cross-rail venue swap
+ *             pays): the ONE "Complete setup" button. A fund/fund-ic run presses through to
+ *             the confirm; create runs straight away (the button itself is the consent, cost
+ *             disclosed above - the same contract the per-asset create card established).
+ *
+ * HARD RULE (2026-09-30 defect, never again): every rendered state carries an ACTIONABLE next
+ * step. The v1 card shipped a refuse state that ONLY explained steps with no affordance at all
+ * (and the idle button above it stayed a doomed retry). Refuse must always render one of its
+ * two escapes below; idle/confirm/busy own the ONE button. Pinned by AtaSetupCard.test.tsx
+ * and HomeTab.test.tsx. (The live state's actionable next step is the run itself: it keeps
+ * going without a press - the honesty line says so, and the record's own panel can stop it.)
+ *
+ * Visual grammar (plan): the instruction card (S.instrCard's radius/padding) + the wide
+ * primary button; the idle state states the required minimum UP FRONT (the measured min line,
+ * else the exact SOL rent) - no number the user has to fail a swap to learn.
+ * `testIDPrefix` keeps parallel cards tellable (`ata-setup-EUR-complete`, `ata-setup-USD-…`).
+ *
+ * Visual grammar (create): the instruction card (one-time cost + what it buys), the
+ * insufficient-SOL warning (+ the fund-SOL escape hatch), the devnet warning, the busy state,
+ * the create button, and the error line. The create action (`onCreateAta`, owned by Wallet →
+ * `createTokenAta`) broadcasts a REAL AssociatedTokenProgram.createIdempotent transaction
+ * signed by the device key; the one-time rent + fee are paid from the device's SOL balance and
+ * DISCLOSED in the copy (honest cost, no silent fee - founder rule 2026-08-14: "I don't want
+ * faking"). Callers render this card ONLY when the ATA status is KNOWN 'absent' - never for
+ * loading/unavailable/error (those states must not claim the account is missing; that was the
+ * 2026-08-14 audit fix).
+ */
+export function AtaSetupCard(props: AtaSetupCardProps) {
+  if (props.surface === 'create') return <CreateSurface {...props} />;
+  return <PlanSurface {...props} />;
+}
+
+function PlanSurface({
+  targets,
+  kind,
+  costLine,
+  minLine = null,
+  fundFromLine = null,
+  live = false,
+  confirming = false,
+  confirmLine = null,
+  busy = false,
+  err = null,
+  errNext = null,
+  errCanRetry = true,
+  solAddress = null,
+  solCopied = false,
+  onStart,
+  onConfirm,
+  onCancel,
+  onCopySolAddress,
+  onShowSolAddress,
+  testIDPrefix,
+}: AtaSetupPlanProps) {
   const targetsPhrase = M.deposit.ata.targetsLabel(targets);
   if (live) {
     // The founder's busy contract (2026-10-02): ONE line next to the spinner, nothing else
@@ -275,5 +327,77 @@ export function AtaSetupCard({
       </Pressable>
       {err ? <Text testID={`${testIDPrefix}-err`} style={S.err}>{err}</Text> : null}
     </View>
+  );
+}
+
+/** The per-asset create surface - byte-identical rendering to the former SolanaAtaSetupCard
+ *  (the four sheet callers' testIDs and copy are pinned and unchanged). */
+function CreateSurface({
+  asset,
+  instrTestID,
+  btnTestID,
+  buttonLabel,
+  hasSol,
+  checkingSol = false,
+  busy = false,
+  err = null,
+  onCreateAta,
+  onShowSolAddress,
+}: AtaSetupCreateProps) {
+  const setupCost = fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT);
+  const canCreate = !!onCreateAta && !busy && hasSol;
+  return (
+    <>
+      <View testID={instrTestID} style={S.instrCard}>
+        <Text style={S.instrLine}>{M.deposit.ata.absent(asset)}</Text>
+        <Text style={S.instrCustody}>{M.deposit.ata.cost(setupCost, asset)}</Text>
+        {!hasSol ? (
+          <>
+            {checkingSol ? (
+              <Text testID="sol-ata-checking-sol" style={S.dim2}>{M.deposit.ata.checkingSol}</Text>
+            ) : (
+              <Text testID="sol-ata-insufficient" style={S.warnNote}>{M.deposit.ata.needSol(setupCost)}</Text>
+            )}
+            {onShowSolAddress ? (
+              <Pressable
+                testID="btn-sol-ata-fund"
+                style={S.linkBtn}
+                onPress={onShowSolAddress}
+                accessibilityRole="button"
+                accessibilityLabel={M.deposit.ata.showSolAddress}>
+                <Text style={S.linkText}>{M.deposit.ata.showSolAddress}</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : null}
+        {isSolanaDevnet() ? (
+          // P4 — the '⚠' text glyph became a leading IconAlert (warnRow mirrors warnNote's
+          // sizing in row form). No e2e/jest asserts this text; the testID moves to the wrapper.
+          <View testID="sol-devnet-warning" style={S.warnRow}>
+            <IconAlert size={14} color={C.warn} />
+            <Text style={S.warnRowText}>{M.deposit.sol.devnetWarn(asset)}</Text>
+          </View>
+        ) : null}
+      </View>
+      {busy ? (
+        <>
+          <ActivityIndicator color={C.brandText} />
+          <Text testID="sol-ata-busy" style={S.dim2}>{M.deposit.ata.creating(asset)}</Text>
+        </>
+      ) : (
+        <Pressable
+          testID={btnTestID}
+          style={[S.primaryWide, !canCreate && S.disabledFlat]}
+          disabled={!canCreate}
+          onPress={onCreateAta}
+          accessibilityRole="button"
+          accessibilityLabel={buttonLabel}
+          accessibilityHint={M.deposit.ata.createHint(setupCost, asset)}
+          accessibilityState={{disabled: !canCreate}}>
+          <Text style={[S.primaryText, !canCreate && S.disabledText]}>{buttonLabel}</Text>
+        </Pressable>
+      )}
+      {err ? <Text testID="sol-ata-err" style={S.err}>{err}</Text> : null}
+    </>
   );
 }

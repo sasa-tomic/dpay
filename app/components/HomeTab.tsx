@@ -148,6 +148,7 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
           states the required minimum up front (`minLine`) before anything is initiated. */}
       {ataSetup != null && ataSetup.targets.length > 0 ? (
         <AtaSetupCard
+          surface="plan"
           targets={ataSetup.targets}
           kind={ataSetup.kind}
           costLine={ataSetup.costLine}

@@ -3,7 +3,7 @@ import {View, Text, Pressable, TextInput} from 'react-native';
 import bs58 from 'bs58';
 import {QrCode} from './QrCode';
 import {InstructionPanel} from './InstructionPanel';
-import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
+import {AtaSetupCard} from './AtaSetupCard';
 import {S, amountFontFor} from '../styles';
 import {C} from '../config/palette';
 import {IconAlert, IconCheck, IconClock, IconScan, IconShare} from './icons';
@@ -843,7 +843,8 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       // Token selected + its account KNOWN absent: the one-tap setup card, with the fund-SOL
       // secondary when SOL is also zero. Setup first, then pay — but the lens stays open, because
       // a request naming SOL or any other mint is perfectly payable from here.
-      <SolanaAtaSetupCard
+      <AtaSetupCard
+        surface="create"
         asset={selectedSymbol}
         instrTestID="sol-pay-ata-instructions"
         btnTestID="btn-sol-pay-ata-create"

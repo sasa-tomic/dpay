@@ -3,7 +3,7 @@
  *
  * The sheet must NEVER make a false claim about the USDC account:
  *   - 'ready'      → address + QR (USDC can land).
- *   - 'absent'     → the one-tap setup card (shared SolanaAtaSetupCard), never the address.
+ *   - 'absent'     → the one-tap setup card (shared AtaSetupCard, create surface), never the address.
  *   - 'checking'   → honest "Checking…" — NO setup card (the account may exist), NO address.
  *   - 'unverified' → "Couldn't check" + Retry — fail-closed, NO false "you don't have one".
  * SOL never gates (the device key IS the account) — any ataStatus still renders the address.

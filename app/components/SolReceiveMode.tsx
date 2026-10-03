@@ -34,7 +34,7 @@ import {CheckoutCharge} from './CheckoutCharge';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
 import {FundingRoutes} from './FundingRoutes';
 import {RailDisclosure} from './RailDisclosure';
-import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
+import {AtaSetupCard} from './AtaSetupCard';
 import {AssetPicker} from './AssetPicker';
 import {AssetSwitchRow} from './AssetSwitchRow';
 import {useJourney} from '../lib/journey';
@@ -692,7 +692,8 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           setup card and block Request (known-absent only; loading/error/unavailable do not block —
           the honest unknown-handling the founder set when the dead-end gate was removed in 19c6e8f). */}
       {isSpl && tokenAtaStatus === 'absent' ? (
-        <SolanaAtaSetupCard
+        <AtaSetupCard
+          surface="create"
           asset={unit}
           instrTestID="sol-req-ata"
           btnTestID="btn-sol-req-ata-create"
