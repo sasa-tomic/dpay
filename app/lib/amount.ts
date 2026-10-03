@@ -200,3 +200,46 @@ export function nettedWireRaw(priceRaw: string, feeRaw: string | null): NettedWi
   if (fee >= price) return {ok: false, err: 'fee_covers_price'};
   return {ok: true, wireRaw: (price - fee).toString()};
 }
+
+// ── Exact decimal-string ordering (2026-10-01 audit F11) ────────────────────────────────────────
+//
+// Money figures that arrive as decimal strings ("12.3456", `rawToDecimal`'s shape) were ranked
+// through `Number(a) - Number(b)` — a float compare that misranks beyond 2^53 and at sub-f64
+// precision differences. Both figures always describe the SAME unit (one target asset), so the
+// exact order is a pure string→BigInt exercise: scale both fractions to the wider one, compare.
+
+/** A canonical non-negative decimal string: optional integer part, optional fraction, no sign,
+ *  no exponent ("0", "12", "12.3", "0.0000001"). `rawToDecimal`'s output shape, plus the looser
+ *  spellings ("4.5400", ".5") a caller may hand over. */
+const RE_DECIMAL = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+
+/** Parse a canonical decimal string into {whole, frac} digit strings ('' fraction allowed). */
+function decimalParts(v: string): {whole: string; frac: string} {
+  if (!RE_DECIMAL.test(v)) {
+    throw new TypeError(`cmpDecimalExact: not a decimal string: ${JSON.stringify(v)}`);
+  }
+  const [whole, frac = ''] = v.split('.');
+  return {whole: whole === '' || whole === undefined ? '0' : whole, frac};
+}
+
+/** Exact order of two decimal strings denoting the same unit: -1 | 0 | 1. Throws TypeError on a
+ *  non-decimal input — a broken figure never silently ranks. */
+export function cmpDecimalExact(a: string, b: string): number {
+  const pa = decimalParts(a);
+  const pb = decimalParts(b);
+  const wa = BigInt(pa.whole === '' ? '0' : pa.whole);
+  const wb = BigInt(pb.whole === '' ? '0' : pb.whole);
+  if (wa !== wb) return wa < wb ? -1 : 1;
+  const width = Math.max(pa.frac.length, pb.frac.length);
+  // padEnd, never parseFloat: the fraction compares digit-exactly at full width.
+  const fa = BigInt((pa.frac.padEnd(width, '0') || '0'));
+  const fb = BigInt((pb.frac.padEnd(width, '0') || '0'));
+  return fa === fb ? 0 : fa < fb ? -1 : 1;
+}
+
+/** True iff a canonical decimal string denotes a value > 0 — the exact positivity gate the
+ *  float-based `Number(v) > 0` used to approximate. Same input contract as `cmpDecimalExact`. */
+export function decimalIsPositive(v: string): boolean {
+  const {whole, frac} = decimalParts(v);
+  return BigInt(whole) > 0n || BigInt(frac.padEnd(1, '0') || '0') > 0n;
+}

@@ -76,6 +76,7 @@ import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {gasFundRoutes} from '../routes';
 import {M} from '../i18n';
 import {fmtAssetCompact, parseUserAmount, randNonceHex, rawToDecimal} from '../lib/format';
+import {cmpDecimalExact, decimalIsPositive} from '../lib/amount';
 import {eip55ChecksumBad} from '../lib/eip55';
 import type {Identity} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
@@ -195,7 +196,10 @@ function computeAutoPick(
   chainBundles: Record<string, ChainBundle>,
   evmQuotes: Record<string, EvmBundle>,
 ): AutoPick {
-  const cmp = (a: string, b: string) => Number(a) - Number(b);
+  // EXACT ordering (2026-10-01 audit F11): the ranked figure is money; a `Number(a)-Number(b)`
+  // float compare misranks beyond 2^53 and at sub-f64 precision differences. Every value in a
+  // pool describes the SAME target unit, so the exact decimal-string order is the whole rule.
+  const cmp = cmpDecimalExact;
   type Quoted = {rowId: string; v: string};
   const venueRows = rows.filter(r => r.kind === 'direct' || r.kind === 'solamm' || r.kind === 'cefi' || r.kind === 'evmamm');
   if (venueRows.length > 0) {
@@ -205,7 +209,7 @@ function computeAutoPick(
       if (v != null) quoted.push({rowId: r.rowId, v});
     }
     if (quoted.length === 0) return null;
-    const positive = quoted.filter(x => Number(x.v) > 0);
+    const positive = quoted.filter(x => decimalIsPositive(x.v));
     const pool = positive.length > 0 ? positive : quoted;
     let best = pool[0];
     for (const x of pool.slice(1)) if (cmp(x.v, best.v) > 0) best = x;

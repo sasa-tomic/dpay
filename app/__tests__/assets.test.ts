@@ -542,8 +542,8 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
       solState: {balance: null, status: 'unavailable'},
       tokenStates: {},
     });
-    expect(balances['ic:7']).toEqual({displayText: '0.00 VCHF', status: 'zero', failure: null});
-    expect(balances['ic:8']).toEqual({displayText: '0 ICP', status: 'zero', failure: null});
+    expect(balances['ic:7']).toEqual({displayText: '0.00 VCHF', status: 'zero', failure: null, amountRaw: null});
+    expect(balances['ic:8']).toEqual({displayText: '0 ICP', status: 'zero', failure: null, amountRaw: null});
   });
 
   it('NO Add money / Cash out actions for VCHF/ICP: ramps Unavailable, no minter, not mintable', () => {

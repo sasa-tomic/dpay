@@ -4,6 +4,8 @@ import {
   cmpRaw,
   applyOffline,
   nettedWireRaw,
+  cmpDecimalExact,
+  decimalIsPositive,
 } from '../lib/amount';
 
 // Mirrors `dpay_core::{parse_decimal_to_units, format_units_to_decimal}` and the Python FFI round-
@@ -216,5 +218,54 @@ describe('nettedWireRaw — payee-quoted fee netting (exact-price rule, 2026-09-
   test('throws TypeError on non-digit input (debuggable, no silent NaN)', () => {
     expect(() => nettedWireRaw('abc', '10')).toThrow(TypeError);
     expect(() => nettedWireRaw('100', 'x')).toThrow(TypeError);
+  });
+});
+
+// The MONEY RANKING comparator (2026-10-01 audit F11): every place the app ranks money figures —
+// the convert auto-pick's "highest quoted output" today — must compare EXACTLY. `Number(a)-Number(b)`
+// misranks beyond 2^53 and at sub-float precision differences; these pins freeze the exact
+// decimal-string order the pick relies on.
+describe('cmpDecimalExact — exact decimal-string ordering (no float, ever)', () => {
+  test('equal values compare 0 regardless of trailing-zero spelling', () => {
+    expect(cmpDecimalExact('4.54', '4.54')).toBe(0);
+    expect(cmpDecimalExact('4.5400', '4.54')).toBe(0);
+    expect(cmpDecimalExact('0', '0.0')).toBe(0);
+  });
+
+  test('orders correctly across wildly different scales', () => {
+    expect(cmpDecimalExact('10', '9.999999')).toBe(1);
+    expect(cmpDecimalExact('0.0000001', '0.0000002')).toBe(-1);
+    expect(cmpDecimalExact('12.3456', '12.3456')).toBe(0);
+  });
+
+  test('2^53-precision boundary — where the float compare lies', () => {
+    // 9007199254740993 vs 9007199254740992 differ by 1 unit; Number() collapses them.
+    const a = '9007199254740993';
+    const b = '9007199254740992';
+    expect(Number(a)).toBe(Number(b)); // the float disease, pinned as the reason
+    expect(cmpDecimalExact(a, b)).toBe(1);
+    expect(cmpDecimalExact(b, a)).toBe(-1);
+  });
+
+  test('sub-float precision differences decide', () => {
+    // 0.1 + 2e-20 exceeds f64 resolution at this magnitude: Number says equal.
+    const a = '0.10000000000000000001';
+    const b = '0.1';
+    expect(Number(a)).toBe(Number(b));
+    expect(cmpDecimalExact(a, b)).toBe(1);
+  });
+
+  test('refuses malformed input loudly (a broken quote never ranks)', () => {
+    expect(() => cmpDecimalExact('abc', '1')).toThrow();
+    expect(() => cmpDecimalExact('1', '')).toThrow();
+    expect(() => cmpDecimalExact('1.2.3', '1')).toThrow();
+  });
+});
+
+describe('decimalIsPositive — the auto-pick positivity gate, exact', () => {
+  test('zero in every spelling is not positive; dust is', () => {
+    expect(decimalIsPositive('0')).toBe(false);
+    expect(decimalIsPositive('0.000000')).toBe(false);
+    expect(decimalIsPositive('0.0000001')).toBe(true);
   });
 });
