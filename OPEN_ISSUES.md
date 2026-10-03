@@ -256,6 +256,29 @@ until the blockers land. THE thing that unblocks it:**
 
 ## Retired this prune (2026-09-30 — decision-shaped; do not re-file)
 
+- **Founder UX wave + test-infra hardening (founder 2026-10-02, "clunky setup loop"; gates VERIFIED `c200d4cc`)** —
+  LANDED 2026-10-03, merged ff to main `c200d4cc`. (1) UX: ONE busy line
+  `M.deposit.ata.settingUp` ("Please wait, your account is being set up. This should take
+  1-2 minutes.", 4 locales) unifying busy+live with a no-idle run window
+  (`busy = ataSetupBusy || ataSwapPending`, `824e7976`); failed panel shows the REAL error
+  first plus next steps (`errNextSafe`/`errNextUnknown`, `ataSetupErrKind` held/unknown set
+  only by the record watcher); amount fields grow + font steps down with typed length
+  (`d6cd79f0`, `convertAmountSizing.test.ts`, 7 call sites); duplicated failed-branch dead
+  code deleted (`76e0364f`). (2) Test infra: flow 187/194/209 balance pins moved to the
+  record-lifecycle cefi auto-deposit semantics (`f2ba046e`); `jest.bigint-ipc-env.js` — a
+  failing `expect(BigInt).toBe(BigInt)` carried raw BigInts through jest 29.7's JSON worker
+  serialization outside any test, killing whole suites as "failed to run" (`09d04900`);
+  seeded per-test ceiling `30s x BUDGET_MAX 6 + 30s` (`f81eb387`) and explicit `it()` closers
+  must use `budgetCeiling(ms)`, never `scaled()` frozen at install factor (`a56279cd`);
+  flow 214 kill arm gets one budget-scaled window per phase (`19cb7a51`); flow 223's
+  awaited exact-debit pin (`71e84dbd`) SUPERSEDES the earlier "223 inverted hermeticity"
+  framing — it was a stale pin + an async race, not hermeticity. (3) Root product fix for
+  the recurring 214 kill-arm strand: the convert engine's `inflight` is now
+  `Map<recordId, engineSession>` — a killed session's draining drive is a ghost that blocks
+  nothing; the remounted engine's boot sweep drives the record and only the owner clears
+  its flag (`0b66a47d` RED, `be425a51` fix, `77c9651a` settle-wait pin, `c200d4cc` dead
+  diag export removed).
+
 - **P0 composed-strand + stuck-record waves (founder 2026-10-02, live-device findings)** —
   LANDED 2026-10-02, both merged to main `4157d272`. (1) COMPOSED fund-ic strand (POCO
   evidence `/tmp/opencode/p4`-`p15`: leg-1 settled on-chain, deposit never sent, card idle
