@@ -357,6 +357,35 @@ describe('advanceProviderRecord — the providerRef driver', () => {
 
 // --- the engine: who drives, when, and with what bounds --------------------------------------------
 describe('the engine — every live record driven from wallet load, mounted screen or not', () => {
+  test('a PREVIOUS session\'s in-flight drive never silences the restarted engine\'s boot sweep (2026-10-03 P0 remount strand)', async () => {
+    // The wallet kill + remount: session 1's driveOne for the record is STILL IN FLIGHT when
+    // the wallet unmounts (its provider poll hung) and a fresh session starts. The boot sweep
+    // of the new session must DRIVE the record anyway - and complete it on the venue's own
+    // verdict. Under a session-global in-flight flag the new session's driveOne early-returned
+    // on the GHOST's flag, no timer was ever armed, and the record sat live in the map with no
+    // driver at all: the silent strand the flow tier's 214 kill arm caught four generations
+    // running (store stuck at awaiting_deposit, the venue never polled once).
+    jest.mocked(loadConvertRecords).mockResolvedValue({'cef-1': providerRecord()});
+    // Session 1's boot drive: its provider poll NEVER returns (the kill caught it mid-flight;
+    // a real drive's awaits are bounded, but the session can die long before they drain).
+    jest.mocked(fetchWithTimeout).mockImplementationOnce(() => new Promise<Response>(() => undefined));
+    const stop1 = startConvertResumeEngine(CTX, FAST);
+    await sleep(20); // the ghost drive is in flight, parked inside its hung poll
+    stop1(); // THE KILL: the wallet unmounted; the ghost drive keeps draining in the background
+    // THE REMOUNT: a fresh engine for the SAME wallet. The boot sweep must drive the record
+    // and the venue's settled verdict must land the record - one poll, one completion.
+    jest.mocked(fetchWithTimeout).mockResolvedValue(res({status: 'settled', settleAmount: '0.0495', settleHash: 'sol-1'}) as never);
+    const stop2 = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      expect(fetchWithTimeout).toHaveBeenCalledTimes(2); // the restarted engine polled ONCE
+      expect(convertResumeSnapshot()['cef-1']?.step).toBe('done');
+      expect(jest.mocked(saveConvertRecord)).toHaveBeenCalledWith('pub', expect.objectContaining({id: 'cef-1', step: 'done'}));
+    } finally {
+      stop2();
+    }
+  });
+
   test('start drives EVERY live record: the leg record via executeConvert, the provider record via its statusUrl', async () => {
     jest.mocked(loadConvertRecords).mockResolvedValue({
       'leg-1': legRecord(),
