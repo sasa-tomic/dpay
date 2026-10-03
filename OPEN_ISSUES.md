@@ -43,15 +43,6 @@ a checksummed registry token prepares (`b6c93abd`). The venue may claim "support
   adapter pattern it lands as a second venue row, not a redesign. Value 6 / effort M, ordered
   after the Uniswap V3 adapter.
 
-- **Swap typing, stage 2: make even CCTP-crossing swaps zero-typing (value 5 / effort M).**
-  Stage 1 (shipped `5cc18f64`) defaults the destination to the wallet's own EVM address for
-  payout-only rows (Route A) and demotes manual editing behind "Change destination"; Route
-  B/C (CCTP burn + mint) still require the destination wallet to sign the crossing, so their
-  typed field stays. Stage 2 removes that: device-signed CCTP burn
-  (`approve` + `depositForBurnWithHook`) reusing the existing primitives (`app/evm/claims.ts`
-  calldata signer, `quoteEvmFee`, `eth_sendRawTransaction`), gas-fund retarget to the derived
-  address; WalletConnect handoff stays as the advanced override. D31: one live funds-ledgered
-  trip + node-anvil golden vectors before any "supported" claim.
 - **"My address" chip on send sheets (value 4 / effort S).** `AddressField.tsx` gets a
   one-tap "use my address" affordance so self-cash-out on sends needs no typing either; the
   empty field remains the send-elsewhere path.
@@ -245,6 +236,23 @@ until the blockers land. THE thing that unblocks it:**
   OWN holdings. Nothing dpay pays, holds, or custodies.
 
 ## Retired this prune (2026-09-30 — decision-shaped; do not re-file)
+
+- **Swap-typing stage 2: the device signs its own CCTP burn (value 5/M; gates VERIFIED `0e60f985`)** —
+  LANDED 2026-10-03, merged ff to main `0e60f985` (5 commits, 24 files +894/-161). (1) `27ca0189`:
+  every cross-rail record freezes `burnSigner` ('device' | 'walletconnect') at prepare time, so a
+  record survives restarts without forgetting WHO signs the crossing. (2) `810d1a7c`: the burn
+  executor signs `approve` + `depositForBurnWithHook` on-device (fee-first with a frozen maxFee,
+  gas gate, adoption-by-receipt); WalletConnect handoff stays as the override for those who
+  prefer it. (3) `b0d252a9`: the sheet forks on disclosure - the device-signed path names the
+  wallet as the burner; a refused burn is an honest dead-end copy, 4 locales. (4) `34526684`:
+  flow tier drives the crossing via `installEvmRpcStub` (flows 186/195/200/209 rewritten);
+  CeFi pins 187/194/197/198/199/208/223 untouched. (5) `0e60f985`: the smoke manifest points at
+  `app/__tests__/cctpBurnSigner.test.ts` (house convention: manifest entries resolve against
+  `__tests__/`). Slow-suite rows at the pre-rebase head `a63c724d` (flow 305.3s, test-app
+  323.1s, dirty=no) + full gate chain on merged main (all 8 rows PASS dirty=no, e2e 16.2s,
+  e2e-visual 14.6s, flow 402.2s, test-app 392.2s). Remaining discipline: the live ZCHF->USDC
+  CCTP funds-ledgered trip before any "supported" claim in-app (D31), same as the Uniswap V3
+  precedent.
 
 - **Founder UX wave + test-infra hardening (founder 2026-10-02, "clunky setup loop"; gates VERIFIED `c200d4cc`)** —
   LANDED 2026-10-03, merged ff to main `c200d4cc`. (1) UX: ONE busy line
