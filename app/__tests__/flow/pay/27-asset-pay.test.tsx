@@ -12,6 +12,7 @@
  */
 import {it, expect} from '@jest/globals';
 import {hermeticDescribe} from '../harness/hermetic';
+import {ceiling as budgetCeiling} from '../harness/budget';
 import {
   accountOf, armPayScan, assert, assertEq, assertIncludes, faucetAccount, generateKeypair,
   getBalance, onboardWallet, openBalances,
@@ -71,7 +72,7 @@ hermeticDescribe('flow 27 — asset-pay (ckBTC, per-asset balance gate, ledger u
     expect(ledgerBody).not.toContain('$');
 
     await m.unmount();
-  }, 150_000);
+  }, budgetCeiling(90_000));
 });
 
 hermeticDescribe('flow 31 — ckusdc-pay (6-decimal, byte-exact netted wire, price-exact total)', () => {
@@ -114,5 +115,5 @@ hermeticDescribe('flow 31 — ckusdc-pay (6-decimal, byte-exact netted wire, pri
     void CKUSDC_FEE_RAW;
 
     await m.unmount();
-  }, 150_000);
+  }, budgetCeiling(90_000));
 });

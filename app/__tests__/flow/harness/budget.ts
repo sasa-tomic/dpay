@@ -113,6 +113,17 @@ export function deadline(ms: number): number {
   return Date.now() + scaled(ms);
 }
 
+/** An explicit per-test jest ceiling for a test whose internal waits total ~ms nominal:
+ *  ms x BUDGET_MAX, computed statically - it DOMINATES the worst stretched total instead of
+ *  racing it. (Observed 2026-10-03, flow 214 kill arm: the it() timeout was scaled(300_000),
+ *  FROZEN at the file-install factor x1.293 = 387.9s, while its budgetDeadline waits ran at
+ *  the worker's live monotone high-water - the ceiling fired on a healthy test. Same class
+ *  as the seeded-ceiling race fixed in setupFlow.ts; an explicit it() timeout must use this,
+ *  never scaled().) */
+export function ceiling(ms: number): number {
+  return Math.round(ms * BUDGET_MAX);
+}
+
 /** One compact self-description per worker, for the run log: the formula's inputs and result. */
 export function describeBudget(): string {
   const env = process.env.DPAY_TEST_BUDGET_MULT;

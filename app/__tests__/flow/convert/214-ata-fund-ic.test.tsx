@@ -19,7 +19,7 @@ import {accountOf, onboardSeededUnfunded, openBalances, faucetAccount} from '../
 import type {Mount} from '../harness/mount';
 import {deadline as budgetDeadline} from '../harness/budget';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
-import {scaled as budgetScaled} from '../harness/budget';
+import {ceiling as budgetCeiling} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import bs58 from 'bs58';
 import {
@@ -332,7 +332,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
     } finally {
       await m.unmount().catch(() => undefined);
     }
-  }, budgetScaled(300_000));
+  }, budgetCeiling(300_000));
 
   it('a DIRECT-cefi verdict sends the user-side deposit itself and never strands the order (2026-10-02 live-trip fix)', async () => {
     // The founder's exact trip: ICP money, no SOL, absent accounts - the fitness pick is the
@@ -412,7 +412,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
     } finally {
       await m.unmount().catch(() => undefined);
     }
-  }, budgetScaled(300_000));
+  }, budgetCeiling(300_000));
 
   it('the refuse verdict SURVIVES balance-poll churn - a re-render never un-answers it', async () => {
     // The live-device bug this pins: the model is a useMemo over polled data, so every real
@@ -468,7 +468,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
     } finally {
       await m.unmount().catch(() => undefined);
     }
-  }, budgetScaled(300_000));
+  }, budgetCeiling(300_000));
 
   it('a confirm-time venue refusal renders the REAL cause and never the un-probed idle (2026-10-02 trip fix)', async () => {
     // eslint-disable-next-line no-console
@@ -497,7 +497,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
     } finally {
       await m.unmount().catch(() => undefined);
     }
-  }, budgetScaled(180_000));
+  }, budgetCeiling(180_000));
 
   it('a floated venue minimum at confirm time goes to RE-CONFIRM with a fresh sized plan (2026-10-02 trip fix)', async () => {
     // eslint-disable-next-line no-console
@@ -523,7 +523,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
     } finally {
       await m.unmount().catch(() => undefined);
     }
-  }, budgetScaled(180_000));
+  }, budgetCeiling(180_000));
 
   it('a KILL after the record is persisted strands NOTHING - the engine sends the deposit and the card stays LIVE (2026-10-02 P0)', async () => {
     // The exact silent-strand shape, replayed: the composed run dies after the record is
@@ -621,7 +621,7 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
     } finally {
       await m.unmount().catch(() => undefined);
     }
-  }, budgetScaled(300_000));
+  }, budgetCeiling(300_000));
 
   it('an UNKNOWN deposit poll never returns the run silently - the card stays LIVE and the venue settle completes it (2026-10-02 P0)', async () => {
     // The direct-cefi family's honest unknown: the deposit envelope is submitted but the
@@ -719,5 +719,5 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
     } finally {
       await m.unmount().catch(() => undefined);
     }
-  }, budgetScaled(300_000));
+  }, budgetCeiling(300_000));
 });
