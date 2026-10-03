@@ -446,8 +446,9 @@ describe('the DEVICE-signed burn — the executor signs the crossing itself (sta
     receiptForAny?: {status: string};
     balance?: string;
     circleFail?: boolean;
+    ethCall?: string;
   } = {}): void {
-    const {receipts = {}, receiptForAny, balance = ETH_BAL, circleFail = false} = opts;
+    const {receipts = {}, receiptForAny, balance = ETH_BAL, circleFail = false, ethCall} = opts;
     evmRpcCalls = [];
     sentKinds = [];
     // Receipt verdicts bind to the hash ASKED after each kind's broadcast (the executor
@@ -482,6 +483,9 @@ describe('the DEVICE-signed burn — the executor signs the crossing itself (sta
           }
           if (body.method === 'eth_getBalance') {
             return fakeRes({jsonrpc: '2.0', id: body.id ?? 1, result: balance});
+          }
+          if (body.method === 'eth_call' && ethCall != null) {
+            return fakeRes({jsonrpc: '2.0', id: body.id ?? 1, result: ethCall});
           }
           const defaults: Record<string, unknown> = {
             eth_chainId: '0x1',
@@ -521,6 +525,50 @@ describe('the DEVICE-signed burn — the executor signs the crossing itself (sta
     expect(rec.crossRail!.burnTxHash).toBeUndefined();
     expect(rec.legPlan![5].state).toBe('pending'); // the burn is the crossing drive's job now
     expect(rec.outTx).toBe('77'); // the minter's block index, same evidence as Route A
+  });
+
+  test('a withdraw REFUSAL is verified at the destination before it is believed: delivered → crossing (2026-10-03 live finding)', async () => {
+    const rec = await plannedDeviceRecord();
+    jest.mocked(relayFetch).mockResolvedValue(rowsRes([
+      {currency: 2, from: POOL, to: myPrincipal, amount: '190000000', block: '7', timestamp: NOW()},
+    ]) as never);
+    jest.mocked(submitTransfer)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '3'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '4'} as never)
+      // The live trip's exact shape: the minter's withdraw answered refused with NO decodable
+      // reason - yet the ckUSDC debit and the Ethereum credit both happened on-chain.
+      .mockResolvedValue({kind: 'rejected', reason: '', variant: undefined} as never);
+    // The destination answers: the burn floor IS there (>= MIN_OUT raw).
+    installEvmRpc({ethCall: '0x' + BigInt(MIN_OUT).toString(16)});
+    const out = await executeConvert(rec, {
+      secretHex: SECRET, publicHex: 'aabb', relayUrl: 'http://relay', onUpdate: () => {},
+    }, OPTS);
+    expect(out.step).toBe('crossing'); // the money moved - the crossing continues, never a false refused
+    expect(out.legPlan![4].state).toBe('confirmed');
+    expect(out.failureCode).toBeUndefined();
+  });
+
+  test('a withdraw refusal with NOTHING at the destination stays an honest refused leg', async () => {
+    const rec = await plannedDeviceRecord();
+    jest.mocked(relayFetch).mockResolvedValue(rowsRes([
+      {currency: 2, from: POOL, to: myPrincipal, amount: '190000000', block: '7', timestamp: NOW()},
+    ]) as never);
+    jest.mocked(submitTransfer)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '3'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '4'} as never)
+      .mockResolvedValue({kind: 'rejected', reason: 'insufficient allowance', variant: 'InsufficientAllowance'} as never);
+    installEvmRpc({ethCall: '0x0'});
+    const out = await executeConvert(rec, {
+      secretHex: SECRET, publicHex: 'aabb', relayUrl: 'http://relay', onUpdate: () => {},
+    }, OPTS);
+    expect(out.step).toBe('failed_leg');
+    expect(out.failureCode).toBe('withdraw_refused');
+    expect(out.failureDetail).toContain('insufficient allowance');
+    expect(out.legPlan![4].state).toBe('failed');
   });
 
   test('the crossing drive signs approve + depositForBurnWithHook with the DEVICE key and parks back on crossing', async () => {

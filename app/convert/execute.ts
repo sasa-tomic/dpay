@@ -1,6 +1,9 @@
 import {DpayCore} from '../services/native';
 import {relayFetch} from '../services/relay';
 import {submitTransfer as railSubmitTransfer, railBalanceOf} from '../services/rail';
+import {USDC_ERC20_ADDRESS} from '../cctp';
+import {ethCall} from '../evm/rpc';
+import {evmRpcUrls} from '../evm/endpoints';
 import {CONVERT_PROBE_WINDOW_ROWS, CONVERT_ENGINE_TEST_OPTS} from '../config/convert';
 import {venueDisplayName, venueEndpointOf} from '../config/venues';
 import {saveTxNote} from '../services/txNotes';
@@ -319,6 +322,22 @@ function withLegState(rec: ConvertRecord, i: number, state: LegState, patch: Par
  *    stuck; every other planned shape probes the hop only.
  *  - unknown outcomes park on `stuck` (the honest unknown; the resume engine's slow watch
  *    resolves a hop row into `failed_leg`, never done — spec §8). */
+/** The destination verdict for a cross-rail withdraw whose reply reads refused: `eth_call`
+ *  balanceOf(USDC, the record's EVM destination) against the chain the minter delivers into.
+ *  True only when the balance covers the record's burn floor. Unreachable/unreadable → false
+ *  (the honest refusal stands; a probe that cannot answer never invents a delivery). */
+async function crossRailHopDelivered(rec: ConvertRecord, minOut: string): Promise<boolean> {
+  const dest = rec.destAddress;
+  if (dest == null || !/^\d+$/.test(minOut) || !/^0x[0-9a-fA-F]{40}$/.test(dest)) return false;
+  try {
+    const word = dest.toLowerCase().replace(/^0x/, '').padStart(64, '0');
+    const raw = await ethCall(evmRpcUrls(1), USDC_ERC20_ADDRESS, `0x70a08231${word}`);
+    return /^\s*0x[0-9a-fA-F]*$/.test(raw) && BigInt(raw) >= BigInt(minOut);
+  } catch {
+    return false;
+  }
+}
+
 async function executePlannedConvert(
   start: ConvertRecord,
   deps: ConvertExecutorDeps,
@@ -604,6 +623,20 @@ async function executePlannedConvert(
       // holds the HOP asset in-wallet — failed_leg, and the standalone Withdraw flow is the
       // named exit. (An approve_gas refusal after the hop approve settled is benign: the
       // hop allowance simply dies unused at its expiry.)
+      // THE CROSS-RAIL EXCEPTION (2026-10-03 live finding): a withdraw REPLY that reads
+      // refused is not proof the minter refused. The withdraw's whole job is moving value
+      // onto Ethereum, and the live trip proved the misclassification: the minter executed
+      // the burn (ckUSDC debit + USDC credit, both verified on-chain) while the poll answered
+      // rejected with an empty reason. So a cross-rail withdraw refusal is VERIFY-DON'T-GUESS:
+      // ask the DESTINATION. Delivered (USDC balance >= the burn floor) → the leg confirmed
+      // and the crossing continues exactly like the settled fork; undelivered/unreachable →
+      // the honest refusal stands. Never resubmits either way.
+      if (plan.kind === 'withdraw_erc20' && rec.crossRail != null
+          && await crossRailHopDelivered(rec, await convertRecordMinOut(rec))) {
+        return tools.advance(withLegState(rec, i, 'confirmed', {
+          step: rec.crossRail.burnSigner === 'device' ? 'crossing' : 'awaiting_external',
+        }));
+      }
       return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'withdraw_refused', failureDetail: detail}));
     }
     if (plan.kind === 'swap') {
