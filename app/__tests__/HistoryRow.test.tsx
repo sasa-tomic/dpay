@@ -17,6 +17,7 @@ import {HistoryRow, TxnReceipt, receiptText} from '../components/HistoryRow';
 import {buildSelectableAssets} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {BUNDLED_VENUES, setRuntimePoolNames} from '../config/venues';
+import {C} from '../config/palette';
 import {M} from '../i18n';
 import type {AssetId, Txn} from '../lib/types';
 
@@ -107,8 +108,49 @@ describe('HistoryRow — one row, both rails, own units', () => {
     act(() => { tree.unmount(); });
   });
 
+  test('the IC reconciliation nonce stays OFF the row (2026-10-02 audit); the receipt keeps it', () => {
+    const t = txn('ic:0', '2500', TS_NEW, {who: PRINCIPAL_PREFIX, memo: NONCE_HEX});
+    const row = mount(t, 2);
+    const all = texts(row);
+    expect(all).not.toContain(NONCE_HEX); // the raw third line no longer crowds the row
+    expect(all).toContain(M.wallet.ledger.to(PRINCIPAL_PREFIX)); // the who-line is untouched
+    expect(all).toContain('Aug 24'); // the time still renders
+    act(() => { row.unmount(); });
+    // The reference survives where a dispute needs it: the receipt and its copied text.
+    expect(texts(mountReceipt(t))).toContain(NONCE_HEX);
+    expect(receiptText(t, CATALOG, ASSETS)).toContain(NONCE_HEX);
+  });
+
+  test('a pending Solana row keeps its signature off the row too (machine reference, not status)', () => {
+    const tree = mount(txn('solana:SOL', '5000', TS_NEW, {
+      pending: true, memo: '5Nq1FakeSig11111111111111111111111111111111111111111111111111111111', ledgerRef: '',
+    }));
+    expect(texts(tree).some(s => s.includes('5Nq1FakeSig'))).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a settled Solana status line still renders (the one human text the rail itself carries)', () => {
+    const tree = mount(txn('solana:SOL', '5000', TS_NEW, {memo: M.wallet.ledger.failed}));
+    expect(texts(tree)).toContain(M.wallet.ledger.failed);
+    act(() => { tree.unmount(); });
+  });
+
+  test('practice-money amounts render in the quiet ink; real credits keep the settled green', () => {
+    const amountColor = (tree: renderer.ReactTestRenderer, i: number): string => {
+      const node = tree.root.findByProps({testID: `hist-amt-${i}`});
+      const flat = Array.isArray(node.props.style) ? Object.assign({}, ...node.props.style) : node.props.style;
+      return flat.color as string;
+    };
+    const demo = mount(txn('ic:0', '2500', TS_NEW, {dir: 'in'}), 0);
+    expect(amountColor(demo, 0)).toBe(C.sub); // play money never wears the real-income green
+    act(() => { demo.unmount(); });
+    const real = mount(txn('ic:7', '2500000', TS_NEW, {dir: 'in'}), 1);
+    expect(amountColor(real, 1)).toBe(C.ok);
+    act(() => { real.unmount(); });
+  });
+
   test('memo and time carry the row index as hist-memo/hist-time by default (the Ledger anchors)', () => {
-    const tree = mount(txn('ic:0', '2500', TS_NEW, {memo: 'coffee'}), 2);
+    const tree = mountNoted(txn('ic:0', '2500', TS_NEW, {memo: NONCE_HEX}), {msg: 'coffee'}, 2);
     const ids = [...new Set(tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
     expect(ids).toContain('hist-memo-2');
     expect(ids).toContain('hist-time-2');
@@ -116,7 +158,7 @@ describe('HistoryRow — one row, both rails, own units', () => {
   });
 
   test('testPrefix re-namespaces the same row for the Home feed (home-hist-*, never hist-*)', () => {
-    const tree = mount(txn('ic:0', '2500', TS_NEW, {memo: 'coffee'}), 1, 'home-hist');
+    const tree = mountNoted(txn('ic:0', '2500', TS_NEW, {memo: NONCE_HEX}), {msg: 'coffee'}, 1, 'home-hist');
     const ids = [...new Set(tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
     expect(ids).toContain('home-hist-memo-1');
     expect(ids).toContain('home-hist-time-1');
@@ -312,11 +354,11 @@ describe('HistoryRow — the device-saved annotation replaces display text, neve
     act(() => { tree.unmount(); });
   });
 
-  test('without a note the row renders exactly its ledger truth (fallbacks intact)', () => {
+  test('without a note the row renders its ledger truth (who/time fallbacks intact; nonce row-off)', () => {
     const tree = mount(txn('ic:0', '2500', TS_NEW, {who: PRINCIPAL_PREFIX, memo: NONCE_HEX}));
     const all = texts(tree);
     expect(all).toContain(M.wallet.ledger.to(PRINCIPAL_PREFIX));
-    expect(all).toContain(NONCE_HEX); // the reconciliation reference, visible in the log
+    expect(all).not.toContain(NONCE_HEX); // the reconciliation reference is a receipt fact now
     act(() => { tree.unmount(); });
   });
 

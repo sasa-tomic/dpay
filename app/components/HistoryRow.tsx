@@ -3,7 +3,7 @@ import {S} from '../styles';
 import {M} from '../i18n';
 import {C} from '../config/palette';
 import {fmtCurrencyAmountCompact, type CurrencyDescriptor} from '../config/catalog';
-import {type SelectableAsset} from '../config/assets';
+import {DEMO_ASSET_ID, type SelectableAsset} from '../config/assets';
 import {fmtAssetCompact} from '../lib/format';
 import {venuePartyOf} from '../config/venues';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
@@ -92,10 +92,22 @@ export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress,
   // person's principal (nothing known about it) renders exactly as before.
   const party = venuePartyOf(t.counterparty);
   const whoTxt = note?.who || (party?.kind === 'venue' ? party.name : '') || t.who || '—';
-  const memoTxt = note?.msg || t.memo;
+  // The memo LINE carries only text a human reads: the device-saved message, or the Solana
+  // rail's failed-broadcast status (the one human text a rail itself puts in this slot).
+  // Machine references stay OFF the row - the IC reconciliation nonce and the pending SOL
+  // signature crowded narrow screens as a raw third line (2026-10-02 audit) - and live on
+  // where a dispute needs them: the receipt's Reference line and its copied text.
+  const rowAsset = assets.find(a => a.id === t.assetId);
+  const memoTxt = note?.msg || (rowAsset?.protocol === 'solana' && t.pending !== true ? t.memo : '');
   // Founder rule 2026-09-14: the fee rides the row ONLY as this annotation line, never in the
   // headline. Hidden when the fee is unknown or zero.
   const feeTxt = fmtNoteFee(t, catalog, assets, note);
+  // Practice money wears the quiet ink in BOTH directions (2026-10-02 audit): the ok green is
+  // the real-income signal, and a ∂ faucet credit read as real money at a glance. The row
+  // still names its counterparty ("from Demo funds"), so nothing is hidden - the color just
+  // stops claiming the settled-success tier for valueless money.
+  const practice = rowAsset?.id === DEMO_ASSET_ID;
+  const amtColor = practice ? C.sub : (t.dir === 'out' ? C.ink : C.ok);
   return (
     <Pressable
       testID={`${testPrefix}-row-${i}`}
@@ -136,7 +148,7 @@ export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress,
           <IconClock size={14} color={C.warn} />
         </View>
       ) : null}
-      <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]} testID={`${testPrefix}-amt-${i}`}>{amtTxt}</Text>
+      <Text style={[S.histAmt, {color: amtColor}]} testID={`${testPrefix}-amt-${i}`}>{amtTxt}</Text>
     </Pressable>
   );
 }
