@@ -3,10 +3,10 @@
  * the IC rail; friendly names are GONE with the facade settlement).
  *
  * Gates the regression that still matters: counterparties render as SHORT PRINCIPAL TEXT (8-char
- * prefix), never a full principal, never the raw hex pubkey; the MEMO (the request nonce the payer
- * bound) is visible on the history row — the reconciliation key; and the online direct payment
- * updates balance + history but does NOT flip the merchant's "Received" (that flip is
- * merchant-app-submission only — flows 08/21).
+ * prefix), never a full principal, never the raw hex pubkey; the reconciliation nonce is NOT on
+ * the history row (2026-10-02 audit: machine references stay off the list) — it lives on the
+ * row's receipt Reference line; and the online direct payment updates balance + history but does
+ * NOT flip the merchant's "Received" (that flip is merchant-app-submission only — flows 08/21).
  */
 import {it, expect} from '@jest/globals';
 import {hermeticDescribe} from '../harness/hermetic';
@@ -49,7 +49,9 @@ hermeticDescribe('flow 61 — the rail renders short principals + the memo (name
     // --- Ledger truth: A credited. ----------------------------------------------------------------
     expect(await getBalance(alicePub, 0)).toBe('12500');
 
-    // --- A's history: SHORT PRINCIPAL + memo visible; no full principal, no hex, no Received flip. -
+    // --- A's history: SHORT PRINCIPAL only; the reconciliation nonce is a RECEIPT fact now. -------
+    // (2026-10-02 audit: the raw nonce third-line crowded the row; the reconciliation key
+    // lives where a dispute looks - the receipt's Reference line and its copied text.)
     await m.driver.click('tab-transactions', {timeoutMs: 5000});
     assert(await m.driver.waitForText('Recent', {timeoutMs: 8000}), 'history should render');
     assert(await m.driver.waitForText(bobPrincipal.slice(0, 8), {timeoutMs: 8000}),
@@ -58,8 +60,24 @@ hermeticDescribe('flow 61 — the rail renders short principals + the memo (name
     assertIncludes(body, bobPrincipal.slice(0, 8), 'history shows the short principal counterparty');
     expect(body).not.toContain(bobPrincipal);
     expect(body).not.toContain(bob.publicHex);
-    assertIncludes(body, nonceHex.slice(0, 8), 'the memo (request nonce prefix) is visible — the reconciliation key');
+    expect(body).not.toContain(nonceHex.slice(0, 8)); // machine references stay off the list row
     expect(body).not.toMatch(/Received ∂/); // the flip is merchant-app-submission only (flows 08/21)
+
+    // The row opens the receipt; the FULL nonce is the reconciliation key, right where a
+    // merchant copies their proof.
+    let opened = false;
+    for (let i = 0; i < 12 && !opened; i++) {
+      const id = `hist-row-${i}`;
+      if (!m.driver.isPresent(id)) break;
+      if (m.driver.readText(id).includes(bobPrincipal.slice(0, 8))) {
+        await m.driver.click(id, {timeoutMs: 5000});
+        opened = true;
+      }
+    }
+    assert(opened, 'the payer row should open its receipt');
+    await m.driver.findByTestID('txn-receipt', {timeoutMs: 5000});
+    assertIncludes(m.driver.readText('txn-receipt-ref'), nonceHex, 'the receipt carries the reconciliation nonce');
+    await m.driver.click('btn-txn-receipt-close', {timeoutMs: 4000});
 
     await m.unmount();
   }, 120_000);

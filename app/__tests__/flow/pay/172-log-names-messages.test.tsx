@@ -316,9 +316,9 @@ hermeticDescribe('flow 172 — device-saved notes name the transaction log, acro
     assert(await m.driver.waitForText('∂7.00', {timeoutMs: 15_000}), '(d) the plain transfer lands in the ledger');
     const histBodyD = m.driver.bodyText();
     assertIncludes(histBodyD, payer4Principal.slice(0, 8), '(d) the un-annotated row keeps the short principal');
-    assertIncludes(histBodyD, nonceD.slice(0, 8), '(d) the row keeps the hex nonce prefix (reconciliation key)');
+    expect(histBodyD).not.toContain(nonceD.slice(0, 8)); // machine references stay off the row (2026-10-02 audit)
 
-    await clickRowWith(nonceD.slice(0, 8));
+    await clickRowWith(payer4Principal.slice(0, 8)); // the row anchor is the principal now, not the nonce
     await m.driver.findByTestID('txn-receipt', {timeoutMs: 5000});
     expect(m.driver.isPresent('txn-receipt-peer')).toBe(false); // NO Peer line
     expect(m.driver.isPresent('txn-receipt-note')).toBe(false); // NO Note line
