@@ -145,6 +145,13 @@ export type SolanaSwapLeg = {
 export type CrossRailInfo = {
   /** 'cctp' = Route B (ends at USDC on Solana); 'cctp_sol' = Route C (+ the Jupiter leg). */
   kind: 'cctp' | 'cctp_sol';
+  /** Swap-typing stage 2 (2026-10-03): who signs the burn. 'device' = the destination IS the
+   *  device's own derived EVM address, so the device key signs approve + depositForBurnWithHook
+   *  itself and the record never parks at `awaiting_external`. 'external' = the user named
+   *  another wallet (Change destination); the handoff panel owns the burn, exactly as before.
+   *  Optional + additive: every record written before stage 2 hydrates byte-identically and
+   *  reads as 'external' (the handoff is the legacy behavior). */
+  burnSigner?: 'device' | 'external';
   /** The device-derived Solana address — the owner whose USDC ATA receives the mint. */
   solAddress: string;
   /** The USDC ATA (base58) the burn names as its mint recipient (display + the credit

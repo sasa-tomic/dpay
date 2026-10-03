@@ -210,6 +210,7 @@ describe('prepareMultihopConvertRecord — the crossRail block (Routes B/C)', ()
     const rec = await plannedCrossRecord();
     expect(rec.crossRail).toEqual({
       kind: 'cctp_sol',
+      burnSigner: 'external', // the typed DEST is not the device's own address
       solAddress: SOL_ADDRESS,
       mintRecipientAta: ATA_B58,
       maxFeeSubunits: MAX_FEE,
@@ -233,6 +234,7 @@ describe('prepareMultihopConvertRecord — the crossRail block (Routes B/C)', ()
       secretHex: SECRET, quote: hopQuote(), math: hopMath(), route, destAddress: DEST,
     });
     expect(rec.crossRail!.kind).toBe('cctp');
+    expect(rec.crossRail!.burnSigner).toBe('external');
     expect(rec.crossRail!.solVenueId).toBeUndefined();
     expect(rec.destSymbol).toBe('USDC');
     expect(rec.destNetwork).toBe('Solana');
@@ -240,6 +242,22 @@ describe('prepareMultihopConvertRecord — the crossRail block (Routes B/C)', ()
     expect(rec.legPlan!.map(p => p.kind)).toEqual([
       'approve', 'swap', 'approve', 'approve_gas', 'withdraw_erc20', 'cctp_burn',
     ]);
+  });
+
+  test('stage 2: the device-derived EVM address as destination freezes burnSigner device', async () => {
+    const {deriveEvmKeypair, toChecksumAddress} = await import('../evm/identity');
+    const own = deriveEvmKeypair(SECRET).address;
+    const route = multihopRoutesFrom(BUNDLED, 8)[2];
+    const rec = await prepareMultihopConvertRecord({
+      secretHex: SECRET, quote: hopQuote(), math: hopMath(), route, destAddress: own,
+    });
+    expect(rec.crossRail!.burnSigner).toBe('device');
+    // The upper-case checksummed spelling of the SAME address is still the device (the
+    // compare is case-insensitive) — a display convention never changes who signs.
+    const rec2 = await prepareMultihopConvertRecord({
+      secretHex: SECRET, quote: hopQuote(), math: hopMath(), route, destAddress: toChecksumAddress(own),
+    });
+    expect(rec2.crossRail!.burnSigner).toBe('device');
   });
 
   test('Circle fee unreachable → nothing signed (fail-closed)', async () => {
@@ -259,6 +277,22 @@ describe('hydration — the cross-rail matrix', () => {
     expect(h.legPlan!.map(p => p.kind)).toEqual(rec.legPlan!.map(p => p.kind));
     expect(h.legs).toHaveLength(5);
     expect(h.destAddress).toBe(DEST);
+  });
+
+  test('stage 2: the frozen signer round-trips; absent stays byte-identical; bad values drop', async () => {
+    const rec = await plannedCrossRecord(); // external (typed DEST)
+    expect(rec.crossRail!.burnSigner).toBe('external');
+    expect(hydrateConvertStore({[rec.id]: JSON.parse(JSON.stringify(rec))})[rec.id]?.crossRail?.burnSigner).toBe('external');
+    // A pre-stage-2 record (no burnSigner) hydrates with the field ABSENT — byte-identical.
+    const legacy = JSON.parse(JSON.stringify(rec));
+    delete legacy.crossRail.burnSigner;
+    const h = hydrateConvertStore({[rec.id]: legacy})[rec.id]!;
+    expect(h.crossRail).not.toHaveProperty('burnSigner');
+    // A value this build never wrote is a corrupt shape — the record is dropped, never
+    // improvised into a signer.
+    const bad = JSON.parse(JSON.stringify(rec));
+    bad.crossRail.burnSigner = 'metamask';
+    expect(hydrateConvertStore({[rec.id]: bad})).toEqual({});
   });
 
   test('the solanaLeg coexists with legs+legPlan ONLY on a cross-rail record', async () => {
@@ -354,6 +388,17 @@ describe('buildCctpHandoff — the exact bytes the user\'s wallet signs', () => 
   test('only an awaiting_external record builds a handoff', async () => {
     const rec = await plannedCrossRecord(); // still 'approving'
     await expect(buildCctpHandoff(SECRET, rec)).rejects.toThrow();
+  });
+
+  test('a DEVICE-signed record never builds a handoff (stage 2: the device signs its own burn)', async () => {
+    const {deriveEvmKeypair} = await import('../evm/identity');
+    const own = deriveEvmKeypair(SECRET).address;
+    const route = multihopRoutesFrom(BUNDLED, 8)[2];
+    const rec = await prepareMultihopConvertRecord({
+      secretHex: SECRET, quote: hopQuote(), math: hopMath(), route, destAddress: own,
+    });
+    const parked = {...rec, step: 'awaiting_external' as const};
+    await expect(buildCctpHandoff(SECRET, parked)).rejects.toThrow('device-signed');
   });
 });
 
@@ -587,6 +632,7 @@ describe('the EURC widening — Route C to a registered USDC-pair SPL out', () =
     const eurc = await plannedEurcRecord();
     expect(eurc.crossRail).toEqual({
       kind: 'cctp_sol',
+      burnSigner: 'external',
       solAddress: SOL_ADDRESS,
       mintRecipientAta: ATA_B58,
       maxFeeSubunits: MAX_FEE,
@@ -608,6 +654,7 @@ describe('the EURC widening — Route C to a registered USDC-pair SPL out', () =
     const sol = await plannedCrossRecord();
     expect(sol.crossRail).toEqual({
       kind: 'cctp_sol',
+      burnSigner: 'external',
       solAddress: SOL_ADDRESS,
       mintRecipientAta: ATA_B58,
       maxFeeSubunits: MAX_FEE,

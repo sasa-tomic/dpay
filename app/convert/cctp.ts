@@ -98,6 +98,11 @@ export async function buildCctpHandoff(secretHex: string, rec: ConvertRecord): P
   if (rec.crossRail == null || rec.step !== 'awaiting_external') {
     throw new Error('record is not awaiting the external signature');
   }
+  if (rec.crossRail.burnSigner === 'device') {
+    // Stage 2: a device-signed record's burn is the executor's job, never a handoff — this
+    // surface asking an external wallet to sign would misdirect the user's funds' custody.
+    throw new Error('record is device-signed — the handoff is not its signing surface');
+  }
   const burnAmount = BigInt(await convertRecordMinOut(rec));
   const kp = deriveSolanaKeypair(secretHex);
   const ata = deriveAta(kp.address, USDC_MINT_ADDRESS);

@@ -55,6 +55,8 @@ export const SMOKE_FILES: readonly string[] = [
   'solana-account-decode.test.ts',
   // the record-lifecycle cefi-deposit once-only gate (2026-10-02 P0)
   'cefiDepositGate.test.ts',
+  // who signs the CCTP burn leg: device-signed own-address crossing vs the external handoff
+  'cctpBurnSigner.test.ts',
   // destination validation + transport pins that keep bytes off dpay origins
   'destination.test.ts',
   'icpBoundary.test.ts',

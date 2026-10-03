@@ -67,6 +67,22 @@ export const CCTP_FINALITY_STANDARD = 2000;
  *  — LIVE-VERIFIED against mainnet TokenMessengerV2 (staged reverts prove the arg path). */
 export const SELECTOR_DEPOSIT_FOR_BURN_WITH_HOOK = '779b432d';
 
+// ── who signs the burn (swap-typing stage 2, 2026-10-03) ───────────────────────────────────────
+
+/** Which key signs the CCTP burn leg. 'device' = the burn lands at the wallet's OWN derived EVM
+ *  address, so the DEVICE key signs approve + depositForBurnWithHook itself (the device has held
+ *  its EVM key since D31) - no external wallet, no handoff. 'external' = the user named another
+ *  wallet via Change destination; that wallet owns the USDC and signs the crossing (the
+ *  WalletConnect handoff stays as the advanced override). */
+export type CctpBurnSigner = 'device' | 'external';
+
+/** The signer decision, as a pure function of the frozen destination vs the device's own
+ *  derivation. Case-insensitive on purpose: EVM hex case is display noise (the EIP-55
+ *  checksum is a display convention, never a different address). */
+export function resolveCctpBurnSigner(destAddress: string, deviceEvmAddress: string): CctpBurnSigner {
+  return destAddress.trim().toLowerCase() === deviceEvmAddress.trim().toLowerCase() ? 'device' : 'external';
+}
+
 // ── word helpers (32-byte big-endian ABI words, 64 lowercase hex chars, no 0x) ─────────────────
 
 function uint256ToWord(n: bigint): string {

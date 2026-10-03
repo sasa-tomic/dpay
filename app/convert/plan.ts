@@ -15,7 +15,8 @@ import {deriveSolanaKeypair} from '../solana/identity';
 import {deriveAta} from '../solana/spl';
 import bs58 from 'bs58';
 import {USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
-import {CCTP_FINALITY_FAST, cctpMaxFee, cctpMintFloor} from '../cctp';
+import {CCTP_FINALITY_FAST, cctpMaxFee, cctpMintFloor, resolveCctpBurnSigner} from '../cctp';
+import {deriveEvmKeypair} from '../evm/identity';
 import {M} from '../i18n';
 import {
   type ConvertRecord,
@@ -252,12 +253,16 @@ export async function prepareMultihopConvertRecord(args: {
 
   // The CROSS-RAIL WIDENING (2026-09-16, Routes B/C): when the route composes a CCTP leg,
   // the five IC legs land USDC at the user's EVM address and the record EXTENDS with the
-  // external-signature burn leg (+ Route C's final Jupiter leg). Nothing here signs: the
-  // burn is the USER's own EVM wallet's transaction — dpay only freezes the facts (the
-  // device-derived SOL address, its USDC ATA as the mint recipient) and prices the census
-  // with Circle's live fee. The calldata itself is built at handoff time from this record.
+  // burn leg (+ Route C's final Jupiter leg). The burn's SIGNER is frozen here (swap-typing
+  // stage 2, 2026-10-03): a destination that IS the device's own derived EVM address means
+  // the device key signs the burn itself (burnSigner 'device' - the executor drives approve +
+  // depositForBurnWithHook through the EVM rail; no handoff, no typed field); any other
+  // destination freezes 'external' and the WalletConnect handoff stays the advanced override.
+  // The device-derived SOL address + its USDC ATA (the mint recipient) are frozen either way,
+  // and the census is priced with Circle's live fee. The calldata itself is built at burn
+  // time (device path) or handoff time (external path) from this record.
   // FEE-BEFORE-SIGNING (honest order): the fee is fetched BEFORE any leg is signed, so an
-  // unreachable Circle census leaves NOTHING signed — same fail-closed rule as route gas.
+  // unreachable Circle census leaves NOTHING signed - same fail-closed rule as route gas.
   let crossRail: CrossRailInfo | undefined;
   if (route.crossRail != null) {
     if (route.crossRail.cctp.finalityThreshold !== CCTP_FINALITY_FAST) {
@@ -271,6 +276,9 @@ export async function prepareMultihopConvertRecord(args: {
     const maxFee = cctpMaxFee(BigInt(burnAmount), fee);
     crossRail = {
       kind: route.crossRail.sol != null ? 'cctp_sol' : 'cctp',
+      // The signer decision: a pure compare against the device's own derivation, frozen so
+      // every later driver (executor, handoff, hydration) agrees on who owns the burn.
+      burnSigner: resolveCctpBurnSigner(destAddress, deriveEvmKeypair(secretHex).address),
       solAddress: kp.address,
       mintRecipientAta: ataB58,
       maxFeeSubunits: maxFee.toString(),
@@ -377,9 +385,10 @@ export async function prepareMultihopConvertRecord(args: {
       {kind: 'approve', canister: route.hop.ledger, fee: route.hop.fee, state: 'pending'},
       {kind: 'approve_gas', canister: route.burn.gasLedger, fee: gasLedgerFee, state: 'pending'},
       {kind: 'withdraw_erc20', canister: route.burn.minter, fee: '', state: 'pending'},
-      // The cross-rail tail: the external-signature burn (no IC canister — the user's own
-      // wallet is the counterparty) and, on Route C, the final device-signed Jupiter leg.
-      // Both start pending; the executor never submits them via the IC rail.
+      // The cross-rail tail: the CCTP burn (no IC canister — device-signed when the
+      // destination is the device's own EVM address, the WalletConnect handoff otherwise)
+      // and, on Route C, the final device-signed Jupiter leg. Both start pending; the
+      // executor never submits them via the IC rail.
       ...(crossRail != null ? [{kind: 'cctp_burn' as const, canister: '', fee: '', state: 'pending' as const}] : []),
       ...(crossRail?.kind === 'cctp_sol' ? [{kind: 'sol_swap' as const, canister: '', fee: '', state: 'pending' as const}] : []),
     ],

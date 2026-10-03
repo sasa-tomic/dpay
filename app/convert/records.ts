@@ -282,6 +282,13 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     if ((solOutMint != null) !== (solOutDecimals != null)) return null;
     if (solExpectedSubunits != null && (solOutMint == null || solExpectedLamports != null)) return null;
     if (solOutMint != null && solExpectedLamports != null) return null;
+    // Swap-typing stage 2 (2026-10-03): the frozen signer. Absent = a pre-stage-2 record,
+    // byte-identical (the handoff behavior). Present but not one of the two values is a
+    // shape this build never wrote — drop the record, never improvise a signer.
+    const burnSigner = c.burnSigner === undefined
+      ? undefined
+      : c.burnSigner === 'device' || c.burnSigner === 'external' ? c.burnSigner : null;
+    if (burnSigner === null) return null;
     crossRail = {
       kind: c.kind,
       solAddress: c.solAddress,
@@ -293,6 +300,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
       mintSubunits: optStr('mintSubunits'),
       solVenueId: optStr('solVenueId'),
       solExpectedLamports,
+      ...(burnSigner != null ? {burnSigner} : {}),
       ...(solOutMint != null && solOutDecimals != null ? {solOutMint, solOutDecimals} : {}),
       ...(solExpectedSubunits != null ? {solExpectedSubunits} : {}),
     };
