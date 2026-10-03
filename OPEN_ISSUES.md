@@ -34,15 +34,6 @@ fixes landed on the way: the native-ETH destination quotes the chain WETH instea
 the quoter an empty token (`3d307ce5`), and the pair red line compares rail-canonical ids so
 a checksummed registry token prepares (`b6c93abd`). The venue may claim "supported".
 
-- **NEXT TOPIC (founder 2026-09-30): CoW Swap is the SECOND EVM venue — build BOTH, in that
-  order (founder directive same day: target 2+ venues per currency, so no single venue is a
-  point of failure).** Uniswap V3 has its D31 live proof (2026-10-03); CoW
-  Swap follows now (D31 rule satisfied). It is
-  mechanically heavier (EIP-712 signed off-chain orders, solver settlement in
-  seconds-to-minutes, an order API to poll): fine for convert, useless for checkout. Under the
-  adapter pattern it lands as a second venue row, not a redesign. Value 6 / effort M, ordered
-  after the Uniswap V3 adapter.
-
 - **"My address" chip on send sheets (value 4 / effort S).** `AddressField.tsx` gets a
   one-tap "use my address" affordance so self-cash-out on sends needs no typing either; the
   empty field remains the send-elsewhere path.
@@ -236,6 +227,22 @@ until the blockers land. THE thing that unblocks it:**
   OWN holdings. Nothing dpay pays, holds, or custodies.
 
 ## Retired this prune (2026-09-30 — decision-shaped; do not re-file)
+
+- **CoW Swap = the SECOND EVM venue (value 6/M; gates VERIFIED `92a2f515`)** — LANDED 2026-10-03,
+  merged ff to main `92a2f515` (5 commits, 29 files +3054/-63). `34bbe73e`: the CoW Protocol
+  order-API proxy in the relay (transport like every other venue call, no key on device).
+  `25c72a9e`: the PURE order surface — EIP-712 signing over domain 'Gnosis Protocol' v2
+  (chainId 1, verifyingContract `0x9008D19f58AAbD9eD0D60971565AA8510560ab41`), off-chain UID
+  derivation, wire shapes; gasless for the trader (the solver pays gas, the fee comes off the
+  sell amount and is surfaced exactly). `01617ce2`: the venue row `cowswap-eth` in the EVM AMM
+  registry (ZCHF on Ethereum chainId 1), convert-matrix regen included. `3c2768d2`: the convert
+  path — prepare, driver, record widening, the order UID frozen in the record, resume recovers
+  submitted-but-unconfirmed orders by polling the order API, honest terminal on
+  expired/cancelled, i18n x4. `92a2f515`: intent-sheet + state-panel wiring and the hermetic
+  flow 226 pin. Rows at `92a2f515` dirty=no: flow 421.1s, test-app 291.1s, e2e 17.5s,
+  e2e-visual 15.1s, verify composite, all PASS — overall VERIFIED. D31 discipline: the venue
+  ships UNPROVEN until ONE live funds-ledgered ZCHF order through the real app (same rule as
+  Uniswap V3 pre-trip); float has no EVM gas budget for a second live trip right now.
 
 - **Swap-typing stage 2: the device signs its own CCTP burn (value 5/M; gates VERIFIED `0e60f985`)** —
   LANDED 2026-10-03, merged ff to main `0e60f985` (5 commits, 24 files +894/-161). (1) `27ca0189`:
