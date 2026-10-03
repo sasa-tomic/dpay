@@ -24,7 +24,7 @@ import {installHeapProbe} from './heapProbe';
 import bs58 from 'bs58';
 import {
   disposeConvertStubs, enableSolRail, installSideShiftStub, setSideShiftStatus,
-  deriveSolanaKeypair,
+  deriveSolanaKeypair, sideShiftStubState,
 } from './convertStubs';
 import type {SolanaRpcStub} from '../../../solana/rpc';
 
@@ -580,13 +580,23 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
       // budget-scaled window: the resumed engine re-sends the deposit (submit polls) and
       // then parks the record, all on load-stretched timers - a window shared with the
       // persist wait above left the later phases an empty budget under full-suite load.
+      // THE ADOPTION EVIDENCE (2026-10-03): parking alone proved nothing - the store can
+      // carry awaiting_deposit from the KILLED session's still-draining executor while the
+      // resumed engine never drives the record at all (the silent strand this arm exists to
+      // catch: the venue was never polled ONCE, the card rendered a stale snapshot, and the
+      // settle window expired watching a dead store). So the exit ALSO requires the venue
+      // stub to have answered at least one status read - the resumed engine's own poll, the
+      // only caller of this endpoint in the process - before the settle may be armed.
       const liveDeadline = budgetDeadline(STORE_TIMEOUT_MS);
       let rec: StoreRecord | null = null;
       for (;;) {
         const store = await storeRecords(account!.publicHex);
         rec = Object.values(store).find(r => r.composedDeposit != null) ?? null;
-        if (rec?.step === 'awaiting_deposit') break;
-        if (Date.now() > liveDeadline) throw new Error(`the killed record never reached awaiting_deposit (steps: ${Object.values(store).map(r => r.step).join(',')})`);
+        const polled = (sideShiftStubState()?.statusCalls.length ?? 0) > 0;
+        if (rec?.step === 'awaiting_deposit' && polled) break;
+        if (Date.now() > liveDeadline) {
+          throw new Error(`the killed record never reached a POLLED awaiting_deposit (steps: ${Object.values(store).map(r => r.step).join(',')}; venue status reads: ${sideShiftStubState()?.statusCalls.length ?? 0})`);
+        }
         await new Promise(r => setTimeout(r, 500));
       }
       expect(rec!.composedDeposit!.venueId).toBe('sideshift');
@@ -615,7 +625,9 @@ hermeticDescribe('flow 214 - the fund-ic setup: IC-side money completes the SOL 
         const store = await storeRecords(account!.publicHex);
         rec = Object.values(store).find(r => r.composedDeposit != null) ?? null;
         if (rec?.step === 'done') break;
-        if (Date.now() > doneDeadline) throw new Error(`the killed record never completed on the settle (steps: ${Object.values(store).map(r => r.step).join(',')})`);
+        if (Date.now() > doneDeadline) {
+          throw new Error(`the killed record never completed on the settle (steps: ${Object.values(store).map(r => r.step).join(',')}; venue status reads: ${sideShiftStubState()?.statusCalls.length ?? 0}, stub now: ${sideShiftStubState()?.status ?? '?'})`);
+        }
         await new Promise(r => setTimeout(r, 500));
       }
     } finally {
