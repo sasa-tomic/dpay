@@ -538,6 +538,16 @@ export type ConvertMessages = {
     legCctpBurn: (sym: string, network: string) => string;
     legSolSwap: (venue: string, sym: string) => string;
     destAddressCrossNote: string;
+    /** Swap-typing stage 2 (2026-10-03): the destination IS the device's own address - the
+     *  device signs the crossing itself, so the disclosure forks to this pair and the
+     *  address note drops the paste ask. The WalletConnect handoff stays behind the
+     *  "Change destination" control (an edited external address restores the old copy). */
+    deviceSignTitle: string;
+    deviceSignBody: string;
+    destAddressDeviceNote: string;
+    /** Stage 2's dead end: the device burn refused at its own gate AFTER the IC legs ran -
+     *  the USDC is at the record's EVM address, never "in this wallet". */
+    burnFailedBody: (address: string, reason: string) => string;
     /** Gas-fund offer (2026-09-20): shown only when the wallet's ckETH cannot cover the
      *  route's gas AND the destination address is checksum-verified AND re-typed once.
      *  One number per line; the offer is the engine's composed fund route or self-funding. */
@@ -928,6 +938,15 @@ export const convertEn: ConvertMessages = {
     legCctpBurn: (sym, network) => `Cross ${sym} to ${network} via Circle (you sign this in your wallet)`,
     legSolSwap: (venue, sym) => `Swap for ${sym} on ${venue}`,
     destAddressCrossNote: 'This address also signs the crossing \u2014 paste an address you control.',
+    // Swap-typing stage 2 (2026-10-03): the destination IS the device's own address, so the
+    // device signs the crossing itself - the disclosure and the address note fork on it.
+    deviceSignTitle: 'The crossing signs on this device',
+    deviceSignBody: 'This wallet\u2019s own key signs the Circle crossing - no other wallet, no extra step. Keep a little ETH at the payout address for the crossing\u2019s gas.',
+    destAddressDeviceNote: 'The crossing signs on this device - keep a little ETH here for its gas.',
+    // The stage-2 dead end: the device burn refused at its own gate (gas short, a reverted
+    // leg, a refused broadcast) AFTER the five IC legs ran - the USDC is at the EVM address.
+    burnFailedBody: (address, reason) =>
+      `The Circle crossing was refused before anything burned. Your USDC sits at your own Ethereum address ${address}${reason ? `: ${reason}` : ''} - send it anywhere, or run this route again later.`,
     checksumMismatch: 'Checksum mismatch',
     retypeAddress: 'Re-type the address',
     retypeMismatch: 'Does not match',

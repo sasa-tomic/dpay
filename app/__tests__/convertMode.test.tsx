@@ -1018,15 +1018,17 @@ describe('multihop — the composed routes are Other-venues rows under the auto-
   test('Route B pays out to the wallet\u2019s OWN address by default; editing sits behind the advanced control', async () => {
     const tree = await mountConvert('250000000', '1');
     await pickRow(tree, ROUTE_B_ROW);
-    // The external-signature exception, disclosed at tap 1 (brief 5.4.1).
-    expect(textOf(tree, 'convert-external-sign-note')).toContain(convertEn.externalSignTitle);
+    // Stage 2: the default destination IS the device's own address, so the crossing signs
+    // HERE - the handoff disclosure forks to the device-signing line and the address note
+    // drops the paste ask (nothing to paste, a little ETH instead).
+    expect(textOf(tree, 'convert-external-sign-note')).toBe(convertEn.crossrail.deviceSignTitle + ' ' + convertEn.crossrail.deviceSignBody);
     // The founder directive (2026-09-30): the payout address IS the wallet's own derived
-    // address — shown, never typed on entry. No input, no re-type; the crossing note keeps
-    // its signer warning; manual destinations wait behind the ONE advanced control.
+    // address — shown, never typed on entry. No input, no re-type; manual destinations wait
+    // behind the ONE advanced control.
     expect(present(tree, 'convert-dest-address')).toBe(false);
     expect(present(tree, 'convert-dest-reenter')).toBe(false);
     expect(textOf(tree, 'convert-dest-shown')).toBe(OWN_EVM);
-    expect(textOf(tree, 'convert-dest-cross-note')).toBe(convertEn.crossrail.destAddressCrossNote);
+    expect(textOf(tree, 'convert-dest-cross-note')).toBe(convertEn.crossrail.destAddressDeviceNote);
     expect(present(tree, 'btn-convert-dest-change')).toBe(true);
     expect(present(tree, 'convert-route-min')).toBe(true);
     expect(present(tree, 'convert-min-out')).toBe(false);
@@ -1041,6 +1043,25 @@ describe('multihop — the composed routes are Other-venues rows under the auto-
       node(tree, 'convert-dest-address')!.props.onChangeText('0x1234');
     });
     expect(present(tree, 'convert-dest-address-invalid')).toBe(true);
+  });
+
+  test('an edited EXTERNAL destination restores the handoff disclosure (the advanced override)', async () => {
+    const tree = await mountConvert('250000000', '1');
+    await pickRow(tree, ROUTE_B_ROW);
+    await act(async () => {
+      node(tree, 'btn-convert-dest-change')!.props.onPress();
+    });
+    await act(async () => {
+      node(tree, 'convert-dest-address')!.props.onChangeText(DEST);
+    });
+    await act(async () => {
+      node(tree, 'convert-dest-reenter')!.props.onChangeText(DEST);
+    });
+    // A named external wallet owns the USDC and signs the crossing: the WalletConnect
+    // handoff disclosure is back, verbatim, and the address note asks for a controlled
+    // address again.
+    expect(textOf(tree, 'convert-external-sign-note')).toBe(convertEn.externalSignTitle + ' ' + convertEn.externalSignBody);
+    expect(textOf(tree, 'convert-dest-cross-note')).toBe(convertEn.crossrail.destAddressCrossNote);
   });
 
   test('editing the destination keeps the checksum + re-type gates; the derived value auto-satisfies', async () => {

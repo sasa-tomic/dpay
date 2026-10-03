@@ -329,6 +329,11 @@ export const convertFr: ConvertMessages = {
     legCctpBurn: (sym, network) => `Emmener ${sym} vers ${network} via Circle (vous signez ça dans votre portefeuille)`,
     legSolSwap: (venue, sym) => `Échanger contre ${sym} sur ${venue}`,
     destAddressCrossNote: 'Cette adresse signe aussi la traversée — collez une adresse que vous contrôlez.',
+    deviceSignTitle: 'La traversée signe sur cet appareil',
+    deviceSignBody: 'La clé de ce portefeuille signe elle-même la traversée Circle - pas d\u2019autre portefeuille, pas d\u2019étape en plus. Gardez un peu d\u2019ETH à l\u2019adresse de paiement pour le gaz de la traversée.',
+    destAddressDeviceNote: 'La traversée signe sur cet appareil - gardez ici un peu d\u2019ETH pour son gaz.',
+    burnFailedBody: (address, reason) =>
+      `La traversée Circle a été refusée avant tout burn. Votre USDC est à votre propre adresse Ethereum ${address}${reason ? `: ${reason}` : ''} - envoyez-le où vous voulez ou refaites cette route plus tard.`,
     checksumMismatch: 'Erreur de checksum',
     retypeAddress: 'Retapez l\u2019adresse',
     retypeMismatch: 'Ne correspond pas',

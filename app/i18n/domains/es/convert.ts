@@ -329,6 +329,11 @@ export const convertEs: ConvertMessages = {
     legCctpBurn: (sym, network) => `Llevar ${sym} a ${network} vía Circle (esto lo firmas en tu billetera)`,
     legSolSwap: (venue, sym) => `Cambiar a ${sym} en ${venue}`,
     destAddressCrossNote: 'Esta dirección también firma el cruce — pega una dirección que controles.',
+    deviceSignTitle: 'El cruce firma en este dispositivo',
+    deviceSignBody: 'La clave de esta propia billetera firma el cruce de Circle - sin otra billetera, sin paso extra. Deja un poco de ETH en la dirección de pago para el gas del cruce.',
+    destAddressDeviceNote: 'El cruce firma en este dispositivo - deja aquí un poco de ETH para su gas.',
+    burnFailedBody: (address, reason) =>
+      `El cruce de Circle fue rechazado antes de quemar nada. Tu USDC está en tu propia dirección de Ethereum ${address}${reason ? `: ${reason}` : ''} - envíalo donde quieras o repite esta ruta más tarde.`,
     checksumMismatch: 'Error de checksum',
     retypeAddress: 'Vuelve a escribir la dirección',
     retypeMismatch: 'No coincide',

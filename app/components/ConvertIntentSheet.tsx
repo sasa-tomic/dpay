@@ -1328,6 +1328,10 @@ export function ConvertIntentSheet({
 
   // ── Derived display figures ──────────────────────────────────────────────────────────────
   const crossInfo = crossRow != null ? crossRow.route.crossRail ?? null : null;
+  // Swap-typing stage 2: the fork key. A cross-rail row whose destination is still the
+  // device's own derived address signs its crossing on-device; the fork collapses the
+  // moment the user names an external wallet behind "Change destination".
+  const destOwnCross = crossInfo != null && destOwn;
   const sourceBalanceLine = sourceCurrency != null
     ? currencyBalances[sourceCurrency]?.displayText ?? '—'
     : (balanceRaw != null ? fmtAssetCompact(balanceRaw, inDecimals, inSym) : null);
@@ -1918,12 +1922,13 @@ export function ConvertIntentSheet({
             </View>
           ) : null}
 
-          {/* The external-signature exception, disclosed at tap 1 (brief 5.4.1): a picked
-              crossrail route is the one path whose final leg signs OUTSIDE this device. */}
+          {/* The crossing disclosure, forked by the frozen signer (swap-typing stage 2):
+              the device's OWN address as destination means the device signs the crossing
+              itself; any named external wallet keeps the handoff warning verbatim. */}
           {routeMode ? (
             <View testID="convert-external-sign-note">
-              <Text style={S.convertChecklistWarn}>{M.convert.externalSignTitle}</Text>
-              <Text style={S.convertChecklistLine}>{M.convert.externalSignBody}</Text>
+              <Text style={S.convertChecklistWarn}>{destOwnCross ? M.convert.crossrail.deviceSignTitle : M.convert.externalSignTitle}</Text>
+              <Text style={S.convertChecklistLine}>{destOwnCross ? M.convert.crossrail.deviceSignBody : M.convert.externalSignBody}</Text>
             </View>
           ) : null}
 
@@ -1993,7 +1998,7 @@ export function ConvertIntentSheet({
                 </View>
               )}
               {crossInfo != null ? (
-                <Text testID="convert-dest-cross-note" style={S.convertMetaLine}>{M.convert.crossrail.destAddressCrossNote}</Text>
+                <Text testID="convert-dest-cross-note" style={S.convertMetaLine}>{destOwnCross ? M.convert.crossrail.destAddressDeviceNote : M.convert.crossrail.destAddressCrossNote}</Text>
               ) : (
                 <Text testID="convert-dest-payout-note" style={S.convertMetaLine}>{M.convert.multihop.destPayoutNote}</Text>
               )}

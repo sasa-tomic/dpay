@@ -330,6 +330,11 @@ export const convertDe: ConvertMessages = {
     legCctpBurn: (sym, network) => `${sym} über Circle nach ${network} bringen (du signierst das in deiner Wallet)`,
     legSolSwap: (venue, sym) => `Auf ${venue} in ${sym} tauschen`,
     destAddressCrossNote: 'Diese Adresse signiert auch die Überquerung — füge eine Adresse ein, die du kontrollierst.',
+    deviceSignTitle: 'Die Überquerung signiert auf diesem Gerät',
+    deviceSignBody: 'Der eigene Schlüssel dieser Wallet signiert die Circle-Überquerung - keine andere Wallet, kein zusätzlicher Schritt. Lass etwas ETH an der Auszahlungsadresse für das Gas der Überquerung liegen.',
+    destAddressDeviceNote: 'Die Überquerung signiert auf diesem Gerät - lass hier etwas ETH für ihr Gas liegen.',
+    burnFailedBody: (address, reason) =>
+      `Die Circle-Überquerung wurde abgelehnt, bevor etwas verbrannt wurde. Dein USDC liegt an deiner eigenen Ethereum-Adresse ${address}${reason ? `: ${reason}` : ''} - sende es beliebig oder führe diese Route später erneut aus.`,
     checksumMismatch: 'Prüfsummenfehler',
     retypeAddress: 'Adresse erneut eingeben',
     retypeMismatch: 'Stimmt nicht überein',

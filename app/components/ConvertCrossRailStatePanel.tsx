@@ -457,7 +457,15 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
 
       {record.step === 'failed_leg' ? (
         <View testID="convert-failed-leg">
-          {record.failureCode === 'external_declined' ? (
+          {record.failureCode === 'burn_refused' ? (
+            /* Stage 2's device burn refused at its own gate (gas short, a reverted leg, a
+                refused broadcast): the five IC legs DID run, so the USDC sits at the EVM
+                address - the copy names it, never the lying "in this wallet" generic. */
+            <>
+              <Text style={S.convertStateTitle}>{M.convert.multihop.failedLegTitle}</Text>
+              <Text style={S.convertStateBody}>{M.convert.crossrail.burnFailedBody(record.destAddress ?? '', record.failureDetail ?? '')}</Text>
+            </>
+          ) : record.failureCode === 'external_declined' ? (
             /* The user walked away from the wallet step: nothing crossed; the USDC is at
                 their OWN Ethereum address — an address they control, not a dead end. On a
                 gas-funded record BOTH stranded assets get their whereabouts named. */
