@@ -407,6 +407,19 @@ export function solanaAmmVenueForMint(mint: string): VenueEntry | null {
   );
 }
 
+// The solana_amm venues trading `mint` against WRAPPED SOL, in REGISTRY ORDER — the ATA-fund
+// swap's candidate list (2026-10-01 audit F8): the wallet's quote seam asks EVERY one of these
+// and answers the highest quoted SOL output, because the first registry row is not a quote and
+// must never decide an autonomous money move. Registry order is enumeration (and the equal-
+// output tie-break via stable venue_id upstream), never a ranking. Testnet rows are kept out —
+// a real wallet's setup funds at mainnet venues only.
+export function wrappedSolVenuesForMint(mint: string): readonly VenueEntry[] {
+  return registeredVenues().filter(
+    v => v.kind === 'solana_amm' && !v.testnet
+      && v.pair_ledgers.includes(mint) && v.pair_ledgers.includes(WRAPPED_SOL_MINT_ADDRESS),
+  );
+}
+
 /** The cefi venue's OTHER-side rail id for this deposit ledger: what actually arrives
  *  (a mint for the Solana rail, a principal for IC). This is the cross-rail widening —
  *  the convert screen's destination rows for CeFi venues are keyed by it. Null when the

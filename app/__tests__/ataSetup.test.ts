@@ -187,10 +187,11 @@ describe('planAtaSetup - the fund-ic branch (no SPL source, IC-side money funds 
     expect(BigInt(sized.outFloor)).toBeGreaterThanOrEqual(4_098_560n);
   });
 
-  test('QUOTE FITNESS: at an equal floor the SMALLER input wins; a full tie keeps registry order', async () => {
+  test('QUOTE FITNESS: at an equal floor the SMALLER input wins; a full tie keeps the stable key', async () => {
     // Constant-floor seam: every input answers the same SOL floor (above the target), so each
     // candidate's walk only shrinks its input - the smaller starting balance lands the same
-    // floor with a smaller input and must win; identical balances tie into registry order.
+    // floor with a smaller input and must win; identical walks tie into the STABLE currencyKey
+    // (ic:3 < ic:4), never the walk seat (audit F15).
     const a = icSource({currencyKey: 'ic:3', symbol: 'A', decimals: 8, rawAmount: '600000000'});
     const b = icSource({currencyKey: 'ic:4', symbol: 'B', decimals: 8, rawAmount: '500000000'});
     const plan = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [a, b]});
@@ -201,7 +202,7 @@ describe('planAtaSetup - the fund-ic branch (no SPL source, IC-side money funds 
     const tie = planAtaSetup({targets: [absent()], solBalance: '0', sources: [], icSources: [b, icSource({currencyKey: 'ic:3', symbol: 'A', decimals: 8, rawAmount: '500000000'})]});
     if (tie.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
     const tied = await sizeAtaIcFundPlan({plan: tie, solKnown: '0', quote: constantFloor});
-    expect(tied?.source.symbol).toBe('B'); // identical walks: the registry-first seat holds
+    expect(tied?.source.symbol).toBe('A'); // identical walks: the stable key (ic:3) holds, not the first seat
   });
 
   test('a zero or unmeasured IC balance is not a candidate (only a measured positive one is)', () => {
@@ -407,7 +408,7 @@ describe('sizeAtaFundPlan — the injected-quote sizing walk', () => {
       quote: async (_source, inRaw) => {
         calls.push(inRaw);
         const out = BigInt(inRaw) * 16n;
-        return {outAmount: out.toString(), otherAmountThreshold: out.toString()};
+        return {outAmount: out.toString(), otherAmountThreshold: out.toString(), venueId: 'ven-a'};
       },
     });
     expect(sized).not.toBeNull();
@@ -425,10 +426,26 @@ describe('sizeAtaFundPlan — the injected-quote sizing walk', () => {
       solKnown: '0',
       quote: async (_source, inRaw) => {
         const out = (BigInt(inRaw) * 1n) / 1_000_000_000n; // ~0.000001 SOL per 5 USDC — far short
-        return {outAmount: out.toString(), otherAmountThreshold: out.toString()};
+        return {outAmount: out.toString(), otherAmountThreshold: out.toString(), venueId: 'ven-a'};
       },
     });
     expect(sized).toBeNull();
+  });
+
+  test('the winning seam VENUE rides through to the sized plan (audit F8)', async () => {
+    // The confirm re-quotes the sizing's OWN venue - a sized floor is never held against a
+    // different venue's fresh rate - so sized.venueId must carry the answering venue's id.
+    const sized = await sizeAtaFundPlan({
+      plan,
+      solKnown: '0',
+      quote: async source => ({
+        outAmount: '5000000',
+        otherAmountThreshold: '5000000',
+        venueId: source.symbol === 'X' ? 'ven-x' : 'ven-usdc',
+      }),
+    });
+    expect(sized?.source.symbol).toBe('USDC');
+    expect(sized?.venueId).toBe('ven-usdc');
   });
 
   test('an unquotable candidate (venue refused / minimum too small) is skipped, not a crash', async () => {
@@ -448,7 +465,7 @@ describe('sizeAtaFundPlan — the injected-quote sizing walk', () => {
       solKnown: shortSol,
       quote: async (_source, inRaw) => {
         const out = BigInt(inRaw) * 16n;
-        return {outAmount: out.toString(), otherAmountThreshold: out.toString()};
+        return {outAmount: out.toString(), otherAmountThreshold: out.toString(), venueId: 'ven-a'};
       },
     });
     expect(sized).not.toBeNull();
@@ -476,9 +493,51 @@ describe('sizeAtaFundPlan — the injected-quote sizing walk', () => {
       quote: async source => ({
         outAmount: '5000000',
         otherAmountThreshold: source.symbol === 'X' ? '4500000' : '5000000',
+        venueId: 'ven-a',
       }),
     });
     expect(sized?.source.symbol).toBe('USDC');
+  });
+
+  test('an EXACT fitness tie breaks on the stable id, never list position (audit F15)', async () => {
+    // Two candidates, identical balance, identical quoted floor and input. Every economically
+    // visible fact ties, so the pick must be a function of the CANDIDATES, not of the order the
+    // caller happened to walk them in: both orders must name the same source.
+    const quote = async () => ({outAmount: '5000000', otherAmountThreshold: '5000000', venueId: 'ven-a'});
+    const planAFirst = planAtaSetup({
+      targets: [absent()], solBalance: '0',
+      sources: [funded(), funded({mint: EURC, symbol: 'EURC'})],
+    });
+    const planEFirst = planAtaSetup({
+      targets: [absent()], solBalance: '0',
+      sources: [funded({mint: EURC, symbol: 'EURC'}), funded()],
+    });
+    if (planAFirst.kind !== 'fund' || planEFirst.kind !== 'fund') throw new Error('fixture: expected fund');
+    const a = await sizeAtaFundPlan({plan: planAFirst, solKnown: '0', quote});
+    const b = await sizeAtaFundPlan({plan: planEFirst, solKnown: '0', quote});
+    expect(a?.source.mint).toBe(b?.source.mint);
+    // …and the winner is the lexicographically smaller mint, whichever end it entered from.
+    expect(a?.source.mint).toBe([...new Set([a?.source.mint, b?.source.mint])].sort()[0]);
+  });
+});
+
+describe('sizeAtaIcFundPlan - the IC twin', () => {
+  test('an EXACT fitness tie breaks on the currencyKey, never list position (audit F15)', async () => {
+    const plan = planAtaSetup({
+      targets: [absent()], solBalance: '0', sources: [],
+      icSources: [
+        icSource({currencyKey: 'ic:9', symbol: 'B', rawAmount: '2000000000'}),
+        icSource({currencyKey: 'ic:7', symbol: 'A', rawAmount: '2000000000'}),
+      ],
+    });
+    if (plan.kind !== 'fund-ic') throw new Error('fixture: expected fund-ic');
+    const sized = await sizeAtaIcFundPlan({
+      plan, solKnown: '0',
+      quote: async () => ({kind: 'quote', outLamports: '5000000'}),
+    });
+    // Identical floors, identical inputs: the stable id decides ('ic:7'), not walk position
+    // (the smaller key sits SECOND in this fixture).
+    expect(sized?.source.currencyKey).toBe('ic:7');
   });
 });
 

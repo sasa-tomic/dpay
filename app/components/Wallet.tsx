@@ -18,7 +18,7 @@ import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILITIES, type RelayCapabilities} from '../services/relay';
 import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
-import {setRuntimePoolNames, registeredVenues, venueOfId, type VenueEntry} from '../config/venues';
+import {setRuntimePoolNames, registeredVenues, venueOfId, wrappedSolVenuesForMint, type VenueEntry} from '../config/venues';
 import {ataConfirmPlan, ataPlanAfterFundShort, ataPlanSignature, ataRecordErrLine, cefiDepositOutstanding, planAtaSetup, sendCefiDepositForRecord, sizeAtaFundPlan, sizeAtaIcFundPlan, type AtaFundSource, type AtaIcFundSource, type AtaIcQuote, type AtaRouteAnswer, type SizedAtaFund, type SizedAtaIcFund} from '../lib/ataSetup';
 import {prepareTransfer as railPrepareTransfer, prepareLegacyTransfer as railPrepareLegacyTransfer, decodeLegacyReply as railDecodeLegacyReply, submitTransfer as railSubmitTransfer} from '../services/rail';
 import {fetchJupiterQuote} from '../services/jupiter';
@@ -825,11 +825,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       .filter(a => tokenStates[a.mint!]?.status === 'balance')
       .map(a => ({mint: a.mint!, symbol: a.symbol, decimals: a.decimals, amount: tokenStates[a.mint!]?.amount ?? null, status: 'balance' as const}));
     // The IC-side funding candidates (fund-ic): every VISIBLE mainnet catalog row with a
-    // MEASURED positive balance and at least one registered route to SOL, in catalog order -
-    // the order is tie-break data for the fitness pick, never a ranking (2026-10-01 audit
+    // MEASURED positive balance and at least one registered route to SOL (2026-10-01 audit
     // F5: a HIDDEN currency's money is not setup fuel - the walk spends only what the
-    // wallet's own list shows). The RAW polled balance - the sizer re-checks against live
-    // quotes anyway.
+    // wallet's own list shows). Catalog order here is WALK ENUMERATION only - the fitness
+    // pick is position-free (an exact tie breaks on the candidate's stable currencyKey, F15),
+    // so no money decision rides on where a row sat. The RAW polled balance - the sizer
+    // re-checks against live quotes anyway.
     const visibleCurrencyIds = new Set(assets.flatMap(a => {
       if (a.protocol !== 'ic') return [];
       const c = currencyOfAsset(a);
@@ -859,16 +860,30 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // The plan's VALUE signature - stable across poll churn (the model's object identity is
   // not). This is the latch key AND the probe's measurement key; nothing keys on identity.
   const ataPlanSig = useMemo(() => ataPlanSignature(ataSetupModel), [ataSetupModel]);
-  // The injected quote seam: the registered wrapped-SOL venue for a mint, quoted through the
-  // relay proxy. Returns the full verbatim quote (the executor needs the raw object to sign);
-  // null = unquotable (refused / too small / unreachable).
+  // The injected quote seam: EVERY registered wrapped-SOL venue for a mint, quoted through the
+  // relay proxy, answering the BEST quote (highest SOL output — the one comparable unit; audit
+  // F8, the same rule the fund-ic seam canonized: one venue's refusal or thin book is never the
+  // candidate's answer, and registry position is never a quote). The answer carries the venue
+  // id so the confirm re-quotes the SAME venue its floor came from. null = unquotable at every
+  // venue (all refused / too small / unreachable).
   const quoteAtaFund = useCallback(async (source: AtaFundSource, inRaw: string) => {
-    const venue = registeredVenues().find(v =>
-      v.kind === 'solana_amm' && !v.testnet
-      && v.pair_ledgers.includes(source.mint) && v.pair_ledgers.includes(WRAPPED_SOL_MINT_ADDRESS));
-    if (venue == null) return null;
-    const res = await fetchJupiterQuote(relayUrl, venue, source.mint, WRAPPED_SOL_MINT_ADDRESS, inRaw, CONVERT_SLIPPAGE_BPS_DEFAULT);
-    return res.ok ? res.quote : null;
+    const venues = wrappedSolVenuesForMint(source.mint);
+    if (venues.length === 0) return null;
+    let best: {outAmount: string; otherAmountThreshold: string; venueId: string} | null = null;
+    for (const venue of venues) {
+      try {
+        const res = await fetchJupiterQuote(relayUrl, venue, source.mint, WRAPPED_SOL_MINT_ADDRESS, inRaw, CONVERT_SLIPPAGE_BPS_DEFAULT);
+        if (!res.ok) continue; // one venue's refusal is one venue's answer, never the candidate's
+        const out = /^\d+$/.test(res.quote.outAmount) ? BigInt(res.quote.outAmount) : null;
+        if (out == null) continue;
+        if (best == null || out > BigInt(best.outAmount)) {
+          best = {outAmount: res.quote.outAmount, otherAmountThreshold: res.quote.otherAmountThreshold, venueId: venue.venue_id};
+        }
+      } catch {
+        continue; // unreachable venue - the next one's turn
+      }
+    }
+    return best;
   }, [relayUrl]);
   // The fund-ic quote seam: the convert engine's OWN quote path for the candidate's route to
   // SOL, in the shape `sizeAtaIcFundPlan` consumes. A below-minimum venue verdict is mapped
@@ -1165,11 +1180,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     try {
       if (sized != null && plan.kind === 'fund') {
         // The fund leg — a REAL user spend, consented one press ago. The sizing quote is
-        // seconds old; re-quote fresh at the SAME sized input and hold it to the plan's
-        // floor (a moved venue rate refuses instead of swapping blind).
-        const venue = registeredVenues().find(v =>
-          v.kind === 'solana_amm' && !v.testnet
-          && v.pair_ledgers.includes(sized.source.mint) && v.pair_ledgers.includes(WRAPPED_SOL_MINT_ADDRESS));
+        // seconds old; re-quote fresh AT THE SIZING'S OWN VENUE (audit F8 — the sized floor
+        // came from that venue's book, so only its fresh rate may be held against it) at the
+        // SAME sized input; a moved rate refuses instead of swapping blind.
+        const venue = venueOfId(sized.venueId);
         if (venue == null) throw new Error(M.deposit.ata.fundShort(sized.source.symbol));
         const res = await fetchJupiterQuote(relayUrl, venue, sized.source.mint, WRAPPED_SOL_MINT_ADDRESS, sized.inAmount, CONVERT_SLIPPAGE_BPS_DEFAULT);
         const solNow = /^\d+$/.test(solState.balance ?? '') ? BigInt(solState.balance!) : 0n;

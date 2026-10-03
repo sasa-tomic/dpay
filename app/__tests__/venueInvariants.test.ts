@@ -611,7 +611,7 @@ import {
   getSolBlockHeight, getSolSignatureStatus, getSolTokenCredit, quoteSolMessageFee, submitRawSolTx,
 } from '../solana';
 import {executeSolanaConvert, prepareSolanaConvertRecord} from '../convert';
-import {solanaAmmVenueForMint, solanaVenuesForMint, icAmmVenueForPair} from '../config/venues';
+import {solanaAmmVenueForMint, solanaVenuesForMint, icAmmVenueForPair, wrappedSolVenuesForMint} from '../config/venues';
 import {deriveSolanaKeypair} from '../solana/identity';
 import {deriveAta} from '../solana/spl';
 import {assembleMessage, hexToBytes} from '../solana/tx';
@@ -713,6 +713,28 @@ describe('venue invariants — solana_amm (V11: Jupiter reaches the screen)', ()
     // jupiter-usdc-eurc (2026-09-19, EUR↔USD completion) makes USDC and EURC two-destination
     // mints too: their SOL-pair row first (registry order), the rail-local FX venue second.
     expect(solanaVenuesForMint(USDC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter', 'jupiter-usdc-eurc']);
+  });
+
+  test('wrappedSolVenuesForMint enumerates EVERY venue pairing the mint with wrapped SOL (audit F8)', () => {
+    // The ATA-fund seam asks ALL of these and answers the best quoted SOL output; the first
+    // registry row must never decide an autonomous money move. Both bundled Jupiter rows pair
+    // their token with the wrapped mint.
+    expect(wrappedSolVenuesForMint(USDC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter']);
+    expect(wrappedSolVenuesForMint(EURC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter-eurc']);
+    // A runtime overlay with TWO venues on one pair returns BOTH, registry order: the seam's
+    // ask-all rule has a real candidate list to walk.
+    setRuntimeVenues([
+      {venue_id: 'jupiter', display_name: 'Jupiter', kind: 'solana_amm', endpoint: 'https://quote-api.jup.ag', pair_ledgers: [WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS], testnet: false, disclosure_key: 'jupiter'},
+      {venue_id: 'jupiter-2', display_name: 'Jupiter 2', kind: 'solana_amm', endpoint: 'https://quote2.jup.ag', pair_ledgers: [USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS], testnet: false, disclosure_key: 'jupiter'},
+    ]);
+    expect(wrappedSolVenuesForMint(USDC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter', 'jupiter-2']);
+    setRuntimeVenues(null);
+    // Testnet rows never qualify, and an IC ledger is not a mint.
+    setRuntimeVenues([{venue_id: 'jupiter-testnet', display_name: 'Jupiter (test)', kind: 'solana_amm', endpoint: 'https://t.jup.ag', pair_ledgers: [WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS], testnet: true, disclosure_key: 'jupiter'}]);
+    expect(wrappedSolVenuesForMint(USDC_MINT_ADDRESS)).toEqual([]);
+    setRuntimeVenues(null);
+    expect(wrappedSolVenuesForMint(ICP_LEDGER)).toEqual([]);
+    // EURC's own rows: the SOL-pair venue first (registry order), the rail-local FX venue second.
     expect(solanaVenuesForMint(EURC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter-eurc', 'jupiter-usdc-eurc']);
   });
 

@@ -29,9 +29,9 @@
 //                     EVERY candidate is sized (the seam's SOL output is the one comparable
 //                     unit - never a raw cross-token balance ranking, the no-FX-quote red
 //                     line), and the winner is picked by QUOTE FITNESS: highest SOL floor,
-//                     then the smallest input at an equal floor, the caller's registry order
-//                     as the final tie-break - the exact policy the convert surface's
-//                     computeAutoPick canonizes.
+//                     then the smallest input at an equal floor, the candidate's stable id
+//                     (mint) as the final tie-break - a function of the CANDIDATES, never of
+//                     walk position (2026-10-01 audit F15: position is not policy).
 //
 //   sizeAtaIcFundPlan - the fund-ic twin, same fitness over the IC candidates: per candidate,
 //                     quote the full balance into SOL through the caller's seam (the convert
@@ -48,11 +48,10 @@
 // conversion over a REGISTERED venue - the no-custody/no-cut red lines are inherited from
 // the convert engine, never re-stated here.
 
-import {registeredVenues} from '../config/venues';
+import {wrappedSolVenuesForMint} from '../config/venues';
 import {ICP_MAINNET_LEDGER} from '../config/currency';
 import {M} from '../i18n';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
-import {WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 import {isTerminalConvertStep, type ConvertStep} from '../convert/types';
 import {bytesToHex} from '@noble/hashes/utils';
 import {utf8ToBytes} from './base64url';
@@ -102,14 +101,6 @@ export function ataPlanAfterFundShort<P extends AtaSetupPlan>(plan: P): P | {kin
  *  themselves are already inside `costLamports` (per-mint rent + fee). */
 export const ATA_FUND_BUFFER_LAMPORTS = 2n * SOL_FEE_LAMPORTS;
 
-/** Registered solana_amm venues pairing `mint` with wrapped SOL, registry order (never ranked). */
-function wrappedSolVenuesFor(mint: string): boolean {
-  return registeredVenues().some(v =>
-    v.kind === 'solana_amm' && !v.testnet
-    && v.pair_ledgers.includes(mint) && v.pair_ledgers.includes(WRAPPED_SOL_MINT_ADDRESS),
-  );
-}
-
 const rawDigits = (v: string | null | undefined): bigint | null =>
   v != null && /^\d+$/.test(v) ? BigInt(v) : null;
 
@@ -118,8 +109,9 @@ const rawDigits = (v: string | null | undefined): bigint | null =>
  * (their known states), `sources` the funded SPL tokens (status 'balance', positive amount —
  * the caller applies that filter; the planner re-checks defensively). An UNMEASURED SOL
  * balance is treated as zero: it never blocks the fund branch (the sizing re-checks live at
- * execute time) and never fakes a create. Candidates keep the CALLER's order - it is tie-break
- * data for the fitness pick, never a ranking (quote fitness decides, 2026-10-01).
+ * execute time) and never fakes a create. Candidates keep the CALLER's order - walk
+ * ENUMERATION only: the fitness pick is position-free (stable-id tie-break, 2026-10-01 F15),
+ * so no money decision rides where a row happened to sit.
  */
 export function planAtaSetup(args: {
   targets: AtaSetupTokenInput[];
@@ -139,7 +131,7 @@ export function planAtaSetup(args: {
     if (s.status !== 'balance') continue;
     const amount = rawDigits(s.amount ?? null);
     if (amount == null || amount <= 0n) continue;
-    if (!wrappedSolVenuesFor(s.mint)) continue; // no venue can swap it into SOL — not a candidate
+    if (wrappedSolVenuesForMint(s.mint).length === 0) continue; // no venue can swap it into SOL — not a candidate
     candidates.push({mint: s.mint, symbol: s.symbol, decimals: s.decimals ?? 0, rawAmount: amount.toString()});
   }
   if (candidates.length > 0) {
@@ -154,10 +146,10 @@ export function planAtaSetup(args: {
     };
   }
   // The fund-ic branch (founder override 2026-09-30): no usable SPL source, but the wallet
-  // holds measured IC-side money. The candidates are the caller's list in the caller's order
-  // (tie-break data only - quote fitness decides the winner, never list position), re-checked
-  // defensively here: only a measured positive balance is a candidate, the same bar the SPL
-  // walk applies.
+  // holds measured IC-side money. The candidates keep the caller's walk order - ENUMERATION
+  // only; the fitness pick is position-free (the stable currencyKey breaks an exact tie,
+  // audit F15). Re-checked defensively here: only a measured positive balance is a candidate,
+  // the same bar the SPL walk applies.
   const icCandidates: AtaIcFundSource[] = [];
   for (const c of args.icSources ?? []) {
     const amount = rawDigits(c.rawAmount);
@@ -174,8 +166,10 @@ export function planAtaSetup(args: {
   };
 }
 
-/** One candidate's quoted sizing: the input to swap and the venue floor it guarantees. */
-export type SizedAtaFund = {source: AtaFundSource; inAmount: string; outFloor: string};
+/** One candidate's quoted sizing: the input to swap, the venue floor it guarantees, and WHICH
+ *  registered venue quoted it (2026-10-01 audit F8) - the confirm re-quotes the SAME venue, so
+ *  a sized floor is never held against a different venue's fresh rate. */
+export type SizedAtaFund = {source: AtaFundSource; inAmount: string; outFloor: string; venueId: string};
 
 /**
  * Size a fund plan against (injected) live quotes. `solKnown` is the wallet's CURRENT SOL —
@@ -192,7 +186,10 @@ export async function sizeAtaFundPlan(args: {
   solKnown: string | null;
   /** The live quote seam. Null return = unquotable (venue refused / minimum too small /
    *  unreachable) — the candidate is skipped, not a crash. */
-  quote: (source: AtaFundSource, inRaw: string) => Promise<{outAmount: string; otherAmountThreshold: string} | null>;
+  /** The live quote seam. Null return = unquotable (venue refused / minimum too small /
+   *  unreachable) - the candidate is skipped, not a crash. `venueId` names the venue that
+   *  answered, so the winner's confirm re-quotes its own venue (audit F8). */
+  quote: (source: AtaFundSource, inRaw: string) => Promise<{outAmount: string; otherAmountThreshold: string; venueId: string} | null>;
 }): Promise<SizedAtaFund | null> {
   const {plan, quote} = args;
   const sol = rawDigits(args.solKnown) ?? 0n;
@@ -200,7 +197,7 @@ export async function sizeAtaFundPlan(args: {
   const swapNeeded = target > sol ? target - sol : 0n;
   if (swapNeeded === 0n) return null; // nothing to fund — the caller should have re-planned
   // QUOTE FITNESS (2026-10-01 audit F1-F2): size every candidate, keep the fittest. The walk
-  // order is the caller's (the tie-break), never a ranking.
+  // order is enumeration only - an exact tie breaks on the stable mint, never position (F15).
   let best: SizedAtaFund | null = null;
   for (const source of plan.candidates) {
     const balance = rawDigits(source.rawAmount);
@@ -213,7 +210,7 @@ export async function sizeAtaFundPlan(args: {
       const floor = rawDigits(q.otherAmountThreshold);
       if (floor == null) break;
       if (floor + sol < swapNeeded) break; // under target — a smaller input never covers either
-      sized = {source, inAmount: input.toString(), outFloor: floor.toString()};
+      sized = {source, inAmount: input.toString(), outFloor: floor.toString(), venueId: q.venueId};
       const scaled = floor === 0n ? input : (input * swapNeeded * 105n) / (floor * 100n) + 1n;
       if (scaled >= input) break; // converged at the floor's own resolution
       input = scaled;
@@ -221,7 +218,12 @@ export async function sizeAtaFundPlan(args: {
     if (sized == null) continue;
     if (best == null
       || BigInt(sized.outFloor) > BigInt(best.outFloor)
-      || (BigInt(sized.outFloor) === BigInt(best.outFloor) && BigInt(sized.inAmount) < BigInt(best.inAmount))) {
+      || (BigInt(sized.outFloor) === BigInt(best.outFloor) && BigInt(sized.inAmount) < BigInt(best.inAmount))
+      // Exact fitness tie (equal floor, equal input): the candidate's STABLE mint decides, never
+      // walk position (2026-10-01 audit F15 - list position is not policy). Economically
+      // indistinguishable candidates, so which one wins is cost-free; determinism is the point.
+      || (BigInt(sized.outFloor) === BigInt(best.outFloor) && BigInt(sized.inAmount) === BigInt(best.inAmount)
+        && sized.source.mint < best.source.mint)) {
       best = sized;
     }
   }
@@ -247,9 +249,10 @@ export type AtaIcQuote =
  * next candidate; one that can re-quotes at the minimum. A quoted input whose SOL floor
  * covers the target is then shrunk toward the shortfall-equivalent (+5% margin), never below
  * the venue minimum and never past the balance. The winner is picked by QUOTE FITNESS -
- * highest SOL floor, then the smallest input at an equal floor, the caller's registry order
- * as the final tie-break; null = no candidate can reach the target - the caller falls
- * through to the honest refusal, never a forced losing swap.
+ * highest SOL floor, then the smallest input at an equal floor, the candidate's stable
+ * currencyKey as the final tie-break - never walk position (2026-10-01 audit F15); null = no
+ * candidate can reach the target - the caller falls through to the honest refusal, never a
+ * forced losing swap.
  */
 export async function sizeAtaIcFundPlan(args: {
   plan: Extract<AtaSetupPlan, {kind: 'fund-ic'}>;
@@ -262,8 +265,8 @@ export async function sizeAtaIcFundPlan(args: {
   const swapNeeded = target > sol ? target - sol : 0n;
   if (swapNeeded === 0n) return null; // nothing to fund - the caller should have re-planned
   // QUOTE FITNESS (2026-10-01 audit F1-F2): size every candidate, keep the fittest. The walk
-  // order is the caller's (the tie-break), never a ranking; the seam's own SOL output is the
-  // one comparable unit across candidates.
+  // order is enumeration only - an exact tie breaks on the stable currencyKey, never position
+  // (F15); the seam's own SOL output is the one comparable unit across candidates.
   let best: SizedAtaIcFund | null = null;
   for (const source of plan.candidates) {
     const balance = rawDigits(source.rawAmount);
@@ -295,7 +298,10 @@ export async function sizeAtaIcFundPlan(args: {
     if (sized == null) continue;
     if (best == null
       || BigInt(sized.outFloor) > BigInt(best.outFloor)
-      || (BigInt(sized.outFloor) === BigInt(best.outFloor) && BigInt(sized.inAmount) < BigInt(best.inAmount))) {
+      || (BigInt(sized.outFloor) === BigInt(best.outFloor) && BigInt(sized.inAmount) < BigInt(best.inAmount))
+      // Exact fitness tie: the stable currencyKey decides, never walk position (audit F15).
+      || (BigInt(sized.outFloor) === BigInt(best.outFloor) && BigInt(sized.inAmount) === BigInt(best.inAmount)
+        && sized.source.currencyKey < best.source.currencyKey)) {
       best = sized;
     }
   }

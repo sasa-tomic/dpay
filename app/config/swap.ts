@@ -118,7 +118,12 @@ function railsOfCurrency(
     if (row.testnet || row.ledger == null || row.ledger === '') continue;
     if (currencyOfLinkToken(assetLinkToken(row)) === currency) rails.push({kind: 'ic', ledger: row.ledger});
   }
-  for (const [name, info] of Object.entries(SOLANA_TOKENS)) {
+  // The SOL-registry rails: at most ONE per currency today (each registry symbol settles exactly
+  // one currency). The walk iterates SORTED symbol keys, not insertion order (2026-10-01 audit
+  // F14): if a second symbol ever settles one currency, the rails' relative order is the sorted
+  // registry - a stated rule - never the order the const object happened to be typed in.
+  for (const name of Object.keys(SOLANA_TOKENS).sort()) {
+    const info = SOLANA_TOKENS[name];
     if (currencyOfLinkToken(name) !== currency) continue;
     // Native SOL rides the registry's WRAPPED identifier (the venue rows' own convention).
     rails.push({kind: 'sol', mint: info.mint ?? WRAPPED_SOL_MINT_ADDRESS});
