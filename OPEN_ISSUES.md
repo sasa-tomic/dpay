@@ -20,21 +20,37 @@
 
 ## NEXT SESSION — work order
 
-**CCTP LIVE TRIP (2026-10-03 afternoon): legs 1-5 PROVEN LIVE; leg 6 (the device-signed Circle
-burn) blocked by a live-found defect - FIXED, needs one fresh VCHF drip to finish.** The full
-multihop VCHF@ICP -> USDC@Solana ran through the real app on the emulator (float seed, prod
-relay): IC legs 1-4 confirmed (approve 0.0001 VCHF, ICPSwap swap, ckUSDC burn-approve, ckETH
-gas-approve), the minter's withdraw EXECUTED on-chain (ckUSDC debit 8.336917, USDC 8.336405
-delivered to the device's own EVM address - verified via relay `eth_call balanceOf`, minter fee
-0.001512), but the withdraw reply misread refused (empty reason) and the record died
-failed_leg/withdraw_refused BEFORE the device-signed burn (Circle allowance 0 - never signed).
-Ledger rows 218-223, `funds reconcile` CLEAN. THE FIX (299d695c, TDD, on main): a cross-rail
-withdraw refusal is VERIFY-DON'T-GUESS - the executor asks the destination (`eth_call
-balanceOf` vs the burn floor); delivered money continues to the crossing, undelivered keeps the
-honest refusal. REMAINING: one fresh VCHF drip (~7, founder-owned) -> rebuild APK from the fix
--> re-drive the route end-to-end -> the device signs approve+depositForBurnWithHook live ->
-Circle attests -> the Solana ATA credits. The float's IC side is empty (VCHF spent on this
-trip; the value now sits as USDC at the EVM rail, in-wallet, verified).
+**CCTP LIVE ROUND TRIP (2026-10-03/04 night): every money leg EXCEPT the final Circle burn is
+LIVE-PROVEN with existing funds; the burn itself is BLOCKED ON-CHAIN - a real D31 finding, full
+evidence below. Nothing lost; the recovery path is itself live-proven.** The night ran THREE
+full app drives on the emulator (float seed, prod relay) plus two raw funded rounds:
+(1) trip 1+2: IC legs 1-4 confirmed, the minter's withdraw DELIVERED on-chain twice (USDC
+8.336405 then 8.185356 at the device's own EVM address, both verified via `eth_call balanceOf`),
+the withdraw reply misread refused (empty reason) 2/2 - DETERMINISTIC - and the record died
+failed_leg before the device burn. THE FIX landed (299d695c verify-at-destination, TDD 58/58).
+(2) THE FULL ROUND TRIP with zero new funds (the founder's directive): the rail address
+approved + deposited 8.336917 USDC to the ckUSDC minter helper (scripts/evm-mainnet-usdc-ckdeposit.mjs,
+78f3f216; approve 0x45217dfe... + depositErc20 0xea42c035...), the minter minted 1:1 (~18 min),
+the app swapped ckUSDC->VCHF 6.7759236 (payout record 82645), and trip 3 ran on the FIXED build:
+IC legs 1-4 CONFIRMED, the withdraw DELIVERED 8.185356 USDC (verified on-chain) - the
+withdraw-refusal defect did NOT recur in a failing form (the fixed engine stayed parked past it).
+(3) THE BLOCKED FINAL LEG: the device-signed Circle burn reverts ON-CHAIN with an empty reason
+at ~29k gas in BOTH hook forms (extended 65B 0x0aeabfcb... AND static 32B 0x27366772...; the
+approve leg succeeds 0xaed9da6e...; allowance+balance verified 8185356). Byte-consistency
+verified: mintRecipient = the ATA (0f303432... = base58 22HkLh...), hookData owner = BzFNJ
+(a33f387d...), maxFee 400000 >= Circle's live census (route 0->5 live: minimumFee 1bps, med
+314431), minFinality 1000, tail padding per the pinned encoder. A same-ABI stranger burn
+succeeds (0x7af7d495..., 2545 USDC, domain 26). PRIME SUSPECTS for the fix lane: (a) Circle V2
+minimum burn amount for Eth->Solana ABOVE 8.19 USDC (the successful sample was 2545 USDC; the
+app's 4.4 floor is fee-math, not Circle's minimum), (b) a TokenMessenger hook-format change.
+NEXT: probe with a larger funded amount (needs ~20+ USDC - founder drip) and/or decode the
+deployed TM bytecode for a minimumBurnAmount check; the app path ALSO needs a resume gap fixed
+(a parked pending_withdrawal/crossing record was NOT re-adopted by the boot sweep after restart
+- the killarm session-ownership fix does not cover this park; the sheet re-open never re-armed
+the drive). LEDGER: rows 218-244, `funds reconcile` CLEAN. END STATE: USDC 8,187,212 at
+0x1888...27668 (in-wallet, verified), ckETH 0.000251 (minter-topped via scripts' depositEth),
+ckUSDC 0.062681, VCHF 0, USDC@Sol 0.828540, SOL 0.013078422. The value is NOT stranded: the
+deposit->mint->swap path that empties it into VCHF is itself proven live.
 
 **CoW Swap D31 LIVE TRIP: two hard blockers, both founder-owned (recon ses_efcccd3cbffeNVhKu95wvwBcag).**
 (1) prod relay runs fcb9c60f - the CoW order-API proxy (34bbe73e, `/api/v1/cow/mainnet/*`)
