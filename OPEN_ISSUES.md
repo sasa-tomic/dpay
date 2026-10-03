@@ -55,18 +55,6 @@ a checksummed registry token prepares (`b6c93abd`). The venue may claim "support
 - **"My address" chip on send sheets (value 4 / effort S).** `AddressField.tsx` gets a
   one-tap "use my address" affordance so self-cash-out on sends needs no typing either; the
   empty field remains the send-elsewhere path.
-- **Setup follow-ups from the 2026-10-01 audit (value 5 / effort M total; founder-invisible
-  polish, no money risk left).** F4: ConvertMode/SolPayMode read raw SOL states where the
-  balances map shows offline-adjusted - one screen, two truths (`Wallet.tsx` ~2194/2337 vs
-  ~1613-1627). F6: `chooseRail`'s FUNDED step ignores balance
-  magnitude (dust ckUSDC can beat a funded USDC-SOL row). F8-F15 (latent): first-venue
-  fallbacks in `quoteAtaFund`/`icAmmVenueForPair`, dead `resolveConvertDirection`, float
-  compares in money ranking, hardcoded catalog ids. One card implementation: merge
-  `SolanaAtaSetupCard.tsx` into `AtaSetupCard.tsx` (4 sheet callers keep their testIDs).
-  DONE from this list 2026-10-02 (`2060259c`): the source line always renders
-  (createSource payer line for create-kind), hidden-source gone, money actions mask while
-  a setup runs, dead expander machinery deleted. Full 15-finding report:
-  ses_f068eb67dffeadjrElCVm5z8d9.
 - **Setup copy/pixel residuals from the 2026-10-02 brutal UX audit (value 4 / effort M;
   all founder-invisible polish, none money-affecting).** ICP row title wrap/clip in the
   accounts list; money-format sweep (mixed decimal/comma styles across surfaces); display
@@ -280,6 +268,23 @@ until the blockers land. THE thing that unblocks it:**
   nothing; the remounted engine's boot sweep drives the record and only the owner clears
   its flag (`0b66a47d` RED, `be425a51` fix, `77c9651a` settle-wait pin, `c200d4cc` dead
   diag export removed).
+
+- **2026-10-01 audit follow-ups: F4/F6/F8-F15 + one setup card** — LANDED 2026-10-03,
+  merged to main `f5e900fe` (7 commits, rebased). F4: Pay/Convert read the
+  offline-adjusted SOL states (`Wallet.tsx`), and the extraction pin caught a real
+  `slice(8)` off-by-one silently disabling all SPL offline deductions. F6+F13: balances
+  carry `amountRaw`; `chooseRail` ranks the funded class by magnitude; readiness keys off
+  raw amounts. F11: exact decimal comparison in the convert auto-pick. F9+F10:
+  `fetchConvertQuote` requires its named venue (no bundled first-venue fallback); dead
+  `resolveConvertDirection` deleted. F12: derived ICP ledger lookup (no `currency === 8`);
+  OCP refusal keys on the SPL class. F8+F14+F15: ATA fund quotes every wrapped-SOL venue
+  (venue id rides to confirm); stable-id fitness ties; sorted SOL registry walk.
+  Card merge: ONE `AtaSetupCard`, `surface`-discriminated; `SolanaAtaSetupCard.tsx`
+  deleted; 4 sheet callers keep exact testIDs. Gates: all 8 rows PASS dirty=no @
+  `f5e900fe` (flow 413s, test-app 372s, e2e/e2e-visual green), smoke 697/697 (8 new
+  audit pins). Earlier DONE from this list 2026-10-02 (`2060259c`): source line always
+  renders, hidden-source gone, money actions mask, dead expander deleted. Full
+  15-finding report: ses_f068eb67dffeadjrElCVm5z8d9.
 
 - **P0 composed-strand + stuck-record waves (founder 2026-10-02, live-device findings)** —
   LANDED 2026-10-02, both merged to main `4157d272`. (1) COMPOSED fund-ic strand (POCO
