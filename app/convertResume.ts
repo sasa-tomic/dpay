@@ -881,30 +881,6 @@ export async function confirmCrossRailSolLeg(id: string): Promise<ConvertRecord 
   return next;
 }
 
-/** TEMP DIAG (killarm investigation): one synchronous look at the engine singleton's live
- *  state - the ctx liveness, the armed timer count, the in-flight drive set, and every held
- *  record's (step, legPlan states, dispatch-shape flags). Read-only, test-only; remove with
- *  the investigation. */
-export function convertResumeDebugSnapshot(): {
-  hasCtx: boolean; stopped: boolean; timers: number; inflight: string[];
-  records: Array<{id: string; step: string; legs: Array<string | null>; composed: boolean; providerRef: boolean; solanaLeg: boolean}>;
-} {
-  return {
-    hasCtx: state.ctx != null,
-    stopped: state.stopped,
-    timers: state.timers.size,
-    inflight: [...state.inflight.keys()],
-    records: [...state.records.values()].map((r) => ({
-      id: r.id,
-      step: r.step,
-      legs: (r.legPlan ?? []).map((l) => l.state),
-      composed: r.composedDeposit != null,
-      providerRef: r.providerRef != null,
-      solanaLeg: r.solanaLeg != null,
-    })),
-  };
-}
-
 /** Test-only: full teardown between suites (jest module state persists across files). */
 export function __resetConvertResumeEngineForTest(): void {
   stopEngine();
