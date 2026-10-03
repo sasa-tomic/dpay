@@ -26,16 +26,18 @@ Spec: `docs/specs/2026-09-28-any-to-any-swap-goal.md`; matrix doc `docs/CONVERT_
 110 ordered pairs across 11 mainnet rails, 46 routable (direct pool / CeFi / Uniswap V3 /
 IC hub 2-hop / composed / CCTP), 64 refused with a named reason. Uniswap V3 adapter shipped
 (`app/evm/uniswap*.ts`; any ERC-20 via catalog chain_id+contract; WETH hub fallback for
-same-chain token pairs). REMAINING (D31): ONE live funds-ledgered ZCHF→ETH trip through the
-real app before the venue may claim "supported". The convert-entry gap is fixed (`b5dfe0fd`),
-so this needs an app rebuild from main plus the EVM float (`0x1888…27668`: 0.00104 ETH +
-0.4 ZCHF; worst-case gas ≈0.0007 ETH at 0.76 gwei — founder drip only if short). Until then
-the venue is labeled UNPROVEN in-app.
+same-chain token pairs). D31 CLOSED (2026-10-03): the live funds-ledgered ZCHF->ETH trip ran
+through the real app on the emulator (float seed, prod relay) - device-signed approve+swap
+both status 0x1 on Ethereum mainnet (blocks 26110182/26110183), 0.4 ZCHF pulled, the wallet's
+own address credited ~0.000179 ETH (min floor honored), ledger rows 215-217. TWO live-trip
+fixes landed on the way: the native-ETH destination quotes the chain WETH instead of feeding
+the quoter an empty token (`3d307ce5`), and the pair red line compares rail-canonical ids so
+a checksummed registry token prepares (`b6c93abd`). The venue may claim "supported".
 
 - **NEXT TOPIC (founder 2026-09-30): CoW Swap is the SECOND EVM venue — build BOTH, in that
   order (founder directive same day: target 2+ venues per currency, so no single venue is a
-  point of failure).** Uniswap V3 is shipped (GOAL above) and awaits its D31 live trip; CoW
-  Swap follows once that live proof lands (D31 rule). It is
+  point of failure).** Uniswap V3 has its D31 live proof (2026-10-03); CoW
+  Swap follows now (D31 rule satisfied). It is
   mechanically heavier (EIP-712 signed off-chain orders, solver settlement in
   seconds-to-minutes, an order API to poll): fine for convert, useless for checkout. Under the
   adapter pattern it lands as a second venue row, not a redesign. Value 6 / effort M, ordered
