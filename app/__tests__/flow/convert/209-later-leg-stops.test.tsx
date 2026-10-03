@@ -16,9 +16,9 @@ import {
   disposeConvertStubs, venueKnob, installCctpStub, installSolRpcStub,
   configureJupiterStub, jupiterStubState, FORWARD_TX_HASH, deriveSolanaKeypair,
   deriveAta, bs58Encode, jupiterSwapTxB64, solConvertTxDetail,
-  solSentTxs, installEvmSignSeam, setCctpMessageState, cctpStubState,
+  solSentTxs, installEvmRpcStub, evmRpcStubState, setCctpMessageState, cctpStubState,
   enableSolRail, installSideShiftStub, sideShiftStubState, sideshiftRelayHits,
-  deriveEvmKeypair, eip55,
+  eip55, deriveEvmKeypair,
 } from './convertStubs';
 
 installHeapProbe();
@@ -41,7 +41,6 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
   });
   it('stops honestly at each phase, freezes the watches, and stays aborted across a reload', async () => {
     const ROUTE_C_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp:jupiter';
-    const BURN_209 = '0x' + '3c'.repeat(32);
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const AsyncStorage = require('@react-native-async-storage/async-storage') as {getItem: (k: string) => Promise<string | null>};
 
@@ -72,11 +71,14 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
         txB64,
         lastValidBlockHeight: 300000000,
       });
-      installEvmSignSeam(BURN_209);
+      installEvmRpcStub(); // the device burn's rail (stage 2: the crossing signs on-device)
 
       /** One Route C run up to a LIVE crossing (the 209 helper). The payout address is the
-       *  wallet's OWN derived default — nothing to type (founder directive 2026-09-30). */
-      const attachBurnAndGetCrossing = async (amountText: string): Promise<void> => {
+       *  wallet's OWN derived default — nothing to type (founder directive 2026-09-30), and
+       *  stage 2 makes that same address the DEVICE-signed crossing: confirm, then the
+       *  executor signs the burn itself and the record walks to crossing. */
+      const confirmToCrossing = async (amountText: string): Promise<void> => {
+        installEvmRpcStub(); // per run: the broadcast counter reads absolute
         for (let attempt = 0; attempt < 3; attempt++) {
           await typeConvertAmount(m!, amountText).catch(() => undefined);
           await m!.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
@@ -88,19 +90,12 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
           if (changed == null) break;
           await m!.driver.click('btn-convert-back', {timeoutMs: 5_000}).catch(() => undefined);
         }
-        await m!.driver.findByTestID('crossrail-handoff', {timeoutMs: 90_000});
-        await m!.driver.waitForText('Step 1', {timeoutMs: 15_000});
-        await m!.driver.type('crossrail-burn-tx', 'signed');
-        for (let i = 0; i < 3; i++) {
-          try {
-            await m!.driver.click('btn-crossrail-attach', {timeoutMs: 5_000});
-            break;
-          } catch (e) {
-            if (i === 2) throw e;
-            await new Promise((r) => setTimeout(r, budgetScaled(250)));
-          }
-        }
-        await m!.driver.findByTestID('crossrail-crossing', {timeoutMs: 20_000});
+        await m!.driver.findByTestID('crossrail-crossing', {timeoutMs: 90_000});
+        await m!.driver.waitForFunction(
+          () => evmRpcStubState()!.sent.length >= 2,
+          {timeoutMs: 30_000, label: 'the device burn broadcast both legs'},
+        );
+        expect(evmRpcStubState()!.sent.map((s: {kind: string}) => s.kind)).toEqual(['approve', 'burn']);
       };
 
       // §B the CROSSING STOP: the burn is out — watching, never "nothing moved".
@@ -108,7 +103,7 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
       await pickSwapTarget(m, 'SOL');
       await openOtherVenues(m);
       await m.driver.click(ROUTE_C_ROW, {timeoutMs: 5_000});
-      await attachBurnAndGetCrossing('5');
+      await confirmToCrossing('5');
       await m.driver.waitForFunction(
         () => cctpStubState().messageCalls.length > 0,
         {timeoutMs: 15_000, label: 'the mint watch polls Circle at least once'},
@@ -130,7 +125,7 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
       await pickSwapTarget(m, 'SOL');
       await openOtherVenues(m);
       await m.driver.click(ROUTE_C_ROW, {timeoutMs: 5_000});
-      await attachBurnAndGetCrossing('5');
+      await confirmToCrossing('5');
       setCctpMessageState('complete');
       await m.driver.findByTestID('crossrail-sol-ready', {timeoutMs: 40_000});
       expect(m.driver.isPresent('btn-convert-stop')).toBe(true);

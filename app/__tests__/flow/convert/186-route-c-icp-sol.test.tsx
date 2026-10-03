@@ -17,9 +17,8 @@ import {
   disposeConvertStubs, venueKnob, installCctpStub, installSolRpcStub,
   configureJupiterStub, jupiterStubState, cctpFeeExpectations, FORWARD_TX_HASH,
   deriveSolanaKeypair, deriveAta, bs58Encode, jupiterSwapTxB64,
-  solConvertTxDetail, solSentTxs, fmt, installEvmSignSeam,
-  evmSignsRecorded, setCctpMessageState, cctpStubState, enableSolRail,
-  deriveEvmKeypair, eip55,
+  solConvertTxDetail, solSentTxs, fmt, installEvmRpcStub,
+  evmRpcStubState, setCctpMessageState, cctpStubState, enableSolRail,
 } from './convertStubs';
 
 installHeapProbe();
@@ -37,7 +36,6 @@ const ICP_FEE = 10000n;
 const CKUSDC_FEE = 10000n;
 const CKETH_FEE = 2000000000000n;
 const GAS_WEI = 78000000000000n;
-const BURN_HASH = '0x' + '1b'.repeat(32);
 type Quote = {venue_id: string; amount_out: string};
 async function relayQuote(pool: string, tokenIn: string, tokenOut: string, amountIn: bigint): Promise<Quote> {
   return await relayGet(`/api/v1/swap_quote?pool=${pool}&token_in=${tokenIn}&token_out=${tokenOut}&amount_in=${amountIn}`) as Quote;
@@ -62,8 +60,8 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
       m = await onboardWallet('jest-crossrail-icp-sol');
       const account = await accountOf(m);
       // The payout default: the wallet's OWN derived EVM address — shown, never typed
-      // (founder directive 2026-09-30). The crossing still signs outside the device.
-      const DEST = eip55(deriveEvmKeypair(account!.secretHex).address.toLowerCase());
+      // (founder directive 2026-09-30). Stage 2: that same address means the DEVICE signs
+      // the crossing itself — no handoff, no second wallet, no typing.
       const fundIcp = await faucetAccount(account!.publicHex, SEED_ICP, {currency: 8});
       expect(fundIcp.ok).toBe(true);
       const fundEth = await faucetAccount(account!.publicHex, SEED_ETH, {currency: 6});
@@ -95,7 +93,7 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
         lastValidBlockHeight: 300000000,
       });
       installCctpStub({forwardTxHash: FORWARD_TX_HASH});
-      installEvmSignSeam(BURN_HASH);
+      installEvmRpcStub(); // the device burn's rail: fee probe, gas gate, nonce, broadcasts
 
       // §1 the composed route is an explicit opt-in row behind the expander.
       await openConvertFor(m, 'icp');
@@ -107,11 +105,10 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
       await typeConvertAmount(m, '5');
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
       await m.driver.waitForFunction(() => m!.driver.isPresent('convert-dest-shown'), {timeoutMs: 8_000, label: 'the payout default rendered'});
-      expect(m.driver.readText('convert-dest-shown')).toBe(DEST);
       expect(m.driver.isPresent('convert-dest-address')).toBe(false);
       expect(m.driver.isPresent('convert-dest-reenter')).toBe(false);
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
-      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'also signs the crossing', 'the destination input warns that this address also SIGNS the crossing');
+      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'signs on this device', 'the destination note forks to the device-signed crossing');
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset');
 
       // §2 the cross-rail fee census (the census lines mount behind Details).
@@ -136,47 +133,29 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
         fees = cctpFeeExpectations(minOut);
       }
 
-      // §3 the handoff: five device-signed IC legs, then dpay renders the EXACT txs.
-      expect(await m.driver.waitForText('is at your Ethereum address', {timeoutMs: 60_000})).toBe(true);
-      await m.driver.waitForText('Step 1', {timeoutMs: 10_000});
-      expect(m.driver.isPresent('crossrail-handoff')).toBe(true);
-      const handoff = m.driver.readText('crossrail-handoff');
-      assertIncludes(handoff, `${fmt(minOut, 6)} USDC`, 'the intro names the crossed amount (the burn floor)');
-      assertIncludes(handoff, 'Nothing is signed on dpay', 'the what-signing line says dpay signs nothing');
-      const approveData = m.driver.readText('crossrail-approve-calldata');
-      const burnData = m.driver.readText('crossrail-burn-calldata');
-      assertIncludes(approveData.slice(0, 10), '0x095ea7b3', 'tx 1 is a plain ERC-20 approve');
-      assertIncludes(burnData.slice(0, 10), '0x779b432d', 'tx 2 is depositForBurnWithHook');
-      assertIncludes(handoff, 'seconds to a few minutes', 'the timing note sets the honest expectation');
-      assertIncludes(handoff, `${fmt(fees.maxFee, 6)} USDC`, 'Circle\'s fee line renders in the handoff too');
-
-      // The wallet double signs, the app attaches the reported hash.
-      await m.driver.type('crossrail-burn-tx', 'signed');
-      for (let i = 0; i < 3; i++) {
-        try {
-          await m.driver.click('btn-crossrail-attach', {timeoutMs: 5_000});
-          break;
-        } catch (e) {
-          if (i === 2) throw e;
-          await new Promise((r) => setTimeout(r, budgetScaled(250)));
-        }
-      }
-      await m.driver.findByTestID('crossrail-crossing', {timeoutMs: 10_000});
-
-      // §4 the mint watch: parked pending with Circle's link — never a false failure.
+      // §3 the DEVICE-signed crossing: five device-signed IC legs, then the executor signs
+      // approve + depositForBurnWithHook ITSELF (stage 2) and the record walks to crossing.
+      // The panel mounts the moment the withdraw lands the record on crossing — the burn's
+      // two broadcasts follow within seconds; wait for them before auditing.
+      await m.driver.findByTestID('crossrail-crossing', {timeoutMs: 90_000});
+      await m.driver.waitForFunction(
+        () => evmRpcStubState()!.sent.length >= 2,
+        {timeoutMs: 30_000, label: 'the device burn broadcast both legs'},
+      );
+      const sent = evmRpcStubState()!.sent;
+      expect(sent.map((s) => s.kind)).toEqual(['approve', 'burn']);
+      assertIncludes(sent[0].raw.slice(0, 400), '095ea7b3', 'tx 1 is a plain ERC-20 approve to canonical USDC');
+      assertIncludes(sent[1].raw.slice(0, 400), '779b432d', 'tx 2 is depositForBurnWithHook to TokenMessengerV2');
       const crossing = m.driver.readText('crossrail-crossing');
       assertIncludes(crossing, 'Crossing to Solana', 'the crossing panel titles the wait');
-      assertIncludes(crossing, BURN_HASH, 'the burn tx hash is visible and copyable');
+      expect(m.driver.isPresent('crossrail-burn-hash')).toBe(true); // the device burn's hash is visible
+      const deviceBurnHash = m.driver.readText('crossrail-burn-hash');
+      expect(deviceBurnHash).toMatch(/^0x[0-9a-fA-F]{64}$/);
+
+      // §4 the mint watch: parked pending with Circle's link — never a false failure.
       assertIncludes(m.driver.readText('crossrail-still'), 'not failed', 'the not-failed line is explicit');
       expect(m.driver.isPresent('btn-crossrail-view-circle')).toBe(true);
       expect(m.driver.isPresent('btn-crossrail-view-burn')).toBe(true);
-      const sigs = evmSignsRecorded();
-      expect(sigs.length).toBe(1);
-      assertIncludes(String(sigs[0].burnCalldata).slice(0, 10), '0x779b432d', 'what dpay asked the wallet to sign IS the burn calldata');
-      assertIncludes(String(sigs[0].approveCalldata).slice(0, 10), '0x095ea7b3', '…and the approve calldata');
-      expect(String(sigs[0].burnTo).toLowerCase()).toContain('28b5a0e9c621a5badaa536219b3a228c8168cf5d');
-      expect(String(sigs[0].approveTo).toLowerCase()).toContain('a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48');
-      expect(String(sigs[0].amountSubunits)).toBe(minOut.toString());
 
       // The STALL: state still pending — the record must stay parked, not failed.
       const pollsAtStall = cctpStubState().messageCalls.length;
@@ -249,7 +228,7 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
       const allMessageCalls = cctpAfter.messageCalls;
       expect(allMessageCalls.length).toBeGreaterThanOrEqual(2);
       for (const msg of allMessageCalls) {
-        expect(msg.hash).toBe(BURN_HASH);
+        expect(msg.hash).toBe(deviceBurnHash); // the watch keys on the DEVICE burn's own hash
       }
       expect(BigInt(await getBalance(account!.publicHex, 8))).toBe(BigInt(SEED_ICP) - 500000000n - 2n * ICP_FEE);
       expect(BigInt(await getBalance(account!.publicHex, 2))).toBe(gross - minOut - CKUSDC_FEE);

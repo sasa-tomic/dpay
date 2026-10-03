@@ -19,7 +19,7 @@ import {
   deriveSolanaKeypair, deriveAta, bs58Encode, jupiterSwapTxB64,
   solConvertTxDetail, solSentTxs, fmt, floor99,
   installEvmSignSeam, evmSignsRecorded, setCctpMessageState, cctpStubState,
-  enableSolRail, deriveEvmKeypair, eip55,
+  enableSolRail,
 } from './convertStubs';
 
 installHeapProbe();
@@ -32,6 +32,9 @@ const CKUSDC_LEDGER = 'xevnm-gaaaa-aaaar-qafnq-cai';
 const CKUSDC_POOL = 'mohjv-bqaaa-aaaag-qjyia-cai';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const EURC_MINT = 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr';
+// The wallet's OWN derived EVM address is read per-account in the flow; this file's OWN pin
+// is a shape check (checksummed 0x-40hex), asserted against the app's own derivation below.
+const OWN_SHAPE = /^0x[0-9a-fA-F]{40}$/;
 
 hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one cross-rail intent', () => {
   afterEach(() => {
@@ -47,14 +50,16 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
     const BURN_HASH = '0x' + '2c'.repeat(32);
     const EURC_OUT = '10300000';
     const EURC_FLOOR = '10200000';
-
+    // An external wallet the user names behind "Change destination" (the advanced override).
+    const EXTERNAL = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
     let m: Awaited<ReturnType<typeof onboardWallet>> | null = null;
     try {
       await enableSolRail();
       m = await onboardWallet('jest-crossrail-icp-eurc');
       const account = await accountOf(m);
       // The payout default: the wallet's OWN derived EVM address (founder directive 2026-09-30).
-      const DEST = eip55(deriveEvmKeypair(account!.secretHex).address.toLowerCase());
+      // Stage 2: this flow then names an EXTERNAL wallet behind "Change destination" — the
+      // advanced override that keeps the WalletConnect handoff path covered.
       const fundIcp = await faucetAccount(account!.publicHex, 2000000000, {currency: 8}); // 20 ICP
       expect(fundIcp.ok).toBe(true);
       const fundEth = await faucetAccount(account!.publicHex, 400000000000000, {currency: 6});
@@ -99,12 +104,23 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
       await m.driver.click(ROUTE_C_EURC_ROW);
       // The payout default renders shown, never typed; no re-type arms (founder directive).
       await m.driver.waitForFunction(() => m!.driver.isPresent('convert-dest-shown'), {timeoutMs: 8_000, label: 'the payout default rendered'});
-      expect(m.driver.readText('convert-dest-shown')).toBe(DEST);
+      const OWN = m.driver.readText('convert-dest-shown');
+      expect(OWN).toMatch(OWN_SHAPE);
       expect(m.driver.isPresent('convert-dest-address')).toBe(false);
       expect(m.driver.isPresent('convert-dest-reenter')).toBe(false);
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
-      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'also signs the crossing', 'the destination warns that this address also SIGNS the crossing');
+      // Stage 2: the device's own address as destination means the crossing signs HERE.
+      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'signs on this device', 'the destination note forks to the device-signed crossing');
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset');
+
+      // The ADVANCED OVERRIDE: name an external wallet — the handoff disclosure returns and
+      // the record will freeze burnSigner 'external' (the WalletConnect path stays covered).
+      await m.driver.click('btn-convert-dest-change');
+      await m.driver.findByTestID('convert-dest-address', {timeoutMs: 5_000});
+      await m.driver.type('convert-dest-address', EXTERNAL);
+      await m.driver.type('convert-dest-reenter', EXTERNAL);
+      await m.driver.waitForFunction(() => m!.driver.readText('convert-dest-cross-note').includes('also signs the crossing'), {timeoutMs: 8_000, label: 'the external disclosure restored'});
+      assertIncludes(m.driver.readText('convert-external-sign-note'), 'your own Ethereum wallet', 'naming an external wallet restores the handoff disclosure');
 
       // §2 the census (unchanged from the SOL route, USDC-denominated).
       await m.driver.click('convert-details', {timeoutMs: 5_000});
@@ -112,6 +128,9 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
         () => m!.driver.isPresent('crossrail-circle-fee') && m!.driver.isPresent('crossrail-mint-floor'),
         {timeoutMs: 15_000, label: 'the cross-rail census mounted'},
       );
+      // The dest edit above can land mid quote-refresh: the census remounts as a unit, so
+      // wait the minter gas line back before reading it.
+      await m.driver.waitForFunction(() => m!.driver.isPresent('convert-gas-note'), {timeoutMs: 15_000, label: 'the minter gas line mounted'});
       assertIncludes(m.driver.readText('crossrail-external-gas'), 'your wallet', 'the census names WHO pays the EVM gas');
       assertIncludes(m.driver.readText('crossrail-circle-fee'), `${fmt(fees.maxFee, 6)} USDC`, 'Circle\'s published fee renders as its own census line');
       assertIncludes(m.driver.readText('crossrail-mint-floor'), `${fmt(fees.mintFloor, 6)} USDC`, 'the mint floor names what survives the fee');

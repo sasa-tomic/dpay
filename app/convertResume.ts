@@ -380,19 +380,24 @@ async function driveOne(id: string): Promise<void> {
         // order). A phase-2 record (legs signed) falls through to the generic IC-legs
         // arm, whose post-run hook below resolves the 1-leg terminal.
       } else if (rec.crossRail != null) {
-        // Cross-rail dispatch (convert.ts, Routes B/C 2026-09-16) — keyed on the phase:
-        //  - `crossing`: Circle's mint watch + the ATA credit verification (the record moves
-        //    itself to done/sol_ready when Circle completes; a stall parks pending, NEVER
-        //    a false failure — the re-arm keeps the watch alive).
+        // Cross-rail dispatch (convert.ts, Routes B/C 2026-09-16 + stage 2 2026-10-03) — keyed
+        // on the phase:
+        //  - `crossing`: the drive BEGINS with the burn when the record is device-signed and
+        //    hashless (the executor signs approve + depositForBurnWithHook itself), then runs
+        //    Circle's mint watch + the ATA credit verification (the record moves itself to
+        //    done/sol_ready when Circle completes; a stall parks pending, NEVER a false
+        //    failure — the re-arm keeps the watch alive).
         //  - `solanaLeg` set (`swapping`/`settling` after sol_ready): the cross-rail Jupiter
         //    driver — NOT executeSolanaConvert, whose payout reads key on the standalone
         //    record shape.
         //  - `awaiting_external` / `sol_ready`: USER-paced. The handoff panel owns the first
-        //    (dpay never signs EVM); the fresh-quote offer owns the second. The engine still
-        //    re-arms so a reload picks the record up the moment it moves.
+        //    (external destinations only — a device-signed record never parks there); the
+        //    fresh-quote offer owns the second. The engine still re-arms so a reload picks
+        //    the record up the moment it moves.
         //  - the IC phases (`approving`/`pending_withdrawal`) fall through to the legs
-        //    driver below, exactly as Route A — the executor hands off to `awaiting_external`
-        //    when the IC route's withdraw lands.
+        //    driver below, exactly as Route A — the executor hands off to `crossing`
+        //    (device-signed) or `awaiting_external` (external) when the IC route's withdraw
+        //    lands.
         if (rec.step === 'crossing') {
           next = await executeCrossRailConvert(rec, {
             secretHex: ctx.secretHex,

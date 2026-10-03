@@ -498,6 +498,82 @@ export function evmSignsRecorded(): Array<Record<string, unknown>> {
   return evmSigns;
 }
 
+
+// --- the EVM RPC stub (swap-typing stage 2: the DEVICE-signed burn's rail) ------------------------
+// The app dials its EVM endpoint for the device burn's fee probe, gas gate, nonce, broadcasts
+// and receipts. In the flow tier the module-load TEST override is '' (the offline contract),
+// so this stub wires the app's OPERATOR override (setEvmRpcUrl, module state a mount resets)
+// at the file's OWN private relay's evm route AND answers that route with a deterministic
+// mainnet-shaped surface, recording every broadcast. Receipt verdicts bind to the hash ASKED
+// after each broadcast (the executor polls its LOCALLY signed hash), so the pre-broadcast
+// adoption probe correctly sees nothing and the post-broadcast watch resolves.
+
+export type EvmRpcSent = {hash: string; raw: string; kind: 'approve' | 'burn' | 'other'};
+export type EvmRpcStubState = {sent: EvmRpcSent[]; calls: number};
+
+let evmRpc: {sent: EvmRpcSent[]; calls: number} | null = null;
+
+export function installEvmRpcStub(cfg: {balanceHex?: string; gasPriceHex?: string} = {}): void {
+  evmRpc = {sent: [], calls: 0};
+  const balanceHex = cfg.balanceHex ?? '0x56bc75e2d63100000'; // 100 ETH
+  const gasPriceHex = cfg.gasPriceHex ?? '0x77359400'; // 2 gwei
+  // The operator override: the app's endpoints module resolves EXACTLY this candidate for
+  // every chain (the private relay is loopback, so plain http passes the setter's rule).
+  // A later MOUNT resets it (mount.tsx's session reset) — files install after their mount.
+  setEvmRpcUrl(`${relayBaseURL()}/api/v1/evm/rpc`);
+  const bound = new Map<string, {status: string}>(); // asked hash → receipt verdict
+  const unbound: Array<{status: string}> = []; // broadcasts awaiting their first receipt ask
+  wrapFetch(async (parsed, init) => {
+    if (parsed.pathname !== '/api/v1/evm/rpc') return undefined;
+    let body: {method?: string; params?: unknown[]; id?: number} = {};
+    try {
+      body = JSON.parse(String(init?.body ?? '{}')) as typeof body;
+    } catch {
+      return undefined;
+    }
+    if (body.method == null) return undefined;
+    evmRpc!.calls += 1;
+    let result: unknown;
+    switch (body.method) {
+      case 'eth_chainId': result = '0x1'; break;
+      case 'eth_gasPrice': result = gasPriceHex; break;
+      case 'eth_maxPriorityFeePerGas': result = '0x0'; break;
+      case 'eth_estimateGas': result = '0xc350'; break; // 50k units
+      case 'eth_getBalance': result = balanceHex; break;
+      case 'eth_getTransactionCount': result = '0x7'; break;
+      case 'eth_sendRawTransaction': {
+        const raw = String(body.params?.[0] ?? '');
+        const kind = raw.includes('095ea7b3') ? 'approve' : raw.includes('779b432d') ? 'burn' : 'other';
+        const hash = '0x' + (kind === 'approve' ? '11' : kind === 'burn' ? '22' : '9d').repeat(32);
+        evmRpc!.sent.push({hash, raw, kind});
+        unbound.push({status: '0x1'}); // this broadcast's receipt resolves on its next ask
+        result = hash;
+        break;
+      }
+      case 'eth_getTransactionReceipt': {
+        const asked = String(body.params?.[0]);
+        const known = bound.get(asked);
+        if (known != null) { result = known; break; }
+        const next = unbound.shift();
+        if (next != null) {
+          bound.set(asked, next);
+          result = next;
+        } else {
+          result = null; // nothing broadcast yet — the honest pending
+        }
+        break;
+      }
+      default:
+        return json({jsonrpc: '2.0', id: body.id ?? 1, error: {code: -32000, message: `evm rpc stub: unrouted ${body.method}`}});
+    }
+    return json({jsonrpc: '2.0', id: body.id ?? 1, result});
+  });
+}
+
+export function evmRpcStubState(): EvmRpcStubState | null {
+  return evmRpc == null ? null : {sent: [...evmRpc.sent], calls: evmRpc.calls};
+}
+
 // --- display helpers (the flows' fmt8 twins) ------------------------------------------------------
 
 /** Raw ledger units → the compact formatter's string (trailing zeros trimmed). */

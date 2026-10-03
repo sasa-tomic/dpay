@@ -18,8 +18,7 @@ import {
   configureJupiterStub, jupiterStubState, cctpFeeExpectations, FORWARD_TX_HASH,
   deriveSolanaKeypair, deriveAta, bs58Encode, jupiterSwapTxB64,
   solConvertTxDetail, solSentTxs, fmt, floor99,
-  installEvmSignSeam, setCctpMessageState, enableSolRail,
-  deriveEvmKeypair, eip55,
+  installEvmRpcStub, evmRpcStubState, setCctpMessageState, enableSolRail,
 } from './convertStubs';
 
 installHeapProbe();
@@ -48,7 +47,6 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
     await venueKnob(FIXTURE_VENUE, true);
   });
   it('names the chain at the picker + census, reads the floor as mid-stop, attributes the receipt', async () => {
-    const BURN_HASH = '0x' + 'c7'.repeat(32);
     const SOL_OUT = '260000000';
     const SOL_FLOOR = '257000000';
 
@@ -60,7 +58,7 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
       m = await onboardWallet('jest-crossrail-vchf-sol');
       const account = await accountOf(m);
       // The payout default: the wallet's OWN derived EVM address (founder directive 2026-09-30).
-      const DEST = eip55(deriveEvmKeypair(account!.secretHex).address.toLowerCase());
+      // Stage 2: that address means the DEVICE signs the crossing — no handoff.
       const fundVchf = await faucetAccount(account!.publicHex, 50000000000, {currency: 7}); // 500 VCHF
       expect(fundVchf.ok).toBe(true);
       const fundEth = await faucetAccount(account!.publicHex, 400000000000000, {currency: 6});
@@ -92,7 +90,7 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
         lastValidBlockHeight: 300000000,
       });
       installCctpStub({forwardTxHash: FORWARD_TX_HASH});
-      installEvmSignSeam(BURN_HASH);
+      installEvmRpcStub(); // the device burn's rail: fee probe, gas gate, nonce, broadcasts
 
       // §1 the composed route: explicit opt-in; the destination input renders on pick.
       await openConvertFor(m, 'vchf');
@@ -104,10 +102,10 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
       // The payout default: shown, never typed; no re-type arms (founder directive).
       await m.driver.waitForFunction(() => m!.driver.isPresent('convert-dest-shown'), {timeoutMs: 8_000, label: 'the payout default rendered'});
-      expect(m.driver.readText('convert-dest-shown')).toBe(DEST);
       expect(m.driver.isPresent('convert-dest-address')).toBe(false);
       expect(m.driver.isPresent('convert-dest-reenter')).toBe(false);
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 20_000});
+      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'signs on this device', 'the destination note forks to the device-signed crossing');
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset');
 
       // §2 the review census: full chain + the destination's own estimate (the fee lines land
@@ -140,27 +138,17 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
         fees = cctpFeeExpectations(minOut);
       }
 
-      // §3 the handoff keeps the mid-stop phrasing.
-      expect(await m.driver.waitForText('is at your Ethereum address', {timeoutMs: 60_000})).toBe(true);
-      await m.driver.waitForText('Step 1', {timeoutMs: 10_000});
-      const handoff = m.driver.readText('crossrail-handoff');
-      assertIncludes(handoff, `${fmt(minOut, 6)} USDC`, 'the intro names the crossed amount (the burn floor)');
-      assertIncludes(handoff, `${fmt(fees.maxFee, 6)} USDC`, 'Circle\'s fee line renders in the handoff too');
-      assertIncludes(handoff, `${fmt(fees.mintFloor, 6)} USDC`, 'the handoff floor line carries the hop-asset figure');
-      assertIncludes(handoff, 'the final step swaps it onward', 'the handoff floor line reads USDC as the MID-STOP');
-
-      // The wallet double signs, the app attaches the reported hash.
-      await m!.driver.type('crossrail-burn-tx', 'signed');
-      for (let i = 0; i < 3; i++) {
-        try {
-          await m!.driver.click('btn-crossrail-attach', {timeoutMs: 5_000});
-          break;
-        } catch (e) {
-          if (i === 2) throw e;
-          await new Promise((r) => setTimeout(r, budgetScaled(250)));
-        }
-      }
-      await m!.driver.findByTestID('crossrail-crossing', {timeoutMs: 15_000});
+      // §3 the DEVICE-signed crossing (stage 2): the executor signs both legs itself. The
+      // panel mounts on the withdraw fork — wait for the burn's broadcasts before auditing.
+      await m.driver.findByTestID('crossrail-crossing', {timeoutMs: 90_000});
+      await m.driver.waitForFunction(
+        () => evmRpcStubState()!.sent.length >= 2,
+        {timeoutMs: 30_000, label: 'the device burn broadcast both legs'},
+      );
+      const sent = evmRpcStubState()!.sent;
+      expect(sent.map((s) => s.kind)).toEqual(['approve', 'burn']);
+      assertIncludes(sent[1].raw.slice(0, 400), '779b432d', 'the burn is depositForBurnWithHook on TokenMessengerV2');
+      expect(m.driver.isPresent('crossrail-burn-hash')).toBe(true);
 
       // §4 the mint lands, then the final leg's offer.
       setCctpMessageState('complete');
