@@ -5,7 +5,7 @@
 // case-insensitive (EVM hex case is display noise) — a checksummed paste of the device's own
 // address must never demote the record to the handoff path.
 import {describe, expect, test} from '@jest/globals';
-import {resolveCctpBurnSigner} from '../../cctp';
+import {resolveCctpBurnSigner} from '../cctp';
 
 const DEVICE = '0xab3f0a1d0c1e2b3c4d5e6f708192a3b4c5d6e7f8';
 
