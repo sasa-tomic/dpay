@@ -11,7 +11,7 @@ import {
 } from '../harness/lib';
 import {relayBaseURL} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
-import {scaled as budgetScaled} from '../harness/budget';
+import {deadline as budgetDeadline, scaled as budgetScaled} from '../harness/budget';
 import {installHeapProbe} from './heapProbe';
 import {
   disposeConvertStubs, venueKnob, installSideShiftStub, setSideShiftStatus,
@@ -130,7 +130,19 @@ hermeticDescribe('flow 223 — the EVM-native CeFi destination (ICP → native E
       expect(rec!.outSymbol).toBe('ETH');
       expect(rec!.outDecimals).toBe(18);
       expect(rec!.destAddress).toBe(expectedAddress);
-      expect(BigInt(await getBalance(account!.publicHex, 8))).toBe(icpBefore);
+      // The auto-deposit (2026-10-02): dpay sends the venue deposit from the wallet the moment
+      // the record reaches awaiting_deposit - ONE order ran (shiftCalls above), so the ledger
+      // ends at icpBefore minus that deposit (3 ICP) and its transfer fee (the ICP ledger's
+      // 10000 e8s). The send is the watcher's async act: wait for exactly that debit to land
+      // before pinning it (a second send could never match this pin).
+      const afterDeposit = icpBefore - 300000000n - 10000n;
+      const debitDeadline = budgetDeadline(60_000);
+      let seen = BigInt(await getBalance(account!.publicHex, 8));
+      while (seen !== afterDeposit) {
+        if (Date.now() > debitDeadline) throw new Error(`the cefi auto-deposit never landed as exactly deposit+fee (observed ${seen})`);
+        await new Promise((r) => setTimeout(r, 250));
+        seen = BigInt(await getBalance(account!.publicHex, 8));
+      }
 
       // §3 reload: the payout watch resumes WITHOUT re-creating the order.
       const shiftsBefore = (await sideshiftRelayHits()).shiftCalls;
