@@ -97,6 +97,20 @@ describe('prepareEvmConvertRecord — red lines', () => {
     expect(leg.preOutRaw).toBeDefined();
     expect(record.expectedNet).toBe(leg.minOut);
   });
+
+  test('a checksummed tokenIn still names the row pair - the rail compare is canonical (D31 live trip 2026-10-03)', async () => {
+    // The registry pins chain tokens checksummed (app/evm/chains.ts); the quoter path
+    // lowercases internally while the pair red line compared raw - the live ZCHF->ETH trip
+    // died at 'Quote unavailable (code pool).' with a perfectly quotable pair on the table.
+    const {record} = await prepareEvmConvertRecord({
+      secretHex: SEED,
+      quote: {...quote, tokenIn: '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB'},
+      inSymbol: 'ZCHF', outSymbol: 'ETH', inDecimals: 18, outDecimals: 18,
+      slippageBps: 100,
+    });
+    expect(record.step).toBe('swapping');
+    expect(record.evmSwap!.inRailId).toBe(`evm:1:${ZCHF}`); // the record freezes the CANONICAL rail id
+  });
 });
 
 describe('executeEvmConvert — the honest edges', () => {

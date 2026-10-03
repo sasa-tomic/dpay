@@ -21,7 +21,7 @@ import {
   readEvmRailBalance,
 } from '../evm';
 import {venueOfId, type VenueEntry} from '../config/venues';
-import {evmAmmChainOf, type EvmAmmChain} from '../config/evmAmm';
+import {evmAmmChainOf, evmAmmRailId, type EvmAmmChain} from '../config/evmAmm';
 import {planTokenToNative, planTokenToToken, planTokenViaWethHub, type UniswapSwapPlan} from '../evm/uniswapPlan';
 import {M} from '../i18n';
 import {type ConvertRecord, type EvmSwapLeg} from './types';
@@ -60,9 +60,12 @@ export async function prepareEvmConvertRecord(args: EvmConvertPrepareArgs): Prom
   }
   const chain = evmAmmChainOf(venue.venue_id);
   if (chain == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
-  // Red line 2: the quote names the pair the row trades (rail-id set equality).
+  // Red line 2: the quote names the pair the row trades (rail-id set equality). The compare
+  // is RAIL-CANONICAL (evmAmmRailId lowercases): the registry pins chain tokens checksummed
+  // (app/evm/chains.ts) while the venue rows derive lowercase - the live ZCHF->ETH D31 trip
+  // (2026-10-03) died here at 'pool' with a perfectly quotable pair on the table.
   if (!venue.pair_ledgers.includes(quote.outRailId)
-    || !venue.pair_ledgers.some(l => l !== quote.outRailId && l === `evm:${chain.id}:${quote.tokenIn}`)) {
+    || !venue.pair_ledgers.some(l => l !== quote.outRailId && l === evmAmmRailId(chain.id, quote.tokenIn))) {
     throw new Error(M.convert.errors.quoteUnavailable('pool'));
   }
   const from = deriveEvmAddress(args.secretHex);
@@ -99,7 +102,7 @@ export async function prepareEvmConvertRecord(args: EvmConvertPrepareArgs): Prom
     protocol: 'evm',
     chainId: chain.id,
     venueId: venue.venue_id,
-    inRailId: `evm:${chain.id}:${quote.tokenIn}`,
+    inRailId: evmAmmRailId(chain.id, quote.tokenIn), // canonical (lowercase) - the record's rail id
     outRailId: quote.outRailId,
     tokenIn: quote.tokenIn,
     tokenOut: quote.tokenOut,
