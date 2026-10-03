@@ -143,7 +143,11 @@ type EngineState = {
   ctx: EngineCtx | null;
   opts: Required<Pick<EngineOpts, 'rearmMs' | 'stuckWatchMs' | 'providerPollMs' | 'providerPollFloorMs'>> & {executorOpts: NonNullable<EngineOpts['executorOpts']>};
   records: Map<string, ConvertRecord>;
-  inflight: Set<string>;
+  /** Per-record drive ownership: record id → the engineSession that owns the drive. A drive
+   *  owned by a DEAD session is a ghost (its writes are D2-gated); it must never block THIS
+   *  session's drives. (Was a bare Set across sessions: the killed session's still-draining
+   *  drive silenced the remounted engine's boot sweep forever - the 2026-10-03 P0 strand.) */
+  inflight: Map<string, number>;
   timers: Map<string, ReturnType<typeof setTimeout>>;
   subscribers: Set<(records: Record<string, ConvertRecord>) => void>;
   stopped: boolean;
@@ -153,7 +157,7 @@ const state: EngineState = {
   ctx: null,
   opts: {rearmMs: CONVERT_ENGINE_REARM_MS, stuckWatchMs: CONVERT_ENGINE_STUCK_WATCH_MS, providerPollMs: CONVERT_ENGINE_PROVIDER_POLL_MS, providerPollFloorMs: CONVERT_ENGINE_PROVIDER_POLL_FLOOR_MS, executorOpts: ENGINE_EXECUTOR_OPTS},
   records: new Map(),
-  inflight: new Set(),
+  inflight: new Map(),
   timers: new Map(),
   subscribers: new Set(),
   stopped: true,
@@ -294,20 +298,29 @@ function fireOnTerminalIfEnteredListed(before: ConvertStep | undefined, after: C
   }
 }
 
-/** The single driver entry. Single-flight per record id; a drive is ONE executor run (IC legs)
- *  or ONE provider poll or ONE stuck probe, never a loop — loops live in the re-arm timers.
+/** The single driver entry. Single-flight per record id WITHIN the live session (a drive is
+ *  ONE executor run or ONE provider poll or ONE stuck probe, never a loop - loops live in the
+ *  re-arm timers); a drive owned by a PREVIOUS session is a ghost and blocks nothing.
  *
  *  A drive BELONGS to the ctx it started under (D2 identity-switch race): if the engine re-keys
  *  to identity B mid-drive, the stale drive still finishes its work, but every write, persist,
- *  and re-arm below is gated on `state.ctx === capturedCtx` — A's record never lands in B's
+ *  and re-arm below is gated on `state.ctx === capturedCtx` - A's record never lands in B's
  *  in-memory records map, B's timers are never armed for it, and B's engine never drives (and
- *  thereby never persists) A's record into `dpay.convert.v3.<B>`. Stale drives finish silently. */
+ *  thereby never persists) A's record into `dpay.convert.v3.<B>`. Stale drives finish silently.
+ *
+ *  THE GHOST RULE (2026-10-03 P0): the killed session's drive can outlive the session itself
+ *  (its bounded awaits drain long after the wallet unmounted). Its ownership entry is keyed by
+ *  ITS session, so the remounted engine's boot sweep drives the record anyway - under the old
+ *  session-global flag the ghost silenced the new session's drive AND its own D2 guard refused
+ *  the re-arm, leaving the record live in the map with no driver and no timer at all. */
 async function driveOne(id: string): Promise<void> {
   const ctx = state.ctx;
-  if (ctx == null || state.stopped || state.inflight.has(id)) return;
+  if (ctx == null || state.stopped) return;
+  if (state.inflight.get(id) === engineSession) return;
+  const session = engineSession;
   const rec = state.records.get(id);
   if (rec == null) return;
-  state.inflight.add(id);
+  state.inflight.set(id, session);
   const mine = () => state.ctx === ctx;
   try {
     let next = rec;
@@ -642,7 +655,9 @@ async function driveOne(id: string): Promise<void> {
     console.warn('convert resume drive failed for', id, e instanceof Error ? e.message : String(e));
     if (mine()) scheduleNext(id, state.records.get(id) ?? rec);
   } finally {
-    state.inflight.delete(id);
+    // The ghost's cleanup never deletes a live session's ownership (a restart re-keyed the
+    // entry); only the owner removes its own flag.
+    if (state.inflight.get(id) === session) state.inflight.delete(id);
   }
 }
 
@@ -746,6 +761,9 @@ export function startConvertResumeEngine(ctx: EngineCtx, opts: EngineOpts = {}):
   state.ctx = ctx;
   state.stopped = false;
   state.records = new Map();
+  // A fresh session owns nothing: ghost ownership entries from dead sessions never block the
+  // boot sweep (the driveOne guard keys on the session), and their cleanup is a no-op here.
+  state.inflight.clear();
   state.opts = {
     rearmMs: opts.rearmMs ?? CONVERT_ENGINE_REARM_MS,
     stuckWatchMs: opts.stuckWatchMs ?? CONVERT_ENGINE_STUCK_WATCH_MS,
@@ -861,6 +879,30 @@ export async function confirmCrossRailSolLeg(id: string): Promise<ConvertRecord 
   await commit(next);
   void driveOne(id);
   return next;
+}
+
+/** TEMP DIAG (killarm investigation): one synchronous look at the engine singleton's live
+ *  state - the ctx liveness, the armed timer count, the in-flight drive set, and every held
+ *  record's (step, legPlan states, dispatch-shape flags). Read-only, test-only; remove with
+ *  the investigation. */
+export function convertResumeDebugSnapshot(): {
+  hasCtx: boolean; stopped: boolean; timers: number; inflight: string[];
+  records: Array<{id: string; step: string; legs: Array<string | null>; composed: boolean; providerRef: boolean; solanaLeg: boolean}>;
+} {
+  return {
+    hasCtx: state.ctx != null,
+    stopped: state.stopped,
+    timers: state.timers.size,
+    inflight: [...state.inflight.keys()],
+    records: [...state.records.values()].map((r) => ({
+      id: r.id,
+      step: r.step,
+      legs: (r.legPlan ?? []).map((l) => l.state),
+      composed: r.composedDeposit != null,
+      providerRef: r.providerRef != null,
+      solanaLeg: r.solanaLeg != null,
+    })),
+  };
 }
 
 /** Test-only: full teardown between suites (jest module state persists across files). */
