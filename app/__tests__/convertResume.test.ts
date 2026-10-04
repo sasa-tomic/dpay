@@ -386,6 +386,38 @@ describe('the engine — every live record driven from wallet load, mounted scre
     }
   });
 
+  test('a parked pre-burn crossing record is DRIVEN at boot: crossing + device + no hash → the sign flow, not a no-op (the D31 resume gap)', async () => {
+    // The device-sign step never completed (the app died mid-trip, 2026-10-03 live finding):
+    // the persisted record sits at `crossing` with crossRail.burnTxHash absent. The boot
+    // sweep must hand it to the crossing executor — which signs the burn itself for a
+    // device-signed record (the executor contract is pinned in convertCrossrail.test.ts:
+    // byte-identical re-drive, receipt adoption) — never leave it driverless. The
+    // pre-810d1a7c watcher returned early on the missing hash and nothing re-armed the
+    // sign drive: this pin is the guard that the engine always re-adopts the record.
+    jest.mocked(loadConvertRecords).mockResolvedValue({
+      'xr-1': legRecord({
+        id: 'xr-1',
+        step: 'crossing',
+        crossRail: {kind: 'cctp_sol', burnSigner: 'device', solAddress: 'SolAddr1', mintRecipientAta: 'AtaAddr1'},
+      }),
+    });
+    jest.mocked(executeCrossRailConvert).mockImplementation(async (rec: ConvertRecord) => rec);
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(20);
+      // Driven means: the crossing executor received THIS record (the sign flow, executor
+      // contract pinned in convertCrossrail) — and the drive re-arms while the record stays
+      // crossing (the mock never advances it, so >1 drive on the FAST clock is the re-arm
+      // working). Zero calls would be the pre-810d1a7c no-op the gap was.
+      const calls = jest.mocked(executeCrossRailConvert).mock.calls.filter(c => (c[0] as ConvertRecord).id === 'xr-1');
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls[0]![0]).toMatchObject({id: 'xr-1', step: 'crossing'});
+      expect(calls[0]![1]).toMatchObject({secretHex: 'sec', publicHex: 'pub'});
+    } finally {
+      stop();
+    }
+  });
+
   test('start drives EVERY live record: the leg record via executeConvert, the provider record via its statusUrl', async () => {
     jest.mocked(loadConvertRecords).mockResolvedValue({
       'leg-1': legRecord(),

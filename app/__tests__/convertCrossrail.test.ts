@@ -678,6 +678,19 @@ describe('the DEVICE-signed burn — the executor signs the crossing itself (sta
     expect(second.crossRail!.burnTxHash).toBe(first.crossRail!.burnTxHash); // identical bytes → identical hash
     expect(secondBurn).toBe(firstBurn); // identical bytes — EVM dedup makes the re-drive safe
   });
+
+  test('a hashless EXTERNAL crossing record parks untouched: no signer is improvised', async () => {
+    // The corrupt-shape rule: an external record reaches crossing only THROUGH attach (which
+    // freezes the hash in the same write), so crossing + external + no hash is a shape this
+    // build never wrote — the drive must park it exactly as-is, sign nothing. (The engine's
+    // re-arm keeps it watchable; the boot-sweep drive itself is pinned in convertResume.)
+    const rec = await runIcLegs(await plannedCrossRecord()); // burnSigner: external
+    const hashless: ConvertRecord = {...rec, step: 'crossing', crossRail: {...rec.crossRail!, burnTxHash: undefined}};
+    installEvmRpc();
+    const out = await executeCrossRailConvert(hashless, deps, burnOpts);
+    expect(out).toBe(hashless); // byte-identical, same object — nothing advanced
+    expect(evmRpcCalls).toHaveLength(0); // nothing signed, nothing broadcast, nothing read
+  });
 });
 
 describe('attachCctpBurnTx / declineCctpHandoff — the two user exits from the handoff', () => {
