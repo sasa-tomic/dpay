@@ -429,6 +429,41 @@ describe('the composed one-press consent', () => {
     expect(textOf(tree, 'convert-composed-deposit-amount')).toContain('0.8415');
   });
 
+  test('the wallet\'s ICP covering the deposit retires the swap: the press adopts the LEGLESS cefi record', async () => {
+    // The founder's 2026-10-04 shape: VCHF + ICP both held, the composed row confirmed.
+    // The hop-skip fires INSIDE prepare (the sheet hands it the hop balance) — the adopted
+    // record is the plain cefi record the deposit watcher auto-funds from the wallet's ICP.
+    let tree: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<ConvertMode {...mountProps} assetBalances={{7: '200000000', 8: '200000000'}} />);
+    });
+    mountedTrees.push(tree!);
+    await act(async () => {
+      present(tree!, 'convert-amount')[0].props.onChangeText('');
+    });
+    await act(async () => {
+      present(tree!, 'convert-amount')[0].props.onChangeText('1');
+    });
+    await act(async () => {});
+    // Earlier tests in this file signed through the same core mock; only THIS gesture's
+    // signature count is the pin.
+    jest.mocked(DpayCore.icpSignUpdate).mockClear();
+    await act(async () => {
+      present(tree!, 'btn-convert-confirm')[0].props.onPress();
+    });
+    expect(jest.mocked(createSideShiftFixedShift).mock.calls.length).toBe(1); // the order exists
+    expect(jest.mocked(adoptConvertRecord).mock.calls.length).toBe(1);
+    const rec = jest.mocked(adoptConvertRecord).mock.calls[0][0] as ConvertRecord;
+    expect(rec.step).toBe('awaiting_deposit');
+    expect(rec.legs).toEqual([]); // NOTHING signed — no approve, no depositFromAndSwap
+    expect(jest.mocked(DpayCore.icpSignUpdate).mock.calls.length).toBe(0);
+    expect(rec.inCurrency).toBe(8); // the source truth: the wallet's own ICP
+    expect(rec.inSymbol).toBe('ICP');
+    expect(rec.amountIn).toBe('89100000'); // the exact order deposit
+    expect(rec.providerDeposit?.depositAddress).toBe(VENUE_DEPOSIT_ADDRESS);
+    expect(rec.providerRef?.orderId).toContain('shift-comp-1');
+  });
+
   test('the tracker renders a deposit_refused failure: the venue, the in-wallet position, the exit', async () => {
     // Adopt a composed record through the ONE consent press, then fail it at the deposit
     // leg the way the engine's gate does and push the update through the engine's own

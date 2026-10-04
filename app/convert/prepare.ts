@@ -12,7 +12,7 @@ import {sideShiftStatusUrl, type SideShiftFixedShift} from '../services/sideshif
 import {trocadorStatusUrl, type TrocadorTrade} from '../services/trocador';
 import {M} from '../i18n';
 import {type ConvertRecord, type ChainRouteInfo, type LegPlan, type SignedLeg} from './types';
-import {type CeFiQuoteResult, type ConvertMath, type ConvertQuote, ceFiServiceError, createCeFiOrder, deriveConvertMath, fetchCeFiQuoteResult, fetchConvertQuote} from './quotes';
+import {type CeFiQuoteResult, type ConvertMath, type ConvertQuote, ceFiQuoteFromResult, ceFiServiceError, createCeFiOrder, deriveConvertMath, fetchCeFiQuoteResult, fetchConvertQuote} from './quotes';
 import {sameDecimalAmount} from './records';
 import {buildChainDepositLeg} from './chainDeposit';
 // --- prepare (confirming): build + sign BOTH envelopes once — never rebuild after this --------------
@@ -309,6 +309,15 @@ export async function prepareComposedConvertRecord(args: {
   /** The reviewed IC gross (the review card's figure). A fresh gross that differs throws
    *  ComposedQuoteChangedError — re-review, nothing created, nothing signed. */
   reviewedGrossRaw: string;
+  /** The wallet's CURRENT raw balance of the DEPOSIT (hop) asset, read by the caller at the
+   *  same gesture (the sheet's polled assetBalances). The HOP-SKIP check (2026-10-04): when
+   *  it covers the cefi order's exact deposit + its transfer fee — the executor's own
+   *  deposit-gate arithmetic — the IC legs are never signed: the record is born as the
+   *  legless cefi record (inCurrency = the hop asset) the deposit watcher auto-funds from
+   *  that balance. Absent/unreadable/short proves nothing, and the composed route signs
+   *  exactly as before — an unreadable balance never invents a skip, and a wrong skip can
+   *  never strand an order (the ledger refuses a short deposit before anything moves). */
+  hopBalanceRaw?: string | null;
 }): Promise<ConvertRecord> {
   const {route, quote1, math1} = args;
   const quote2 = args.quote2;
@@ -385,6 +394,19 @@ export async function prepareComposedConvertRecord(args: {
     throw new Error(M.convert.errors.quoteUnavailable('pool'));
   }
   const depositAmountDecimal = rawToDecimal(minOutFinal, depositEp.decimals);
+  // (4b) THE HOP-SKIP VERDICT (2026-10-04 founder finding): does the wallet's existing
+  // balance of the DEPOSIT asset already cover what the cefi leg needs — the order's exact
+  // deposit plus the transfer's own ledger fee? The same arithmetic the executor's deposit
+  // gate re-checks (amountRaw + fee, inclusive `>=`), so the check can never drift from the
+  // send. True → the VCHF→ICP swap the route was about to sign is UNNECESSARY WORK: it
+  // costs pool fees to produce money the wallet already holds, and the money rule is that
+  // such a swap is never signed. The covered shape is decided here, before the order
+  // exists, and the branch below returns the legless cefi record.
+  const hopNeed = BigInt(minOutFinal) + BigInt(depositEp.fee);
+  const hopBalance = args.hopBalanceRaw != null && /^\d+$/.test(args.hopBalanceRaw)
+    ? BigInt(args.hopBalanceRaw)
+    : null;
+  const hopCovered = hopBalance != null && hopBalance >= hopNeed;
   // (5) THE ORDER FIRST — the venue's own deposit address + locked figure are known before
   // anything signs. The settle address is the user's own derived address (never typed);
   // the refund address is the user's own account ON THE DEPOSIT RAIL (the fund-loss guard,
@@ -424,6 +446,26 @@ export async function prepareComposedConvertRecord(args: {
   }
   if (!sameDecimalAmount(order.depositAmount, depositAmountDecimal)) {
     throw new Error(M.convert.errors.quoteUnavailable('deposit'));
+  }
+  // (6b) THE COVERED BRANCH — the hop is dropped, the downstream leg draws from balance.
+  // The record IS the plain cefi shape (the one honest way, no new kind, no toggles): the
+  // settle quote built from the SAME venue answer the order was created from, the hop asset
+  // as the input. From here the deposit watcher owns the funding exactly as it does for the
+  // direct cefi surface: one auto-send of the EXACT order amount from the wallet's balance,
+  // then the provider poll. The VCHF the user typed stays untouched — no pool was touched.
+  if (hopCovered) {
+    return prepareCeFiConvertRecord({
+      id: args.id,
+      quote: ceFiQuoteFromResult(cefiVenue, depositEp.ledger, route.settleMint, minOutFinal, quoteRes, route.settleDecimals),
+      order,
+      relayUrl: args.relayUrl,
+      settleAddress,
+      inCurrency: depositEp.currency,
+      inSymbol: depositEp.symbol,
+      outSymbol: route.settleSymbol,
+      inDecimals: depositEp.decimals,
+      outDecimals: route.settleDecimals,
+    });
   }
   // (7) The deposit destination, resolved through the core's own validators — ICRC-1
   // account text first, else the ICP ledger's 64-hex account identifier (the one namespace

@@ -1250,6 +1250,10 @@ export function ConvertIntentSheet({
           math1: fresh.m1,
           ...(fresh.q2 != null && fresh.m2 != null ? {quote2: fresh.q2, math2: fresh.m2} : {}),
           reviewedGrossRaw: b.q1.amountOutGross,
+          // The hop-skip's balance fact (2026-10-04): the wallet's polled balance of the
+          // DEPOSIT asset, read at the same gesture. Prepare owns the verdict — covered →
+          // the legless cefi record, no swap signed; short/unreadable → the composed route.
+          hopBalanceRaw: assetBalances[activeRow.route.endpoints[activeRow.route.legs.length]!.currency] ?? null,
         });
         if (!mountedRef.current) return;
         onPrepared(rec); // adopted in the SAME gesture; the tracker narrates the venue facts live

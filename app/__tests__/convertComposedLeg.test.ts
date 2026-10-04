@@ -67,6 +67,7 @@ import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config
 import {convertStoreKey} from '../config/convert';
 import {EURC_MINT_ADDRESS} from '../solana/tokens';
 import {deriveSolanaAddress} from '../solana/identity';
+import {sendCefiDepositForRecord} from '../lib/ataSetup';
 import {toUnits} from '../lib/format';
 
 const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
@@ -493,5 +494,120 @@ describe('the composed record’s provider phase — the venue poll finishes the
     stop();
     expect(convertResumeSnapshot()[sent.id]?.step).toBe('done');
     expect(convertResumeSnapshot()[sent.id]?.outAmountNet).toBe('11500');
+  });
+});
+
+// --- THE HOP-SKIP (2026-10-04 founder finding) ------------------------------------------------------
+// The founder's device held BOTH VCHF and ICP; Convert VCHF → EURC still signed the
+// VCHF→ICP pool swap even though the wallet's ICP already covered the cefi leg's exact
+// deposit requirement. Money rule: a swap the existing balance makes unnecessary is never
+// signed. When the wallet's balance of the DEPOSIT (hop) asset covers the order's exact
+// deposit + its transfer fee — the executor's own deposit-gate arithmetic (amountRaw + fee)
+// — the record must be born as the LEGLESS cefi record (inCurrency = the hop asset) the
+// deposit watcher auto-funds from balance. Fail-open: an unreadable balance never proves
+// coverage, and the composed route signs exactly as before.
+
+/** The covered prepare: the same reviewed quote, plus the wallet's hop balance. */
+async function preparedWithHopBalance(hopBalanceRaw: string | null | undefined): Promise<ConvertRecord> {
+  return prepareComposedConvertRecord({
+    id: 'hop-1',
+    secretHex: SECRET,
+    publicHex: PUBLIC,
+    relayUrl: 'http://relay.test',
+    route: ROUTE,
+    inDesc: rowOf(7) as CurrencyDescriptor,
+    quote1: quote1(),
+    math1: math1(),
+    reviewedGrossRaw: '120000000',
+    ...(hopBalanceRaw !== undefined ? {hopBalanceRaw} : {}),
+  });
+}
+
+describe('the hop-skip — existing balance of the deposit asset retires the swap', () => {
+  test('a wallet balance covering deposit + fee builds the LEGLESS cefi record — nothing signed', async () => {
+    const rec = await preparedWithHopBalance('200000000'); // 2 ICP ≥ 1.188 + 0.0001
+    // The truth, named: a plain cefi record. ICP in (the hop asset), the venue's order
+    // carried verbatim, awaiting the deposit the watcher sends from the wallet.
+    expect(rec.step).toBe('awaiting_deposit');
+    expect(rec.venueId).toBe('sideshift-eurc'); // the CEFI venue, never the pool
+    expect(rec.legs).toEqual([]);
+    expect(rec.legPlan).toBeUndefined();
+    expect(rec.composedDeposit).toBeUndefined();
+    expect(rec.hopLedger).toBeUndefined(); // no hop: the input IS the deposit asset
+    expect(rec.inCurrency).toBe(8);
+    expect(rec.inLedger).toBe(ICP_LEDGER);
+    expect(rec.inSymbol).toBe('ICP');
+    expect(rec.inDecimals).toBe(8);
+    expect(rec.amountIn).toBe('118800000'); // the order's EXACT deposit figure
+    expect(rec.outLedger).toBe(EURC_MINT_ADDRESS);
+    expect(rec.outSymbol).toBe('EURC');
+    expect(rec.providerDeposit).toMatchObject({depositAddress: VENUE_DEPOSIT, depositAmount: '1.188'});
+    expect(rec.providerRef).toMatchObject({orderId: 'shift-1'});
+    // ORDER FIRST still holds — and NOTHING was signed: no approve, no depositFromAndSwap.
+    expect(createSideShiftFixedShift).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(DpayCore.icpSignUpdate)).not.toHaveBeenCalled();
+    expect(jest.mocked(DpayCore.icpApproveArg)).not.toHaveBeenCalled();
+    expect(jest.mocked(DpayCore.icpDepositAndSwapArg)).not.toHaveBeenCalled();
+  });
+
+  test('the balance boundary is the executor\'s own gate arithmetic: amount + fee, inclusive', async () => {
+    // Exactly amountRaw + fee → covered (the executor's gate is `>=`, never `>`).
+    const exact = await preparedWithHopBalance('118810000');
+    expect(exact.legs).toEqual([]);
+    // One raw unit short → the swap is NOT provably unnecessary: the composed route signs.
+    const short = await preparedWithHopBalance('118809999');
+    expect(short.legs.map(l => l.method)).toEqual(['icrc2_approve', 'depositFromAndSwap', 'icrc1_transfer']);
+    expect(jest.mocked(DpayCore.icpSignUpdate)).toHaveBeenCalledTimes(3);
+  });
+
+  test('an unreadable balance never invents a skip — the composed route signs as before', async () => {
+    for (const unreadable of [null, 'abc', ''] as const) {
+      const rec = await preparedWithHopBalance(unreadable);
+      expect(rec.legs.map(l => l.method)).toEqual(['icrc2_approve', 'depositFromAndSwap', 'icrc1_transfer']);
+      expect(rec.composedDeposit).not.toBeUndefined();
+    }
+  });
+
+  test('the covered record drives to done with ZERO ICPSwap calls — the engine never signs a leg', async () => {
+    const rec = await preparedWithHopBalance('200000000');
+    await AsyncStorage.setItem(convertStoreKey(PUBLIC), JSON.stringify({[rec.id]: rec}));
+    jest.mocked(fetchWithTimeout).mockResolvedValue(fakeRes({status: 'waiting'}) as never);
+    const stop = startConvertResumeEngine(
+      {secretHex: SECRET, publicHex: PUBLIC, relayUrl: 'http://relay.test'},
+      {rearmMs: 5, stuckWatchMs: 5, providerPollMs: 5, executorOpts: OPTS},
+    );
+    await new Promise((r) => setTimeout(r, 60)); // several engine ticks
+    stop();
+    // The venue poll owns the record; no IC envelope was ever submitted: zero approves to
+    // the VCHF ledger, zero swaps to the pool — the wallet's ICP is the only money that moves.
+    expect(convertResumeSnapshot()[rec.id]?.step).toBe('awaiting_deposit');
+    expect(jest.mocked(submitTransfer)).not.toHaveBeenCalled();
+    expect(jest.mocked(DpayCore.icpSignUpdate)).not.toHaveBeenCalled();
+  });
+
+  test('the watcher\'s deposit send draws the EXACT order amount from the hop balance', async () => {
+    const rec = await preparedWithHopBalance('200000000');
+    // The legacy ICP shape (SideShift's live deposit address form): the watcher's dispatch
+    // on the venue's address, amount = the order's exact deposit, fee = the ledger's own.
+    const legacyRec = {...rec, providerDeposit: {...rec.providerDeposit!, depositAddress: 'c'.repeat(64)}};
+    const preparedLegacy: Array<{ledger: string; toAccountId: string; amountE8s: string; feeE8s: string}> = [];
+    const outcome = await sendCefiDepositForRecord(legacyRec as never, {
+      catalog: {currencies: [{currency: 8, ledger: ICP_LEDGER, fee: HUB_FEE}]},
+      secretHex: SECRET,
+      prepareTransfer: async () => { throw new Error('icrc path must not fire for a legacy address'); },
+      prepareLegacyTransfer: async (_s, req) => {
+        preparedLegacy.push(req);
+        return {ledger: ICP_LEDGER, envelopeHex: 'env-dep', requestIdHex: 'rid-dep'};
+      },
+      decodeLegacyReply: async () => ({ok: true, blockIndex: '77'}),
+      submitTransfer: async (p) => {
+        expect(p.ledger).toBe(ICP_LEDGER);
+        return {kind: 'settled', blockIndex: '77'};
+      },
+    });
+    expect(outcome).toEqual({kind: 'sent', blockIndex: '77'});
+    expect(preparedLegacy).toEqual([
+      {ledger: ICP_LEDGER, toAccountId: 'c'.repeat(64), amountE8s: '118800000', feeE8s: HUB_FEE},
+    ]);
   });
 });
