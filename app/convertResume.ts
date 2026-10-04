@@ -57,6 +57,7 @@ import {
   prepareCrossRailSolLeg,
   probeConvertSettlement,
   probeHopPayout,
+  crossRailHopDelivered,
   requestConvertAbort,
   isHubConvertRecord,
   saveConvertRecord,
@@ -244,7 +245,29 @@ async function probeStuckOnce(rec: ConvertRecord, ctx: EngineCtx): Promise<Conve
       excludeOutTx: claimedOutTxFor(rec.id),
       swapLeg,
     });
-    if (isHubConvertRecord(rec)) {
+    // THE CROSS-RAIL EXCEPTION (phantom-refusal instance 3, 2026-10-04 live finding): a
+    // record stuck on its SUBMITTED (sent) withdraw leg resolves at the DESTINATION, never
+    // by the hop-row probe — the hop row is this record's OWN already-consumed confirmation
+    // (hopTx; the dedupe sets exclude only OTHER records' claims), and the withdraw's payout
+    // never lands on any IC ledger. Re-matching the consumed row is the live mis-mark: a
+    // delivered withdraw flipped failed_leg/unknown before the crossing. Delivered → the leg
+    // confirms and the crossing continues (the engine's cross-rail dispatch takes it from
+    // here). Undelivered → the honest unknown stands: stuck, slow-watched, resolved by the
+    // expiry machinery — never a stale-row failed_leg. Observation only: nothing resubmitted,
+    // nothing re-signed. A withdraw that never went out keeps the hop semantics below.
+    const sentWithdraw = rec.legPlan.findIndex(l => l.kind === 'withdraw_erc20' && l.state === 'sent');
+    if (rec.crossRail != null && sentWithdraw >= 0) {
+      const delivered = await crossRailHopDelivered(rec);
+      if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
+      noteStuckProbeDone(rec.id, Date.now());
+      if (delivered) {
+        return commit({
+          ...rec,
+          legPlan: rec.legPlan.map((l, idx) => (idx === sentWithdraw ? {...l, state: 'confirmed' as const} : l)),
+          step: rec.crossRail.burnSigner === 'device' ? 'crossing' : 'awaiting_external',
+        });
+      }
+    } else if (isHubConvertRecord(rec)) {
       const dest = await probe(2);
       if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
       if (dest != null) {

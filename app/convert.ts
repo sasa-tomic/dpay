@@ -119,7 +119,7 @@ export {
 } from './convert/cctp';
 
 export type {ConvertExecutorDeps, SettleWatch} from './convert/execute';
-export {executeConvert, probeConvertSettlement, probeDepositRow, probeHopPayout} from './convert/execute';
+export {executeConvert, probeConvertSettlement, probeDepositRow, probeHopPayout, crossRailHopDelivered} from './convert/execute';
 
 export type {SolanaConvertPrepareArgs, SolanaExecutorDeps, SolanaExecutorOpts} from './convert/executeSolana';
 export {executeSolanaConvert, prepareSolanaConvertRecord} from './convert/executeSolana';

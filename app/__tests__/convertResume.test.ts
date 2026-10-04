@@ -30,6 +30,7 @@ jest.mock('../convert', () => ({
   isHubConvertRecord: jest.fn(() => false),
   isComposedConvertRecord: (rec: {composedDeposit?: unknown} | null) => rec?.composedDeposit != null,
   isChainConvertRecord: (rec: {chainRoute?: unknown} | null) => rec?.chainRoute != null,
+  crossRailHopDelivered: jest.fn(async () => false),
   prepareCrossRailSolLeg: jest.fn(),
   attachCctpBurnTx: jest.fn(),
   declineCctpHandoff: jest.fn(),
@@ -59,6 +60,8 @@ import {
   executeSolanaConvert,
   loadConvertRecords,
   probeConvertSettlement,
+  probeHopPayout,
+  crossRailHopDelivered,
   saveConvertRecord,
 } from '../convert';
 import {DpayCore} from '../services/native';
@@ -130,6 +133,7 @@ beforeEach(() => {
   jest.mocked(executeConvert).mockImplementation(async (rec: ConvertRecord) => rec);
   jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue('principal' as never);
   jest.mocked(probeConvertSettlement).mockResolvedValue(null as never);
+  jest.mocked(probeHopPayout).mockResolvedValue(null as never);
 });
 
 afterEach(async () => {
@@ -544,6 +548,56 @@ describe('the engine — every live record driven from wallet load, mounted scre
       unsub();
     }
   });
+
+  // --- the cross-rail stuck watch (phantom-refusal instance 3, 2026-10-04) ----------------------
+  // A cross-rail record stuck on its withdraw leg resolves at the DESTINATION, never by the
+  // hop-row probe: the hop row is the record's OWN already-consumed confirmation (hopTx), and
+  // the withdraw's payout never lands on any IC ledger. Re-matching the consumed row is the
+  // live mis-mark: a delivered withdraw flipped failed_leg/unknown before the crossing.
+  const crossRailStuckRecord = (): ConvertRecord => ({
+    ...legRecord({step: 'stuck', failureCode: 'unknown'}),
+    destAddress: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+    crossRail: {kind: 'cctp_sol', burnSigner: 'device', solAddress: 'sol', mintRecipientAta: 'ata', maxFeeSubunits: '1', mintFloorSubunits: '1', solVenueId: 'jupiter'},
+    legPlan: [
+      {kind: 'approve', state: 'confirmed'},
+      {kind: 'swap', state: 'confirmed'},
+      {kind: 'approve', state: 'confirmed'},
+      {kind: 'approve_gas', state: 'confirmed'},
+      {kind: 'withdraw_erc20', state: 'sent'},
+      {kind: 'cctp_burn', state: 'pending', canister: ''},
+    ],
+  } as unknown as ConvertRecord);
+
+  test('a cross-rail withdraw stuck UNKNOWN resolves at the destination: delivered → the crossing continues', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'leg-1': crossRailStuckRecord()});
+    jest.mocked(probeHopPayout).mockResolvedValue({amount: '190000000', tx: 'stale-hop-row'} as never); // the record's OWN consumed row sits there
+    jest.mocked(crossRailHopDelivered).mockResolvedValue(true as never);
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      expect(saveConvertRecord).toHaveBeenCalledWith('pub', expect.objectContaining({step: 'crossing'}));
+      expect(saveConvertRecord).not.toHaveBeenCalledWith('pub', expect.objectContaining({step: 'failed_leg'}));
+      expect(probeHopPayout).not.toHaveBeenCalled(); // the stale row is never even consulted
+    } finally {
+      stop();
+    }
+  });
+
+  test('a cross-rail withdraw stuck UNKNOWN with nothing at the destination stays stuck — the stale hop row never marks failed_leg', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({'leg-1': crossRailStuckRecord()});
+    jest.mocked(probeHopPayout).mockResolvedValue({amount: '190000000', tx: 'stale-hop-row'} as never);
+    jest.mocked(crossRailHopDelivered).mockResolvedValue(false as never);
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      expect(saveConvertRecord).not.toHaveBeenCalledWith('pub', expect.objectContaining({step: 'failed_leg'}));
+      expect(probeHopPayout).not.toHaveBeenCalled(); // the consumed row cannot re-mark anything it never reads
+      expect(convertResumeSnapshot()['leg-1']?.step).toBe('stuck'); // the honest unknown, slow-watched
+    } finally {
+      stop();
+    }
+  });
+
 
   test('a record landing terminal fires onTerminal once (the ledger refresh seam)', async () => {
     const onTerminal = jest.fn();

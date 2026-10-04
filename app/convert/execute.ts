@@ -322,12 +322,14 @@ function withLegState(rec: ConvertRecord, i: number, state: LegState, patch: Par
  *    stuck; every other planned shape probes the hop only.
  *  - unknown outcomes park on `stuck` (the honest unknown; the resume engine's slow watch
  *    resolves a hop row into `failed_leg`, never done — spec §8). */
-/** The destination verdict for a cross-rail withdraw whose reply reads refused: `eth_call`
- *  balanceOf(USDC, the record's EVM destination) against the chain the minter delivers into.
- *  True only when the balance covers the record's burn floor. Unreachable/unreadable → false
- *  (the honest refusal stands; a probe that cannot answer never invents a delivery). */
-async function crossRailHopDelivered(rec: ConvertRecord, minOut: string): Promise<boolean> {
+/** The destination verdict for a cross-rail withdraw whose reply is unproven (refused with no
+ *  decodable reason, or a poll that exhausted unknown): `eth_call` balanceOf(USDC, the record's
+ *  EVM destination) against the chain the minter delivers into, compared against the record's
+ *  burn floor. True only when the balance covers that floor. Unreachable/unreadable → false
+ *  (the honest refusal/unknown stands; a probe that cannot answer never invents a delivery). */
+export async function crossRailHopDelivered(rec: ConvertRecord): Promise<boolean> {
   const dest = rec.destAddress;
+  const minOut = await convertRecordMinOut(rec);
   if (dest == null || !/^\d+$/.test(minOut) || !/^0x[0-9a-fA-F]{40}$/.test(dest)) return false;
   try {
     const word = dest.toLowerCase().replace(/^0x/, '').padStart(64, '0');
@@ -447,6 +449,21 @@ async function executePlannedConvert(
       return tools.advance(hub != null
         ? {...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: hub.tx}
         : {...rec, step: 'stuck', failureCode: 'unknown'});
+    }
+    // THE CROSS-RAIL EXCEPTION (phantom-refusal instance 3): a SUBMITTED (sent) withdraw leg
+    // with dead bytes is an unknown outcome, and the hop-row probe below can only re-match
+    // this record's OWN consumed confirmation (hopTx) — the withdraw's payout never lands on
+    // any IC ledger. Verify at the destination: delivered → the crossing continues; else the
+    // honest unknown (stuck, slow-watched), never a stale-row failed_leg. A withdraw that
+    // never went out keeps the hop semantics below (its hop asset IS in-wallet).
+    const sentWithdraw = (rec.legPlan ?? []).findIndex(l => l.kind === 'withdraw_erc20' && l.state === 'sent');
+    if (rec.crossRail != null && sentWithdraw >= 0) {
+      if (await crossRailHopDelivered(rec)) {
+        return tools.advance(withLegState(rec, sentWithdraw, 'confirmed', {
+          step: rec.crossRail.burnSigner === 'device' ? 'crossing' : 'awaiting_external',
+        }));
+      }
+      return tools.advance({...rec, step: 'stuck', failureCode: 'unknown'});
     }
     const seen = await probeHop(rec);
     return tools.advance(seen != null
@@ -585,6 +602,21 @@ async function executePlannedConvert(
       if (plan.kind === 'deposit_transfer') {
         return tools.advance(withLegState(rec, i, 'sent', {step: 'awaiting_deposit'}));
       }
+      // THE CROSS-RAIL EXCEPTION (phantom-refusal instance 3, 2026-10-04 live finding): a
+      // poll budget that died answering unknown is not proof the minter did nothing — the
+      // live trip's withdraw parked unknown while the burn executed and the USDC landed.
+      // Before parking the honest unknown, ask the DESTINATION (the same verify-at-
+      // destination probe the refused fork runs): delivered → the leg confirmed and the
+      // crossing continues exactly like the settled fork. Undelivered/unreachable → the
+      // honest unknown stands (stuck; the engine's slow watch re-probes the destination).
+      // Never resubmits either way — the bytes were live, their outcome is merely unread.
+      if (plan.kind === 'withdraw_erc20' && rec.crossRail != null
+          && await crossRailHopDelivered(rec)) {
+        return tools.advance(withLegState(rec, i, 'confirmed', {
+          step: rec.crossRail.burnSigner === 'device' ? 'crossing' : 'awaiting_external',
+          outTx: legBlockIndex ?? undefined,
+        }));
+      }
       return tools.advance({...rec, step: 'stuck', failureCode: 'unknown'});
     }
     if (outcome !== 'settled') {
@@ -632,7 +664,7 @@ async function executePlannedConvert(
       // and the crossing continues exactly like the settled fork; undelivered/unreachable →
       // the honest refusal stands. Never resubmits either way.
       if (plan.kind === 'withdraw_erc20' && rec.crossRail != null
-          && await crossRailHopDelivered(rec, await convertRecordMinOut(rec))) {
+          && await crossRailHopDelivered(rec)) {
         return tools.advance(withLegState(rec, i, 'confirmed', {
           step: rec.crossRail.burnSigner === 'device' ? 'crossing' : 'awaiting_external',
         }));

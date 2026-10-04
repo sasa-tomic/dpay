@@ -571,6 +571,49 @@ describe('the DEVICE-signed burn — the executor signs the crossing itself (sta
     expect(out.legPlan![4].state).toBe('failed');
   });
 
+  test('a withdraw poll that answers UNKNOWN is verified at the destination before it parks: delivered → crossing (2026-10-04 live finding, phantom-refusal instance 3)', async () => {
+    const rec = await plannedDeviceRecord();
+    jest.mocked(relayFetch).mockResolvedValue(rowsRes([
+      {currency: 2, from: POOL, to: myPrincipal, amount: '190000000', block: '7', timestamp: NOW()},
+    ]) as never);
+    jest.mocked(submitTransfer)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '3'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '4'} as never)
+      // The live trip's shape: the withdraw's poll budget died answering unknown while the
+      // minter executed the burn — the USDC landed at the destination (balanceOf-verified).
+      .mockResolvedValue({kind: 'unknown'} as never);
+    // The destination answers: the burn floor IS there (>= MIN_OUT raw).
+    installEvmRpc({ethCall: '0x' + BigInt(MIN_OUT).toString(16)});
+    const out = await executeConvert(rec, {
+      secretHex: SECRET, publicHex: 'aabb', relayUrl: 'http://relay', onUpdate: () => {},
+    }, OPTS);
+    expect(out.step).toBe('crossing'); // delivered money continues the crossing — never stuck, never failed_leg
+    expect(out.legPlan![4].state).toBe('confirmed');
+    expect(out.failureCode).toBeUndefined();
+  });
+
+  test('a withdraw UNKNOWN with NOTHING at the destination stays the honest stuck park', async () => {
+    const rec = await plannedDeviceRecord();
+    jest.mocked(relayFetch).mockResolvedValue(rowsRes([
+      {currency: 2, from: POOL, to: myPrincipal, amount: '190000000', block: '7', timestamp: NOW()},
+    ]) as never);
+    jest.mocked(submitTransfer)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '3'} as never)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '4'} as never)
+      .mockResolvedValue({kind: 'unknown'} as never);
+    installEvmRpc({ethCall: '0x0'}); // nothing proven at the destination — CCTP may still be in flight
+    const out = await executeConvert(rec, {
+      secretHex: SECRET, publicHex: 'aabb', relayUrl: 'http://relay', onUpdate: () => {},
+    }, OPTS);
+    expect(out.step).toBe('stuck'); // the honest unknown, slow-watched — never an invented success, never failed_leg
+    expect(out.failureCode).toBe('unknown');
+    expect(out.legPlan![4].state).toBe('sent'); // the bytes WERE sent; delivery unproven either way
+  });
+
   test('the crossing drive signs approve + depositForBurnWithHook with the DEVICE key and parks back on crossing', async () => {
     const rec = await runIcLegs(await plannedDeviceRecord());
     installEvmRpc();
