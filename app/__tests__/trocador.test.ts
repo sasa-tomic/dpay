@@ -230,8 +230,11 @@ describe('convert.ts — the trocador family dispatch', () => {
     expect(caught).toBeInstanceOf(CeFiNoQuoteError);
     const noQuote = caught as CeFiNoQuoteError;
     expect(noQuote.venueName).toBe('Trocador');
-    expect(noQuote.message).toContain('Trocador');
+    // The copy law (spec 2026-10-04 §3): the verdict's message is venue-less - the venue
+    // rides the error object (above) and the Details fold, never the primary line.
+    expect(noQuote.message).toContain('no live market right now');
     expect(noQuote.message).toContain('Nothing was sent');
+    expect(noQuote.message).not.toContain('Trocador');
   });
 
   test('createCeFiOrder routes to the trocador service and refuses a quote missing the provider', async () => {
