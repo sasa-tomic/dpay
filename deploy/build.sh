@@ -80,9 +80,18 @@ if [ -d "$apk_dir" ]; then
 fi
 if [ -n "$apk" ]; then
   install -m 0644 "$apk" deploy/dist/dpay.apk
-  echo "== staged release APK $(basename "$apk") → deploy/dist/dpay.apk =="
+  # The build identity beside the bytes (scripts/build-apk.sh writes "<apk>.commit"): the one
+  # answer GET /api/v1/update gives. An APK predating the stamp has no .commit — drop any stale
+  # dist copy so the image can never serve an identity that does not belong to THESE bytes.
+  if [ -f "$apk.commit" ]; then
+    install -m 0644 "$apk.commit" deploy/dist/dpay.apk.commit
+  else
+    rm -f deploy/dist/dpay.apk.commit
+  fi
+  echo "== staged release APK $(basename "$apk") → deploy/dist/dpay.apk (+ .commit identity) =="
 else
   rm -f deploy/dist/dpay.apk
+  rm -f deploy/dist/dpay.apk.commit
   echo "== no release APK found — landing page will show 'coming soon' =="
 fi
 

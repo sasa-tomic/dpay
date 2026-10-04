@@ -37,6 +37,11 @@ COPY dist/dpay-relay /usr/local/bin/dpay-relay
 COPY dist/dpay.ap[k] /srv/dpay.apk
 ENV DPAY_APK_PATH=/srv/dpay.apk
 
+# The APK's build commit (one line, written by scripts/build-apk.sh beside the build, staged by
+# build.sh beside dist/dpay.apk) — the update identity GET /api/v1/update serves the app. Same
+# 0-or-1 glob trick: absent = the relay reads no file and the update route answers {"apk":null}.
+COPY dist/dpay.ap[k].commit /srv/dpay.apk.commit
+
 # Bind on all interfaces *inside the container* so the proxy (or a phone on the LAN) can reach it.
 # Everything the relay serves (landing page, web wallet, APK) is compiled in — no asset files.
 # Deliberately NO default ledger config: an unconfigured container exits rather than guess.
