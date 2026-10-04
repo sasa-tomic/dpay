@@ -20,6 +20,28 @@
 
 ## NEXT SESSION — work order
 
+**SWAP-UI DEFECT WAVE (founder 2026-10-04, "Bugs left and right around currency swaps"): LANDED.**
+Live screenshot of an in-flight VCHF→ICP→EURC convert showed five UI lies: the pending body
+rendered the leg-3 SideShift order while leg 2 still ran (keyed on
+`inflight||pending_withdrawal||awaiting_deposit`); `awaiting_deposit` claimed "Payout
+pending"/"holds the deposit" before the venue held anything; the leg list was not stateful (a
+stale "Approve the pool to pull your VCHF" hung below the pending panel); two conflicting expiry
+lines (the order expiry read `legs[0].expiresAtMs`, leg 1's spent clock); and the support recipe
+leaked an internal pool canister id for the WRONG leg. FIXED ff `dbf6cf24`/`8aece68e`/
+`13e0417d`/`bb56ac81`/`28965286` (7 files +542/-100): one truthful active-leg pending panel
+(shared `pendingPayoutViewOf` mirroring the executor's own probe target + `activeLegExpiryMs`),
+honest `awaitingDepositTitle/Body`, a stateful leg checklist (`legRowMood` + new styles tokens),
+order expiries only inside cefi-active blocks, and the support recipe naming only the active
+leg's pool. Flow 227 pins the founder's exact shape (a parked pending_withdrawal handoff
+resolves in window; venue expired → quote_expired; refunded → provider_refunded). NO functional
+hole found in the leg-2→leg-3 deposit handoff (executor re-probe + deposit gate + engine re-arm
++ boot sweep). The founder's own order `71c70fc7…` had expired with NO deposit sent - money
+safe, nothing reached the venue. Gates: all 8 rows PASS dirty=no `28965286` (the one test-app
+FAIL en route was flow 214's kill-arm load flake - solo green 7/7, known class). Follow-ups
+(value 4 each): raw pool ids still inline in direct/hub pendingBody (need the copyable-line
+treatment); "sent HH:MM" uses the record's createdAtMs, not the per-leg submit instant; the
+composed cefi wait lacks a "Last checked" line.
+
 **APK WEB DOWNLOAD + IN-APP UPDATE FLOW (founder 2026-10-04): LANDED.**
 (1) The landing page's download button was dead because `deploy/docker-compose.yml` always set
 `DPAY_APK_PATH:` to an EMPTY string, overriding the Dockerfile's baked default, so the relay's
