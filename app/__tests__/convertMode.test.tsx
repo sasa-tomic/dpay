@@ -947,6 +947,87 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
   });
 });
 
+// --- the founder's composed stuck screen (2026-10-04, real-money display bugs) --------------
+// The founder's device: composed VCHF → ICP → EURC, stuck, watch window expired. Two display
+// lies pinned here:
+//  (1) the signed minimum is the FIRST POOL LEG's floor in the LEG's own output raw units
+//      (ICP, 8dp) — printing it through the route-final out* fields (EURC, 6dp) multiplied
+//      the user's floor by 100 ("360.179063 EURC" for 3.60179063 ICP);
+//  (2) with the window expired, the route body still claimed the ledgers are being watched —
+//      flatly contradicted by the expired-window block right below it.
+describe('the composed stuck screen — leg-scoped signed minimum, honest expired copy', () => {
+  const POOL = '65mrh-fqaaa-aaaar-qapoa-cai';
+  const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
+  const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
+  const OPEN_AT = Date.now() + 600_000;
+  /** The founder's exact repro: composed VCHF → ICP → EURC, minOut 360179063 raw. The IC
+   *  swap's floor is leg 1's OWN output (ICP, 8dp); the record's out* fields name the cefi
+   *  settle (EURC, 6dp) — composed records are the one shape where the two differ. */
+  const composedStuck = (expiryMs: number): ConvertRecord => ({
+    id: 'founder-3',
+    createdAtMs: Date.now() - 120 * 60_000,
+    step: 'stuck',
+    failureCode: 'unknown',
+    venueId: 'icpswap',
+    inCurrency: 7,
+    inLedger: VCHF_LEDGER,
+    inSymbol: 'VCHF',
+    inDecimals: 8,
+    outLedger: 'EURC_MINT',
+    outSymbol: 'EURC',
+    outDecimals: 6,
+    hopLedger: ICP_LEDGER,
+    hopSymbol: 'ICP',
+    hopCurrency: 8,
+    hopDecimals: 8,
+    amountIn: '500000000',
+    expectedGross: '363817232',
+    expectedNet: '0',
+    inFee: '10000',
+    outFee: '0',
+    slippageBps: 100,
+    legs: [
+      {canister: VCHF_LEDGER, method: 'icrc2_approve', argHex: 'a', envelopeHex: 'aa', requestIdHex: 'c1', expiresAtMs: expiryMs},
+      {canister: POOL, method: 'depositFromAndSwap', argHex: 'b', envelopeHex: 'bb', requestIdHex: 'c2', expiresAtMs: expiryMs},
+      {canister: ICP_LEDGER, method: 'icrc1_transfer', argHex: 'c', envelopeHex: 'cc', requestIdHex: 'c3', expiresAtMs: expiryMs},
+    ],
+    legPlan: [
+      {kind: 'approve', canister: VCHF_LEDGER, fee: '10000', state: 'confirmed'},
+      {kind: 'swap', canister: POOL, fee: '', state: 'confirmed'},
+      {kind: 'deposit_transfer', canister: ICP_LEDGER, fee: '10000', state: 'sent'},
+    ],
+    destAddress: 'settle-addr',
+    destSymbol: 'EURC',
+    destNetwork: 'Solana',
+    providerRef: {orderId: 'ord-3'},
+    composedDeposit: {
+      venueId: 'sideshift', orderId: 'ord-3', depositAddress: 'venue-acct', depositOwner: 'venue-p',
+      amountDecimal: '3.60179063', amountRaw: '360179063', fee: '10000',
+      settleSymbol: 'EURC', settleDecimals: 6,
+    },
+  });
+
+  afterEach(() => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({});
+    jest.mocked(convertRecordMinOut).mockResolvedValue(null as never);
+  });
+
+  const mountStuck = async (rec: ConvertRecord) => {
+    // The engine's re-derived leg-1 floor, verbatim: 360179063 raw = 3.60179063 ICP.
+    jest.mocked(convertRecordMinOut).mockResolvedValue('360179063' as never);
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[rec.id]: rec});
+    return mountConvert('250000000', null);
+  };
+
+  test('the signed minimum reads in the LEG\'s output asset (3.60179063 ICP), never the route-final asset', async () => {
+    const tree = await mountStuck(composedStuck(OPEN_AT));
+    expect(present(tree, 'convert-stuck')).toBe(true);
+    const stuck = textOf(tree, 'convert-stuck');
+    expect(stuck).toContain('3.60179063 ICP');
+    expect(stuck).not.toContain('360.179063');
+  });
+});
+
 // --- the composed routes: expander rows, the Route-B gates, the hub two-quote surface -------------
 describe('multihop — the composed routes are Other-venues rows under the auto-picked direct pool', () => {
   const ROUTE_B_ROW = 'convert-venue-multihop:icpswap-ckusdc:2:cctp';

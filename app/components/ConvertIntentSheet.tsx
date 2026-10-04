@@ -2402,6 +2402,14 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
   const hopSymbol = record.hopSymbol ?? record.outSymbol;
   const destSymbol = record.destSymbol ?? record.outSymbol;
   const venueName = venueDisplayName(record.venueId);
+  // The signed floor is swap leg 1's min-out, in the LEG's own output asset (2026-10-04
+  // founder fix): a direct and a hub record name that asset with out* (a hub record's out*
+  // fields ARE the first swap's payout - the hop), but a COMPOSED record's out* names the
+  // cefi settle, so its leg payout is the hop asset. Formatting the hop-raw floor through
+  // the settle's decimals/symbol multiplied the user's floor by the decimal mismatch
+  // (the founder's 360179063 = 3.60179063 ICP printed as "360.179063 EURC").
+  const minOutDecimals = record.composedDeposit != null ? hopDecimals : outDecimals;
+  const minOutSymbol = record.composedDeposit != null ? hopSymbol : record.outSymbol;
   // The stuck-evidence clock (the leg-0 envelope's death, verbatim history) vs the ACTIVE
   // leg's binding deadline the live bodies show (2026-10-04 composed-truth fix).
   const legExpiryMs = record.legs[0]?.expiresAtMs ?? record.chainRoute?.expiresAtMs ?? record.createdAtMs;
@@ -2788,7 +2796,7 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
           ) : null}
           {!chainPhase1 && minOut != null ? (
             <Text style={S.fieldBody}>
-              {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), fmtAssetCompact(minOut, outDecimals, record.outSymbol), venueName)}
+              {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), fmtAssetCompact(minOut, minOutDecimals, minOutSymbol), venueName)}
             </Text>
           ) : null}
           {/* A legless record (chain phase 1, a Jupiter leg) has NO IC envelopes: the line
