@@ -37,20 +37,21 @@ signs NO pool swap; insufficient balance keeps the composed route). Gates: all 8
 dirty=no @ `b5103dc2`, overall VERIFIED. Live corroboration: the founder's own retry converted
 ICP→EURC with the venue deposit auto-sent from existing ICP - no pool leg.
 
-**CONVERT DISPLAY LIES, ROUND 2 (founder bug 3, "After some time" + screenshot): IN PROGRESS**
-via the copyfix lane (worktree `dpay-copyfix`, branch `copyfix` from `b5103dc2`). Two verified
-defects on the expired "Unknown outcome" screen: (A) the stuck view formats the FIRST POOL LEG's
-minimum with the ROUTE-FINAL symbol/decimals - 360179063 raw = 3.60179063 ICP rendered as
-"360.179063 EURC" (`ConvertIntentSheet.tsx` ~2787, `stuckSigned`; `ConvertStatePanel.tsx`:209 is
-fine for direct records); fix = leg-scoped symbol/decimals. (B) copy contradiction: `stuckRouteBody`
-("dpay keeps watching the ledgers; this screen flips on its own") renders adjacent to
-`stuckExpiredLine` ("nothing can move anymore"); fix = fork the body on expiry (watch-closed /
-settles-from-evidence copy), 4 locales. Money verdict (delivered, on-chain): the "Unknown
-outcome" was a display/poll lie - the pool swap DID execute (3.63807236 ICP received ≥ the
-3.60179063 minimum); a retry convert's 2.67102103 ICP deposit WAS auto-sent to the venue
-(swept in 3s); EURC payout pending at last probe; founder wallet keeps 8.01306312 ICP.
-Follow-up when the copyfix wave merges: re-probe the 2.67102103 ICP order (EURC at the
-founder's Solana address 8ZhJ2xdE or refund to `a2227143…`).
+**CONVERT DISPLAY LIES, ROUND 2 (founder bug 3, "After some time" + screenshot): CLOSED.**
+The copyfix wave is merged to main (`32be15d3` + `b42f0f8f`, rebased onto `15010b1c`; all 8 gate
+rows pass dirty=no, e2e-visual needed one retry after a first-run flow-78 flake). (A) the stuck
+view now signs its minimum in the FIRST POOL LEG's own asset - "3.60179063 ICP", never
+"360.179063 EURC" (`ConvertIntentSheet.tsx` `stuckSigned`; pins in `convertMode.test.tsx` +97).
+(B) the expired arm stops claiming the ledgers are watched: the body forks on expiry
+(watch-closed / settles-from-evidence), 4 locales (pins in `convertStuck.test.tsx`). Money
+verdict (on-chain): the "Unknown outcome" was a display/poll lie - the pool swap DID execute
+(3.63807236 ICP received ≥ the 3.60179063 minimum); a retry convert's 2.67102103 ICP deposit WAS
+auto-sent to the venue (swept in 3s); founder wallet keeps 8.01306312 ICP. Follow-up probe at
+22:30 local: EURC ATA still 0, no refund - the 2.67102103 ICP order is still mid-order at the
+venue hours later; re-probe (EURC at `8ZhJ2xdE…` or refund to `a2227143…`) until it resolves.
+The systemic answer to "is this the only bug": the adversarial swap-flow review + four-screen
+rework spec landed at `docs/specs/2026-10-04-convert-ux-rework.md` (`15010b1c`); the rework lane
+runs next from the merged tree.
 
 **SWAP-UI DEFECT WAVE (founder 2026-10-04, "Bugs left and right around currency swaps"): LANDED.**
 Live screenshot of an in-flight VCHF→ICP→EURC convert showed five UI lies: the pending body
