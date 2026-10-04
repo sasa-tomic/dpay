@@ -253,11 +253,11 @@ describe('convert.ts — the cefi mapping helpers', () => {
   test('ceFiServiceError names the SAME honesty keys as the IC surface, plus unconfigured', () => {
     const name = 'SideShift';
     expect(ceFiServiceError(new Error('unreachable'), name).message)
-      .toBe(convertEn.errors.quoteUnreachable(name));
+      .toBe(convertEn.errors.quoteUnreachable);
     expect(ceFiServiceError(new Error('unconfigured'), name).message)
-      .toBe(convertEn.errors.quoteUnconfigured(name));
+      .toBe(convertEn.errors.quoteUnconfigured);
     expect(ceFiServiceError(new Error('refused'), name).message)
-      .toBe(convertEn.errors.quoteRefused(name));
+      .toBe(convertEn.errors.quoteRefused);
     expect(ceFiServiceError(new Error('shape'), name).message)
       .toBe(convertEn.errors.quoteUnavailable('shape'));
     expect(ceFiServiceError('not an error', name).message)

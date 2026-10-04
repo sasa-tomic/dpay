@@ -51,9 +51,9 @@ export const convertDe: ConvertMessages = {
   venueSlow: 'Kürzlich langsam bei der Abwicklung.',
   sheetTitle: inSym => `${inSym} umwandeln`,
   youReceive: amt => `Du erhältst ≈ ${amt}`,
-  quoteFetching: venue => `Kurs von ${venue}…`,
+  quoteFetching: 'Kurs wird geholt…',
   autoVenueLine: (venue, at, n) => `${venue} · ${at} · ${n} Handelsplätze`,
-  otherVenues: n => `Weitere Handelsplätze (${n})`,
+  otherVenues: n => `Optionen (${n})`,
   atLeast: amt => `Min. ${amt}`,
   ctaConvert: amt => `${amt} umwandeln`,
   rateMoved: newAmt => `Preis geändert: jetzt etwa ${newAmt}. Erneut bestätigen.`,
@@ -182,7 +182,7 @@ export const convertDe: ConvertMessages = {
   cow: {
     feeLine: fee => `CoW-Gebühr (Schätzung): ${fee}`,
     protocolFeeLine: bps => `zuzüglich der Volumengebühr des Anbieters (${bps} bps)`,
-    settlingBody: 'Der Auftrag liegt bei den CoW-Solvern - er füllt in Sekunden bis Minuten. Diese Ansicht klärt sich von selbst; starten Sie keinen zweiten Tausch.',
+    settlingBody: 'Der Auftrag liegt bei den Solvern - er füllt in Sekunden bis Minuten. Diese Ansicht klärt sich von selbst; starte keinen zweiten Tausch.',
     failedBody: (inSym, detail) => `Der Auftrag wurde nicht ausgeführt (${detail}). Es hat nichts Ihre Wallet verlassen - Ihre ${inSym} sind noch da; nur die exakte Freigabe bleibt und läuft ungenutzt ab.`,
   },
   multihop: {
@@ -231,7 +231,7 @@ export const convertDe: ConvertMessages = {
     routeVenues: (icVenue, solVenue) => `Route: ${icVenue} → Circle CCTP → ${solVenue}`,
     gasPreflightTitle: 'Erst Gas nötig',
     gasPreflightBody: needed =>
-      `Der Burn nach Ethereum braucht etwa ${needed} Gas in ckETH - diese Wallet hält zu wenig. Hol zuerst ckETH in diese Wallet und komm zurück.`,
+      `Die Überquerung braucht etwa ${needed} Gas-Geld in ckETH - diese Wallet hält zu wenig. Hol zuerst ckETH in diese Wallet und komm zurück.`,
     executingTitle: 'Route läuft',
     doneRouteTitle: 'Auszahlung läuft',
     doneRouteBody: (amount, address) => `Mindestens ${amount} ist unterwegs zu ${address}.`,
@@ -327,14 +327,14 @@ export const convertDe: ConvertMessages = {
     declineButton: 'Ich signiere nicht',
     whatSigning: 'Du signierst zwei ganz normale Ethereum-Transaktionen: eine Freigabe, dann den Burn. Auf dpay-Seite wird nichts signiert.',
     crossingTitle: 'Überquerung nach Solana',
-    crossingBody: 'Circle attestiert den Burn und prägt die USDC an deine Solana-Adresse - dpay beobachtet Circles Status-Feed.',
+    crossingBody: 'Deine USDC überqueren nach Solana - die Bridge prägt sie an deine eigene Adresse. Dieser Bildschirm aktualisiert sich von selbst.',
     viewBurnTx: 'Burn-Transaktion ansehen',
     viewCircle: 'Circles Status-Seite',
     stillCrossing: 'Noch offen - wartet, nicht fehlgeschlagen. Schneller Pfad: Sekunden bis Minuten; bei Ethereum-Stau länger.',
     solReadyTitle: 'USDC sind auf Solana angekommen',
     solReadyBody: (credit, ata) => `${credit} verifiziert bei ${ata}. Schließe die Route ab - oder behalte die USDC; sie sind so oder so deine.`,
     abortedCrossing: ata =>
-      `Beobachtung gestoppt. Der Burn ist raus - Circle kann den Mint noch abschließen; die USDC landet so oder so an deiner eigenen Solana-Adresse ${ata}. Sieh später unter Guthaben nach.`,
+      `Beobachtung gestoppt. Die Überquerung ist schon raus - sie kann den Mint noch abschließen; die USDC landet so oder so an deiner eigenen Solana-Adresse ${ata}. Sieh später unter Guthaben nach.`,
     abortedSolReady: ata =>
       `Nichts wurde signiert - der letzte Tausch lief nie. Deine USDC liegen an deiner Solana-Adresse ${ata}: behalten oder dort umwandeln.`,
     solQuoteLabel: venue => `${venue}-Kurs`,
@@ -351,16 +351,16 @@ export const convertDe: ConvertMessages = {
     declinedBody: address =>
       `Nichts ist überquert. Deine USDC liegen an deiner eigenen Ethereum-Adresse ${address} - sende sie, wohin du willst, oder starte die Route später erneut.`,
     solFailedTitle: 'Solana-Tausch fehlgeschlagen',
-    solFailedBody: (ata, venue) =>
-      `Die USDC sind sicher rüber - an deiner Solana-Adresse ${ata}. ${venue} hat den letzten Tausch abgelehnt: gleich hier erneut versuchen oder die USDC behalten.`,
+    solFailedBody: ata =>
+      `Die USDC sind sicher rüber - an deiner Solana-Adresse ${ata}. Der letzte Tausch wurde abgelehnt: gleich hier erneut versuchen oder die USDC behalten.`,
     legCctpBurn: (sym, network) => `${sym} über Circle nach ${network} bringen (du signierst das in deiner Wallet)`,
     legSolSwap: (venue, sym) => `Auf ${venue} in ${sym} tauschen`,
     destAddressCrossNote: 'Diese Adresse signiert auch die Überquerung - füge eine Adresse ein, die du kontrollierst.',
     deviceSignTitle: 'Die Überquerung signiert auf diesem Gerät',
-    deviceSignBody: 'Der eigene Schlüssel dieser Wallet signiert die Circle-Überquerung - keine andere Wallet, kein zusätzlicher Schritt. Lass etwas ETH an der Auszahlungsadresse für das Gas der Überquerung liegen.',
+    deviceSignBody: 'Der eigene Schlüssel dieser Wallet signiert die Überquerung - keine andere Wallet, kein zusätzlicher Schritt. Lass etwas ETH an der Auszahlungsadresse für ihr Gas liegen.',
     destAddressDeviceNote: 'Die Überquerung signiert auf diesem Gerät - lass hier etwas ETH für ihr Gas liegen.',
     burnFailedBody: (address, reason) =>
-      `Die Circle-Überquerung wurde abgelehnt, bevor etwas verbrannt wurde. Dein USDC liegt an deiner eigenen Ethereum-Adresse ${address}${reason ? `: ${reason}` : ''} - sende es beliebig oder führe diese Route später erneut aus.`,
+      `Die Überquerung wurde abgelehnt, bevor etwas unterwegs war. Dein USDC liegt an deiner eigenen Ethereum-Adresse ${address}${reason ? `: ${reason}` : ''} - sende es beliebig oder führe diese Route später erneut aus.`,
     checksumMismatch: 'Prüfsummenfehler',
     retypeAddress: 'Adresse erneut eingeben',
     retypeMismatch: 'Stimmt nicht überein',
@@ -379,16 +379,14 @@ export const convertDe: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: venue => `${venue} war über dpays Relay nicht erreichbar. Nichts wurde gesendet - prüfe deine Verbindung und versuche es gleich erneut.`,
-    quoteRefused: venue => `${venue} hat abgelehnt, für dieses Paar gerade einen Kurs zu liefern.`,
-    buildRefused: venue => `${venue} konnte den Tausch nicht vorbereiten. Nichts bewegt - versuche es gleich erneut.`,
+    quoteUnreachable: 'Die Börse ist gerade nicht erreichbar. Nichts wurde gesendet - prüfe deine Verbindung und versuche es gleich erneut.',
+    quoteRefused: 'Für dieses Paar gibt es gerade keinen Kurs. Nichts wurde gesendet.',
+    buildRefused: 'Der Tausch konnte nicht vorbereitet werden. Nichts bewegt - versuche es gleich erneut.',
     quoteUnavailable: code => `Kurs nicht verfügbar (${code}).`,
-    quoteUnconfigured: venue =>
-      `${venue} ist auf diesem Relay noch nicht eingerichtet - kein Kurs anfragbar. Mit deiner Wallet ist nichts verkehrt.`,
+    quoteUnconfigured: 'Für dieses Paar ist auf diesem Relay noch keine Börse eingerichtet - mit deiner Wallet ist nichts verkehrt.',
     gasUnavailable: 'Der Gaspreis des Minters war nicht abrufbar - nichts wurde signiert. Versuche es erneut.',
-    cctpFeeUnavailable: 'Circles Bridge-Gebühr ließ sich nicht abrufen - nichts wurde signiert. Prüfe deine Verbindung und versuche es erneut.',
-    chainDepositUnreadable: venue =>
-      `${venue}s Einzahlungsadresse ließ sich auf Solana nicht verifizieren - nichts wurde signiert. Prüfe deine Verbindung und versuche es erneut, oder sende die Einzahlung aus deiner eigenen Wallet.`,
+    cctpFeeUnavailable: 'Die Gebühr der Überquerung ließ sich nicht abrufen - nichts wurde signiert. Prüfe deine Verbindung und versuche es erneut.',
+    chainDepositUnreadable: 'Die Einzahlungsadresse ließ sich auf Solana nicht verifizieren - nichts wurde signiert. Prüfe deine Verbindung und versuche es erneut, oder sende die Einzahlung aus deiner eigenen Wallet.',
     chainSenderEmpty: sym => `Kein ${sym}-Token-Konto in dieser Wallet - nichts wurde signiert. Empfange zuerst ${sym}.`,
     chainSenderShort: sym => `Der ${sym}-Bestand dieser Wallet deckt diesen Betrag nicht - nichts wurde signiert.`,
     chainRentShort: sym => `Das ${sym}-Konto des Handelsplatzes kostet etwas SOL an Miete - das Guthaben reicht nicht. Nichts wurde signiert; lade SOL auf und versuche es erneut.`,

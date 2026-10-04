@@ -37,7 +37,6 @@ import {utf8ToBytes} from '../lib/base64url';
 import {bytesToHex} from '../lib/format';
 import {deriveSolanaKeypair} from '../solana/identity';
 import {M} from '../i18n';
-import {venueDisplayName, venueOfId} from '../config/venues';
 import {solAssetOfMint} from '../config/swap';
 import {WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
 
@@ -68,8 +67,6 @@ export async function buildChainDepositLeg(args: {
   amountRaw: string;
   depositMemo?: string;
 }): Promise<ChainDepositLeg> {
-  const venue = venueOfId(args.cefiVenueId);
-  const venueName = venue != null ? venue.display_name : venueDisplayName(args.cefiVenueId);
   const amount = BigInt(args.amountRaw);
   if (amount <= 0n) throw new Error(M.convert.errors.quoteUnavailable('deposit'));
   // The venue's deposit address must BE a Solana pubkey — a non-base58 string (a venue
@@ -93,13 +90,13 @@ export async function buildChainDepositLeg(args: {
     const [info] = await rpc.getMultipleAccounts(solanaRpcUrls(), [args.depositAddress]);
     depositOwner = info == null ? SYSTEM_PROGRAM_ADDRESS : info.owner;
   } catch {
-    throw new Error(M.convert.errors.chainDepositUnreadable(venueName));
+    throw new Error(M.convert.errors.chainDepositUnreadable);
   }
   const isNativeSol = args.depositMint === WRAPPED_SOL_MINT_ADDRESS;
   const instructions = [];
   if (isNativeSol) {
     if (depositOwner !== SYSTEM_PROGRAM_ADDRESS) {
-      throw new Error(M.convert.errors.chainDepositUnreadable(venueName));
+      throw new Error(M.convert.errors.chainDepositUnreadable);
     }
     // Sender gate: lamports for the transfer + the base fee, read before the signature.
     const lamports = await rpc.getBalance(solanaRpcUrls(), senderAddress).catch(() => null);
@@ -129,9 +126,9 @@ export async function buildChainDepositLeg(args: {
       }
     } catch (e) {
       if (e instanceof Error && e.message === 'foreign-owner') {
-        throw new Error(M.convert.errors.chainDepositUnreadable(venueName));
+        throw new Error(M.convert.errors.chainDepositUnreadable);
       }
-      throw new Error(M.convert.errors.chainDepositUnreadable(venueName));
+      throw new Error(M.convert.errors.chainDepositUnreadable);
     }
     if (senderInfo == null || senderInfo.data == null) {
       throw new Error(M.convert.errors.chainSenderEmpty(inSymOf(args.depositMint)));
@@ -154,7 +151,7 @@ export async function buildChainDepositLeg(args: {
         const [destInfo] = await rpc.getMultipleAccounts(solanaRpcUrls(), [bs58.encode(destAta)]);
         destExists = destInfo != null;
       } catch {
-        throw new Error(M.convert.errors.chainDepositUnreadable(venueName));
+        throw new Error(M.convert.errors.chainDepositUnreadable);
       }
       if (!destExists) {
         const lamports = await rpc.getBalance(solanaRpcUrls(), senderAddress).catch(() => null);

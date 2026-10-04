@@ -16,12 +16,12 @@ import {copyToClipboard} from '../lib/clipboard';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconSwap} from './icons';
-import {activeLegExpiryMs, ConvertHeader, gasPreFundedAborted, LinkRow, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
+import {activeLegExpiryMs, ConvertHeader, DetailsToggle, gasPreFundedAborted, LinkRow, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
 import {ConvertStuckReceipts, stuckWindowExpired} from './ConvertStuckEvidence';
 import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 
 /** The cross-rail record surface (Routes B/C, 2026-09-16): everything after the five IC legs.
- *  The IC phases render exactly like RouteStatePanel's; then the surface splits —
+ *  The IC phases render exactly like the Settlement Field tracker's; then the surface splits —
  *  awaiting_external hands the user's OWN wallet the two exact Ethereum transactions (dpay
  *  holds no EVM key and signs nothing here), crossing watches Circle's own status feed until
  *  the mint lands AND is corroborated on-chain at the ATA, and sol_ready offers the final
@@ -36,6 +36,8 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
 }) {
   const cross = record.crossRail;
   const [, forceTick] = useState(0);
+  // The done receipt's audit fold (venue attribution + payout record under Details).
+  const [doneDetailsOpen, setDoneDetailsOpen] = useState(false);
   const [handoff, setHandoff] = useState<Awaited<ReturnType<typeof buildCctpHandoff>> | null>(null);
   const [handoffErr, setHandoffErr] = useState<string | null>(null);
   const [burnTxText, setBurnTxText] = useState('');
@@ -102,10 +104,10 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
       .then((q) => {
         if (!live || !mountedRef.current) return;
         if (q.ok) { setSolQuote(q.quote); setSolQuoteErr(null); }
-        else if (q.code === 'refused') setSolQuoteErr(M.convert.errors.quoteRefused(solVenueName));
+        else if (q.code === 'refused') setSolQuoteErr(M.convert.errors.quoteRefused);
         else setSolQuoteErr(M.convert.errors.quoteUnavailable(q.code));
       })
-      .catch(() => { if (live && mountedRef.current) setSolQuoteErr(M.convert.errors.quoteUnreachable(solVenueName)); });
+      .catch(() => { if (live && mountedRef.current) setSolQuoteErr(M.convert.errors.quoteUnreachable); });
     return () => { live = false; };
   }, [record.step, record.id, cross?.mintSubunits, cross?.solVenueId, cross?.solOutMint, record.slippageBps]);
 
@@ -418,16 +420,26 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
           <Text style={S.convertStateBody}>
             {M.convert.crossrail.doneBody(amountStr, destSymbol, cross.solAddress)}
           </Text>
-          {/* The receipt names WHO executed it (founder clarity fix 2026-09-22): the IC
-              swap venue, Circle's crossing, and the final leg's venue — the record's own
-              frozen registry keys, never literals. Route B has no final venue: its receipt
-              keeps the plain done body. */}
-          {cross.kind === 'cctp_sol' && cross.solVenueId != null ? (
-            <Text testID="crossrail-done-via" style={S.convertStateMeta}>
-              {M.convert.crossrail.doneVia(venueName, solVenueName)}
-            </Text>
+          {/* S4 (spec 2026-10-04): the receipt is a status word + one sentence + one action;
+              the audit facts (who executed it, the payout record) fold under Details. */}
+          <DetailsToggle
+            open={doneDetailsOpen}
+            onToggle={() => setDoneDetailsOpen(o => !o)}
+            label={M.convert.detailsLabel}
+          />
+          {doneDetailsOpen ? (
+            <View testID="convert-details-block">
+              {/* The receipt names WHO executed it (founder clarity fix 2026-09-22): the IC
+                  swap venue, Circle's crossing, and the final leg's venue - the record's own
+                  frozen registry keys. Route B has no final venue: the plain body stands. */}
+              {cross.kind === 'cctp_sol' && cross.solVenueId != null ? (
+                <Text testID="crossrail-done-via" style={S.convertStateMeta}>
+                  {M.convert.crossrail.doneVia(venueName, solVenueName)}
+                </Text>
+              ) : null}
+              {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
+            </View>
           ) : null}
-          {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
         </View>
       ) : null}
 
@@ -437,7 +449,7 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
             /* The SOL leg refused: the USDC ALREADY crossed — the dead-end copy must say so. */
             <>
               <Text style={S.convertStateTitle}>{M.convert.crossrail.solFailedTitle}</Text>
-              <Text style={S.convertStateBody}>{M.convert.crossrail.solFailedBody(cross.mintRecipientAta, solVenueName)}</Text>
+              <Text style={S.convertStateBody}>{M.convert.crossrail.solFailedBody(cross.mintRecipientAta)}</Text>
             </>
           ) : (
             <>

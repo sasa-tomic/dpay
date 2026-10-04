@@ -50,9 +50,9 @@ export const convertEs: ConvertMessages = {
   venueSlow: 'Recientemente lento para liquidar.',
   sheetTitle: inSym => `Convertir ${inSym}`,
   youReceive: amt => `Recibirás ≈ ${amt}`,
-  quoteFetching: venue => `Cotización de ${venue}…`,
+  quoteFetching: 'Buscando la cotización…',
   autoVenueLine: (venue, at, n) => `${venue} · ${at} · ${n} sedes`,
-  otherVenues: n => `Otras sedes (${n})`,
+  otherVenues: n => `Opciones (${n})`,
   atLeast: amt => `Mín. ${amt}`,
   ctaConvert: amt => `Convertir ${amt}`,
   rateMoved: newAmt => `El precio cambió: ahora unos ${newAmt}. Confirma de nuevo.`,
@@ -181,7 +181,7 @@ export const convertEs: ConvertMessages = {
   cow: {
     feeLine: fee => `Comisión de CoW (estimada): ${fee}`,
     protocolFeeLine: bps => `más la comisión de volumen del sitio (${bps} pbs)`,
-    settlingBody: 'La orden está con los solvers de CoW - se completa en segundos a minutos. Esta pantalla se resuelve sola; no inicie un segundo intercambio.',
+    settlingBody: 'La orden está con los solvers - se completa en segundos a minutos. Esta pantalla se resuelve sola; no inicies un segundo intercambio.',
     failedBody: (inSym, detail) => `La orden no se ejecutó (${detail}). Nada salió de su cartera - su ${inSym} sigue ahí; solo queda la aprobación exacta, que expira sin usarse.`,
   },
   multihop: {
@@ -230,7 +230,7 @@ export const convertEs: ConvertMessages = {
     routeVenues: (icVenue, solVenue) => `Ruta: ${icVenue} → Circle CCTP → ${solVenue}`,
     gasPreflightTitle: 'Primero falta gas',
     gasPreflightBody: needed =>
-      `Quemar hacia Ethereum necesita unos ${needed} de gas en ckETH - esta billetera no tiene suficiente. Consigue ckETH en esta billetera primero y vuelve.`,
+      `El cruce necesita unos ${needed} de gas en ckETH - esta billetera no tiene suficiente. Consigue ckETH en esta billetera primero y vuelve.`,
     executingTitle: 'Ejecutando la ruta',
     doneRouteTitle: 'Retiro en camino',
     doneRouteBody: (amount, address) => `Al menos ${amount} va en camino a ${address}.`,
@@ -326,14 +326,14 @@ export const convertEs: ConvertMessages = {
     declineButton: 'No voy a firmar',
     whatSigning: 'Firmas dos transacciones Ethereum normales en tu propia billetera: una aprobación y luego el burn. Del lado de dpay no se firma nada.',
     crossingTitle: 'Cruzando a Solana',
-    crossingBody: 'Circle atestigua el burn y acuña los USDC en tu dirección Solana - dpay vigila el feed de estado de Circle.',
+    crossingBody: 'Tus USDC están cruzando a Solana - el puente los acuña en tu propia dirección. Esta pantalla se actualiza sola.',
     viewBurnTx: 'Ver la transacción de burn',
     viewCircle: 'Página de estado de Circle',
     stillCrossing: 'Aún pendiente - no es un fallo. Vía rápida: segundos o minutos; con Ethereum congestionado, más.',
     solReadyTitle: 'Los USDC ya están en Solana',
     solReadyBody: (credit, ata) => `${credit} verificado en ${ata}. Termina la ruta - o quédate los USDC; son tuyos igual.`,
     abortedCrossing: ata =>
-      `Vigilancia detenida. Tu burn ya salió - Circle aún puede completar el mint; el USDC llega de todos modos a tu propia dirección de Solana ${ata}. Revisa Saldos más tarde.`,
+      `Vigilancia detenida. El cruce ya salió - aún puede completar el mint; el USDC llega de todos modos a tu propia dirección de Solana ${ata}. Revisa Saldos más tarde.`,
     abortedSolReady: ata =>
       `Nada se firmó - el último intercambio nunca se ejecutó. Tu USDC está en tu dirección de Solana ${ata}: consérvalo o conviértelo allí.`,
     solQuoteLabel: venue => `Cotización de ${venue}`,
@@ -350,16 +350,16 @@ export const convertEs: ConvertMessages = {
     declinedBody: address =>
       `No cruzó nada. Tus USDC están en tu propia dirección Ethereum ${address} - envíalos donde quieras o repite esta ruta más tarde.`,
     solFailedTitle: 'El intercambio en Solana falló',
-    solFailedBody: (ata, venue) =>
-      `Los USDC ya cruzaron - están en tu dirección Solana ${ata}. ${venue} rechazó el intercambio final: reintenta aquí en un momento o quédate los USDC.`,
+    solFailedBody: ata =>
+      `Los USDC ya cruzaron - están en tu dirección Solana ${ata}. El último intercambio fue rechazado: inténtalo de nuevo en un momento o quédate con los USDC.`,
     legCctpBurn: (sym, network) => `Llevar ${sym} a ${network} vía Circle (esto lo firmas en tu billetera)`,
     legSolSwap: (venue, sym) => `Cambiar a ${sym} en ${venue}`,
     destAddressCrossNote: 'Esta dirección también firma el cruce - pega una dirección que controles.',
     deviceSignTitle: 'El cruce firma en este dispositivo',
-    deviceSignBody: 'La clave de esta propia billetera firma el cruce de Circle - sin otra billetera, sin paso extra. Deja un poco de ETH en la dirección de pago para el gas del cruce.',
+    deviceSignBody: 'La clave de esta propia billetera firma el cruce - sin otra billetera, sin paso extra. Deja un poco de ETH en la dirección de pago para su gas.',
     destAddressDeviceNote: 'El cruce firma en este dispositivo - deja aquí un poco de ETH para su gas.',
     burnFailedBody: (address, reason) =>
-      `El cruce de Circle fue rechazado antes de quemar nada. Tu USDC está en tu propia dirección de Ethereum ${address}${reason ? `: ${reason}` : ''} - envíalo donde quieras o repite esta ruta más tarde.`,
+      `El cruce fue rechazado antes de que algo saliera. Tu USDC está en tu propia dirección de Ethereum ${address}${reason ? `: ${reason}` : ''} - envíalo donde quieras o repite esta ruta más tarde.`,
     checksumMismatch: 'Error de checksum',
     retypeAddress: 'Vuelve a escribir la dirección',
     retypeMismatch: 'No coincide',
@@ -378,16 +378,14 @@ export const convertEs: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: venue => `${venue} no fue accesible a través del relay de dpay. No se envió nada - revisa tu conexión e inténtalo en un momento.`,
-    quoteRefused: venue => `${venue} se negó a cotizar este par ahora mismo.`,
-    buildRefused: venue => `${venue} no pudo preparar este intercambio. No se movió nada - inténtalo de nuevo en un momento.`,
+    quoteUnreachable: 'El exchange no fue accesible ahora mismo. No se envió nada - revisa tu conexión e inténtalo en un momento.',
+    quoteRefused: 'No hay cotización para este par ahora mismo. No se envió nada.',
+    buildRefused: 'No se pudo preparar el intercambio. No se movió nada - inténtalo de nuevo en un momento.',
     quoteUnavailable: code => `Cotización no disponible (${code}).`,
-    quoteUnconfigured: venue =>
-      `${venue} aún no está configurado en este relay - no se puede pedir cotización. Tu billetera no tiene ningún problema.`,
+    quoteUnconfigured: 'Aún no hay un exchange configurado en este relay para este par - tu billetera no tiene ningún problema.',
     gasUnavailable: 'El precio del gas del minter no estuvo disponible - no se firmó nada. Inténtalo de nuevo.',
-    cctpFeeUnavailable: 'No se pudo consultar la comisión del puente de Circle - no se firmó nada. Revisa tu conexión y vuelve a intentarlo.',
-    chainDepositUnreadable: venue =>
-      `No se pudo verificar la dirección de depósito de ${venue} en Solana - no se firmó nada. Revisa tu conexión y vuelve a intentarlo, o envía el depósito desde tu propia billetera.`,
+    cctpFeeUnavailable: 'No se pudo consultar la comisión del cruce - no se firmó nada. Revisa tu conexión y vuelve a intentarlo.',
+    chainDepositUnreadable: 'No se pudo verificar la dirección de depósito en Solana - no se firmó nada. Revisa tu conexión y vuelve a intentarlo, o envía el depósito desde tu propia billetera.',
     chainSenderEmpty: sym => `Sin cuenta de tokens ${sym} en esta billetera - no se firmó nada. Recibe ${sym} primero.`,
     chainSenderShort: sym => `El saldo de ${sym} de la billetera no cubre este monto - no se firmó nada.`,
     chainRentShort: sym => `La cuenta de ${sym} de la sede necesita un poco de SOL para el alquiler - la billetera no alcanza. No se firmó nada; carga SOL y vuelve a intentarlo.`,

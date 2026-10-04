@@ -334,12 +334,12 @@ export async function prepareCrossRailSolLeg(secretHex: string, rec: ConvertReco
   }
   const quoted = await fetchJupiterQuote(relayUrl, venue, USDC_MINT_ADDRESS, outMint, cross.mintSubunits, rec.slippageBps);
   if (!quoted.ok) {
-    if (quoted.code === 'refused') throw new Error(M.convert.errors.quoteRefused(venue.display_name));
+    if (quoted.code === 'refused') throw new Error(M.convert.errors.quoteRefused);
     throw new Error(M.convert.errors.quoteUnavailable(quoted.code));
   }
   const built = await fetchJupiterSwapTx(relayUrl, quoted.quote, kp.address);
   if (!built.ok) {
-    if (built.code === 'refused') throw new Error(M.convert.errors.buildRefused(venue.display_name));
+    if (built.code === 'refused') throw new Error(M.convert.errors.buildRefused);
     throw new Error(M.convert.errors.quoteUnavailable(built.code));
   }
   const decoded = decodeVenueSwapTx(built.swap.swapTransaction);

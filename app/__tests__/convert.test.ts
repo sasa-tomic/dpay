@@ -215,13 +215,13 @@ describe('fetchConvertQuote — the venue verbatim, ONE call, nothing derived', 
     expect(jest.mocked(relayFetch).mock.calls.length).toBe(1); // never a second quote — not for ic_amm either
   });
 
-  test('unreachable relay → the localized quoteUnreachable error (venue named from the registry)', async () => {
+  test('unreachable relay → the localized quoteUnreachable error (venue-less, the copy law)', async () => {
     jest.mocked(relayFetch).mockRejectedValueOnce(new Error('boom') as never);
-    await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1', {venue: VENUE})).rejects.toThrow(convertEn.errors.quoteUnreachable(VENUE.display_name));
+    await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1', {venue: VENUE})).rejects.toThrow(convertEn.errors.quoteUnreachable);
   });
   test('pool refusal (422) and malformed (400) map to their own copy', async () => {
     jest.mocked(relayFetch).mockResolvedValueOnce(fakeRes({}, false, 422) as never);
-    await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1', {venue: VENUE})).rejects.toThrow(convertEn.errors.quoteRefused(VENUE.display_name));
+    await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1', {venue: VENUE})).rejects.toThrow(convertEn.errors.quoteRefused);
     jest.mocked(relayFetch).mockResolvedValueOnce(fakeRes({}, false, 400) as never);
     await expect(fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1', {venue: VENUE})).rejects.toThrow(convertEn.errors.quoteUnavailable('400'));
   });
@@ -1082,7 +1082,6 @@ describe('fail-closed copy — all four locales carry it', () => {
     expect(d.detailsLabel.length).toBeGreaterThan(0); // the one Details control (verbosity pass 2026-09-16)
     // The parameterized copy still speaks the passed-in venue, not a baked one.
     expect(d.quoteSource('12:00', 'SomeFutureVenue')).toContain('SomeFutureVenue');
-    expect(d.errors.quoteRefused('SomeFutureVenue')).toContain('SomeFutureVenue');
   });
   test('no locale hardcodes a venue display name anymore (ICPSwap appears in no copy source)', () => {
     for (const d of Object.values(domains)) {
@@ -1096,8 +1095,8 @@ describe('fail-closed copy — all four locales carry it', () => {
         d.swappingBody,
         d.failedSwapBody('why', 'SYM'),
         d.stuckSigned('1', '2'),
-        d.errors.quoteUnreachable('V'),
-        d.errors.quoteRefused('V'),
+        d.errors.quoteUnreachable,
+        d.errors.quoteRefused,
       ];
       for (const s of samples) expect(s).not.toContain('ICPSwap');
     }

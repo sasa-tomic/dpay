@@ -50,9 +50,9 @@ export const convertFr: ConvertMessages = {
   venueSlow: 'Récemment lent à régler.',
   sheetTitle: inSym => `Convertir ${inSym}`,
   youReceive: amt => `Vous recevrez ≈ ${amt}`,
-  quoteFetching: venue => `Devis de ${venue}…`,
+  quoteFetching: 'Récupération du devis…',
   autoVenueLine: (venue, at, n) => `${venue} · ${at} · ${n} plateformes`,
-  otherVenues: n => `Autres plateformes (${n})`,
+  otherVenues: n => `Options (${n})`,
   atLeast: amt => `Min ${amt}`,
   ctaConvert: amt => `Convertir ${amt}`,
   rateMoved: newAmt => `Le prix a changé : environ ${newAmt} maintenant. Confirmez à nouveau.`,
@@ -181,7 +181,7 @@ export const convertFr: ConvertMessages = {
   cow: {
     feeLine: fee => `Frais CoW (estimation) : ${fee}`,
     protocolFeeLine: bps => `plus les frais de volume du site (${bps} bps)`,
-    settlingBody: 'L’ordre est chez les solvers CoW - il s’exécute en secondes ou minutes. Cet écran se résout de lui-même ; ne lancez pas un second échange.',
+    settlingBody: 'L’ordre est chez les solvers - il s’exécute en secondes ou minutes. Cet écran se résout de lui-même ; ne lancez pas un second échange.',
     failedBody: (inSym, detail) => `L’ordre n’a pas été exécuté (${detail}). Rien n’a quitté votre portefeuille - vos ${inSym} y sont toujours ; seule l’approbation exacte reste, et elle expire sans être utilisée.`,
   },
   multihop: {
@@ -230,7 +230,7 @@ export const convertFr: ConvertMessages = {
     routeVenues: (icVenue, solVenue) => `Route : ${icVenue} → Circle CCTP → ${solVenue}`,
     gasPreflightTitle: 'D\u2019abord le gaz',
     gasPreflightBody: needed =>
-      `Brûler vers Ethereum demande environ ${needed} de gaz en ckETH - ce portefeuille en détient trop peu. Procure-vous du ckETH dans ce portefeuille d'abord, puis revenez.`,
+      `La traversée demande environ ${needed} de gaz en ckETH - votre portefeuille en a trop peu. Mettez d\u2019abord du ckETH dans ce portefeuille puis revenez.`,
     executingTitle: 'Route en cours',
     doneRouteTitle: 'Retrait en route',
     doneRouteBody: (amount, address) => `Au moins ${amount} est en route vers ${address}.`,
@@ -326,14 +326,14 @@ export const convertFr: ConvertMessages = {
     declineButton: 'Je ne signe pas',
     whatSigning: 'Vous signez deux transactions Ethereum ordinaires dans votre propre portefeuille : une approbation, puis le burn. Rien n\u2019est signé côté dpay.',
     crossingTitle: 'Traversée vers Solana',
-    crossingBody: 'Circle atteste le burn et frappe les USDC à votre adresse Solana - dpay surveille le flux d\u2019état de Circle.',
+    crossingBody: 'Vos USDC traversent vers Solana - le pont les frappe à votre propre adresse. Cet écran se met à jour tout seul.',
     viewBurnTx: 'Voir la transaction de burn',
     viewCircle: 'Page d\u2019état de Circle',
     stillCrossing: 'Encore en attente - pas un échec. Voie rapide : secondes à minutes ; Ethereum congestionné, plus longtemps.',
     solReadyTitle: 'Les USDC sont arrivés sur Solana',
     solReadyBody: (credit, ata) => `${credit} vérifiés à ${ata}. Terminez la route - ou gardez les USDC ; ils sont à vous dans les deux cas.`,
     abortedCrossing: ata =>
-      `Suveillance arrêtée. Votre burn est déjà parti - Circle peut encore compléter le mint ; l’USDC arrive de toute façon à votre propre adresse Solana ${ata}. Vérifiez Soldes plus tard.`,
+      `Surveillance arrêtée. La traversée est déjà partie - elle peut encore compléter le mint ; l\u2019USDC arrive de toute façon à votre propre adresse Solana ${ata}. Vérifiez Soldes plus tard.`,
     abortedSolReady: ata =>
       `Rien n’a été signé - l’échange final n’a jamais été lancé. Vos USDC sont à votre adresse Solana ${ata} : gardez-les ou convertissez-les là-bas.`,
     solQuoteLabel: venue => `Devis ${venue}`,
@@ -350,16 +350,16 @@ export const convertFr: ConvertMessages = {
     declinedBody: address =>
       `Rien n\u2019a traversé. Vos USDC sont à votre propre adresse Ethereum ${address} - envoyez-les où vous voulez ou relancez cette route plus tard.`,
     solFailedTitle: 'L\u2019échange Solana a échoué',
-    solFailedBody: (ata, venue) =>
-      `Les USDC ont déjà traversé - ils sont à votre adresse Solana ${ata}. ${venue} a refusé l\u2019échange final : réessayez ici dans un instant ou gardez les USDC.`,
+    solFailedBody: ata =>
+      `Les USDC ont déjà traversé - elles sont à votre adresse Solana ${ata}. L\u2019échange final a été refusé : réessayez dans un instant ou gardez les USDC.`,
     legCctpBurn: (sym, network) => `Emmener ${sym} vers ${network} via Circle (vous signez ça dans votre portefeuille)`,
     legSolSwap: (venue, sym) => `Échanger contre ${sym} sur ${venue}`,
     destAddressCrossNote: 'Cette adresse signe aussi la traversée - collez une adresse que vous contrôlez.',
     deviceSignTitle: 'La traversée signe sur cet appareil',
-    deviceSignBody: 'La clé de ce portefeuille signe elle-même la traversée Circle - pas d\u2019autre portefeuille, pas d\u2019étape en plus. Gardez un peu d\u2019ETH à l\u2019adresse de paiement pour le gaz de la traversée.',
+    deviceSignBody: 'La clé de ce portefeuille signe elle-même la traversée - pas d\u2019autre portefeuille, pas d\u2019étape en plus. Gardez un peu d\u2019ETH à l\u2019adresse de paiement pour son gaz.',
     destAddressDeviceNote: 'La traversée signe sur cet appareil - gardez ici un peu d\u2019ETH pour son gaz.',
     burnFailedBody: (address, reason) =>
-      `La traversée Circle a été refusée avant tout burn. Votre USDC est à votre propre adresse Ethereum ${address}${reason ? `: ${reason}` : ''} - envoyez-le où vous voulez ou refaites cette route plus tard.`,
+      `La traversée a été refusée avant que quoi que ce soit parte. Votre USDC est à votre propre adresse Ethereum ${address}${reason ? `: ${reason}` : ''} - envoyez-le où vous voulez ou refaites cette route plus tard.`,
     checksumMismatch: 'Erreur de checksum',
     retypeAddress: 'Retapez l\u2019adresse',
     retypeMismatch: 'Ne correspond pas',
@@ -378,16 +378,14 @@ export const convertFr: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: venue => `${venue} était inaccessible via le relay de dpay. Rien n'a été envoyé - vérifiez votre connexion et réessayez dans un instant.`,
-    quoteRefused: venue => `${venue} a refusé pour l'instant d'établir un devis pour cette paire.`,
-    buildRefused: venue => `${venue} n'a pas pu préparer cet échange. Rien n'a bougé - réessayez dans un instant.`,
+    quoteUnreachable: 'La bourse est inaccessible pour le moment. Rien n\u2019a été envoyé - vérifiez votre connexion et réessayez dans un instant.',
+    quoteRefused: 'Pas de devis pour cette paire pour le moment. Rien n\u2019a été envoyé.',
+    buildRefused: 'L\u2019échange n\u2019a pas pu être préparé. Rien n\u2019a bougé - réessayez dans un instant.',
     quoteUnavailable: code => `Devis indisponible (${code}).`,
-    quoteUnconfigured: venue =>
-      `${venue} n'est pas encore configuré sur ce relay - aucun devis ne peut être demandé. Votre portefeuille n'a aucun problème.`,
+    quoteUnconfigured: 'Aucune bourse n\u2019est encore configurée sur ce relay pour cette paire - votre portefeuille n\u2019a aucun problème.',
     gasUnavailable: 'Le prix du gaz du minter était indisponible - rien n\u2019a été signé. Réessayez.',
-    cctpFeeUnavailable: 'Les frais du pont de Circle n\u2019ont pas pu être récupérés - rien n\u2019a été signé. Vérifiez votre connexion et réessayez.',
-    chainDepositUnreadable: venue =>
-      `L\u2019adresse de dépôt de ${venue} n\u2019a pas pu être vérifiée sur Solana - rien n\u2019a été signé. Vérifiez votre connexion et réessayez, ou envoyez le dépôt depuis votre propre portefeuille.`,
+    cctpFeeUnavailable: 'Les frais de la traversée n\u2019ont pas pu être récupérés - rien n\u2019a été signé. Vérifiez votre connexion et réessayez.',
+    chainDepositUnreadable: 'L\u2019adresse de dépôt n\u2019a pas pu être vérifiée sur Solana - rien n\u2019a été signé. Vérifiez votre connexion et réessayez, ou envoyez le dépôt depuis votre propre portefeuille.',
     chainSenderEmpty: sym => `Pas de compte de jetons ${sym} dans ce portefeuille - rien n\u2019a été signé. Recevez d\u2019abord des ${sym}.`,
     chainSenderShort: sym => `Le solde de ${sym} du portefeuille ne couvre pas ce montant - rien n\u2019a été signé.`,
     chainRentShort: sym => `Le compte ${sym} de la plateforme demande un peu de SOL pour le loyer - le portefeuille n’en a pas assez. Rien n\u2019a été signé ; rechargez en SOL et réessayez.`,

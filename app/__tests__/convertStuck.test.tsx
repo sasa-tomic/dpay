@@ -11,7 +11,8 @@
  *  - the engine's last completed probe renders (convert-stuck-last-checked);
  *  - the window_closed resolution renders its honest failed_refunded body.
  *
- * The six surfaces: StatePanel, RouteStatePanel, CrossRailStatePanel, SolStatePanel,
+ * The surfaces: StatePanel, the Settlement Field tracker (ConvertFieldTracker - it owns
+ * every planned/direct record view since the RouteStatePanel deletion), CrossRailStatePanel, SolStatePanel,
  * EvmStatePanel (here) and ConvertIntentSheet's stuck block (pinned in convertMode.test.tsx,
  * which owns that mount harness).
  */
@@ -40,7 +41,7 @@ jest.mock('../services/native', () => ({
 
 import {noteStuckProbeDone, clearStuckProbes} from '../convert/stuckProbeLog';
 import {StatePanel} from '../components/ConvertStatePanel';
-import {RouteStatePanel} from '../components/ConvertRouteStatePanel';
+import {ConvertFieldTracker} from '../components/ConvertIntentSheet';
 import {CrossRailStatePanel} from '../components/ConvertCrossRailStatePanel';
 import {SolStatePanel} from '../components/SolStatePanel';
 import {EvmStatePanel} from '../components/EvmStatePanel';
@@ -165,7 +166,7 @@ const textOfTree = (n: {children?: unknown[]}): string =>
 
 describe.each([
   ['StatePanel', StatePanel, (rec: ConvertRecord) => ({record: rec, onBack: () => {}})],
-  ['RouteStatePanel', RouteStatePanel, (rec: ConvertRecord) => ({record: rec, onBack: () => {}})],
+  ['ConvertFieldTracker', ConvertFieldTracker, (rec: ConvertRecord) => ({record: rec, onBack: () => {}})],
   ['SolStatePanel', SolStatePanel, (rec: ConvertRecord) => ({record: rec, onBack: () => {}})],
   ['EvmStatePanel', EvmStatePanel, (rec: ConvertRecord) => ({record: rec, onBack: () => {}})],
 ])('%s stuck surface', (_name, Panel, props) => {

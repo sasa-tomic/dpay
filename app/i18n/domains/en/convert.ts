@@ -99,7 +99,8 @@ export type ConvertMessages = {
    *  above IS the sell figure and the CTA names the amount.) */
   youReceive: (amt: string) => string;
   /** The quoting state's line: whose rate is being fetched right now. */
-  quoteFetching: (venue: string) => string;
+  /** The fetching state's line - venue-less (the attribution renders in Details). */
+  quoteFetching: string;
   /** The merged quote line when the AUTO pick compared venues: venue + read instant + the
    *  mechanical count. Never an endorsement; the word "best" is a designed-out failure mode.
    *  `n >= 2` by the caller's contract (a one-venue pair renders the plain quoteSource). */
@@ -598,7 +599,7 @@ export type ConvertMessages = {
     declinedTitle: string;
     declinedBody: (address: string) => string;
     solFailedTitle: string;
-    solFailedBody: (ata: string, venue: string) => string;
+    solFailedBody: (ata: string) => string;
     legCctpBurn: (sym: string, network: string) => string;
     legSolSwap: (venue: string, sym: string) => string;
     destAddressCrossNote: string;
@@ -640,17 +641,17 @@ export type ConvertMessages = {
 
   // --- module-thrown errors (app/convert.ts) ----------------------------------------------------
   errors: {
-    quoteUnreachable: (venue: string) => string;
-    quoteRefused: (venue: string) => string;
+    quoteUnreachable: string;
+    quoteRefused: string;
     /** The venue refused to BUILD the signed exchange for a quote it had just priced. Nothing has moved. */
-    buildRefused: (venue: string) => string;
+    buildRefused: string;
     quoteUnavailable: (code: string) => string;
     /** A cefi venue whose relay holds no partner credential — the venue is ABSENT, not broken. */
-    quoteUnconfigured: (venue: string) => string;
+    quoteUnconfigured: string;
     gasUnavailable: string;
     cctpFeeUnavailable: string;
     /** The chain deposit leg's fail-closed refusals (2026-09-28). */
-    chainDepositUnreadable: (venue: string) => string;
+    chainDepositUnreadable: string;
     chainSenderEmpty: (sym: string) => string;
     chainSenderShort: (sym: string) => string;
     chainRentShort: (sym: string) => string;
@@ -714,9 +715,9 @@ export const convertEn: ConvertMessages = {
   // The intent sheet (brief Part V): the copy the two-tap flow renders.
   sheetTitle: inSym => `Convert ${inSym}`,
   youReceive: amt => `You receive ≈ ${amt}`,
-  quoteFetching: venue => `Rate from ${venue}…`,
+  quoteFetching: 'Fetching the rate…',
   autoVenueLine: (venue, at, n) => `${venue} · ${at} · ${n} venues`,
-  otherVenues: n => `Other venues (${n})`,
+  otherVenues: n => `Options (${n})`,
   atLeast: amt => `Min ${amt}`,
   ctaConvert: amt => `Convert ${amt}`,
   rateMoved: newAmt => `Price changed: now about ${newAmt}. Confirm again.`,
@@ -841,15 +842,15 @@ export const convertEn: ConvertMessages = {
     feeLabel: unit => `Network fee (${unit}, estimate)`,
     pendingBody: 'The swap is on-chain and confirmed. Waiting for your balance to show it.',
     failedBody: (inSym, detail) => String(detail).includes('approve landed')
-      ? `The swap failed after the approval. Your ${inSym} is still in your wallet; the unused approval is for the exact swap amount only.`
+      ? `The swap failed at the last step. Your ${inSym} is still in your wallet; the signed permission covers exactly this swap amount and expires unused.`
       : `Nothing was sent. Your ${inSym} is still in your wallet.`,
     stuckBody: outSym => `The swap may or may not have landed. Your ${outSym} balance will resolve on its own; do not start a second swap.`,
   },
   cow: {
     feeLine: fee => `CoW fee (estimate): ${fee}`,
     protocolFeeLine: bps => `plus the venue's volume fee (${bps} bps)`,
-    settlingBody: 'The order is with the CoW solvers - it fills in seconds to minutes. This screen resolves on its own; do not start a second swap.',
-    failedBody: (inSym, detail) => `The order did not fill (${detail}). Nothing left your wallet - your ${inSym} is still there; only the exact-amount approval remains, and it expires unused.`,
+    settlingBody: 'The order is with the solvers - it fills in seconds to minutes. This screen resolves on its own; do not start a second swap.',
+    failedBody: (inSym, detail) => `The order did not fill (${detail}). Nothing left your wallet - your ${inSym} is still there; the signing permission expires unused.`,
   },
   multihop: {
     destLabel: 'Destination',
@@ -897,7 +898,7 @@ export const convertEn: ConvertMessages = {
     routeVenues: (icVenue, solVenue) => `Route: ${icVenue} → Circle CCTP → ${solVenue}`,
     gasPreflightTitle: 'Gas needed first',
     gasPreflightBody: needed =>
-      `Burning to Ethereum needs about ${needed} gas in ckETH - this wallet holds too little. Get ckETH into this wallet first, then come back.`,
+      `The crossing needs about ${needed} of gas money in ckETH - this wallet holds too little. Get ckETH into this wallet first, then come back.`,
     executingTitle: 'Running the route',
     doneRouteTitle: 'Cash-out under way',
     doneRouteBody: (amount, address) => `At least ${amount} is on its way to ${address}.`,
@@ -1002,14 +1003,14 @@ export const convertEn: ConvertMessages = {
     declineButton: 'I\u2019m not signing',
     whatSigning: 'You sign two ordinary Ethereum transactions in your own wallet: an approval, then the burn. Nothing is signed on dpay\u2019s side.',
     crossingTitle: 'Crossing to Solana',
-    crossingBody: 'Circle is attesting the burn and mints the USDC at your Solana address - dpay watches Circle\u2019s own status feed.',
+    crossingBody: 'Your USDC is crossing to Solana - the bridge mints it at your own address. This screen updates on its own.',
     viewBurnTx: 'View the burn transaction',
     viewCircle: 'Circle\u2019s status page',
     stillCrossing: 'Still pending - not failed. Fast path: seconds to minutes; if Ethereum is congested, longer.',
     solReadyTitle: 'USDC landed on Solana',
     solReadyBody: (credit, ata) => `${credit} verified at ${ata}. Finish the route, or keep the USDC - yours either way.`,
     abortedCrossing: ata =>
-      `Watch stopped. The burn is already out - Circle may still complete the mint; the USDC lands at your own Solana address ${ata} either way. Check Balances later.`,
+      `Watch stopped. The crossing is already out - it may still complete the mint; the USDC lands at your own Solana address ${ata} either way. Check Balances later.`,
     abortedSolReady: ata =>
       `Nothing was signed - the final swap never ran. Your USDC sits at your Solana address ${ata}: keep it, or convert it there.`,
     solQuoteLabel: venue => `${venue} quote`,
@@ -1026,20 +1027,20 @@ export const convertEn: ConvertMessages = {
     declinedBody: address =>
       `Nothing crossed. Your USDC sits at your own Ethereum address ${address} - send it anywhere, or run this route again later.`,
     solFailedTitle: 'Solana swap failed',
-    solFailedBody: (ata, venue) =>
-      `The USDC already crossed - it is at your Solana address ${ata}. ${venue} declined the final swap: try again in a moment, or keep the USDC.`,
+    solFailedBody: ata =>
+      `The USDC already crossed - it is at your Solana address ${ata}. The final swap was declined: try again in a moment, or keep the USDC.`,
     legCctpBurn: (sym, network) => `Cross ${sym} to ${network} via Circle (you sign this in your wallet)`,
     legSolSwap: (venue, sym) => `Swap for ${sym} on ${venue}`,
     destAddressCrossNote: 'This address also signs the crossing - paste an address you control.',
     // Swap-typing stage 2 (2026-10-03): the destination IS the device's own address, so the
     // device signs the crossing itself - the disclosure and the address note fork on it.
     deviceSignTitle: 'The crossing signs on this device',
-    deviceSignBody: 'This wallet\u2019s own key signs the Circle crossing - no other wallet, no extra step. Keep a little ETH at the payout address for the crossing\u2019s gas.',
+    deviceSignBody: 'This wallet\u2019s own key signs the crossing - no other wallet, no extra step. Keep a little ETH at the payout address for its gas.',
     destAddressDeviceNote: 'The crossing signs on this device - keep a little ETH here for its gas.',
     // The stage-2 dead end: the device burn refused at its own gate (gas short, a reverted
     // leg, a refused broadcast) AFTER the five IC legs ran - the USDC is at the EVM address.
     burnFailedBody: (address, reason) =>
-      `The Circle crossing was refused before anything burned. Your USDC sits at your own Ethereum address ${address}${reason ? `: ${reason}` : ''} - send it anywhere, or run this route again later.`,
+      `The crossing was refused before anything left. Your USDC sits at your own Ethereum address ${address}${reason ? `: ${reason}` : ''} - send it anywhere, or run this route again later.`,
     checksumMismatch: 'Checksum mismatch',
     retypeAddress: 'Re-type the address',
     retypeMismatch: 'Does not match',
@@ -1058,16 +1059,14 @@ export const convertEn: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: venue => `${venue} is unreachable through dpay\u2019s relay. Nothing was sent - check your connection and try again in a moment.`,
-    quoteRefused: venue => `${venue} declined to quote this pair right now.`,
-    buildRefused: venue => `${venue} could not prepare this exchange. Nothing moved - try again in a moment.`,
+    quoteUnreachable: 'The exchange is unreachable right now. Nothing was sent - check your connection and try again in a moment.',
+    quoteRefused: 'No quote for this pair right now. Nothing was sent.',
+    buildRefused: 'The exchange could not be prepared. Nothing moved - try again in a moment.',
     quoteUnavailable: code => `Quote unavailable (code ${code}).`,
-    quoteUnconfigured: venue =>
-      `${venue} is not set up on this relay yet - no quote can be asked for. Nothing is wrong with your wallet.`,
-    gasUnavailable: 'The minter\u2019s gas price was unavailable - nothing was signed. Try again.',
-    cctpFeeUnavailable: 'Circle\u2019s bridge fee could not be fetched - nothing was signed. Check your connection and try again.',
-    chainDepositUnreadable: venue =>
-      `${venue}\u2019s deposit address could not be verified on Solana - nothing was signed. Check your connection and try again, or send the deposit from your own wallet.`,
+    quoteUnconfigured: 'No exchange is set up on this relay for this pair yet - nothing is wrong with your wallet.',
+    gasUnavailable: 'The gas price was unavailable - nothing was signed. Try again.',
+    cctpFeeUnavailable: 'The crossing fee could not be fetched - nothing was signed. Check your connection and try again.',
+    chainDepositUnreadable: 'The deposit address could not be verified on Solana - nothing was signed. Check your connection and try again, or send the deposit from your own wallet.',
     chainSenderEmpty: sym => `No ${sym} token account in this wallet - nothing was signed. Receive ${sym} first.`,
     chainSenderShort: sym => `The wallet\u2019s ${sym} balance does not cover this amount - nothing was signed.`,
     chainRentShort: sym => `The venue\u2019s ${sym} account needs a little SOL for rent - the wallet is short. Nothing was signed; top up SOL and try again.`,

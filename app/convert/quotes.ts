@@ -78,9 +78,9 @@ async function getSwapQuote(
   try {
     r = await relayFetch(relayUrl, path, undefined, timeoutMs);
   } catch {
-    throw new Error(M.convert.errors.quoteUnreachable(venue.display_name));
+    throw new Error(M.convert.errors.quoteUnreachable);
   }
-  if (r.status === 422) throw new Error(M.convert.errors.quoteRefused(venue.display_name));
+  if (r.status === 422) throw new Error(M.convert.errors.quoteRefused);
   if (!r.ok) throw new Error(M.convert.errors.quoteUnavailable(String(r.status)));
   const j = await r.json().catch(() => null) as SwapQuoteBody | null;
   // `zero_for_one` is deliberately NOT required here: a venue without an AMM direction flag
@@ -152,9 +152,9 @@ export async function fetchConvertQuote(
 export function ceFiServiceError(e: unknown, venueName: string): Error {
   const code = e instanceof Error ? e.message : 'unavailable';
   if (e instanceof SideShiftMinDepositError) return new CeFiMinDepositError(venueName, e.venueMessage, e.minDeposit);
-  if (code === 'unreachable') return new Error(M.convert.errors.quoteUnreachable(venueName));
-  if (code === 'unconfigured') return new Error(M.convert.errors.quoteUnconfigured(venueName));
-  if (code === 'refused') return new Error(M.convert.errors.quoteRefused(venueName));
+  if (code === 'unreachable') return new Error(M.convert.errors.quoteUnreachable);
+  if (code === 'unconfigured') return new Error(M.convert.errors.quoteUnconfigured);
+  if (code === 'refused') return new Error(M.convert.errors.quoteRefused);
   // The venue's own listed-but-unquoted verdict (Trocador's "no resulting quote",
   // live-measured 2026-09-22): a COVERAGE state, not a failure — typed so the surfaces
   // render the attributed no-market line, never a generic error.

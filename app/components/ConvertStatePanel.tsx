@@ -28,6 +28,8 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
   const [refundDetailsOpen, setRefundDetailsOpen] = useState(false);
   // The done receipt's audit fold.
   const [doneDetailsOpen, setDoneDetailsOpen] = useState(false);
+  // The failed card's refund-evidence fold.
+  const [failedDetailsOpen, setFailedDetailsOpen] = useState(false);
   // The Stop label follows the flavor (2026-09-24): a submitted swap is 'watching', a
   // provider order is 'provider', everything else is the plain Stop.
   const stopLabel = convertAbortFlavor(record) === 'watching' ? M.convert.stopWatching
@@ -111,7 +113,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           ) : null}
           {/* A cross-rail payout (the CeFi settle) lands at a destination address on ANOTHER
               rail — the completed panel says which one. Only the cefi provider record carries
-              destAddress through THIS panel (planned routes render via RouteStatePanel, cctp
+              destAddress through THIS panel (planned routes render via the tracker, cctp
               handoffs via CrossRailStatePanel), so the line fires for exactly that shape. */}
           {record.destAddress != null ? (
             <Text testID="convert-payout-address" style={S.convertStateMeta}>
@@ -209,9 +211,24 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           ) : (
             <Text style={S.convertStateBody}>{M.convert.refundedBody(inSymbol)}</Text>
           )}
-          {/* The approval-expiry line renders ONLY where the window is still live
-              (10x-verbosity pass 2026-09-16): on failed_refunded the pool has returned the
-              funds — the approval window is closed, so the line is noise here. */}
+          {/* F7 (spec 2026-10-04): a venue/pool refund carries its evidence - the ledger
+              row identity, folded under Details with the rest of the audit trail. */}
+          {record.refundTx != null ? (
+            <View>
+              <DetailsToggle
+                open={failedDetailsOpen}
+                onToggle={() => setFailedDetailsOpen(o => !o)}
+                label={M.convert.detailsLabel}
+              />
+              {failedDetailsOpen ? (
+                <View testID="convert-details-block">
+                  <Text testID="convert-refund-tx" style={S.convertStateMeta} selectable>
+                    {M.convert.doneTx(record.refundTx)}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </View>
       ) : null}
       {record.step === 'stuck' ? (

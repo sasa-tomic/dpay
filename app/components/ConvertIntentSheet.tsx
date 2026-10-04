@@ -560,13 +560,12 @@ export function ConvertIntentSheet({
             quotes[r.rowId] = await fetchConvertQuote(relayUrl, r.inLedger, r.outLedger, parsed.raw, {venue: r.venue});
             amts[r.rowId] = parsed.raw;
           } else if (r.kind === 'solamm') {
-            const name = venueDisplayName(r.venue.venue_id);
             const res = await fetchJupiterQuote(relayUrl, r.venue, r.inMint, r.outMint, parsed.raw, slippageBps);
             if (res.ok) {
               jups[r.rowId] = res.quote;
               jupAmts[r.rowId] = parsed.raw;
             } else {
-              errs[r.rowId] = res.code === 'refused' ? M.convert.errors.quoteRefused(name) : M.convert.errors.quoteUnreachable(name);
+              errs[r.rowId] = res.code === 'refused' ? M.convert.errors.quoteRefused : M.convert.errors.quoteUnreachable;
             }
           } else if (r.kind === 'crossrail') {
             // The route's named venue, fail-closed (audit F9 — never a bundled fallback).
@@ -1382,7 +1381,7 @@ export function ConvertIntentSheet({
       if (q == null) return;
       const fresh = await fetchJupiterQuote(relayUrl, activeRow.venue, activeRow.inMint, activeRow.outMint, amountRaw, slippageBps);
       if (!fresh.ok) {
-        if (mountedRef.current) setConfirmErr(M.convert.errors.quoteUnreachable(venueDisplayName(activeRow.venue.venue_id)));
+        if (mountedRef.current) setConfirmErr(M.convert.errors.quoteUnreachable);
         return;
       }
       if (fresh.quote.outAmount !== q.outAmount && quoteMovedMaterially(q.outAmount, fresh.quote.outAmount)) {
@@ -1651,7 +1650,7 @@ export function ConvertIntentSheet({
             {receiveStr != null
               ? M.convert.youReceive(receiveStr)
               : quoteBusy
-                ? (counterVenueId != null ? M.convert.quoteFetching(venueDisplayName(counterVenueId)) : M.convert.quoteFetching(''))
+                ? M.convert.quoteFetching
                 : '—'}
           </Text>
           {/* THE one quote line (second verbosity pass 2026-09-29): attribution + read instant,
@@ -2436,6 +2435,8 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
   const [orderDetailsOpen, setOrderDetailsOpen] = useState(false);
   // The done receipt's audit fold (venue attribution + payout record under Details).
   const [doneDetailsOpen, setDoneDetailsOpen] = useState(false);
+  // The failed card's refund-evidence fold.
+  const [failedDetailsOpen, setFailedDetailsOpen] = useState(false);
   // stuck/pending states show when the signed envelopes expire — a 30 s tick keeps the
   // countdown honest; the engine (not this screen) advances the record itself.
   useEffect(() => {
@@ -2787,6 +2788,9 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
       {record.step === 'failed_refunded' ? (
         <View testID="convert-failed">
           <Text style={S.fieldTitle}>{M.convert.failedTitle}</Text>
+          {record.refundTx != null ? (
+            <Text style={S.fieldBody}>{M.convert.refundedBody(record.inSymbol)}</Text>
+          ) : null}
           {record.chainRoute != null && record.legs.length === 0 ? (
             // The chain's dead FIRST phase: the deposit transfer never landed on-chain —
             // the pool bodies below would claim a return that never happened.
@@ -2807,6 +2811,22 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
           ) : (
             <Text style={S.fieldBody}>{M.convert.refundedBody(record.inSymbol)}</Text>
           )}
+          {record.refundTx != null ? (
+            <View>
+              <DetailsToggle
+                open={failedDetailsOpen}
+                onToggle={() => setFailedDetailsOpen(o => !o)}
+                label={M.convert.detailsLabel}
+              />
+              {failedDetailsOpen ? (
+                <View testID="convert-details-block">
+                  <Text testID="convert-refund-tx" style={S.fieldTx} selectable>
+                    {M.convert.doneTx(record.refundTx)}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
           <Pressable
             testID="btn-convert-back-failed"
             style={S.fieldAction}
