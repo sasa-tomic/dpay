@@ -479,6 +479,7 @@ export function SendSheet({
         onPickSaved={setAddress}
         onForgetSaved={a => { void forgetAddress(assetKey, a).then(setSaved); }}
         onManageSaved={onOpenAddressBook}
+        ownAddress={selfAccount?.principal ?? null}
         testIDPrefix="send"
       />
 

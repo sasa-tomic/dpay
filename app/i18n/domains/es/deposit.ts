@@ -344,6 +344,8 @@ export const withdrawEs: WithdrawMessages = {
     saveNamePlaceholder: 'Ponle un nombre (opcional)',
     forgetLabel: address => `Eliminar la dirección guardada ${address}`,
     unnamed: 'Sin nombre',
+    ownAddress: 'Mi direcci\u00f3n',
+    ownAddressHint: 'Rellenar con la direcci\u00f3n de esta propia billetera',
     manage: 'Libreta de direcciones',
     manageHint: 'Ver, nombrar y eliminar las direcciones guardadas',
 

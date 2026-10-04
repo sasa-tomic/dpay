@@ -770,6 +770,9 @@ export type WithdrawMessages = {
     saveNamePlaceholder: string;
     forgetLabel: (address: string) => string;
     unnamed: string;
+    /** The one-tap fill of THIS wallet's own address for the sheet's rail. */
+    ownAddress: string;
+    ownAddressHint: string;
     /** The contextual entry into the full address-book route, riding the saved list's title. */
     manage: string;
     manageHint: string;
@@ -905,6 +908,8 @@ export const withdrawEn: WithdrawMessages = {
     saveNamePlaceholder: 'Name it (optional)',
     forgetLabel: address => `Remove the saved address ${address}`,
     unnamed: 'Unnamed',
+    ownAddress: 'My address',
+    ownAddressHint: 'Fill in this wallet\u2019s own address',
     manage: 'Address book',
     manageHint: 'Browse, name and remove saved destinations',
 

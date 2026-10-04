@@ -103,6 +103,22 @@ describe('SolanaWithdrawSheet — sol-send-needs-sol (USDC fees are paid in SOL)
   });
 });
 
+describe('SolanaWithdrawSheet — the My-address chip (2026-10-04)', () => {
+  test('one tap fills the field with THIS wallet\u2019s own Solana address; the chip yields to a typed destination', async () => {
+    const own = deriveSolanaAddress(IDENT.secretHex);
+    const tree = await mount({solBalance: '2044280'});
+    expect(has(tree, 'sol-send-own-address')).toBe(true);
+    act(() => { tree.root.findByProps({testID: 'sol-send-own-address'}).props.onPress(); });
+    expect(tree.root.findByProps({testID: 'sol-send-address-input'}).props.value).toBe(own);
+    // The empty field stays the send-elsewhere path: once filled, the chip is gone.
+    expect(has(tree, 'sol-send-own-address')).toBe(false);
+    // And clearing the field brings it back.
+    act(() => { tree.root.findByProps({testID: 'sol-send-address-input'}).props.onChangeText(''); });
+    expect(has(tree, 'sol-send-own-address')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+});
+
 describe('SolanaWithdrawSheet — stale-ok balance gating (2026-09-21 live EURC attempt #7)', () => {
   /** Fill destination + amount and return the confirm control's disabled state. */
   async function fill(tree: renderer.ReactTestRenderer, amount: string): Promise<{disabled: boolean; aria: boolean}> {

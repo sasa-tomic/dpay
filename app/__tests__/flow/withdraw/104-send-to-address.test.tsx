@@ -53,6 +53,22 @@ hermeticDescribe('flow 104 — send VCHF to an external IC account (direct icrc1
     await openPaySend(m);
     await m.driver.findByTestID('send-address-input', {timeoutMs: 5000});
 
+    // The My-address chip (2026-10-04): one tap fills the field with THIS wallet's own
+    // principal — the self-send warning then resolves it as the wallet's own account.
+    await m.driver.findByTestID('send-own-address', {timeoutMs: 6000});
+    await m.driver.click('send-own-address', {timeoutMs: 4000});
+    const filled = await (async () => {
+      for (let i = 0; i < 50; i++) {
+        const v = m.driver.readInputValue('send-address-input');
+        if (v.length > 0) return v;
+        await new Promise(r => setTimeout(r, 100));
+      }
+      throw new Error('the own-address chip never filled the field');
+    })();
+    assertIncludes(filled, '-', 'the chip filled the wallet principal (the dashed IC form)');
+    await m.driver.type('send-address-input', '', {timeoutMs: 4000}); // back to the empty field
+    expect(m.driver.isPresent('send-own-address')).toBe(true);
+
     // The route line resolves through the REAL core parser: network + fee, BEFORE any amount.
     await m.driver.type('send-address-input', recipientPrincipal, {timeoutMs: 4000});
     const route = await routeLine(m, 'Internet Computer');

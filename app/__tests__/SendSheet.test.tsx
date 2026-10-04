@@ -323,6 +323,24 @@ describe('SendSheet — an unreachable ledger leaves the fee UNKNOWN, never 0', 
 
 // --- self-send + the confirm gate -----------------------------------------------------------------
 
+describe('SendSheet — the My-address chip (2026-10-04)', () => {
+  // The chip's own render/fill behavior is pinned against the REAL AddressField in
+  // SolanaWithdrawSheet.test.tsx and flow/withdraw/104; this suite mocks AddressField to null
+  // (QrScanner), so the pin here is the WIRING: the derived principal reaches the field.
+  test('the field receives the wallet\u2019s own principal as its own-address chip', async () => {
+    const tree = await mountSend();
+    expect(field(tree).ownAddress).toBe(OISY);
+    act(() => { tree.unmount(); });
+  });
+
+  test('no derived principal, no chip input (the field keeps its manual path)', async () => {
+    jest.mocked(DpayCore.icpSelfPrincipal).mockRejectedValue(new Error('core unavailable'));
+    const tree = await mountSend();
+    expect(field(tree).ownAddress).toBeNull();
+    act(() => { tree.unmount(); });
+  });
+});
+
 describe('SendSheet — sending to yourself warns but never blocks', () => {
   test('an IC account equal to the wallet\'s own principal warns, and the send stays enabled', async () => {
     jest.mocked(DpayCore.icpValidateIcrcAccount).mockResolvedValue({owner: OISY, subaccountHex: ''});

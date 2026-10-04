@@ -24,7 +24,7 @@ import {M} from '../i18n';
  * so there is nothing to strip and inventing a parser would only create a way to misread one.
  */
 export function AddressField({
-  value, onChange, status, saved, onPickSaved, onForgetSaved, onManageSaved, testIDPrefix,
+  value, onChange, status, saved, onPickSaved, onForgetSaved, onManageSaved, ownAddress, testIDPrefix,
 }: {
   value: string;
   onChange: (text: string) => void;
@@ -37,6 +37,10 @@ export function AddressField({
    *  the link is CONTEXTUAL (the user is looking at destinations right now), and the book has its
    *  own browse/edit entry in Settings for every other moment. */
   onManageSaved?: () => void;
+  /** THIS wallet's own address for the sheet's rail (2026-10-04). Present ⇒ a one-tap chip
+   *  fills the field with it while the field is empty. The empty field stays the
+   *  send-elsewhere path — the chip only fills; it never sends. */
+  ownAddress?: string | null;
   testIDPrefix: string;
 }) {
   const [scanOpen, setScanOpen] = useState(false);
@@ -76,6 +80,21 @@ export function AddressField({
 
       {/* The route disclosure / refusal. Always present once something is typed — the user learns
           which rail will move the money, and what it costs, BEFORE entering an amount. */}
+      {ownAddress != null && ownAddress.length > 0 && value.trim().length === 0 ? (
+        <View testID={`${testIDPrefix}-own-row`} style={S.savedRow}>
+          <Pressable
+            testID={`${testIDPrefix}-own-address`}
+            style={S.savedAddrChip}
+            onPress={() => onChange(ownAddress)}
+            accessibilityRole="button"
+            accessibilityLabel={M.withdraw.send.ownAddress}
+            accessibilityHint={M.withdraw.send.ownAddressHint}
+            accessibilityState={{disabled: false}}>
+            <Text style={S.savedAddrLabel}>{M.withdraw.send.ownAddress}</Text>
+            <Text style={S.savedAddrText}>{shortAddress(ownAddress)}</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {status ? (
         <Text
           testID={`${testIDPrefix}-status`}

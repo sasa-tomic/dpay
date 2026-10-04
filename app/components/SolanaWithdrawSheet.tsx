@@ -466,6 +466,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
             onPickSaved={setAddress}
             onForgetSaved={a => { void forgetAddress(assetKey, a).then(setSaved); }}
             onManageSaved={onOpenAddressBook}
+            ownAddress={selfAddress}
             testIDPrefix="sol-send"
           />
 

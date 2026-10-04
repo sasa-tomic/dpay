@@ -87,6 +87,19 @@ hermeticDescribe('flow 221 — the EVM pay link: grammar, slugs, prefill promise
     // NEVER auto-signed: no send is in flight and no terminal exists.
     expect(m.driver.isPresent('evm-send-hash')).toBe(false);
 
+    // The My-address chip (2026-10-04): the filled field hides it; clearing the field brings
+    // it back and one tap fills THIS wallet's own EVM address for the EVM send.
+    expect(m.driver.isPresent('evm-send-own-address')).toBe(false);
+    await m.driver.type('evm-send-address-input', '', {timeoutMs: 5000});
+    await m.driver.findByTestID('evm-send-own-address', {timeoutMs: 5000});
+    await m.driver.click('evm-send-own-address', {timeoutMs: 5000});
+    const chipDeadline = budgetDeadline(8000);
+    for (;;) {
+      if (m.driver.readInputValue('evm-send-address-input').toLowerCase() === payer.address.toLowerCase()) break;
+      if (Date.now() > chipDeadline) throw new Error('the own-address chip never filled the EVM address');
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
     // The refusal leg: ZCHF does not live on Solana — wrong_network names BOTH by name.
     const badLink = payLink({origin: local, recipient: merchant.address, asset: 'ZCHF', network: 'solana', amount: '12.50'});
     (g.__DPAY_TEST_DEEPLINK as (u: string) => void)(badLink);

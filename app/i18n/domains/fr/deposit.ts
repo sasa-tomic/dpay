@@ -346,6 +346,8 @@ export const withdrawFr: WithdrawMessages = {
     saveNamePlaceholder: 'Donnez-lui un nom (facultatif)',
     forgetLabel: address => `Supprimer l’adresse enregistrée ${address}`,
     unnamed: 'Sans nom',
+    ownAddress: 'Mon adresse',
+    ownAddressHint: 'Remplir avec l\u2019adresse de ce propre portefeuille',
     manage: 'Carnet d’adresses',
     manageHint: 'Parcourir, nommer et supprimer les adresses enregistrées',
 

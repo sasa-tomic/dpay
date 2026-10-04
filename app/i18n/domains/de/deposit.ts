@@ -347,6 +347,8 @@ export const withdrawDe: WithdrawMessages = {
     saveNamePlaceholder: 'Name vergeben (optional)',
     forgetLabel: address => `Gespeicherte Adresse ${address} entfernen`,
     unnamed: 'Ohne Namen',
+    ownAddress: 'Meine Adresse',
+    ownAddressHint: 'Die eigene Adresse dieser Wallet einsetzen',
     manage: 'Adressbuch',
     manageHint: 'Gespeicherte Adressen anzeigen, benennen und entfernen',
 

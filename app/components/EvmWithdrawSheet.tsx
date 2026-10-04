@@ -358,6 +358,7 @@ export function EvmWithdrawSheet({identity, asset, balance, gasWei, gasChecking 
             onPickSaved={setAddress}
             onForgetSaved={a => { void forgetAddress(assetKey, a).then(setSaved); }}
             onManageSaved={onOpenAddressBook}
+            ownAddress={selfAddress}
             testIDPrefix="evm-send"
           />
 
