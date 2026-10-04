@@ -20,6 +20,38 @@
 
 ## NEXT SESSION — work order
 
+**HOP-FITNESS WAVE (founder bug 2, 2026-10-04: "To get eurc if I already have VCHF and icp, we
+swap VCHF to icp although there is enough icp."): LANDED.**
+A composed route used to sign the intermediate pool swap even when the wallet already held the
+downstream leg's input. FIXED ff `ebac2348`/`7016bb0c`/`b5103dc2` (7 files +384/-4):
+`prepareComposedConvertRecord` takes `hopBalanceRaw` (read by the sheet at the same gesture) and
+computes `hopNeed = minOutFinal + deposit fee` - the executor's OWN deposit-gate arithmetic,
+inclusive `>=`, so the check can never drift from the send. Covered → the record is born as the
+legless cefi record REUSING the same venue order (`inCurrency` = the hop asset); the deposit
+watcher auto-funds it from balance; no pool is touched, the typed VCHF stays put. Absent,
+unreadable, or short balance proves nothing: the composed route signs exactly as before (an
+unreadable balance never invents a skip, and the ledger refuses a short deposit before anything
+moves). The cefi handoff census names the exact deposit amount. Tests: convertComposedLeg +116,
+convertComposedSheet +35, flow 227 adapted, NEW flow 228 (composed-hop-skip: the covered wallet
+signs NO pool swap; insufficient balance keeps the composed route). Gates: all 8 rows PASS
+dirty=no @ `b5103dc2`, overall VERIFIED. Live corroboration: the founder's own retry converted
+ICP→EURC with the venue deposit auto-sent from existing ICP - no pool leg.
+
+**CONVERT DISPLAY LIES, ROUND 2 (founder bug 3, "After some time" + screenshot): IN PROGRESS**
+via the copyfix lane (worktree `dpay-copyfix`, branch `copyfix` from `b5103dc2`). Two verified
+defects on the expired "Unknown outcome" screen: (A) the stuck view formats the FIRST POOL LEG's
+minimum with the ROUTE-FINAL symbol/decimals - 360179063 raw = 3.60179063 ICP rendered as
+"360.179063 EURC" (`ConvertIntentSheet.tsx` ~2787, `stuckSigned`; `ConvertStatePanel.tsx`:209 is
+fine for direct records); fix = leg-scoped symbol/decimals. (B) copy contradiction: `stuckRouteBody`
+("dpay keeps watching the ledgers; this screen flips on its own") renders adjacent to
+`stuckExpiredLine` ("nothing can move anymore"); fix = fork the body on expiry (watch-closed /
+settles-from-evidence copy), 4 locales. Money verdict (delivered, on-chain): the "Unknown
+outcome" was a display/poll lie - the pool swap DID execute (3.63807236 ICP received ≥ the
+3.60179063 minimum); a retry convert's 2.67102103 ICP deposit WAS auto-sent to the venue
+(swept in 3s); EURC payout pending at last probe; founder wallet keeps 8.01306312 ICP.
+Follow-up when the copyfix wave merges: re-probe the 2.67102103 ICP order (EURC at the
+founder's Solana address 8ZhJ2xdE or refund to `a2227143…`).
+
 **SWAP-UI DEFECT WAVE (founder 2026-10-04, "Bugs left and right around currency swaps"): LANDED.**
 Live screenshot of an in-flight VCHF→ICP→EURC convert showed five UI lies: the pending body
 rendered the leg-3 SideShift order while leg 2 still ran (keyed on
