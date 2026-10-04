@@ -8,6 +8,8 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount,
+  openConvertDetails,
+  closeConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {deadline as budgetDeadline} from '../harness/budget';
@@ -31,8 +33,11 @@ const SEED = 300000000; // 3 ICP
 const AMOUNT_IN = 100000000n; // 1 ICP
 /** The pool the sheet's auto pick is executing through (real vs fixture — the file runs in the
  *  two-venue world, and the real pool's edge over the fixture flips as its state drifts). */
-function pickedPool(m: Awaited<ReturnType<typeof onboardWallet>>): string {
-  return (m.driver.readTextSafe('convert-venue-auto') ?? '').includes('offline fixture') ? POOL_B : POOL;
+async function pickedPoolAsync(m: Awaited<ReturnType<typeof onboardWallet>>): Promise<string> {
+  await openConvertDetails(m);
+  const pick = (m.driver.readTextSafe('convert-venue-auto') ?? '');
+  await closeConvertDetails(m); // collapsed again for the reads below
+  return pick.includes('offline fixture') ? POOL_B : POOL;
 }
 async function swapQuoteOut(pool: string): Promise<bigint> {
   const q = await relayGet(`/api/v1/swap_quote?pool=${pool}&token_in=${ICP_LEDGER}&token_out=${VCHF_LEDGER}&amount_in=${AMOUNT_IN}`) as {amount_out: string};
@@ -58,14 +63,14 @@ hermeticDescribe('flow 141 — pool #ok with a held withdrawal is an honest pend
 
       await openConvertFor(m, 'icp');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
 
       // Hold the venue's output leg BEFORE confirming (BOTH pools — the pick follows the live
       // quotes in the two-venue world); re-read the winning pool's quote right before arming so
       // the confirm re-quote matches the number the screen shows.
       await swapPoolKnob({pool: POOL, fail_withdrawal: true});
       await swapPoolKnob({pool: POOL_B, fail_withdrawal: true});
-      const winPool = pickedPool(m);
+      const winPool = await pickedPoolAsync(m);
       let executedGross = await swapQuoteOut(winPool);
       let pending = false;
       for (let round = 0; round < 5 && !pending; round++) {
@@ -95,17 +100,20 @@ hermeticDescribe('flow 141 — pool #ok with a held withdrawal is an honest pend
         ?? `(no convert-pending after 5 confirm rounds — on screen: ${m.driver.bodyText().slice(0, 400)})`;
       assertIncludes(pendingBody, 'Payout pending', 'pending title');
       assertIncludes(pendingBody, 'VCHF', 'pending names the asset owed');
-      assertIncludes(pendingBody, winPool, 'pending names the pool principal (support line)');
-      assertIncludes(pendingBody, 'quote this to support', 'the practical support recipe stays');
+      // F1 (spec 2026-10-04 §1/§3): the support recipe names the ACTIVE leg's own
+      // reference - NEVER a pool principal, never another leg's id.
+      assertIncludes(pendingBody, 'quote this reference to support', 'the support recipe names the ACTIVE leg reference');
+      expect(pendingBody).not.toContain(winPool);
+      expect(m.driver.isPresent('convert-pending-support')).toBe(true);
       assertIncludes(pendingBody, 'watching', 'it keeps watching (no dead end)');
-      expect(m.driver.bodyText()).not.toContain('Converted');
+      expect(m.driver.bodyText()).not.toContain('Done');
 
       // The VCHF is NOT credited while held.
       expect(BigInt(await getBalance(account!.publicHex, 7))).toBe(0n);
 
       // Resolution: drain the venue's queue → the screen flips to done on its own.
       await swapPoolKnob({pool: POOL, fail_withdrawal: false, settle_pending: true});
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 30_000})).toBe(true);
+      expect(await m.driver.waitForText('Done', {timeoutMs: 30_000})).toBe(true);
       const doneBody = m.driver.readText('convert-done');
       assertIncludes(doneBody, 'VCHF', 'done names the asset received');
 

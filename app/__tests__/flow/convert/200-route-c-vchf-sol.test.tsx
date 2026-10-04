@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, pickSwapTarget, openOtherVenues,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -110,7 +111,7 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
 
       // §2 the review census: full chain + the destination's own estimate (the fee lines land
       // async behind Details — wait for the census to mount before reading it).
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       await m.driver.waitForFunction(
         () => m!.driver.isPresent('convert-route-venues') && m!.driver.isPresent('crossrail-circle-fee'),
         {timeoutMs: 15_000, label: 'the census lines mounted behind Details'},

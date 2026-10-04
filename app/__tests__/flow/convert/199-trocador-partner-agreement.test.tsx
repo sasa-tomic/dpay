@@ -8,6 +8,7 @@ import {it, expect, afterEach} from '@jest/globals';
 import {
   assertIncludes, onboardWallet, accountOf, openConvertFor, typeConvertAmount,
   pickSwapTarget, openOtherVenues,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -102,6 +103,7 @@ hermeticDescribe('flow 199 — the trocador partner agreement (webhook registrat
           () => m!.driver.readTextSafe('convert-headline')?.includes('0.0496 ICP') === true,
           {timeoutMs: 20_000, label: 'the venue settle figure rendered (the rate arrived)'},
         );
+        await openConvertDetails(m);
         assertIncludes(m.driver.readText('convert-quote-source'), 'Trocador', 'attribution names the venue');
         expect(m.driver.readText('convert-settle-address')).toBe(settleAddress);
 
@@ -164,7 +166,7 @@ hermeticDescribe('flow 199 — the trocador partner agreement (webhook registrat
           provider: 'StubSwap', fixed: true, details: {hashout: 'sol-settle-sig-199'},
         });
         await deliverWebhook(orderId, donePayload);
-        expect(await m.driver.waitForText('Converted', {timeoutMs: 90_000})).toBe(true);
+        expect(await m.driver.waitForText('Done', {timeoutMs: 90_000})).toBe(true);
         const done = m.driver.readText('convert-done');
         assertIncludes(done, '0.0496 ICP', 'done reports the realized settle figure off the webhook payload');
         assertIncludes(done, 'Paid out to your own address', 'done names the payout destination');

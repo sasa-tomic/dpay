@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, pickSwapTarget, openOtherVenues,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayBaseURL} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -99,6 +100,7 @@ hermeticDescribe('flow 223 — the EVM-native CeFi destination (ICP → native E
         () => m!.driver.readTextSafe('convert-headline')?.includes('0.0495 ETH') === true,
         {timeoutMs: 20_000, label: 'the venue settle figure rendered'},
       );
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-quote-source'), 'SideShift', 'the quote is attributed to SideShift');
 
       // NOTHING is adopted before the consent: the store is still empty.

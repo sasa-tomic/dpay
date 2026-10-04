@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, pickSwapTarget, openOtherVenues,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -71,7 +72,8 @@ hermeticDescribe('flow 183 — the pair-scoped ICPSwap venues (ckUSDC, ckETH) ar
       // ONE direct venue on this pair → the sheet auto-picks it; the via-VCHF hub waits behind
       // the ONE expander as an explicit opt-in row.
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 15_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 15_000});
+      await openConvertDetails(m);
       const autoLine = m.driver.readText('convert-venue-auto');
       assertIncludes(autoLine, 'ICPSwap', 'the pick line names its executor');
       expect(autoLine).not.toContain('of 2 venues');
@@ -89,7 +91,7 @@ hermeticDescribe('flow 183 — the pair-scoped ICPSwap venues (ckUSDC, ckETH) ar
       expect(gross > 0n).toBe(true);
       let minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n;
 
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       expect(m.driver.readText('convert-pool-principal').trim()).toBe(CKUSDC_POOL);
       assertIncludes(m.driver.readText('convert-counterparty'), 'ICPSwap', 'the counterparty is attributed to ICPSwap');
       assertIncludes(m.driver.readText('convert-headline'), `${fmt(gross - ICP_FEE, 8)} ICP`, 'the headline states the net ICP output');
@@ -114,7 +116,8 @@ hermeticDescribe('flow 183 — the pair-scoped ICPSwap venues (ckUSDC, ckETH) ar
         gross = BigInt(re.amount_out);
         minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n;
       }
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 60_000})).toBe(true);
+      expect(await m.driver.waitForText('Done', {timeoutMs: 60_000})).toBe(true);
+      await openConvertDetails(m); // the payout record folds under Details (S4, spec 2026-10-04)
       const done = m.driver.readText('convert-done');
       assertIncludes(done, `${fmt(gross, 8)} ICP`, 'the done panel states the pool\'s quoted ICP payout');
       assertIncludes(done, 'Payout record', 'the done panel carries the payout record');
@@ -130,7 +133,7 @@ hermeticDescribe('flow 183 — the pair-scoped ICPSwap venues (ckUSDC, ckETH) ar
       await typeConvertAmount(m, '0.002');
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
       expect(m.driver.isPresent('convert-venue-none')).toBe(false);
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       // The ckETH pool venue resolves async over the relay (seconds under lane load); until it
       // commits, venue-none is ALSO absent — absence proves nothing. Poll for the pool line.
       expect(await m.driver.waitForText(CKETH_POOL, {timeoutMs: 15_000})).toBe(true);

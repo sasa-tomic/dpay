@@ -237,8 +237,12 @@ describe('the composed one-press consent', () => {
     // quote (0.9 ICP floored to 0.891, quoted 0.88 EUR), attributed to SideShift — the venue
     // + locked figure are disclosed BEFORE the tap.
     expect(textOf(tree, 'convert-receive')).toContain('0.88');
-    // ONE merged quote line (the pair's only row → the plain attribution, no count):
-    // venue + read instant, the SideShift attribution carried before the tap.
+    // The SideShift attribution lives in Details (the copy law keeps venue brands off the
+    // open card; spec 2026-10-04 §3).
+    await act(async () => {
+      present(tree, 'convert-details')[0].props.onPress();
+    });
+    await act(async () => {});
     expect(textOf(tree, 'convert-venue-auto')).toContain('SideShift');
     expect(textOf(tree, 'convert-venue-auto')).toMatch(/\d{1,2}:\d{2}/);
     expect(exists(tree, 'convert-quote-source')).toBe(false);
@@ -291,8 +295,9 @@ describe('the composed one-press consent', () => {
     expect(textOf(tree, 'convert-composed-order-at')).toContain('SideShift'); // attributed + timestamped
     expect(textOf(tree, 'convert-composed-deposit-amount')).toContain('0.891'); // the exact-amount gate's figure
     expect(textOf(tree, 'convert-composed-deposit-address')).toContain(VENUE_DEPOSIT_ADDRESS);
-    // The deposit leg itself renders in the leg list, still pending.
-    expect(textOf(tree, 'convert-leg-2')).toContain('SideShift');
+    // The deposit leg itself renders in the leg list, still pending - a plain story line
+    // (the venue's name lives in the order block under Details).
+    expect(textOf(tree, 'convert-leg-2')).toContain('Send 0.891 ICP to the exchange');
   });
 
   test('a mid-route park renders the ACTIVE leg (the pool payout), never the queued order', async () => {
@@ -319,12 +324,12 @@ describe('the composed one-press consent', () => {
     await act(async () => {
       (globalThis as {__SHEET_TEST_EMIT?: (records: Record<string, ConvertRecord>) => void}).__SHEET_TEST_EMIT?.({[parked.id]: parked});
     });
-    // The step header and the body name the SAME leg.
-    expect(textOf(tree, 'convert-step')).toContain('Step 2 of 3');
+    // The step header and the body name the SAME leg (the active leg's plain story line).
+    expect(textOf(tree, 'convert-step')).toContain('Exchange VCHF for ICP');
     expect(exists(tree, 'convert-pending')).toBe(true);
     const body = textOf(tree, 'convert-pending');
     expect(body).toContain('ICP'); // the payout actually being watched
-    expect(body).toContain('Pool accepted'); // the pool's own truth: input spent, payout owed
+    expect(body).toContain('waiting for your ICP'); // the pool's own truth: input spent, payout owed
     expect(body).not.toContain('Payout pending');
     expect(body).not.toContain('EURC'); // the queued leg's asset never speaks
     expect(body).not.toContain('SideShift');
@@ -368,8 +373,8 @@ describe('the composed one-press consent', () => {
     });
     expect(exists(tree, 'convert-awaiting-deposit')).toBe(true);
     const body = textOf(tree, 'convert-awaiting-deposit');
-    expect(body).toContain('Waiting for deposit');
-    expect(body).toContain('waits for its ICP deposit'); // the venue's honest state
+    expect(body).toContain('Waiting for the deposit');
+    expect(body).toContain('Waiting for your ICP deposit to land'); // the venue's honest wait
     expect(body).not.toContain('Payout pending');
     expect(body).not.toContain('holds the deposit and is executing'); // that is provider_processing's truth
     expect(body).not.toContain('Still watching');
@@ -490,8 +495,7 @@ describe('the composed one-press consent', () => {
     });
     expect(exists(tree, 'convert-failed-leg')).toBe(true);
     const body = textOf(tree, 'convert-failed-leg');
-    expect(body).toContain('SideShift');
-    expect(body).toContain('ICP');
+    expect(body).toContain('ICP'); // the in-wallet position named; the venue stays in Details
     expect(textOf(tree, 'convert-leg-2-state')).toContain('Refused');
   });
 });

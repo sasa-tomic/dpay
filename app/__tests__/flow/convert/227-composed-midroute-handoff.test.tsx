@@ -116,7 +116,7 @@ hermeticDescribe('flow 227 — the composed mid-route park hands off to the cefi
       await openConvertFor(m, 'vchf');
       await pickSwapTarget(m, 'EUR');
       await typeConvertAmount(m, '2');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 15_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 15_000});
       await m.driver.click('btn-convert-confirm', {timeoutMs: 5_000});
       await m.driver.findByTestID('convert-awaiting-deposit', {timeoutMs: 45_000});
       expect((await sideshiftRelayHits()).shiftCalls).toBe(1);

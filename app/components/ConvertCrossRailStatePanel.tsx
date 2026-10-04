@@ -4,7 +4,7 @@
 // moves with it unchanged — never an import or config.
 import {useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, TextInput, View} from 'react-native';
-import {venueDisplayName, venueEndpointOf, venueOfId} from '../config/venues';
+import {venueDisplayName, venueOfId} from '../config/venues';
 import {buildCctpHandoff, convertAbortFlavor, convertRecordMinOut, type ConvertRecord, type LegPlan} from '../convert';
 import {abortConvertRecord, acknowledgeStuckRecord, attachCctpBurnTx, confirmCrossRailSolLeg, declineCctpHandoff} from '../convertResume';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
@@ -16,7 +16,7 @@ import {copyToClipboard} from '../lib/clipboard';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconSwap} from './icons';
-import {ConvertHeader, gasPreFundedAborted, LinkRow, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
+import {activeLegExpiryMs, ConvertHeader, gasPreFundedAborted, LinkRow, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
 import {ConvertStuckReceipts, stuckWindowExpired} from './ConvertStuckEvidence';
 import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 
@@ -165,7 +165,7 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.multihop.executingTitle}</Text>
           <Text style={S.convertStateBody}>
-            {M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), formatClock(new Date(legExpiryMs)))}
+            {M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), formatClock(new Date(activeLegExpiryMs(record))))}
           </Text>
         </View>
       ) : null}
@@ -174,10 +174,18 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
         <View testID="convert-pending">
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.pendingTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.pendingBody(hopSymbol, venueEndpointOf(record.venueId), formatClock(new Date(record.createdAtMs)))}</Text>
+          <Text style={S.convertStateBody}>{M.convert.pendingBody(hopSymbol)}</Text>
+          {(() => {
+            const ref = [...record.legs].reverse().find(l => l.requestIdHex)?.requestIdHex ?? record.outTx ?? null;
+            return ref != null ? (
+              <Text testID="convert-pending-support" style={S.convertStateMeta} selectable>
+                {M.convert.pendingSupport(ref)}
+              </Text>
+            ) : null;
+          })()}
           <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
           <Text testID="convert-expiry" style={S.convertStateMeta}>
-            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+            {M.convert.expiryLine(formatClock(new Date(activeLegExpiryMs(record))))}
           </Text>
         </View>
       ) : null}
@@ -446,7 +454,7 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
                   ) : null}
                 </>
               ) : (
-                <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol, venueName)}</Text>
+                <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol)}</Text>
               )}
               {/* No approval-expiry line here: failed_refunded means the window is closed
                   (10x-verbosity pass 2026-09-16); only live windows carry the line. */}
@@ -511,7 +519,7 @@ export function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, o
             </View>
           ) : (
             <Text testID="convert-expiry" style={S.convertStateMeta}>
-              {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+              {M.convert.expiryLine(formatClock(new Date(activeLegExpiryMs(record))))}
             </Text>
           )}
           {(() => {

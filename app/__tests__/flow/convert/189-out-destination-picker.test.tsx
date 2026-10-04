@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, onboardWallet, accountOf, openConvertFor, typeConvertAmount,
   pickSwapTarget,
+  openConvertDetails,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -66,7 +67,8 @@ hermeticDescribe('flow 189 — the out-destination picker: SOL → EURC via jupi
 
       // §3 Jupiter's digits for the EURC pair, verbatim through the relay proxy.
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-venue-auto'), 'Jupiter', 'attribution names the venue');
       expect(m.driver.readText('convert-venue-auto')).toMatch(/\d{1,2}:\d{2}/);
       await m.driver.waitForFunction(
@@ -74,7 +76,7 @@ hermeticDescribe('flow 189 — the out-destination picker: SOL → EURC via jupi
         {timeoutMs: 15_000, label: 'the receive estimate re-keyed to the typed amount'},
       );
       assertIncludes(m.driver.readText('convert-min-out'), '83 EURC', 'minimum is otherAmountThreshold verbatim');
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       await m.driver.waitForFunction(
         () => m!.driver.isPresent('convert-rate') && m!.driver.isPresent('convert-sol-impact'),
         {timeoutMs: 15_000, label: 'the census mounted behind Details'},
@@ -94,7 +96,7 @@ hermeticDescribe('flow 189 — the out-destination picker: SOL → EURC via jupi
 
       // §4 confirm → one broadcast; §5 the realized EURC credit.
       await m.driver.click('btn-convert-confirm', {timeoutMs: 5_000});
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 60_000})).toBe(true);
+      expect(await m.driver.waitForText('Done', {timeoutMs: 60_000})).toBe(true);
       const done = m.driver.readText('convert-done');
       assertIncludes(done, '84.12 EURC', 'done reports the realized token credit');
       assertIncludes(done, 'Payout record:', 'done names the payout record');

@@ -5,7 +5,6 @@
 // payout shown on done is the REALIZED chain credit (never the estimate).
 import {useEffect, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, View} from 'react-native';
-import {venueDisplayName} from '../config/venues';
 import {evmAmmChainOf, evmAmmFamilyOf} from '../config/evmAmm';
 import type {ConvertRecord} from '../convert';
 import {acknowledgeStuckRecord} from '../convertResume';
@@ -30,7 +29,6 @@ export function EvmStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record.step]);
 
-  const venueName = venueDisplayName(record.venueId);
   const chainName = evmAmmChainOf(record.venueId)?.name ?? `chain ${record.evmSwap?.chainId ?? ''}`;
   const isCow = evmAmmFamilyOf(record.venueId) === 'cowswap';
   const outDec = record.outDecimals ?? 18;
@@ -47,7 +45,7 @@ export function EvmStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
         <View testID="convert-swapping">
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.swappingTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.swappingBody(venueName)}</Text>
+          <Text style={S.convertStateBody}>{M.convert.swappingBody}</Text>
           {legs.length > 0 ? <Text style={S.convertStateMeta}>{M.convert.doneTx(legs[legs.length - 1]!)}</Text> : null}
         </View>
       ) : null}
@@ -77,7 +75,7 @@ export function EvmStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
         <View testID="convert-stuck">
           <Text style={S.convertStateTitle}>{M.convert.stuckTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.evm.stuckBody(record.outSymbol)}</Text>
-          <Text style={S.convertStateBody}>{M.convert.stuckSigned(fmtIn(record.amountIn), fmtOut(record.expectedNet), venueName)}</Text>
+          <Text style={S.convertStateBody}>{M.convert.stuckSigned(fmtIn(record.amountIn), fmtOut(record.expectedNet))}</Text>
           {legs.length > 0 ? <Text style={S.convertStateMeta}>{M.convert.doneTx(legs[legs.length - 1]!)}</Text> : null}
           {/* The receipts block (2026-10-02 POCO P0): each broadcast leg + any failure cause,
               verbatim — never a bare "unknown". (No "keeps watching" claim: an EVM-shaped

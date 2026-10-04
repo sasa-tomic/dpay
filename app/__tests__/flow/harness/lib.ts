@@ -304,6 +304,25 @@ export async function pickSwapTarget(m: Mount, code: string, opts: {timeoutMs?: 
   throw new Error(`pickSwapTarget: the target line never flipped to "${name}" after 3 tries`);
 }
 
+/** Open the sheet's Details census unless it is already open - a blind click TOGGLES it
+ *  closed, and several flows open it twice on one mount. The copy law (spec 2026-10-04 §3)
+ *  moved the venue/fee census inside this disclosure. */
+export async function openConvertDetails(m: Mount, opts: {timeoutMs?: number} = {}): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (m.driver.isPresent('convert-details-block')) return;
+    await m.driver.click('convert-details', opts);
+  }
+  await m.driver.findByTestID('convert-details-block', {timeoutMs: opts.timeoutMs ?? 2500});
+}
+
+/** Close the sheet's Details census unless it is already closed (a blind click toggles). */
+export async function closeConvertDetails(m: Mount, opts: {timeoutMs?: number} = {}): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!m.driver.isPresent('convert-details-block')) return;
+    await m.driver.click('convert-details', opts);
+  }
+}
+
 export async function openOtherVenues(m: Mount, opts: {timeoutMs?: number} = {}): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt++) {
     if (m.driver.isPresent('convert-venues-expanded')) return;

@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, pickSwapTarget, openOtherVenues, fmtHero,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -58,7 +59,7 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
         expect(m.driver.isPresent(`convert-target-chip-${code}`)).toBe(true);
       }
       await pickSwapTarget(m, 'ICP');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 8_000});
       await openOtherVenues(m);
       await m.driver.findByTestID('convert-venue-hub:icpswap-vchf-ckusdc:2:icpswap-ckusdc', {timeoutMs: 8_000});
 
@@ -87,8 +88,9 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
         () => m!.driver.readTextSafe('convert-headline')?.includes(`≈ ${fmtHero(net2.toString(), 18, 'ETH', {displayDecimals: 6})}`) === true,
         {timeoutMs: 15_000, label: 'the composed headline re-keyed to the two-hop oracle'},
       );
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-quote-verbatim'), `${fmt(gross2, 18)} ETH`, 'Details carries swap2\'s verbatim quoted figure');
+      // Details is open (the census read below needs it): the attribution lives there now.
       assertIncludes(m.driver.readText('convert-quote-source'), 'ICPSwap + ICPSwap', 'the attribution names BOTH venues verbatim');
       assertIncludes(m.driver.readText('convert-route-via'), 'via ICP · 2 swaps', 'the route chip names the hub and the swap count');
       const census = m.driver.readText('convert-hub-census');
@@ -111,15 +113,17 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
       }
       expect(confirmed).toBe(true);
       await m.driver.findByTestID('convert-state', {timeoutMs: 10_000});
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 60_000})).toBe(true);
+      expect(await m.driver.waitForText('Done', {timeoutMs: 60_000})).toBe(true);
       const stateText = m.driver.readText('convert-state');
       assertIncludes(stateText, 'Convert VCHF → ETH', 'the state screen keeps the plain selection heading');
       expect(m.driver.isPresent('convert-route-legs')).toBe(true);
+      // S3 story lines: plain verbs, no venue brand (spec 2026-10-04 §2/§3); the venue
+      // names live in the Details census.
       const legLabels = [
-        'Approve the pool to pull your VCHF',
-        'Swap VCHF → ICP on ICPSwap',
-        'Approve the pool to pull your ICP',
-        'Swap ICP → ETH on ICPSwap',
+        'Let the pool use your VCHF',
+        'Exchange VCHF for ICP',
+        'Let the pool use your ICP',
+        'Exchange ICP for ETH',
       ];
       for (let i = 0; i < 4; i++) {
         assertIncludes(m.driver.readText(`convert-leg-${i}`), legLabels[i], `leg ${i} carries its own label`);
@@ -127,9 +131,10 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
       }
       assertIncludes(m.driver.readText('convert-leg-0-state'), '· 0.0001 VCHF', 'leg 1\'s approve fee is its own ledger\'s fee');
       assertIncludes(m.driver.readText('convert-leg-2-state'), '· 0.0001 ICP', 'leg 3\'s approve fee is the hub ledger\'s fee');
+      await m.driver.click('convert-details', {timeoutMs: 5_000}); // the tracker's own Details (S4)
       const done = m.driver.readText('convert-done');
-      assertIncludes(done, 'Converted', 'the done title is the in-wallet receipt\'s title');
-      assertIncludes(done, `${fmt(gross2, 18)} ETH received in your wallet.`, 'the receipt names the SEEN payout amount');
+      assertIncludes(done, 'Done', 'the done title is the status word');
+      assertIncludes(done, `${fmt(gross2, 18)} ETH is in your wallet.`, 'the receipt names the SEEN payout amount');
       assertIncludes(done, 'Payout record: ', 'the receipt carries the dest-ledger payout record');
       expect(!done.includes('on its way') && !stateText.includes('Ethereum')).toBe(true);
 
@@ -141,8 +146,10 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
       // --- the USD pair's venue rows: direct pool standing, hub opt-in; selection only ----------
       await openConvertFor(m, 'vchf');
       await pickSwapTarget(m, 'USD');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 15_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 15_000});
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-venue-auto'), 'ICPSwap', 'the direct pool is the auto pick for the USD pair');
+      await openConvertDetails(m);
       await openOtherVenues(m);
       const hubRow = m.driver.readText('convert-venue-hub:icpswap:8:icpswap-ckusdc');
       assertIncludes(hubRow, 'Via ICP', 'the opt-in hub row names its mechanism');
@@ -195,7 +202,7 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
       const failed = m.driver.readText('convert-failed-leg');
       assertIncludes(failed, 'ICP', 'the failure names the HUB asset as the in-wallet position');
       assertIncludes(failed, 'ETH', 'the failure names what the refused leg was bound for');
-      expect(m.driver.bodyText()).not.toContain('received in your wallet');
+      expect(m.driver.bodyText()).not.toContain('is on its way');
       // Books: swap2 pulled NOTHING — the user holds swap1's gross minus ICP's approve fee.
       expect(BigInt(await getBalance(account!.publicHex, 7))).toBe(BigInt(2000000000) - 2n * (200000000n + 2n * VCHF_FEE));
       expect(BigInt(await getBalance(account!.publicHex, 8))).toBe((gross1 - minOut1 - 2n * ICP_FEE) + (run2.gross1 - ICP_FEE));

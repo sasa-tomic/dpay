@@ -167,6 +167,10 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
       present(tree, 'convert-amount')[0].props.onChangeText('1');
     });
     await act(async () => {});
+    // The attribution lives inside Details now (the copy law, spec 2026-10-04 §3).
+    expect(present(tree, 'convert-details').length).toBeGreaterThan(0);
+    await act(async () => { present(tree, 'convert-details')[0].props.onPress(); });
+    await act(async () => {});
     expect(present(tree, 'convert-venue-auto').length).toBeGreaterThan(0);
     expect(textOf(present(tree, 'convert-venue-auto')[0])).toContain('SideShift');
   });
@@ -212,6 +216,9 @@ describe('SOL-side CeFi destination (sideshift-eurc)', () => {
     // The settle figure is the venue's own number, verbatim (V8): 0.0495 ICP raw = 4950000.
     expect(present(tree, 'convert-headline').length).toBeGreaterThan(0);
     expect(textOf(present(tree, 'convert-headline')[0])).toContain('0.0495');
+    // The attribution lives inside Details now (the copy law, spec 2026-10-04 §3).
+    await act(async () => { present(tree, 'convert-details')[0].props.onPress(); });
+    await act(async () => {});
     expect(textOf(present(tree, 'convert-venue-auto')[0])).toContain('SideShift');
     // The payout target is the wallet's OWN derived IC account identifier (DpayCore,
     // never typed) — the pinned 64-hex vector, derived from the principal by the core;

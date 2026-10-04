@@ -62,7 +62,7 @@ export function convertStuckLegs(record: ConvertRecord): StuckLegRow[] {
   if (record.solanaLeg != null) {
     const label = record.chainRoute != null
       // A chain phase-1 record's unknown is the venue DEPOSIT transfer's (D32).
-      ? M.convert.depositLegSent(venueDisplayName(record.chainRoute.venueId),
+      ? M.convert.depositLegSent(
         fmtAssetCompact(record.amountIn, record.inDecimals ?? 9, record.inSymbol))
       : record.crossRail?.kind === 'cctp_sol'
         ? M.convert.crossrail.legSolSwap(venueDisplayName(record.crossRail.solVenueId ?? record.venueId), record.destSymbol ?? record.outSymbol)

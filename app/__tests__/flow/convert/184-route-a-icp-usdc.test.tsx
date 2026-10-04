@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, onboardWallet, accountOf, openConvertFor,
   typeConvertAmount, pickSwapTarget, openOtherVenues, fmtHero,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -55,13 +56,16 @@ hermeticDescribe('flow 184 — Route A: ICP → USDC(Ethereum) as one opt-in int
       await openConvertFor(m, 'icp');
       await pickSwapTarget(m, 'USD');
       await typeConvertAmount(m, '5');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 8_000});
       await openOtherVenues(m);
       for (const rowId of ['hub:icpswap:7:icpswap-vchf-ckusdc', 'multihop:icpswap-ckusdc:2:cctp', 'sideshift-usdc']) {
         expect(await m.driver.findByTestID(`convert-venue-${rowId}`, {timeoutMs: 4_000}).then(() => true).catch(() => false)).toBe(true);
       }
       expect(await m.driver.findByTestID('convert-venue-multihop:icpswap-ckusdc:2', {timeoutMs: 1_000}).then(() => true).catch(() => false)).toBe(false);
+      // The auto pick's attribution renders inside Details (the copy law, spec 2026-10-04 §3).
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-venue-auto'), 'ICPSwap', 'the direct pool is the auto pick (disclosed mechanically)');
+      await openConvertDetails(m);
       expect(m.driver.isPresent('convert-headline')).toBe(true);
       expect(m.driver.isPresent('convert-dest-address')).toBe(false);
 
@@ -93,7 +97,7 @@ hermeticDescribe('flow 184 — Route A: ICP → USDC(Ethereum) as one opt-in int
         {timeoutMs: 15_000, label: 'the headline re-keyed to the hop oracle'},
       );
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the crossing minimum is the hop quote\'s 1% floor');
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       await m.driver.waitForFunction(
         () => m!.driver.isPresent('convert-quote-verbatim') && m!.driver.isPresent('convert-gas-note'),
         {timeoutMs: 15_000, label: 'the census lines mounted behind Details'},

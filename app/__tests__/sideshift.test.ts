@@ -270,7 +270,7 @@ describe('convert.ts — the cefi mapping helpers', () => {
     );
     expect(minErr).toBeInstanceOf(CeFiMinDepositError);
     expect(minErr.message).toBe(convertEn.cefi.minDepositBody(
-      name, 'Amount too low. Minimum deposit amount: 2.97962608.', '2.97962608',
+      'Amount too low. Minimum deposit amount: 2.97962608.', '2.97962608',
     ));
     expect((minErr as CeFiMinDepositError).minDeposit).toBe('2.97962608');
   });

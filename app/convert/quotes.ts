@@ -169,7 +169,7 @@ export function ceFiServiceError(e: unknown, venueName: string): Error {
 export class CeFiNoQuoteError extends Error {
   readonly venueName: string;
   constructor(venueName: string) {
-    super(M.convert.cefi.noQuoteBody(venueName));
+    super(M.convert.cefi.noQuoteBody);
     this.name = 'CeFiNoQuoteError';
     this.venueName = venueName;
   }
@@ -187,7 +187,7 @@ export class CeFiMinDepositError extends Error {
   readonly venueMessage: string;
   readonly minDeposit: string;
   constructor(venueName: string, venueMessage: string, minDeposit: string) {
-    super(M.convert.cefi.minDepositBody(venueName, venueMessage, minDeposit));
+    super(M.convert.cefi.minDepositBody(venueMessage, minDeposit));
     this.name = 'CeFiMinDepositError';
     this.venueName = venueName;
     this.venueMessage = venueMessage;

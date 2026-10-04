@@ -73,6 +73,14 @@ export type ConvertMessages = {
   };
   slippageLabel: string;
   refusalLine: (sym: string) => string;
+  /** S1's recommendation line (spec 2026-10-04 §2): rendered under the receive hero the
+   *  moment a quote stands - the arrival fact, plus the route's known fee in its own
+   *  asset when one exists. No venue, no id, no rail. */
+  arrives: string;
+  feeAbout: (fee: string) => string;
+  /** The quiet exchanges-involved line: rendered only when the route involves more than
+   *  one exchange (composed/hub/chain/crossrail), or the auto pick compared venues. */
+  exchangesInvolved: (n: number) => string;
   /** The one disclosure control on the quote-ready card: the venue/fee/signing census
    *  collapses behind it, default CLOSED (the 2026-09-16 10x-verbosity pass). */
   detailsLabel: string;
@@ -123,20 +131,19 @@ export type ConvertMessages = {
   /** Settlement Field states (brief 5.5): the device signing, the swap in flight, the pool
    *  payout watch, the resolved receipt, and the composed route's automatic deposit leg. */
   signing: string;
-  swapVia: (venue: string) => string;
   awaitingPool: string;
   receivedDone: (amt: string) => string;
-  viaChain: (venue: string) => string;
   /** The composed IC+CeFi route's deposit leg: dpay creates the venue order first, then the
-   *  device signs the deposit transfer as a leg of the SAME intent (no second handoff). */
-  depositLegSent: (venue: string, amt: string) => string;
-  depositLegPending: (venue: string, amt: string) => string;
+   *  device signs the deposit transfer as a leg of the SAME intent (no second handoff).
+   *  Plain lines - the venue's name lives in the order block under Details, never here. */
+  depositLegSent: (amt: string) => string;
+  depositLegPending: (amt: string) => string;
   /** The composed tracker's order-creation line (the ONE consent's live narration): the
-   *  venue and the payout figure its order locked, verbatim. */
+   *  venue and the payout figure its order locked, verbatim. Details-class. */
   composedOrderLine: (venue: string, amt: string) => string;
   /** The composed deposit transfer was refused at a gate or by the ledger (terminal, never
    *  retried): the swap went through, the hub asset is still in the wallet, the exit is named. */
-  depositRefusedBody: (hopSym: string, venue: string) => string;
+  depositRefusedBody: (hopSym: string) => string;
 
   // --- fail closed BEFORE the confirm (a swap that can only fail is never offered) ---------------
   /** Zero balance: the Pay tab's fund-gate shape, routed at the surface that can actually fund an
@@ -160,56 +167,64 @@ export type ConvertMessages = {
   approvingTitle: string;
   approvingBody: (amount: string, at: string) => string;
   swappingTitle: string;
-  swappingBody: (venue: string) => string;
+  swappingBody: string;
   settlingTitle: string;
   settlingBody: (sym: string) => string;
   doneTitle: string;
   doneBody: (amount: string) => string;
   doneTx: (tx: string) => string;
   pendingTitle: string;
-  pendingBody: (sym: string, pool: string, at: string) => string;
+  /** The pool-payout watch: the asset only - the support reference is the ACTIVE leg's own,
+   *  on its own line (pendingSupport), never a pool id smuggled into the body. */
+  pendingBody: (sym: string) => string;
+  /** The support recipe, pending only: the ACTIVE step's own reference, nothing else. */
+  pendingSupport: (ref: string) => string;
   stillWatching: string;
   failedTitle: string;
-  /** Definitive ledger refusal BEFORE anything moved — the user's position is unchanged. */
+  /** Definitive ledger refusal BEFORE anything moved - the user's position is unchanged. */
   failedApproveBody: (sym: string) => string;
-  /** The pool's own atomic refusal (e.g. minimum not met) — input never left the wallet. */
-  failedSwapBody: (reason: string, sym: string, venue: string) => string;
+  /** The exchange's own atomic refusal (e.g. minimum not met) - input never left the wallet. */
+  failedSwapBody: (reason: string, sym: string) => string;
+  /** The pool returned the funds: the refund is the status word. */
+  refundedTitle: string;
   refundedBody: (sym: string) => string;
   stuckTitle: string;
   /** The CHAIN record's phase-1 stuck state (D32): the pool's copy would name a swap that
-   *  never ran — the unknown outcome is the venue DEPOSIT transfer's own. */
+   *  never ran - the unknown outcome is the venue DEPOSIT transfer's own. */
   chainStuckTitle: string;
-  chainStuckBody: (venue: string) => string;
+  chainStuckBody: string;
   stop: string;
   stopWatching: string;
-  /** The provider-held stop (2026-09-24): the venue order keeps its own life at the venue —
+  /** The provider-held stop (2026-09-24): the venue order keeps its own life at the venue -
    *  dpay only ever watched its status. Its own key so locales can carry that nuance. */
   stopProvider: string;
   abortedTitle: string;
   abortedClean: string;
   abortedFee: string;
   abortedWatching: string;
-  /** The provider-held abort body (2026-09-24): BOTH halves of the truth — no deposit sent
-   *  → nothing can move and the order dies unfunded at the venue; deposit already sent →
+  /** The provider-held abort body (2026-09-24): BOTH halves of the truth - no deposit sent
+   *  -> nothing can move and the order dies unfunded at the venue; deposit already sent ->
    *  the trade may still settle (check Balances + the venue's own status page). */
   abortedProvider: string;
   stuckBody: string;
-  stuckSigned: (amount: string, minAmount: string, venue: string) => string;
+  /** The stuck screen's one restating line: what was signed, amount for amount. The pool's
+   *  identity lives in the receipts block (Details evidence), never in this line. */
+  stuckSigned: (amount: string, minAmount: string) => string;
   /** "Expires by 14:42 — after that nothing can move." */
   expiryLine: (at: string) => string;
 
   // --- V6: the provider-held states (convertResume.ts drivers) + the extended stuck watch -----
   awaitingDepositTitle: string;
-  awaitingDepositBody: (sym: string, venue: string) => string;
+  awaitingDepositBody: (sym: string) => string;
   providerProcessingTitle: string;
-  providerProcessingBody: (sym: string, venue: string) => string;
-  /** The provider's own quote/deposit window died BEFORE the deposit arrived — but a LATE
+  providerProcessingBody: (sym: string) => string;
+  /** The provider's own quote/deposit window died BEFORE the deposit arrived - but a LATE
    *  deposit can still land and be refunded (the engine keeps a slow watch for exactly
    *  that, 2026-09-24), so this copy names the watch instead of claiming the story is over. */
   quoteExpiredTitle: string;
-  quoteExpiredBody: (sym: string, venue: string) => string;
+  quoteExpiredBody: (sym: string) => string;
   providerRefundedTitle: string;
-  providerRefundedBody: (sym: string, venue: string) => string;
+  providerRefundedBody: (sym: string) => string;
   /** The stuck record is still probed in the background — resolution flips the screen itself. */
   stuckWatching: string;
   /** The user's acknowledgement of a stuck record: instructions read, watch may stop. */
@@ -255,7 +270,7 @@ export type ConvertMessages = {
     refusalLine: (sym: string) => string;
     /** Submitted-and-watching: the chain is the ledger; the screen resolves itself. */
     pendingBody: string;
-    failedBody: (sym: string, venue: string, detail: string) => string;
+    failedBody: (sym: string, detail: string) => string;
   };
 
   // --- the EVM rail's Uniswap V3 venue (2026-09-28, the any-pair mandate) ------------------------
@@ -400,6 +415,26 @@ export type ConvertMessages = {
     insufficientHubLine: (needed: string, balance: string) => string;
   };
 
+  // --- the progress STORY (S3, spec 2026-10-04): one plain line per leg, stateful. Plain
+  // verbs, no venue brands, no ids - the venue/fee census lives behind Details. These are
+  // the lines the leg list renders; the audit block may reuse them verbatim.
+  story: {
+    /** The approve legs' plain verb (never "approve"). */
+    letPoolUse: (sym: string) => string;
+    letPoolUseGas: (sym: string) => string;
+    /** A pool swap leg: asset for asset. */
+    swap: (inSym: string, outSym: string) => string;
+    /** The final Jupiter leg of a crossing: the destination asset only. */
+    swapFor: (sym: string) => string;
+    /** The CCTP crossing leg. */
+    cross: (sym: string, network: string) => string;
+    /** The cash-out burn leg: what leaves, what arrives, where. */
+    withdraw: (hopSym: string, destSym: string, network: string) => string;
+    /** The composed route's device-signed deposit leg (the venue's name is in Details). */
+    depositSend: (amt: string) => string;
+    depositSent: (amt: string) => string;
+  };
+
   // --- CeFi venues (SideShift widening, 2026-09-15, founder decision 3): the destination
   // rows and the deposit handoff. The honest CeFi facts: the venue holds funds mid-trade,
   // the USER's own deposit is the value movement (nothing is signed by dpay), and every
@@ -469,26 +504,27 @@ export type ConvertMessages = {
      *  the pair but no provider is quoting it right now. NOT an error — nothing moved, and
      *  the line says so and names the way out. */
     noQuoteTitle: string;
-    noQuoteBody: (venue: string) => string;
+    noQuoteBody: string;
     /** The venue's own BELOW-MINIMUM verdict (SideShift, 2026-09-29 probe: a too-small
      *  amount answers HTTP 500 QUOTE_UNAVAILABLE with the published figure in the body).
      *  The venue's own message rides verbatim; the frame attributes it, states nothing
      *  moved, and names the way out. */
-    minDepositBody: (venue: string, venueMessage: string, min: string) => string;
+    minDepositBody: (venueMessage: string, min: string) => string;
   };
 
   // --- the chain family (2026-09-28, the any-pair mandate): a SOL-rail source rides a cefi
   // venue's order into a mid IC ledger, then registered pools finish the route. One review,
   // one consent, one CTA; the second phase signs itself from the frozen plan when the venue
-  // settles. Every dead-end names where the funds sit and the exit.
+  // settles. Every dead-end names where the funds sit and the exit. The order's machine
+  // facts (venue, order id, deposit address) live under Details; the story stays plain.
   chain: {
     /** The deposit transfer's flight title (the tracker's spinner line): the device-signed
      *  transfer to the venue's own address, not a swap. */
-    depositSending: (venue: string) => string;
+    depositSending: string;
     /** The order line: the venue, the exact deposit, and what arrives (the mid asset). */
     orderLine: (venue: string, depositAmt: string, midSym: string) => string;
     /** The awaiting-payout body: the deposit went out automatically (never a manual send). */
-    depositSent: (venue: string, depositAmt: string, midSym: string) => string;
+    depositSent: (depositAmt: string, midSym: string) => string;
     /** The review card's phase-2 note (the consent covers the whole chain). */
     phase2Note: string;
     /** The phase-2 leg line in the live narration (mid → dest via the IC venue). */
@@ -630,7 +666,7 @@ export const convertEn: ConvertMessages = {
   maxAmount: 'Max',
   balanceLine: balance => `Balance ${balance}`,
   counterparty: venue => `Executed by the ${venue} pool.`,
-  counterpartySigns: 'Your phone signs; the pool pulls exactly the approved amount.',
+  counterpartySigns: 'Your phone signs; the pool can use exactly the agreed amount.',
   quoteSource: (at, venue) => `${venue} · ${at}`,
   quoteVerbatim: (venue, amt) => `${venue} quoted exactly ${amt}`,
   rateLabel: (inSym, outSym) => `Rate (${inSym} → ${outSym})`,
@@ -646,17 +682,17 @@ export const convertEn: ConvertMessages = {
       // disclosure_key 'jupiter': WHAT Jupiter is, that the quote is its own verbatim number,
       // and that dpay stays outside the trade.
       jupiter: venue =>
-        `${venue} is an autonomous on-chain aggregator on Solana — it picks the route; the route executes it. This wallet signs the transaction ${venue} builds, and the quote is ${venue}'s own, shown verbatim. dpay is not a party.`,
+        `${venue} is an autonomous on-chain aggregator on Solana - it picks the route; the route executes it. This wallet signs the transaction ${venue} builds, and the quote is ${venue}'s own, shown verbatim. dpay is not a party.`,
       // disclosure_key 'sideshift': an automated exchange service holding funds mid-trade,
       // terms named (KYC is ITS to disclose), dpay a non-party paid nothing.
       sideshift: venue =>
-        `${venue} is an automated exchange service — not a licensed provider or bank. It holds your funds mid-trade, then pays out to your own address; its terms, including any identity checks under its policy, are at sideshift.ai/terms. This wallet shows ${venue}'s own quote and deposit address — your funds go straight from your own wallet to the venue; dpay is not a party and is paid nothing.`,
+        `${venue} is an automated exchange service - not a licensed provider or bank. It holds your funds mid-trade, then pays out to your own address; its terms, including any identity checks under its policy, are at sideshift.ai/terms. This wallet shows ${venue}'s own quote and deposit address - your funds go straight from your own wallet to the venue; dpay is not a party and is paid nothing.`,
 
       // disclosure_key 'trocador': the sideshift truths plus the aggregate fact — the venue
       // picks among its own backends (dpay never ranks beneath that pick), and dpay asks it
       // for non-KYC backends only.
       trocador: venue =>
-        `${venue} is an automated exchange aggregator — it routes your trade to one of its own backends and holds your funds mid-trade, then pays to your own address; its terms, including any backend identity checks, are at trocador.app/terms. dpay asks ${venue} for no-KYC backends only. This wallet shows ${venue}'s own quote and deposit address — your funds go straight from your own wallet to the venue; dpay is not a party and is paid nothing.`,
+        `${venue} is an automated exchange aggregator - it routes your trade to one of its own backends and holds your funds mid-trade, then pays to your own address; its terms, including any backend identity checks, are at trocador.app/terms. dpay asks ${venue} for no-KYC backends only. This wallet shows ${venue}'s own quote and deposit address - your funds go straight from your own wallet to the venue; dpay is not a party and is paid nothing.`,
       // disclosure_key 'cowswap': the second EVM venue - the intent/settlement fact is
       // WHAT happens after the signature (off-chain solvers, no gas for the trader), and
       // the same no-party/no-cut truths.
@@ -667,9 +703,12 @@ export const convertEn: ConvertMessages = {
   },
   slippageLabel: 'Slippage',
   refusalLine: sym =>
-    `Past your minimum the swap fails — your ${sym} stays in your wallet, the approval expires unused.`,
+    `Past your minimum the swap fails - your ${sym} stays in your wallet, the approval expires unused.`,
+  arrives: 'Arrives in a few minutes.',
+  feeAbout: fee => `Fee about ${fee}.`,
+  exchangesInvolved: n => `${n} exchanges involved.`,
   detailsLabel: 'Details',
-  staleRefreshing: 'Quote stale — refreshing…',
+  staleRefreshing: 'Quote stale - refreshing…',
   venueSlow: 'Recently slow to settle.',
 
   // The intent sheet (brief Part V): the copy the two-tap flow renders.
@@ -690,62 +729,72 @@ export const convertEn: ConvertMessages = {
   externalSignTitle: 'One step needs your own Ethereum wallet',
   externalSignBody: 'You sign the crossing in your own wallet; dpay never holds its keys. Everything else stays in this sheet.',
   signing: 'Signing…',
-  swapVia: venue => `Swapping via ${venue}`,
   awaitingPool: 'Waiting for the pool payout',
   receivedDone: amt => `You received ${amt}`,
-  viaChain: venue => `via ${venue}`,
-  depositLegSent: (venue, amt) => `${amt} deposit sent to ${venue}`,
-  depositLegPending: (venue, amt) => `Sending ${amt} to ${venue}`,
+  depositLegSent: amt => `${amt} sent to the exchange`,
+  depositLegPending: amt => `Sending ${amt} to the exchange`,
   composedOrderLine: (venue, amt) => `Order at ${venue}, payout locked ${amt}`,
-  depositRefusedBody: (hopSym, venue) =>
-    `The ${venue} deposit was refused — the swap went through and your ${hopSym} is still in this wallet. Nothing more will be signed: convert or send the ${hopSym} from its own account.`,
+  depositRefusedBody: hopSym =>
+    `The deposit was refused - the swap went through and your ${hopSym} is still in this wallet. Nothing more will be signed: convert or send the ${hopSym} from its own account.`,
+
+  story: {
+    letPoolUse: sym => `Let the pool use your ${sym}`,
+    letPoolUseGas: sym => `Let the pool use your ${sym} for gas`,
+    swap: (inSym, outSym) => `Exchange ${inSym} for ${outSym}`,
+    swapFor: sym => `Exchange for ${sym}`,
+    cross: (sym, network) => `Move ${sym} across to ${network}`,
+    withdraw: (hopSym, destSym, network) => `Send ${hopSym} out - ${destSym} arrives on ${network}`,
+    depositSend: amt => `Send ${amt} to the exchange`,
+    depositSent: amt => `${amt} sent to the exchange`,
+  },
 
   sol: {
     heading: (inSym, outSym) => `Convert ${inSym} to ${outSym} (Solana)`,
     counterparty: venue => `Executed by ${venue}.`,
-    counterpartySigns: 'Your phone signs the venue\u2019s transaction — nobody else signs anything.',
+    counterpartySigns: 'Your phone signs the venue\u2019s transaction - nobody else signs anything.',
     priceImpactLine: (pct, venue) => `Price impact: ${pct} (${venue}'s own figure)`,
     solFeeLine: fee => `Solana network fee: ${fee} (to the network, not the venue, not dpay)`,
     refusalLine: sym =>
-      `Past the minimum the swap fails whole on-chain — your ${sym} stays in your wallet.`,
-    pendingBody: 'The swap is on Solana — this screen resolves on its own.',
-    failedBody: (sym, venue, detail) =>
-      `${venue}'s swap failed${detail ? ` (${detail})` : ''} — on Solana nothing moved; your ${sym} is where it was.`,
+      `Past the minimum the swap fails whole on-chain - your ${sym} stays in your wallet.`,
+    pendingBody: 'The swap is on Solana - this screen resolves on its own.',
+    failedBody: (sym, detail) =>
+      `The swap failed${detail ? ` (${detail})` : ''} - on Solana nothing moved; your ${sym} is where it was.`,
   },
 
   fundBody: (sym, receiveTab, myAddress) =>
     `No ${sym} here. To convert, receive ${sym} first: open ${receiveTab} below and choose \u201C${myAddress}\u201D.`,
-  fundOtherHolds: (held, toSym) => `You hold ${held} — convert that to ${toSym} instead.`,
+  fundOtherHolds: (held, toSym) => `You hold ${held} - convert that to ${toSym} instead.`,
   fundOtherSwitch: sym => `Convert from ${sym} instead`,
   insufficientLine: (needed, balance) => `${needed} needed, you have ${balance}`,
 
-  approvingTitle: 'Approving',
+  approvingTitle: 'Signing',
   approvingBody: (amount, at) =>
-    `Approving the pool to pull exactly ${amount}. Unused, it expires at ${at}.`,
-  swappingTitle: 'Swapping',
-  swappingBody: venue => `Submitting to the ${venue} pool — it can pull only the approved amount.`,
+    `Letting the pool use exactly ${amount}. Unused, it expires at ${at}.`,
+  swappingTitle: 'Converting',
+  swappingBody: 'Your exchange is running - this usually takes a few minutes.',
   settlingTitle: 'Settling',
-  settlingBody: sym => `Pool accepted — waiting for your ${sym}\u2026`,
-  doneTitle: 'Converted',
-  doneBody: amount => `${amount} received in your wallet.`,
+  settlingBody: sym => `Almost there - waiting for your ${sym}\u2026`,
+  doneTitle: 'Done',
+  doneBody: amount => `${amount} is in your wallet.`,
   doneTx: tx => `Payout record: ${tx}`,
   pendingTitle: 'Payout pending',
-  pendingBody: (sym, pool, at) =>
-    `Swap accepted — the ${sym} payout has not arrived. If it never does, quote this to support: pool ${pool}, sent ${at}.`,
+  pendingBody: sym => `The swap was accepted - your ${sym} payout has not arrived yet.`,
+  pendingSupport: ref => `If it never arrives, quote this reference to support: ${ref}`,
   stillWatching: 'Still watching for the payout…',
-  failedTitle: 'Swap not executed',
+  failedTitle: 'Failed',
   failedApproveBody: sym =>
-    `The ${sym} ledger refused the approval — nothing moved, nothing to undo.`,
-  failedSwapBody: (reason, sym, venue) =>
-    `The ${venue} pool refused the swap (${reason}) — your ${sym} never left your wallet.`,
+    `The ledger refused the first signature - nothing moved, nothing to undo. Your ${sym} never left your wallet.`,
+  failedSwapBody: (reason, sym) =>
+    `The exchange refused the swap (${reason}) - your ${sym} never left your wallet.`,
+  refundedTitle: 'Refunded',
   refundedBody: sym =>
-    `Swap failed — the pool returned your ${sym}. Balance whole again.`,
+    `The pool returned your ${sym} - your balance is whole again.`,
   stuckTitle: 'Unknown outcome',
   // The CHAIN record's phase-1 stuck state (D32): the pool's copy would name a swap that
-  // never ran — at this point only the venue DEPOSIT transfer's outcome is unknown.
+  // never ran - at this point only the venue DEPOSIT transfer's outcome is unknown.
   chainStuckTitle: 'Deposit outcome unknown',
-  chainStuckBody: venue =>
-    `The ${venue} deposit was sent but never confirmed. It lands on its own or expires — never send it a second time.`,
+  chainStuckBody:
+    'The deposit was sent but never confirmed. It lands on its own, or it expires - never send it a second time.',
   // The user's Stop (2026-09-19): the button and the frozen-record panel. Short on purpose.
   stop: 'Stop',
   stopWatching: 'Stop watching',
@@ -755,28 +804,28 @@ export const convertEn: ConvertMessages = {
   abortedFee: 'You paid a small approval fee.',
   abortedWatching: 'The swap may still go through. Check Balances later.',
   abortedProvider:
-    'Watching stopped. No deposit sent \u2192 nothing can move; already sent \u2192 the trade may still settle. Check Balances and the venue\u2019s status page \u2014 shift id below.',
+    'Watching stopped. No deposit sent \u2192 nothing can move; already sent \u2192 the trade may still settle. Check Balances and the venue\u2019s status page - shift id below.',
   stuckBody:
-    'Swap submitted \u2014 the pool\u2019s answer never arrived. Do not start a second swap.',
-  stuckSigned: (amount, minAmount, venue) =>
-    `Signed: approve ${amount} to the ${venue} pool, swap for at least ${minAmount}.`,
-  expiryLine: at => `Expires by ${at} \u2014 after that nothing can move.`,
+    'Swap submitted - the pool\u2019s answer never arrived. Do not start a second swap.',
+  stuckSigned: (amount, minAmount) =>
+    `You signed an exchange of ${amount} for at least ${minAmount}.`,
+  expiryLine: at => `Expires by ${at} - after that nothing can move.`,
 
-  awaitingDepositTitle: 'Waiting for deposit',
-  awaitingDepositBody: (sym, venue) =>
-    `${venue} waits for its ${sym} deposit; the swap starts when it lands. If none arrives in time, the quote expires and nothing moves.`,
-  providerProcessingTitle: 'Processing at the venue',
-  providerProcessingBody: (sym, venue) =>
-    `${venue} holds the deposit and is executing. Your ${sym} arrives when it completes.`,
+  awaitingDepositTitle: 'Waiting for the deposit',
+  awaitingDepositBody: sym =>
+    `Waiting for your ${sym} deposit to land - the exchange starts when it arrives. If it misses the window, the quote expires and nothing moves.`,
+  providerProcessingTitle: 'Converting',
+  providerProcessingBody: sym =>
+    `The exchange holds your deposit and is converting it. Your ${sym} arrives when it completes.`,
   quoteExpiredTitle: 'Quote expired',
-  quoteExpiredBody: (sym, venue) =>
-    `The quote expired before the deposit arrived: ${venue} stopped waiting, nothing was swapped. A late deposit \u2014 the venue returns it; dpay keeps watching in the background and this screen updates on its own. Your ${sym} stays put.`,
-  providerRefundedTitle: 'Refunded by the venue',
-  providerRefundedBody: (sym, venue) =>
-    `${venue} cancelled the order and returned your ${sym}. Watch for it in Balances.`,
-  stuckWatching: 'dpay keeps watching \u2014 this screen flips on its own when funds move.',
-  stuckAcknowledge: 'Understood \u2014 stop watching',
-  stuckAcknowledged: 'Watch stopped \u2014 funds moving later still land at this wallet\u2019s address.',
+  quoteExpiredBody: sym =>
+    `The quote expired before the deposit arrived - nothing was swapped, and a late deposit is simply returned. dpay keeps watching in the background and this screen updates on its own. Your ${sym} stays put.`,
+  providerRefundedTitle: 'Refunded',
+  providerRefundedBody: sym =>
+    `The exchange cancelled the order and returned your ${sym}. Watch for it in Balances.`,
+  stuckWatching: 'dpay keeps watching - this screen flips on its own when funds move.',
+  stuckAcknowledge: 'Understood - stop watching',
+  stuckAcknowledged: 'Watch stopped - funds moving later still land at this wallet\u2019s address.',
 
   stuckReceiptsTitle: 'What happened',
   stuckErrorLine: d => `Error: ${d}`,
@@ -804,12 +853,12 @@ export const convertEn: ConvertMessages = {
   },
   multihop: {
     destLabel: 'Destination',
-    destDirect: sym => `${sym} — in this wallet`,
-    destRoute: (sym, network) => `${sym} — to your ${network} address`,
-    destRouteSol: (sym, network, venue) => `${sym} — to your ${network} address · final step via ${venue}`,
+    destDirect: sym => `${sym} - in this wallet`,
+    destRoute: (sym, network) => `${sym} - to your ${network} address`,
+    destRouteSol: (sym, network, venue) => `${sym} - to your ${network} address · final step via ${venue}`,
     routeHeadingCollapsed: (inSym, hopSym, network) => `Route: ${inSym} → ${hopSym} (to ${network})`,
     destAddressLabel: 'Your own address on the destination network',
-    destAddressInvalid: 'Invalid address — expected 0x followed by 40 hex characters.',
+    destAddressInvalid: 'Invalid address - expected 0x followed by 40 hex characters.',
     destPayoutNote: 'Funds land at your own wallet address.',
     destChange: 'Change destination',
     routeHeading: (inSym, hopSym, destSym, network) => `Route: ${inSym} → ${hopSym} → ${destSym} on ${network}`,
@@ -818,13 +867,13 @@ export const convertEn: ConvertMessages = {
     legSwap: (venue, inSym, hopSym) => `Swap ${inSym} → ${hopSym} on ${venue}`,
     legApproveBurn: sym => `Approve the ${sym} burn (the cash-out amount)`,
     legApproveGas: sym => `Approve ${sym} to pay the cash-out gas`,
-    legWithdraw: (hopSym, destSym, network) => `Burn ${hopSym} — ${destSym} arrives on ${network}`,
+    legWithdraw: (hopSym, destSym, network) => `Burn ${hopSym} - ${destSym} arrives on ${network}`,
     legStatePending: 'Waiting',
     legStateSent: 'Sent',
     legStateConfirmed: 'Confirmed',
     legStateFailed: 'Refused',
     legProgress: (n, total) => `Step ${n} of ${total}`,
-    destInWallet: sym => `${sym} — in this wallet`,
+    destInWallet: sym => `${sym} - in this wallet`,
     destGroupOther: 'Other destinations',
     mechDirect: 'Direct pool',
     mechViaHub: hubSym => `Via ${hubSym}`,
@@ -844,36 +893,36 @@ export const convertEn: ConvertMessages = {
     routeMinLine: amount => `Min ${amount} at your address`,
     routeSurplusNote: hopSym => `Above the floor, the surplus stays in this wallet as ${hopSym}.`,
     routeDestEstimate: (amount, sym) =>
-      `Lands \u2248 ${amount} ${sym} at your Solana address — the final Jupiter step re-quotes fresh`,
+      `Lands \u2248 ${amount} ${sym} at your Solana address - the final Jupiter step re-quotes fresh`,
     routeVenues: (icVenue, solVenue) => `Route: ${icVenue} → Circle CCTP → ${solVenue}`,
     gasPreflightTitle: 'Gas needed first',
     gasPreflightBody: needed =>
-      `Burning to Ethereum needs about ${needed} gas in ckETH — this wallet holds too little. Get ckETH into this wallet first, then come back.`,
+      `Burning to Ethereum needs about ${needed} gas in ckETH - this wallet holds too little. Get ckETH into this wallet first, then come back.`,
     executingTitle: 'Running the route',
     doneRouteTitle: 'Cash-out under way',
     doneRouteBody: (amount, address) => `At least ${amount} is on its way to ${address}.`,
-    doneOnItsWay: 'Delivery runs on Ethereum and can take a while — dpay cannot watch that network.',
+    doneOnItsWay: 'Delivery runs on Ethereum and can take a while - dpay cannot watch that network.',
     failedLegTitle: 'Cash-out refused',
     failedLegBody: (sym, reason) =>
-      `The swap went through — your funds are ${sym} in this wallet. The cash-out refused${reason ? `: ${reason}` : ''}.`,
-    failedLegExit: 'Cash out via Pay \u25B8 Send to address — paste any destination address.',
-    stuckRouteBody: 'A leg\u2019s outcome is unknown \u2014 dpay keeps watching the ledgers; this screen flips on its own.',
+      `The swap went through - your funds are ${sym} in this wallet. The cash-out refused${reason ? `: ${reason}` : ''}.`,
+    failedLegExit: 'Cash out via Pay \u25B8 Send to address - paste any destination address.',
+    stuckRouteBody: 'A leg\u2019s outcome is unknown - dpay keeps watching the ledgers; this screen flips on its own.',
     stuckRouteBodyExpired: 'The watch window has closed - nothing can move anymore. dpay settles this from the evidence above.',
     failedHop2Title: 'Second swap refused',
     failedHop2Body: (hubSym, outSym, reason) =>
-      `The first swap went through — you hold ${hubSym} in this wallet. The ${hubSym} \u2192 ${outSym} swap was refused${reason ? `: ${reason}` : ''}.`,
+      `The first swap went through - you hold ${hubSym} in this wallet. The ${hubSym} \u2192 ${outSym} swap was refused${reason ? `: ${reason}` : ''}.`,
     failedHop2Exit: hubSym =>
-      `Your ${hubSym} are spendable as-is — keep, convert, or send them. Nothing to reverse.`,
+      `Your ${hubSym} are spendable as-is - keep, convert, or send them. Nothing to reverse.`,
     stuckHoldsLine: hubSym => `So far: you hold ${hubSym} in this wallet.`,
     insufficientHubLine: (needed, balance) =>
-      `Needs ${needed} — the amount plus three fees \u2014 you have ${balance}.`,
+      `Needs ${needed} - the amount plus three fees - you have ${balance}.`,
   },
 
   /** CeFi venues (SideShift widening, 2026-09-15): the deposit handoff screen. The venue
    *  holds the funds mid-trade; the user's own deposit IS the value movement — nothing is
    *  signed by dpay. Every address/amount shown is the venue's own, verbatim. */
   cefi: {
-    destRow: (sym, network, venue) => `${sym} on ${network} — via ${venue} (exchange service)`,
+    destRow: (sym, network, venue) => `${sym} on ${network} - via ${venue} (exchange service)`,
     destRowMulti: (sym, network) => `${sym} on ${network}`,
     settleAddressLabel: 'Payout lands at your own address',
     settleRailEthereum: 'Pays out native ETH on Ethereum mainnet',
@@ -881,49 +930,48 @@ export const convertEn: ConvertMessages = {
     depositAmountLabel: 'Exact amount',
     depositMemoLabel: 'Memo (required)',
     counterparty: venue =>
-      `Executed by ${venue} — an automated exchange service, not a bank, not dpay.`,
+      `Executed by ${venue} - an automated exchange service, not a bank, not dpay.`,
     checklistSigns:
-      'Nothing is signed on this phone — after you confirm, you send the deposit to the venue\u2019s address yourself.',
+      'Nothing is signed on this phone - after you confirm, you send the deposit to the venue\u2019s address yourself.',
     checklistSignsAuto:
-      'After you confirm, this wallet sends the deposit to the venue itself — the trade is the venue\u2019s.',
+      'After you confirm, this wallet sends the deposit to the venue itself - the trade is the venue\u2019s.',
     refusalLine: sym =>
-      `If the deposit never arrives, the order expires — nothing moves, your ${sym} stays in your wallet.`,
+      `If the deposit never arrives, the order expires - nothing moves, your ${sym} stays in your wallet.`,
     insufficientLine: (needed, balance) =>
-      `The deposit needs ${needed} (transfer fee included) \u2014 you have ${balance}.`,
+      `The deposit needs ${needed} (transfer fee included) - you have ${balance}.`,
     payoutAt: address => `Paid out to your own address: ${address}`,
     depositExpiryLine: at => `Order expires ${at}`,
-    noExpiryLine: 'No published expiry — dpay keeps watching.',
+    noExpiryLine: 'No published expiry - dpay keeps watching.',
     lastCheckedLine: at => `Last checked ${at}.`,
     shiftId: id => `Shift ${id}`,
-    settlingFundsLine: 'Funds confirmed \u2014 your payout is locked at the quoted amount.',
-    settlingWatchLine: 'Most settle within minutes \u2014 dpay monitors every shift and steps in if one stalls.',
+    settlingFundsLine: 'Funds confirmed - your payout is locked at the quoted amount.',
+    settlingWatchLine: 'Most settle within minutes - dpay monitors every shift and steps in if one stalls.',
     depositNote: (venue, sym) =>
-      `Send ${sym} from your wallet to ${venue}\u2019s deposit address above \u2014 exactly the deposit amount. ${venue} holds it mid-trade, then pays out to your address. dpay is not a party and is paid nothing.`,
+      `Send ${sym} from your wallet to ${venue}\u2019s deposit address above - exactly the deposit amount. ${venue} holds it mid-trade, then pays out to your address. dpay is not a party and is paid nothing.`,
     depositAutoNote: (venue, sym) =>
-      `This wallet sends the ${sym} deposit to ${venue}\u2019s address itself \u2014 exactly the deposit amount. ${venue} holds it mid-trade, then pays out to your address. dpay is not a party and is paid nothing.`,
-    stillWaitingDeposit: 'Still watching for your deposit — this page updates on its own.',
-    stillWaitingAuto: 'The deposit sends itself once — watching for the venue\u2019s word; this page updates on its own.',
-    depositSolFeeNote: 'The deposit also pays a small network fee in SOL \u2014 keep a little SOL in this wallet.',
+      `This wallet sends the ${sym} deposit to ${venue}\u2019s address itself - exactly the deposit amount. ${venue} holds it mid-trade, then pays out to your address. dpay is not a party and is paid nothing.`,
+    stillWaitingDeposit: 'Still watching for your deposit - this page updates on its own.',
+    stillWaitingAuto: 'The deposit sends itself once - watching for the venue\u2019s word; this page updates on its own.',
+    depositSolFeeNote: 'The deposit also pays a small network fee in SOL - keep a little SOL in this wallet.',
     solInsufficientLine: (needed, balance) =>
-      `The deposit sends exactly ${needed} \u2014 you have ${balance}.`,
+      `The deposit sends exactly ${needed} - you have ${balance}.`,
     noQuoteTitle: 'No live market',
-    noQuoteBody: venue =>
-      `${venue} lists this pair but has no live market right now. Nothing was sent. Pick another venue or try again later.`,
-    minDepositBody: (venue, venueMessage, min) =>
-      `${venue} declined this amount: \u201C${venueMessage}\u201D (minimum ${min}). Nothing was sent \u2014 raise the amount and try again.`,
+    noQuoteBody: 'This pair has no live market right now. Nothing was sent. Pick another venue or try again later.',
+    minDepositBody: (venueMessage, min) =>
+      `This amount is below the exchange's minimum: \u201C${venueMessage}\u201D (minimum ${min}). Nothing was sent - raise the amount and try again.`,
   },
 
   /** The chain family (2026-09-28, the any-pair mandate): one consent, two phases — the
    *  venue order + the signed deposit first, the IC legs from the frozen plan second. */
   chain: {
-    depositSending: venue => `Sending the deposit to ${venue}`,
+    depositSending: 'Sending your deposit',
     orderLine: (venue, depositAmt, midSym) => `Order at ${venue}: ${depositAmt} in, ${midSym} out`,
-    depositSent: (venue, depositAmt, midSym) => `${depositAmt} sent to ${venue} — waiting for the ${midSym} payout`,
+    depositSent: (depositAmt, midSym) => `${depositAmt} sent - waiting for the ${midSym} payout`,
     phase2Note: 'The second leg runs itself once the payout lands.',
-    phase2Leg: (midSym, outSym, venue) => `Then ${midSym} → ${outSym} via ${venue} — quoted fresh when the payout lands`,
+    phase2Leg: (midSym, outSym, venue) => `Then ${midSym} → ${outSym} via ${venue} - quoted fresh when the payout lands`,
     rowShape: midSym => `via ${midSym}, converts in one tap`,
-    phase2Failed: midSym => `The second leg could not run — your ${midSym} is in this wallet. Convert it normally (pre-selected).`,
-    depositFailed: sym => `The deposit never landed on-chain — your ${sym} never left your wallet.`,
+    phase2Failed: midSym => `The second leg could not run - your ${midSym} is in this wallet. Convert it normally (pre-selected).`,
+    depositFailed: sym => `The deposit never landed on-chain - your ${sym} never left your wallet.`,
   },
 
   /** The cross-rail family (Routes B/C, 2026-09-16): everything past the five IC legs —
@@ -933,56 +981,56 @@ export const convertEn: ConvertMessages = {
   crossrail: {
     heading: 'Sign in your Ethereum wallet',
     handoffIntro: (amount) =>
-      `IC part done: ${amount} is at your Ethereum address. Your wallet crosses it — dpay never touches your Ethereum keys.`,
-    stepApproveLabel: 'Step 1 — let Circle\u2019s contract move the USDC',
-    stepBurnLabel: 'Step 2 — burn the USDC for the Solana transfer',
+      `IC part done: ${amount} is at your Ethereum address. Your wallet crosses it - dpay never touches your Ethereum keys.`,
+    stepApproveLabel: 'Step 1 - let Circle\u2019s contract move the USDC',
+    stepBurnLabel: 'Step 2 - burn the USDC for the Solana transfer',
     txAmountLabel: 'Amount',
     copy: 'Copy',
     copied: 'Copied',
-    approveHint: 'Lets Circle\u2019s TokenMessenger move exactly these USDC \u2014 nothing more.',
-    burnHint: 'Locks the USDC on Ethereum; Circle\u2019s bridge mints the same USDC at your Solana address \u2014 no wrapped token.',
-    timingNote: 'Fast path: seconds to a few minutes (measured ~20 s). If Ethereum is busy, longer \u2014 this screen updates on its own.',
-    externalGasLine: 'Gas is paid from your wallet\u2019s own ETH \u2014 dpay cannot pay it or quote it exactly.',
+    approveHint: 'Lets Circle\u2019s TokenMessenger move exactly these USDC - nothing more.',
+    burnHint: 'Locks the USDC on Ethereum; Circle\u2019s bridge mints the same USDC at your Solana address - no wrapped token.',
+    timingNote: 'Fast path: seconds to a few minutes (measured ~20 s). If Ethereum is busy, longer - this screen updates on its own.',
+    externalGasLine: 'Gas is paid from your wallet\u2019s own ETH - dpay cannot pay it or quote it exactly.',
     circleFeeLine: fee => `Circle\u2019s bridge fee (its own figure, from the amount): at most ${fee}`,
     mintFloorLine: (floor, sym) =>
-      `Min ${floor} ${sym} at your Solana address — the final step swaps it onward`,
+      `Min ${floor} ${sym} at your Solana address - the final step swaps it onward`,
     mintFloorDestLine: (floor, sym) => `Min ${floor} ${sym} arrive at your Solana address`,
     burnTxLabel: 'Burn tx hash (from your wallet)',
     burnTxPlaceholder: '0x…',
-    attachButton: 'I signed it — watch the crossing',
+    attachButton: 'I signed it - watch the crossing',
     burnTxInvalid: 'Not an Ethereum transaction hash.',
     declineButton: 'I\u2019m not signing',
     whatSigning: 'You sign two ordinary Ethereum transactions in your own wallet: an approval, then the burn. Nothing is signed on dpay\u2019s side.',
     crossingTitle: 'Crossing to Solana',
-    crossingBody: 'Circle is attesting the burn and mints the USDC at your Solana address \u2014 dpay watches Circle\u2019s own status feed.',
+    crossingBody: 'Circle is attesting the burn and mints the USDC at your Solana address - dpay watches Circle\u2019s own status feed.',
     viewBurnTx: 'View the burn transaction',
     viewCircle: 'Circle\u2019s status page',
-    stillCrossing: 'Still pending \u2014 not failed. Fast path: seconds to minutes; if Ethereum is congested, longer.',
+    stillCrossing: 'Still pending - not failed. Fast path: seconds to minutes; if Ethereum is congested, longer.',
     solReadyTitle: 'USDC landed on Solana',
-    solReadyBody: (credit, ata) => `${credit} verified at ${ata}. Finish the route, or keep the USDC \u2014 yours either way.`,
+    solReadyBody: (credit, ata) => `${credit} verified at ${ata}. Finish the route, or keep the USDC - yours either way.`,
     abortedCrossing: ata =>
-      `Watch stopped. The burn is already out \u2014 Circle may still complete the mint; the USDC lands at your own Solana address ${ata} either way. Check Balances later.`,
+      `Watch stopped. The burn is already out - Circle may still complete the mint; the USDC lands at your own Solana address ${ata} either way. Check Balances later.`,
     abortedSolReady: ata =>
-      `Nothing was signed \u2014 the final swap never ran. Your USDC sits at your Solana address ${ata}: keep it, or convert it there.`,
+      `Nothing was signed - the final swap never ran. Your USDC sits at your Solana address ${ata}: keep it, or convert it there.`,
     solQuoteLabel: venue => `${venue} quote`,
     solMinLine: (min, sym) => `Min ${min} ${sym} at your address`,
     solConfirmButton: sym => `Swap to ${sym}`,
     solFeeLine: fee => `Solana fee: ${fee}`,
     solPreflightTitle: 'SOL needed for the fee',
     solPreflightBody:
-      'The swap\u2019s fee is paid in SOL and this wallet holds none. Add a little SOL \u2014 the USDC stays put.',
+      'The swap\u2019s fee is paid in SOL and this wallet holds none. Add a little SOL - the USDC stays put.',
     doneTitle: 'Converted',
-    doneBody: (amount, sym, address) => `${amount} ${sym} is at your Solana address ${address} — verified on-chain.`,
+    doneBody: (amount, sym, address) => `${amount} ${sym} is at your Solana address ${address} - verified on-chain.`,
     doneVia: (icVenue, solVenue) => `Via ${icVenue}, Circle and ${solVenue}.`,
     declinedTitle: 'Handoff cancelled',
     declinedBody: address =>
-      `Nothing crossed. Your USDC sits at your own Ethereum address ${address} \u2014 send it anywhere, or run this route again later.`,
+      `Nothing crossed. Your USDC sits at your own Ethereum address ${address} - send it anywhere, or run this route again later.`,
     solFailedTitle: 'Solana swap failed',
     solFailedBody: (ata, venue) =>
-      `The USDC already crossed \u2014 it is at your Solana address ${ata}. ${venue} declined the final swap: try again in a moment, or keep the USDC.`,
+      `The USDC already crossed - it is at your Solana address ${ata}. ${venue} declined the final swap: try again in a moment, or keep the USDC.`,
     legCctpBurn: (sym, network) => `Cross ${sym} to ${network} via Circle (you sign this in your wallet)`,
     legSolSwap: (venue, sym) => `Swap for ${sym} on ${venue}`,
-    destAddressCrossNote: 'This address also signs the crossing \u2014 paste an address you control.',
+    destAddressCrossNote: 'This address also signs the crossing - paste an address you control.',
     // Swap-typing stage 2 (2026-10-03): the destination IS the device's own address, so the
     // device signs the crossing itself - the disclosure and the address note fork on it.
     deviceSignTitle: 'The crossing signs on this device',
@@ -1004,24 +1052,24 @@ export const convertEn: ConvertMessages = {
     gasFundRecheck: 'Check again',
     gasFundShort: short => `Still ${short} short`,
     gasLegsNote: 'First legs fund the gas.',
-    abortedGasBody: 'The gas funding landed \u2014 still in this wallet. The conversion never ran.',
+    abortedGasBody: 'The gas funding landed - still in this wallet. The conversion never ran.',
     declinedWithGasBody: address => `Nothing crossed. Your USDC is at your Ethereum address ${address}; the gas funding is still in this wallet.`,
-    gasShortFailedBody: needed => `The gas funding fell short of ${needed}. Nothing left this wallet \u2014 the conversion never started.`,
+    gasShortFailedBody: needed => `The gas funding fell short of ${needed}. Nothing left this wallet - the conversion never started.`,
   },
 
   errors: {
-    quoteUnreachable: venue => `${venue} is unreachable through dpay\u2019s relay. Nothing was sent \u2014 check your connection and try again in a moment.`,
+    quoteUnreachable: venue => `${venue} is unreachable through dpay\u2019s relay. Nothing was sent - check your connection and try again in a moment.`,
     quoteRefused: venue => `${venue} declined to quote this pair right now.`,
-    buildRefused: venue => `${venue} could not prepare this exchange. Nothing moved \u2014 try again in a moment.`,
+    buildRefused: venue => `${venue} could not prepare this exchange. Nothing moved - try again in a moment.`,
     quoteUnavailable: code => `Quote unavailable (code ${code}).`,
     quoteUnconfigured: venue =>
-      `${venue} is not set up on this relay yet \u2014 no quote can be asked for. Nothing is wrong with your wallet.`,
-    gasUnavailable: 'The minter\u2019s gas price was unavailable \u2014 nothing was signed. Try again.',
-    cctpFeeUnavailable: 'Circle\u2019s bridge fee could not be fetched \u2014 nothing was signed. Check your connection and try again.',
+      `${venue} is not set up on this relay yet - no quote can be asked for. Nothing is wrong with your wallet.`,
+    gasUnavailable: 'The minter\u2019s gas price was unavailable - nothing was signed. Try again.',
+    cctpFeeUnavailable: 'Circle\u2019s bridge fee could not be fetched - nothing was signed. Check your connection and try again.',
     chainDepositUnreadable: venue =>
-      `${venue}\u2019s deposit address could not be verified on Solana \u2014 nothing was signed. Check your connection and try again, or send the deposit from your own wallet.`,
-    chainSenderEmpty: sym => `No ${sym} token account in this wallet \u2014 nothing was signed. Receive ${sym} first.`,
-    chainSenderShort: sym => `The wallet\u2019s ${sym} balance does not cover this amount \u2014 nothing was signed.`,
-    chainRentShort: sym => `The venue\u2019s ${sym} account needs a little SOL for rent \u2014 the wallet is short. Nothing was signed; top up SOL and try again.`,
+      `${venue}\u2019s deposit address could not be verified on Solana - nothing was signed. Check your connection and try again, or send the deposit from your own wallet.`,
+    chainSenderEmpty: sym => `No ${sym} token account in this wallet - nothing was signed. Receive ${sym} first.`,
+    chainSenderShort: sym => `The wallet\u2019s ${sym} balance does not cover this amount - nothing was signed.`,
+    chainRentShort: sym => `The venue\u2019s ${sym} account needs a little SOL for rent - the wallet is short. Nothing was signed; top up SOL and try again.`,
   },
 };

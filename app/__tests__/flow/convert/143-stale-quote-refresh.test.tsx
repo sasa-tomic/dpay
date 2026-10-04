@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, onboardWallet, accountOf, openConvertFor,
   typeConvertAmount, isDisabled,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayPost} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -45,7 +46,10 @@ hermeticDescribe('flow 143 — a stale quote refreshes itself; confirm re-quotes
 
       await openConvertFor(m, 'icp');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
+
+      // The attribution lives inside Details (the copy law, spec 2026-10-04 §3).
+      await openConvertDetails(m);
 
       // Fresh: attributed + timestamped, no stale notice, no quote-changed interrupt.
       assertIncludes(m.driver.readText('convert-venue-auto'), 'ICPSwap', 'fresh quote renders attributed');

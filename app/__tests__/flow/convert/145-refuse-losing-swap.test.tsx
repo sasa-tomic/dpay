@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, onboardWallet, accountOf, openConvertFor,
   typeConvertAmount, isDisabled,
+  openConvertDetails,
 } from '../harness/lib';
 import {deadline as budgetDeadline} from '../harness/budget';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -80,7 +81,7 @@ hermeticDescribe('flow 145 — convert refuses a swap that could only fail', () 
       assertIncludes(headline, 'VCHF', 'the headline is in the asset the user ends up holding');
       // The census folds behind the ONE Details control: the rate + pool principal are still
       // spelled on their own lines; the net end-state line is GONE (the headline IS the end state).
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-rate'), 'ICP', 'the rate names both legs');
       assertIncludes(m.driver.readText('convert-pool-principal'), POOL, 'the pool principal has a line of its own');
       expect(m.driver.isPresent('convert-net')).toBe(false);

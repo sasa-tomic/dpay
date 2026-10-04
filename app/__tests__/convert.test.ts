@@ -1079,7 +1079,6 @@ describe('fail-closed copy — all four locales carry it', () => {
     expect(d.counterparty(VENUE.display_name)).not.toContain(POOL); // the principal is not copy
     expect(d.noPathTitle('X')).toContain('X');
     expect(d.noPathBody('ICP ↔ Swiss francs (VCHF)')).toContain('ICP ↔ Swiss francs (VCHF)');
-    expect(d.depositRefusedBody('ICP', 'SomeFutureVenue')).toContain('SomeFutureVenue');
     expect(d.detailsLabel.length).toBeGreaterThan(0); // the one Details control (verbosity pass 2026-09-16)
     // The parameterized copy still speaks the passed-in venue, not a baked one.
     expect(d.quoteSource('12:00', 'SomeFutureVenue')).toContain('SomeFutureVenue');
@@ -1090,14 +1089,13 @@ describe('fail-closed copy — all four locales carry it', () => {
       const samples = [
         d.counterparty('V'),
         d.noPathBody('pair'),
-        d.depositRefusedBody('ICP', 'V'),
         d.quoteSource('now', 'V'),
         d.poolFeeTier('0.30%', 'V'),
         d.disclosures.byKey.icpswap('V'),
         d.disclosures.generic('V'),
-        d.swappingBody('V'),
-        d.failedSwapBody('why', 'SYM', 'V'),
-        d.stuckSigned('1', '2', 'V'),
+        d.swappingBody,
+        d.failedSwapBody('why', 'SYM'),
+        d.stuckSigned('1', '2'),
         d.errors.quoteUnreachable('V'),
         d.errors.quoteRefused('V'),
       ];

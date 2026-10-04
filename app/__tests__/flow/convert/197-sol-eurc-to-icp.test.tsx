@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, onboardWallet, accountOf, openConvertFor, typeConvertAmount,
   pickSwapTarget,
+  openConvertDetails,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -61,6 +62,7 @@ hermeticDescribe('flow 197 — EURC(Solana) → ICP via sideshift-eurc from the 
         () => m!.driver.readTextSafe('convert-headline')?.includes('0.0495 ICP') === true,
         {timeoutMs: 20_000, label: 'the venue settle figure rendered (the rate arrived)'},
       );
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-venue-auto'), 'SideShift', 'attribution names the venue');
       expect(m.driver.readText('convert-venue-auto')).toMatch(/\d{1,2}:\d{2}/);
       await m.driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
@@ -69,7 +71,7 @@ hermeticDescribe('flow 197 — EURC(Solana) → ICP via sideshift-eurc from the 
       expect(settle).toBe(expectedSettleId);
       expect(m.driver.isPresent('convert-slippage')).toBe(false);
       expect(m.driver.isPresent('convert-min-out')).toBe(false);
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       await m.driver.waitForFunction(() => m!.driver.isPresent('convert-counterparty'), {timeoutMs: 15_000, label: 'the census mounted'});
       assertIncludes(m.driver.readText('convert-counterparty'), 'SideShift', 'counterparty line names the venue');
       assertIncludes(m.driver.readText('convert-counterparty'), 'automated exchange service', 'not a licensed provider');
@@ -87,7 +89,7 @@ hermeticDescribe('flow 197 — EURC(Solana) → ICP via sideshift-eurc from the 
       assertIncludes(handoff, 'not a party', 'dpay party-hood denied');
       expect(m.driver.isPresent('convert-deposit-sol-fee-note')).toBe(true);
       // NEGATIVE (honest-pending: the conversion must NOT complete) — window stays tight.
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 1_000, unscaled: true}).catch(() => false)).toBe(false);
+      expect(await m.driver.waitForText('Done', {timeoutMs: 1_000, unscaled: true}).catch(() => false)).toBe(false);
       expect(solSentTxs().length).toBe(0);
 
       // §4 the partner-key audit.
@@ -114,7 +116,7 @@ hermeticDescribe('flow 197 — EURC(Solana) → ICP via sideshift-eurc from the 
 
       // §7 settle → done with the realized figures at the user's own address.
       setSideShiftStatus('settled', {settleAmount: '0.0495', settleHash: 'ic-settle-sig-197'});
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 45_000})).toBe(true);
+      expect(await m.driver.waitForText('Done', {timeoutMs: 45_000})).toBe(true);
       const done = m.driver.readText('convert-done');
       assertIncludes(done, '0.0495 ICP', 'done reports the realized settle figure');
       assertIncludes(done, 'Paid out to your own address', 'done names the payout destination');

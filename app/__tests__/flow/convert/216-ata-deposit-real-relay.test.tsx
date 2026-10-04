@@ -386,7 +386,7 @@ hermeticDescribe('flow 216 - the P0 deposit lifecycle against the REAL relay (no
       await openConvertFor(m, 'vchf');
       await pickSwapTarget(m, 'EUR');
       await typeConvertAmount(m, '2');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 15_000}); // the quotes settled on the composed pick
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 15_000}); // the quotes settled on the composed pick
       await m.driver.click('btn-convert-confirm', {timeoutMs: 5_000});
       await m.driver.findByTestID('convert-awaiting-deposit', {timeoutMs: 45_000});
       expect((await sideshiftRelayHits()).shiftCalls).toBe(shiftsBefore + 1); // the REAL order, minted once

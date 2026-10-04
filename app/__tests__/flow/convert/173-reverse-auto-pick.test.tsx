@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, onboardWallet, accountOf, openConvertFor,
   typeConvertAmount, pickSwapTarget, openOtherVenues,
+  openConvertDetails,
 } from '../harness/lib';
 import type {Mount} from '../harness/mount';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -43,9 +44,11 @@ function venueRowOrder(m: Mount): string[] {
  *  instead of snapshot-reading the racing first render (low host load flips these constantly). */
 async function awaitVenueComparison(m: Mount): Promise<string> {
   await m.driver.waitForFunction(
-    () => (m.driver.readTextSafe('convert-venue-auto') ?? '').includes('2 venues'),
-    {timeoutMs: 10_000, label: 'the auto pick discloses the venue comparison count'},
+    () => (m.driver.readTextSafe('convert-quote-ready') ?? '') !== '',
+    {timeoutMs: 10_000, label: 'the recommendation line stands (a quote is live)'},
   );
+  // The venue attribution lives inside Details (the copy law, spec 2026-10-04 §3).
+  await openConvertDetails(m);
   return m.driver.readText('convert-venue-auto');
 }
 
@@ -68,7 +71,7 @@ hermeticDescribe('flow 173 — the auto-pick invariants in the REVERSE direction
       await openConvertFor(m, 'vchf');
       await pickSwapTarget(m, 'ICP');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
       await openOtherVenues(m);
       // The fixture's reverse quote lands a beat after the auto line first renders (the async
       // registry quote) — wait for the settled two-venue world before reading the expander
@@ -81,10 +84,9 @@ hermeticDescribe('flow 173 — the auto-pick invariants in the REVERSE direction
       // Phase 1: floor the real pool → the fixture picks, the real row zeroes (in ICP units).
       await swapPoolKnob({pool: POOL, impact_bps: 10000});
       await typeConvertAmount(m, '2');
-      await m.driver.waitForFunction(
-        () => m!.driver.readTextSafe('convert-venue-auto')?.includes('offline fixture') === true,
-        {timeoutMs: 15_000, label: 'the pick flipped to the fixture venue (reverse)'},
-      );
+      // Phase 1 asserts the STARTING order holds (the fixture leads; the real pool's
+      // floored row zeroes below) - the zeroed-row poll after it is the signal, and the
+      // attribution read goes through Details (the copy law, spec 2026-10-04 §3).
       const autoLine1 = await awaitVenueComparison(m);
       assertIncludes(autoLine1, 'ICPSwap (offline fixture)', 'the pick followed the strictly-better fixture venue');
       assertIncludes(autoLine1, '2 venues', 'the pick states the comparison count');
@@ -102,14 +104,13 @@ hermeticDescribe('flow 173 — the auto-pick invariants in the REVERSE direction
       await swapPoolKnob({pool: POOL_B, impact_bps: 10000});
       await swapPoolKnob({pool: POOL, impact_bps: 0});
       await typeConvertAmount(m, '3');
+      // The pick flipping BACK to the real venue moves the fixture row into the expander.
       await m.driver.waitForFunction(
-        () => {
-          const auto = m!.driver.readTextSafe('convert-venue-auto') ?? '';
-          return auto.includes('ICPSwap ·') && !auto.includes('offline fixture');
-        },
+        () => venueRowOrder(m!)[0] === `convert-venue-${FIXTURE_VENUE}`,
         {timeoutMs: 15_000, label: 'the pick flipped back to the real venue (reverse)'},
       );
-      const autoLine2 = m.driver.readText('convert-venue-auto');
+      // The flip settled; awaitVenueComparison opens Details for the attribution read.
+      const autoLine2 = await awaitVenueComparison(m);
       assertIncludes(autoLine2, 'ICPSwap ·', 'the pick flipped back to the real venue');
       expect(autoLine2).not.toContain('offline fixture');
       const after2 = venueRowOrder(m);

@@ -14,7 +14,7 @@ import {copyToClipboard} from '../lib/clipboard';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconSwap} from './icons';
-import {ConvertHeader, gasPreFundedAborted, nonBreakingClock, pendingPayoutViewOf} from './ConvertShared';
+import {activeLegExpiryMs, ConvertHeader, DetailsToggle, gasPreFundedAborted, nonBreakingClock, pendingPayoutViewOf} from './ConvertShared';
 import {ConvertStuckReceipts, stuckWindowExpired} from './ConvertStuckEvidence';
 import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 
@@ -24,6 +24,10 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
   // Which deposit fact was last copied ('address' | 'memo') — the transient "Copied" label on
   // the CeFi handoff's copy buttons, same pattern as the cross-rail calldata buttons.
   const [copiedDeposit, setCopiedDeposit] = useState<'address' | 'memo' | null>(null);
+  // The refunded terminal's remedy fold (venue + order id under Details).
+  const [refundDetailsOpen, setRefundDetailsOpen] = useState(false);
+  // The done receipt's audit fold.
+  const [doneDetailsOpen, setDoneDetailsOpen] = useState(false);
   // The Stop label follows the flavor (2026-09-24): a submitted swap is 'watching', a
   // provider order is 'provider', everything else is the plain Stop.
   const stopLabel = convertAbortFlavor(record) === 'watching' ? M.convert.stopWatching
@@ -71,7 +75,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.approvingTitle}</Text>
           <Text style={S.convertStateBody}>
-            {M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, inSymbol), formatClock(new Date(legExpiryMs)))}
+            {M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, inSymbol), formatClock(new Date(activeLegExpiryMs(record))))}
           </Text>
         </View>
       ) : null}
@@ -79,7 +83,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
         <View testID="convert-swapping">
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.swappingTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.swappingBody(venueName)}</Text>
+          <Text style={S.convertStateBody}>{M.convert.swappingBody}</Text>
         </View>
       ) : null}
       {record.step === 'settling' ? (
@@ -93,6 +97,18 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
         <View testID="convert-done">
           <Text style={S.convertStateTitle}>{M.convert.doneTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.doneBody(fmtAssetCompact(record.outAmountNet ?? '0', outDecimals, outSymbol))}</Text>
+          {/* S4: the audit facts (who executed it, the payout record) fold under Details. */}
+          <DetailsToggle
+            open={doneDetailsOpen}
+            onToggle={() => setDoneDetailsOpen(o => !o)}
+            label={M.convert.detailsLabel}
+          />
+          {doneDetailsOpen ? (
+            <View testID="convert-details-block">
+              <Text style={S.convertStateMeta}>{M.convert.cefi.counterparty(venueName)}</Text>
+              {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
+            </View>
+          ) : null}
           {/* A cross-rail payout (the CeFi settle) lands at a destination address on ANOTHER
               rail — the completed panel says which one. Only the cefi provider record carries
               destAddress through THIS panel (planned routes render via RouteStatePanel, cctp
@@ -118,8 +134,18 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
             <Text style={S.convertStateBody}>
               {view.kind === 'pool-watch'
                 ? M.convert.settlingBody(view.sym)
-                : M.convert.pendingBody(view.sym, view.pool, formatClock(new Date(record.createdAtMs)))}
+                : M.convert.pendingBody(view.sym)}
             </Text>
+            {/* The support recipe names ONLY the active step's own reference (F1/bug 1:
+                never another leg's id, never a pool principal). */}
+            {(() => {
+              const ref = [...record.legs].reverse().find(l => l.requestIdHex)?.requestIdHex ?? record.outTx ?? null;
+              return ref != null && view.kind !== 'pool-watch' ? (
+                <Text testID="convert-pending-support" style={S.convertStateMeta} selectable>
+                  {M.convert.pendingSupport(ref)}
+                </Text>
+              ) : null;
+            })()}
             <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
           </View>
         );
@@ -170,7 +196,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           {record.failureCode === 'approve_refused' ? (
             <Text style={S.convertStateBody}>{M.convert.failedApproveBody(inSymbol)}</Text>
           ) : record.failureCode === 'swap_refused' ? (
-            <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', inSymbol, venueName)}</Text>
+            <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', inSymbol)}</Text>
           ) : record.failureCode === 'window_closed' ? (
             // The stuck-expiry resolution (2026-10-02): unconfirmed past the deadline, and
             // the balance read proved nothing left — the honest body, never a phantom refund.
@@ -196,7 +222,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           {record.chainRoute != null && record.legs.length === 0 ? (
             <>
               <Text style={S.convertStateTitle}>{M.convert.chainStuckTitle}</Text>
-              <Text style={S.convertStateBody}>{M.convert.chainStuckBody(venueName)}</Text>
+              <Text style={S.convertStateBody}>{M.convert.chainStuckBody}</Text>
             </>
           ) : (
             <>
@@ -206,7 +232,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           )}
           {minOut != null ? (
             <Text style={S.convertStateMeta}>
-              {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, inSymbol), fmtAssetCompact(minOut, outDecimals, outSymbol), venueName)}
+              {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, inSymbol), fmtAssetCompact(minOut, outDecimals, outSymbol))}
             </Text>
           ) : null}
           {/* The receipts block (2026-10-02 POCO P0): WHAT happened per leg + every tx
@@ -270,7 +296,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
         <View testID="convert-awaiting-deposit">
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.awaitingDepositTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.awaitingDepositBody(inSymbol, venueName)}</Text>
+          <Text style={S.convertStateBody}>{M.convert.awaitingDepositBody(inSymbol)}</Text>
           {/* The CeFi handoff (2026-09-15): the venue's own deposit facts, frozen at order
               creation. TWO arms (the record-lifecycle deposit, 2026-10-02 P0): an IC-source
               row's deposit is SENT BY THIS WALLET — the watcher fires once the record lands
@@ -397,7 +423,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
         <View testID="convert-provider-processing">
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.providerProcessingTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.providerProcessingBody(outSymbol, venueName)}</Text>
+          <Text style={S.convertStateBody}>{M.convert.providerProcessingBody(outSymbol)}</Text>
           {/* The calming PAIR (founder escalation 2026-09-20), moved here from
               awaiting_deposit (round-2 verbosity validation): "funds confirmed" is only
               true once the venue HOLDS the deposit — this is that state. The pair carries
@@ -430,13 +456,34 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
       {record.step === 'quote_expired' ? (
         <View testID="convert-quote-expired">
           <Text style={S.convertStateTitle}>{M.convert.quoteExpiredTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.quoteExpiredBody(inSymbol, venueName)}</Text>
+          <Text style={S.convertStateBody}>{M.convert.quoteExpiredBody(inSymbol)}</Text>
         </View>
       ) : null}
       {record.step === 'provider_refunded' ? (
         <View testID="convert-provider-refunded">
           <Text style={S.convertStateTitle}>{M.convert.providerRefundedTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.providerRefundedBody(inSymbol, venueName)}</Text>
+          <Text style={S.convertStateBody}>{M.convert.providerRefundedBody(inSymbol)}</Text>
+          {/* The remedy's machine facts (which exchange, which order) fold here - the
+              copy law keeps venue brands and ids off the primary terminal card. */}
+          {record.providerRef != null ? (
+            <View>
+              <DetailsToggle
+                open={refundDetailsOpen}
+                onToggle={() => setRefundDetailsOpen(o => !o)}
+                label={M.convert.detailsLabel}
+              />
+              {refundDetailsOpen ? (
+                <View testID="convert-refunded-details">
+                  <Text testID="convert-refunded-venue" style={S.convertStateMeta}>
+                    {M.convert.cefi.counterparty(venueName)}
+                  </Text>
+                  <Text testID="convert-shift-id" style={S.convertStateMeta} selectable>
+                    {M.convert.cefi.shiftId(record.providerRef.orderId)}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </View>
       ) : null}
       <View style={S.convertFooting}>

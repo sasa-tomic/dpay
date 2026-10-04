@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, onboardWallet, accountOf, openConvertFor,
   typeConvertAmount, pickSwapTarget, openOtherVenues, isDisabled,
+  openConvertDetails,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -49,7 +50,8 @@ hermeticDescribe('flow 207 — the trocador listed-but-unquoted verdict renders 
       await m.driver.findByTestID('convert-screen', {timeoutMs: 8_000});
       await typeConvertAmount(m, '2');
       await m.driver.findByTestID('convert-venues', {timeoutMs: 8_000});
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 15_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 15_000});
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-venue-auto'), 'SideShift', 'the registry-first venue is the auto pick (disclosed)');
       await openOtherVenues(m);
       expect(m.driver.isPresent('convert-venue-trocador')).toBe(true);
@@ -59,7 +61,11 @@ hermeticDescribe('flow 207 — the trocador listed-but-unquoted verdict renders 
       await m.driver.click('convert-venue-trocador', {timeoutMs: 5_000});
       await m.driver.findByTestID('convert-no-quote', {timeoutMs: 20_000});
       const noQuoteText = m.driver.readText('convert-no-quote');
-      assertIncludes(noQuoteText, 'Trocador', 'the line attributes the verdict to the VENUE');
+      // The copy law (spec 2026-10-04 §3): the primary refusal stays venue-less; the
+      // verdict's attribution folds under the no-quote card's own Details control.
+      assertIncludes(noQuoteText, 'No live market', 'the refusal names the state and the way out');
+      await m.driver.click('convert-no-quote-details', {timeoutMs: 5_000});
+      assertIncludes(m.driver.readText('convert-no-quote-venue'), 'Trocador', 'the verdict is attributed to the venue (Details)');
       assertIncludes(noQuoteText, 'no live market', 'the line says the venue has no live market right now');
       assertIncludes(noQuoteText, 'Nothing was sent', 'the line states the fail-closed fact first');
       assertIncludes(noQuoteText, 'Pick another venue or try again later', 'the line names the way out');
@@ -81,7 +87,7 @@ hermeticDescribe('flow 207 — the trocador listed-but-unquoted verdict renders 
       expect(m.driver.isPresent('convert-no-quote')).toBe(false);
       await m.driver.findByTestID('convert-headline', {timeoutMs: 20_000});
       assertIncludes(m.driver.readText('convert-headline'), '0.0495 SOL', 'the sideshift quote renders verbatim');
-      assertIncludes(m.driver.readText('convert-quote-source'), 'SideShift', 'the quote is attributed to the sibling venue');
+      assertIncludes(m.driver.readText('convert-quote-source'), 'SideShift', 'the quote is attributed to the sibling venue'); // Details still open from the read above
     } finally {
       if (m) await m.unmount().catch(() => undefined);
     }

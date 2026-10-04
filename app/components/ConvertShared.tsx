@@ -459,62 +459,56 @@ export function legRowMood(plan: LegPlan[] | null | undefined, i: number): LegRo
 /** The done row's state-line marker: the one glyph that says "behind you" without a word. */
 export const LEG_DONE_MARKER = '✓';
 
-export function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string, venueName: string, swapOrdinal = 0): string {
+export function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string, _venueName: string, swapOrdinal = 0): string {
   if (lp.kind === 'sol_swap') {
-    // The final Jupiter leg names ITS own venue (the cross-rail record's venueId is the IC
-    // swap venue — the sol venue id is frozen on the crossRail block at prepare).
-    return M.convert.crossrail.legSolSwap(venueDisplayName(record.crossRail?.solVenueId ?? record.venueId), record.destSymbol ?? record.outSymbol);
+    // The final Jupiter leg: the destination asset only - the venue lives in the Details
+    // census, never in the story line (the copy law, spec 2026-10-04 §3).
+    return M.convert.story.swapFor(record.destSymbol ?? record.outSymbol);
   }
   if (lp.kind === 'cctp_burn') {
-    return M.convert.crossrail.legCctpBurn(record.hopSymbol ?? record.outSymbol, record.destNetwork ?? '');
+    return M.convert.story.cross(record.hopSymbol ?? record.outSymbol, record.destNetwork ?? '');
   }
   if (lp.kind === 'deposit_transfer') {
     // The composed route's final leg: the device-signed transfer that funds the venue
-    // order. The pre-provisioned depositLeg copy IS this leg's line — pending names the
-    // send, sent/confirmed name the venue-side wait. The amount is the record's frozen
-    // order figure in the deposit (hop) ledger's own unit — every reachable composed route
-    // deposits the hop asset (endpoints[1]).
+    // order. The story line names the amount (the record's frozen order figure in the
+    // deposit ledger's own unit); the venue's name lives in the order block under Details.
     const dep = record.composedDeposit;
     const amt = fmtAssetCompact(dep?.amountRaw ?? record.amountIn, record.hopDecimals ?? 8, record.hopSymbol ?? '');
     return lp.state === 'pending'
-      ? M.convert.depositLegPending(venueDisplayName(dep?.venueId ?? record.venueId), amt)
-      : M.convert.depositLegSent(venueDisplayName(dep?.venueId ?? record.venueId), amt);
+      ? M.convert.story.depositSend(amt)
+      : M.convert.story.depositSent(amt);
   }
   if (lp.kind === 'swap' && record.chainRoute != null
     && record.chainRoute.icLegs[swapOrdinal] != null) {
     // The chain's swap leg names ITS OWN frozen pair (a 1-leg chain's in and hop both
-    // name the mid asset — the generic read below would render "Swap ICP → ICP").
-    return M.convert.multihop.legSwap(
-      venueName,
+    // name the mid asset - the generic read would render "Exchange ICP for ICP").
+    return M.convert.story.swap(
       chainLedgerSymbol(record.chainRoute.icLegs[swapOrdinal]!.fromLedger),
       chainLedgerSymbol(record.chainRoute.icLegs[swapOrdinal]!.toLedger));
   }
   if (lp.kind === 'swap') {
     // Hub records run TWO swap legs (D14, same leg vocabulary parameterised per hop):
-    // the second names venue2 and lands the DESTINATION asset in this wallet.
+    // the second lands the DESTINATION asset in this wallet.
     if (record.venue2Id != null && swapOrdinal >= 1) {
-      return M.convert.multihop.legSwap(
-        venueDisplayName(record.venue2Id),
-        record.hopSymbol ?? record.outSymbol,
-        record.destSymbol ?? record.outSymbol);
+      return M.convert.story.swap(record.hopSymbol ?? record.outSymbol, record.destSymbol ?? record.outSymbol);
     }
-    return M.convert.multihop.legSwap(venueName, record.inSymbol, record.hopSymbol ?? record.outSymbol);
+    return M.convert.story.swap(record.inSymbol, record.hopSymbol ?? record.outSymbol);
   }
   if (lp.kind === 'approve') {
     if (legCanister === record.inLedger) {
-      return M.convert.multihop.legApprovePull(record.inSymbol);
+      return M.convert.story.letPoolUse(record.inSymbol);
     }
-    // Hub leg 3 approves the DESTINATION pool's pull of the hub asset — a plain pool
-    // approval on the hub ledger, never the burn-side wording.
+    // Hub leg 3 approves the DESTINATION pool's pull of the hub asset - the same plain
+    // verb, the hub asset named.
     if (record.venue2Id != null && record.hopLedger != null && legCanister === record.hopLedger) {
-      return M.convert.multihop.legApprovePull(record.hopSymbol ?? record.outSymbol);
+      return M.convert.story.letPoolUse(record.hopSymbol ?? record.outSymbol);
     }
-    return M.convert.multihop.legApproveBurn(record.hopSymbol ?? record.outSymbol);
+    return M.convert.story.letPoolUse(record.hopSymbol ?? record.outSymbol);
   }
   if (lp.kind === 'approve_gas') {
-    return M.convert.multihop.legApproveGas(record.gasSymbol ?? 'ckETH');
+    return M.convert.story.letPoolUseGas(record.gasSymbol ?? 'ckETH');
   }
-  return M.convert.multihop.legWithdraw(record.hopSymbol ?? record.outSymbol, record.destSymbol ?? record.outSymbol, record.destNetwork ?? '');
+  return M.convert.story.withdraw(record.hopSymbol ?? record.outSymbol, record.destSymbol ?? record.outSymbol, record.destNetwork ?? '');
 }
 
 /** A leg's own fee, formatted in the FEE'S ledger's units (approve legs pay their ledger's

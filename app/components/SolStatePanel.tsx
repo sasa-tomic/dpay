@@ -3,7 +3,6 @@
 // (2026-09-21 decomposition).
 import {useEffect, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, View} from 'react-native';
-import {venueDisplayName} from '../config/venues';
 import type {ConvertRecord} from '../convert';
 import {acknowledgeStuckRecord} from '../convertResume';
 import {SOLANA_TOKENS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
@@ -32,7 +31,6 @@ export function SolStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record.step]);
 
-  const venueName = venueDisplayName(record.venueId);
   const outDec = record.outDecimals ?? 8;
   const fmtOut = (raw: string) => fmtAssetCompact(raw, outDec, record.outSymbol);
   const fmtIn = (raw: string) => fmtAssetCompact(raw, record.inDecimals ?? 8, record.inSymbol);
@@ -48,7 +46,7 @@ export function SolStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
         <View testID="convert-swapping">
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.swappingTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.swappingBody(venueName)}</Text>
+          <Text style={S.convertStateBody}>{M.convert.swappingBody}</Text>
         </View>
       ) : null}
       {record.step === 'settling' ? (
@@ -78,7 +76,7 @@ export function SolStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
       {record.step === 'failed_refunded' ? (
         <View testID="convert-failed">
           <Text style={S.convertStateTitle}>{M.convert.failedTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.sol.failedBody(record.inSymbol, venueName, record.failureDetail ?? '')}</Text>
+          <Text style={S.convertStateBody}>{M.convert.sol.failedBody(record.inSymbol, record.failureDetail ?? '')}</Text>
         </View>
       ) : null}
       {record.step === 'stuck' ? (
@@ -87,7 +85,7 @@ export function SolStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
           <Text style={S.convertStateBody}>{M.convert.stuckBody}</Text>
           {/* What was signed, restated: the amount in and the VENUE'S own floor (expectedNet is
               Jupiter's otherAmountThreshold frozen at prepare — not a re-derived figure). */}
-          <Text style={S.convertStateBody}>{M.convert.stuckSigned(fmtIn(record.amountIn), fmtOut(record.expectedNet), venueName)}</Text>
+          <Text style={S.convertStateBody}>{M.convert.stuckSigned(fmtIn(record.amountIn), fmtOut(record.expectedNet))}</Text>
           {/* The receipts block (2026-10-02 POCO P0): the signed tx's own identity + any
               failure cause, verbatim — never a bare "unknown". (No wall-clock expiry line:
               a Solana leg dies at its blockhash height, not at a clock.) */}

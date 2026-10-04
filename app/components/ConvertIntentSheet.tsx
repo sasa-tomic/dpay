@@ -417,6 +417,7 @@ export function ConvertIntentSheet({
   const [evmFeeWei, setEvmFeeWei] = useState<string | null>(null);
   // The venue's own listed-but-unquoted verdict (CeFi no-quote): a STATE, not an error.
   const [noQuoteRow, setNoQuoteRow] = useState<{rowId: string; venueName: string} | null>(null);
+  const [noQuoteDetailsOpen, setNoQuoteDetailsOpen] = useState(false);
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [quoteErr, setQuoteErr] = useState<string | null>(null);
   const [staleRefreshing, setStaleRefreshing] = useState(false);
@@ -1655,33 +1656,30 @@ export function ConvertIntentSheet({
           </Text>
           {/* THE one quote line (second verbosity pass 2026-09-29): attribution + read instant,
               and — when the AUTO pick compared venues — the mechanical count on the same line.
-              The venue + timestamp red line lives here; an override renders the plain
-              attribution and the mechanical-pick line stands down. A hub names BOTH venues. */}
-          {receiveStr != null && hubRow != null && activeHub != null ? (
-            <Text testID="convert-quote-source" style={S.reviewMeta}>
-              {M.convert.multihop.hubQuoteSource(
-                venueDisplayName(activeHub.q1.venueId),
-                venueDisplayName(activeHub.q2.venueId),
-                nonBreakingClock(new Date(Math.max(activeHub.q1.fetchedAtMs, activeHub.q2.fetchedAtMs))),
-              )}
+              Per the copy law it renders INSIDE Details below - no venue brand on the open
+              card (spec 2026-10-04 §2 S1/§3). */}
+          {/* S1's recommendation line (spec 2026-10-04 §2): the moment a quote stands, the
+              user reads ONE plain line - arrival, plus the route's known fee in its own
+              asset. No venue, no id. The venue's name lives in Details (attribution below). */}
+          {receiveStr != null ? (
+            <Text testID="convert-quote-ready" style={S.reviewMeta}>
+              {M.convert.arrives}
+              {overheadN > 0n ? ' ' + M.convert.feeAbout(fmtAssetCompact(overheadN.toString(), inDecimals, inSym)) : ''}
             </Text>
-          ) : receiveStr != null && counterVenueId != null ? (() => {
-            const at = nonBreakingClock(new Date(
-              activeIcQuote?.fetchedAtMs
-              ?? activeCefiQuote?.fetchedAtMs
-              ?? activeComposed?.cefi.fetchedAtMs
-              ?? activeJup?.fetchedAtMs
-              ?? activeEvm?.quote.fetchedAtMs
-              ?? Date.now(),
-            ));
-            return (
-              <Text testID={autoApplied ? 'convert-venue-auto' : 'convert-quote-source'} style={S.reviewMeta}>
-                {autoApplied && autoPick!.compared >= 2
-                  ? M.convert.autoVenueLine(venueDisplayName(counterVenueId), at, autoPick!.compared)
-                  : M.convert.quoteSource(at, venueDisplayName(counterVenueId))}
+          ) : null}
+          {(() => {
+            const exchanges = hubRow != null ? 2
+              : composedRow != null ? composedRow.route.legs.length + 1
+              : chainRow != null ? chainRow.route.legs.length + 1
+              : crossRow != null ? 2
+              : autoPick != null && autoPick.compared > 1 ? autoPick.compared
+              : 1;
+            return exchanges > 1 ? (
+              <Text testID="convert-quote-exchanges" style={S.reviewMeta}>
+                {M.convert.exchangesInvolved(exchanges)}
               </Text>
-            );
-          })() : null}
+            ) : null;
+          })()}
           {activeRow != null && (activeRow.kind === 'direct' || activeRow.kind === 'solamm' || activeRow.kind === 'cefi')
             && activeRow.venue.health?.status === 'degraded' ? (
             <Text testID={`convert-venue-${activeRow.rowId}-slow`} style={S.reviewMeta}>
@@ -1693,52 +1691,9 @@ export function ConvertIntentSheet({
               {M.convert.multihop.viaHub(hubRow.route.hub.symbol)}
             </Text>
           ) : null}
-          {/* The composed route names its IC chain, leg by leg (the settle leg's venue is the
-              attribution line above). The ONE CTA press creates the venue order and runs
-              everything; the tracker narrates the venue-side facts live from execution. */}
-          {composedRow != null && activeComposed != null ? (
-            <View testID="convert-route-via">
-              {composedRow.route.legs.map((leg, i) => (
-                <Text key={leg.venueId + String(i)} style={S.reviewMeta}>
-                  {M.convert.multihop.legSwap(
-                    venueDisplayName(leg.venueId),
-                    composedRow.route.endpoints[i]!.symbol,
-                    composedRow.route.endpoints[i + 1]!.symbol,
-                  )}
-                </Text>
-              ))}
-              <Text style={S.reviewMeta}>
-                {M.convert.depositLegPending(
-                  venueDisplayName(composedRow.route.cefiVenueId),
-                  minOutStr ?? '',
-                )}
-              </Text>
-            </View>
-          ) : null}
-          {/* The chain names BOTH its executors, leg by leg: the cefi venue that holds the
-              order, then the registered pool(s) that finish the route (the any-pair
-              mandate's one review — every venue's own quote sits in Details). */}
-          {chainRow != null && activeChain != null ? (
-            <View testID="convert-route-via">
-              <Text style={S.reviewMeta}>
-                {M.convert.multihop.legSwap(
-                  venueDisplayName(chainRow.route.cefiVenueId),
-                  inSym,
-                  chainRow.route.endpoints[0]!.symbol,
-                )}
-              </Text>
-              {chainRow.route.legs.map((leg, i) => (
-                <Text key={leg.venueId + String(i)} style={S.reviewMeta}>
-                  {M.convert.multihop.legSwap(
-                    venueDisplayName(leg.venueId),
-                    chainRow.route.endpoints[i]!.symbol,
-                    chainRow.route.endpoints[i + 1]!.symbol,
-                  )}
-                </Text>
-              ))}
-              <Text style={S.reviewMeta}>{M.convert.chain.phase2Note}</Text>
-            </View>
-          ) : null}
+          {/* The composed route names its IC chain INSIDE Details (the copy law keeps venue
+              lines off the open card); the ONE CTA press creates the venue order and runs
+              everything - the tracker narrates the venue-side facts live from execution. */}
           {staleRefreshing ? (
             <Text testID="convert-stale" style={S.reviewMeta}>{M.convert.staleRefreshing}</Text>
           ) : null}
@@ -1793,6 +1748,74 @@ export function ConvertIntentSheet({
           />
           {detailsOpen && activeRow != null ? (
             <View testID="convert-details-block">
+              {/* The quote's attribution: venue + read instant (the mechanical count when the
+                  auto pick compared), rendered here per the copy law - venue facts live only
+                  inside Details/Options. A hub names BOTH venues. */}
+              {receiveStr != null && hubRow != null && activeHub != null ? (
+                <Text testID="convert-quote-source" style={S.convertChecklistLine}>
+                  {M.convert.multihop.hubQuoteSource(
+                    venueDisplayName(activeHub.q1.venueId),
+                    venueDisplayName(activeHub.q2.venueId),
+                    nonBreakingClock(new Date(Math.max(activeHub.q1.fetchedAtMs, activeHub.q2.fetchedAtMs))),
+                  )}
+                </Text>
+              ) : receiveStr != null && counterVenueId != null ? (() => {
+                const at = nonBreakingClock(new Date(
+                  activeIcQuote?.fetchedAtMs
+                  ?? activeCefiQuote?.fetchedAtMs
+                  ?? activeComposed?.cefi.fetchedAtMs
+                  ?? activeJup?.fetchedAtMs
+                  ?? activeEvm?.quote.fetchedAtMs
+                  ?? Date.now(),
+                ));
+                return (
+                  <Text testID={autoApplied ? 'convert-venue-auto' : 'convert-quote-source'} style={S.convertChecklistLine}>
+                    {autoApplied && autoPick!.compared >= 2
+                      ? M.convert.autoVenueLine(venueDisplayName(counterVenueId), at, autoPick!.compared)
+                      : M.convert.quoteSource(at, venueDisplayName(counterVenueId))}
+                  </Text>
+                );
+              })() : null}
+              {/* The composed/chain route's executors, leg by leg: the IC pool(s), then the
+                  CeFi venue that holds the order - every venue's own number sits here in
+                  the census (the any-pair mandate's one review, folded). */}
+              {composedRow != null && activeComposed != null ? (
+                <View testID="convert-route-via">
+                  {composedRow.route.legs.map((leg, i) => (
+                    <Text key={leg.venueId + String(i)} style={S.convertChecklistLine}>
+                      {M.convert.multihop.legSwap(
+                        venueDisplayName(leg.venueId),
+                        composedRow.route.endpoints[i]!.symbol,
+                        composedRow.route.endpoints[i + 1]!.symbol,
+                      )}
+                    </Text>
+                  ))}
+                  <Text style={S.convertChecklistLine}>
+                    {M.convert.depositLegPending(minOutStr ?? '')}
+                  </Text>
+                </View>
+              ) : null}
+              {chainRow != null && activeChain != null ? (
+                <View testID="convert-route-via">
+                  <Text style={S.convertChecklistLine}>
+                    {M.convert.multihop.legSwap(
+                      venueDisplayName(chainRow.route.cefiVenueId),
+                      inSym,
+                      chainRow.route.endpoints[0]!.symbol,
+                    )}
+                  </Text>
+                  {chainRow.route.legs.map((leg, i) => (
+                    <Text key={leg.venueId + String(i)} style={S.convertChecklistLine}>
+                      {M.convert.multihop.legSwap(
+                        venueDisplayName(leg.venueId),
+                        chainRow.route.endpoints[i]!.symbol,
+                        chainRow.route.endpoints[i + 1]!.symbol,
+                      )}
+                    </Text>
+                  ))}
+                  <Text style={S.convertChecklistLine}>{M.convert.chain.phase2Note}</Text>
+                </View>
+              ) : null}
               {/* The venue's own verbatim figure behind the hero: the quote the user is
                   confirming, exactly as the venue published it (round-1 item 8 — the hero
                   renders at standard display precision, this line keeps the verbatim). */}
@@ -1801,9 +1824,13 @@ export function ConvertIntentSheet({
                   {M.convert.quoteVerbatim(verbatimQuote.venue, verbatimQuote.amt)}
                 </Text>
               ) : null}
-              <Text testID="convert-slippage" style={S.convertChecklistLine}>
-                {M.convert.slippageLabel}: {formatBps(slippageBps)}
-              </Text>
+              {/* A locked-rate CeFi order has NO slippage axis - the venue locks the rate,
+                  so a slippage line would state a fact that does not apply (F1's class). */}
+              {!cefiMode ? (
+                <Text testID="convert-slippage" style={S.convertChecklistLine}>
+                  {M.convert.slippageLabel}: {formatBps(slippageBps)}
+                </Text>
+              ) : null}
               {/* Rate — derived (amount_out ÷ amount_in), never presented as venue-published. */}
               {math != null && activeIcQuote != null ? (
                 <View testID="convert-rate" style={S.convertRateRow}>
@@ -2271,7 +2298,20 @@ export function ConvertIntentSheet({
         {noQuoteRow != null && noQuoteRow.rowId === activeRow?.rowId ? (
           <View testID="convert-no-quote">
             <Text style={S.convertChecklistWarn}>{M.convert.cefi.noQuoteTitle}</Text>
-            <Text style={S.convertChecklistLine}>{M.convert.cefi.noQuoteBody(noQuoteRow.venueName)}</Text>
+            <Text style={S.convertChecklistLine}>{M.convert.cefi.noQuoteBody}</Text>
+            {/* The venue's own attribution folds here (the copy law keeps brands off the
+                primary refusal; the way out names the row that carries it). */}
+            <DetailsToggle
+              testID="convert-no-quote-details"
+              open={noQuoteDetailsOpen}
+              onToggle={() => setNoQuoteDetailsOpen(o => !o)}
+              label={M.convert.detailsLabel}
+            />
+            {noQuoteDetailsOpen ? (
+              <Text testID="convert-no-quote-venue" style={S.convertChecklistLine}>
+                {M.convert.cefi.counterparty(noQuoteRow.venueName)}
+              </Text>
+            ) : null}
           </View>
         ) : null}
         {(activeRowErr ?? quoteErr) != null ? (
@@ -2394,6 +2434,8 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
   // The composed order's Details disclosure (2026-10-04 composed-truth fix): while the
   // cefi leg is NOT the active one, its order facts fold here - closed by default.
   const [orderDetailsOpen, setOrderDetailsOpen] = useState(false);
+  // The done receipt's audit fold (venue attribution + payout record under Details).
+  const [doneDetailsOpen, setDoneDetailsOpen] = useState(false);
   // stuck/pending states show when the signed envelopes expire — a 30 s tick keeps the
   // countdown honest; the engine (not this screen) advances the record itself.
   useEffect(() => {
@@ -2448,9 +2490,10 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
   const activeLegIndex = legPlan.findIndex(lp => lp.state !== 'confirmed');
   const activeLeg = activeLegIndex >= 0 ? legPlan[activeLegIndex] : null;
   const swapOrdinalOf = (i: number) => legPlan.slice(0, i).filter(x => x.kind === 'swap').length;
+  // S3 (spec 2026-10-04): the top line names the ACTIVE leg, plainly - no "Step n of m"
+  // counter (it is the line that contradicted the body), no venue brand, no id.
   const stepLine = activeLeg != null
-    ? M.convert.multihop.legProgress(activeLegIndex + 1, legPlan.length) + ' — '
-      + plannedLegLabel(record, activeLeg, activeLeg.canister, venueName, swapOrdinalOf(activeLegIndex))
+    ? plannedLegLabel(record, activeLeg, activeLeg.canister, venueName, swapOrdinalOf(activeLegIndex))
     : null;
   const stopLabel = convertAbortFlavor(record) === 'watching' ? M.convert.stopWatching
     : convertAbortFlavor(record) === 'provider' ? M.convert.stopProvider
@@ -2468,15 +2511,15 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
     destSymbol,
   );
   const inflightTitle =
-    chainPhase1 && record.step === 'swapping' ? M.convert.chain.depositSending(venueDisplayName(chain!.venueId))
-    : record.step === 'swapping' ? M.convert.swapVia(venueName)
+    chainPhase1 && record.step === 'swapping' ? M.convert.chain.depositSending
+    : record.step === 'swapping' ? M.convert.swappingTitle
     : record.step === 'settling' ? M.convert.awaitingPool
     : M.convert.signing;
   const inflightBody =
     record.step === 'approving' || record.step === 'approved'
       ? M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), formatClock(new Date(activeExpiryMs)))
       : record.step === 'swapping'
-        ? M.convert.swappingBody(venueName)
+        ? M.convert.swappingBody
         : M.convert.settlingBody(destSymbol);
   // The venue order's facts, verbatim (the composed body block AND the Details fallback's
   // content - one source, so the two surfaces can never drift).
@@ -2597,19 +2640,32 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
               ? M.convert.doneBody(doneAmt)
               : M.convert.receivedDone(doneAmt)}
           </Text>
-          {venueName !== '' ? (
-            <Text style={S.fieldBody}>
-              {M.convert.viaChain(record.composedDeposit != null ? venueDisplayName(record.composedDeposit.venueId) : venueName)}
-            </Text>
+          {/* S4 (spec 2026-10-04): the receipt is a status word + one sentence + one action;
+              the audit facts (who executed it, the payout record hash) fold under Details. */}
+          <DetailsToggle
+            open={doneDetailsOpen}
+            onToggle={() => setDoneDetailsOpen(o => !o)}
+            label={M.convert.detailsLabel}
+          />
+          {doneDetailsOpen ? (
+            <View testID="convert-details-block">
+              {venueName !== '' ? (
+                <Text style={S.fieldBody}>
+                  {M.convert.cefi.counterparty(
+                    record.composedDeposit != null ? venueDisplayName(record.composedDeposit.venueId) : venueName,
+                  )}
+                </Text>
+              ) : null}
+              {record.outTx != null ? <Text style={S.fieldTx}>{M.convert.doneTx(record.outTx)}</Text> : null}
+            </View>
           ) : null}
-          {record.outTx != null ? <Text style={S.fieldTx}>{M.convert.doneTx(record.outTx)}</Text> : null}
           <Pressable
             testID="btn-convert-done"
             style={S.fieldAction}
             onPress={onBack}
             accessibilityRole="button"
-            accessibilityLabel={M.common.done}>
-            <Text style={S.fieldActionText}>{M.common.done}</Text>
+            accessibilityLabel={M.convert.backToWallet}>
+            <Text style={S.fieldActionText}>{M.convert.backToWallet}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -2631,7 +2687,15 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
             ) : (
               <>
                 <Text style={S.fieldTitle}>{M.convert.pendingTitle}</Text>
-                <Text style={S.fieldBody}>{M.convert.pendingBody(view.sym, view.pool, formatClock(new Date(record.createdAtMs)))}</Text>
+                <Text style={S.fieldBody}>{M.convert.pendingBody(view.sym)}</Text>
+                {(() => {
+                  const ref = [...record.legs].reverse().find(l => l.requestIdHex)?.requestIdHex ?? record.outTx ?? null;
+                  return ref != null ? (
+                    <Text testID="convert-pending-support" style={S.fieldBody} selectable>
+                      {M.convert.pendingSupport(ref)}
+                    </Text>
+                  ) : null;
+                })()}
               </>
             )}
             <Text style={S.fieldBody}>{M.convert.stillWatching}</Text>
@@ -2654,12 +2718,9 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
           <ActivityIndicator size="large" color={C.brandInk} />
           <Text style={S.fieldTitle}>{M.convert.awaitingDepositTitle}</Text>
           <Text style={S.fieldBody}>
-            {M.convert.depositLegSent(
-              venueDisplayName(record.composedDeposit.venueId),
-              fmtAssetCompact(record.composedDeposit.amountRaw, hopDecimals, hopSymbol),
-            )}
+            {M.convert.story.depositSent(fmtAssetCompact(record.composedDeposit.amountRaw, hopDecimals, hopSymbol))}
           </Text>
-          <Text style={S.fieldBody}>{M.convert.awaitingDepositBody(hopSymbol, venueDisplayName(record.composedDeposit.venueId))}</Text>
+          <Text style={S.fieldBody}>{M.convert.awaitingDepositBody(hopSymbol)}</Text>
         </View>
       ) : null}
 
@@ -2671,7 +2732,6 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
           <Text style={S.fieldTitle}>{M.convert.awaitingDepositTitle}</Text>
           <Text style={S.fieldBody}>
             {M.convert.chain.depositSent(
-              venueDisplayName(chain!.venueId),
               fmtAssetCompact(chain!.amountRaw, record.inDecimals ?? 8, record.inSymbol),
               hopSymbol,
             )}
@@ -2734,7 +2794,7 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
           ) : record.failureCode === 'approve_refused' ? (
             <Text style={S.fieldBody}>{M.convert.failedApproveBody(record.inSymbol)}</Text>
           ) : record.failureCode === 'swap_refused' ? (
-            <Text style={S.fieldBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol, venueName)}</Text>
+            <Text style={S.fieldBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol)}</Text>
           ) : record.failureCode === 'window_closed' ? (
             // The stuck-expiry resolution (2026-10-02): unconfirmed past the deadline,
             // nothing left the wallet — never a phantom "the pool returned it".
@@ -2773,7 +2833,7 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
           ) : record.failureCode === 'deposit_refused' && record.composedDeposit != null ? (
             <>
               <Text style={S.fieldBody}>
-                {M.convert.depositRefusedBody(hopSymbol, venueDisplayName(record.composedDeposit.venueId))}
+                {M.convert.depositRefusedBody(hopSymbol)}
               </Text>
               <Text style={S.fieldBody}>{M.convert.multihop.failedLegExit}</Text>
             </>
@@ -2819,7 +2879,7 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
           ) : null}
           {!chainPhase1 && minOut != null ? (
             <Text style={S.fieldBody}>
-              {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), fmtAssetCompact(minOut, minOutDecimals, minOutSymbol), venueName)}
+              {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), fmtAssetCompact(minOut, minOutDecimals, minOutSymbol))}
             </Text>
           ) : null}
           {/* A legless record (chain phase 1, a Jupiter leg) has NO IC envelopes: the line

@@ -8,6 +8,8 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, pickSwapTarget,
+  openConvertDetails,
+  closeConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {deadline as budgetDeadline} from '../harness/budget';
@@ -125,24 +127,28 @@ hermeticDescribe('flow 213 — the composed IC+CeFi conversion at the ONE consen
       await openConvertFor(m, 'vchf');
       await pickSwapTarget(m, 'EUR');
       await typeConvertAmount(m, '2');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 15_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 15_000});
       await m.driver.waitForFunction(
         () => m!.driver.readTextSafe('convert-receive')?.includes('≈ 0.04 EURC') === true,
         {timeoutMs: 15_000, label: 'the receive hero settled on the venue quote'},
       );
+      // The copy law (spec 2026-10-04 §3): the pick disclosure AND the route narration
+      // live inside Details now.
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-venue-auto'), 'SideShift', 'the pick disclosure names the settle venue');
       await m.driver.waitForFunction(
         () => m!.driver.readTextSafe('convert-route-via')?.includes('Swap VCHF → ICP on ICPSwap') === true,
         {timeoutMs: 15_000, label: 'the route named its IC leg'},
       );
-      assertIncludes(m.driver.readText('convert-route-via'), 'to SideShift', 'the deposit line names the venue that will hold the order');
+      // The deposit line is a plain story line (the copy law): the venue lives in the
+      // order block below it; the IC floor figure is still the line's number.
+      assertIncludes(m.driver.readText('convert-route-via'), 'to the exchange', 'the deposit line names the way (plain)');
       assertIncludes(m.driver.readText('convert-route-via'), depositDecimal, 'the deposit line names the IC floor the order will price');
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
       await m.driver.waitForFunction(
         () => m!.driver.readTextSafe('convert-quote-verbatim')?.includes('0.0495 EURC') === true,
         {timeoutMs: 15_000, label: 'the settle venue\'s verbatim quote in Details'},
       );
-      await m.driver.click('convert-details', {timeoutMs: 5_000}); // close it again for the press
+      await closeConvertDetails(m); // closed again for the press
 
       // NOTHING is adopted before the consent: the store is still empty.
       let store = await storeRecords(account!.publicHex);
@@ -155,7 +161,9 @@ hermeticDescribe('flow 213 — the composed IC+CeFi conversion at the ONE consen
       await m.driver.findByTestID('convert-leg-2', {timeoutMs: 15_000});
       await m.driver.findByTestID('convert-awaiting-deposit', {timeoutMs: 45_000});
       const awaiting = m.driver.readText('convert-awaiting-deposit');
-      assertIncludes(awaiting, 'SideShift', 'the payout watch names the venue');
+      // The story line is plain (the copy law); the venue's name rides the order block
+      // beside it (asserted right below).
+      assertIncludes(awaiting, 'sent to the exchange', 'the deposit leg names the plain way');
       assertIncludes(awaiting, depositDecimal, 'the deposit leg\'s copy names the sent amount');
       expect((await sideshiftRelayHits()).shiftCalls).toBe(1);
 
@@ -197,7 +205,9 @@ hermeticDescribe('flow 213 — the composed IC+CeFi conversion at the ONE consen
       await m.driver.findByTestID('convert-done', {timeoutMs: 45_000});
       const done = m.driver.readText('convert-done');
       assertIncludes(done, '0.0495', 'done reports the VENUE\'s own settle amount');
-      assertIncludes(done, 'SideShift', 'done attributes the trade to the venue');
+      // The venue attribution folds under the receipt's Details (S4, spec 2026-10-04).
+      await openConvertDetails(m);
+      assertIncludes(m.driver.readText('convert-details-block'), 'SideShift', 'done attributes the trade to the venue (Details)');
 
       // §4 the expired deposit window (seeded): the gate refuses ONCE, nothing re-signs.
       await seedComposedClone(account!.publicHex, 'seeded-expired-213', (clone, now) => {

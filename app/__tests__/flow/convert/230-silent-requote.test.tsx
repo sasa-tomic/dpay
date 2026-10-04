@@ -30,8 +30,7 @@ const BASE_FEE = 3000;
 async function setPoolFee(millionths: number): Promise<void> {
   const a = await relayPost('/api/v1/test/swap_pool', {pool: POOL, fee_millionths: millionths});
   expect(a.ok).toBe(true);
-  const b = await relayPost('/api/v1/test/swap_pool', {pool: POOL_B, fee_millionths: millionths});
-  expect(b.ok).toBe(true);
+  // The fixture pool stays priced out (see beforeAll); only the real pool moves.
 }
 
 hermeticDescribe('flow 230 - the confirm absorbs noise, re-arms once on a material move', () => {
@@ -40,6 +39,12 @@ hermeticDescribe('flow 230 - the confirm absorbs noise, re-arms once on a materi
   });
   beforeAll(async () => {
     await venueKnob(FIXTURE_VENUE, true);
+    // The fixture pool's quotes decay per fetch (simulated reserves) - it must NEVER be
+    // the pick, or the confirm's own re-quote could never match the display. The real
+    // pool's quotes are stateless per amount (flow 190's re-confirm loop relies on it).
+    await setPoolFee(20000); // both pools at the within-tolerance tier to start
+    const fix = await relayPost('/api/v1/test/swap_pool', {pool: POOL_B, fee_millionths: 990_000});
+    expect(fix.ok).toBe(true);
   });
 
   it('a 1.7% fee move at confirm proceeds silently - no moved note, no second tap', async () => {
@@ -50,7 +55,7 @@ hermeticDescribe('flow 230 - the confirm absorbs noise, re-arms once on a materi
       expect((await faucetAccount(account!.publicHex, SEED, {currency: 8})).ok).toBe(true);
       await openConvertFor(m, 'icp');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
 
       // The venue's fee tier jumps 0.30% -> 2%: the quoted output drops ~1.7% - INSIDE the
       // 5% tolerance. The confirm must proceed from the fresh quote without a re-arm.
@@ -73,7 +78,7 @@ hermeticDescribe('flow 230 - the confirm absorbs noise, re-arms once on a materi
       expect((await faucetAccount(account!.publicHex, SEED, {currency: 8})).ok).toBe(true);
       await openConvertFor(m, 'icp');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
 
       // 0.30% -> 60%: the quoted output drops far past 5% - the ONE re-confirm arm.
       await setPoolFee(600_000);

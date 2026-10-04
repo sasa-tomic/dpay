@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, pickSwapTarget, openOtherVenues,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -123,7 +124,7 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
       assertIncludes(m.driver.readText('convert-external-sign-note'), 'your own Ethereum wallet', 'naming an external wallet restores the handoff disclosure');
 
       // §2 the census (unchanged from the SOL route, USDC-denominated).
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       await m.driver.waitForFunction(
         () => m!.driver.isPresent('crossrail-circle-fee') && m!.driver.isPresent('crossrail-mint-floor'),
         {timeoutMs: 15_000, label: 'the cross-rail census mounted'},

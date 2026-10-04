@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, onboardWallet, accountOf, openConvertFor,
   typeConvertAmount, openOtherVenues, fmtHero,
+  openConvertDetails,
 } from '../harness/lib';
 import type {Mount} from '../harness/mount';
 import {relayGet} from '../harness/relayClient';
@@ -56,9 +57,11 @@ function venueRowOrder(m: Mount): string[] {
  *  instead of snapshot-reading the racing first render (low host load flips these constantly). */
 async function awaitVenueComparison(m: Mount): Promise<string> {
   await m.driver.waitForFunction(
-    () => (m.driver.readTextSafe('convert-venue-auto') ?? '').includes('2 venues'),
-    {timeoutMs: 10_000, label: 'the auto pick discloses the venue comparison count'},
+    () => (m.driver.readTextSafe('convert-quote-ready') ?? '') !== '',
+    {timeoutMs: 10_000, label: 'the recommendation line stands (a quote is live)'},
   );
+  // The venue attribution lives inside Details (the copy law, spec 2026-10-04 §3).
+  await openConvertDetails(m);
   return m.driver.readText('convert-venue-auto');
 }
 
@@ -80,7 +83,7 @@ hermeticDescribe('flow 166 — the disclosed auto pick + the one-tap override + 
 
       await openConvertFor(m, 'icp');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
       // The served registry lands async: wait for BOTH rows' quotes before any expander read.
       await m.driver.findByTestID(`convert-venue-${FIXTURE_VENUE}-quote`, {timeoutMs: 10_000}).catch(() => null);
       await m.driver.findByTestID('convert-venue-icpswap-quote', {timeoutMs: 10_000}).catch(() => null);
@@ -119,6 +122,8 @@ hermeticDescribe('flow 166 — the disclosed auto pick + the one-tap override + 
 
       // ONE-TAP override: attribution + floor + headline move to the picked row's numbers.
       await m.driver.click(`convert-venue-${otherId}`, {timeoutMs: 5_000});
+      // The override's plain attribution renders in Details (the copy law) - already open
+      // from awaitVenueComparison above.
       await m.driver.findByTestID('convert-quote-source', {timeoutMs: 10_000});
       const overriddenSource = m.driver.readText('convert-quote-source');
       expect(overriddenSource).toMatch(/\d{1,2}:\d{2}/); // attribution + a timestamp
@@ -144,7 +149,8 @@ hermeticDescribe('flow 166 — the disclosed auto pick + the one-tap override + 
       await typeConvertAmount(m, '2');
       if (m.driver.isPresent('convert-venue-icpswap') === false) await openOtherVenues(m);
       await m.driver.click('convert-venue-icpswap', {timeoutMs: 5_000});
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      // Details is still open from awaitVenueComparison above - the census reads below
+      // need it that way (the copy law moved the venue/fee census inside it).
       // The pool-fee line settling at the FORCED tier + the hero re-keying to the typed
       // amount are jointly the deterministic signal that the fresh quote landed (the two
       // card sections settle on separate ticks — poll the money figure, then read the rest).

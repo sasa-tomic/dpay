@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, openBalances, typeConvertAmount, fmtHero,
+  openConvertDetails,
 } from '../harness/lib';
 import type {Mount} from '../harness/mount';
 import {relayGet} from '../harness/relayClient';
@@ -45,9 +46,11 @@ const relayQuote = async (tokenIn: string, tokenOut: string, amountIn: bigint): 
  *  instead of snapshot-reading the racing first render (low host load flips these constantly). */
 async function awaitVenueComparison(m: Mount): Promise<string> {
   await m.driver.waitForFunction(
-    () => (m.driver.readTextSafe('convert-venue-auto') ?? '').includes('2 venues'),
-    {timeoutMs: 10_000, label: 'the auto pick discloses the venue comparison count'},
+    () => (m.driver.readTextSafe('convert-quote-ready') ?? '') !== '',
+    {timeoutMs: 10_000, label: 'the recommendation line stands (a quote is live)'},
   );
+  // The venue attribution lives inside Details (the copy law, spec 2026-10-04 §3).
+  await openConvertDetails(m);
   return m.driver.readText('convert-venue-auto');
 }
 
@@ -71,7 +74,7 @@ hermeticDescribe('flow 140 — the two-tap convert (sheet → oracle → engine 
     await openConvertFor(m, 'icp');
 
     await m.driver.findByTestID('convert-sheet', {timeoutMs: 8000});
-    await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+    await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
     const autoLine = await awaitVenueComparison(m);
     assertIncludes(autoLine, 'ICPSwap', 'the venue pick is disclosed mechanically (attribution, no "best" claim)');
     expect(autoLine.toLowerCase()).not.toContain('best');
@@ -114,7 +117,8 @@ hermeticDescribe('flow 140 — the two-tap convert (sheet → oracle → engine 
 
     // TAP 2: re-quote at the gesture, then the Settlement Field runs the engine.
     await m.driver.click('btn-convert-confirm', {timeoutMs: 6000});
-    expect(await m.driver.waitForText('Converted', {timeoutMs: 60_000})).toBe(true);
+    expect(await m.driver.waitForText('Done', {timeoutMs: 60_000})).toBe(true);
+    await openConvertDetails(m); // the payout record folds under Details (S4, spec 2026-10-04)
     const doneBody = m.driver.readText('convert-done');
     assertIncludes(doneBody, 'VCHF', 'done names the asset received');
     assertIncludes(doneBody, `${fmt8(gross)} VCHF`, 'done amount is the SEEN ledger row (the pool credits full gross)');

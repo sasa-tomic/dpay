@@ -111,7 +111,7 @@ import type {ConvertMath, ConvertQuote, ConvertRecord} from '../convert';
 import {buildSelectableAssets} from '../config/assets';
 import type {Identity} from '../lib/types';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
-import {BUNDLED_VENUES, setRuntimeVenues, venueDisplayName, type VenueEntry} from '../config/venues';
+import {BUNDLED_VENUES, setRuntimeVenues, type VenueEntry} from '../config/venues';
 import {convertEn} from '../i18n/domains/en/convert';
 import {nonBreakingClock} from '../components/ConvertShared';
 import {formatClock} from '../i18n/intl';
@@ -285,7 +285,7 @@ describe('C1 — the unit is printed exactly once on every money line', () => {
       // 'ICP' alone is not countable here — the venue's registry display name may CONTAIN a
       // unit token, and naming the counterparty is a §5 requirement. Count the FORMATTED
       // amounts instead: each must appear exactly once, with no bare unit trailing it.
-      const signed = d.stuckSigned('9.99 ICP', '4.44 VCHF', 'ICPSwap');
+      const signed = d.stuckSigned('9.99 ICP', '4.44 VCHF');
       expect(occurrences(signed, '9.99 ICP')).toBe(1);
       expect(occurrences(signed, '4.44 VCHF')).toBe(1);
       expect(signed).not.toMatch(/9\.99 ICP ICP|4\.44 VCHF VCHF/);
@@ -427,11 +427,13 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
 
   test('not one §5 census fact was dropped — the sheet carries them; the census folds behind Details', async () => {
     const tree = await mountConvert('250000000', '1');
-    // On the open sheet: the decision facts — receive figure, the ONE merged quote line
-    // (attribution + instant + pick count), floor, CTA. The net/dpay lines are GONE (below).
-    for (const id of ['convert-min-out', 'convert-venue-auto', 'convert-receive']) {
+    // On the open sheet: the decision facts - receive figure, floor, CTA. The venue
+    // attribution is NOT on the open card anymore: the copy law (spec 2026-10-04 §3)
+    // keeps venue facts inside Details only.
+    for (const id of ['convert-min-out', 'convert-receive']) {
       expect(`${id}: ${present(tree, id)}`).toBe(`${id}: true`);
     }
+    expect(present(tree, 'convert-venue-auto')).toBe(false);
     expect(present(tree, 'convert-net')).toBe(false);
     expect(present(tree, 'convert-dpay-fee')).toBe(false);
     expect(present(tree, 'convert-impact')).toBe(false);
@@ -452,8 +454,9 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
     expect(cp).not.toContain('not a licensed provider and not dpay');
   });
 
-  test('the pick line is a MECHANICAL disclosure — it states the pick, never a "best" claim', async () => {
+  test('the pick line is a MECHANICAL disclosure - it states the pick, never a "best" claim (Details)', async () => {
     const tree = await mountConvert('250000000', '1');
+    await openDetails(tree);
     const pickLine = textOf(tree, 'convert-venue-auto');
     expect(pickLine).toContain('ICPSwap'); // the executor, named
     expect(pickLine).toMatch(/\d{1,2}:\d{2}/); // the quote's read instant, on the same line
@@ -560,14 +563,13 @@ describe('AUTO — the disclosed mechanical venue pick', () => {
     jest.mocked(convertResumeSnapshot).mockReturnValue({});
   });
 
-  test('the pick FOLLOWS the highest net quoted output and says so — with the count', async () => {
+  test('the pick FOLLOWS the highest net quoted output and says so - with the count (Details)', async () => {
     const tree = await mountConvert('250000000', '1');
-    // ONE merged quote line: venue + read instant + the mechanical comparison count.
-    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueLine(VENUE_B.display_name, nonBreakingClock(new Date(QUOTE_B.fetchedAtMs)), 2));
-    // The hero figure is B's own number at the hero's standard display precision — the pick
-    // never blends or recomputes; the venue's VERBATIM figure sits in Details, attributed.
+    // The hero figure is B's own number at the hero's standard display precision - the pick
+    // never blends or recomputes; the attribution + VERBATIM figure sit in Details.
     expect(textOf(tree, 'convert-receive')).toContain(convertEn.youReceive('0.89 VCHF'));
     await openDetails(tree);
+    expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueLine(VENUE_B.display_name, nonBreakingClock(new Date(QUOTE_B.fetchedAtMs)), 2));
     expect(textOf(tree, 'convert-quote-verbatim')).toContain(convertEn.quoteVerbatim(VENUE_B.display_name, fmtAssetCompact(QUOTE_B.amountOutGross, 8, 'VCHF')));
     // Armed at the pick: tap 2 exists without any further decision.
     expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(false);
@@ -588,7 +590,8 @@ describe('AUTO — the disclosed mechanical venue pick', () => {
         ? {...QUOTE_B, amountOutGross: '20000000'}
         : {...QUOTE_A, amountOutGross: '90000000'}) as never));
     const tree = await mountConvert('250000000', '1');
-    // Now A quotes strictly better — the PICK flips to A, mechanically…
+    // Now A quotes strictly better — the PICK flips to A, mechanically (attribution in Details)…
+    await openDetails(tree);
     expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.autoVenueLine(VENUE_A.display_name, nonBreakingClock(new Date(QUOTE_A.fetchedAtMs)), 2));
     // …and the expander STILL lists the other row first-served, registry order, unchanged.
     await openVenues(tree);
@@ -602,8 +605,9 @@ describe('AUTO — the disclosed mechanical venue pick', () => {
     await act(async () => {
       node(tree, `convert-venue-${VENUE_A.venue_id}`)!.props.onPress();
     });
-    // The user's pick governs: A's own quote + floor + attribution on the card, no pick
-    // criterion line (the mechanical disclosure describes the AUTO pick, not a user choice).
+    // The user's pick governs: A's own quote + floor, no pick criterion line. The plain
+    // attribution (no auto line) renders in Details (the copy law keeps venues there).
+    await openDetails(tree);
     expect(present(tree, 'convert-venue-auto')).toBe(false);
     expect(textOf(tree, 'convert-quote-source')).toBe(convertEn.quoteSource(nonBreakingClock(new Date(QUOTE_A.fetchedAtMs)), VENUE_A.display_name));
     expect(textOf(tree, 'convert-min-out')).toContain(fmtAssetCompact(MATH.minOut, 8, 'VCHF'));
@@ -628,7 +632,8 @@ describe('AUTO — the disclosed mechanical venue pick', () => {
   test('a pair with ONE quotable venue discloses the single form — no comparison that never happened', async () => {
     setRuntimeVenues(null); // the bundled registry alone: exactly one quotable venue on the pair
     const tree = await mountConvert('250000000', '1');
-    // ONE venue = the plain attribution on the merged line, no count that never happened.
+    // ONE venue = the plain attribution (no count that never happened), in Details.
+    await openDetails(tree);
     expect(textOf(tree, 'convert-venue-auto')).toBe(convertEn.quoteSource(nonBreakingClock(new Date(QUOTE_A.fetchedAtMs)), VENUE_A.display_name));
     // The pick is already armed: the common case is literally two taps.
     expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(false);
@@ -1311,12 +1316,12 @@ describe('hub destination — the two-quote composed surface under the sheet (20
     // The heading names the CURRENCY pair (currency-first grammar): CHF → ETH.
     const headingTexts = tree.root.findAllByType(Text).filter(n => n.props.children === convertEn.heading('CHF', 'ETH'));
     expect(headingTexts.length).toBeGreaterThanOrEqual(1);
-    // The receive figure is the composed net estimate; BOTH venues verbatim on the line.
+    // The receive figure is the composed net estimate; BOTH venues verbatim in Details.
     expect(textOf(tree, 'convert-headline')).toContain(convertEn.youReceive(fmtAssetCompact('1000000000000', 18, 'ETH')));
-    expect(textOf(tree, 'convert-quote-source')).toBe(
-      convertEn.multihop.hubQuoteSource('ICPSwap', 'ICPSwap', nbclock(1_700_000_005_000)));
     expect(textOf(tree, 'convert-route-via')).toBe(convertEn.multihop.viaHub('ICP'));
     await openDetails(tree);
+    expect(textOf(tree, 'convert-quote-source')).toBe(
+      convertEn.multihop.hubQuoteSource('ICPSwap', 'ICPSwap', nbclock(1_700_000_005_000)));
     const census = textOf(tree, 'convert-hub-census');
     expect(census).toContain(convertEn.multihop.hubCensusHeading);
     expect(census).toContain(convertEn.multihop.legSwap('ICPSwap', 'VCHF', 'ICP'));
@@ -1409,8 +1414,8 @@ describe('hub destination — the two-quote composed surface under the sheet (20
     // The title is the plan's own route, collapsed (the mid → dest hop pair).
     expect(textOf(tree, 'convert-state')).toContain(
       convertEn.multihop.routeHeadingCollapsed('ICP', 'VCHF', 'Internet Computer'));
-    // The swap leg names its OWN from→to from the frozen plan.
-    expect(textOf(tree, 'convert-leg-1')).toContain(convertEn.multihop.legSwap('ICPSwap', 'ICP', 'VCHF'));
+    // The swap leg names its OWN from→to from the frozen plan (the plain story line).
+    expect(textOf(tree, 'convert-leg-1')).toContain(convertEn.story.swap('ICP', 'VCHF'));
     expect(textOf(tree, 'convert-leg-1')).not.toContain('ICP \u2192 ICP');
   });
 
@@ -1445,8 +1450,8 @@ describe('hub destination — the two-quote composed surface under the sheet (20
     });
     jest.mocked(convertResumeSnapshot).mockReturnValue({[live.id]: live});
     const tree = await mountConvert('250000000', null);
-    expect(textOf(tree, 'convert-leg-1')).toContain(convertEn.multihop.legSwap('ICPSwap', 'ICP', 'USDC'));
-    expect(textOf(tree, 'convert-leg-3')).toContain(convertEn.multihop.legSwap(venueDisplayName('icpswap-ckusdc'), 'USDC', 'VCHF'));
+    expect(textOf(tree, 'convert-leg-1')).toContain(convertEn.story.swap('ICP', 'USDC'));
+    expect(textOf(tree, 'convert-leg-3')).toContain(convertEn.story.swap('USDC', 'VCHF'));
   });
 
   test('in-flight: four legs fully expanded, per-hop labels, top line tracks the current leg (D14/D15)', async () => {
@@ -1464,10 +1469,11 @@ describe('hub destination — the two-quote composed surface under the sheet (20
     expect(present(tree, 'convert-route-legs')).toBe(true);
     expect(present(tree, 'convert-leg-0')).toBe(true);
     expect(present(tree, 'convert-leg-3')).toBe(true);
-    expect(textOf(tree, 'convert-leg-2')).toContain(convertEn.multihop.legApprovePull('ICP'));
-    expect(textOf(tree, 'convert-leg-3')).toContain(convertEn.multihop.legSwap(venueDisplayName('icpswap-cketh'), 'ICP', 'ETH'));
-    expect(textOf(tree, 'convert-step')).toBe(
-      convertEn.multihop.legProgress(2, 4) + ' \u2014 ' + convertEn.multihop.legSwap(venueDisplayName('icpswap'), 'VCHF', 'ICP'));
+    // S3 story lines: plain verbs, no venue brand, and the top line is the ACTIVE leg
+    // itself - never a "Step n of m" counter (the counter is what contradicted the body).
+    expect(textOf(tree, 'convert-leg-2')).toContain(convertEn.story.letPoolUse('ICP'));
+    expect(textOf(tree, 'convert-leg-3')).toContain(convertEn.story.swap('ICP', 'ETH'));
+    expect(textOf(tree, 'convert-step')).toBe(convertEn.story.swap('VCHF', 'ICP'));
   });
 
   test('done: the hub receipt is the IN-WALLET copy — never the cash-out "on its way" family (D17)', async () => {
@@ -1492,7 +1498,10 @@ describe('hub destination — the two-quote composed surface under the sheet (20
     expect(receipt).toContain(convertEn.doneTitle);
     expect(receipt).toContain(convertEn.doneBody(fmtAssetCompact('1000000000000', 18, 'ETH')));
     expect(receipt).not.toContain(convertEn.multihop.doneOnItsWay);
-    expect(receipt).toContain(convertEn.doneTx('dest-tx-9'));
+    // The payout record folds under the receipt's Details (S4, spec 2026-10-04).
+    await act(async () => { node(tree, 'convert-details')!.props.onPress(); });
+    await act(async () => {});
+    expect(textOf(tree, 'convert-details-block')).toContain(convertEn.doneTx('dest-tx-9'));
   });
 
   test('failed_leg: the hub trio — first swap behind you, hub asset held, its own exits (D18)', async () => {

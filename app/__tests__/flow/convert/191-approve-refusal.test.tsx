@@ -43,7 +43,7 @@ hermeticDescribe('flow 191 — the approve refusal is a terminal failed card, ne
       await openConvertFor(m, 'icp');
       expect(m.driver.isPresent('convert-screen')).toBe(true);
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
 
       // Arm the approve_fail knob (AllowanceChanged{0}, the live-defect shape; one refusal).
       await approveFailKnob(ICP_LEDGER);
@@ -55,9 +55,11 @@ hermeticDescribe('flow 191 — the approve refusal is a terminal failed card, ne
       expect(await m.driver.findByTestID('convert-stuck', {timeoutMs: 1_000}).then(() => true).catch(() => false)).toBe(false);
 
       const failedBody = m.driver.readText('convert-failed');
-      expect(failedBody.includes('Swap not executed')).toBe(true);
-      expect(failedBody.includes('ICP') && failedBody.includes('refused the approval')).toBe(true);
-      expect(failedBody.includes('nothing moved') || failedBody.includes('No allowance was created')).toBe(true);
+      expect(failedBody.includes('Failed')).toBe(true);
+      // The plain-verb copy (the copy law bans "approve"): the ledger refused the FIRST
+      // signature - the position is unchanged, and that is the sentence.
+      expect(failedBody.includes('ICP') && failedBody.includes('refused the first signature')).toBe(true);
+      expect(failedBody.includes('nothing moved')).toBe(true);
       expect(failedBody.includes('Approving')).toBe(false);
 
       // The ledger is byte-whole: a refused approve charges no fee and moves nothing.

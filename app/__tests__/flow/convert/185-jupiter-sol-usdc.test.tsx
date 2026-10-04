@@ -7,6 +7,7 @@
 import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, onboardWallet, accountOf, openConvertFor, typeConvertAmount,
+  openConvertDetails,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -67,7 +68,8 @@ hermeticDescribe('flow 185 — SOL → USDC(Solana) via Jupiter, end to end, off
 
       // §2 Jupiter's own digits, verbatim through the relay proxy.
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
+      await openConvertDetails(m);
       const quoteSource = m.driver.readText('convert-venue-auto');
       assertIncludes(quoteSource, 'Jupiter', 'attribution names the venue');
       expect(quoteSource).toMatch(/\d{1,2}:\d{2}/); // the read instant
@@ -78,7 +80,7 @@ hermeticDescribe('flow 185 — SOL → USDC(Solana) via Jupiter, end to end, off
       assertIncludes(m.driver.readText('convert-min-out'), '10.25 USDC', 'minimum is otherAmountThreshold verbatim');
 
       // The census folds behind Details; the fee-note + dpay lines are GONE.
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       await m.driver.waitForFunction(
         () => m!.driver.isPresent('convert-rate') && m!.driver.isPresent('convert-pool-principal'),
         {timeoutMs: 15_000, label: 'the census mounted behind Details'},
@@ -104,9 +106,11 @@ hermeticDescribe('flow 185 — SOL → USDC(Solana) via Jupiter, end to end, off
 
       // §4 confirm: re-quote, verbatim quoteResponse POST, beneficiary-checked venue tx, one broadcast.
       await m.driver.click('btn-convert-confirm', {timeoutMs: 5_000});
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 60_000})).toBe(true);
+      expect(await m.driver.waitForText('Done', {timeoutMs: 60_000})).toBe(true);
 
       // §5 the done panel is honest: the REALIZED chain credit, payout by signature.
+      // The Solana machine's done card still shows the payout record openly (its Details
+      // fold lands with the S3 consolidation; the tracker's is folded already).
       const done = m.driver.readText('convert-done');
       assertIncludes(done, '10.36 USDC', 'done reports the realized token credit');
       assertIncludes(done, 'Payout record:', 'done names the payout record');

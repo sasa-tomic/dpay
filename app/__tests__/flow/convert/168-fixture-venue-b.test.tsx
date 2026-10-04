@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, openOtherVenues, fmtHero,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -54,7 +55,7 @@ hermeticDescribe('flow 168 — picking fixture venue B executes through pool B, 
 
       await openConvertFor(m, 'icp');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
       await openOtherVenues(m);
 
       // The oracle BEFORE the pick: pool B's own facts (its token0 is ICP).
@@ -79,7 +80,7 @@ hermeticDescribe('flow 168 — picking fixture venue B executes through pool B, 
       );
       await m.driver.findByTestID('convert-headline', {timeoutMs: 10_000});
       expect(m.driver.isPresent('convert-venue-none')).toBe(false);
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       expect(m.driver.readText('convert-pool-principal').trim()).toBe(POOL_B);
       assertIncludes(m.driver.readText('convert-counterparty'), 'ICPSwap (offline fixture)', 'the counterparty is attributed to venue B');
       assertIncludes(m.driver.readText('convert-headline'), `≈ ${fmtHero(net.toString(), 8, 'VCHF', {stable: true})}`, 'the headline states B\'s net output at display precision');
@@ -93,7 +94,8 @@ hermeticDescribe('flow 168 — picking fixture venue B executes through pool B, 
         const changed = await m.driver.findByTestID('convert-moved-note', {timeoutMs: 2_000}).catch(() => null);
         if (changed == null) break;
       }
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 60_000})).toBe(true);
+      expect(await m.driver.waitForText('Done', {timeoutMs: 60_000})).toBe(true);
+      await openConvertDetails(m); // the payout record folds under Details (S4, spec 2026-10-04)
       const done = m.driver.readText('convert-done');
       assertIncludes(done, `${fmt8(gross)} VCHF`, 'the done panel states B\'s quoted payout');
       assertIncludes(done, 'Payout record', 'the done panel carries the payout record');

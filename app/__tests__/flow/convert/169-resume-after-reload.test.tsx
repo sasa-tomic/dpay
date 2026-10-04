@@ -8,6 +8,8 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount,
+  openConvertDetails,
+  closeConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {deadline as budgetDeadline, scaled as budgetScaled} from '../harness/budget';
@@ -30,8 +32,11 @@ const SEED = 300000000; // 3 ICP
 const AMOUNT_IN = 100000000n; // 1 ICP
 /** The pool the sheet's auto pick is executing through (real vs fixture — the file runs in the
  *  two-venue world, and the real pool's edge over the fixture flips as its state drifts). */
-function pickedPool(m: Awaited<ReturnType<typeof onboardWallet>>): string {
-  return (m.driver.readTextSafe('convert-venue-auto') ?? '').includes('offline fixture') ? POOL_B : POOL;
+async function pickedPoolAsync(m: Awaited<ReturnType<typeof onboardWallet>>): Promise<string> {
+  await openConvertDetails(m);
+  const pick = (m.driver.readTextSafe('convert-venue-auto') ?? '');
+  await closeConvertDetails(m); // collapsed again for the reads below
+  return pick.includes('offline fixture') ? POOL_B : POOL;
 }
 async function swapQuoteOut(pool: string): Promise<bigint> {
   const q = await relayGet(`/api/v1/swap_quote?pool=${pool}&token_in=${ICP_LEDGER}&token_out=${VCHF_LEDGER}&amount_in=${AMOUNT_IN}`) as {amount_out: string};
@@ -56,13 +61,13 @@ hermeticDescribe('flow 169 — a pending conversion survives an app reload; the 
 
       await openConvertFor(m, 'icp');
       await typeConvertAmount(m, '1');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 10_000});
 
       // Park the conversion on the honest pending (venue holds the output) — both pools, the
       // winner-derived gross, exactly flow 141's adaptation to the two-venue world.
       await swapPoolKnob({pool: POOL, fail_withdrawal: true});
       await swapPoolKnob({pool: POOL_B, fail_withdrawal: true});
-      const winPool = pickedPool(m);
+      const winPool = await pickedPoolAsync(m);
       const executedGross = await swapQuoteOut(winPool);
       let parked = false;
       for (let round = 0; round < 5 && !parked; round++) {

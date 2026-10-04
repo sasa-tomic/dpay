@@ -181,9 +181,11 @@ export class Driver {
   }
 
   async click(testID: string, opts: WaitOpts = {}): Promise<void> {
-    const node = await this.findByTestID(testID, opts);
-    // Pressable/Pressable-like props carry onPress directly (the app's convention — the same
-    // press idiom every existing component test uses).
+    await this.findByTestID(testID, opts);
+    // RN mirrors a testID onto wrapper layers; the pressable is whichever hit carries
+    // onPress (the app's convention - the same press idiom every component test uses).
+    const hits = this.findAllByTestID(testID);
+    const node = hits.find((n) => typeof n.props.onPress === 'function') ?? hits[0];
     const onPress = node.props.onPress as ((...a: unknown[]) => void) | undefined;
     if (typeof onPress !== 'function') {
       throw new Error(`[driver] testID=${testID} has no onPress to press`);

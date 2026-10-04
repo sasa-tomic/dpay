@@ -22,6 +22,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, pickSwapTarget,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {deadline as budgetDeadline} from '../harness/budget';
@@ -107,7 +108,7 @@ hermeticDescribe('flow 228 — a covering hop balance retires the swap, the cefi
       await openConvertFor(m, 'vchf');
       await pickSwapTarget(m, 'EUR');
       await typeConvertAmount(m, '2');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 15_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 15_000});
       const vchfBefore = BigInt(await getBalance(account!.publicHex, 7));
       const icpBefore = BigInt(await getBalance(account!.publicHex, 8));
       await m.driver.click('btn-convert-confirm', {timeoutMs: 5_000});
@@ -165,7 +166,9 @@ hermeticDescribe('flow 228 — a covering hop balance retires the swap, the cefi
       const done = m.driver.readText('convert-done');
       assertIncludes(done, '0.0495', 'done reports the VENUE\'s own settle amount');
       assertIncludes(done, 'EURC', 'done names the settle asset');
-      assertIncludes(done, 'sol-settle-sig-228', 'the payout record is the venue\'s settle hash');
+      // The payout record folds under the receipt's Details (S4, spec 2026-10-04).
+      await openConvertDetails(m);
+      assertIncludes(m.driver.readText('convert-details-block'), 'sol-settle-sig-228', 'the payout record is the venue\'s settle hash');
       expect((await sideshiftRelayHits()).shiftCalls).toBe(1);
     } finally {
       if (m) await m.unmount().catch(() => undefined);

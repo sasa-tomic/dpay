@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, pickSwapTarget, openOtherVenues,
+  openConvertDetails,
 } from '../harness/lib';
 import {deadline as budgetDeadline} from '../harness/budget';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -80,7 +81,8 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
       // §1 the disclosed pick, the disclosure, and the verbatim quote.
       await openConvertFor(m, 'icp');
       await pickSwapTarget(m, 'SOL');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 8_000});
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-venue-auto'), 'SideShift', 'the pick line names the venue');
       await openOtherVenues(m);
       expect(m.driver.isPresent('convert-venues-expanded')).toBe(true);
@@ -89,7 +91,7 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
       assertIncludes(m.driver.readText('convert-settle-address'), kp.address, 'the payout address is the wallet\'s OWN derived Solana address');
       expect(await m.driver.waitForText('0.0495 SOL', {timeoutMs: 15_000})).toBe(true);
       assertIncludes(m.driver.readText('convert-venue-auto'), 'SideShift', 'the quote is attributed to SideShift (the ONE merged line, auto-picked)');
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       await m.driver.waitForFunction(() => m!.driver.isPresent('convert-counterparty'), {timeoutMs: 15_000, label: 'the census mounted'});
       const counterparty = m.driver.readText('convert-counterparty');
       assertIncludes(counterparty, 'SideShift', 'the counterparty line names the venue');
@@ -168,7 +170,10 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
       await m.driver.findByTestID('convert-deposit-auto-note', {timeoutMs: 8_000});
       setSideShiftStatus('refunded');
       await m.driver.findByTestID('convert-provider-refunded', {timeoutMs: 45_000});
-      assertIncludes(m.driver.readText('convert-provider-refunded'), 'SideShift', 'the refund dead-end names the venue that holds the remedy');
+      // The remedy's machine facts (venue + order id) fold under Details on the terminal
+      // card (the copy law, spec 2026-10-04 §3).
+      await openConvertDetails(m);
+      assertIncludes(m.driver.readText('convert-refunded-venue'), 'SideShift', 'the refund dead-end names the venue that holds the remedy (Details)');
 
       // §9 audits: status keying, no unexpected origins, ledger truth.
       const st = sideShiftStubState();

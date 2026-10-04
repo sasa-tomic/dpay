@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, onboardWallet, accountOf, openConvertFor, typeConvertAmount,
   pickSwapTarget, openOtherVenues,
+  openConvertDetails,
 } from '../harness/lib';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -47,7 +48,7 @@ hermeticDescribe('flow 198 — SOL → ICP via the trocador aggregator: every ve
       expect(m.driver.isPresent('convert-screen')).toBe(true);
       assertIncludes(m.driver.readText('convert-screen'), 'Convert SOL → USD', 'the standing pair is SOL→USD (registry order)');
       await pickSwapTarget(m, 'ICP');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 8_000});
       await openOtherVenues(m);
       expect(m.driver.isPresent('convert-venue-trocador')).toBe(true);
       await m.driver.click('convert-venue-trocador', {timeoutMs: 3_000});
@@ -57,6 +58,7 @@ hermeticDescribe('flow 198 — SOL → ICP via the trocador aggregator: every ve
         () => m!.driver.readTextSafe('convert-headline')?.includes('0.0496 ICP') === true,
         {timeoutMs: 20_000, label: 'the venue settle figure rendered (the rate arrived)'},
       );
+      await openConvertDetails(m);
       assertIncludes(m.driver.readText('convert-quote-source'), 'Trocador', 'attribution names the venue (override: the plain attribution line)');
       expect(m.driver.readText('convert-quote-source')).toMatch(/\d{1,2}:\d{2}/);
       await m.driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
@@ -64,7 +66,7 @@ hermeticDescribe('flow 198 — SOL → ICP via the trocador aggregator: every ve
       expect(settle).toBe(await icpAccountIdHex(account!.publicHex));
       expect(m.driver.isPresent('convert-slippage')).toBe(false);
       expect(m.driver.isPresent('convert-min-out')).toBe(false);
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       await m.driver.waitForFunction(() => m!.driver.isPresent('convert-counterparty'), {timeoutMs: 15_000, label: 'the census mounted'});
       assertIncludes(m.driver.readText('convert-counterparty'), 'Trocador', 'counterparty line names the venue');
       assertIncludes(m.driver.readText('convert-counterparty'), 'automated exchange service', 'not a licensed provider');
@@ -80,7 +82,7 @@ hermeticDescribe('flow 198 — SOL → ICP via the trocador aggregator: every ve
       assertIncludes(handoff, '2 SOL', 'the exact deposit amount renders in the deposit asset');
       assertIncludes(handoff, 'exactly the deposit amount', 'the handoff says what to send');
       assertIncludes(handoff, 'not a party', 'dpay party-hood denied');
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 1_000, unscaled: true}).catch(() => false)).toBe(false);
+      expect(await m.driver.waitForText('Done', {timeoutMs: 1_000, unscaled: true}).catch(() => false)).toBe(false);
       expect(solSentTxs().length).toBe(0);
 
       // §4 the partner-key audit: EVERY venue call rode the relay, key attached.
@@ -113,7 +115,7 @@ hermeticDescribe('flow 198 — SOL → ICP via the trocador aggregator: every ve
 
       // §7 settle → done with the realized figures at the user's own address.
       await trocadorConfig({status: 'Completed', amount_to: '0.0496', hashout: 'sol-settle-sig-198'});
-      expect(await m.driver.waitForText('Converted', {timeoutMs: 90_000})).toBe(true);
+      expect(await m.driver.waitForText('Done', {timeoutMs: 90_000})).toBe(true);
       const done = m.driver.readText('convert-done');
       assertIncludes(done, '0.0496 ICP', 'done reports the realized settle figure');
       assertIncludes(done, 'Paid out to your own address', 'done names the payout destination');

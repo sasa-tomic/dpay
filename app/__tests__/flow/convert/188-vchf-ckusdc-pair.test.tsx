@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, pickSwapTarget, openOtherVenues,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -77,7 +78,7 @@ hermeticDescribe('flow 188 — the VCHF ↔ ckUSDC pair (registry order + both-d
       await typeConvertAmount(m, '10');
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
       expect(m.driver.isPresent('convert-unavailable')).toBe(false);
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       await m.driver.waitForFunction(
         () => m!.driver.isPresent('convert-pool-principal'),
         {timeoutMs: 15_000, label: 'the details census mounted'},
@@ -85,7 +86,7 @@ hermeticDescribe('flow 188 — the VCHF ↔ ckUSDC pair (registry order + both-d
       expect(m.driver.readText('convert-pool-principal').trim()).toBe(VCHF_USDC_POOL);
 
       await pickSwapTarget(m, 'USD');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 8_000});
       await openOtherVenues(m);
       await m.driver.findByTestID('convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp', {timeoutMs: 3_000});
       await m.driver.click('convert-venue-multihop:icpswap-vchf-ckusdc:2:cctp', {timeoutMs: 4_000});

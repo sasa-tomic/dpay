@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf,
   openConvertFor, typeConvertAmount, pickSwapTarget, openOtherVenues,
+  openConvertDetails,
 } from '../harness/lib';
 import {relayGet} from '../harness/relayClient';
 import {scaled as budgetScaled} from '../harness/budget';
@@ -98,7 +99,7 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
       // §1 the composed route is an explicit opt-in row behind the expander.
       await openConvertFor(m, 'icp');
       await pickSwapTarget(m, 'SOL');
-      await m.driver.findByTestID('convert-venue-auto', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-quote-ready', {timeoutMs: 8_000});
       await openOtherVenues(m);
       expect(await m.driver.findByTestID(ROUTE_C_ROW, {timeoutMs: 3_000}).then(() => true).catch(() => false)).toBe(true);
       await m.driver.click(ROUTE_C_ROW);
@@ -112,7 +113,7 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset');
 
       // §2 the cross-rail fee census (the census lines mount behind Details).
-      await m.driver.click('convert-details', {timeoutMs: 5_000});
+      await openConvertDetails(m);
       await m.driver.waitForFunction(
         () => m!.driver.isPresent('crossrail-external-gas') && m!.driver.isPresent('crossrail-circle-fee') && m!.driver.isPresent('crossrail-mint-floor'),
         {timeoutMs: 15_000, label: 'the cross-rail census mounted'},

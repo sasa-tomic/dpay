@@ -59,9 +59,9 @@ export function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack
   const activeLegIndex = legPlan.findIndex(lp => lp.state !== 'confirmed');
   const activeLeg = activeLegIndex >= 0 ? legPlan[activeLegIndex] : null;
   const swapOrdinalOf = (i: number): number => legPlan.slice(0, i).filter(x => x.kind === 'swap').length;
+  // S3: the active leg's own plain label - never a "Step n of m" counter.
   const stepLine = activeLeg != null
-    ? M.convert.multihop.legProgress(activeLegIndex + 1, legPlan.length) + ' — '
-      + plannedLegLabel(record, activeLeg, activeLeg.canister, venueName, swapOrdinalOf(activeLegIndex))
+    ? plannedLegLabel(record, activeLeg, activeLeg.canister, venueName, swapOrdinalOf(activeLegIndex))
     : null;
   return (
     <View testID="convert-state" style={S.convertWrap}>
@@ -111,7 +111,7 @@ export function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack
             ) : (
               <>
                 <Text style={S.convertStateTitle}>{M.convert.pendingTitle}</Text>
-                <Text style={S.convertStateBody}>{M.convert.pendingBody(view.sym, view.pool, formatClock(new Date(record.createdAtMs)))}</Text>
+                <Text style={S.convertStateBody}>{M.convert.pendingBody(view.sym)}</Text>
               </>
             )}
             <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
@@ -165,7 +165,7 @@ export function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack
               ) : null}
             </>
           ) : (
-            <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol, venueName)}</Text>
+            <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol)}</Text>
           )}
         </View>
       ) : null}
