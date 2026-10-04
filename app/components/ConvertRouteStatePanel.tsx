@@ -16,6 +16,8 @@ import {IconSwap} from './icons';
 import {
   ConvertHeader,
   activeLegExpiryMs,
+  LEG_DONE_MARKER,
+  legRowMood,
   pendingPayoutViewOf,
   plannedLegFee,
   plannedLegLabel,
@@ -261,13 +263,21 @@ export function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack
           const fee = plannedLegFee(record, lp, canister);
           const label = plannedLegLabel(record, lp, canister, venueName,
             (record.legPlan ?? []).slice(0, i).filter(x => x.kind === 'swap').length);
+          // STATEFUL (2026-10-04): done recedes behind the done marker, the active row is
+          // the one emphasized row, pending rows stay muted, refusals shout.
+          const mood = legRowMood(record.legPlan, i);
           return (
             <View key={i} testID={`convert-leg-${i}`}>
-              <Text style={S.convertChecklistLine}>{label}</Text>
+              <Text style={mood === 'done' ? S.convertChecklistLineDone
+                : mood === 'active' ? S.convertChecklistLineActive
+                  : mood === 'pending' ? S.convertChecklistLinePending
+                    : S.convertChecklistLine}>{label}</Text>
               <Text
                 testID={`convert-leg-${i}-state`}
-                style={lp.state === 'failed' ? [S.convertStateMeta, S.convertLegStateBad] : S.convertStateMeta}>
-                {fee != null ? `${legStateText(lp.state)} · ${fee}` : legStateText(lp.state)}
+                style={mood === 'failed' ? [S.convertStateMeta, S.convertLegStateBad]
+                  : mood === 'done' ? [S.convertStateMeta, S.convertLegStateDone]
+                    : S.convertStateMeta}>
+                {`${mood === 'done' ? LEG_DONE_MARKER + ' ' : ''}${fee != null ? `${legStateText(lp.state)} · ${fee}` : legStateText(lp.state)}`}
               </Text>
             </View>
           );

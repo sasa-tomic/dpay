@@ -2365,7 +2365,7 @@ import {ConvertStuckReceipts, stuckWindowExpired} from './ConvertStuckEvidence';
 import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 import {formatClock} from '../i18n/intl';
 import {IconChevronLeft} from './icons';
-import {activeLegExpiryMs, gasPreFundedAborted, pendingPayoutViewOf, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
+import {activeLegExpiryMs, gasPreFundedAborted, LEG_DONE_MARKER, legRowMood, pendingPayoutViewOf, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
 
 export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; onBack: () => void}) {
   const [, forceTick] = useState(0);
@@ -2859,13 +2859,23 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
             const fee = plannedLegFee(record, lp, canister);
             const label = plannedLegLabel(record, lp, canister, venueName,
               legPlan.slice(0, i).filter(x => x.kind === 'swap').length);
+            // STATEFUL (2026-10-04): done recedes behind the done marker, the active row
+            // is the one emphasized row, pending rows stay muted, refusals shout.
+            const mood = legRowMood(legPlan, i);
+            const stateLine = `${mood === 'done' ? LEG_DONE_MARKER + ' ' : ''}${fee != null ? `${legStateText(lp.state)} · ${fee}` : legStateText(lp.state)}`;
             return (
               <View key={i} testID={`convert-leg-${i}`} style={S.fieldLegRow}>
-                <Text style={S.fieldLegLabel}>{label}</Text>
+                <Text style={mood === 'done' ? S.fieldLegLabelDone
+                  : mood === 'active' ? S.fieldLegLabelActive
+                    : mood === 'pending' ? S.fieldLegLabelPending
+                      : S.fieldLegLabel}>{label}</Text>
                 <Text
                   testID={`convert-leg-${i}-state`}
-                  style={lp.state === 'failed' ? S.fieldLegStateBad : S.fieldLegState}>
-                  {fee != null ? `${legStateText(lp.state)} · ${fee}` : legStateText(lp.state)}
+                  style={mood === 'failed' ? S.fieldLegStateBad
+                    : mood === 'done' ? S.fieldLegStateDone
+                      : mood === 'active' ? S.fieldLegStateActive
+                        : S.fieldLegState}>
+                  {stateLine}
                 </Text>
               </View>
             );

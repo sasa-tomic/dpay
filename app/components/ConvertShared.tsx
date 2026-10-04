@@ -436,6 +436,22 @@ export function pendingPayoutViewOf(record: ConvertRecord): PendingPayoutView {
   return {kind: 'venue-payout', sym: record.hopSymbol ?? record.outSymbol, pool: venueEndpointOf(record.venueId)};
 }
 
+/** The leg checklist row's mood (2026-10-04 stateful leg list): confirmed rows are DONE,
+ *  the FIRST non-confirmed leg is the ACTIVE one, later rows stay PENDING, refusals shout.
+ *  The components map the mood to their own style tokens - the strings never move. */
+export type LegRowMood = 'done' | 'active' | 'pending' | 'failed';
+
+export function legRowMood(plan: LegPlan[] | null | undefined, i: number): LegRowMood {
+  const state = plan?.[i]?.state;
+  if (state === 'failed') return 'failed';
+  if (state === 'confirmed') return 'done';
+  const firstOpen = (plan ?? []).findIndex(l => l.state !== 'confirmed');
+  return i === firstOpen ? 'active' : 'pending';
+}
+
+/** The done row's state-line marker: the one glyph that says "behind you" without a word. */
+export const LEG_DONE_MARKER = '✓';
+
 export function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string, venueName: string, swapOrdinal = 0): string {
   if (lp.kind === 'sol_swap') {
     // The final Jupiter leg names ITS own venue (the cross-rail record's venueId is the IC

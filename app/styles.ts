@@ -388,6 +388,11 @@ function buildStyles(p: Palette) {
   convertDetailsToggleText: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
   convertDetailsChevronOpen: {transform: [{rotate: '180deg'}]},
   convertChecklistLine: {fontSize: 13, color: p.sub, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},
+  // The stateful leg checklist's panel-family twins (2026-10-04): done recedes, the active
+  // row is the one emphasized row, pending rows stay muted. Tokens only.
+  convertChecklistLineDone: {fontSize: 13, color: p.sub2, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},
+  convertChecklistLineActive: {fontSize: 13, color: p.ink, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sansMedium},
+  convertChecklistLinePending: {fontSize: 13, color: p.sub2, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},
   convertChecklistWarn: {fontSize: 13, color: p.bad, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sansMedium},
   // The pool principal on its own line: 27 hyphenated characters inside a paragraph wrap
   // mid-token (browsers break at '-'), so it gets the receipt voice and a line of its own.
@@ -474,6 +479,7 @@ function buildStyles(p: Palette) {
   // A failed leg state INSIDE a checklist keeps the list's left alignment - S.err centers,
   // which is right for standalone form errors and wrong inside the leg list (2026-09-20).
   convertLegStateBad: {color: p.bad},
+  convertLegStateDone: {color: p.sub2},
   // TRANSIENT dimming - a busy button while its spinner runs, and the header account block while
   // a payment holds it locked. NOT the disabled-button state (that is `disabledFlat` +
   // `disabledText`, which swaps the fill instead of fading it; see the note there).
@@ -1122,6 +1128,14 @@ function buildStyles(p: Palette) {
   fieldHeaderTitle: {flex: 1, fontSize: 22, fontWeight: '700', color: p.brandInk, fontFamily: FONT.sansBold, letterSpacing: -0.3},
   fieldLegs: {alignSelf: 'stretch', marginTop: 16},
   fieldLegStateBad: {fontSize: 13, color: p.brandInk, fontFamily: FONT.sansBold, opacity: 1, marginTop: 4, fontWeight: '700'},
+  // The stateful leg checklist (2026-10-04 composed-truth fix): done rows recede behind a
+  // done marker, the ACTIVE row is the one emphasized row, pending rows stay muted. Tokens
+  // only - the components keep the strings.
+  fieldLegLabelDone: {fontSize: 16, color: withAlpha(p.brandInk, 0.55), fontFamily: FONT.sans, lineHeight: 22},
+  fieldLegStateDone: {fontSize: 13, color: withAlpha(p.brandInk, 0.55), fontFamily: FONT.sans, marginTop: 4},
+  fieldLegLabelActive: {fontSize: 16, color: p.brandInk, fontFamily: FONT.sansMedium, lineHeight: 22},
+  fieldLegStateActive: {fontSize: 13, color: p.brandInk, fontFamily: FONT.sansMedium, marginTop: 4},
+  fieldLegLabelPending: {fontSize: 16, color: withAlpha(p.brandInk, 0.7), fontFamily: FONT.sans, lineHeight: 22},
   // The composed tracker's verbatim venue deposit address (mono, brandInk, wraps left-aligned).
   fieldPrincipal: {fontSize: 12, color: p.brandInk, fontFamily: FONT.mono, lineHeight: 18, marginTop: 4, marginBottom: 8},
   });

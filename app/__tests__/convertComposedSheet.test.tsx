@@ -88,6 +88,7 @@ import {relayFetch} from '../services/relay';
 import {fetchSideShiftQuote, createSideShiftFixedShift} from '../services/sideshift';
 import {adoptConvertRecord} from '../convertResume';
 import {formatClock} from '../i18n/intl';
+import {S} from '../styles';
 import type {ConvertRecord} from '../convert';
 import type {Identity} from '../lib/types';
 import {buildSelectableAssets} from '../config/assets';
@@ -334,6 +335,18 @@ describe('the composed one-press consent', () => {
     // ONE EXPIRY: the ACTIVE leg's binding deadline, never leg 0's spent clock.
     expect(textOf(tree, 'convert-expiry')).toContain(formatClock(new Date(T1)));
     expect(textOf(tree, 'convert-expiry')).not.toContain(formatClock(new Date(T0)));
+    // STATEFUL LEG LIST: done recedes behind a done marker, the active row is the one
+    // emphasized row, pending rows stay muted - never a flat stale instruction list.
+    const rowStyles = (testID: string): {label: unknown; state: unknown} => {
+      const texts = present(tree, testID)[0].findAllByType(Text);
+      return {label: texts[0]!.props.style, state: texts[1]!.props.style};
+    };
+    const leg0 = rowStyles('convert-leg-0');
+    expect(leg0.label).toBe(S.fieldLegLabelDone);
+    expect(leg0.state).toBe(S.fieldLegStateDone);
+    expect(textOf(tree, 'convert-leg-0-state')).toContain('✓');
+    expect(rowStyles('convert-leg-1').label).toBe(S.fieldLegLabelActive);
+    expect(rowStyles('convert-leg-2').label).toBe(S.fieldLegLabelPending);
   });
 
   test('the cefi wait copy says the venue is waiting for the deposit - not holding it', async () => {
