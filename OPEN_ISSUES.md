@@ -20,37 +20,32 @@
 
 ## NEXT SESSION — work order
 
-**CCTP LIVE ROUND TRIP (2026-10-03/04 night): every money leg EXCEPT the final Circle burn is
-LIVE-PROVEN with existing funds; the burn itself is BLOCKED ON-CHAIN - a real D31 finding, full
-evidence below. Nothing lost; the recovery path is itself live-proven.** The night ran THREE
-full app drives on the emulator (float seed, prod relay) plus two raw funded rounds:
-(1) trip 1+2: IC legs 1-4 confirmed, the minter's withdraw DELIVERED on-chain twice (USDC
-8.336405 then 8.185356 at the device's own EVM address, both verified via `eth_call balanceOf`),
-the withdraw reply misread refused (empty reason) 2/2 - DETERMINISTIC - and the record died
-failed_leg before the device burn. THE FIX landed (299d695c verify-at-destination, TDD 58/58).
-(2) THE FULL ROUND TRIP with zero new funds (the founder's directive): the rail address
-approved + deposited 8.336917 USDC to the ckUSDC minter helper (scripts/evm-mainnet-usdc-ckdeposit.mjs,
-78f3f216; approve 0x45217dfe... + depositErc20 0xea42c035...), the minter minted 1:1 (~18 min),
-the app swapped ckUSDC->VCHF 6.7759236 (payout record 82645), and trip 3 ran on the FIXED build:
-IC legs 1-4 CONFIRMED, the withdraw DELIVERED 8.185356 USDC (verified on-chain) - the
-withdraw-refusal defect did NOT recur in a failing form (the fixed engine stayed parked past it).
-(3) THE BLOCKED FINAL LEG: the device-signed Circle burn reverts ON-CHAIN with an empty reason
-at ~29k gas in BOTH hook forms (extended 65B 0x0aeabfcb... AND static 32B 0x27366772...; the
-approve leg succeeds 0xaed9da6e...; allowance+balance verified 8185356). Byte-consistency
-verified: mintRecipient = the ATA (0f303432... = base58 22HkLh...), hookData owner = BzFNJ
-(a33f387d...), maxFee 400000 >= Circle's live census (route 0->5 live: minimumFee 1bps, med
-314431), minFinality 1000, tail padding per the pinned encoder. A same-ABI stranger burn
-succeeds (0x7af7d495..., 2545 USDC, domain 26). PRIME SUSPECTS for the fix lane: (a) Circle V2
-minimum burn amount for Eth->Solana ABOVE 8.19 USDC (the successful sample was 2545 USDC; the
-app's 4.4 floor is fee-math, not Circle's minimum), (b) a TokenMessenger hook-format change.
-NEXT: probe with a larger funded amount (needs ~20+ USDC - founder drip) and/or decode the
-deployed TM bytecode for a minimumBurnAmount check; the app path ALSO needs a resume gap fixed
-(a parked pending_withdrawal/crossing record was NOT re-adopted by the boot sweep after restart
-- the killarm session-ownership fix does not cover this park; the sheet re-open never re-armed
-the drive). LEDGER: rows 218-244, `funds reconcile` CLEAN. END STATE: USDC 8,187,212 at
-0x1888...27668 (in-wallet, verified), ckETH 0.000251 (minter-topped via scripts' depositEth),
-ckUSDC 0.062681, VCHF 0, USDC@Sol 0.828540, SOL 0.013078422. The value is NOT stranded: the
-deposit->mint->swap path that empties it into VCHF is itself proven live.
+**CCTP LIVE ROUND TRIP (2026-10-03/04): COMPLETE - the burn landed live, the root cause was the
+app's own encoder, and both product fixes are landed and gate-green.** Final state: the burn
+0xbeac9fae… (10.139901 USDC, feeExecuted exactly the frozen 378582 cap, Circle attested ~20s,
+forward COMPLETE, the Solana ATA credited 9.761319 = the record's mint floor to the digit;
+screenshots /tmp/opencode/cctpfix2-*.png). ROOT CAUSE (proven by the diagnosis lane
+ses_efbdbde95ffe82ATswpPRqs50H): `app/cctp.ts encodeDepositForBurnWithHook` wrote the dynamic
+bytes-tail OFFSET one word short (0xe0 instead of 0x100 - the offset must point at the tail's
+LENGTH word), so solc's ABI decoder failed and the TM reverted empty at ~29k gas; the smoke
+golden pins had frozen the buggy bytes. FIXED (TDD RED->GREEN, fd281ec3: offset + pins + the
+header note 'pin against the LIVE contract's decoder, never against the encoder's own output').
+The parked-record resume gap also FIXED (7238d55c: the boot sweep re-drives crossing+device
+records whose burnTxHash is still null) and VERIFIED LIVE (a parked watcher record flipped DONE
+after an app restart during the night's drive). The in-app funding chain ran live end-to-end:
+SOL->USDC via the app's jupiter row, USDC@Sol -> SideShift -> ICP -> ICPSwap -> 8.62542446 VCHF,
+then the fresh CCTP record 8.4 VCHF -> IC legs 0-4 confirmed -> 10.139901 USDC@Eth delivered
+(balanceOf-verified) -> the burn. Ledger rows 218-292, `funds reconcile` CLEAN; gates verify +
+test-app 4007/4007 pass dirty=no @ f8b95751.
+REMAINING (filed for the next session, small): (1) PHANTOM-REFUSAL INSTANCE 3 - the multihop
+leg driver mis-marked the withdraw `failed_leg/unknown` BEFORE leg 5 (the 299d695c
+verify-at-destination fix covers the refused branch; the UNKNOWN branch still marks failed
+instead of handing to the hop-row probe - the money was delivered and safe); terminal records
+are never re-driven, so the final burn was signed device-keyed OUTSIDE the in-flow signer (the
+record's own frozen bytes; the D31 mechanics are proven - the in-flow completion needs this
+fix). (2) The converter's maxFee honesty line should quote the maxFee CAP (Circle executed
+exactly the cap, not med+bps). (3) publicnode now 403s archive eth_getLogs (EVM history display
+only) - a keyed upstream is the founder's call (DO NOT NAG).
 
 **CoW Swap D31 LIVE TRIP: two hard blockers, both founder-owned (recon ses_efcccd3cbffeNVhKu95wvwBcag).**
 (1) prod relay runs fcb9c60f - the CoW order-API proxy (34bbe73e, `/api/v1/cow/mainnet/*`)
