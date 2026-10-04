@@ -285,6 +285,12 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
                 <Text testID="convert-deposit-auto-note" style={S.convertStateMeta}>
                   {M.convert.cefi.depositAutoNote(venueName, inSymbol)}
                 </Text>
+                {/* The exact figure the auto-send moves (the hop-skip census, 2026-10-04):
+                    the record's own frozen deposit amount, in the SOURCE asset's unit —
+                    the same formatter every money line uses. */}
+                <Text testID="convert-deposit-auto-amount" style={S.convertStateMeta}>
+                  {M.convert.cefi.depositAmountLabel}: {fmtAssetCompact(record.amountIn, inDecimals, inSymbol)}
+                </Text>
                 {record.providerDeposit.expiresAtMs != null ? (
                   <Text style={S.convertStateMeta}>
                     {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(record.providerDeposit.expiresAtMs)))}
