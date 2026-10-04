@@ -293,6 +293,14 @@ function buildStyles(p: Palette) {
   homeSeeAll: {minHeight: 44, justifyContent: 'center', alignItems: 'flex-end', paddingLeft: 16, flexShrink: 0},
   homeSeeAllText: {color: p.brandText, fontWeight: '600', fontSize: 14, fontFamily: FONT.sansMedium},
   homeActivity: {alignSelf: 'stretch', marginTop: 24},
+  // The in-app update notice (2026-10-04): ONE hairline-bound row — the line left, ONE compact
+  // brand-fill button right (the primary-button idiom at keycap size; LIFT stays reserved for
+  // full-width CTAs). Renders NOTHING when the check is silent: no reserved space, nothing to
+  // dismiss.
+  updateRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, alignSelf: 'stretch', marginTop: 12, backgroundColor: p.card, borderRadius: 12, borderWidth: 1, borderColor: p.line2, paddingVertical: 8, paddingLeft: 12, paddingRight: 8},
+  updateText: {flexShrink: 1, fontSize: 13, lineHeight: 18, color: p.ink, fontFamily: FONT.sans},
+  updateBtn: {minHeight: 44, paddingHorizontal: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: p.brand},
+  updateBtnText: {color: p.brandInk, fontSize: 15, fontWeight: '700', fontFamily: FONT.sansBold},
   // ── The Accounts route (2026-09-08) - the accounts list lifted off Home ────────────────────
   // Same rows, same testIDs; a route header (back + title) instead of an inline section heading,
   // and a divider that names the practice rail in a whole sentence before its row.

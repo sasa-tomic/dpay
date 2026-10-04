@@ -44,6 +44,8 @@ import {applyLocale} from './i18n';
 import {type LocaleChoice, deviceLocaleTag, localePersistValue, parseLocale} from './i18n/locale';
 import type {Identity} from './lib/types';
 import {hasSeen, useJourney} from './lib/journey';
+import {BUILD_COMMIT} from './lib/buildStamp';
+import {fetchUpdate, updateAvailable} from './lib/updateCheck';
 import {DpayCore} from './services/native';
 import {installLogSink} from './services/log';
 import {S, applyPalette} from './styles';
@@ -82,6 +84,26 @@ export default function App() {
   // Wallet renders the chooser instead of the wallet until they do. `undefined` would be a third
   // state with no extra meaning here: the mount read below always resolves it to a value or null.
   const [homeCurrency, setHomeCurrency] = useState<HomeCurrency | null>(null);
+
+  // The in-app update check (founder 2026-10-04: the app tells the user there is a newer version,
+  // and the download is 1-2 clicks). ONE fetch per launch, held as the ABSOLUTE download URL Home
+  // renders a single 'Update' button for — null means silent: same build, no APK served, a
+  // dev/test build (empty BUILD_COMMIT), or any fetch failure. lib/updateCheck owns the decision;
+  // this effect only runs it once and composes the URL.
+  const [updateUrl, setUpdateUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (BUILD_COMMIT === '') return; // dev/test build: no identity, the check stays silent
+    let alive = true;
+    fetchUpdate(relayUrl).then((info) => {
+      if (alive && info !== null && updateAvailable(info, BUILD_COMMIT) && info.apk !== null) {
+        setUpdateUrl(`${relayUrl.replace(/\/+$/, '')}${info.apk.url}`);
+      }
+    }).catch(() => {}); // fetchUpdate already swallows; this guard keeps the promise chain honest
+    return () => { alive = false; };
+    // ONE fetch per launch, against the mount-time relay: a mid-session relay edit must never
+    // turn the check into a poll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // The journey store, live: the router's second line reads a `seen` marker off it, and `see`
   // is the optimistic setter that makes the route flip on the tap rather than on the AsyncStorage
@@ -365,5 +387,5 @@ export default function App() {
     // same marker, so first run is never blocked by it.
     return <View style={S.screenFrame}><Practice identity={identity} relayUrl={relayUrl} onDone={() => markJourneySeen(FIRST_RUN_PRACTICE)} /></View>;
   }
-  return <View style={S.screenFrame}><Wallet identity={identity} relayUrls={relayUrls} setRelayUrls={persistRelayList} setSolanaRpc={persistSolanaRpc} setEvmRpc={persistEvmRpc} setIcGateway={persistIcGateway} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} homeCurrency={homeCurrency} onSetHomeCurrency={persistHomeCurrency} /></View>;
+  return <View style={S.screenFrame}><Wallet identity={identity} relayUrls={relayUrls} setRelayUrls={persistRelayList} setSolanaRpc={persistSolanaRpc} setEvmRpc={persistEvmRpc} setIcGateway={persistIcGateway} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} homeCurrency={homeCurrency} onSetHomeCurrency={persistHomeCurrency} updateUrl={updateUrl} /></View>;
 }

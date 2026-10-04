@@ -1,4 +1,5 @@
-import {Pressable, Text, View} from 'react-native';
+import {useState} from 'react';
+import {Linking, Pressable, Text, View} from 'react-native';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {M} from '../i18n';
@@ -44,7 +45,7 @@ import type {BalanceView} from '../lib/assetBalances';
 /** How many ledger rows the Home feed shows. Five since 2026-09-08. */
 export const ACTIVITY_ROWS = 5;
 
-export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBalances, catalog, online, history, noteFor, onDeposit, onConvert, onWithdraw, onOpenMenu, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings, ataSetup, onAtaSetupStart, onAtaSetupConfirm, onAtaSetupCancel, onAtaSetupShowSol}: {
+export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBalances, catalog, online, history, noteFor, onDeposit, onConvert, onWithdraw, onOpenMenu, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings, ataSetup, onAtaSetupStart, onAtaSetupConfirm, onAtaSetupCancel, onAtaSetupShowSol, updateUrl}: {
   assets: SelectableAsset[];
   homeCurrency: HomeCurrency;
   /** The main currency's preferred rail — the account this screen funds. Null only when the
@@ -83,6 +84,11 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   onAtaSetupConfirm?: () => void;
   onAtaSetupCancel?: () => void;
   onAtaSetupShowSol?: () => void;
+  /** The ABSOLUTE download URL when the one-shot update check reports a newer build (App runs
+   *  the check; lib/updateCheck owns the decision). Null/absent = silent: NOTHING renders —
+   *  no reserved space. Present = ONE line + ONE button (founder 2026-10-04: the notice and
+   *  the download in 1-2 clicks; the system installer prompt is the second click). */
+  updateUrl?: string | null;
 }) {
   // The eyebrow is the sketch's "Balance CHF" — the SHORT code, the unit a price is read in.
   // Offline OUTRANKS it: the marker moves onto the whole line, and nothing is asserted that the
@@ -109,6 +115,11 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   const actionIcon = noRail ? C.sub2 : C.brandText;
   // The refuse panel's copy affordance: the device's SOL receive address, copied in place.
   const {copied, copy} = useCopyFeedback();
+  // The update notice's one failure path: the OS refused to open the browser. The line swaps to
+  // the shared fallback (the URL itself, per the every-step-tells-you-what-to-do rule); the
+  // button stays — a retry is one tap away and never a second surface.
+  const [updateOpenFailed, setUpdateOpenFailed] = useState(false);
+  const updateLine = updateOpenFailed && updateUrl != null ? M.common.linkFallback(updateUrl) : M.update.available;
   return (
     <View>
       {/* The headline block IS the accounts affordance (kept from 2026-09-14) — tapping the
@@ -140,6 +151,24 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
           that is not answering, once, with its Settings escape. It sits OUTSIDE the tappable
           headline — one Pressable must never nest another. */}
       {homeAsset !== null && railUnreadable(homeBalance) ? <RailUnreadableNote asset={homeAsset} failure={homeBalance?.failure} onOpenSettings={onOpenSettings} /> : null}
+      {/* The in-app update notice (founder 2026-10-04): ONE line + ONE button, nothing else —
+          no dialog, no badge, no settings surface. Click 1 is the button (the browser downloads
+          the APK), the system installer prompt is click 2. Silent whenever the check did not
+          report a newer build: no reserved space, nothing to dismiss. Sits right under the
+          headline, beside the unreadable-rail note — a note-class row, not chrome. */}
+      {updateUrl != null ? (
+        <View style={S.updateRow} testID="update-banner">
+          <Text style={S.updateText}>{updateLine}</Text>
+          <Pressable
+            testID="btn-update-now"
+            style={S.updateBtn}
+            onPress={() => { Linking.openURL(updateUrl).catch(() => setUpdateOpenFailed(true)); }}
+            accessibilityRole="button"
+            accessibilityLabel={M.update.action}>
+            <Text style={S.updateBtnText}>{M.update.action}</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {/* The per-currency setup state (2026-10-01 founder directive): the ONE setup affordance
           lives HERE, in the currency's own view, shown only when this currency's SPL accounts
           are absent (Wallet passes the view model only then). The wallet-level banner above the

@@ -52,6 +52,7 @@ import {depositDe, withdrawDe} from './domains/de/deposit.ts';
 import {convertDe} from './domains/de/convert.ts';
 import {receiptDe} from './domains/de/receipt.ts';
 import {evmDe} from './domains/de/evm.ts';
+import {updateDe} from './domains/de/update.ts';
 import {errorsDe} from './domains/de/errors.ts';
 import {payDe, receiveDe} from './domains/de/pay.ts';
 import {onboardingDe, settingsDe} from './domains/de/settings.ts';
@@ -85,6 +86,8 @@ export const de: Messages = {
   receipt: receiptDe,
 
   evm: evmDe,
+
+  update: updateDe,
 
   nfc: {
     reason: {

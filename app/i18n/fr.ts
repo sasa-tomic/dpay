@@ -52,6 +52,7 @@ import {depositFr, withdrawFr} from './domains/fr/deposit.ts';
 import {convertFr} from './domains/fr/convert.ts';
 import {receiptFr} from './domains/fr/receipt.ts';
 import {evmFr} from './domains/fr/evm.ts';
+import {updateFr} from './domains/fr/update.ts';
 import {errorsFr} from './domains/fr/errors.ts';
 import {payFr, receiveFr} from './domains/fr/pay.ts';
 import {onboardingFr, settingsFr} from './domains/fr/settings.ts';
@@ -84,6 +85,7 @@ export const fr: Messages = {
   receipt: receiptFr,
 
   evm: evmFr,
+  update: updateFr,
   withdraw: withdrawFr,
 
   nfc: {

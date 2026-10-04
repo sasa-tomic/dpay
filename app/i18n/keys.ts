@@ -29,6 +29,7 @@ import type {EducationMessages, WalletMessages} from './domains/en/wallet';
 import type {ConvertMessages} from './domains/en/convert';
 import type {ReceiptMessages} from './domains/en/receipt';
 import type {EvmMessages} from './domains/en/evm';
+import type {UpdateMessages} from './domains/en/update';
 
 /**
  * The per-domain contracts, re-exported from the ONE module every locale already imports for
@@ -50,6 +51,7 @@ export type {
 export type {ConvertMessages} from './domains/en/convert';
 export type {ReceiptMessages} from './domains/en/receipt';
 export type {EvmMessages} from './domains/en/evm';
+export type {UpdateMessages} from './domains/en/update';
 
 /** Title + sub-line for one NFC tap phase, as rendered by the shared tap status view. */
 export type NfcPhaseCopy = {title: string; sub: string};
@@ -104,6 +106,10 @@ export type Messages = {
   /** The EVM rail's screens: receive address + request/settle, pay scan/sign, send with the gas
    *  honesty gate. Chain names and ETH are proper nouns — never translated. */
   evm: EvmMessages;
+
+  /** The in-app update notice (2026-10-04): ONE line + ONE button, rendered only when the
+   *  relay serves an APK whose build commit differs from this build's. */
+  update: UpdateMessages;
 
   nfc: {
     /** Why tap-to-pay is unavailable. Each ends with the honest fallback that QR always works. */
