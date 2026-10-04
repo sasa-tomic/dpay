@@ -1130,12 +1130,13 @@ function buildStyles(p: Palette) {
   fieldLegStateBad: {fontSize: 13, color: p.brandInk, fontFamily: FONT.sansBold, opacity: 1, marginTop: 4, fontWeight: '700'},
   // The stateful leg checklist (2026-10-04 composed-truth fix): done rows recede behind a
   // done marker, the ACTIVE row is the one emphasized row, pending rows stay muted. Tokens
-  // only - the components keep the strings.
-  fieldLegLabelDone: {fontSize: 16, color: withAlpha(p.brandInk, 0.55), fontFamily: FONT.sans, lineHeight: 22},
-  fieldLegStateDone: {fontSize: 13, color: withAlpha(p.brandInk, 0.55), fontFamily: FONT.sans, marginTop: 4},
+  // only - the components keep the strings. Receding is OPACITY on the approved ink (the
+  // stylesheet closure test admits no off-token colours).
+  fieldLegLabelDone: {fontSize: 16, color: p.brandInk, opacity: 0.55, fontFamily: FONT.sans, lineHeight: 22},
+  fieldLegStateDone: {fontSize: 13, color: p.brandInk, opacity: 0.55, fontFamily: FONT.sans, marginTop: 4},
   fieldLegLabelActive: {fontSize: 16, color: p.brandInk, fontFamily: FONT.sansMedium, lineHeight: 22},
   fieldLegStateActive: {fontSize: 13, color: p.brandInk, fontFamily: FONT.sansMedium, marginTop: 4},
-  fieldLegLabelPending: {fontSize: 16, color: withAlpha(p.brandInk, 0.7), fontFamily: FONT.sans, lineHeight: 22},
+  fieldLegLabelPending: {fontSize: 16, color: p.brandInk, opacity: 0.7, fontFamily: FONT.sans, lineHeight: 22},
   // The composed tracker's verbatim venue deposit address (mono, brandInk, wraps left-aligned).
   fieldPrincipal: {fontSize: 12, color: p.brandInk, fontFamily: FONT.mono, lineHeight: 18, marginTop: 4, marginBottom: 8},
   });
