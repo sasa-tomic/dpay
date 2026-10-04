@@ -122,7 +122,10 @@ services:
       DPAY_TRUST_PROXY: ${DPAY_TRUST_PROXY:-}
       DPAY_TROCADOR_RATE_PER_MIN: ${DPAY_TROCADOR_RATE_PER_MIN:-}
       DPAY_TROCADOR_TRADE_PER_MIN: ${DPAY_TROCADOR_TRADE_PER_MIN:-}
-      DPAY_APK_PATH: ${DPAY_APK_PATH:-}
+      # NOTE the default: the image bakes ENV DPAY_APK_PATH=/srv/dpay.apk (see Dockerfile), so the
+      # compose default must match it — an empty value here would OVERRIDE the image default with a
+      # path that cannot exist and silently disable the landing page's download.
+      DPAY_APK_PATH: ${DPAY_APK_PATH:-/srv/dpay.apk}
 
       # The Jupiter quote/swap API base override (default the live lite-api host; the offline
       # e2e loop points it at a stub — leave unset in prod).
