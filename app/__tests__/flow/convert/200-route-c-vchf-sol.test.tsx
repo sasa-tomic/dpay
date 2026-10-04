@@ -168,11 +168,13 @@ hermeticDescribe('flow 200 — VCHF → SOL Route C with the whole venue chain n
       const done = m.driver.readText('convert-done');
       assertIncludes(done, `${fmt(SOL_OUT, 9)} SOL`, 'done reports the REALIZED native credit');
       assertIncludes(done, kp.address, 'the Solana address is named');
-      assertIncludes(m.driver.readText('crossrail-done-via'), 'ICPSwap, Circle and Jupiter', 'the done receipt attributes the conversion to all three');
+      // The venue attribution + payout record fold under the receipt's Details (S4).
+      await openConvertDetails(m);
+      assertIncludes(m.driver.readText('crossrail-done-via'), 'ICPSwap, Circle and Jupiter', 'the done receipt attributes the conversion to all three (Details)');
 
       // Stub audits + ledger truth.
       expect(solSentTxs().length).toBe(1);
-      assertIncludes(done, solSentTxs()[0].signature, 'the payout record IS the broadcast signature');
+      assertIncludes(m.driver.readText('convert-details-block'), solSentTxs()[0].signature, 'the payout record IS the broadcast signature (Details)');
       const jup = await jupiterStubState();
       expect(jup).not.toBeNull();
       expect(jup!.unexpected.length).toBe(0);

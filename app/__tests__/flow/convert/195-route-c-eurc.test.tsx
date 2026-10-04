@@ -217,13 +217,15 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
       assertIncludes(done, `${fmt(EURC_OUT, 6)} EURC`, 'done reports the REALIZED EURC credit');
       expect(done.includes('EURC EURC')).toBe(false);
       assertIncludes(done, kp.address, 'the Solana address is named');
+      // The payout record folds under the receipt's Details (S4, spec 2026-10-04).
+      await openConvertDetails(m);
       for (let i = 0; i < 7; i++) {
         assertIncludes(m.driver.readText(`convert-leg-${i}-state`), 'Confirmed', `final leg ${i} of 7 reads Confirmed`);
       }
 
       // Stub audits + ledger truth.
       expect(solSentTxs().length).toBe(1);
-      assertIncludes(done, solSentTxs()[0].signature, 'the payout record IS the broadcast signature');
+      assertIncludes(m.driver.readText('convert-details-block'), solSentTxs()[0].signature, 'the payout record IS the broadcast signature (Details)');
       const jup = await jupiterStubState();
       expect(jup).not.toBeNull();
       expect(jup!.unexpected.length).toBe(0);

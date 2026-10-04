@@ -8,6 +8,7 @@ import {it, expect, afterEach, beforeAll} from '@jest/globals';
 import {
   assertIncludes, faucetAccount, onboardWallet, accountOf, openConvertFor,
   typeConvertAmount, pickSwapTarget,
+  openConvertDetails,
 } from '../harness/lib';
 import {deadline as budgetDeadline} from '../harness/budget';
 import {hermeticFlow, hermeticDescribe} from '../harness/hermetic';
@@ -76,7 +77,11 @@ hermeticDescribe('flow 208 — the CeFi lifecycle is honest past quote expiry', 
       await typeConvertAmount(m, '3');
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
       await m.driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
-      expect(await m.driver.waitForText('SideShift', {timeoutMs: 8_000})).toBe(true);
+      // The venue attribution lives inside Details (the copy law, spec 2026-10-04 §3):
+      // wait on the quote figure, then read the attribution in the opened census.
+      expect(await m.driver.waitForText('0.0495 SOL', {timeoutMs: 8_000})).toBe(true);
+      await openConvertDetails(m);
+      assertIncludes(m.driver.readText('convert-venue-auto'), 'SideShift', 'the pick line names the venue');
       await confirmCefi(m);
       await m.driver.findByTestID('convert-deposit-auto-note', {timeoutMs: 8_000});
       const handoff = m.driver.readText('convert-awaiting-deposit');
@@ -88,7 +93,7 @@ hermeticDescribe('flow 208 — the CeFi lifecycle is honest past quote expiry', 
       await m.driver.findByTestID('convert-quote-expired', {timeoutMs: 45_000});
       const expired = m.driver.readText('convert-quote-expired');
       expect(expired.includes('expired')).toBe(true);
-      assertIncludes(expired, 'returns it', 'the copy says the venue RETURNS a late deposit');
+      assertIncludes(expired, 'is simply returned', 'the copy says a late deposit is RETURNED (venue-lessly, the copy law)');
       assertIncludes(expired, 'keeps watching', 'the copy says dpay keeps watching in the background');
       expect(expired.includes('nothing needs reversing')).toBe(false);
 
@@ -103,7 +108,9 @@ hermeticDescribe('flow 208 — the CeFi lifecycle is honest past quote expiry', 
       // §4 the venue's later word lands: refunded after expiry → provider_refunded, on its own.
       setSideShiftStatus('refunded');
       await m.driver.findByTestID('convert-provider-refunded', {timeoutMs: 30_000});
-      assertIncludes(m.driver.readText('convert-provider-refunded'), 'SideShift', 'the refund card names the venue that holds the remedy');
+      // The remedy's venue folds under Details on the terminal card (the copy law).
+      await m.driver.click('convert-details');
+      assertIncludes(m.driver.readText('convert-refunded-details'), 'SideShift', 'the refund card names the venue that holds the remedy (Details)');
       const polls = sideShiftStubState()!.statusCalls;
       expect(polls.every((c) => c.id === SHIFT_ID)).toBe(true);
 

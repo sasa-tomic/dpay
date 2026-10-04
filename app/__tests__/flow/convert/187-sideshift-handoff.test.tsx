@@ -91,7 +91,6 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
       assertIncludes(m.driver.readText('convert-settle-address'), kp.address, 'the payout address is the wallet\'s OWN derived Solana address');
       expect(await m.driver.waitForText('0.0495 SOL', {timeoutMs: 15_000})).toBe(true);
       assertIncludes(m.driver.readText('convert-venue-auto'), 'SideShift', 'the quote is attributed to SideShift (the ONE merged line, auto-picked)');
-      await openConvertDetails(m);
       await m.driver.waitForFunction(() => m!.driver.isPresent('convert-counterparty'), {timeoutMs: 15_000, label: 'the census mounted'});
       const counterparty = m.driver.readText('convert-counterparty');
       assertIncludes(counterparty, 'SideShift', 'the counterparty line names the venue');
@@ -171,9 +170,10 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
       setSideShiftStatus('refunded');
       await m.driver.findByTestID('convert-provider-refunded', {timeoutMs: 45_000});
       // The remedy's machine facts (venue + order id) fold under Details on the terminal
-      // card (the copy law, spec 2026-10-04 §3).
-      await openConvertDetails(m);
-      assertIncludes(m.driver.readText('convert-refunded-venue'), 'SideShift', 'the refund dead-end names the venue that holds the remedy (Details)');
+      // card (the copy law, spec 2026-10-04 §3). The fold's container carries its own
+      // testID - it lives beside the generic details block, never with it.
+      await m.driver.click('convert-details');
+      assertIncludes(m.driver.readText('convert-refunded-details'), 'SideShift', 'the refund dead-end names the venue that holds the remedy (Details)');
 
       // §9 audits: status keying, no unexpected origins, ledger truth.
       const st = sideShiftStubState();
