@@ -47,8 +47,17 @@ fix). (2) The converter's maxFee honesty line should quote the maxFee CAP (Circl
 exactly the cap, not med+bps). (3) publicnode now 403s archive eth_getLogs (EVM history display
 only) - a keyed upstream is the founder's call (DO NOT NAG).
 
-**CoW Swap D31 LIVE TRIP: two hard blockers, both founder-owned (recon ses_efcccd3cbffeNVhKu95wvwBcag).**
-(1) prod relay runs fcb9c60f - the CoW order-API proxy (34bbe73e, `/api/v1/cow/mainnet/*`)
+**CoW Swap D31 LIVE TRIP: blocker 1 CLEARED (2026-10-04) - the prod relay now runs `b300dff9`**
+(deployed by the agent, founder-authorized; `just up` = docker compose on the relay box; container
+healthy; `POST /api/v1/cow/mainnet/quote` ANSWERS live: 20 ZCHF -> 0.008786 ETH). Remaining
+blocker: **funding** - the float cannot mint ZCHF in-app (VCHF->ZCHF refused; native ETH never a
+convert source) and every SideShift exit of the float's 9.761319 USDC@Sol crosses the venue's
+~9.9995 USDC fixed-quote floor (probed 2026-10-04: usdc->eth/icp/sol all 9.99945-9.99955; variable
+shifts need a partner affiliateId; the float's SOL 0.001577 converts to only ~0.18 USDC via
+Jupiter, landing 9.9413 = 0.058 short; the EVM rail is down to 0.0000656 ETH gas dust). The
+remaining autonomous path: a raw Circle CCTP Sol->Eth bridge script (the reverse of the proven
+Eth->Sol burn; ~1-2h work, sub-cent fees) to move ~9.7 USDC@Sol to USDC@Eth, then the V3 buy
+(~2.6 ZCHF after gas) and the live CoW order with its honest ~20% small-order fee.
 is NOT deployed: quote 404s live. (2) The float holds 0 ZCHF and the shipped matrix cannot
 mint ZCHF (VCHF->ZCHF refused - no venue; native ETH is never a convert source). CoW
 liquidity for ZCHF->WETH VERIFIED live (`verified: true`, protocolFeeBps 2; fee curve
