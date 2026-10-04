@@ -62,9 +62,11 @@ CoW Swap now carries its D31 live proof: the venue may claim 'supported'.
 Historical wall text (superseded by the completed chain): the earlier blocker analysis (SideShift
 fixed-quote floors, the no-ZCHF-in-app matrix fact, the ETH-gas requirement for the VaultRelayer
 approve + WETH unwrap) is preserved in git history (09c1bf20); the defects observed on the run:
-the 'Rate moved - Confirm again' loop needed ~11 confirms in ~3min (CoW's fee re-estimate jitters
-the quoted TOTAL +-0.04% per fetch - comparing price not fee-inclusive total would calm it; value
-4/M follow-up) and the ZCHF row's full-precision amount wraps two lines (cosmetic).
+the 'Rate moved - Confirm again' loop (CoW's fee re-estimate jitters the quoted TOTAL +-0.04%
+per fetch, which the confirm gesture treated as a moved quote) FIXED by `767c0951`: the confirm
+gesture signs a LIVE quote as displayed - `cowQuoteFresh` keys on the quote's own validTo window
+(the cefi order-is-the-lock precedent); only an expired window triggers one re-quote. The ZCHF
+row's full-precision amount wraps two lines (cosmetic).
 
 **GOAL (filed 2026-09-28): 2-tap swaps between ANY two supported currencies — LANDED 2026-09-30.**
 Spec: `docs/specs/2026-09-28-any-to-any-swap-goal.md`; matrix doc `docs/CONVERT_MATRIX.md`
