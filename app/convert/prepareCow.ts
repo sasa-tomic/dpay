@@ -25,6 +25,7 @@ import {
 import {venueOfId, type VenueEntry} from '../config/venues';
 import {evmAmmChainOf, evmAmmFamilyOf, evmAmmRailId, type EvmAmmChain} from '../config/evmAmm';
 import {dpayCowAppDataHash} from '../evm/cowPlan';
+import {type CowQuote} from '../evm/cow';
 import {M} from '../i18n';
 import {type ConvertRecord, type EvmSwapLeg} from './types';
 
@@ -155,4 +156,18 @@ export async function prepareCowConvertRecord(args: CowConvertPrepareArgs): Prom
     evmSwap: leg,
   };
   return {record, chain};
+}
+
+/**
+ * Is the displayed CoW quote still signable AS DISPLAYED? CoW quotes carry the venue's own
+ * `validTo` (absolute unix seconds) — an order signed inside that window locks the quoted
+ * buyAmount at fulfillment, so the confirm gesture does not re-quote a LIVE quote (the
+ * venue's per-fetch fee re-estimate jitters ±0.04%, and re-arming the confirm on that
+ * jitter loops the 2-tap grammar — the 2026-10-04 live CoW trip needed 11 confirms in 3
+ * minutes). An EXPIRED quote re-quotes and re-arms with the moved note. The
+ * order-is-the-lock precedent: the plain-cefi branch (prepare.ts, 2026-09-26).
+ */
+export function cowQuoteFresh(quote: Pick<CowQuote, 'validTo'>, nowMs: number): boolean {
+  if (!Number.isInteger(quote.validTo) || quote.validTo <= 0) return false;
+  return quote.validTo * 1000 > nowMs;
 }

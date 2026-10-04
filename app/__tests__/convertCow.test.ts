@@ -260,3 +260,16 @@ describe('hydration — the cow widening', () => {
     expect(Object.keys(salvageConvertStore(badAppData).records)).toEqual([]);
   });
 });
+
+describe('cowQuoteFresh - the confirm gesture signs a LIVE quote as displayed (the order is the lock)', () => {
+  test('a quote inside its validTo window is fresh - no re-quote, no confirm loop', async () => {
+    const {cowQuoteFresh} = await import('../convert/prepareCow');
+    expect(cowQuoteFresh({validTo: Math.floor(1_700_000_000) + 300}, 1_700_000_000_000)).toBe(true);
+  });
+  test('an expired (or malformed) validTo re-quotes and re-arms with the moved note', async () => {
+    const {cowQuoteFresh} = await import('../convert/prepareCow');
+    expect(cowQuoteFresh({validTo: Math.floor(1_700_000_000) - 1}, 1_700_000_000_000)).toBe(false);
+    expect(cowQuoteFresh({validTo: 0}, 1)).toBe(false);
+    expect(cowQuoteFresh({validTo: 1.5}, 1)).toBe(false);
+  });
+});

@@ -68,6 +68,7 @@ import {
   type CeFiQuoteResult,
 } from '../convert';
 import {cctpMaxFee, cctpMintFloor, fetchEthBalance} from '../cctp';
+import {cowQuoteFresh} from '../convert/prepareCow';
 import {DpayCore} from '../services/native';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
 import {USDC_MINT_ADDRESS} from '../solana/tokens';
@@ -1287,10 +1288,23 @@ export function ConvertIntentSheet({
         // record (the dry gas gate runs inside prepare) and adopts it — the executor signs.
         const tokenOut = activeRow.out.kind === 'native' ? '' : activeRow.out.address;
         const isCow = evmAmmFamilyOf(activeRow.venue.venue_id) === 'cowswap';
-        const fresh = isCow
-          ? await quoteCowSwap({relayUrl, chainId: activeRow.chainId, secretHex: identity.secretHex, tokenIn: activeRow.inAddress, tokenOut, amountIn: BigInt(amountRaw)})
-          : await quoteUniswapSwap({kind: 'exact-input', chainId: activeRow.chainId, tokenIn: activeRow.inAddress, tokenOut, amountIn: BigInt(amountRaw)});
-        if (fresh.amountOut !== b.quote.amountOut) {
+        // The CoW order IS the lock (the cefi precedent): a still-live displayed quote signs
+        // AS DISPLAYED - the venue freezes the quoted buyAmount at fulfillment, so re-quoting
+        // only feeds the ±0.04% per-fetch fee jitter that looped the confirm (the 2026-10-04
+        // live trip: 11 confirms in 3 minutes). Expired -> re-quote + the moved note, once.
+        const cowLive = isCow && cowQuoteFresh(b.quote as CowQuote, Date.now());
+        if (isCow && !cowLive) {
+          const fresh = await quoteCowSwap({relayUrl, chainId: activeRow.chainId, secretHex: identity.secretHex, tokenIn: activeRow.inAddress, tokenOut, amountIn: BigInt(amountRaw)});
+          if (mountedRef.current) {
+            const minOut = await DpayCore.icpSwapMinOut((fresh as unknown as CowQuote & {amountOut: string}).amountOut ?? fresh.buyAmount, slippageBps);
+            setEvmQuotes(prev => ({...prev, [activeRow.rowId]: {quote: fresh, minOut}}));
+            evmQuoteAmts.current[activeRow.rowId] = amountRaw;
+            setMoved({oldAmt: b.quote.amountOut, newAmt: (fresh as unknown as CowQuote & {amountOut: string}).amountOut ?? fresh.buyAmount});
+          }
+          return;
+        }
+        const fresh = isCow ? (b.quote as unknown as UniswapQuote & {amountOut: string}) : await quoteUniswapSwap({kind: 'exact-input', chainId: activeRow.chainId, tokenIn: activeRow.inAddress, tokenOut, amountIn: BigInt(amountRaw)});
+        if (!isCow && fresh.amountOut !== b.quote.amountOut) {
           if (mountedRef.current) {
             const minOut = await DpayCore.icpSwapMinOut(fresh.amountOut, slippageBps);
             setEvmQuotes(prev => ({...prev, [activeRow.rowId]: {quote: fresh, minOut}}));
@@ -1305,10 +1319,10 @@ export function ConvertIntentSheet({
               quote: {
                 venueId: activeRow.venue.venue_id,
                 amountIn: fresh.amountIn,
-                buyAmount: (fresh as CowQuote & {amountOut: string}).buyAmount,
-                feeAmount: (fresh as CowQuote & {amountOut: string}).feeAmount,
-                protocolFeeBps: (fresh as CowQuote & {amountOut: string}).protocolFeeBps,
-                validTo: (fresh as CowQuote & {amountOut: string}).validTo,
+                buyAmount: (fresh as unknown as CowQuote & {amountOut: string}).buyAmount,
+                feeAmount: (fresh as unknown as CowQuote & {amountOut: string}).feeAmount,
+                protocolFeeBps: (fresh as unknown as CowQuote & {amountOut: string}).protocolFeeBps,
+                validTo: (fresh as unknown as CowQuote & {amountOut: string}).validTo,
                 tokenIn: activeRow.inAddress,
                 tokenOut,
                 outRailId: activeRow.out.railId,

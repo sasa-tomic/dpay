@@ -47,24 +47,24 @@ fix). (2) The converter's maxFee honesty line should quote the maxFee CAP (Circl
 exactly the cap, not med+bps). (3) publicnode now 403s archive eth_getLogs (EVM history display
 only) - a keyed upstream is the founder's call (DO NOT NAG).
 
-**CoW Swap D31 LIVE TRIP: blocker 1 CLEARED (2026-10-04) - the prod relay now runs `b300dff9`**
-(deployed by the agent, founder-authorized; `just up` = docker compose on the relay box; container
-healthy; `POST /api/v1/cow/mainnet/quote` ANSWERS live: 20 ZCHF -> 0.008786 ETH). Remaining
-blocker: **funding** - the float cannot mint ZCHF in-app (VCHF->ZCHF refused; native ETH never a
-convert source) and every SideShift exit of the float's 9.761319 USDC@Sol crosses the venue's
-~9.9995 USDC fixed-quote floor (probed 2026-10-04: usdc->eth/icp/sol all 9.99945-9.99955; variable
-shifts need a partner affiliateId; the float's SOL 0.001577 converts to only ~0.18 USDC via
-Jupiter, landing 9.9413 = 0.058 short; the EVM rail is down to 0.0000656 ETH gas dust). The
-remaining autonomous path: a raw Circle CCTP Sol->Eth bridge script (the reverse of the proven
-Eth->Sol burn; ~1-2h work, sub-cent fees) to move ~9.7 USDC@Sol to USDC@Eth, then the V3 buy
-(~2.6 ZCHF after gas) and the live CoW order with its honest ~20% small-order fee.
-is NOT deployed: quote 404s live. (2) The float holds 0 ZCHF and the shipped matrix cannot
-mint ZCHF (VCHF->ZCHF refused - no venue; native ETH is never a convert source). CoW
-liquidity for ZCHF->WETH VERIFIED live (`verified: true`, protocolFeeBps 2; fee curve
-1 ZCHF ~37%, 20 ZCHF ~2.7% - a live order wants >=20 ZCHF seeded at 0x1888…27668). The
-trader DOES need ETH gas (the adapter always sends an exact-amount VaultRelayer approve +
-a WETH unwrap; worst ~0.000033 ETH - covered by the 0.0012 ETH on the rail). After the
-founder's relay redeploy + a ZCHF seed, the trip is a ~10-minute emulator run.
+**CoW Swap D31 LIVE TRIP: COMPLETE (2026-10-04) - the full funding chain ran with existing funds, the order is FULFILLED.**
+The prod relay runs `b300dff9` (deployed by the agent, founder-authorized; the CoW order-API proxy
+ANSWERS live). The funding wall (SideShift's 9.9995 floor vs 9.761319 held) was crossed by the raw
+Circle CCTP V1 Sol->Eth bridge (`scripts/cctp-sol-eth-bridge.mjs`, commit `32e48cd9`: Solana burn
+`4r7PZfP5…`, MessageTransmitter v1 `0x0a992d19…` receiveMessage mint `0x311c948a…`, 1:1, attestation
+<10s; V1 chosen over V2 for zero fee + instant rent reclaim), then the USDC->ZCHF V3 buy
+(`scripts/evm-mainnet-usdc-zchf-buy.mjs`, 4 txs), then **ONE live CoW order placed IN THE APP**
+(device-signed EIP-712, uid `0x5b5856f6…6ac1d345`, appCode dpay, **status fulfilled**, solver settled
+via VaultRelayer, app approve `0xd973544d…` + WETH unwrap `0xc073203b…` -> **0.003445332536202788 ETH
+received**, Home "Converted" panel cow-20.png). Total friction ≈0.26 USDC (V3 ~0.5% + CoW fee 0.0762
+ZCHF + gas); ledger rows 293-313, `funds reconcile` CLEAN 26 pairs, lease closed loss CHF 0.
+CoW Swap now carries its D31 live proof: the venue may claim 'supported'.
+Historical wall text (superseded by the completed chain): the earlier blocker analysis (SideShift
+fixed-quote floors, the no-ZCHF-in-app matrix fact, the ETH-gas requirement for the VaultRelayer
+approve + WETH unwrap) is preserved in git history (09c1bf20); the defects observed on the run:
+the 'Rate moved - Confirm again' loop needed ~11 confirms in ~3min (CoW's fee re-estimate jitters
+the quoted TOTAL +-0.04% per fetch - comparing price not fee-inclusive total would calm it; value
+4/M follow-up) and the ZCHF row's full-precision amount wraps two lines (cosmetic).
 
 **GOAL (filed 2026-09-28): 2-tap swaps between ANY two supported currencies — LANDED 2026-09-30.**
 Spec: `docs/specs/2026-09-28-any-to-any-swap-goal.md`; matrix doc `docs/CONVERT_MATRIX.md`
