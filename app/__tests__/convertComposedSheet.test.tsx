@@ -87,6 +87,7 @@ import {icStampExpiry} from '../services/icp';
 import {relayFetch} from '../services/relay';
 import {fetchSideShiftQuote, createSideShiftFixedShift} from '../services/sideshift';
 import {adoptConvertRecord} from '../convertResume';
+import {formatClock} from '../i18n/intl';
 import type {ConvertRecord} from '../convert';
 import type {Identity} from '../lib/types';
 import {buildSelectableAssets} from '../config/assets';
@@ -267,23 +268,101 @@ describe('the composed one-press consent', () => {
     expect(rec.providerRef?.orderId).toContain('shift-comp-1');
   });
 
-  test('the tracker narrates the venue order facts live during execution', async () => {
+  test('the tracker keeps the venue order facts in Details while the IC legs run', async () => {
     const tree = await mountComposedEur();
     await act(async () => {
       present(tree, 'btn-convert-confirm')[0].props.onPress();
     });
-    // The deposit address (which only exists once the order does) is disclosed live,
-    // verbatim, beside the venue-attributed order facts and the exact signed amount.
-    expect(exists(tree, 'convert-composed-live')).toBe(true);
+    // ONE ACTIVE LEG (2026-10-04 composed-truth fix): while the IC legs run, the NEXT
+    // leg's pre-created order is NOT the body - the body narrates the active leg, and the
+    // order facts (venue, locked figure, shift id, deposit address, window) live in the
+    // Details disclosure, closed by default.
+    expect(exists(tree, 'convert-composed-live')).toBe(false);
+    expect(exists(tree, 'convert-composed-order')).toBe(false);
+    await act(async () => {
+      present(tree, 'convert-details')[0].props.onPress();
+    });
+    await act(async () => {});
+    expect(exists(tree, 'convert-composed-order')).toBe(true);
     expect(textOf(tree, 'convert-composed-order')).toContain('SideShift');
     expect(textOf(tree, 'convert-composed-order')).toContain('0.88'); // the locked payout figure
     expect(textOf(tree, 'convert-composed-order-id')).toContain('shift-comp-1');
     expect(textOf(tree, 'convert-composed-order-at')).toContain('SideShift'); // attributed + timestamped
     expect(textOf(tree, 'convert-composed-deposit-amount')).toContain('0.891'); // the exact-amount gate's figure
     expect(textOf(tree, 'convert-composed-deposit-address')).toContain(VENUE_DEPOSIT_ADDRESS);
-    expect(exists(tree, 'convert-composed-expiry')).toBe(true); // the venue's deposit window
     // The deposit leg itself renders in the leg list, still pending.
     expect(textOf(tree, 'convert-leg-2')).toContain('SideShift');
+  });
+
+  test('a mid-route park renders the ACTIVE leg (the pool payout), never the queued order', async () => {
+    // The founder's 2026-10-04 screen: leg 2 (swap) still watching its payout while the
+    // leg-3 SideShift order sits pre-created. The body must be leg 2's truth - the pool
+    // accepted, the ICP payout is the wait - with no order details, no dest-asset claim,
+    // and no 'Payout pending' (that copy names a venue payout past the deposit).
+    const tree = await mountComposedEur();
+    await act(async () => {
+      present(tree, 'btn-convert-confirm')[0].props.onPress();
+    });
+    const adopted = jest.mocked(adoptConvertRecord).mock.calls[0][0] as ConvertRecord;
+    const T0 = 1_800_000_001_000; // leg 0's (spent) envelope death
+    const T1 = T0 + 5_400_000; // leg 1's - the ACTIVE leg's binding deadline (90 min later)
+    const parked: ConvertRecord = {
+      ...adopted,
+      step: 'pending_withdrawal',
+      legPlan: adopted.legPlan!.map((lp, i) => (
+        i === 0 ? {...lp, state: 'confirmed' as const}
+          : i === 1 ? {...lp, state: 'sent' as const}
+            : {...lp, state: 'pending' as const})),
+      legs: adopted.legs.map((l, i) => ({...l, expiresAtMs: i === 1 ? T1 : T0})),
+    };
+    await act(async () => {
+      (globalThis as {__SHEET_TEST_EMIT?: (records: Record<string, ConvertRecord>) => void}).__SHEET_TEST_EMIT?.({[parked.id]: parked});
+    });
+    // The step header and the body name the SAME leg.
+    expect(textOf(tree, 'convert-step')).toContain('Step 2 of 3');
+    expect(exists(tree, 'convert-pending')).toBe(true);
+    const body = textOf(tree, 'convert-pending');
+    expect(body).toContain('ICP'); // the payout actually being watched
+    expect(body).toContain('Pool accepted'); // the pool's own truth: input spent, payout owed
+    expect(body).not.toContain('Payout pending');
+    expect(body).not.toContain('EURC'); // the queued leg's asset never speaks
+    expect(body).not.toContain('SideShift');
+    expect(body).not.toContain('Shift'); // no raw shift id in the body
+    // The pre-created order is out of the body entirely.
+    expect(exists(tree, 'convert-composed-live')).toBe(false);
+    expect(exists(tree, 'convert-composed-order')).toBe(false);
+    // ONE EXPIRY: the ACTIVE leg's binding deadline, never leg 0's spent clock.
+    expect(textOf(tree, 'convert-expiry')).toContain(formatClock(new Date(T1)));
+    expect(textOf(tree, 'convert-expiry')).not.toContain(formatClock(new Date(T0)));
+  });
+
+  test('the cefi wait copy says the venue is waiting for the deposit - not holding it', async () => {
+    // The venue's own status word while the deposit is in flight is 'waiting': the panel
+    // may not claim the venue HOLDS the deposit (that state arrives with its own step).
+    const tree = await mountComposedEur();
+    await act(async () => {
+      present(tree, 'btn-convert-confirm')[0].props.onPress();
+    });
+    const adopted = jest.mocked(adoptConvertRecord).mock.calls[0][0] as ConvertRecord;
+    const awaiting: ConvertRecord = {
+      ...adopted,
+      step: 'awaiting_deposit',
+      legPlan: adopted.legPlan!.map(lp => ({...lp, state: 'confirmed' as const})),
+      composedDeposit: {...adopted.composedDeposit!, sentTx: 'block-213'},
+    };
+    await act(async () => {
+      (globalThis as {__SHEET_TEST_EMIT?: (records: Record<string, ConvertRecord>) => void}).__SHEET_TEST_EMIT?.({[awaiting.id]: awaiting});
+    });
+    expect(exists(tree, 'convert-awaiting-deposit')).toBe(true);
+    const body = textOf(tree, 'convert-awaiting-deposit');
+    expect(body).toContain('Waiting for deposit');
+    expect(body).toContain('waits for its ICP deposit'); // the venue's honest state
+    expect(body).not.toContain('Payout pending');
+    expect(body).not.toContain('holds the deposit and is executing'); // that is provider_processing's truth
+    expect(body).not.toContain('Still watching');
+    // The cefi leg IS the active leg here: the order facts belong in the body now.
+    expect(exists(tree, 'convert-composed-order')).toBe(true);
+    expect(textOf(tree, 'convert-composed-order')).toContain('SideShift');
   });
 
   test('a moved IC quote at the gesture re-arms BEFORE the order exists (old/new inline)', async () => {
@@ -327,9 +406,13 @@ describe('the composed one-press consent', () => {
     expect(jest.mocked(adoptConvertRecord).mock.calls.length).toBe(1);
     expect(exists(tree, 'convert-state')).toBe(true);
     // The adopted record prices the MOVED market's floor (0.85 floored to 0.8415), shown
-    // live on the tracker.
+    // in the order's Details disclosure (the body carries the active leg only).
     const rec = jest.mocked(adoptConvertRecord).mock.calls[0][0] as ConvertRecord;
     expect(rec.composedDeposit?.amountRaw).toBe('84150000');
+    await act(async () => {
+      present(tree, 'convert-details')[0].props.onPress();
+    });
+    await act(async () => {});
     expect(textOf(tree, 'convert-composed-deposit-amount')).toContain('0.8415');
   });
 

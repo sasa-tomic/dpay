@@ -3,7 +3,7 @@
 // IC form and the Solana surface (provider-shaped records).
 import {useEffect, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, View} from 'react-native';
-import {venueDisplayName, venueEndpointOf} from '../config/venues';
+import {venueDisplayName} from '../config/venues';
 import {convertAbortFlavor, convertRecordMinOut, type ConvertRecord} from '../convert';
 import {abortConvertRecord, acknowledgeStuckRecord, providerLastCheckedAtMs} from '../convertResume';
 import {solanaTokenOfMint} from '../solana/tokens';
@@ -14,7 +14,7 @@ import {copyToClipboard} from '../lib/clipboard';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconSwap} from './icons';
-import {ConvertHeader, gasPreFundedAborted, nonBreakingClock} from './ConvertShared';
+import {ConvertHeader, gasPreFundedAborted, nonBreakingClock, pendingPayoutViewOf} from './ConvertShared';
 import {ConvertStuckReceipts, stuckWindowExpired} from './ConvertStuckEvidence';
 import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 
@@ -58,7 +58,6 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
   // The record's own venue, looked up per V1 — display name and pool principal follow the
   // record, never a module constant.
   const venueName = venueDisplayName(record.venueId);
-  const venuePool = venueEndpointOf(record.venueId);
   // Both legs share the prepare-time expiry (the authority death the countdown shows).
   // The signed envelope's expiry: a pool leg carries its own; a CHAIN phase-1 record's only
   // signed thing is the deposit, whose window is the venue order's (chainRoute.expiresAtMs).
@@ -106,15 +105,25 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
         </View>
       ) : null}
-      {record.step === 'pending_withdrawal' ? (
-        <View testID="convert-pending">
-          <Text style={S.convertStateTitle}>{M.convert.pendingTitle}</Text>
-          <Text style={S.convertStateBody}>
-            {M.convert.pendingBody(outSymbol, venuePool, formatClock(new Date(record.createdAtMs)))}
-          </Text>
-          <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
-        </View>
-      ) : null}
+      {record.step === 'pending_withdrawal' ? (() => {
+        // ONE ACTIVE LEG (2026-10-04 composed-truth fix): the body names the payout the
+        // executor is actually probing, via the shared view (a direct record's own values
+        // fall out of it unchanged - sym = the output asset, pool = its own venue).
+        const view = pendingPayoutViewOf(record);
+        return (
+          <View testID="convert-pending">
+            <Text style={S.convertStateTitle}>
+              {view.kind === 'pool-watch' ? M.convert.awaitingPool : M.convert.pendingTitle}
+            </Text>
+            <Text style={S.convertStateBody}>
+              {view.kind === 'pool-watch'
+                ? M.convert.settlingBody(view.sym)
+                : M.convert.pendingBody(view.sym, view.pool, formatClock(new Date(record.createdAtMs)))}
+            </Text>
+            <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
+          </View>
+        );
+      })() : null}
       {/* The user's Stop (2026-09-19): offered while the conversion runs — widened 2026-09-24
           to the provider-held states (awaiting_deposit / provider_processing), where stopping
           means dpay stops polling the venue (the order's own life is the venue's business).

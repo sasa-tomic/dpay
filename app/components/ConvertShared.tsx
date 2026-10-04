@@ -7,7 +7,7 @@ import {useState} from 'react';
 import {Linking, Pressable, Text, View} from 'react-native';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
-import {BUNDLED_VENUES, venueDisplayName, venueOfId} from '../config/venues';
+import {BUNDLED_VENUES, venueDisplayName, venueEndpointOf, venueOfId} from '../config/venues';
 import type {ChainConvertRoute, ComposedConvertRoute} from '../config/convert';
 import {deriveConvertMath, fetchCeFiConvertQuote, fetchConvertQuote, isTerminalConvertStep, type ConvertMath, type ConvertQuote, type ConvertRecord, type LegPlan} from '../convert';
 import type {HubRoute} from '../routes';
@@ -387,6 +387,53 @@ export function routeTitleOf(record: ConvertRecord, hopSymbol: string, destSymbo
   return hopSymbol === destSymbol
     ? M.convert.multihop.routeHeadingCollapsed(record.inSymbol, hopSymbol, record.destNetwork ?? '')
     : M.convert.multihop.routeHeading(record.inSymbol, hopSymbol, destSymbol, record.destNetwork ?? '');
+}
+
+/** ONE active leg's binding deadline (2026-10-04 composed-truth fix): the clock a LIVE
+ *  state body shows is the ACTIVE leg's own envelope death - never leg 0's (a confirmed
+ *  leg's deadline is spent history; the founder's 2026-10-04 screen showed a stale leg-1
+ *  clock under a live leg-2 header). Planned records read the first non-confirmed leg's
+ *  signed envelope; direct records keep legs[0]; a chain phase 1 has no signed IC leg, so
+ *  the venue order's window stands in; nothing signed carries the creation clock. */
+export function activeLegExpiryMs(record: ConvertRecord): number {
+  const plan = record.legPlan ?? [];
+  const i = plan.findIndex(l => l.state !== 'confirmed');
+  const leg = i >= 0 ? record.legs[i] : undefined;
+  return leg?.expiresAtMs
+    ?? record.legs[0]?.expiresAtMs
+    ?? record.chainRoute?.expiresAtMs
+    ?? record.createdAtMs;
+}
+
+/** What the pending-withdrawal body must name (2026-10-04 composed-truth fix): the payout
+ *  ACTUALLY being watched, for the swap leg the executor is probing - never a later leg's
+ *  payout. A record whose cefi leg is still queued renders the POOL-watch shape (the pool
+ *  accepted its input and owes its own payout; the final-payout template names a venue
+ *  payout only where no later leg is queued). The pool id rides only where the pending
+ *  step IS that pool's leg - the executor's probe target, mirrored here exactly. */
+export type PendingPayoutView =
+  | {kind: 'pool-watch'; sym: string}
+  | {kind: 'venue-payout'; sym: string; pool: string};
+
+export function pendingPayoutViewOf(record: ConvertRecord): PendingPayoutView {
+  const plan = record.legPlan ?? [];
+  const swapIdx = plan.findIndex(l => l.kind === 'swap' && l.state !== 'confirmed');
+  const idx = swapIdx >= 0 ? swapIdx : plan.findIndex(l => l.kind === 'swap');
+  if (idx < 0) {
+    // No planned swap: the direct record's own output watch (venue-payout, its own pool).
+    return {kind: 'venue-payout', sym: record.outSymbol, pool: venueEndpointOf(record.venueId)};
+  }
+  if (plan[plan.length - 1]?.kind === 'deposit_transfer') {
+    // A queued cefi leg: the pool's payout is the wait, never the venue's.
+    return {kind: 'pool-watch', sym: record.hopSymbol ?? record.outSymbol};
+  }
+  const preLegCount = record.gasPre != null ? record.gasPre.legs.length * 2 : 0;
+  const ordinal = plan.slice(preLegCount, idx).filter(l => l.kind === 'swap').length;
+  if (ordinal >= 1 && record.venue2Id != null) {
+    // A hub record's SECOND swap: its dest payout, from venue2's own pool.
+    return {kind: 'venue-payout', sym: record.destSymbol ?? record.outSymbol, pool: venueEndpointOf(record.venue2Id)};
+  }
+  return {kind: 'venue-payout', sym: record.hopSymbol ?? record.outSymbol, pool: venueEndpointOf(record.venueId)};
 }
 
 export function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string, venueName: string, swapOrdinal = 0): string {

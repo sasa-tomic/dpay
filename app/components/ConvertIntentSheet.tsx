@@ -2359,17 +2359,19 @@ function fromBaseUnitsWei(wei: string): string {
 // provider, cross-rail and Solana record kinds keep their own panels (their deposit handoff,
 // calldata signing and chain watches are their own surfaces). Copy + testIDs carry over from
 // the state panels this tracker re-skins, so every invariant the flows assert survives.
-import {venueEndpointOf} from '../config/venues';
 import {convertAbortFlavor, convertRecordMinOut} from '../convert';
 import {abortConvertRecord, acknowledgeStuckRecord} from '../convertResume';
 import {ConvertStuckReceipts, stuckWindowExpired} from './ConvertStuckEvidence';
 import {stuckLastCheckedAtMs} from '../convert/stuckProbeLog';
 import {formatClock} from '../i18n/intl';
 import {IconChevronLeft} from './icons';
-import {gasPreFundedAborted, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
+import {activeLegExpiryMs, gasPreFundedAborted, pendingPayoutViewOf, plannedLegFee, plannedLegLabel, routeTitleOf} from './ConvertShared';
 
 export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; onBack: () => void}) {
   const [, forceTick] = useState(0);
+  // The composed order's Details disclosure (2026-10-04 composed-truth fix): while the
+  // cefi leg is NOT the active one, its order facts fold here - closed by default.
+  const [orderDetailsOpen, setOrderDetailsOpen] = useState(false);
   // stuck/pending states show when the signed envelopes expire — a 30 s tick keeps the
   // countdown honest; the engine (not this screen) advances the record itself.
   useEffect(() => {
@@ -2396,8 +2398,10 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
   const hopSymbol = record.hopSymbol ?? record.outSymbol;
   const destSymbol = record.destSymbol ?? record.outSymbol;
   const venueName = venueDisplayName(record.venueId);
-  const venuePool = venueEndpointOf(record.venueId);
+  // The stuck-evidence clock (the leg-0 envelope's death, verbatim history) vs the ACTIVE
+  // leg's binding deadline the live bodies show (2026-10-04 composed-truth fix).
   const legExpiryMs = record.legs[0]?.expiresAtMs ?? record.chainRoute?.expiresAtMs ?? record.createdAtMs;
+  const activeExpiryMs = activeLegExpiryMs(record);
   const legPlan = record.legPlan ?? [];
   const isHub = record.venue2Id != null;
   // The CHAIN record (2026-09-28): phase 1 has NO legPlan (the deposit transfer is the
@@ -2440,10 +2444,40 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
     : M.convert.signing;
   const inflightBody =
     record.step === 'approving' || record.step === 'approved'
-      ? M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), formatClock(new Date(legExpiryMs)))
+      ? M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), formatClock(new Date(activeExpiryMs)))
       : record.step === 'swapping'
         ? M.convert.swappingBody(venueName)
         : M.convert.settlingBody(destSymbol);
+  // The venue order's facts, verbatim (the composed body block AND the Details fallback's
+  // content - one source, so the two surfaces can never drift).
+  const composedOrderBlock = () => {
+    const cd = record.composedDeposit!;
+    const cdVenue = venueDisplayName(cd.venueId);
+    return (
+      <View testID="convert-composed-live" style={S.fieldLegs}>
+        <Text testID="convert-composed-order" style={S.fieldLegLabel}>
+          {M.convert.composedOrderLine(
+            cdVenue,
+            fmtAssetCompact(cd.settleAmountRaw ?? '0', cd.settleDecimals, cd.settleSymbol),
+          )}
+        </Text>
+        <Text testID="convert-composed-order-id" style={S.fieldLegLabel}>{M.convert.cefi.shiftId(cd.orderId)}</Text>
+        <Text testID="convert-composed-order-at" style={S.fieldLegLabel}>
+          {M.convert.quoteSource(nonBreakingClock(new Date(record.createdAtMs)), cdVenue)}
+        </Text>
+        <Text testID="convert-composed-deposit-amount" style={S.fieldLegLabel}>
+          {M.convert.cefi.depositAmountLabel}: {fmtAssetCompact(cd.amountRaw, hopDecimals, hopSymbol)}
+        </Text>
+        <Text testID="convert-composed-address-label" style={S.fieldLegLabel}>{M.convert.cefi.depositAddressLabel}</Text>
+        <Text testID="convert-composed-deposit-address" style={S.fieldPrincipal} selectable>{cd.depositAddress}</Text>
+        {cd.expiresAtMs != null ? (
+          <Text testID="convert-composed-expiry" style={S.fieldLegLabel}>
+            {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(cd.expiresAtMs)))}
+          </Text>
+        ) : null}
+      </View>
+    );
+  };
   return (
     <View testID="convert-state" style={S.fieldRoot}>
       {/* The field header: back + the record's own title, inverted ink. */}
@@ -2465,41 +2499,13 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
         <Text testID="convert-step" style={S.fieldBody}>{stepLine}</Text>
       ) : null}
 
-      {/* COMPOSED: the ONE consent's live narration (2-press fold, 2026-09-26). The venue
-          order was created before anything signed, so its facts are narrated here AS the
-          legs run: the venue + its locked payout figure verbatim (attributed + timestamped),
-          the venue's own deposit address revealed live, the exact amount the signed
-          transfer moves, and the venue's deposit window. Terminal states below name the
-          venue and the way out on their own. */}
-      {record.composedDeposit != null
-        && (inflight || record.step === 'pending_withdrawal' || record.step === 'awaiting_deposit') ? (() => {
-        const cd = record.composedDeposit!;
-        const cdVenue = venueDisplayName(cd.venueId);
-        return (
-          <View testID="convert-composed-live" style={S.fieldLegs}>
-            <Text testID="convert-composed-order" style={S.fieldLegLabel}>
-              {M.convert.composedOrderLine(
-                cdVenue,
-                fmtAssetCompact(cd.settleAmountRaw ?? '0', cd.settleDecimals, cd.settleSymbol),
-              )}
-            </Text>
-            <Text testID="convert-composed-order-id" style={S.fieldLegLabel}>{M.convert.cefi.shiftId(cd.orderId)}</Text>
-            <Text testID="convert-composed-order-at" style={S.fieldLegLabel}>
-              {M.convert.quoteSource(nonBreakingClock(new Date(record.createdAtMs)), cdVenue)}
-            </Text>
-            <Text testID="convert-composed-deposit-amount" style={S.fieldLegLabel}>
-              {M.convert.cefi.depositAmountLabel}: {fmtAssetCompact(cd.amountRaw, hopDecimals, hopSymbol)}
-            </Text>
-            <Text testID="convert-composed-address-label" style={S.fieldLegLabel}>{M.convert.cefi.depositAddressLabel}</Text>
-            <Text testID="convert-composed-deposit-address" style={S.fieldPrincipal} selectable>{cd.depositAddress}</Text>
-            {cd.expiresAtMs != null ? (
-              <Text testID="convert-composed-expiry" style={S.fieldLegLabel}>
-                {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(cd.expiresAtMs)))}
-              </Text>
-            ) : null}
-          </View>
-        );
-      })() : null}
+      {/* COMPOSED: the venue order's facts (2026-09-26), ONE ACTIVE LEG-gated (2026-10-04
+          composed-truth fix): the order was created before anything signed, but it is the
+          NEXT leg's business - its details hold the body only while the cefi leg IS the
+          active one (awaiting_deposit). While an earlier leg runs (or the pool payout is
+          being watched), the order facts live in the Details disclosure below - never as
+          the pending body. */}
+      {record.step === 'awaiting_deposit' && record.composedDeposit != null ? composedOrderBlock() : null}
 
       {/* CHAIN phase 1: the ONE consent's live narration — the venue order (its locked
           figures verbatim), the venue's own Solana deposit address, the exact amount the
@@ -2577,44 +2583,61 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
         </View>
       ) : null}
 
-      {record.step === 'pending_withdrawal' ? (
-        <View testID="convert-pending">
-          <ActivityIndicator size="large" color={C.brandInk} />
-          <Text style={S.fieldTitle}>{M.convert.pendingTitle}</Text>
-          <Text style={S.fieldBody}>{M.convert.pendingBody(destSymbol, venuePool, formatClock(new Date(record.createdAtMs)))}</Text>
-          <Text style={S.fieldBody}>{M.convert.stillWatching}</Text>
-          {legPlan.length > 0 ? (
-            <Text testID="convert-expiry" style={S.fieldBody}>
-              {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
-            </Text>
-          ) : null}
-        </View>
-      ) : null}
+      {record.step === 'pending_withdrawal' ? (() => {
+        // ONE ACTIVE LEG (2026-10-04 composed-truth fix): the body names the payout the
+        // executor is actually probing. A queued cefi leg keeps the pool-watch copy (the
+        // pool accepted its input; the venue's payout story waits for its own leg), and
+        // the direct/hub records keep the payout template with THEIR OWN asset + pool.
+        const view = pendingPayoutViewOf(record);
+        return (
+          <View testID="convert-pending">
+            <ActivityIndicator size="large" color={C.brandInk} />
+            {view.kind === 'pool-watch' ? (
+              <>
+                <Text style={S.fieldTitle}>{M.convert.awaitingPool}</Text>
+                <Text style={S.fieldBody}>{M.convert.settlingBody(view.sym)}</Text>
+              </>
+            ) : (
+              <>
+                <Text style={S.fieldTitle}>{M.convert.pendingTitle}</Text>
+                <Text style={S.fieldBody}>{M.convert.pendingBody(view.sym, view.pool, formatClock(new Date(record.createdAtMs)))}</Text>
+              </>
+            )}
+            <Text style={S.fieldBody}>{M.convert.stillWatching}</Text>
+            {legPlan.length > 0 ? (
+              <Text testID="convert-expiry" style={S.fieldBody}>
+                {M.convert.expiryLine(formatClock(new Date(activeExpiryMs)))}
+              </Text>
+            ) : null}
+          </View>
+        );
+      })() : null}
 
       {/* Composed: the deposit transfer went out automatically; this phase is the VENUE's
-          payout watch (the provider driver polls its status here). The leg list below shows
-          the deposit leg as sent — the depositLeg copy is the state line. */}
+          deposit wait (the provider driver polls its status here). The venue's own status
+          word while the deposit is in flight is 'waiting' - the panel says exactly that,
+          never that the venue already holds the deposit (that truth arrives with the
+          provider_processing step). */}
       {record.step === 'awaiting_deposit' && record.composedDeposit != null ? (
         <View testID="convert-awaiting-deposit">
           <ActivityIndicator size="large" color={C.brandInk} />
-          <Text style={S.fieldTitle}>{M.convert.pendingTitle}</Text>
+          <Text style={S.fieldTitle}>{M.convert.awaitingDepositTitle}</Text>
           <Text style={S.fieldBody}>
             {M.convert.depositLegSent(
               venueDisplayName(record.composedDeposit.venueId),
               fmtAssetCompact(record.composedDeposit.amountRaw, hopDecimals, hopSymbol),
             )}
           </Text>
-          <Text style={S.fieldBody}>{M.convert.providerProcessingBody(destSymbol, venueDisplayName(record.composedDeposit.venueId))}</Text>
-          <Text style={S.fieldBody}>{M.convert.stillWatching}</Text>
+          <Text style={S.fieldBody}>{M.convert.awaitingDepositBody(hopSymbol, venueDisplayName(record.composedDeposit.venueId))}</Text>
         </View>
       ) : null}
 
-      {/* CHAIN: the deposit went out automatically; this phase is the VENUE's payout watch
+      {/* CHAIN: the deposit went out automatically; this phase is the VENUE's deposit wait
           (the provider poll), after which the second leg signs itself from the frozen plan. */}
       {record.step === 'awaiting_deposit' && chainPhase1 ? (
         <View testID="convert-chain-awaiting">
           <ActivityIndicator size="large" color={C.brandInk} />
-          <Text style={S.fieldTitle}>{M.convert.pendingTitle}</Text>
+          <Text style={S.fieldTitle}>{M.convert.awaitingDepositTitle}</Text>
           <Text style={S.fieldBody}>
             {M.convert.chain.depositSent(
               venueDisplayName(chain!.venueId),
@@ -2622,8 +2645,7 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
               hopSymbol,
             )}
           </Text>
-          <Text style={S.fieldBody}>{M.convert.providerProcessingBody(hopSymbol, venueDisplayName(chain!.venueId))}</Text>
-          <Text style={S.fieldBody}>{M.convert.stillWatching}</Text>
+          <Text style={S.fieldBody}>{M.convert.cefi.stillWaitingAuto}</Text>
         </View>
       ) : null}
 
@@ -2807,6 +2829,20 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
           ) : (
             <Text style={S.fieldBody}>{M.convert.stuckAcknowledged}</Text>
           )}
+        </View>
+      ) : null}
+
+      {/* COMPOSED, Details fallback (2026-10-04 composed-truth fix): while the cefi leg is
+          NOT the active one, the pre-created order's facts fold into this disclosure - a
+          locked-rate census, never the pending body. */}
+      {record.composedDeposit != null && !chainPhase1 && record.step !== 'awaiting_deposit' ? (
+        <View style={S.fieldLegs}>
+          <DetailsToggle
+            open={orderDetailsOpen}
+            onToggle={() => setOrderDetailsOpen(o => !o)}
+            label={M.convert.detailsLabel}
+          />
+          {orderDetailsOpen ? composedOrderBlock() : null}
         </View>
       ) : null}
 

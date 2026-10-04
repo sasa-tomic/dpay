@@ -4,7 +4,7 @@
 // body; hoisting it to module scope changes no behavior. One component, not split internally.
 import {useEffect, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, View} from 'react-native';
-import {venueDisplayName, venueEndpointOf} from '../config/venues';
+import {venueDisplayName} from '../config/venues';
 import type {ConvertRecord, LegPlan} from '../convert';
 import {acknowledgeStuckRecord} from '../convertResume';
 import {formatClock} from '../i18n/intl';
@@ -15,6 +15,8 @@ import {S} from '../styles';
 import {IconSwap} from './icons';
 import {
   ConvertHeader,
+  activeLegExpiryMs,
+  pendingPayoutViewOf,
   plannedLegFee,
   plannedLegLabel,
   routeTitleOf,
@@ -39,8 +41,10 @@ export function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack
   const hopSymbol = record.hopSymbol ?? record.outSymbol;
   const destSymbol = record.destSymbol ?? record.outSymbol;
   const venueName = venueDisplayName(record.venueId);
-  const venuePool = venueEndpointOf(record.venueId);
+  // The stuck-evidence clock (the leg-0 envelope's death, verbatim history) vs the ACTIVE
+  // leg's binding deadline the live bodies show (2026-10-04 composed-truth fix).
   const legExpiryMs = record.legs[0]?.expiresAtMs ?? record.createdAtMs;
+  const activeExpiryMs = activeLegExpiryMs(record);
   const legStateText = (s: LegPlan['state']) =>
     s === 'pending' ? M.convert.multihop.legStatePending
     : s === 'sent' ? M.convert.multihop.legStateSent
@@ -83,22 +87,38 @@ export function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.multihop.executingTitle}</Text>
           <Text style={S.convertStateBody}>
-            {M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), formatClock(new Date(legExpiryMs)))}
+            {M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), formatClock(new Date(activeExpiryMs)))}
           </Text>
         </View>
       ) : null}
 
-      {record.step === 'pending_withdrawal' ? (
-        <View testID="convert-pending">
-          <ActivityIndicator size="large" color={C.brandText} />
-          <Text style={S.convertStateTitle}>{M.convert.pendingTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.pendingBody(hopSymbol, venuePool, formatClock(new Date(record.createdAtMs)))}</Text>
-          <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
-          <Text testID="convert-expiry" style={S.convertStateMeta}>
-            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
-          </Text>
-        </View>
-      ) : null}
+      {record.step === 'pending_withdrawal' ? (() => {
+        // ONE ACTIVE LEG (2026-10-04 composed-truth fix): the body names the payout the
+        // executor is actually probing - a queued cefi leg keeps the pool-watch copy, a
+        // hub record's second swap names ITS OWN dest pool, and the direct shape keeps
+        // the payout template with the record's own pool.
+        const view = pendingPayoutViewOf(record);
+        return (
+          <View testID="convert-pending">
+            <ActivityIndicator size="large" color={C.brandText} />
+            {view.kind === 'pool-watch' ? (
+              <>
+                <Text style={S.convertStateTitle}>{M.convert.awaitingPool}</Text>
+                <Text style={S.convertStateBody}>{M.convert.settlingBody(view.sym)}</Text>
+              </>
+            ) : (
+              <>
+                <Text style={S.convertStateTitle}>{M.convert.pendingTitle}</Text>
+                <Text style={S.convertStateBody}>{M.convert.pendingBody(view.sym, view.pool, formatClock(new Date(record.createdAtMs)))}</Text>
+              </>
+            )}
+            <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
+            <Text testID="convert-expiry" style={S.convertStateMeta}>
+              {M.convert.expiryLine(formatClock(new Date(activeExpiryMs)))}
+            </Text>
+          </View>
+        );
+      })() : null}
 
       {record.step === 'done' ? (
         record.venue2Id != null ? (
