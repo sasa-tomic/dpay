@@ -20,6 +20,22 @@
 
 ## NEXT SESSION — work order
 
+**APK WEB DOWNLOAD + IN-APP UPDATE FLOW (founder 2026-10-04): LANDED.**
+(1) The landing page's download button was dead because `deploy/docker-compose.yml` always set
+`DPAY_APK_PATH:` to an EMPTY string, overriding the Dockerfile's baked default, so the relay's
+`load_apk()` disabled `/download/dpay.apk`. FIXED `46f7968c` (default = `/srv/dpay.apk`) and
+verified live after redeploy: prod `/api/v1/version` = the deploy commit, the landing button
+renders "Download for Android" with href `/download/dpay.apk?v=<etag>` and serves the APK as an
+attachment (HTTP 200, ~59.2 MB, correct sha256 ETag). (2) In-app update check, update-lane wave
+merged ff (8663cdb6 relay route, d69b8e65 app notice, f4ef75e0 pins): `scripts/build-apk.sh`
+stamps `app/lib/buildStamp.ts` with BUILD_COMMIT and writes a `<apk>.commit` sidecar that
+`deploy/build.sh` stages and the image carries; the relay answers `GET /api/v1/update` with
+`{"apk":null}` or `{"apk":{"commit","url"}}` (missing sidecar = named warning, null arm); the
+app fetches once per launch (`app/lib/updateCheck.ts`, silent on ANY failure and for dev
+builds), and Home renders ONE line + ONE `btn-update-now` opening the download URL - browser
+download + system installer = 2 clicks total. The route lights up on the deploy that carries a
+stamped APK.
+
 **CCTP LIVE ROUND TRIP (2026-10-03/04): COMPLETE - the burn landed live, the root cause was the
 app's own encoder, and both product fixes are landed and gate-green.** Final state: the burn
 0xbeac9fae… (10.139901 USDC, feeExecuted exactly the frozen 378582 cap, Circle attested ~20s,
@@ -37,15 +53,15 @@ SOL->USDC via the app's jupiter row, USDC@Sol -> SideShift -> ICP -> ICPSwap -> 
 then the fresh CCTP record 8.4 VCHF -> IC legs 0-4 confirmed -> 10.139901 USDC@Eth delivered
 (balanceOf-verified) -> the burn. Ledger rows 218-292, `funds reconcile` CLEAN; gates verify +
 test-app 4007/4007 pass dirty=no @ f8b95751.
-REMAINING (filed for the next session, small): (1) PHANTOM-REFUSAL INSTANCE 3 - the multihop
-leg driver mis-marked the withdraw `failed_leg/unknown` BEFORE leg 5 (the 299d695c
-verify-at-destination fix covers the refused branch; the UNKNOWN branch still marks failed
-instead of handing to the hop-row probe - the money was delivered and safe); terminal records
-are never re-driven, so the final burn was signed device-keyed OUTSIDE the in-flow signer (the
-record's own frozen bytes; the D31 mechanics are proven - the in-flow completion needs this
-fix). (2) The converter's maxFee honesty line should quote the maxFee CAP (Circle executed
-exactly the cap, not med+bps). (3) publicnode now 403s archive eth_getLogs (EVM history display
-only) - a keyed upstream is the founder's call (DO NOT NAG).
+REMAINING (closed 2026-10-04, small): (1) PHANTOM-REFUSAL INSTANCE 3 CLOSED `0755961b` - an
+UNKNOWN withdraw outcome is now verified at the destination too (`crossRailHopDelivered` probe
+at all four unknown sites in `app/convert/execute.ts`; `probeStuckOnce` also resolves a
+cross-rail record stuck on a SUBMITTED withdraw at destination), so delivered money continues
+the crossing in-flow instead of stranding as failed/unknown. (2) maxFee honesty CLOSED
+`36ecc017` - the crossing census is pinned to the SIGNED maxFee cap (0.377588, never the
+unbuffered med+bps 0.314657; every surface already quoted the cap, the domain pin locks it).
+(3) STILL OPEN: publicnode 403s archive eth_getLogs (EVM history display only) - a keyed
+upstream is the founder's call (DO NOT NAG).
 
 **CoW Swap D31 LIVE TRIP: COMPLETE (2026-10-04) - the full funding chain ran with existing funds, the order is FULFILLED.**
 The prod relay runs `b300dff9` (deployed by the agent, founder-authorized; the CoW order-API proxy
@@ -66,7 +82,8 @@ the 'Rate moved - Confirm again' loop (CoW's fee re-estimate jitters the quoted 
 per fetch, which the confirm gesture treated as a moved quote) FIXED by `767c0951`: the confirm
 gesture signs a LIVE quote as displayed - `cowQuoteFresh` keys on the quote's own validTo window
 (the cefi order-is-the-lock precedent); only an expired window triggers one re-quote. The ZCHF
-row's full-precision amount wraps two lines (cosmetic).
+row's full-precision amount wrap FIXED by `f04fb99e` (the amount column holds one line, title
+fixed earlier by 931c4201).
 
 **BRUTAL-UX RESIDUALS (the 2026-10-02 audit list): LANDED - uxres wave `6421cf5d`..`0f95ab48`
 (merged ff 2026-10-04), e2e-visual accounts baselines reseeded.** History rows read machine
@@ -104,21 +121,24 @@ fixes landed on the way: the native-ETH destination quotes the chain WETH instea
 the quoter an empty token (`3d307ce5`), and the pair red line compares rail-canonical ids so
 a checksummed registry token prepares (`b6c93abd`). The venue may claim "supported".
 
-- **"My address" chip on send sheets (value 4 / effort S).** `AddressField.tsx` gets a
-  one-tap "use my address" affordance so self-cash-out on sends needs no typing either; the
-  empty field remains the send-elsewhere path.
-- **Setup copy/pixel residuals from the 2026-10-02 brutal UX audit (value 4 / effort M;
-  all founder-invisible polish, none money-affecting).** ICP row title wrap/clip in the
-  accounts list; money-format sweep (mixed decimal/comma styles across surfaces); display
-  rounding consistency; stale readiness pill after balances change; hash third-lines in
-  activity rows crowd narrow screens; demo-funds rows could read as real money at a
-  glance; the convert path has no in-app confirmation for swap executions (evidence note
-  from the trip, founder call whether to add one). Full report in
-  ses_f0313186dffeELTHeV3XHqUDWM.
-- **Residual CeFi papercut (value 4 / effort S).** Plain-IC-source CeFi convert rows
-  (`app/convert/prepare.ts` ~127-140) still hand the user a manual deposit send;
-  composed/chain kinds already auto-sign. Route them through the same auto-flow or state why
-  not.
+- ~~"My address" chip on send sheets~~ **DONE `b0bc8be7` (2026-10-04).** `AddressField` grew an
+  optional `ownAddress`; the chip renders ONLY on an empty field (empty stays send-elsewhere)
+  and fills the wallet's own rail address; wired on the EVM sheet, the SOL sheet, and the IC
+  send sheet (own principal resolves into the existing self-send warning); 4 locales; pins
+  incl flow 104 (IC) + flow 221 (EVM); AddressesTab deliberately gets none.
+- ~~Setup copy/pixel residuals from the 2026-10-02 brutal UX audit~~ **DONE - uxres wave
+  `6421cf5d`..`0f95ab48` (2026-10-04) + `f04fb99e`.** ICP row title one line (931c4201), row
+  amount one line (f04fb99e), history rows machine-refs off-row + practice-money ink
+  (6421cf5d), setup-card estimates capped+marked 4 locales (d00f184d). Evidence notes stand:
+  one formatter family (variance is unit placement + honest ≈), readiness pill was an audit
+  misread (liveness flow-pinned), no-swap-confirm is the founder-set 2-tap grammar.
+- ~~Residual CeFi papercut~~ **DONE `e85d435b` (2026-10-04).** The functional half (the watcher
+  auto-sends the deposit) was already composfix; the residual was the review census saying
+  "you send the deposit yourself" plus a manual address/amount/memo trio rendered ON TOP of
+  the auto-send (a double-spend invitation). The panel + census now fork on the record's
+  source rail: IC source gets the honest auto-note and the order handles it; another-rail
+  sources keep the manual handoff verbatim (flows 197/198/199 untouched). RED pin in
+  convertCefiConfirm; flows 187/194/208/209/223 updated.
 
 **1. Objective 3 (card/bank funding) — HARD-BLOCKED on founder/legal; NOTHING is offline-buildable
 until the blockers land. THE thing that unblocks it:**
