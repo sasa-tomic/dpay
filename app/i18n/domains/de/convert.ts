@@ -228,6 +228,7 @@ export const convertDe: ConvertMessages = {
       `Der Tausch lief — deine Mittel liegen als ${sym} in dieser Wallet. Die Auszahlung wurde abgelehnt${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Auszahlen über Bezahlen ▸ Adresse senden — beliebige Ziel-Adresse einfügen.',
     stuckRouteBody: 'Das Ergebnis eines Schritts ist offen — dpay beobachtet die Ledgers; dieser Bildschirm springt von selbst.',
+    stuckRouteBodyExpired: 'Das Beobachtungsfenster ist geschlossen - nichts kann sich mehr bewegen. dpay rechnet anhand der Nachweise oben ab.',
     failedHop2Title: 'Zweiter Tausch abgelehnt',
     failedHop2Body: (hubSym, outSym, reason) =>
       `Der erste Tausch lief — du hältst ${hubSym} in dieser Wallet. Der Tausch ${hubSym} → ${outSym} wurde abgelehnt${reason ? `: ${reason}` : ''}.`,

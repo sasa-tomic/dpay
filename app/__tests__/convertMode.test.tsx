@@ -960,6 +960,7 @@ describe('the composed stuck screen — leg-scoped signed minimum, honest expire
   const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
   const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
   const OPEN_AT = Date.now() + 600_000;
+  const PASSED_AT = Date.now() - 90 * 60_000; // the founder's shape: the window died 1.5 h ago
   /** The founder's exact repro: composed VCHF → ICP → EURC, minOut 360179063 raw. The IC
    *  swap's floor is leg 1's OWN output (ICP, 8dp); the record's out* fields name the cefi
    *  settle (EURC, 6dp) — composed records are the one shape where the two differ. */
@@ -1025,6 +1026,21 @@ describe('the composed stuck screen — leg-scoped signed minimum, honest expire
     const stuck = textOf(tree, 'convert-stuck');
     expect(stuck).toContain('3.60179063 ICP');
     expect(stuck).not.toContain('360.179063');
+  });
+
+  test('window OPEN: the route body keeps its live watch copy', async () => {
+    const tree = await mountStuck(composedStuck(OPEN_AT));
+    expect(present(tree, 'convert-stuck-expired')).toBe(false);
+    expect(textOf(tree, 'convert-stuck')).toContain(convertEn.multihop.stuckRouteBody);
+  });
+
+  test('window EXPIRED: no watching claim anywhere - the body names the closed window and the evidence settlement', async () => {
+    const tree = await mountStuck(composedStuck(PASSED_AT));
+    expect(present(tree, 'convert-stuck-expired')).toBe(true);
+    const stuck = textOf(tree, 'convert-stuck');
+    expect(stuck).not.toContain(convertEn.multihop.stuckRouteBody);
+    expect(stuck).not.toContain('keeps watching');
+    expect(stuck).toContain(convertEn.multihop.stuckRouteBodyExpired);
   });
 });
 

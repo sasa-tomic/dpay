@@ -2788,8 +2788,13 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
       {record.step === 'stuck' ? (
         <View testID="convert-stuck">
           <Text style={S.fieldTitle}>{M.convert.stuckTitle}</Text>
+          {/* The expired arm may not claim a live watch (2026-10-04 founder fix): the
+              expired-window block below states nothing can move anymore, so the body above
+              it forks too - the live arm keeps stuckRouteBody verbatim. */}
           <Text style={S.fieldBody}>
-            {legPlan.length > 0 ? M.convert.multihop.stuckRouteBody : M.convert.stuckBody}
+            {legPlan.length > 0
+              ? (stuckWindowExpired(record) ? M.convert.multihop.stuckRouteBodyExpired : M.convert.multihop.stuckRouteBody)
+              : M.convert.stuckBody}
           </Text>
           {isHub ? (
             <Text style={S.fieldBody}>{M.convert.multihop.stuckHoldsLine(hopSymbol)}</Text>

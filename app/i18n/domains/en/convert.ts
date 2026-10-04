@@ -383,6 +383,10 @@ export type ConvertMessages = {
     failedLegBody: (sym: string, reason: string) => string;
     failedLegExit: string;
     stuckRouteBody: string;
+    /** The expired arm of the stuck body (2026-10-04 founder fix): past the window nothing
+     *  can move, so the live arm's watching claim would be false - this arm names the
+     *  closed window and the evidence settlement instead. Plain hyphen, never an em-dash. */
+    stuckRouteBodyExpired: string;
     /** D18: the hub failed_leg trio — a completed swap is BEHIND you; the funds are the hub
      *  asset, in this wallet; the exit is that asset's own surfaces, never a cash-out. */
     failedHop2Title: string;
@@ -853,6 +857,7 @@ export const convertEn: ConvertMessages = {
       `The swap went through — your funds are ${sym} in this wallet. The cash-out refused${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Cash out via Pay \u25B8 Send to address — paste any destination address.',
     stuckRouteBody: 'A leg\u2019s outcome is unknown \u2014 dpay keeps watching the ledgers; this screen flips on its own.',
+    stuckRouteBodyExpired: 'The watch window has closed - nothing can move anymore. dpay settles this from the evidence above.',
     failedHop2Title: 'Second swap refused',
     failedHop2Body: (hubSym, outSym, reason) =>
       `The first swap went through — you hold ${hubSym} in this wallet. The ${hubSym} \u2192 ${outSym} swap was refused${reason ? `: ${reason}` : ''}.`,

@@ -297,6 +297,16 @@ describe('the new copy exists in all four locales (type-checked by strict tsc, p
       expect((cat[k] as string).length).toBeGreaterThan(0);
     }
   });
+  // The expired stuck arm's body (2026-10-04 founder fix): present everywhere, never an
+  // em-dash, and no locale's live arm leaks its watching claim into the expired arm.
+  test('multihop.stuckRouteBodyExpired is present in en/de/es/fr, hyphenated, watch-free', () => {
+    for (const cat of [convertEn, convertDe, convertEs, convertFr]) {
+      const line = cat.multihop.stuckRouteBodyExpired;
+      expect(line.length).toBeGreaterThan(0);
+      expect(line).not.toContain('\u2014');
+      expect(line).not.toMatch(/surveille|beobachtet|vigila|keeps watching|observe/);
+    }
+  });
   test.each(['stuckErrorLine', 'stuckExpiredLine', 'stuckLastCheckedLine', 'failedWindowClosedBody'] as const)('%s is a function in all locales', (k) => {
     for (const cat of [convertEn, convertDe, convertEs, convertFr]) {
       expect(typeof cat[k]).toBe('function');

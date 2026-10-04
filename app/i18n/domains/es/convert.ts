@@ -227,6 +227,7 @@ export const convertEs: ConvertMessages = {
       `El intercambio se completó — tus fondos están en ${sym} en esta billetera. El retiro fue rechazado${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Retira vía Pagar ▸ Enviar a dirección — pega cualquier dirección de destino.',
     stuckRouteBody: 'El resultado de un tramo sigue abierto — dpay vigila los libros; esta pantalla cambia sola.',
+    stuckRouteBodyExpired: 'La ventana de observación se cerró - ya nada puede moverse. dpay liquida según la evidencia de arriba.',
     failedHop2Title: 'Segundo intercambio rechazado',
     failedHop2Body: (hubSym, outSym, reason) =>
       `El primer intercambio pasó — tienes ${hubSym} en esta billetera. El intercambio ${hubSym} → ${outSym} fue rechazado${reason ? `: ${reason}` : ''}.`,

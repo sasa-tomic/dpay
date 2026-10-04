@@ -227,6 +227,7 @@ export const convertFr: ConvertMessages = {
       `L'échange est passé — vos fonds sont en ${sym} dans ce portefeuille. Le retrait a été refusé${reason ? ` : ${reason}` : ''}.`,
     failedLegExit: 'Retirer via Payer ▸ Vers une adresse — collez n\u2019importe quelle adresse de destination.',
     stuckRouteBody: 'L\u2019issue d\u2019une étape reste inconnue — dpay surveille les registres ; cet écran change tout seul.',
+    stuckRouteBodyExpired: 'La fenêtre d\u2019observation est close - plus rien ne peut bouger. dpay règle d\u2019après les preuves ci-dessus.',
     failedHop2Title: 'Second échange refusé',
     failedHop2Body: (hubSym, outSym, reason) =>
       `Le premier échange est passé — vous détenez ${hubSym} dans ce portefeuille. L'échange ${hubSym} → ${outSym} a été refusé${reason ? ` : ${reason}` : ''}.`,
