@@ -83,7 +83,7 @@ describe('encodeDepositForBurnWithHook', () => {
     expect(words[4]).toBe('0'.repeat(64)); // destinationCaller = bytes32(0)
     expect(words[5]).toBe((600_000n).toString(16).padStart(64, '0')); // maxFee
     expect(words[6]).toBe((1000).toString(16).padStart(64, '0')); // minFinalityThreshold
-    expect(words[7]).toBe((224).toString(16).padStart(64, '0')); // bytes offset = 7×32
+    expect(words[7]).toBe((256).toString(16).padStart(64, '0')); // bytes offset = 8×32 (points at the len word, past the 7 arg words + itself)
     const tail = body.slice(8 + 8 * 64);
     expect(tail.slice(0, 64)).toBe((65).toString(16).padStart(64, '0')); // len = 65
     expect(tail.slice(64, 64 + 130)).toBe(hookData); // the hook bytes verbatim
@@ -99,7 +99,7 @@ describe('encodeDepositForBurnWithHook', () => {
       + '0000000000000000000000000000000000000000000000000000000000000000'
       + '00000000000000000000000000000000000000000000000000000000000927c0'
       + '00000000000000000000000000000000000000000000000000000000000003e8'
-      + '00000000000000000000000000000000000000000000000000000000000000e0'
+      + '0000000000000000000000000000000000000000000000000000000000000100'
       + '0000000000000000000000000000000000000000000000000000000000000041'
       + '636374702d666f7277617264000000000000000000000000' // magic (24 B)
       + '00000000' // version u32 = 0 (packed 4 bytes, NOT a word)

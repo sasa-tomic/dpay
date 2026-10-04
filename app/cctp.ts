@@ -4,7 +4,11 @@
  * Dependency-free (no react-native, no keccak lib) so it runs under jest on the
  * fast inner loop — the `cketh.ts` pattern: every byte produced here is pinned byte-exact
  * against the LIVE Ethereum contract, so a unit test proves the external interface is
- * represented accurately with zero network. (ONE exception since the gas-fund widening:
+ * represented accurately with zero network. Golden pins must hold the bytes the LIVE
+ * contract's DECODER consumes — never pin against this encoder's own output: a golden
+ * frozen from the encoder's output approves any encoder bug forever (the 2026-10-04
+ * 0xe0-offset burn-revert: the pins and the encoder shared the bug, so the suite stayed
+ * green while every real burn reverted). (ONE exception since the gas-fund widening:
  * `fetchEthBalance` dials the global `fetch` against the publicnode staging — still no
  * import, still jest-mockable via the global.)
  *
@@ -145,10 +149,16 @@ export function buildForwardHookData(ownerHex64: string): string {
  *
  * ABI: 7 static words in the head (amount, destinationDomain, mintRecipient, burnToken,
  * destinationCaller, maxFee, minFinalityThreshold), then the `bytes hookData` tail: one
- * offset word (0xe0 = 7×32), one length word, and the data zero-padded to a whole 32-byte
- * word boundary (65 bytes → 3 words = 192 bytes). The tail padding is load-bearing — an
- * unpadded 65-byte tail decodes as garbage and the call reverts with no reason string
- * (reproduced live against mainnet while pinning this encoder).
+ * offset word (0x100 = 8×32 — the offset counts from the start of the args area and must
+ * point at the LENGTH word, i.e. past the 7 static words AND the offset word itself), one
+ * length word, and the data zero-padded to a whole 32-byte word boundary (65 bytes → 3
+ * words = 192 bytes). The tail padding is load-bearing — an unpadded 65-byte tail decodes
+ * as garbage and the call reverts with no reason string (reproduced live against mainnet
+ * while pinning this encoder). So is the offset: writing 0xe0 (= 7×32, one word short)
+ * froze into the golden pins undetected because they pinned the encoder's own output; the
+ * real decoder read the offset word as the length and every burn reverted empty. The pins
+ * now hold the value the LIVE contract's decoder consumes — never re-pin a golden against
+ * the encoder's own output (reproduced live: 0x70130f9c…6ef3 landed with 0x100).
  *
  * `mintRecipientHex64` is the recipient's ATA for the burn token on the DESTINATION chain
  * (Solana: deriveAta(owner, USDC mint), raw 32 bytes). `destinationCaller` stays bytes32(0)
@@ -179,7 +189,7 @@ export function encodeDepositForBurnWithHook(args: {
     + uint256ToWord(args.maxFee)
     + uint32ToWord(args.minFinalityThreshold);
   const tail =
-    uint256ToWord(BigInt(7 * 32)) // offset of the bytes tail, after the 7 static words
+    uint256ToWord(BigInt(8 * 32)) // offset of the bytes tail: past the 7 static words AND the offset word itself, i.e. at the length word (0x100)
     + uint256ToWord(BigInt(byteLen))
     + hook.padEnd(paddedWords * 64, '0');
   return '0x' + SELECTOR_DEPOSIT_FOR_BURN_WITH_HOOK + head + tail;
