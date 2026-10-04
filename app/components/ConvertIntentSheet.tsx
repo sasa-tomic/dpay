@@ -2502,10 +2502,11 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
       {/* COMPOSED: the venue order's facts (2026-09-26), ONE ACTIVE LEG-gated (2026-10-04
           composed-truth fix): the order was created before anything signed, but it is the
           NEXT leg's business - its details hold the body only while the cefi leg IS the
-          active one (awaiting_deposit). While an earlier leg runs (or the pool payout is
-          being watched), the order facts live in the Details disclosure below - never as
-          the pending body. */}
-      {record.step === 'awaiting_deposit' && record.composedDeposit != null ? composedOrderBlock() : null}
+          active one (awaiting_deposit / provider_processing). While an earlier leg runs
+          (or the pool payout is being watched), the order facts live in the Details
+          disclosure below - never as the pending body. */}
+      {(record.step === 'awaiting_deposit' || record.step === 'provider_processing')
+        && record.composedDeposit != null ? composedOrderBlock() : null}
 
       {/* CHAIN phase 1: the ONE consent's live narration — the venue order (its locked
           figures verbatim), the venue's own Solana deposit address, the exact amount the
@@ -2833,9 +2834,11 @@ export function ConvertFieldTracker({record, onBack}: {record: ConvertRecord; on
       ) : null}
 
       {/* COMPOSED, Details fallback (2026-10-04 composed-truth fix): while the cefi leg is
-          NOT the active one, the pre-created order's facts fold into this disclosure - a
-          locked-rate census, never the pending body. */}
-      {record.composedDeposit != null && !chainPhase1 && record.step !== 'awaiting_deposit' ? (
+          NOT yet the active one and the record is still LIVE, the pre-created order's
+          facts fold into this disclosure - a locked-rate census, never the pending body.
+          Terminal states keep their own copy (the failure/done cards name the venue). */}
+      {record.composedDeposit != null && !chainPhase1
+        && (inflight || record.step === 'pending_withdrawal') ? (
         <View style={S.fieldLegs}>
           <DetailsToggle
             open={orderDetailsOpen}

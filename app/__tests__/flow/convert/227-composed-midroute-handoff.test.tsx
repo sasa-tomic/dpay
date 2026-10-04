@@ -45,7 +45,6 @@ const POOL_VCHF_ICP = '65mrh-fqaaa-aaaar-qapoa-cai';
 const SHIFT_ID = 'e2e-shift-9c1d';
 const SEED_VCHF = 2000000000; // 20 VCHF
 const SEED_ICP = 200000000; // 2 ICP - the deposit gate's balance read must pass for the clone
-const ICP_FEE = 10000n;
 const CLONE_ID = 'seeded-pending-227';
 
 type ConvertRecord = {
