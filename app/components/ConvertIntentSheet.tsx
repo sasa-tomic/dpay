@@ -1873,7 +1873,7 @@ export function ConvertIntentSheet({
                   ) : null}
                   <Text style={S.convertChecklistLine}>
                     {cefiMode
-                      ? M.convert.cefi.checklistSigns
+                      ? (selectedAsset.protocol === 'ic' ? M.convert.cefi.checklistSignsAuto : M.convert.cefi.checklistSigns)
                       : ammMode ? M.convert.sol.counterpartySigns
                       : M.convert.counterpartySigns}
                   </Text>

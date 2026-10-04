@@ -32,9 +32,9 @@ export const convertDe: ConvertMessages = {
       jupiter: venue =>
         `${venue} ist ein autonomer On-Chain-Aggregator auf Solana — er wählt die Route und führt sie aus. Diese Wallet signiert die Transaktion, die ${venue} baut, und der Kurs ist der eigene von ${venue}, unverändert. dpay ist nicht Partei.`,
       sideshift: venue =>
-        `${venue} ist ein automatisierter Tauschdienst — kein lizenzierter Anbieter, keine Bank. Er hält deine Mittel während des Tauschs und zahlt dann an deine eigene Adresse aus; seine Bedingungen, einschließlich etwaiger Identitätsprüfungen nach seiner Policy, stehen unter sideshift.ai/terms. Diese Wallet zeigt ${venue}s eigenen Kurs und die Einzahlungs-Adresse — dpay signiert nichts, ist nicht Partei und wird nicht bezahlt.`,
+        `${venue} ist ein automatisierter Tauschdienst — kein lizenzierter Anbieter, keine Bank. Er hält deine Mittel während des Tauschs und zahlt dann an deine eigene Adresse aus; seine Bedingungen, einschließlich etwaiger Identitätsprüfungen nach seiner Policy, stehen unter sideshift.ai/terms. Diese Wallet zeigt ${venue}s eigenen Kurs und die Einzahlungs-Adresse — deine Mittel gehen direkt aus deiner eigenen Wallet an den Dienst; dpay ist nicht Partei und wird nicht bezahlt.`,
       trocador: venue =>
-        `${venue} ist ein automatisierter Tausch-Aggregator — er leitet deinen Tausch an einen seiner eigenen Anbieter weiter und hält deine Mittel während des Tauschs, zahlt dann an deine eigene Adresse aus; seine Bedingungen, einschließlich etwaiger Identitätsprüfungen eines Anbieters, stehen unter trocador.app/terms. dpay bittet ${venue} nur um Anbieter ohne Identitätsprüfung. Diese Wallet zeigt ${venue}s eigenen Kurs und die Einzahlungs-Adresse — dpay signiert nichts, ist nicht Partei und wird nicht bezahlt.`,
+        `${venue} ist ein automatisierter Tausch-Aggregator — er leitet deinen Tausch an einen seiner eigenen Anbieter weiter und hält deine Mittel während des Tauschs, zahlt dann an deine eigene Adresse aus; seine Bedingungen, einschließlich etwaiger Identitätsprüfungen eines Anbieters, stehen unter trocador.app/terms. dpay bittet ${venue} nur um Anbieter ohne Identitätsprüfung. Diese Wallet zeigt ${venue}s eigenen Kurs und die Einzahlungs-Adresse — deine Mittel gehen direkt aus deiner eigenen Wallet an den Dienst; dpay ist nicht Partei und wird nicht bezahlt.`,
       cowswap: venue =>
         `${venue} erfüllt signierte Off-Chain-Aufträge mit konkurrierenden Solvern, meist in Sekunden bis Minuten. Die Übersicht zeigt ${venue}s eigene Gebühr. dpay signiert Ihren Auftrag, ist nicht Partei und wird nicht bezahlt.`,
     },
@@ -250,6 +250,8 @@ export const convertDe: ConvertMessages = {
       `Ausgeführt von ${venue} — ein automatisierter Tauschdienst, keine Bank, nicht dpay.`,
     checklistSigns:
       'Auf diesem Handy wird nichts signiert — nach der Bestätigung sendest du die Einzahlung selbst an die Adresse des Tauschdiensts.',
+    checklistSignsAuto:
+      'Nach der Bestätigung sendet diese Wallet die Einzahlung selbst an den Tauschdienst — der Tausch ist dessen Sache.',
     refusalLine: sym =>
       `Kommt die Einzahlung nie an, läuft die Bestellung ab — nichts bewegt sich, dein ${sym} bleibt in deiner Wallet.`,
     insufficientLine: (needed, balance) =>
@@ -263,7 +265,10 @@ export const convertDe: ConvertMessages = {
     settlingWatchLine: 'Die meisten laufen in Minuten durch — dpay überwacht jeden Shift und greift ein, falls einer hakt.',
     depositNote: (venue, sym) =>
       `Sende ${sym} an die Einzahlungs-Adresse von ${venue} oben — genau den Einzahlungsbetrag. ${venue} hält ihn während des Tauschs und zahlt dann an deine Adresse aus. dpay ist nicht Partei und wird nicht bezahlt.`,
+    depositAutoNote: (venue, sym) =>
+      `Diese Wallet sendet die ${sym}-Einzahlung selbst an die Adresse von ${venue} — genau den Einzahlungsbetrag. ${venue} hält ihn während des Tauschs und zahlt dann an deine Adresse aus. dpay ist nicht Partei und wird nicht bezahlt.`,
     stillWaitingDeposit: 'Weitere Beobachtung deiner Einzahlung — diese Seite aktualisiert sich von selbst.',
+    stillWaitingAuto: 'Die Einzahlung geht einmal von selbst raus — wartend auf das Wort des Tauschdiensts; diese Seite aktualisiert sich von selbst.',
     depositSolFeeNote: 'Die Einzahlung zahlt auch eine kleine Netzwerkgebühr in SOL — halte etwas SOL in dieser Wallet.',
     solInsufficientLine: (needed, balance) =>
       `Die Einzahlung sendet genau ${needed} — du hast ${balance}.`,

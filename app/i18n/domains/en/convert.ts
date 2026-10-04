@@ -416,8 +416,12 @@ export type ConvertMessages = {
      *  on-chain contract" sentence is FALSE for an exchange service; this one is not. */
     counterparty: (venue: string) => string;
     /** Same slot as counterpartySigns, cefi truth: the phone signs NOTHING — the user sends
-     *  the deposit to the venue's own address themselves. */
+     *  the deposit to the venue's own address themselves. The another-rail-source arm; an
+     *  IC-source row rides checklistSignsAuto (the wallet sends the deposit itself). */
     checklistSigns: string;
+    /** The IC-source arm (2026-10-04): the record-lifecycle watcher sends the deposit from
+     *  this wallet once the order exists — nothing for the user to send by hand. */
+    checklistSignsAuto: string;
     /** Same slot as the pool trades' refusalLine, cefi truth: the only way this "fails" before
      *  the deposit is sent is expiry — the order lapses, nothing moved, funds never left. */
     refusalLine: (sym: string) => string;
@@ -442,9 +446,14 @@ export type ConvertMessages = {
     settlingWatchLine: string;
     /** The CeFi fact itself: the user sends to the VENUE's address; the venue holds mid-trade. */
     depositNote: (venue: string, sym: string) => string;
+    /** The IC-source body (2026-10-04): the wallet sends the deposit itself; the venue
+     *  truths stay, the manual-send instruction is gone. */
+    depositAutoNote: (venue: string, sym: string) => string;
     /** The awaiting_deposit tail line: watches the DEPOSIT (the payout lines belong to the
      *  states after the venue has the money). */
     stillWaitingDeposit: string;
+    /** The IC-source tail: the deposit is the wallet's job, the wait is the venue's word. */
+    stillWaitingAuto: string;
     /** SOL-side deposit handoff (2026-09-20 SOL-side cefi): the deposit is an SPL transfer
      *  the USER sends — its network fee is paid in SOL from the same wallet. */
     depositSolFeeNote: string;
@@ -636,13 +645,13 @@ export const convertEn: ConvertMessages = {
       // disclosure_key 'sideshift': an automated exchange service holding funds mid-trade,
       // terms named (KYC is ITS to disclose), dpay a non-party paid nothing.
       sideshift: venue =>
-        `${venue} is an automated exchange service — not a licensed provider or bank. It holds your funds mid-trade, then pays out to your own address; its terms, including any identity checks under its policy, are at sideshift.ai/terms. This wallet shows ${venue}'s own quote and deposit address — dpay signs nothing, is not a party, and is paid nothing.`,
+        `${venue} is an automated exchange service — not a licensed provider or bank. It holds your funds mid-trade, then pays out to your own address; its terms, including any identity checks under its policy, are at sideshift.ai/terms. This wallet shows ${venue}'s own quote and deposit address — your funds go straight from your own wallet to the venue; dpay is not a party and is paid nothing.`,
 
       // disclosure_key 'trocador': the sideshift truths plus the aggregate fact — the venue
       // picks among its own backends (dpay never ranks beneath that pick), and dpay asks it
       // for non-KYC backends only.
       trocador: venue =>
-        `${venue} is an automated exchange aggregator — it routes your trade to one of its own backends and holds your funds mid-trade, then pays to your own address; its terms, including any backend identity checks, are at trocador.app/terms. dpay asks ${venue} for no-KYC backends only. This wallet shows ${venue}'s own quote and deposit address — dpay signs nothing, is not a party, and is paid nothing.`,
+        `${venue} is an automated exchange aggregator — it routes your trade to one of its own backends and holds your funds mid-trade, then pays to your own address; its terms, including any backend identity checks, are at trocador.app/terms. dpay asks ${venue} for no-KYC backends only. This wallet shows ${venue}'s own quote and deposit address — your funds go straight from your own wallet to the venue; dpay is not a party and is paid nothing.`,
       // disclosure_key 'cowswap': the second EVM venue - the intent/settlement fact is
       // WHAT happens after the signature (off-chain solvers, no gas for the trader), and
       // the same no-party/no-cut truths.
@@ -869,6 +878,8 @@ export const convertEn: ConvertMessages = {
       `Executed by ${venue} — an automated exchange service, not a bank, not dpay.`,
     checklistSigns:
       'Nothing is signed on this phone — after you confirm, you send the deposit to the venue\u2019s address yourself.',
+    checklistSignsAuto:
+      'After you confirm, this wallet sends the deposit to the venue itself — the trade is the venue\u2019s.',
     refusalLine: sym =>
       `If the deposit never arrives, the order expires — nothing moves, your ${sym} stays in your wallet.`,
     insufficientLine: (needed, balance) =>
@@ -882,7 +893,10 @@ export const convertEn: ConvertMessages = {
     settlingWatchLine: 'Most settle within minutes \u2014 dpay monitors every shift and steps in if one stalls.',
     depositNote: (venue, sym) =>
       `Send ${sym} from your wallet to ${venue}\u2019s deposit address above \u2014 exactly the deposit amount. ${venue} holds it mid-trade, then pays out to your address. dpay is not a party and is paid nothing.`,
+    depositAutoNote: (venue, sym) =>
+      `This wallet sends the ${sym} deposit to ${venue}\u2019s address itself \u2014 exactly the deposit amount. ${venue} holds it mid-trade, then pays out to your address. dpay is not a party and is paid nothing.`,
     stillWaitingDeposit: 'Still watching for your deposit — this page updates on its own.',
+    stillWaitingAuto: 'The deposit sends itself once — watching for the venue\u2019s word; this page updates on its own.',
     depositSolFeeNote: 'The deposit also pays a small network fee in SOL \u2014 keep a little SOL in this wallet.',
     solInsufficientLine: (needed, balance) =>
       `The deposit sends exactly ${needed} \u2014 you have ${balance}.`,

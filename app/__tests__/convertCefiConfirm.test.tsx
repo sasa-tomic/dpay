@@ -210,9 +210,19 @@ describe('CeFi confirm vs a ticking venue rate', () => {
     expect(jest.mocked(fetchSideShiftQuote).mock.calls.length).toBe(2);
     expect(jest.mocked(createSideShiftFixedShift).mock.calls.length).toBe(1);
     expect(exists(tree, 'convert-awaiting-deposit')).toBe(true);
-    // The handoff shows the ORDER's own figures, verbatim — the consent point.
-    expect(textOf(tree, 'convert-deposit-address')).toContain('ss-deposit-address-tick');
-    expect(textOf(tree, 'convert-deposit-amount')).toContain('1 ICP');
+    // IC-source rows auto-send (the record-lifecycle watcher, 2026-10-02 P0): the panel
+    // says so and renders NO manual deposit trio — a second, hand-copied deposit on top of
+    // the auto-send would be a double-spend invitation. The venue truths stay.
+    expect(exists(tree, 'convert-deposit-handoff')).toBe(true);
+    expect(exists(tree, 'convert-deposit-address')).toBe(false);
+    expect(exists(tree, 'convert-deposit-amount')).toBe(false);
+    expect(exists(tree, 'convert-deposit-auto-note')).toBe(true);
+    const autoNote = textOf(tree, 'convert-deposit-auto-note');
+    expect(autoNote).toContain('ICP');
+    expect(autoNote).toContain('holds');
+    expect(autoNote).toContain('not a party');
+    // The order's own handles stay: expiry and the shift id.
+    expect(exists(tree, 'convert-shift-id')).toBe(true);
     // The record is the legless provider shape, expectedNet = the ORDER's locked settle.
     const rec = jest.mocked(adoptConvertRecord).mock.calls[0][0] as ConvertRecord;
     expect(rec.step).toBe('awaiting_deposit');

@@ -31,9 +31,9 @@ export const convertFr: ConvertMessages = {
       jupiter: venue =>
         `${venue} est un agrégateur on-chain autonome sur Solana — il choisit la route ; la route l'exécute. Ce portefeuille signe la transaction que ${venue} construit, et le devis est celui de ${venue}, tel quel. dpay n'en est pas partie.`,
       sideshift: venue =>
-        `${venue} est un service d'échange automatisé — ni un prestataire agréé, ni une banque. Il détient vos fonds pendant l'échange, puis paie vers votre propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité selon sa politique, sont sur sideshift.ai/terms. Ce portefeuille affiche le devis propre de ${venue} et l'adresse de dépôt — dpay ne signe rien, n'est pas partie et ne touche rien.`,
+        `${venue} est un service d'échange automatisé — ni un prestataire agréé, ni une banque. Il détient vos fonds pendant l'échange, puis paie vers votre propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité selon sa politique, sont sur sideshift.ai/terms. Ce portefeuille affiche le devis propre de ${venue} et l'adresse de dépôt — vos fonds vont directement de votre propre portefeuille au service ; dpay n'est pas partie et ne touche rien.`,
       trocador: venue =>
-        `${venue} est un agrégateur d'échange automatisé — il dirige votre échange vers l'un de ses propres services et détient vos fonds pendant l'échange, puis paie vers votre propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité d'un service, sont sur trocador.app/terms. dpay demande à ${venue} uniquement des services sans vérification d'identité. Ce portefeuille affiche le devis propre de ${venue} et l'adresse de dépôt — dpay ne signe rien, n'est pas partie et ne touche rien.`,
+        `${venue} est un agrégateur d'échange automatisé — il dirige votre échange vers l'un de ses propres services et détient vos fonds pendant l'échange, puis paie vers votre propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité d'un service, sont sur trocador.app/terms. dpay demande à ${venue} uniquement des services sans vérification d'identité. Ce portefeuille affiche le devis propre de ${venue} et l'adresse de dépôt — vos fonds vont directement de votre propre portefeuille au service ; dpay n'est pas partie et ne touche rien.`,
       cowswap: venue =>
         `${venue} exécute des ordres signés hors chaîne avec des solvers concurrents, généralement en secondes ou minutes. La revue affiche les frais propres de ${venue}. dpay signe votre ordre, n’est pas partie et ne reçoit rien.`,
     },
@@ -249,6 +249,8 @@ export const convertFr: ConvertMessages = {
       `Exécuté par ${venue} — un service d'échange automatisé, ni une banque, ni dpay.`,
     checklistSigns:
       'Rien n\'est signé sur ce téléphone — après confirmation, c\'est vous qui envoyez le dépôt à l\'adresse du service.',
+    checklistSignsAuto:
+      'Après confirmation, ce portefeuille envoie lui-même le dépôt au service — l\'échange appartient au service.',
     refusalLine: sym =>
       `Si le dépôt n'arrive jamais, l'ordre expire — rien ne bouge et votre ${sym} reste dans votre portefeuille.`,
     insufficientLine: (needed, balance) =>
@@ -262,7 +264,10 @@ export const convertFr: ConvertMessages = {
     settlingWatchLine: 'La plupart se règlent en minutes — dpay surveille chaque shift et intervient si l\u2019un bloque.',
     depositNote: (venue, sym) =>
       `Envoyez ${sym} depuis votre portefeuille vers l'adresse de dépôt de ${venue} ci-dessus — exactement le montant indiqué. ${venue} le détient pendant l'échange, puis paie vers votre adresse. dpay n'est pas partie et ne touche rien.`,
+    depositAutoNote: (venue, sym) =>
+      `Ce portefeuille envoie lui-même le dépôt de ${sym} à l'adresse de ${venue} — exactement le montant indiqué. ${venue} le détient pendant l'échange, puis paie vers votre adresse. dpay n'est pas partie et ne touche rien.`,
     stillWaitingDeposit: 'Toujours en attente de votre dépôt — cet écran se met à jour tout seul.',
+    stillWaitingAuto: 'Le dépôt part tout seul une fois — en attente du mot du service ; cet écran se met à jour tout seul.',
     depositSolFeeNote: 'Le dépôt paie aussi de petits frais de réseau en SOL — gardez un peu de SOL dans ce portefeuille.',
     solInsufficientLine: (needed, balance) =>
       `Le dépôt envoie exactement ${needed} — vous avez ${balance}.`,

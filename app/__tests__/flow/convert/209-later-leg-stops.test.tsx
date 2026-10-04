@@ -155,7 +155,7 @@ hermeticDescribe('flow 209 — the Stop on the later legs: crossing, sol_ready, 
       await m.driver.findByTestID('convert-settle-address', {timeoutMs: 15_000});
       await m.driver.click('btn-convert-confirm', {timeoutMs: 5_000});
       await m.driver.findByTestID('convert-awaiting-deposit', {timeoutMs: 30_000});
-      await m.driver.findByTestID('convert-deposit-address', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-deposit-auto-note', {timeoutMs: 8_000});
       await m.driver.waitForFunction(
         () => (sideShiftStubState()?.statusCalls.length ?? 0) > 0,
         {timeoutMs: 15_000, label: 'the provider watch polls the venue at least once'},

@@ -32,7 +32,6 @@ async function awaitDepositPanel(m: Awaited<ReturnType<typeof onboardWallet>>): 
     throw e;
   }
 }
-const DEPOSIT_ADDRESS = 'ryjl3-tyaaa-aaaaa-aaaba-cai'; // the stub's valid ICRC-1 account text
 const SHIFT_ID = 'e2e-shift-9c1d';
 const SEED_ICP = 2000000000; // 20 ICP
 /** confirmCefi — press the CTA and wait for the awaiting panel; a moved-quote interrupt gets
@@ -95,19 +94,23 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
       const counterparty = m.driver.readText('convert-counterparty');
       assertIncludes(counterparty, 'SideShift', 'the counterparty line names the venue');
       assertIncludes(counterparty, 'automated exchange service', 'the cefi copy says what the venue IS');
-      assertIncludes(counterparty, 'Nothing is signed on this phone', 'the phone signs nothing — the user deposits to the venue themselves');
+      assertIncludes(counterparty, 'this wallet sends the deposit to the venue itself', 'the IC-source census says the WALLET sends the deposit (2026-10-02 auto-deposit)');
       const disclosure = m.driver.readText('convert-venue-disclosure');
       assertIncludes(disclosure, 'sideshift.ai/terms', 'the venue\'s OWN published terms link renders');
       assertIncludes(disclosure, 'not a licensed provider', 'the disclosure says what the venue is NOT');
 
       // §2 confirm: order created through the relay; the deposit handoff renders verbatim.
       await confirmCefi(m);
-      await m.driver.findByTestID('convert-deposit-address', {timeoutMs: 8_000});
-      assertIncludes(m.driver.readText('convert-deposit-address'), DEPOSIT_ADDRESS, 'the venue\'s deposit address renders VERBATIM');
+      // The auto-deposit panel (2026-10-04): an IC-source row renders NO manual send trio
+      // (a hand-copied deposit on top of the auto-send is a double-spend invitation); the
+      // venue truths and the order handles stay.
+      await m.driver.findByTestID('convert-deposit-auto-note', {timeoutMs: 8_000});
+      expect(m.driver.isPresent('convert-deposit-address')).toBe(false);
+      expect(m.driver.isPresent('convert-deposit-amount')).toBe(false);
       const handoff = m.driver.readText('convert-awaiting-deposit');
-      assertIncludes(handoff, '3', 'the EXACT deposit amount renders');
       assertIncludes(handoff, 'holds', 'the handoff copy says the venue holds funds mid-trade');
       assertIncludes(handoff, 'not a party', 'dpay names itself a non-party');
+      assertIncludes(m.driver.readText('convert-shift-id'), SHIFT_ID, 'the venue shift id stays visible');
 
       // §3 the partner-key audit: credentialed upstream calls only, one order so far.
       let hits = await sideshiftRelayHits();
@@ -149,7 +152,7 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
       await typeConvertAmount(m, '3');
       await m.driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
       await confirmCefi(m);
-      await m.driver.findByTestID('convert-deposit-address', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-deposit-auto-note', {timeoutMs: 8_000});
       setSideShiftStatus('expired');
       await m.driver.findByTestID('convert-quote-expired', {timeoutMs: 45_000});
       assertIncludes(m.driver.readText('convert-quote-expired'), 'expired', 'the expired dead-end says expired');
@@ -162,7 +165,7 @@ hermeticDescribe('flow 187 — ICP → SOL via SideShift: partner key relay-held
       await typeConvertAmount(m, '3');
       await m.driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
       await confirmCefi(m);
-      await m.driver.findByTestID('convert-deposit-address', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-deposit-auto-note', {timeoutMs: 8_000});
       setSideShiftStatus('refunded');
       await m.driver.findByTestID('convert-provider-refunded', {timeoutMs: 45_000});
       assertIncludes(m.driver.readText('convert-provider-refunded'), 'SideShift', 'the refund dead-end names the venue that holds the remedy');

@@ -23,7 +23,6 @@ hermeticFlow();
 
 const FIXTURE_VENUE = 'icpswap-fixture-b';
 
-const DEPOSIT_ADDRESS = 'ryjl3-tyaaa-aaaaa-aaaba-cai'; // the stub's valid ICRC-1 account text
 const SEED_VCHF = 2000000000; // 20 VCHF
 const ETH_RAIL_ID = 'evm:native-eth';
 type ConvertRecord = {
@@ -110,10 +109,10 @@ hermeticDescribe('flow 223 — the EVM-native CeFi destination (ICP → native E
       const icpBefore = BigInt(await getBalance(account!.publicHex, 8));
       await m.driver.click('btn-convert-confirm', {timeoutMs: 5_000});
       await m.driver.findByTestID('convert-awaiting-deposit', {timeoutMs: 30_000});
-      await m.driver.findByTestID('convert-deposit-address', {timeoutMs: 8_000});
-      assertIncludes(m.driver.readText('convert-deposit-address'), DEPOSIT_ADDRESS, 'the venue\'s deposit address renders VERBATIM');
+      // The auto-deposit panel (2026-10-04): no manual trio on an IC-source row.
+      await m.driver.findByTestID('convert-deposit-auto-note', {timeoutMs: 8_000});
+      expect(m.driver.isPresent('convert-deposit-address')).toBe(false);
       const handoff = m.driver.readText('convert-awaiting-deposit');
-      assertIncludes(handoff, '3', 'the EXACT deposit amount renders');
       assertIncludes(handoff, 'holds', 'the handoff copy says the venue holds funds mid-trade');
 
       // The partner-key audit + the record's provenance.

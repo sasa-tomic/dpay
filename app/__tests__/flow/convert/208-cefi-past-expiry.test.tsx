@@ -78,7 +78,7 @@ hermeticDescribe('flow 208 — the CeFi lifecycle is honest past quote expiry', 
       await m.driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
       expect(await m.driver.waitForText('SideShift', {timeoutMs: 8_000})).toBe(true);
       await confirmCefi(m);
-      await m.driver.findByTestID('convert-deposit-address', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-deposit-auto-note', {timeoutMs: 8_000});
       const handoff = m.driver.readText('convert-awaiting-deposit');
       assertIncludes(handoff, SHIFT_ID, 'the venue\'s shift id renders (the status-page handle)');
       assertIncludes(handoff, 'expires', 'the order\'s own expiry window renders beside it');
@@ -116,7 +116,7 @@ hermeticDescribe('flow 208 — the CeFi lifecycle is honest past quote expiry', 
       await m.driver.findByTestID('convert-headline', {timeoutMs: 15_000});
       await m.driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
       await confirmCefi(m);
-      await m.driver.findByTestID('convert-deposit-address', {timeoutMs: 8_000});
+      await m.driver.findByTestID('convert-deposit-auto-note', {timeoutMs: 8_000});
       setSideShiftStatus('multiple');
       await m.driver.findByTestID('convert-provider-processing', {timeoutMs: 45_000});
       await m.driver.findByTestID('convert-last-checked', {timeoutMs: 20_000});

@@ -263,89 +263,119 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
           <Text style={S.convertStateTitle}>{M.convert.awaitingDepositTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.awaitingDepositBody(inSymbol, venueName)}</Text>
           {/* The CeFi handoff (2026-09-15): the venue's own deposit facts, frozen at order
-              creation — the exact address, the exact amount (a fixed shift settles only this
-              figure), the memo when the venue issued one, and the order's own expiry. The
-              amount goes through the SAME formatter as every other money line (10x-verbosity
-              pass audit fix): the venue's decimal string is normalized via
-              decimal→raw→fmtAssetCompact, so a padded "3.00000000" renders as "3 ICP" and no
-              raw-unit figure can ever leak through raw. The address stays verbatim. This IS
-              the value movement: the user sends from their own wallet; dpay signed nothing. */}
+              creation. TWO arms (the record-lifecycle deposit, 2026-10-02 P0): an IC-source
+              row's deposit is SENT BY THIS WALLET — the watcher fires once the record lands
+              here — so the panel names that and renders NO manual send trio (a second,
+              hand-copied deposit on top of the auto-send would be a double-spend invitation).
+              An another-rail source (SOL-side) is still the USER's own transfer: the manual
+              handoff stays verbatim. The amount goes through the SAME formatter as every
+              other money line; the address stays verbatim. */}
           {record.providerDeposit != null ? (
-            <View testID="convert-deposit-handoff">
-              <Text style={S.convertStateMeta}>{M.convert.cefi.depositNote(venueName, inSymbol)}</Text>
-              <Text style={S.convertStateMeta}>{M.convert.cefi.depositAddressLabel}:</Text>
-              {/* The address is the ONE thing the user must move verbatim into another wallet —
-                  it gets the same machine-data treatment as the cross-rail calldata blocks
-                  (mono, boxed), not prose styling. The memo equally: a fixed shift settles only
-                  the exact (address, amount, memo) triple. */}
-              <Text testID="convert-deposit-address" style={S.convertCalldata} selectable>
-                {record.providerDeposit.depositAddress}
-              </Text>
-              <Pressable
-                testID="btn-convert-copy-deposit-address"
-                style={S.linkBtn}
-                onPress={() => {
-                  setCopiedDeposit(null);
-                  void copyToClipboard(record.providerDeposit!.depositAddress).then(() => setCopiedDeposit('address'));
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={M.convert.crossrail.copy}>
-                <Text style={S.linkText}>{copiedDeposit === 'address' ? M.convert.crossrail.copied : M.convert.crossrail.copy}</Text>
-              </Pressable>
-              <Text testID="convert-deposit-amount" style={S.convertStateMeta}>
-                {M.convert.cefi.depositAmountLabel}: {fmtAssetCompact(toUnits(record.providerDeposit.depositAmount, inDecimals), inDecimals, inSymbol)}
-              </Text>
-              {/* SOL-side deposit leg (2026-09-20): the user sends an SPL transfer THEMSELVES —
-                  its network fee is paid in SOL from the same wallet, a fact the IC-side
-                  handoff never had to name. */}
-              {solanaTokenOfMint(record.inLedger) != null ? (
-                <Text testID="convert-deposit-sol-fee-note" style={S.convertStateMeta}>
-                  {M.convert.cefi.depositSolFeeNote}
+            record.inCurrency != null ? (
+              <View testID="convert-deposit-handoff">
+                <Text testID="convert-deposit-auto-note" style={S.convertStateMeta}>
+                  {M.convert.cefi.depositAutoNote(venueName, inSymbol)}
                 </Text>
-              ) : null}
-              {record.providerDeposit.depositMemo != null ? (
-                <>
-                  <Text testID="convert-deposit-memo" style={S.convertCalldata} selectable>
-                    {M.convert.cefi.depositMemoLabel}: {record.providerDeposit.depositMemo}
+                {record.providerDeposit.expiresAtMs != null ? (
+                  <Text style={S.convertStateMeta}>
+                    {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(record.providerDeposit.expiresAtMs)))}
                   </Text>
-                  <Pressable
-                    testID="btn-convert-copy-deposit-memo"
-                    style={S.linkBtn}
-                    onPress={() => {
-                      setCopiedDeposit(null);
-                      void copyToClipboard(record.providerDeposit!.depositMemo!).then(() => setCopiedDeposit('memo'));
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={M.convert.crossrail.copy}>
-                    <Text style={S.linkText}>{copiedDeposit === 'memo' ? M.convert.crossrail.copied : M.convert.crossrail.copy}</Text>
-                  </Pressable>
-                </>
-              ) : null}
-              {record.providerDeposit.expiresAtMs != null ? (
-                <Text style={S.convertStateMeta}>
-                  {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(record.providerDeposit.expiresAtMs)))}
+                ) : (
+                  // The venue published NO expiry (e.g. Trocador orders): say so, instead of
+                  // letting an unfunded order read as quietly abandoned. The shift id below
+                  // is the handle; the watch is the commitment.
+                  <Text testID="convert-deposit-no-expiry" style={S.convertStateMeta}>
+                    {M.convert.cefi.noExpiryLine}
+                  </Text>
+                )}
+                {/* The venue's own order id: the one handle support and the user both need
+                    when talking to the venue's own status page — visible, not buried. */}
+                {record.providerRef != null ? (
+                  <Text testID="convert-shift-id" style={S.convertStateMeta} selectable>
+                    {M.convert.cefi.shiftId(record.providerRef.orderId)}
+                  </Text>
+                ) : null}
+              </View>
+            ) : (
+              <View testID="convert-deposit-handoff">
+                <Text style={S.convertStateMeta}>{M.convert.cefi.depositNote(venueName, inSymbol)}</Text>
+                <Text style={S.convertStateMeta}>{M.convert.cefi.depositAddressLabel}:</Text>
+                {/* The address is the ONE thing the user must move verbatim into another wallet —
+                    it gets the same machine-data treatment as the cross-rail calldata blocks
+                    (mono, boxed), not prose styling. The memo equally: a fixed shift settles only
+                    the exact (address, amount, memo) triple. */}
+                <Text testID="convert-deposit-address" style={S.convertCalldata} selectable>
+                  {record.providerDeposit.depositAddress}
                 </Text>
-              ) : (
-                // The venue published NO expiry (e.g. Trocador orders): say so, instead of
-                // letting an unfunded order read as quietly abandoned. The shift id below
-                // is the handle; the watch is the commitment.
-                <Text testID="convert-deposit-no-expiry" style={S.convertStateMeta}>
-                  {M.convert.cefi.noExpiryLine}
+                <Pressable
+                  testID="btn-convert-copy-deposit-address"
+                  style={S.linkBtn}
+                  onPress={() => {
+                    setCopiedDeposit(null);
+                    void copyToClipboard(record.providerDeposit!.depositAddress).then(() => setCopiedDeposit('address'));
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={M.convert.crossrail.copy}>
+                  <Text style={S.linkText}>{copiedDeposit === 'address' ? M.convert.crossrail.copied : M.convert.crossrail.copy}</Text>
+                </Pressable>
+                <Text testID="convert-deposit-amount" style={S.convertStateMeta}>
+                  {M.convert.cefi.depositAmountLabel}: {fmtAssetCompact(toUnits(record.providerDeposit.depositAmount, inDecimals), inDecimals, inSymbol)}
                 </Text>
-              )}
-              {/* The venue's own order id: the one handle support and the user both need
-                  when talking to the venue's own status page — visible, not buried. */}
-              {record.providerRef != null ? (
-                <Text testID="convert-shift-id" style={S.convertStateMeta} selectable>
-                  {M.convert.cefi.shiftId(record.providerRef.orderId)}
-                </Text>
-              ) : null}
-            </View>
+                {/* SOL-side deposit leg (2026-09-20): the user sends an SPL transfer THEMSELVES —
+                    its network fee is paid in SOL from the same wallet, a fact the IC-side
+                    handoff never had to name. */}
+                {solanaTokenOfMint(record.inLedger) != null ? (
+                  <Text testID="convert-deposit-sol-fee-note" style={S.convertStateMeta}>
+                    {M.convert.cefi.depositSolFeeNote}
+                  </Text>
+                ) : null}
+                {record.providerDeposit.depositMemo != null ? (
+                  <>
+                    <Text testID="convert-deposit-memo" style={S.convertCalldata} selectable>
+                      {M.convert.cefi.depositMemoLabel}: {record.providerDeposit.depositMemo}
+                    </Text>
+                    <Pressable
+                      testID="btn-convert-copy-deposit-memo"
+                      style={S.linkBtn}
+                      onPress={() => {
+                        setCopiedDeposit(null);
+                        void copyToClipboard(record.providerDeposit!.depositMemo!).then(() => setCopiedDeposit('memo'));
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={M.convert.crossrail.copy}>
+                      <Text style={S.linkText}>{copiedDeposit === 'memo' ? M.convert.crossrail.copied : M.convert.crossrail.copy}</Text>
+                    </Pressable>
+                  </>
+                ) : null}
+                {record.providerDeposit.expiresAtMs != null ? (
+                  <Text style={S.convertStateMeta}>
+                    {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(record.providerDeposit.expiresAtMs)))}
+                  </Text>
+                ) : (
+                  // The venue published NO expiry (e.g. Trocador orders): say so, instead of
+                  // letting an unfunded order read as quietly abandoned. The shift id below
+                  // is the handle; the watch is the commitment.
+                  <Text testID="convert-deposit-no-expiry" style={S.convertStateMeta}>
+                    {M.convert.cefi.noExpiryLine}
+                  </Text>
+                )}
+                {/* The venue's own order id: the one handle support and the user both need
+                    when talking to the venue's own status page — visible, not buried. */}
+                {record.providerRef != null ? (
+                  <Text testID="convert-shift-id" style={S.convertStateMeta} selectable>
+                    {M.convert.cefi.shiftId(record.providerRef.orderId)}
+                  </Text>
+                ) : null}
+              </View>
+            )
           ) : null}
           {/* Deposit context says "deposit", never "payout" — the generic watching line belongs
               to the states past the deposit (processing/settling), where a payout is what is
-              being watched for. */}
-          <Text style={S.convertStateMeta}>{M.convert.cefi.stillWaitingDeposit}</Text>
+              being watched for. The IC-source arm's deposit is the wallet's own job, so its
+              tail names the venue wait, not the user's send. */}
+          <Text style={S.convertStateMeta}>
+            {record.inCurrency != null ? M.convert.cefi.stillWaitingAuto : M.convert.cefi.stillWaitingDeposit}
+          </Text>
         </View>
       ) : null}
       {record.step === 'provider_processing' ? (

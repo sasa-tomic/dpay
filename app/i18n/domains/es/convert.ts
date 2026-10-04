@@ -31,9 +31,9 @@ export const convertEs: ConvertMessages = {
       jupiter: venue =>
         `${venue} es un agregador on-chain autónomo en Solana — elige la ruta; la ruta la ejecuta. Esta billetera firma la transacción que construye ${venue}, y la cotización es la propia de ${venue}, tal cual. dpay no es parte.`,
       sideshift: venue =>
-        `${venue} es un servicio de intercambio automatizado — ni un proveedor con licencia ni un banco. Retiene tus fondos durante el intercambio y luego paga a tu propia dirección; sus términos, incluidas las verificaciones de identidad según su política, están en sideshift.ai/terms. Esta billetera muestra la cotización propia de ${venue} y la dirección de depósito — dpay no firma nada, no es parte y no cobra nada.`,
+        `${venue} es un servicio de intercambio automatizado — ni un proveedor con licencia ni un banco. Retiene tus fondos durante el intercambio y luego paga a tu propia dirección; sus términos, incluidas las verificaciones de identidad según su política, están en sideshift.ai/terms. Esta billetera muestra la cotización propia de ${venue} y la dirección de depósito — tus fondos van directamente de tu propia billetera al servicio; dpay no es parte y no cobra nada.`,
       trocador: venue =>
-        `${venue} es un agregador de intercambio automatizado — dirige tu intercambio a uno de sus propios servicios y retiene tus fondos durante el intercambio, luego paga a tu propia dirección; sus términos, incluidas las verificaciones de identidad que un servicio pueda aplicar, están en trocador.app/terms. dpay pide a ${venue} solo servicios sin verificación de identidad. Esta billetera muestra la cotización propia de ${venue} y la dirección de depósito — dpay no firma nada, no es parte y no cobra nada.`,
+        `${venue} es un agregador de intercambio automatizado — dirige tu intercambio a uno de sus propios servicios y retiene tus fondos durante el intercambio, luego paga a tu propia dirección; sus términos, incluidas las verificaciones de identidad que un servicio pueda aplicar, están en trocador.app/terms. dpay pide a ${venue} solo servicios sin verificación de identidad. Esta billetera muestra la cotización propia de ${venue} y la dirección de depósito — tus fondos van directamente de tu propia billetera al servicio; dpay no es parte y no cobra nada.`,
       cowswap: venue =>
         `${venue} ejecuta órdenes firmadas fuera de la cadena con solvers competidores, normalmente en segundos a minutos. La revisión muestra la comisión propia de ${venue}. dpay firma su orden, no es parte y no recibe nada.`,
     },
@@ -249,6 +249,8 @@ export const convertEs: ConvertMessages = {
       `Ejecutado por ${venue} — un servicio de intercambio automatizado, ni un banco ni dpay.`,
     checklistSigns:
       'No se firma nada en este teléfono: tras confirmar, tú mismo envías el depósito a la dirección del servicio.',
+    checklistSignsAuto:
+      'Tras confirmar, esta billetera envía el depósito al servicio por sí sola — el intercambio es cosa del servicio.',
     refusalLine: sym =>
       `Si el depósito nunca llega, la orden caduca — no se mueve nada y tu ${sym} sigue en tu billetera.`,
     insufficientLine: (needed, balance) =>
@@ -262,7 +264,10 @@ export const convertEs: ConvertMessages = {
     settlingWatchLine: 'La mayoría se liquidan en minutos — dpay supervisa cada shift e interviene si uno se demora.',
     depositNote: (venue, sym) =>
       `Envía ${sym} desde tu billetera a la dirección de depósito de ${venue} arriba — exactamente la cantidad indicada. ${venue} la retiene durante el intercambio y luego paga a tu dirección. dpay no es parte y no cobra nada.`,
+    depositAutoNote: (venue, sym) =>
+      `Esta billetera envía por sí sola el depósito de ${sym} a la dirección de ${venue} — exactamente la cantidad indicada. ${venue} la retiene durante el intercambio y luego paga a tu dirección. dpay no es parte y no cobra nada.`,
     stillWaitingDeposit: 'Todavía esperando tu depósito — esta página se actualiza sola.',
+    stillWaitingAuto: 'El depósito sale solo una vez — a la espera de la respuesta del servicio; esta página se actualiza sola.',
     depositSolFeeNote: 'El depósito también paga una pequeña comisión de red en SOL — conserva algo de SOL en esta billetera.',
     solInsufficientLine: (needed, balance) =>
       `El depósito envía exactamente ${needed} — tienes ${balance}.`,
