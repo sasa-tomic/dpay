@@ -18,10 +18,10 @@
  * The activity feed is capped at ACTIVITY_ROWS rows of the merged ledger, rendered through the
  * same HistoryRow as the Transactions tab but under its OWN home-hist-* testIDs.
  */
-import {describe, test, expect, jest} from '@jest/globals';
+import {describe, test, expect, jest, beforeEach} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
-import {Text} from 'react-native';
+import {Linking, Text} from 'react-native';
 import {ACTIVITY_ROWS, HomeTab} from '../components/HomeTab';
 import {AtaSetupCard} from '../components/AtaSetupCard';
 import {buildSelectableAssets} from '../config/assets';
@@ -435,6 +435,40 @@ describe('HomeTab — the inline activity feed', () => {
     const tree = mountHome({history: [txn('ic:0', '100', TS)], onSeeAll});
     act(() => { pressable(tree, 'btn-home-activity-all').props.onPress(); });
     expect(onSeeAll).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('HomeTab — the in-app update notice (founder 2026-10-04: newer version, 1-2 clicks)', () => {
+  let mockOpenURL: jest.Mock<(uri: string) => Promise<void>>;
+  beforeEach(() => {
+    mockOpenURL = jest.fn<(uri: string) => Promise<void>>().mockResolvedValue(undefined);
+    (Linking.openURL as unknown) = mockOpenURL;
+  });
+
+  test('when the check reports a newer build: ONE line + ONE Update button; press opens the exact URL', () => {
+    const url = 'https://relay.example/download/dpay.apk?v=582be6599b1cecf6eed4e6794b3f1c99';
+    const tree = mountHome({updateUrl: url});
+    // Presence via the Set-deduped idiom (the RN preset mirrors every node, so raw findAll
+    // counts are 2x; ONE banner + ONE button is enforced by the single conditional block and
+    // the ONE-openURL-per-press pin below is the behavioral half).
+    const ids = testIDs(tree);
+    expect(ids).toContain('update-banner');
+    expect(ids).toContain('btn-update-now');
+    expect(textUnder(tree, 'update-banner')).toContain('A newer version of dpay is available.');
+    expect(textUnder(tree, 'btn-update-now')).toBe(M.update.action);
+    act(() => { pressable(tree, 'btn-update-now').props.onPress(); });
+    expect(mockOpenURL).toHaveBeenCalledTimes(1);
+    expect(mockOpenURL).toHaveBeenCalledWith(url);
+    act(() => { tree.unmount(); });
+  });
+
+  test('when unavailable: renders NOTHING — no banner, no button, no reserved copy', () => {
+    const tree = mountHome({updateUrl: null});
+    const ids = testIDs(tree);
+    expect(ids).not.toContain('update-banner');
+    expect(ids).not.toContain('btn-update-now');
+    expect(texts(tree)).not.toContain('A newer version of dpay is available.');
     act(() => { tree.unmount(); });
   });
 });
