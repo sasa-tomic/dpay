@@ -169,6 +169,11 @@ pub struct AppState {
     /// on the landing-page download link and the strong ETag on `/download/dpay.apk`, so the CDN
     /// revalidates cheaply instead of pinning a stale build.
     apk_version: String,
+    /// The APK's build commit (the git SHA `scripts/build-apk.sh` writes beside the build as a
+    /// one-line `.commit` file; `main` reads the sibling of `DPAY_APK_PATH`). `None` — dev build,
+    /// missing file, or no APK at all — keeps `GET /api/v1/update` on its null arm: "newer" is
+    /// undecidable without a build identity, and a silent answer is the honest one.
+    apk_commit: Arc<Option<String>>,
     /// Fake-IC gateway state (test-helpers only). When set, `/api/v2/canister/*` is served from
     /// this relay and the value-path helpers below (faucet/balances/transactions) read the
     /// gateway's principal-keyed ledgers instead of the facade-era `dyn Ledger`. `None` in prod.
@@ -237,6 +242,7 @@ impl AppState {
             ))),
             apk: Arc::new(None),
             apk_version: String::new(),
+            apk_commit: Arc::new(None),
             // The unconfigured solana proxy: /api/v1/solana/rpc answers 503 naming the env var
             // until `with_solana` points it at DPAY_SOLANA_RPC_URL (see `crate::solana`).
             solana: Arc::new(crate::solana::SolanaProxy::new(
@@ -382,6 +388,16 @@ impl AppState {
         self
     }
 
+    /// Attach the APK's build commit — the identity `GET /api/v1/update` compares against the
+    /// running app's own build. `main` reads it from the `.commit` file staged beside the APK;
+    /// `None` (no file, empty file) leaves the update route on its null arm. Kept SEPARATE from
+    /// [`AppState::with_apk`] because the bytes and their identity have different sources (env
+    /// file reads vs the builder the tests drive) and one may exist without the other.
+    pub fn with_apk_commit(mut self, commit: Option<String>) -> Self {
+        self.apk_commit = Arc::new(commit);
+        self
+    }
+
     /// Declare whether this deployment's faucet can actually credit — see
     /// [`faucet_available`](AppState::faucet_available). `main` derives it from the backend it
     /// built (fixture: `DPAY_ENABLE_FAUCET`; agent: an authenticated identity); tests declare it
@@ -433,6 +449,7 @@ pub fn app(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/capabilities", get(capabilities))
         .route("/version", get(version))
+        .route("/update", get(update))
         .route("/integrity", get(integrity))
         // The Solana JSON-RPC proxy (spec 2026-09-09, Direction 1) — registered ALWAYS, unlike
         // the checkout below: an unconfigured proxy still answers (503 naming DPAY_SOLANA_RPC_URL),
@@ -2944,6 +2961,42 @@ async fn apk_download(State(state): State<AppState>, headers: HeaderMap) -> Resp
         HeaderValue::from_str(&etag).expect("quoted hex sha256 is always a valid header value"),
     );
     resp
+}
+
+/// `GET /api/v1/update` response — the app's one-shot "is there a newer build?" answer. `apk` is
+/// `Some` only when BOTH halves of the identity exist: the bytes AND the build commit.
+#[derive(Serialize)]
+struct UpdateBody {
+    apk: Option<UpdateApk>,
+}
+
+#[derive(Serialize)]
+struct UpdateApk {
+    commit: String,
+    url: String,
+}
+
+/// `GET /api/v1/update` — what the installed app polls ONCE per launch to decide whether to show
+/// its single "Update" affordance (founder directive: tell me there is a newer version, and get
+/// me to it in 1-2 clicks). Two arms, both `200` so the client never special-cases a status:
+///
+///   • CONFIGURED — an APK and its build commit are attached (`DPAY_APK_PATH` + the sibling
+///     `.commit` file `scripts/build-apk.sh` stages, `deploy/build.sh` copies, the Dockerfile
+///     bakes at `/srv/dpay.apk.commit`): `{"apk":{"commit":"<sha>","url":"/download/dpay.apk?v=<sha256>"}}`.
+///     The `url` reuses the sha256 ETag as the cache-buster, byte-identical to the landing
+///     page's link, so the browser download rides the same cheap revalidation path.
+///   • NULL — `{"apk":null}`. No APK, or an APK without a commit: "newer" is undecidable without
+///     a build identity on at least one side, and a silent answer is the honest one (the app
+///     renders nothing).
+async fn update(State(state): State<AppState>) -> Response {
+    let apk = match (state.apk.as_ref(), state.apk_commit.as_ref()) {
+        (Some(_), Some(commit)) => Some(UpdateApk {
+            commit: commit.clone(),
+            url: format!("/download/dpay.apk?v={}", state.apk_version),
+        }),
+        _ => None,
+    };
+    (StatusCode::OK, Json(UpdateBody { apk })).into_response()
 }
 
 /// `GET /merchant` — permanent redirect to `/wallet` (2026-08-16 merge). The hand-rolled merchant

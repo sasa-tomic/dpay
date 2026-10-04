@@ -58,6 +58,9 @@
 //!                           it as a secret (same sensitivity as the PEM itself).
 //!   DPAY_APK_PATH           path to an Android build to serve at `GET /download/dpay.apk` and light
 //!                           up the landing page's download button. Unset → downloads disabled.
+//!                           The sibling `<path>.commit` file (one line: the build's git SHA) is
+//!                           the update identity `GET /api/v1/update` serves; without it the
+//!                           update route answers {"apk":null}.
 //!   DPAY_SOLANA_RPC_URL     the Solana JSON-RPC provider endpoint proxied at POST
 //!                           /api/v1/solana/rpc (spec 2026-09-09, Direction 1) — the FULL URL
 //!                           including its api key (e.g. `https://…-rpc.com/?api-key=…`).
@@ -262,9 +265,10 @@ async fn main() {
     }
 
     let (ledger, faucet_available) = build_ledger(&cfg).await;
-    let apk = load_apk();
+    let (apk, apk_commit) = load_apk();
     let state = AppState::new(ledger.clone())
         .with_apk(apk)
+        .with_apk_commit(apk_commit)
         .with_checkout(cfg.checkout)
         // The ONE faucet predicate: `GET /api/v1/capabilities` reports it and `POST
         // /api/v1/faucet` refuses on it. Derived from the backend that was actually built, right
@@ -602,7 +606,11 @@ async fn main() {
 
 /// Load the Android build to serve, if `DPAY_APK_PATH` names one. A set-but-unreadable path is a
 /// loud warning, not a hard stop: the relay still serves payments, just without a download link.
-fn load_apk() -> Option<Vec<u8>> {
+/// Alongside the bytes, the sibling `<path>.commit` file (one line: the build's git SHA, written
+/// by `scripts/build-apk.sh`, staged by `deploy/build.sh`, baked by the Dockerfile) is read into
+/// the update identity — see [`AppState::with_apk_commit`]. Missing/empty commit ⇒ `None`: the
+/// update route stays on its null arm rather than guessing.
+fn load_apk() -> (Option<Vec<u8>>, Option<String>) {
     match std::env::var("DPAY_APK_PATH") {
         Ok(path) if !path.trim().is_empty() => {
             let path = path.trim().to_string();
@@ -612,14 +620,15 @@ fn load_apk() -> Option<Vec<u8>> {
                         "serving APK from {path} ({} bytes) at /download/dpay.apk",
                         bytes.len()
                     );
-                    Some(bytes)
+                    let commit = read_apk_commit(&path);
+                    (Some(bytes), commit)
                 }
                 Err(e) => {
                     eprintln!(
                         "dpay-relay: warn: DPAY_APK_PATH={path:?} is set but unreadable ({e}); \
                          APK downloads disabled"
                     );
-                    None
+                    (None, None)
                 }
             }
         }
@@ -630,10 +639,34 @@ fn load_apk() -> Option<Vec<u8>> {
                 "dpay-relay: warn: DPAY_APK_PATH is set to a value that is not valid UTF-8 ({raw:?}); \
                  APK downloads disabled"
             );
-            None
+            (None, None)
         }
         _ => {
             println!("no DPAY_APK_PATH set — APK downloads disabled (/download/dpay.apk → 404)");
+            (None, None)
+        }
+    }
+}
+
+/// The APK's build commit — the one-line `.commit` file sitting beside the APK bytes. Absent,
+/// unreadable, or empty is `None` with a named warning: `/api/v1/update` can only be silent
+/// about a build whose identity it does not have.
+fn read_apk_commit(apk_path: &str) -> Option<String> {
+    let commit_path = format!("{apk_path}.commit");
+    match std::fs::read_to_string(&commit_path) {
+        Ok(s) => {
+            let s = s.trim();
+            if s.is_empty() {
+                eprintln!("dpay-relay: warn: {commit_path} is empty; /api/v1/update stays silent");
+                None
+            } else {
+                Some(s.to_string())
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "dpay-relay: warn: no {commit_path} ({e}); /api/v1/update stays silent"
+            );
             None
         }
     }

@@ -1657,6 +1657,57 @@ async fn apk_download_revalidates_with_304_on_if_none_match() {
     assert_eq!(bytes, apk);
 }
 
+/// `GET /api/v1/update` with an APK AND its build commit attached (the sibling `.commit` file
+/// `scripts/build-apk.sh` writes, staged by `deploy/build.sh`, baked by the Dockerfile): the
+/// configured arm answers the EXACT update shape — the build commit plus the download URL with
+/// the sha256 cache-buster, byte-identical to the landing page's link.
+#[tokio::test]
+async fn update_route_reports_configured_build() {
+    let (state, _led) = state_from(ledger());
+    let apk = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02];
+    let commit = "0123456789abcdef0123456789abcdef01234567".to_string();
+    let state = state.with_apk(Some(apk.clone())).with_apk_commit(Some(commit.clone()));
+
+    let (status, body) = call(&state, get_req("/api/v1/update")).await;
+    assert_eq!(status, StatusCode::OK);
+    let etag = hex::encode(sha2::Sha256::digest(&apk));
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "apk": {"commit": commit, "url": format!("/download/dpay.apk?v={etag}")}
+        }),
+        "the configured arm carries the build commit + the cache-busting download url"
+    );
+}
+
+/// `GET /api/v1/update` with no APK configured (the default state — no DPAY_APK_PATH): the null
+/// arm. Still 200 and still shaped, so the app's parser never has to special-case a 404.
+#[tokio::test]
+async fn update_route_without_apk_answers_null() {
+    let (state, _led) = state_from(ledger());
+
+    let (status, body) = call(&state, get_req("/api/v1/update")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, serde_json::json!({"apk": null}));
+}
+
+/// An APK without a build identity answers the null arm too: "newer" is undecidable without a
+/// build commit, and a silent answer is the honest one — the app must never show an update
+/// button it cannot justify.
+#[tokio::test]
+async fn update_route_apk_without_commit_answers_null() {
+    let (state, _led) = state_from(ledger());
+    let state = state.with_apk(Some(vec![0xDE, 0xAD, 0xBE, 0xEF]));
+
+    let (status, body) = call(&state, get_req("/api/v1/update")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        serde_json::json!({"apk": null}),
+        "no build commit = the update check stays silent"
+    );
+}
+
 // --- currency catalog (M0 + v2 network-first envelope) ------------------------
 //
 // Covers GET /api/v1/currencies — the wallet's runtime asset catalog (closes issue #7), served
