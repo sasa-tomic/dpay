@@ -1064,6 +1064,31 @@ describe('multihop — the composed routes are Other-venues rows under the auto-
     expect(textOf(tree, 'convert-dest-cross-note')).toBe(convertEn.crossrail.destAddressCrossNote);
   });
 
+  test('the crossing census quotes the SIGNED maxFee cap, never the unbuffered fee (2026-10-03 live: Circle executed exactly the cap)', async () => {
+    // The honest "at most" figure IS the cap the burn signs: Circle's protocol bps + the
+    // med forwarding fee + the 20% buffer (cctpMaxFee). The live trip's burn executed
+    // exactly that cap, so quoting the unbuffered med+bps total would understate what
+    // Circle is authorized to take. With the mocked census (8 bps, med 282032) and the
+    // 0.40782196 USDC burn: cap = (32625 + 282032) * 1.2 = 377588 → "0.377588 USDC";
+    // the unbuffered total would read 0.314657.
+    const {cctpMaxFee} = jest.requireActual('../cctp') as typeof import('../cctp');
+    const fee = {finalityThreshold: 1000, minimumFeeBps: 8n, forwardFeeSubunits: 282032n};
+    expect(cctpMaxFee(BigInt(MATH.minOut), fee)).toBe(377588n);
+    const tree = await mountConvert('250000000', '1');
+    await pickRow(tree, ROUTE_B_ROW);
+    await openDetails(tree);
+    let feeText = '';
+    for (let i = 0; i < 50 && feeText === ''; i++) {
+      await act(async () => { await new Promise(r => setTimeout(r, 10)); });
+      feeText = textOf(tree, 'crossrail-circle-fee');
+    }
+    expect(feeText).toContain('at most 0.377588 USDC');
+    expect(feeText).not.toContain('0.314657');
+    // The floor line derives from the SAME cap: 40782196 - 377588 = 40404608 subunits.
+    expect(textOf(tree, 'crossrail-mint-floor')).toContain('40.404608');
+    act(() => { tree.unmount(); });
+  });
+
   test('editing the destination keeps the checksum + re-type gates; the derived value auto-satisfies', async () => {
     const tree = await mountConvert('250000000', '1');
     await pickRow(tree, ROUTE_B_ROW);
