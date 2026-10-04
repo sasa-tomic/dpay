@@ -101,9 +101,10 @@ hermeticDescribe('flow 227 — the composed mid-route park hands off to the cefi
       const account = await accountOf(m);
       const fundVchf = await faucetAccount(account!.publicHex, SEED_VCHF, {currency: 7});
       expect(fundVchf.ok).toBe(true);
-      const fundIcp = await faucetAccount(account!.publicHex, SEED_ICP, {currency: 8});
-      expect(fundIcp.ok).toBe(true);
-
+      // The ICP seed lands AFTER §0 (the hop-skip fix, 2026-10-04): a wallet already
+      // holding covering ICP now takes the legless cefi route — no composed record would
+      // exist to clone. §0 runs ICP-poor (the composed path), then the seed funds the
+      // CLONE's deposit gate below.
       installSideShiftStub({initialStatus: 'waiting'});
 
       // The composed oracle: the IC leg's quote answered by the fixture pool.
@@ -123,6 +124,8 @@ hermeticDescribe('flow 227 — the composed mid-route park hands off to the cefi
       const tpl = Object.values(store).find((r) => r != null && r.composedDeposit != null);
       if (tpl == null) throw new Error('no composed record to clone');
       expect(tpl.step).toBe('awaiting_deposit');
+      const fundIcp = await faucetAccount(account!.publicHex, SEED_ICP, {currency: 8});
+      expect(fundIcp.ok).toBe(true);
 
       // §1 THE MID-ROUTE PARK: the founder's exact shape - leg 2's pool payout watch with
       // the leg-3 order pre-created. The clone keeps the template's frozen bytes (the
