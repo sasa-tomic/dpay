@@ -216,6 +216,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   // signs the instant a request decodes, often before the fee lands in `feeRaw`) still records the
   // price, not whatever the state happened to hold at sign time. Null = no query for this intent.
   const feePromiseRef = useRef<Promise<string | null> | null>(null);
+  // The intent object this journey already started its one fee query for (per-journey
+  // once-and-deliver; the reset effect below clears feeRaw on a new intent but the started
+  // marker rides the intent OBJECT, so a re-render churn never restarts the query).
+  const startedFor = useRef<PayIntent | null>(null);
   // No fee resolution while the review cannot be approved (online + insufficient): a doomed
   // payment must touch NOTHING on the network (flow 101's zero-canister-call invariant — a
   // read-only icrc1_fee query included), and offline the fetch could not succeed anyway. The
@@ -237,10 +241,20 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     const cur = intent?.currency ?? null;
     if (cur == null || cur === 0) return; // DEMO is play money — no honest fee to add
     if (!intentLedger) return;
-    // Keep any fee this journey already fetched: `reviewBlocked` flips true AFTER a payment
-    // lands (the account just moved) and the paid screen still needs the fee for its total.
+    // Per-journey once-and-deliver (live failure 2026-10-04, flow 31 full-suite): a catalog
+    // flap to [] turned intentLedger null for one render, the old effect's cleanup killed the
+    // in-flight delivery, and the reviewBlocked guard then refused a replacement - the paid
+    // total stayed the bare wire forever. This effect therefore owns NO cancellation: the flap
+    // render early-returns above BEFORE touching `startedFor`, so the pending promise still
+    // delivers to a journey that is current, and `startedFor` guarantees exactly ONE query per
+    // intent journey (a settle that flips reviewBlocked can never block a query already
+    // started; the paid screen requires the fee either way). (14b4eae0 fixed the
+    // catalog-object churn; this closes the flap-to-null shape of the same family.)
+    if (startedFor.current === intent) return;
+    // A doomed review (online + insufficient) touches NOTHING on the network — flow 101's
+    // zero-canister-call invariant includes this read-only icrc1_fee query.
     if (reviewBlocked) return;
-    let alive = true;
+    startedFor.current = intent;
     // Promise.resolve: the boundary is also a jest mock — an un-configured one returns undefined,
     // and the displays' honesty must not depend on the mock's return shape.
     const query = Promise.resolve(fetchLedgerFee(identity.secretHex, intentLedger)).catch((e: unknown) => {
@@ -249,16 +263,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     });
     feePromiseRef.current = query;
     void query.then(fee => {
-      if (alive && fee != null) setFeeRaw(fee);
+      if (fee != null && startedFor.current === intent) setFeeRaw(fee);
     });
-    return () => { alive = false; };
-    // `reviewBlocked` is deliberately NOT a dep (it IS read, at every run): the settle flips it
-    // within one balance-poll tick, and a re-run here would cancel the IN-FLIGHT fee delivery —
-    // the paid screen's total then falls back to the wire-only amount forever (observed in-run:
-    // flow 31's "0.05 USDC" total never rendered; the wire is 0.04 and the poll beat the fee).
-    // The flip only ever needs to STOP a new query from starting, which the guard above does at
-    // every run this effect actually gets. `catalog` is also deliberately not a dep: the intent's
-    // ledger above is the primitive this effect truly depends on (see intentLedger).
+    // `intentLedger` is the primitive this effect depends on (see above); `catalog` is read only
+    // inside the catch's fallback and is deliberately not a dep.
   }, [intent, intentLedger, identity.secretHex]);
   // The total debit a payer-facing amount on this journey renders: amount + fee when the fee is
   // known, the amount alone when it is not. The signed envelope is NEVER built from this — it stays

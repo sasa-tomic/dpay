@@ -367,6 +367,41 @@ describe('PayMode — the payer reads the TOTAL DEBIT, never the bare wire (foun
     });
   });
 
+  test('a catalog flap to EMPTY mid-journey never cancels the in-flight fee delivery (paid total keeps its fee)', async () => {
+    // The second live failure (flow 31, full-suite 2026-10-04): a refetch answered [] for ONE
+    // render. The flap turned intentLedger null, the effect re-ran, its cleanup killed the
+    // IN-FLIGHT delivery, and when the catalog refilled the reviewBlocked guard (the balance
+    // had already settled) refused to start a replacement - the payer's total stayed the bare
+    // wire forever. The effect must not own cancellation at all: the flap render early-returns
+    // before touching anything, the in-flight promise delivers when the journey is still the
+    // same, and no run after the settle may block a journey's one query.
+    const resolvers: Array<(v: string) => void> = [];
+    jest.mocked(fetchLedgerFee).mockImplementation(() => new Promise<string>(r => { resolvers.push(r); }));
+    jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {})); // keep the signing surface put
+    const mounted = {online: true, catalog: CATALOG_V, assets: VCHF_ASSET, assetBalances: {7: '200000000'}};
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(payElement(mounted));
+    });
+    await scanToSign(tree, REQ_VCHF);
+    await act(async () => {}); // the deferred queries started
+    // THE FLAP: one render with an empty catalog, then the refill (same content) AND the
+    // balance settle (reviewBlocked true from here on).
+    act(() => {
+      tree.update(payElement({...mounted, catalog: []}));
+    });
+    act(() => {
+      tree.update(payElement({...mounted, assetBalances: {7: '50000000'}, catalog: [...CATALOG_V]}));
+    });
+    for (const r of resolvers) r('10000'); // the ledger's answer lands AFTER the flap
+    await act(async () => {});
+    expect(textByTestID(tree, 'pay-amount')).toBe(M.pay.payAmount(fmtCurrencyAmountCompact(CATALOG_V, 7, '100000000')));
+    expect(textByTestID(tree, 'pay-amount')).not.toContain('0.9999'); // never the bare wire
+    act(() => {
+      tree.unmount();
+    });
+  });
+
   test('unknown fee (DEMO, no ledger): the review falls back to the wire alone — no guessed total', async () => {
     jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {}));
     const tree = mountPay(); // DEMO (currency 0) is the default fixture; its fee never fetches
