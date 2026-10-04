@@ -27,6 +27,7 @@ import {DEMO_ASSET_ID, buildSelectableAssets} from '../config/assets';
 import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {offerableCurrencies} from '../config/currency';
+import {S} from '../styles';
 import type {EvmSelectableAsset} from '../lib/evmCatalog';
 
 const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
@@ -154,6 +155,42 @@ describe('AccountsTab — one row per VISIBLE currency, stables then Other', () 
     const demoTitles = demoRow.findAllByType(Text).filter(n => n.props.children === 'DEMO');
     expect(demoTitles.length).toBeGreaterThan(0);
     for (const t of demoTitles) expect(t.props.numberOfLines).toBe(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a row AMOUNT holds ONE line (the ZCHF full-precision figure never wraps, 2026-10-02 audit)', () => {
+    // The ZCHF row's full-precision balance overflowed the title row and wrapped to a second
+    // line. The amount gets the title's clamp: one line, no mid-wrap, in BOTH renderers of the
+    // shared title row (the currency-list route and the CurrencyRow card).
+    const tree = mount(views, sums);
+    const icpRow = tree.root.findAll(n => n.props?.testID === 'accounts-currency-ICP')[0]!;
+    const icpAmts = icpRow.findAllByType(Text).filter(n => Array.isArray(n.props.style) && n.props.style.includes(S.assetAmt));
+    expect(icpAmts.length).toBeGreaterThan(0);
+    for (const t of icpAmts) expect(t.props.numberOfLines).toBe(1);
+    // The practice card is the mounted CurrencyRow here.
+    const demoRow = tree.root.findAll(n => n.props?.testID === 'asset-demo')[0]!;
+    const demoAmts = demoRow.findAllByType(Text).filter(n => Array.isArray(n.props.style) && n.props.style.includes(S.assetAmt));
+    expect(demoAmts.length).toBeGreaterThan(0);
+    for (const t of demoAmts) expect(t.props.numberOfLines).toBe(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the EVM rail rows (ZCHF) carry the same one-line amount clamp', () => {
+    const zchf = ASSETS_EVM.filter((a): a is EvmSelectableAsset => a.protocol === 'evm');
+    expect(zchf.length).toBeGreaterThan(0);
+    const evmStates = Object.fromEntries(zchf.map(a => [a.id, {amount: '3445332536202788123456', status: 'balance' as const}]));
+    const evmViews = assetViews({assets: ASSETS_EVM, evmStates});
+    const tree = mount(evmViews, sums, {assets: ASSETS_EVM, onConvertAsset: jest.fn()});
+    let checked = 0;
+    for (const a of zchf) {
+      const row = tree.root.findAll(n => n.props?.testID === `asset-${a.testKey}`)[0];
+      if (row == null) continue; // a chain whose rail gate is closed renders no row
+      checked += 1;
+      const amts = row.findAllByType(Text).filter(n => Array.isArray(n.props.style) && n.props.style.includes(S.assetAmt));
+      expect(amts.length).toBeGreaterThan(0);
+      for (const t of amts) expect(t.props.numberOfLines).toBe(1);
+    }
+    expect(checked).toBeGreaterThan(0);
     act(() => { tree.unmount(); });
   });
 

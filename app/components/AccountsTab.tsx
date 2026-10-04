@@ -154,9 +154,10 @@ export function AccountsTab({
                       <View style={S.assetTitleRow}>
                         {/* ONE line, always (2026-10-02 audit): "Internet Computer" beside a wide
                             balance wrapped to two lines. The clamp yields to the amount (the
-                            non-wrapping money column); the full name sits in the subtitle below. */}
+                            non-wrapping money column); the full name sits in the subtitle below.
+                            The amount clamps too — a full-precision balance never wraps. */}
                         <Text style={S.assetLabel} numberOfLines={1}>{currencyName(currency)}</Text>
-                        <Text style={[S.assetAmt, view != null && view.status !== 'ok' && S.assetCardZero]}>{view?.displayText ?? '—'}</Text>
+                        <Text style={[S.assetAmt, view != null && view.status !== 'ok' && S.assetCardZero]} numberOfLines={1}>{view?.displayText ?? '—'}</Text>
                       </View>
                       <View style={S.assetTitleRow}>
                         {mainBadge}

@@ -100,9 +100,10 @@ export function CurrencyRow({testId, asset, label, amount, active, onPress, acce
             <View style={S.pickTextCol}>
               <View style={S.assetTitleRow}>
                 {/* ONE line, always (2026-10-02 audit): the title yields to the amount (the
-                    non-wrapping money column); the subtitle carries the full rail name. */}
+                    non-wrapping money column); the subtitle carries the full rail name. The
+                    amount clamps too — a full-precision balance never wraps to a second line. */}
                 <Text style={S.assetLabel} numberOfLines={1}>{title}</Text>
-                {amount != null ? <Text style={[S.assetAmt, zero && S.assetCardZero]}>{amount}</Text> : null}
+                {amount != null ? <Text style={[S.assetAmt, zero && S.assetCardZero]} numberOfLines={1}>{amount}</Text> : null}
                 {check}
               </View>
               <Text style={S.assetSub}>{asset.networkLabel}</Text>
