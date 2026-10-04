@@ -97,6 +97,7 @@ import {
   formatBps,
   formatMillionthsPct,
   nonBreakingClock,
+  quoteMovedMaterially,
   scaledRate,
   venueDisclosure,
   type ChainBundle,
@@ -419,8 +420,9 @@ export function ConvertIntentSheet({
   const [quoteBusy, setQuoteBusy] = useState(false);
   const [quoteErr, setQuoteErr] = useState<string | null>(null);
   const [staleRefreshing, setStaleRefreshing] = useState(false);
-  // The moved-quote note: old then new inline, the same button re-armed (brief 5.5).
-  const [moved, setMoved] = useState<{oldAmt: string; newAmt: string} | null>(null);
+  // The moved-quote note: the fresh figure inline, the same button re-armed (S2). One
+  // re-confirm per material move; noise within the tolerance never interrupts.
+  const [moved, setMoved] = useState<{newAmt: string} | null>(null);
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmErr, setConfirmErr] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -674,8 +676,10 @@ export function ConvertIntentSheet({
             if (!mountedRef.current) return;
             if (rowQuoteAmts.current[r.rowId] !== q.amountIn) continue; // re-typed mid-refresh
             setRowQuotes(prev => ({...prev, [r.rowId]: fresh}));
-            if (activeRowId === r.rowId && fresh.amountOutGross !== q.amountOutGross) {
-              setMoved({oldAmt: q.amountOutGross, newAmt: fresh.amountOutGross});
+            // S2: the live refresh applies the SAME grammar as the confirm - a move within
+            // the tolerance updates the figure silently; only a material move interrupts.
+            if (activeRowId === r.rowId && quoteMovedMaterially(q.amountOutGross, fresh.amountOutGross)) {
+              setMoved({newAmt: fresh.amountOutGross});
             }
           }
           for (const r of staleEvm) {
@@ -691,8 +695,8 @@ export function ConvertIntentSheet({
             if (evmQuoteAmts.current[r.rowId] !== amt) continue; // re-typed mid-refresh
             const minOut = await DpayCore.icpSwapMinOut(fresh.amountOut, slippageBps);
             setEvmQuotes(prev => ({...prev, [r.rowId]: {quote: fresh, minOut}}));
-            if (activeRowId === r.rowId && fresh.amountOut !== b.quote.amountOut) {
-              setMoved({oldAmt: b.quote.amountOut, newAmt: fresh.amountOut});
+            if (activeRowId === r.rowId && quoteMovedMaterially(b.quote.amountOut, fresh.amountOut)) {
+              setMoved({newAmt: fresh.amountOut});
             }
           }
           for (const r of staleJup) {
@@ -705,8 +709,8 @@ export function ConvertIntentSheet({
             if (res.ok) {
               if (jupQuoteAmts.current[r.rowId] !== q.inAmount) continue; // re-typed mid-refresh
               setJupQuotes(prev => ({...prev, [r.rowId]: res.quote}));
-              if (activeRowId === r.rowId && res.quote.outAmount !== q.outAmount) {
-                setMoved({oldAmt: q.outAmount, newAmt: res.quote.outAmount});
+              if (activeRowId === r.rowId && quoteMovedMaterially(q.outAmount, res.quote.outAmount)) {
+                setMoved({newAmt: res.quote.outAmount});
               }
             }
           }
@@ -720,8 +724,8 @@ export function ConvertIntentSheet({
             if (hubBundleAmts.current[r.rowId] !== b.q1.amountIn) continue; // re-typed mid-refresh
             setHubBundles(prev => ({...prev, [r.rowId]: got}));
             if (activeRowId === r.rowId
-              && (got.q1.amountOutGross !== b.q1.amountOutGross || got.q2.amountOutGross !== b.q2.amountOutGross)) {
-              setMoved({oldAmt: b.m2.netOut, newAmt: got.m2.netOut});
+              && quoteMovedMaterially(b.m2.netOut, got.m2.netOut)) {
+              setMoved({newAmt: got.m2.netOut});
             }
           }
         } catch {
@@ -1103,18 +1107,23 @@ export function ConvertIntentSheet({
         const q = rowQuotes[activeRow.rowId];
         if (q == null || math == null) return;
         const fresh = await fetchConvertQuote(relayUrl, activeRow.inLedger, activeRow.outLedger, q.amountIn, {venue: activeRow.venue});
-        if (fresh.amountOutGross !== q.amountOutGross) {
+        // S2 confirm lock: ONE silent re-quote at the gesture. Within the tolerance the
+        // confirm proceeds from the fresh quote; only a material move re-arms the button.
+        if (quoteMovedMaterially(q.amountOutGross, fresh.amountOutGross)) {
           if (mountedRef.current) {
             setRowQuotes(prev => ({...prev, [activeRow.rowId]: fresh}));
-            setMoved({oldAmt: q.amountOutGross, newAmt: fresh.amountOutGross});
+            setMoved({newAmt: fresh.amountOutGross});
           }
           return;
         }
+        // The floor always derives from the quote being SIGNED (the review effect's own
+        // arithmetic) - never the displayed quote's stale floor.
+        const freshMath = await deriveConvertMath(fresh, inFee, activeRow.outDesc.fee ?? '0', slippageBps);
         const rec = await prepareConvertRecord({
           secretHex: identity.secretHex,
           relayUrl,
           quote: fresh,
-          math,
+          math: freshMath,
           inDesc: sourceDesc!,
           outDesc: activeRow.outDesc,
         });
@@ -1125,12 +1134,14 @@ export function ConvertIntentSheet({
       if (activeRow.kind === 'hub') {
         const b = hubBundles[activeRow.rowId];
         if (b == null) return;
-        // Both hops re-quoted fresh at confirm; quote2 is sized on the FRESH floor.
+        // Both hops re-quoted fresh at confirm; quote2 is sized on the FRESH floor. The
+        // S2 lock reads the FINAL net figure (what the user confirmed); a material move
+        // re-arms once, noise proceeds silently from the fresh bundle.
         const fresh = await fetchHubQuotes(relayUrl, activeRow.route, b.q1.amountIn, inFee, slippageBps);
-        if (fresh.q1.amountOutGross !== b.q1.amountOutGross || fresh.q2.amountOutGross !== b.q2.amountOutGross) {
+        if (quoteMovedMaterially(b.m2.netOut, fresh.m2.netOut)) {
           if (mountedRef.current) {
             setHubBundles(prev => ({...prev, [activeRow.rowId]: fresh}));
-            setMoved({oldAmt: b.m2.netOut, newAmt: fresh.m2.netOut});
+            setMoved({newAmt: fresh.m2.netOut});
           }
           return;
         }
@@ -1152,17 +1163,19 @@ export function ConvertIntentSheet({
         const xVenue = venueOfId(activeRow.route.swapVenueId);
         if (xVenue == null) throw new Error(M.convert.errors.quoteUnavailable('venue'));
         const fresh = await fetchConvertQuote(relayUrl, activeRow.route.from.ledger, activeRow.route.hop.ledger, q.amountIn, {venue: xVenue});
-        if (fresh.amountOutGross !== q.amountOutGross) {
+        // S2 confirm lock (the direct arm's grammar): noise proceeds, a material move re-arms.
+        if (quoteMovedMaterially(q.amountOutGross, fresh.amountOutGross)) {
           if (mountedRef.current) {
             setRowQuotes(prev => ({...prev, [activeRow.rowId]: fresh}));
-            setMoved({oldAmt: q.amountOutGross, newAmt: fresh.amountOutGross});
+            setMoved({newAmt: fresh.amountOutGross});
           }
           return;
         }
+        const freshMath = await deriveConvertMath(fresh, inFee, crossRow?.route.hop.fee ?? '0', slippageBps);
         const rec = await prepareMultihopConvertRecord({
           secretHex: identity.secretHex,
           quote: fresh,
-          math,
+          math: freshMath,
           route: activeRow.route,
           destAddress,
           ...(gasFundArg != null ? {gasFund: gasFundArg} : {}),
@@ -1232,10 +1245,14 @@ export function ConvertIntentSheet({
         // the last signed leg of the SAME intent. No intermediate stop, no second press.
         // An unmount before this point adopts nothing and the order dies unfunded.
         const fresh = await fetchComposedQuotes(relayUrl, activeRow.route, b.q1.amountIn, inFee, slippageBps);
-        if (fresh.q1.amountOutGross !== b.q1.amountOutGross) {
+        // S2 confirm lock: the figure the user confirmed is the IC chain's FINAL FLOOR - the
+        // exact deposit the venue order prices. Noise within the tolerance proceeds (the
+        // order is the lock); a material IC move re-arms once BEFORE the order exists
+        // (nothing created, nothing signed - prepare's own gate runs the same predicate).
+        if (quoteMovedMaterially(composedFloorRaw(b), composedFloorRaw(fresh))) {
           if (mountedRef.current) {
             setComposedBundles(prev => ({...prev, [activeRow.rowId]: fresh}));
-            setMoved({oldAmt: b.q1.amountOutGross, newAmt: fresh.q1.amountOutGross});
+            setMoved({newAmt: composedFloorRaw(fresh)});
           }
           return;
         }
@@ -1303,17 +1320,17 @@ export function ConvertIntentSheet({
             const minOut = await DpayCore.icpSwapMinOut((fresh as unknown as CowQuote & {amountOut: string}).amountOut ?? fresh.buyAmount, slippageBps);
             setEvmQuotes(prev => ({...prev, [activeRow.rowId]: {quote: fresh, minOut}}));
             evmQuoteAmts.current[activeRow.rowId] = amountRaw;
-            setMoved({oldAmt: b.quote.amountOut, newAmt: (fresh as unknown as CowQuote & {amountOut: string}).amountOut ?? fresh.buyAmount});
+            setMoved({newAmt: (fresh as unknown as CowQuote & {amountOut: string}).amountOut ?? fresh.buyAmount});
           }
           return;
         }
         const fresh = isCow ? (b.quote as unknown as UniswapQuote & {amountOut: string}) : await quoteUniswapSwap({kind: 'exact-input', chainId: activeRow.chainId, tokenIn: activeRow.inAddress, tokenOut, amountIn: BigInt(amountRaw)});
-        if (!isCow && fresh.amountOut !== b.quote.amountOut) {
+        if (!isCow && quoteMovedMaterially(b.quote.amountOut, fresh.amountOut)) {
           if (mountedRef.current) {
             const minOut = await DpayCore.icpSwapMinOut(fresh.amountOut, slippageBps);
             setEvmQuotes(prev => ({...prev, [activeRow.rowId]: {quote: fresh, minOut}}));
             evmQuoteAmts.current[activeRow.rowId] = amountRaw;
-            setMoved({oldAmt: b.quote.amountOut, newAmt: fresh.amountOut});
+            setMoved({newAmt: fresh.amountOut});
           }
           return;
         }
@@ -1367,10 +1384,10 @@ export function ConvertIntentSheet({
         if (mountedRef.current) setConfirmErr(M.convert.errors.quoteUnreachable(venueDisplayName(activeRow.venue.venue_id)));
         return;
       }
-      if (fresh.quote.outAmount !== q.outAmount) {
+      if (fresh.quote.outAmount !== q.outAmount && quoteMovedMaterially(q.outAmount, fresh.quote.outAmount)) {
         if (mountedRef.current) {
           setJupQuotes(prev => ({...prev, [activeRow.rowId]: fresh.quote}));
-          setMoved({oldAmt: q.outAmount, newAmt: fresh.quote.outAmount});
+          setMoved({newAmt: fresh.quote.outAmount});
         }
         return;
       }
@@ -1752,17 +1769,18 @@ export function ConvertIntentSheet({
             </Text>
           ) : null}
           {moved != null ? (() => {
-            // A composed row's moved compare is its IC gross — the note formats in the
-            // DEPOSIT asset's unit (what the venue order prices), never the settle unit.
+            // The note formats in the figure's OWN unit, per kind: a composed move names the
+            // DEPOSIT asset (the IC floor the order prices), a cross-rail move the hop asset
+            // (the quoted gross's own unit) - never the final asset's decimals over another
+            // leg's raw number (F3's class).
             const u = composedRow != null
               ? composedRow.route.endpoints[composedRow.route.legs.length]!
-              : null;
+              : crossRow != null
+                ? {decimals: crossRow.route.hop.decimals, symbol: crossRow.route.hop.symbol}
+                : {decimals: outDecimals, symbol: outSym};
             return (
               <Text testID="convert-moved-note" style={S.movedNote}>
-                {M.convert.rateMoved(
-                  fmtAssetCompact(moved.oldAmt, u?.decimals ?? outDecimals, u?.symbol ?? outSym),
-                  fmtAssetCompact(moved.newAmt, u?.decimals ?? outDecimals, u?.symbol ?? outSym),
-                )}
+                {M.convert.rateMoved(fmtAssetCompact(moved.newAmt, u.decimals, u.symbol))}
               </Text>
             );
           })() : null}

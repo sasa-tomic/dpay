@@ -1,6 +1,7 @@
 import {DpayCore} from '../services/native';
 import {icStampExpiry} from '../services/icp';
 import {bytesToHex, randNonceHex, rawToDecimal, toUnits} from '../lib/format';
+import {quoteMovedMaterially} from '../lib/amount';
 import {utf8ToBytes} from '../lib/base64url';
 import {type CurrencyDescriptor} from '../config/catalog';
 import {ICP_MAINNET_LEDGER} from '../config/currency';
@@ -261,10 +262,7 @@ export class ComposedQuoteChangedError extends Error {
   readonly reviewedGrossRaw: string;
   readonly freshGrossRaw: string;
   constructor(args: {inSymbol: string; inDecimals: number; reviewedGrossRaw: string; freshGrossRaw: string}) {
-    super(M.convert.rateMoved(
-      `${rawToDecimal(args.reviewedGrossRaw, args.inDecimals)} ${args.inSymbol}`,
-      `${rawToDecimal(args.freshGrossRaw, args.inDecimals)} ${args.inSymbol}`,
-    ));
+    super(M.convert.rateMoved(`${rawToDecimal(args.freshGrossRaw, args.inDecimals)} ${args.inSymbol}`));
     this.name = 'ComposedQuoteChangedError';
     this.reviewedGrossRaw = args.reviewedGrossRaw;
     this.freshGrossRaw = args.freshGrossRaw;
@@ -367,10 +365,12 @@ export async function prepareComposedConvertRecord(args: {
     }
   }
   // (2) THE QUOTE-CHANGED GATE — before the venue order exists, so a re-review never
-  // orphans one. (The CeFi settle figure gets NO exact-match gate: a ticking venue rate
-  // can never be matched and the gate would livelock — the ORDER is the lock, the standing
-  // cefi rule; its locked figures freeze onto the record verbatim.)
-  if (args.reviewedGrossRaw !== quote1.amountOutGross) {
+  // orphans one. S2's rule (2026-10-04): the reviewed figure is the LOCK; a re-quote within
+  // the 5% tolerance is noise the gesture absorbs (the order is the lock, the settle leg's
+  // own standing rule), a material move re-reviews. (The CeFi settle figure gets NO
+  // moved-gate at all: a ticking venue rate can never be matched and the gate would
+  // livelock — its locked figures freeze onto the record verbatim.)
+  if (quoteMovedMaterially(args.reviewedGrossRaw, quote1.amountOutGross)) {
     throw new ComposedQuoteChangedError({
       inSymbol, inDecimals: args.inDesc.decimals ?? 8,
       reviewedGrossRaw: args.reviewedGrossRaw, freshGrossRaw: quote1.amountOutGross,

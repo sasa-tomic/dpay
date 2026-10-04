@@ -53,7 +53,7 @@ export const convertDe: ConvertMessages = {
   otherVenues: n => `Weitere Handelsplätze (${n})`,
   atLeast: amt => `Min. ${amt}`,
   ctaConvert: amt => `${amt} umwandeln`,
-  rateMoved: (oldAmt, newAmt) => `Kurs geändert: ${oldAmt} → ${newAmt}. Erneut bestätigen.`,
+  rateMoved: newAmt => `Preis geändert: jetzt etwa ${newAmt}. Erneut bestätigen.`,
   neededVsHave: (need, have) => `${need} nötig, du hast ${have}`,
   smallerAmount: 'Wandle einen kleineren Betrag um',
   noPathTitle: inSym => `Keine Route von ${inSym}`,

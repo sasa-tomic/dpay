@@ -52,7 +52,7 @@ export const convertEs: ConvertMessages = {
   otherVenues: n => `Otras sedes (${n})`,
   atLeast: amt => `Mín. ${amt}`,
   ctaConvert: amt => `Convertir ${amt}`,
-  rateMoved: (oldAmt, newAmt) => `La cotización cambió: ${oldAmt} → ${newAmt}. Confirma de nuevo.`,
+  rateMoved: newAmt => `El precio cambió: ahora unos ${newAmt}. Confirma de nuevo.`,
   neededVsHave: (need, have) => `Se necesitan ${need}, tienes ${have}`,
   smallerAmount: 'Convierte un importe menor',
   noPathTitle: inSym => `Sin ruta desde ${inSym}`,

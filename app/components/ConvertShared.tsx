@@ -196,6 +196,13 @@ export const chainFinalNet = (b: ChainBundle): string => (b.m2 != null ? b.m2.ne
 export const isLiveRecord = (r: ConvertRecord | null): boolean =>
   r !== null && !isTerminalConvertStep(r.step) && r.step !== 'quote' && r.step !== 'confirming';
 
+/** S2's confirm lock (spec 2026-10-04 §2): the quoted figure the user confirmed is THE lock.
+ *  A fresh re-quote within 5% of it is market noise the confirm absorbs silently (it proceeds
+ *  from the fresh quote; the user taps once); beyond 5% the move is material and the same
+ *  button re-arms once with the new figure. Lives in lib/amount.ts (the money layer owns the
+ *  rule - prepare's own race gate runs the same predicate); re-exported here for the sheet. */
+export {quoteMovedMaterially} from '../lib/amount';
+
 /** The gas-fund abort read (2026-09-20): the funding pre-legs CONFIRMED and no main leg has
  *  moved — the generic abort flavors would misread this position, so the aborted card says
  *  exactly what happened: the gas money is still in the wallet, the conversion never ran.

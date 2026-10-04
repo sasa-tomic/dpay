@@ -243,3 +243,18 @@ export function decimalIsPositive(v: string): boolean {
   const {whole, frac} = decimalParts(v);
   return BigInt(whole) > 0n || BigInt(frac.padEnd(1, '0') || '0') > 0n;
 }
+
+/** S2's confirm-lock rule (spec 2026-10-04 §2), on RAW integer strings: the quoted figure the
+ *  user confirmed is the lock; a fresh re-quote within 5% of it is market noise the confirm
+ *  absorbs silently, beyond 5% the move is material and the button re-arms once. Exact over
+ *  BigInt - a float ratio misjudges at sub-f64 precision differences, and this gates money.
+ *  Non-numeric input falls back to inequality (fail loud, never silently absorb). */
+export function quoteMovedMaterially(oldRaw: string, newRaw: string): boolean {
+  if (!/^\d+$/.test(oldRaw) || !/^\d+$/.test(newRaw)) return oldRaw !== newRaw;
+  const o = BigInt(oldRaw);
+  const n = BigInt(newRaw);
+  if (o === n) return false;
+  if (o === 0n) return true;
+  const d = o > n ? o - n : n - o;
+  return d * 20n > o;
+}

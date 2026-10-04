@@ -378,10 +378,11 @@ describe('the composed one-press consent', () => {
     expect(textOf(tree, 'convert-composed-order')).toContain('SideShift');
   });
 
-  test('a moved IC quote at the gesture re-arms BEFORE the order exists (old/new inline)', async () => {
+  test('a moved IC quote at the gesture re-arms BEFORE the order exists (the fresh figure inline)', async () => {
     // The Max prefill quotes its own amount (and never moves); the REVIEW fetch for '1'
-    // sees 0.9× and every LATER fetch for '1' sees 0.85× — the market MOVED at the gesture:
-    // the order must never be created, the note must show old then new, and the same
+    // sees 0.9× and every LATER fetch for '1' sees 0.83× — a 7.8% move, PAST the S2
+    // tolerance (within 5% the gesture absorbs the noise silently; flow 230 pins that):
+    // the order must never be created, the note shows the fresh figure, and the same
     // button re-arms.
     const seenAmounts = new Set<string>();
     jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) => {
@@ -389,7 +390,7 @@ describe('the composed one-press consent', () => {
       if (p.includes('/api/v1/venues')) return fakeRes({venues: []}, false, 404);
       if (p.includes('/api/v1/swap_quote')) {
         const amountIn = new URL('http://x' + p).searchParams.get('amount_in') ?? '0';
-        const factor = amountIn === '100000000' && seenAmounts.has(amountIn) ? 85n : 90n;
+        const factor = amountIn === '100000000' && seenAmounts.has(amountIn) ? 83n : 90n;
         seenAmounts.add(amountIn);
         return fakeRes({
           venue_id: 'icpswap', pool: POOL1, token_in: VCHF_LEDGER, token_out: ICP_LEDGER,
@@ -407,8 +408,9 @@ describe('the composed one-press consent', () => {
     expect(jest.mocked(adoptConvertRecord).mock.calls.length).toBe(0); // nothing adopted
     expect(exists(tree, 'convert-composed-review')).toBe(false);
     expect(exists(tree, 'convert-moved-note')).toBe(true);
-    expect(textOf(tree, 'convert-moved-note')).toContain('0.9');
-    expect(textOf(tree, 'convert-moved-note')).toContain('0.85');
+    expect(textOf(tree, 'convert-moved-note')).toContain('Price changed');
+    // The note carries the fresh FLOOR (what the venue order prices), in the deposit asset.
+    expect(textOf(tree, 'convert-moved-note')).toContain('0.8217 ICP');
     // The same button is re-armed: the next press re-quotes — and now the venue holds still.
     // (This second press is the moved-quote exception to the 2-press grammar, not the old
     // review-card consent: the FIRST clean press adopts in one gesture.)
@@ -418,15 +420,15 @@ describe('the composed one-press consent', () => {
     expect(jest.mocked(createSideShiftFixedShift).mock.calls.length).toBe(1);
     expect(jest.mocked(adoptConvertRecord).mock.calls.length).toBe(1);
     expect(exists(tree, 'convert-state')).toBe(true);
-    // The adopted record prices the MOVED market's floor (0.85 floored to 0.8415), shown
+    // The adopted record prices the MOVED market's floor (0.83 floored to 0.8217), shown
     // in the order's Details disclosure (the body carries the active leg only).
     const rec = jest.mocked(adoptConvertRecord).mock.calls[0][0] as ConvertRecord;
-    expect(rec.composedDeposit?.amountRaw).toBe('84150000');
+    expect(rec.composedDeposit?.amountRaw).toBe('82170000');
     await act(async () => {
       present(tree, 'convert-details')[0].props.onPress();
     });
     await act(async () => {});
-    expect(textOf(tree, 'convert-composed-deposit-amount')).toContain('0.8415');
+    expect(textOf(tree, 'convert-composed-deposit-amount')).toContain('0.8217');
   });
 
   test('the wallet\'s ICP covering the deposit retires the swap: the press adopts the LEGLESS cefi record', async () => {

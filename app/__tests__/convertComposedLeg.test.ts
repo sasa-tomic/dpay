@@ -270,7 +270,7 @@ describe('prepareComposedConvertRecord — order first, then one signing pass', 
     expect(rec.providerRef).toMatchObject({orderId: 'shift-1', statusUrl: 'https://sideshift.ai/api/v2/shifts/shift-1'});
   });
 
-  test('a moved IC quote throws the re-review error BEFORE the order exists — nothing created, nothing signed', async () => {
+  test('a MATERIALY moved IC quote (>5%, S2) throws the re-review error BEFORE the order exists — nothing created, nothing signed', async () => {
     await expect(prepareComposedConvertRecord({
       id: 'comp-1',
       secretHex: SECRET,
@@ -278,7 +278,7 @@ describe('prepareComposedConvertRecord — order first, then one signing pass', 
       relayUrl: 'http://relay.test',
       route: ROUTE,
       inDesc: rowOf(7) as CurrencyDescriptor,
-      quote1: quote1({amountOutGross: '121000000'}), // the confirm-time re-quote moved
+      quote1: quote1({amountOutGross: '132000000'}), // the confirm-time re-quote moved +10%
       math1: math1(),
       reviewedGrossRaw: '120000000', // what the review showed
     })).rejects.toBeInstanceOf(ComposedQuoteChangedError);

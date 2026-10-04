@@ -52,7 +52,7 @@ export const convertFr: ConvertMessages = {
   otherVenues: n => `Autres plateformes (${n})`,
   atLeast: amt => `Min ${amt}`,
   ctaConvert: amt => `Convertir ${amt}`,
-  rateMoved: (oldAmt, newAmt) => `Le devis a bougé : ${oldAmt} → ${newAmt}. Confirmez à nouveau.`,
+  rateMoved: newAmt => `Le prix a changé : environ ${newAmt} maintenant. Confirmez à nouveau.`,
   neededVsHave: (need, have) => `${need} nécessaires, vous avez ${have}`,
   smallerAmount: 'Convertissez un montant moins élevé',
   noPathTitle: inSym => `Aucune route depuis ${inSym}`,

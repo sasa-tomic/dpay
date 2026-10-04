@@ -79,14 +79,16 @@ hermeticDescribe('flow 143 — a stale quote refreshes itself; confirm re-quotes
       }
 
       // A REAL venue-price move raises the review interrupt — driven via the relay's fee knob
-      // on BOTH pools (whichever venue the sheet picked must see its quote move).
-      const knob = await relayPost('/api/v1/test/swap_pool', {pool: POOL, fee_millionths: 4000});
+      // on BOTH pools (whichever venue the sheet picked must see its quote move). The jump is
+      // sized PAST the S2 tolerance (0.30% -> 60%: the output drops far beyond 5%), because a
+      // within-tolerance move is now absorbed silently (flow 230 pins that arm).
+      const knob = await relayPost('/api/v1/test/swap_pool', {pool: POOL, fee_millionths: 600_000});
       expect(knob.ok).toBe(true);
-      const knobB = await relayPost('/api/v1/test/swap_pool', {pool: POOL_B, fee_millionths: 4321});
+      const knobB = await relayPost('/api/v1/test/swap_pool', {pool: POOL_B, fee_millionths: 600_001});
       expect(knobB.ok).toBe(true);
       await m.driver.findByTestID('convert-moved-note', {timeoutMs: 15_000});
       const changedText = m.driver.readText('convert-moved-note');
-      assertIncludes(changedText, 'Rate moved', 'the interrupt names what happened, both figures inline');
+      assertIncludes(changedText, 'Price changed', 'the interrupt names what happened, the fresh figure inline');
       assertIncludes(changedText, 'Confirm again', 'the interrupt re-arms the same button');
       expect(await isDisabled(m, 'btn-convert-confirm')).toBe(false);
     } finally {

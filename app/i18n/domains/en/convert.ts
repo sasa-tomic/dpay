@@ -103,8 +103,9 @@ export type ConvertMessages = {
   atLeast: (amt: string) => string;
   /** The one bottom CTA. The action names the amount ("Convert 4.54 CHF"). */
   ctaConvert: (amt: string) => string;
-  /** Confirm re-quoted and the market had moved: both figures inline, the same button re-arms. */
-  rateMoved: (oldAmt: string, newAmt: string) => string;
+  /** The ONE material-move interrupt (S2): the fresh figure inline, the same button re-arms.
+   *  Noise within the tolerance never reaches this line (the confirm absorbs it silently). */
+  rateMoved: (newAmt: string) => string;
   /** The amount is above what the wallet can spend on this route: need vs have; the preset
    *  chips + the line below are the named way out. */
   neededVsHave: (need: string, have: string) => string;
@@ -679,7 +680,7 @@ export const convertEn: ConvertMessages = {
   otherVenues: n => `Other venues (${n})`,
   atLeast: amt => `Min ${amt}`,
   ctaConvert: amt => `Convert ${amt}`,
-  rateMoved: (oldAmt, newAmt) => `Rate moved: ${oldAmt} → ${newAmt}. Confirm again.`,
+  rateMoved: newAmt => `Price changed: now about ${newAmt}. Confirm again.`,
   neededVsHave: (need, have) => `${need} needed, you have ${have}`,
   smallerAmount: 'Convert a smaller amount',
   noPathTitle: inSym => `No route from ${inSym}`,
