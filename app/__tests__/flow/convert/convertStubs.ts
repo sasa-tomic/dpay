@@ -58,6 +58,7 @@ export function disposeConvertStubs(): void {
   }
   delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;
   delete (globalThis as {__DPAY_TEST_EVM_SIGN?: unknown}).__DPAY_TEST_EVM_SIGN;
+  delete (globalThis as {__DPAY_TEST_EVM_RPC_URL?: unknown}).__DPAY_TEST_EVM_RPC_URL;
   setSolanaRpcUrl('');
   setEvmRpcUrl('');
 }
@@ -520,7 +521,14 @@ export function installEvmRpcStub(cfg: {balanceHex?: string; gasPriceHex?: strin
   // The operator override: the app's endpoints module resolves EXACTLY this candidate for
   // every chain (the private relay is loopback, so plain http passes the setter's rule).
   // A later MOUNT resets it (mount.tsx's session reset) — files install after their mount.
-  setEvmRpcUrl(`${relayBaseURL()}/api/v1/evm/rpc`);
+  const url = `${relayBaseURL()}/api/v1/evm/rpc`;
+  setEvmRpcUrl(url);
+  // ALSO arm the mount hook itself: mount.tsx's session reset re-applies
+  // __DPAY_TEST_EVM_RPC_URL on every (re)mount. Without it a remount clears the override and
+  // an engine boot sweep that starts before the test's post-remount re-arm quotes against ''
+  // (flow 226's deterministic failed_refunded 'EVM not configured (chain 1)'). The stub
+  // survives remounts by construction, not by timing.
+  (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_EVM_RPC_URL = url;
   const bound = new Map<string, {status: string}>(); // asked hash → receipt verdict
   const unbound: Array<{status: string}> = []; // broadcasts awaiting their first receipt ask
   wrapFetch(async (parsed, init) => {

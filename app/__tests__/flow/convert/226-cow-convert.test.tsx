@@ -132,8 +132,7 @@ hermeticDescribe('flow 226 — ZCHF → native ETH via CoW Swap: relay-proxied o
       });
       await AsyncStorage().setItem(`dpay.convert.v3.${account!.publicHex}`, JSON.stringify({[id]: record}));
       const evmBefore = evmRpcStubState();
-      await m.remount(); // the resumed engine sweeps the non-terminal record at start
-      installEvmRpcStub(); // the mount's session reset clears the operator override — re-arm
+      await m.remount(); // the resumed engine sweeps the non-terminal record at start (the stub's mount hook keeps the EVM override armed — a reinstall here would reset the send census mid-flight)
       await waitForRecord(account!.publicHex, id, (r) => r.step === 'done', budgetScaled(60_000));
       const done = (await storeRecords(account!.publicHex))[id]!;
       // The venue's own durable identities + the realized figures, all frozen on the record.
@@ -185,9 +184,11 @@ hermeticDescribe('flow 226 — ZCHF → native ETH via CoW Swap: relay-proxied o
         `dpay.convert.v3.${account!.publicHex}`,
         JSON.stringify({['cow-killed']: killed}),
       );
-      await m.remount();
-      installEvmRpcStub(); // the mount's session reset clears the operator override — re-arm
+      // The census marker goes BEFORE the remount: with the stub's mount hook armed, the
+      // boot sweep broadcasts DURING the remount — a capture taken after it slices the
+      // unwrap away.
       const evmBeforeB = evmRpcStubState();
+      await m.remount();
       await waitForRecord(account!.publicHex, 'cow-killed', (r) => r.step === 'done', budgetScaled(60_000));
       const resumed = (await storeRecords(account!.publicHex))['cow-killed']!;
       expect(resumed.evmSwap?.cow?.uid).toBe(derivedUid(account!.secretHex, record));
@@ -224,7 +225,6 @@ hermeticDescribe('flow 226 — ZCHF → native ETH via CoW Swap: relay-proxied o
         JSON.stringify({['cow-slow']: slow}),
       );
       await m.remount();
-      installEvmRpcStub(); // the mount's session reset clears the operator override — re-arm
       // The drive hands back to the watcher (per-drive budget), the engine re-arms, and the
       // record stays `settling` with its uid — live money in motion, never a fake done.
       await new Promise((r) => setTimeout(r, budgetScaled(12_000)));
