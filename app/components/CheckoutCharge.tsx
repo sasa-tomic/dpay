@@ -359,7 +359,7 @@ export function CheckoutCharge({identity, relayUrl, asset, assets, catalog, nfcS
         expiry,
       };
     } catch (e) {
-      console.warn(`checkout: could not arm a tap for ${charge.id} — the code still scans: ${e instanceof Error ? e.message : String(e)}`);
+      console.warn(`checkout: could not arm a tap for ${charge.id} - the code still scans: ${e instanceof Error ? e.message : String(e)}`);
       return null;
     }
   }

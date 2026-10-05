@@ -487,7 +487,7 @@ async function executePlannedConvert(
     if (plan.kind === 'approve_gas' && rec.gasPre != null) {
       const balRaw = await railBalanceOf(deps.secretHex, leg.canister);
       if (balRaw == null || !/^\d+$/.test(balRaw)) {
-        console.warn('gas-fund re-check: gas-ledger balance unreadable — holding the burn legs');
+        console.warn('gas-fund re-check: gas-ledger balance unreadable - holding the burn legs');
         return rec;
       }
       const needed = BigInt(rec.gasPre.neededWei);
@@ -531,15 +531,15 @@ async function executePlannedConvert(
       }
       if (leg.expiresAtMs <= opts.nowMs) {
         return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'deposit_refused',
-          failureDetail: 'the signed deposit transfer expired before it could be submitted'}));
+          failureDetail: 'signed deposit expired unsent'}));
       }
       if (cd.expiresAtMs != null && opts.nowMs >= cd.expiresAtMs) {
         return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'deposit_refused',
-          failureDetail: 'the venue order expired before the deposit could be sent'}));
+          failureDetail: 'venue order expired, deposit unsent'}));
       }
       const balRaw = await railBalanceOf(deps.secretHex, leg.canister);
       if (balRaw == null || !/^\d+$/.test(balRaw)) {
-        console.warn('deposit gate: hub-ledger balance unreadable — holding the deposit leg');
+        console.warn('deposit gate: hub-ledger balance unreadable - holding the deposit leg');
         return rec;
       }
       const needed = BigInt(cd.amountRaw) + BigInt(cd.fee);

@@ -92,7 +92,7 @@ async function bounded<T>(work: Promise<T>, what: string, timeoutMs: number): Pr
       work,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          console.warn(`wallet: ${what} was not answered within ${timeoutMs} ms — giving up on this attempt`);
+          console.warn(`wallet: ${what} was not answered within ${timeoutMs} ms - giving up on this attempt`);
           reject(new WalletRequestTimeout(what, timeoutMs));
         }, timeoutMs);
       }),

@@ -171,7 +171,7 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
       // Not reachable through the UI — the mount effect starts the probe before any tap can get
       // here — but "the wallet was created unfunded and said nothing" is the exact failure this
       // path exists to prevent, so it is logged rather than assumed away.
-      console.warn('onboarding: no relay capability probe was started — creating the wallet without asking for demo funds');
+      console.warn('onboarding: no relay capability probe was started - creating the wallet without asking for demo funds');
     } else if ((await probe).demoFaucet) {
       try {
         const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})}, BALANCE_TIMEOUT_MS);

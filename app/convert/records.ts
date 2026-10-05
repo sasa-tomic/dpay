@@ -898,7 +898,7 @@ export async function loadConvertRecords(publicHex: string): Promise<Record<stri
     if (raw != null) {
       const salvaged = salvageRawStore(raw);
       if (salvaged.dropped > 0) {
-        console.warn(`convert store ${scopedKey}: ${salvaged.dropped} record(s) unreadable — dropped from the working set (bytes left on disk until the next save)`);
+        console.warn(`convert store ${scopedKey}: ${salvaged.dropped} record(s) unreadable - dropped from the working set (bytes left on disk until the next save)`);
       }
       return salvaged.records;
     }
@@ -931,7 +931,7 @@ export async function loadConvertRecords(publicHex: string): Promise<Record<stri
       if (s.dropped === 0) {
         await AsyncStorage.removeItem(s.key); // fully copied — retire the legacy key
       } else {
-        console.warn(`convert legacy store ${s.key}: ${s.dropped} record(s) unreadable — valid records were copied to ${scopedKey}; the legacy key is KEPT on disk (source preserved)`);
+        console.warn(`convert legacy store ${s.key}: ${s.dropped} record(s) unreadable - valid records were copied to ${scopedKey}; the legacy key is KEPT on disk (source preserved)`);
       }
     }
     return merged;

@@ -162,7 +162,7 @@ export async function executeCowConvert(
       if (/reverted on-chain/.test(msg)) {
         // The WETH credit SITS at the wallet (the unwrap failed, not the trade): the
         // failure names the honest exit — send/convert the WETH from its own account.
-        return advance({step: 'failed_leg', failureCode: 'withdraw_refused', failureDetail: `cow unwrap reverted: the WETH stays in this wallet (${msg.slice(0, 120)})`});
+        return advance({step: 'failed_leg', failureCode: 'withdraw_refused', failureDetail: `cow unwrap reverted: WETH stays at your address (${msg.slice(0, 120)})`});
       }
       return advance({step: 'failed_leg', failureCode: 'unknown', failureDetail: `cow unwrap: ${msg.slice(0, 160)}`});
     }

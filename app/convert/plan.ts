@@ -235,7 +235,7 @@ export async function prepareMultihopConvertRecord(args: {
     const haveRaw = await railBalanceOf(secretHex, route.burn.gasLedger);
     const neededMin = gasFundNeededWei(gasFeeWei);
     if (haveRaw == null || !/^\d+$/.test(haveRaw)) {
-      console.warn('gas-fund: gas-ledger balance unreadable — refusing to prepend funding legs');
+      console.warn('gas-fund: gas-ledger balance unreadable - refusing to prepend funding legs');
     } else if (BigInt(haveRaw) >= neededMin) {
       // The double-gas guard: already funded, nothing to prepend.
     } else {

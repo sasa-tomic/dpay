@@ -110,7 +110,7 @@ function uint32ToWord(n: number): string {
  *  normalized to exactly 64 lowercase hex chars. */
 function bytes32ToWord(hex: string): string {
   const h = hex.replace(/^0x/, '').toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(h)) throw new Error('bytes32 word must be exactly 64 hex chars');
+  if (!/^[0-9a-f]{64}$/.test(h)) throw new Error('bytes32 word must be 64 hex chars');
   return h;
 }
 
@@ -220,7 +220,7 @@ export function cctpMaxFee(amount: bigint, fee: CctpBurnFee): bigint {
   const total = protocolFee + fee.forwardFeeSubunits;
   const buffered = total + (total * 20n) / 100n;
   if (buffered >= amount) {
-    throw new Error('cctp fee reaches the burn amount — the transfer is too small to route');
+    throw new Error('cctp fee reaches the burn amount - the transfer is too small to route');
   }
   return buffered;
 }

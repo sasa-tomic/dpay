@@ -487,7 +487,7 @@ describe('the composed one-press consent', () => {
       ...adopted,
       step: 'failed_leg',
       failureCode: 'deposit_refused',
-      failureDetail: 'the venue order expired before the deposit could be sent',
+      failureDetail: 'venue order expired, deposit unsent',
       legPlan: adopted.legPlan!.map((lp, i) => (i === 2 ? {...lp, state: 'failed' as const} : {...lp, state: 'confirmed' as const})),
     };
     await act(async () => {

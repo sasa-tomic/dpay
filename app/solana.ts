@@ -170,7 +170,7 @@ export async function loadRpcForSend(
     const raw = e instanceof Error ? e.message : String(e);
     const copy = await engineLoadCopy(raw);
     if (copy != null) {
-      console.warn(`money: sol send loadRpcForSend — the engine chunk never arrived: ${raw}`);
+      console.warn(`money: sol send loadRpcForSend - the engine chunk never arrived: ${raw}`);
       throw new Error(copy);
     }
     throw e;
@@ -718,7 +718,7 @@ export async function sendSpl(
       at('recipient-ata-check');
       const ixs: Instruction[] = [];
       if (!(await accountExists(solanaRpcUrls(), bs58.encode(recipientAta), {signal}))) {
-        traceSend('recipient ATA missing — createIdempotent joins the tx');
+        traceSend('recipient ATA missing - createIdempotent joins the tx');
         // Honest cost pre-check (mirrors createTokenAta): without it the send passes review and dies at
         // broadcast with a raw "custom program error: 0x1" that no friendlySolError pattern matches.
         at('sender-balance-check');

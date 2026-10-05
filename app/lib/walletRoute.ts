@@ -78,7 +78,7 @@ export function modeForScreen(screen: WalletScreen): WalletMode {
     // Unreachable while the record above is total over WalletScreen — which the round-trip test
     // pins. Stated rather than assumed, because a silent `?? 'home'` would hide a future screen
     // that someone added to one vocabulary and not the other.
-    throw new Error(`walletRoute: no mode for screen "${screen}" — the mode↔screen map is not total`);
+    throw new Error(`walletRoute: no mode for screen "${screen}" - the mode↔screen map is not total`);
   }
   return found;
 }
@@ -188,7 +188,7 @@ export function parseRouteQuery(search: string): WalletRoute {
   if (rawScreen !== null && rawScreen !== DEPOSIT_DEEP_LINK) {
     const match = ALL_SCREENS.find(s => s === rawScreen);
     if (match === undefined) {
-      console.warn(`[dpay] walletRoute: unknown screen "${rawScreen}" in "${search}" — showing home instead`);
+      console.warn(`[dpay] walletRoute: unknown screen "${rawScreen}" in "${search}" - showing home instead`);
     } else {
       route.screen = match;
     }
@@ -198,9 +198,9 @@ export function parseRouteQuery(search: string): WalletRoute {
   if (rawSub !== null) {
     const sub = (Object.keys(SUB_MODE_SCREEN) as WalletSubMode[]).find(s => s === rawSub);
     if (sub === undefined) {
-      console.warn(`[dpay] walletRoute: unknown sub-mode "${rawSub}" in "${search}" — showing the screen's default`);
+      console.warn(`[dpay] walletRoute: unknown sub-mode "${rawSub}" in "${search}" - showing the screen's default`);
     } else if (SUB_MODE_SCREEN[sub] !== route.screen) {
-      console.warn(`[dpay] walletRoute: sub-mode "${sub}" does not belong to screen "${route.screen}" — dropping it`);
+      console.warn(`[dpay] walletRoute: sub-mode "${sub}" does not belong to screen "${route.screen}" - dropping it`);
     } else {
       route.sub = sub;
     }

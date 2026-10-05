@@ -459,7 +459,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     // resolver's same-rail filter had failed, so it is refused rather than coerced.
     const paying = assets.find(a => a.id === out.target.assetId) ?? null;
     if (paying === null || paying.protocol !== 'ic') {
-      console.warn(`ocp: resolved target names ${out.target.assetId}, which is not an IC row in this wallet`);
+      console.warn(`ocp: resolved target ${out.target.assetId}, not an IC row`);
       setPhase('scan');
       refuseScan(M.pay.ocp.badCode);
       return;
@@ -659,7 +659,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     if (out.kind === 'rejected') return {kind: 'refused', message: out.reason};
     if (out.kind === 'settled' && out.blockIndex !== '') {
       if (target.ledger === null) {
-        console.warn(`ocp: settled at block ${out.blockIndex} but the checkout named no ledger — not reporting it`);
+        console.warn(`ocp: settled at block ${out.blockIndex} but the checkout named no ledger - not reporting it`);
         return {kind: 'unknown'};
       }
       return {
@@ -789,7 +789,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     // somehow gone — signing an unreported transfer to a provider's address is the loss path itself.
     if (r.source === 'ocp') {
       if (ocp === null) {
-        console.warn('ocp: approve with no live quote — refusing to sign an unreportable transfer');
+        console.warn('ocp: approve with no live quote - refusing to sign an unreportable transfer');
         setErr(M.pay.ocp.quoteExpired);
         return;
       }

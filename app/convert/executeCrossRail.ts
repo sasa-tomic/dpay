@@ -99,7 +99,7 @@ async function executeDeviceCctpBurn(
     return advance({step: 'failed_leg', failureCode: 'burn_refused', failureDetail: detail.slice(0, 300), legPlan});
   };
   const urls = evmRpcUrls(CCTP_BURN_CHAIN_ID);
-  if (urls[0] === '') return failLeg(`EVM is not configured on this device (chain ${CCTP_BURN_CHAIN_ID})`);
+  if (urls[0] === '') return failLeg(`EVM not configured (chain ${CCTP_BURN_CHAIN_ID})`);
   await ensureChain(CCTP_BURN_CHAIN_ID, urls); // the wrong-chain gate — a mismatch throws (engine re-arms)
   const evm = deriveEvmKeypair(deps.secretHex);
 
@@ -139,7 +139,7 @@ async function executeDeviceCctpBurn(
   const worstWei = gasUnits.reduce((a, g) => a + g * maxFeePerGas, 0n);
   const gasBalance = BigInt(await ethGetBalance(urls, evm.address));
   if (gasBalance < worstWei) {
-    return failLeg(`the crossing needs about ${worstWei} wei of ETH for gas and ${evm.address} holds ${gasBalance} wei — receive ETH at that address and the burn runs on its own`);
+    return failLeg(`needs about ${worstWei} wei ETH for gas; ${evm.address} holds ${gasBalance} wei - receive ETH there and the burn runs`);
   }
 
   // 3. One nonce read; per leg: sign → probe (adoption) → broadcast → budgeted receipt watch.
@@ -200,7 +200,7 @@ async function executeDeviceCctpBurn(
     return failLeg(e instanceof Error ? e.message : String(e));
   }
   if (approveOutcome.status === 'failed') {
-    return failLeg(`the burn's approve reverted on-chain — the USDC is untouched at ${evm.address}`);
+    return failLeg(`approve reverted on-chain - USDC untouched at ${evm.address}`);
   }
   if (approveOutcome.status === 'pending') {
     rec = await advance({step: 'stuck', failureCode: 'unknown', failureDetail: approveOutcome.hash});
@@ -213,10 +213,10 @@ async function executeDeviceCctpBurn(
   try {
     burnOutcome = await runLeg(1);
   } catch (e) {
-    return failLeg(`${e instanceof Error ? e.message : String(e)} — the USDC is untouched at ${evm.address}`);
+    return failLeg(`${e instanceof Error ? e.message : String(e)} - USDC untouched at ${evm.address}`);
   }
   if (burnOutcome.status === 'failed') {
-    return failLeg(`the burn reverted on-chain — the USDC is untouched at ${evm.address}`);
+    return failLeg(`burn reverted on-chain - USDC untouched at ${evm.address}`);
   }
   const planIdx = rec.legPlan?.findIndex(p => p.kind === 'cctp_burn') ?? -1;
   const legPlan = rec.legPlan?.map((p, i) => (i === planIdx ? {...p, state: 'sent' as const} : p));

@@ -206,7 +206,7 @@ export async function loadEvmRpcForSend(
     const raw = e instanceof Error ? e.message : String(e);
     const copy = await engineLoadCopy(raw);
     if (copy != null) {
-      console.warn(`money: evm send loadEvmRpcForSend — the engine chunk never arrived: ${raw}`);
+      console.warn(`money: evm send loadEvmRpcForSend - the engine chunk never arrived: ${raw}`);
       throw new Error(copy);
     }
     throw e;
@@ -312,7 +312,7 @@ export async function quoteEvmFee(
   data: string,
   signal?: AbortSignal,
 ): Promise<EvmFeeQuote> {
-  if (evmRpcUrl(chainId) === '') throw new Error(`EVM is not configured on this device (chain ${chainId})`);
+  if (evmRpcUrl(chainId) === '') throw new Error(`EVM not configured (chain ${chainId})`);
   const {quoteEvmFee: quote} = await import('./evm/service');
   return quote(chainId, from, to, data, signal);
 }
@@ -331,7 +331,7 @@ export async function sendErc20(
   signal?: AbortSignal,
   onBroadcast?: (txHash: string) => void,
 ): Promise<{txHash: string}> {
-  if (evmRpcUrl(input.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${input.chainId})`);
+  if (evmRpcUrl(input.chainId) === '') throw new Error(`EVM not configured (chain ${input.chainId})`);
   return abortable((async () => {
     let step = 'module-load';
     // Step-ENTRY tracing: a STALL never reaches the catch below, so the last traced line is
@@ -360,7 +360,7 @@ export async function sendErc20(
  *  broadcast succeeded — an RPC that has since gone missing is a state to retry, never a
  *  silent "not found"). */
 export async function getEvmReceiptStatus(chainId: number, txHash: string, signal?: AbortSignal): Promise<EvmReceiptStatus> {
-  if (evmRpcUrl(chainId) === '') throw new Error(`EVM is not configured on this device (chain ${chainId})`);
+  if (evmRpcUrl(chainId) === '') throw new Error(`EVM not configured (chain ${chainId})`);
   const {getEvmReceiptStatus: get} = await import('./evm/service');
   return get(chainId, txHash, signal);
 }
@@ -446,7 +446,7 @@ export function createEvmPaymentRequest(input: EvmPaymentRequestInput): {req: Ev
  * classifies it as `needs-resign` and `resetEvmNonce` re-seeds the true value for the re-sign.
  */
 export async function signEvmPermitClaim(secretHex: string, req: EvmReqV1): Promise<EvmSignedClaim> {
-  if (isEvmReqExpired(req)) throw new Error('This payment request has expired — ask for a fresh QR code.');
+  if (isEvmReqExpired(req)) throw new Error('Payment request expired - ask for a fresh QR code.');
   if (resolveEvmTokenAddress(req.chainId, req.token) === null) {
     throw new Error(`evm claim: no ${req.token} deployment on chain ${req.chainId}`);
   }
@@ -469,7 +469,7 @@ export async function settleEvmClaim(
   claim: EvmPayV1,
   signal?: AbortSignal,
 ): Promise<EvmSettleResult> {
-  if (evmRpcUrl(req.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${req.chainId})`);
+  if (evmRpcUrl(req.chainId) === '') throw new Error(`EVM not configured (chain ${req.chainId})`);
   const {settleEvmClaimForDevice} = await import('./evm/settle');
   return settleEvmClaimForDevice(secretHex, req, claim, signal);
 }
@@ -493,7 +493,7 @@ export async function findEvmSettledTransfer(
   fromBlock?: number,
   signal?: AbortSignal,
 ): Promise<string | null> {
-  if (evmRpcUrl(chainId) === '') throw new Error(`EVM is not configured on this device (chain ${chainId})`);
+  if (evmRpcUrl(chainId) === '') throw new Error(`EVM not configured (chain ${chainId})`);
   const {findEvmSettledTransfer: find} = await import('./evm/settle');
   return find(chainId, tokenAddress, owner, to, rawAmount, fromBlock, signal);
 }
@@ -530,7 +530,7 @@ export async function quoteUniswapSwap(
   args: Parameters<typeof import('./evm/uniswap')['quoteUniswap']>[0],
   signal?: AbortSignal,
 ): Promise<UniswapQuote> {
-  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM not configured (chain ${args.chainId})`);
   const {quoteUniswap} = await import('./evm/uniswap');
   return quoteUniswap(args, signal);
 }
@@ -542,7 +542,7 @@ export async function estimateUniswapSequenceFee(
   args: {chainId: number; plan: UniswapSwapPlan},
   signal?: AbortSignal,
 ): Promise<{maxFeeWei: string}> {
-  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM not configured (chain ${args.chainId})`);
   const {estimateSequenceFee} = await import('./evm/uniswap');
   return estimateSequenceFee(secretHex, args, signal);
 }
@@ -555,7 +555,7 @@ export async function executeUniswapSequence(
   signal?: AbortSignal,
   onBroadcast?: (step: {label: string; txHash: string}) => void,
 ): Promise<{steps: Array<{label: string; txHash: string}>}> {
-  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM not configured (chain ${args.chainId})`);
   const {executeUniswapSequence: run} = await import('./evm/uniswap');
   return run(secretHex, args, signal, onBroadcast as Parameters<typeof run>[3]);
 }
@@ -586,7 +586,7 @@ export async function quoteCowSwap(
   args: Omit<Parameters<typeof import('./evm/cow')['quoteCow']>[0], 'secretHex'> & {secretHex: string},
   signal?: AbortSignal,
 ): Promise<import('./evm/cow').CowQuote & {amountOut: string}> {
-  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM not configured (chain ${args.chainId})`);
   const {quoteCow} = await import('./evm/cow');
   const q = await quoteCow(args, signal);
   return {...q, amountOut: q.buyAmount};
@@ -599,7 +599,7 @@ export async function estimateCowSequenceFee(
   args: Parameters<typeof import('./evm/cow')['estimateCowSequenceFee']>[1],
   signal?: AbortSignal,
 ): Promise<{maxFeeWei: string}> {
-  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM not configured (chain ${args.chainId})`);
   const {estimateCowSequenceFee: run} = await import('./evm/cow');
   return run(secretHex, args, signal);
 }
@@ -613,7 +613,7 @@ export async function driveCowSequence(
   signal?: AbortSignal,
   onProgress?: Parameters<typeof import('./evm/cow')['driveCowSequence']>[3],
 ): Promise<ReturnType<typeof import('./evm/cow')['driveCowSequence']>> {
-  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM not configured (chain ${args.chainId})`);
   const {driveCowSequence: run} = await import('./evm/cow');
   return run(secretHex, args, signal, onProgress as Parameters<typeof run>[3]);
 }
@@ -624,7 +624,7 @@ export async function unwrapCowWeth(
   args: {chainId: number; amount: bigint},
   signal?: AbortSignal,
 ): Promise<string> {
-  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM is not configured on this device (chain ${args.chainId})`);
+  if (evmRpcUrl(args.chainId) === '') throw new Error(`EVM not configured (chain ${args.chainId})`);
   const {unwrapCowWeth: run} = await import('./evm/cow');
   return run(secretHex, args, signal);
 }

@@ -350,7 +350,7 @@ export async function recordWalletChoice(wallet: KnownWallet): Promise<void> {
   const cached = cachedProvider;
   if (!cached) {
     throw new Error(
-      `recordWalletChoice: no WalletConnect provider — pair before opening ${wallet.name}`,
+      `recordWalletChoice: no WalletConnect provider - pair before opening ${wallet.name}`,
     );
   }
   const provider = await cached;

@@ -89,7 +89,7 @@ export function entropyToMnemonic(entropy: Uint8Array): string[] {
  */
 export function mnemonicToEntropy(words: string[]): Uint8Array {
   if (!Array.isArray(words) || words.length !== WORD_COUNT) {
-    throw new Error(`mnemonic must be exactly ${WORD_COUNT} words, got ${words && words.length}`);
+    throw new Error(`mnemonic must be ${WORD_COUNT} words, got ${words && words.length}`);
   }
   // Lay the 24 × 11-bit indices into a 33-byte (264-bit) MSB-first stream, then slice the first
   // 256 bits as entropy and the last 8 as the checksum.

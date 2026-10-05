@@ -326,7 +326,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
         }
         setSignature(broadcast.sig);
         setPhase('unknown');
-        console.warn(`money: sol send sheet UNKNOWN outcome — broadcast accepted, confirmation missed, sig kept: ${broadcast.sig}`);
+        console.warn(`money: sol send sheet UNKNOWN outcome - broadcast accepted, confirmation missed, sig kept: ${broadcast.sig}`);
         onSent(); // the balance may already reflect it — refresh rather than claim either way
       } else {
         // A Solana RPC error (insufficient funds / rent-exempt violation / network / missing ATA),
