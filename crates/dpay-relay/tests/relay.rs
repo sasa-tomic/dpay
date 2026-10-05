@@ -1325,13 +1325,14 @@ async fn landing_page_states_non_custodial_honestly() {
         html.contains("Non-custodial. Your key stays on your phone"),
         "footer must carry the explicit non-custodial claim"
     );
-    // The on-demand fold: concrete implications, not jargon.
+    // The on-demand fold: concrete implications, not jargon. (The trailing "That's what owning
+    // it means" flourish came off in the 2026-10-05 brutal copy sweep - the consequences stay,
+    // the rhetoric went.)
     for required in [
         "<details class=\"custody\">",
         "What does \"non-custodial\" mean?",
         "There is no dpay account",
         "We can't move, freeze, or recover your money",
-        "That's what owning it means",
     ] {
         assert!(
             html.contains(required),
