@@ -154,7 +154,7 @@ hermeticDescribe('flow 153 — practice-not-settled', () => {
       await m.driver.findByTestID('practice-outcome', {timeoutMs: 40_000});
 
       expect(m.driver.readText('practice-outcome-body')).toBe(
-        'Signed and sent, not yet settled — nothing is confirmed. This is what pending looks like.');
+        'Signed and sent, not yet settled - nothing is confirmed. This is what pending looks like.'); // copy-economy sweep: copy shortened/hyphened, the fact stays
       const unknownScreen = m.driver.readText('practice-outcome');
       expect(unknownScreen.includes('the ledger settled it')).toBe(false);
       expect(m.driver.isPresent('practice-left')).toBe(false);

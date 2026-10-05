@@ -75,7 +75,7 @@ hermeticDescribe('flow 33 — ckERC20 watching persists across an app restart', 
     // Founder 2026-08-29: the connect view must ALSO surface the plain ICRC-1 receive route —
     // ckUSDC already on the IC transfers straight to the wallet's principal (no Ethereum txs).
     const icTxt = m.driver.readText('ic-also-section');
-    assertIncludes(icTxt, 'Already on the Internet Computer', 'erc20 sheet shows the IC-receive section');
+    assertIncludes(icTxt, 'Have an Internet Computer wallet', 'erc20 sheet shows the IC-receive section'); // copy-economy sweep: copy shortened/hyphened, the fact stays
     assertIncludes(icTxt, 'ckUSDC', 'IC-receive section names the LEDGER token (ckUSDC, not USDC-on-Ethereum)');
 
     // Connect + enter amount + approve → both txs mined (mock receipt 0x1) → watching.

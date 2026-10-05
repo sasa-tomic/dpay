@@ -204,7 +204,7 @@ hermeticDescribe('flow 18 — withdraw error paths (guards + an honest rail reje
     await m.driver.waitForFunction(() => m.driver.readTextSafe('send-status')?.includes('Bitcoin') === true,
       {timeoutMs: 6000, label: 'the wrong-chain refusal displaced the route line'});
     assertEq(m.driver.readText('send-status'),
-      "Bitcoin addresses can't receive ETH — it settles on Ethereum. Paste an address for that network instead.",
+      "Bitcoin addresses can't receive ETH - it settles on Ethereum. Paste an address for that network instead.", // copy-economy sweep: copy shortened/hyphened, the fact stays
       'the wrong-chain refusal names the pasted chain, the asset and the network to use');
     await m.driver.waitGone('withdraw-amount-input', {timeoutMs: 4000});
     expect(m.driver.isPresent('btn-withdraw-confirm')).toBe(false);

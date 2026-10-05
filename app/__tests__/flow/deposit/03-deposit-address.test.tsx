@@ -53,7 +53,7 @@ hermeticDescribe('flow 03 — deposit address: address + complete instructions +
     //    "Already on the Internet Computer?" section with the wallet's own ICRC-1 account.
     await m.driver.findByTestID('ic-also-section', {timeoutMs: 5_000});
     const icTxt = m.driver.readText('ic-also-section');
-    assertIncludes(icTxt, 'Already on the Internet Computer', 'IC-receive section is present');
+    assertIncludes(icTxt, 'Have an Internet Computer wallet', 'IC-receive section is present'); // copy-economy sweep: copy shortened/hyphened, the fact stays
     assertIncludes(icTxt, 'ckBTC', 'IC-receive section names the LEDGER token (ckBTC, not BTC)');
     const acct = await accountOf(m);
     assertEq(m.driver.readText('ic-also-address').trim(), await railPrincipalText(acct!.publicHex),
