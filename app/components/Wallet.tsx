@@ -45,6 +45,7 @@ import {useSolanaHistory} from '../hooks/useSolanaHistory';
 import {useEvmBalances} from '../hooks/useEvmBalances';
 import {evmAssetsOf} from '../config/catalog';
 import {useEvmHistory} from '../hooks/useEvmHistory';
+import {useRecheckAll} from '../hooks/useRecheckAll';
 import {useFundsReady} from '../hooks/useFundsReady';
 import {TripStrip} from './TripStrip';
 import {deriveSolanaAddress, createTokenAta} from '../solana';
@@ -248,13 +249,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // SOL/USDC polls are fire-and-forget (no completion signal), so this is a UI-level affordance
   // (the button reads 'Checking…' + disables) rather than a poll-lifecycle tracker. The poll's
   // own 2.5s cadence + generation gate remain the source of truth for the balance itself.
-  const [recheckBusy, setRecheckBusy] = useState(false);
+  // Owned by useRecheckAll since the ONE-REFRESH change (founder 2026-10-05): the flag and the
+  // refresh composition moved into the hook with the handler they belong to.
   // Wave 8: the header flip pins the OPPOSITE of the resolved mode (Light ↔ Dark). App.tsx owns
   // the state + AsyncStorage persistence; onSetTheme is the single mutator (Settings segments call
   // it directly with an explicit choice or null=Auto).
   const cycleTheme = useCallback(() => onSetTheme(nextTheme(resolvedTheme)), [onSetTheme, resolvedTheme]);
-  const recheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (recheckTimer.current != null) clearTimeout(recheckTimer.current); }, []);
   // Within-tab sub-modes for the Receive/Pay IA: "request"/"address" (Receive) and "scan"/"send"
   // (Pay). The on-chain deposit + withdraw surfaces now live INLINE in these tabs (lifted out of the
   // Balances per-row buttons + the overlay sheets). Owned here so deeplinks (?screen=deposit, the
@@ -428,24 +428,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // (icp-api.io / __DPAY_TEST_IC_GATEWAY), NOT the relay — post-proxy the Solana rail path IS the
   // relay, so a relay outage must not read as "this phone is offline".
   const {sol: solState, tokens: tokenStates, freshAt: solFreshAt, refreshSol, refreshToken, refreshTokens} = useSolanaBalances(identity.secretHex, solAddress, solanaMints);
-  // Defined AFTER the destructure (TDZ): manual re-poll for the fund-first "Check again" —
-  // fire-and-forget polls get a self-clearing busy flag (UI affordance, not lifecycle tracking).
-  const recheckSolBalances = useCallback(() => {
-    refreshSol();
-    refreshTokens();
-    setRecheckBusy(true);
-    if (recheckTimer.current != null) clearTimeout(recheckTimer.current);
-    recheckTimer.current = setTimeout(() => setRecheckBusy(false), 1500);
-  }, [refreshSol, refreshTokens]);
-  // IC rail twin (UX review r3 MUST-1): same self-clearing busy affordance for the shared
-  // InstructionPanel's "Check again" — without this, the IC panel's button gives zero feedback
-  // while the identical SOL panel spins (per-rail divergence in a shared surface).
-  const recheckIcBalances = useCallback(() => {
-    refreshBalances();
-    setRecheckBusy(true);
-    if (recheckTimer.current != null) clearTimeout(recheckTimer.current);
-    recheckTimer.current = setTimeout(() => setRecheckBusy(false), 1500);
-  }, [refreshBalances]);
   const solBalance = solState.balance;
   // The SOL rail's half of the Transactions list, read straight from the Solana RPC (no relay, no
   // canister — same device-key rail as the balances above). Gated on `solAddress` exactly as
@@ -482,13 +464,20 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   const {history: evmHistory, dropped: evmDropped, failure: evmHistoryFailure, refreshHistory: refreshEvmHistory} = useEvmHistory(evmAddress, evmKeys);
   const ledgerHistory = useMemo(() => mergeHistoryByTime(mergeHistoryByTime(history, solHistory), evmHistory), [history, solHistory, evmHistory]);
   const onEvmSent = useCallback(() => { refreshEvmBalances(); refreshEvmHistory(); }, [refreshEvmBalances, refreshEvmHistory]);
-  // Fire-and-forget manual re-poll for the shared InstructionPanel's "Check again" (the SOL twin).
-  const recheckEvmBalances = useCallback(() => {
-    refreshEvmBalances();
-    setRecheckBusy(true);
-    if (recheckTimer.current != null) clearTimeout(recheckTimer.current);
-    recheckTimer.current = setTimeout(() => setRecheckBusy(false), 1500);
-  }, [refreshEvmBalances]);
+  // THE ONE REFRESH (founder 2026-10-05): every Pay surface's Check-again wires the SAME hook —
+  // both rails' balances AND both histories re-poll from one affordance; the per-rail handlers
+  // (IC-only / SOL-only / EVM-only) are gone. Same fire-and-forget polls, same self-clearing
+  // busy dwell throughout.
+  const recheckSeams = useMemo(() => ({
+    refreshIcBalances: refreshBalances,
+    refreshIcHistory: refreshHistory,
+    refreshSolBalances: refreshSol,
+    refreshSolTokens: refreshTokens,
+    refreshSolHistory: refreshSolHistory,
+    refreshEvmBalances: refreshEvmBalances,
+    refreshEvmHistory: refreshEvmHistory,
+  }), [refreshBalances, refreshHistory, refreshSol, refreshTokens, refreshSolHistory, refreshEvmBalances, refreshEvmHistory]);
+  const {recheckAll, recheckBusy} = useRecheckAll(recheckSeams);
   // The evm hook states re-keyed to ASSET ids (`evm:<chainId>:<TOKEN>`) — the balance map's keys.
   const evmStatesById = useMemo(() => {
     const next: Record<string, {amount: string | null; status: 'loading' | 'balance' | 'unavailable' | 'error'; failure: import('../evm').EvmReadFailure | null}> = {};
@@ -2506,14 +2495,14 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
             />
           : mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solShownState.balance ?? '0'} tokenBalance={selectedTokenShownBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenShownStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solShownState, selectedTokenShownState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solShownState.status === 'ok' && solShownState.balance === '0'} solChecking={solShownState.status === 'loading' || solShownState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} />
+              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solShownState.balance ?? '0'} tokenBalance={selectedTokenShownBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenShownStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solShownState, selectedTokenShownState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solShownState.status === 'ok' && solShownState.balance === '0'} solChecking={solShownState.status === 'loading' || solShownState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} />
               : activeEvm && activeEvmAsset != null
-              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckEvmBalances} recheckBusy={recheckBusy} />
+              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} shownBalance={shownBalance}
                   onShowDepositAddress={() => goToDeposit(`ic:${selectedCurrency}`, `ic:${selectedCurrency}`)}
-                  onRefreshBalances={recheckIcBalances}
+                  onRefreshBalances={recheckAll}
                   refreshBusy={recheckBusy}
                   catalog={catalog} assets={assets} assetBalances={displayAssetBalances}
                   homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch}
@@ -2678,8 +2667,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           setRelayUrls={setRelayUrls}
           setSolanaRpc={setSolanaRpc}
           setEvmRpc={setEvmRpc}
-          onEvmRpcApplied={recheckEvmBalances}
-          onSolanaRpcApplied={recheckSolBalances}
+          onEvmRpcApplied={recheckAll}
+          onSolanaRpcApplied={recheckAll}
           setIcGateway={setIcGateway}
           onIcGatewayApplied={refreshBalances}
           onClose={closeSettings}
