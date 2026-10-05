@@ -146,6 +146,18 @@ export const BALANCE_OFFLINE_AFTER_FAILURES =
 // number on screen is about to change and the user is watching for it.
 export const SOL_ACTIVE_POLL_WINDOW_MS =
   ((globalThis as unknown as {__DPAY_TEST_SOL_ACTIVE_WINDOW_MS?: number}).__DPAY_TEST_SOL_ACTIVE_WINDOW_MS ?? 30000);
+// The POST-ACTION re-poll window (founder 2026-10-05: "Solana refresh => should be done also
+// periodically and/or for some time after making payments and after conversions"): after a
+// payment sent on the Solana rail, or a conversion whose payout lands there (a cefi venue payout,
+// a CCTP mint), the rail's balances + transactions re-poll every INTERVAL_MS for WINDOW_MS
+// (3 min ≈ 36 reads — comparable to the active cadence the send path already spends in its first
+// 30 s), then the window closes for good. The pure arithmetic lives in lib/postActionRepoll.ts;
+// the timers live in useRecheckAll's `armSolWindow`. The seam mirrors POLL: read ONCE at module
+// load from `__DPAY_TEST_POST_ACTION_REPOLL_*`; a shipped build never sets those globals.
+export const POST_ACTION_REPOLL_INTERVAL_MS =
+  ((globalThis as unknown as {__DPAY_TEST_POST_ACTION_REPOLL_INTERVAL_MS?: number}).__DPAY_TEST_POST_ACTION_REPOLL_INTERVAL_MS ?? 5000);
+export const POST_ACTION_REPOLL_WINDOW_MS =
+  ((globalThis as unknown as {__DPAY_TEST_POST_ACTION_REPOLL_WINDOW_MS?: number}).__DPAY_TEST_POST_ACTION_REPOLL_WINDOW_MS ?? 180000);
 // Bounded unknown-budget for the Receive settlement poll (F2, 2026-08-20): how many 'unknown'
 // read_state results we accept before stopping with actionable copy. NOT poll-interval-scaled —
 // a count budget keeps the wall-clock bound proportional to POLL.receiptRcv (45s at prod cadence,
