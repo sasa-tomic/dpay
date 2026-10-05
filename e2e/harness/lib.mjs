@@ -1049,8 +1049,9 @@ export async function selectCurrency(driver, key, opts = {}) {
 /**
  * The CONVERT entry, currency-first (2026-09-24): opens the convert surface with `key`'s
  * CURRENCY as the source — the per-row Convert button on the currency list
- * (`btn-accounts-convert-<CODE>`), which replaced the old selected-row-only
- * `btn-accounts-convert`. Does the whole journey: opens the route, taps the row's Convert.
+ * (the 2026-10-05 entry rework: Home's ONE convert button + the sheet's explicit FROM
+ * selector), replacing the removed per-row `btn-accounts-convert-<CODE>` buttons. Does the
+ * whole journey: goes Home, taps the ONE button, makes the wanted FROM stand.
  * Wait budget: the convert surface's own fund-gate/quote state is the caller's business.
  */
 /**
@@ -1143,10 +1144,12 @@ export async function selectSolRail(driver, key, opts = {}) {
 
 
 export async function openConvertFor(driver, key, opts = {}) {
-  await openBalances(driver, { timeoutMs: opts.timeoutMs ?? 5_000 });
   const currency = ASSET_KEY_TO_CURRENCY[key] ?? (key.length <= 4 ? key.toUpperCase() : null);
   if (currency == null) throw new Error(`openConvertFor: no currency for asset key "${key}"`);
-  await driver.click(`btn-accounts-convert-${currency}`, { timeoutMs: opts.timeoutMs ?? 5_000 });
+  // 2026-10-05 entry rework: convert enters from Home's ONE button; the sheet's explicit
+  // FROM selector (funded currencies only) replaced the per-row convert buttons.
+  await driver.click('tab-home', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.click('btn-home-convert', { timeoutMs: opts.timeoutMs ?? 5_000 });
   // A LIVE conversion record renders the RECORD VIEW on entry (no `convert-screen` chrome —
   // the per-record panels carry their own roots). Wait for the FORM screen or any record
   // root, whichever this entry carries. ONE `whichPresent` probe per 100ms tick (instant — no
@@ -1169,7 +1172,7 @@ export async function openConvertFor(driver, key, opts = {}) {
     const now = Date.now();
     if (!rePressed && now >= repressAt) {
       rePressed = true;
-      try { await driver.click(`btn-accounts-convert-${currency}`, { timeoutMs: 2_000 }); } catch { /* the deadline check below reports it */ }
+      try { await driver.click('btn-home-convert', { timeoutMs: 2_000 }); } catch { /* the deadline check below reports it */ }
     }
     if (now > entryDeadline) {
       throw new Error(`openConvertFor: the ${currency} convert surface never rendered (no form, record, gate, or unavailable panel within ${Math.round((opts.timeoutMs ?? 5_000) + 4_000)}s)`);
@@ -1192,7 +1195,22 @@ export async function openConvertFor(driver, key, opts = {}) {
     let sawGate = false;
     for (;;) {
       const found = await driver.whichPresent(['convert-amount', ...RECORD_IDS, 'convert-fund']);
-      if (found[0] === 'convert-amount') return;
+      if (found[0] === 'convert-amount') {
+        // The reworked sheet opens with a DEFAULT source (first funded currency). When the
+        // wanted currency is offered as a FROM chip, make it stand; an absent chip = already
+        // selected or not funded (the caller's assertions judge).
+        const chipDeadline = Date.now() + 2_000;
+        for (;;) {
+          const chip = (await driver.whichPresent([`convert-from-chip-${currency}`]))[0];
+          if (chip != null) {
+            await driver.click(`convert-from-chip-${currency}`, { timeoutMs: 5_000 });
+            break;
+          }
+          if (Date.now() > chipDeadline) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        return;
+      }
       if (found.length > 0 && RECORD_IDS.includes(found[0])) return;
       sawGate = sawGate || found.includes('convert-fund');
       if (Date.now() > deadline) break;
@@ -1201,7 +1219,8 @@ export async function openConvertFor(driver, key, opts = {}) {
     if (!sawGate) return; // not the gate (a record view / unavailable) — the caller's business
     // Re-enter once: the poll has had its window; the remount reads the funded map.
     await driver.click('btn-convert-back', { timeoutMs: 5_000 });
-    await driver.click(`btn-accounts-convert-${currency}`, { timeoutMs: 5_000 });
+    await driver.click('tab-home', { timeoutMs: 5_000 });
+    await driver.click('btn-home-convert', { timeoutMs: 5_000 });
     await driver.findByTestID('convert-screen', { timeoutMs: 5_000 });
   }
 }
