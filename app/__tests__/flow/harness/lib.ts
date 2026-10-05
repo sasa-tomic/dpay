@@ -257,8 +257,9 @@ const CONVERT_CURRENCY_NAMES: Record<string, string> = {
   ETH: 'Ether', ICP: 'Internet Computer', SOL: 'Solana',
 };
 
-/** The convert surface's real roots — the sheet, a record view, the fund gate or unavailable. */
-const CONVERT_ROOTS = ['convert-from-line', 'convert-state', 'crossrail-crossing', 'convert-awaiting-deposit',
+/** The convert surface's real roots — the sheet, the venue-less refusal, a record view, the
+ *  fund gate or unavailable. */
+const CONVERT_ROOTS = ['convert-from-line', 'convert-no-venue', 'convert-state', 'crossrail-crossing', 'convert-awaiting-deposit',
   'convert-provider-processing', 'convert-done', 'convert-pending', 'convert-fund', 'convert-unavailable'];
 
 export async function openConvertFor(m: Mount, key: string, opts: {timeoutMs?: number; formTimeoutMs?: number} = {}): Promise<void> {
