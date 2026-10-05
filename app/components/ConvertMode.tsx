@@ -109,6 +109,25 @@ export function ConvertMode({
     () => fundedCurrencies(visibleCurrencies, currencyBalances),
     [visibleCurrencies, currencyBalances],
   );
+  // The stale-default correction (founder 2026-10-05, the zero-balance hard requirement): the
+  // ENTRY default was computed from the balances KNOWN at the gesture — a first poll that has
+  // not landed yet can stand a provably-empty currency on the fund gate. Once the funded list
+  // arrives and EXCLUDES the standing source while naming others, the default CORRECTS to the
+  // first funded currency — the same fall-back-to-first-funded rule the entry used, now with
+  // fresh facts. An UNREADABLE source never corrects (it may hold money; switching would hide
+  // that) and a truly empty wallet keeps the gate. One-shot by construction: after the switch
+  // the source IS funded, so the condition is false. Navigation-level only — no money moves.
+  const fromOptionsKey = fromOptions.join('|');
+  const sourceCurrencyKey = sourceCurrency ?? '';
+  useEffect(() => {
+    if (onSwitchSource == null || sourceCurrencyKey === '' || fromOptionsKey === '') return;
+    const options = fromOptionsKey.split('|') as HomeCurrency[];
+    if (options.includes(sourceCurrencyKey as HomeCurrency)) return;
+    const st = currencyBalances[sourceCurrencyKey as HomeCurrency]?.status;
+    if (st !== 'zero' && st !== 'absent') return;
+    onSwitchSource(options[0]!);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromOptionsKey, sourceCurrencyKey, onSwitchSource]);
   // The relay's served venue registry (V5): what THIS relay serves, loaded once per relay;
   // the bundled table is the fallback until it lands. Key input to the pair walk — when the
   // served registry lands (the knob-armed fixture venue, a new pool) the pairs re-resolve.

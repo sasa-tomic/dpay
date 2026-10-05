@@ -273,29 +273,59 @@ export async function openConvertFor(m: Mount, key: string, opts: {timeoutMs?: n
     await m.driver.waitForFunction(() => CONVERT_ROOTS.some((t) => m.driver.isPresent(t)), {
       timeoutMs: timeoutMs + 4000, label: 'the convert surface renders',
     });
-    const gate = m.driver.isPresent('convert-fund');
-    if (gate || !m.driver.isPresent('convert-from-line')) {
-      // The gate can be REAL (nothing funded — the caller's fund-gate assertions take over) or
-      // a flash of the same race (the first balance poll has not armed the funded list yet, so
-      // the entry default landed on the gate). One re-entry, then hand the state to the caller.
-      if (attempt === 0) {
-        await m.driver.click('btn-convert-back', {timeoutMs: 5000});
-        continue;
+    if (!m.driver.isPresent('convert-from-line')) {
+      if (!m.driver.isPresent('convert-fund')) {
+        // A record view, the venue-less refusal, or unavailable: the caller decides.
+        return;
       }
-      return;
+      // The FUND GATE: the entry default was computed from the balances known at the gesture,
+      // so a first poll that has not landed can stand an empty currency on it (the host
+      // corrects to the first funded currency once the truth arrives), while a real empty
+      // wallet keeps the gate. Wait out the flip or the gate's own held-money pointer; follow
+      // the pointer when it offers money; one re-entry; then hand the state to the caller.
+      const waitMs = attempt === 0 ? (opts.formTimeoutMs ?? 8000) : 3000;
+      const deadline = budgetDeadline(waitMs);
+      while (Date.now() < deadline && !m.driver.isPresent('convert-from-line') && !m.driver.isPresent('btn-convert-fund-other')) {
+        await sleep(100);
+      }
+      if (!m.driver.isPresent('convert-from-line') && m.driver.isPresent('btn-convert-fund-other')) {
+        await m.driver.click('btn-convert-fund-other', {timeoutMs: 5000});
+        await m.driver.waitForFunction(() => m.driver.isPresent('convert-from-line'), {
+          timeoutMs: 6000, label: 'the held-money pointer lands the sheet',
+        });
+      }
+      if (!m.driver.isPresent('convert-from-line')) {
+        if (attempt === 0) {
+          await m.driver.click('btn-convert-back', {timeoutMs: 5000});
+          continue;
+        }
+        return; // the REAL gate: the caller's fund-gate assertions take over
+      }
     }
     // The sheet: make the WANTED source stand (the default may name another funded currency).
     const line = () => m.driver.readTextSafe('convert-from-line') ?? '';
     if (!line().includes(name)) {
       if (!m.driver.isPresent(`convert-from-chip-${currency}`)) {
-        if (attempt === 0) {
-          // The funded list can still be arming (the poll racing the entry): one re-entry.
-          await m.driver.click('btn-convert-back', {timeoutMs: 5000});
-          continue;
+        // The funded list can still be arming: the chips re-render live when the poll lands,
+        // so WAIT for the wanted currency to become a FROM option (a flow that wants a
+        // currency the wallet never holds throws after the same budget, with the line named).
+        const chipDeadline = budgetDeadline(opts.formTimeoutMs ?? 8000);
+        while (Date.now() < chipDeadline && !m.driver.isPresent(`convert-from-chip-${currency}`)
+          && !(m.driver.readTextSafe('convert-from-line') ?? '').includes(name)) {
+          await sleep(100);
         }
-        throw new Error(`openConvertFor: ${currency} is not a FROM option (only funded currencies are offered); on-screen FROM line: "${line()}"`);
       }
-      await m.driver.click(`convert-from-chip-${currency}`, {timeoutMs: 5000});
+      if (!(m.driver.readTextSafe('convert-from-line') ?? '').includes(name)) {
+        if (!m.driver.isPresent(`convert-from-chip-${currency}`)) {
+          if (attempt === 0) {
+            // Still arming after the budget: one re-entry (a fresh mount re-reads balances).
+            await m.driver.click('btn-convert-back', {timeoutMs: 5000});
+            continue;
+          }
+          throw new Error(`openConvertFor: ${currency} is not a FROM option (only funded currencies are offered); on-screen FROM line: "${line()}"`);
+        }
+        await m.driver.click(`convert-from-chip-${currency}`, {timeoutMs: 5000});
+      }
     }
     await m.driver.waitForFunction(
       () => (m.driver.readTextSafe('convert-from-line') ?? '').includes(name),

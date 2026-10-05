@@ -398,6 +398,16 @@ export function ConvertIntentSheet({
   // ── Screen state ─────────────────────────────────────────────────────────────────────────
   const [amountText, setAmountText] = useState('');
   const [amountTouched, setAmountTouched] = useState(false);
+  // A SOURCE change re-denominates the field (the FROM selector's re-key, founder 2026-10-05):
+  // the standing figure is the OLD source's unit ("2.5" USDC re-read as 2.5 SOL is a lie), so
+  // the amount resets and the prefill re-applies for the new source below. Same key as the
+  // pair reset above.
+  const [amountSourceKey, setAmountSourceKey] = useState<string | null>(selectedAsset.id ?? null);
+  if ((selectedAsset.id ?? null) !== amountSourceKey) {
+    setAmountSourceKey(selectedAsset.id ?? null);
+    setAmountText('');
+    setAmountTouched(false);
+  }
   const slippageBps = CONVERT_SLIPPAGE_BPS_DEFAULT; // disclosed inside Details; not a decision
   const [rowQuotes, setRowQuotes] = useState<Record<string, ConvertQuote>>({});
   const [rowQuoteErrs, setRowQuoteErrs] = useState<Record<string, string>>({});

@@ -1657,4 +1657,91 @@ describe('the explicit FROM selector (founder 2026-10-05)', () => {
     expect(onSwitchSource).toHaveBeenCalledWith('CHF');
     await act(async () => { tree.unmount(); });
   });
+
+  test('a KNOWN-zero standing source corrects to the first funded currency once balances land', async () => {
+    // The entry default was computed from the balances known at the gesture: a first poll that
+    // has not landed yet can stand an empty currency. When the funded list arrives and excludes
+    // the standing source, the default corrects itself (the same fall-back-to-first-funded rule
+    // the entry used, now with fresh facts) - the gate stays only for a truly empty wallet.
+    const onSwitchSource = jest.fn();
+    const tree = await mountConvert('0', null, {
+      currencyBalances: {
+        ICP: {displayText: '0 ICP', status: 'zero', failure: null},
+        CHF: {displayText: '2.00 Fr', status: 'ok', failure: null, amountRaw: '20000'},
+      },
+      onSwitchSource,
+    });
+    expect(onSwitchSource).toHaveBeenCalledWith('CHF');
+    await act(async () => { tree.unmount(); });
+  });
+
+  test('a FROM switch re-denominates the field: the old source\'s figure never quotes as the new unit', async () => {
+    // '2.5' typed against a USDC source must never re-key into the SOL sheet as 2.5 SOL - the
+    // amount is the OLD unit's figure, so a source change resets it and the prefill re-applies.
+    const onSwitchSource = jest.fn();
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(
+        <ConvertMode
+          identity={IDENTITY}
+          relayUrl="http://relay"
+          catalog={CATALOG}
+          visibleCurrencies={['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'] as const}
+          currencyBalances={{
+            ICP: {displayText: '2.5 ICP', status: 'ok', failure: null, amountRaw: '250000000'},
+            SOL: {displayText: '5 SOL', status: 'ok', failure: null, amountRaw: '5000000000'},
+          }}
+          selectedAsset={ICP_ASSET}
+          assetBalances={{8: '250000000'}}
+          onSwitchSource={onSwitchSource}
+          onBack={jest.fn()}
+          onShowDepositAddress={jest.fn()}
+        />,
+      );
+    });
+    mounted = tree; // the shared afterEach unmounts even when an assertion below throws
+    const input = node(tree, 'convert-amount');
+    await act(async () => { input!.props.onChangeText('2.5'); });
+    expect(node(tree, 'convert-amount')!.props.value).toBe('2.5');
+    // The user switches FROM ICP to SOL (the host re-points the selection; the sheet re-keys).
+    const SOL_ASSET = ASSETS.find(a => a.protocol === 'solana' && a.token === 'SOL') ?? ASSETS.find(a => a.protocol === 'solana')!;
+    await act(async () => {
+      tree.update(
+        <ConvertMode
+          identity={IDENTITY}
+          relayUrl="http://relay"
+          catalog={CATALOG}
+          visibleCurrencies={['CHF', 'USD', 'EUR', 'BTC', 'ETH', 'ICP', 'SOL'] as const}
+          currencyBalances={{
+            ICP: {displayText: '2.5 ICP', status: 'ok', failure: null, amountRaw: '250000000'},
+            SOL: {displayText: '5 SOL', status: 'ok', failure: null, amountRaw: '5000000000'},
+          }}
+          selectedAsset={SOL_ASSET}
+          assetBalances={{8: '250000000'}}
+          onSwitchSource={onSwitchSource}
+          onBack={jest.fn()}
+          onShowDepositAddress={jest.fn()}
+        />,
+      );
+    });
+    const value = node(tree, 'convert-amount')!.props.value;
+    expect(value).not.toBe('2.5');
+    expect(value === '' || value === '5').toBe(true); // reset, or the fresh source's own Max
+    await act(async () => { tree.unmount(); });
+  });
+
+  test('an UNREADABLE standing source is never corrected away (fail open stays)', async () => {
+    // A source whose balance cannot be read may hold money; silently switching it would hide
+    // that fact. Only a KNOWN zero corrects.
+    const onSwitchSource = jest.fn();
+    const tree = await mountConvert('250000000', null, {
+      currencyBalances: {
+        ICP: {displayText: '—', status: 'error', failure: null},
+        CHF: {displayText: '2.00 Fr', status: 'ok', failure: null, amountRaw: '20000'},
+      },
+      onSwitchSource,
+    });
+    expect(onSwitchSource).not.toHaveBeenCalled();
+    await act(async () => { tree.unmount(); });
+  });
 });
