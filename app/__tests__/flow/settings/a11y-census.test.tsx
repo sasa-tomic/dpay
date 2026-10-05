@@ -22,11 +22,10 @@ hermeticFlow();
 const SURFACES: Record<string, string[]> = {
   chrome: ['btn-settings', 'btn-theme', 'link-home', 'tab-home', 'tab-pay', 'tab-receive', 'tab-transactions'],
   home: [],
-  homeTab: ['btn-home-add-funds', 'btn-home-convert', 'btn-home-withdraw', 'btn-home-more',
+  homeTab: ['btn-home-convert', 'btn-home-add-funds', 'btn-home-withdraw', 'btn-home-more',
     'btn-home-accounts', 'btn-home-activity-all'],
-  accounts: ['btn-accounts-back', 'btn-accounts-convert-CHF', 'btn-accounts-convert-USD',
-    'btn-accounts-convert-EUR', 'btn-accounts-convert-BTC', 'btn-accounts-convert-ETH',
-    'btn-accounts-convert-ICP', 'btn-accounts-convert-SOL', 'btn-topup',
+  // NO per-row Convert since the 2026-10-05 rework: the ONE entry is Home's top-right button.
+  accounts: ['btn-accounts-back', 'btn-topup',
     'btn-toggle-testnet', 'asset-demo-select', 'btn-accounts-currency-CHF',
     'btn-accounts-currency-USD', 'btn-accounts-currency-EUR', 'btn-accounts-currency-BTC',
     'btn-accounts-currency-ETH', 'btn-accounts-currency-ICP', 'btn-accounts-currency-SOL',

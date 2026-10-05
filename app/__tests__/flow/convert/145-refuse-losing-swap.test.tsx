@@ -37,7 +37,10 @@ hermeticDescribe('flow 145 — convert refuses a swap that could only fail', () 
     let m: Awaited<ReturnType<typeof onboardWallet>> | null = null;
     try {
       // --- half 1: nothing to convert ---------------------------------------------------------
-      m = await onboardWallet('jest-convert-fundgate'); // funds DEMO only — ICP stays zero
+      // Nothing funded (DEMO is practice money, never a source): the entry resolves the
+      // PRIMARY currency and the fund gate prompts for it - the one honest zero state the
+      // 2026-10-05 entry keeps.
+      m = await onboardWallet('jest-convert-fundgate'); // funds DEMO only — the currencies stay zero
       const account = await accountOf(m);
       await openConvertFor(m, 'icp');
 
@@ -45,10 +48,10 @@ hermeticDescribe('flow 145 — convert refuses a swap that could only fail', () 
       expect(m.driver.isPresent('btn-convert-confirm')).toBe(false);
       expect(m.driver.isPresent('convert-amount')).toBe(false);
       const gate = m.driver.readText('convert-fund');
-      assertIncludes(gate, 'ICP', 'the gate names the asset the wallet lacks');
+      assertIncludes(gate, 'VCHF', 'the gate names the asset the wallet lacks (the funded-entry default: the primary currency)');
       assertIncludes(gate, 'Receive', 'the gate names the tab that can fund it');
       assertIncludes(gate, 'My address', 'the gate names the sub-surface inside it');
-      assertIncludes(gate, 'Show my ICP address', 'the gate offers the route it names, as a button');
+      assertIncludes(gate, 'Show my VCHF address', 'the gate offers the route it names, as a button');
       await m.driver.click('convert-fund-go', {timeoutMs: 5_000});
       await m.driver.findByTestID('deposit-address', {timeoutMs: 8_000});
 

@@ -356,7 +356,7 @@ describe('AccountsTab - radical vertical density (founder 2026-10-05: a balance 
   const views = assetViews();
   const sums = currencyViews(views);
   /** Nodes carrying a style token, directly or inside an array (both shapes render). */
-  const withToken = (tree: renderer.ReactTestRenderer, token: number | object) =>
+  const withToken = (tree: renderer.ReactTestInstance, token: number | object) =>
     tree.findAll(n => n.props?.style === token || (Array.isArray(n.props?.style) && (n.props.style as unknown[]).includes(token)));
 
   test('the compact card tokens: tight padding, tight inter-row gap', () => {

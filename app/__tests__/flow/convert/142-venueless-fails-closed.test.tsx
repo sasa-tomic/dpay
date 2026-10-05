@@ -38,7 +38,8 @@ hermeticDescribe('flow 142 — venue-less fails closed; a venue subject opens th
       await openBalances(m);
       expect(await m.driver.findByTestID('asset-veur', {timeoutMs: 3_000}).then(() => true).catch(() => false)).toBe(false);
 
-      // DEMO: the practice row offers NO convert affordance at all.
+      // DEMO: the practice row offers NO convert affordance at all (and since the 2026-10-05
+      // rework NO row does - the ONE entry is Home's top-right button).
       await selectCurrency(m, 'demo');
       await openBalances(m);
       expect(await m.driver.findByTestID('asset-demo', {timeoutMs: 5_000})).not.toBeNull();

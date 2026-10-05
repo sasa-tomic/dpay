@@ -170,6 +170,8 @@ export async function openBalances(m: Mount, opts: {timeoutMs?: number} = {}): P
   if (affordance === null) {
     if (m.driver.isPresent('btn-convert-back')) {
       await m.driver.click('btn-convert-back', {timeoutMs});
+      // Convert Back lands on HOME (the 2026-10-05 entry): the list is one more tap away.
+      if (m.driver.isPresent('btn-home-accounts')) await m.driver.click('btn-home-accounts', {timeoutMs});
     } else {
       throw new Error('openBalances: neither the header chip, Home\'s headline, nor the convert back chevron is on screen — the accounts route is unreachable from here');
     }
@@ -244,35 +246,61 @@ export async function openPaySend(m: Mount, opts: {timeoutMs?: number} = {}): Pr
 }
 
 // --- convert sugar ------------------------------------------------------------------------------
+// The ONE entry (founder 2026-10-05): Home's top-right Convert opens the sheet with NO preset
+// source; the sheet's FROM selector names the FUNDED currencies, and the host resolves the
+// entry default (primary when funded, else first funded). `key` is the source the flow wants:
+// the harness picks its chip when the standing default differs, and hands the fund gate or a
+// live record view straight to the caller.
+
+const CONVERT_CURRENCY_NAMES: Record<string, string> = {
+  CHF: 'Swiss francs', USD: 'US dollars', EUR: 'Euros', BTC: 'Bitcoin',
+  ETH: 'Ether', ICP: 'Internet Computer', SOL: 'Solana',
+};
+
+/** The convert surface's real roots — the sheet, a record view, the fund gate or unavailable. */
+const CONVERT_ROOTS = ['convert-from-line', 'convert-state', 'crossrail-crossing', 'convert-awaiting-deposit',
+  'convert-provider-processing', 'convert-done', 'convert-pending', 'convert-fund', 'convert-unavailable'];
 
 export async function openConvertFor(m: Mount, key: string, opts: {timeoutMs?: number; formTimeoutMs?: number} = {}): Promise<void> {
   const timeoutMs = opts.timeoutMs ?? 5000;
-  await openBalances(m, {timeoutMs});
   const currency = ASSET_KEY_TO_CURRENCY[key] ?? (key.length <= 4 ? key.toUpperCase() : null);
   if (currency == null) throw new Error(`openConvertFor: no currency for asset key "${key}"`);
-  await m.driver.click(`btn-accounts-convert-${currency}`, {timeoutMs});
-  // The surface's own entry: form, live record, fund gate, or unavailable — any real root.
-  const roots = ['convert-screen', 'convert-sheet', 'convert-state', 'crossrail-crossing', 'convert-awaiting-deposit',
-    'convert-provider-processing', 'convert-done', 'convert-pending', 'convert-fund', 'convert-unavailable'];
-  await m.driver.waitForFunction(() => roots.some((t) => m.driver.isPresent(t)), {
-    timeoutMs: timeoutMs + 4000, label: `the ${currency} convert surface renders`,
-  });
-  // The fund gate can flash first when entry races the first balance poll — one re-entry, then
-  // hand the gate to the caller (its fund-gate assertions take over), exactly like lib.mjs.
+  const name = CONVERT_CURRENCY_NAMES[currency] ?? currency;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const deadline = budgetDeadline(opts.formTimeoutMs ?? 6000); // positive transition (budget)
-    let sawGate = false;
-    for (;;) {
-      if (m.driver.isPresent('convert-amount')) return;
-      if (['convert-state', 'convert-awaiting-deposit', 'convert-provider-processing', 'convert-done', 'convert-pending', 'crossrail-crossing']
-        .some((t) => m.driver.isPresent(t))) return;
-      sawGate = sawGate || m.driver.isPresent('convert-fund');
-      if (Date.now() > deadline) break;
-      await sleep(100);
+    await m.driver.click('tab-home', {timeoutMs: 5000});
+    await m.driver.click('btn-home-convert', {timeoutMs});
+    await m.driver.waitForFunction(() => CONVERT_ROOTS.some((t) => m.driver.isPresent(t)), {
+      timeoutMs: timeoutMs + 4000, label: 'the convert surface renders',
+    });
+    const gate = m.driver.isPresent('convert-fund');
+    if (gate || !m.driver.isPresent('convert-from-line')) {
+      // The gate can be REAL (nothing funded — the caller's fund-gate assertions take over) or
+      // a flash of the same race (the first balance poll has not armed the funded list yet, so
+      // the entry default landed on the gate). One re-entry, then hand the state to the caller.
+      if (attempt === 0) {
+        await m.driver.click('btn-convert-back', {timeoutMs: 5000});
+        continue;
+      }
+      return;
     }
-    if (!sawGate) return;
-    await m.driver.click('btn-convert-back', {timeoutMs: 5000});
-    await m.driver.click(`btn-accounts-convert-${currency}`, {timeoutMs: 5000});
+    // The sheet: make the WANTED source stand (the default may name another funded currency).
+    const line = () => m.driver.readTextSafe('convert-from-line') ?? '';
+    if (!line().includes(name)) {
+      if (!m.driver.isPresent(`convert-from-chip-${currency}`)) {
+        if (attempt === 0) {
+          // The funded list can still be arming (the poll racing the entry): one re-entry.
+          await m.driver.click('btn-convert-back', {timeoutMs: 5000});
+          continue;
+        }
+        throw new Error(`openConvertFor: ${currency} is not a FROM option (only funded currencies are offered); on-screen FROM line: "${line()}"`);
+      }
+      await m.driver.click(`convert-from-chip-${currency}`, {timeoutMs: 5000});
+    }
+    await m.driver.waitForFunction(
+      () => (m.driver.readTextSafe('convert-from-line') ?? '').includes(name),
+      {timeoutMs: timeoutMs + 4000, label: `the FROM line names ${currency}`},
+    );
+    return;
   }
 }
 
