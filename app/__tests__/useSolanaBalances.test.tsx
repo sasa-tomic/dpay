@@ -33,7 +33,7 @@ jest.mock('../solana', () => ({
 import {readSolanaBalances} from '../solana';
 import type {SolanaBalancesRead} from '../solana';
 import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
-import {POLL} from '../config/constants';
+import {POLL, SOL_ACTIVE_POLL_WINDOW_MS} from '../config/constants';
 import {useSolanaBalances} from '../hooks/useSolanaBalances';
 import {resetSolTokenStateCache} from '../services/solTokenStatePersist';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -127,6 +127,24 @@ describe('useSolanaBalances', () => {
     // …and one more tick is one more request, not three.
     await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); });
     expect(mockedRead).toHaveBeenCalledTimes(2);
+    act(() => { tree.unmount(); });
+  });
+
+  test('periodic forever: past the active window the rail keeps reading, at the IDLE cadence (founder 2026-10-05: Solana re-polls periodically, like the IC rail)', async () => {
+    mockedRead.mockResolvedValue(read(lamports('1500000000'), {}));
+    const {tree} = renderHook(SECRET_HEX, SOL_ADDRESS, []);
+    await act(async () => { await flushMicrotasks(); });
+    expect(mockedRead).toHaveBeenCalledTimes(1);
+    // The active window (SOL_ACTIVE_POLL_WINDOW_MS from mount) ticks at the ACTIVE cadence…
+    await act(async () => { jest.advanceTimersByTime(SOL_ACTIVE_POLL_WINDOW_MS); await flushMicrotasks(); });
+    const afterWindow = mockedRead.mock.calls.length;
+    expect(afterWindow).toBeGreaterThan(1);
+    // …and past it the rail NEVER stops reading — it only slows to POLL.balanceIdle: no read at
+    // the active spacing any more, then one lands exactly at the idle boundary.
+    await act(async () => { jest.advanceTimersByTime(POLL.balanceIdle - POLL.balance); await flushMicrotasks(); });
+    expect(mockedRead).toHaveBeenCalledTimes(afterWindow);
+    await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); });
+    expect(mockedRead).toHaveBeenCalledTimes(afterWindow + 1);
     act(() => { tree.unmount(); });
   });
 

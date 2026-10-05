@@ -29,6 +29,7 @@ import {CeFiMinDepositError, ceFiQuoteFromResult, ceFiServiceError, createCeFiOr
 import {prepareCeFiConvertRecord, prepareComposedConvertRecord} from '../convert/prepare';
 import type {ConvertRecord} from '../convert/types';
 import {isTerminalConvertStep} from '../convert';
+import {convertRecordPayoutRail, repollWantedForPayoutRail} from '../lib/postActionRepoll';
 import {WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {adoptConvertRecord, convertResumeSnapshot, markConvertDepositSent, subscribeConvertRecords} from '../convertResume';
 import {normalizePendingKey, removePendingPays} from '../services/pendingPays';
@@ -477,7 +478,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     refreshEvmBalances: refreshEvmBalances,
     refreshEvmHistory: refreshEvmHistory,
   }), [refreshBalances, refreshHistory, refreshSol, refreshTokens, refreshSolHistory, refreshEvmBalances, refreshEvmHistory]);
-  const {recheckAll, recheckBusy} = useRecheckAll(recheckSeams);
+  const {recheckAll, recheckBusy, armSolWindow} = useRecheckAll(recheckSeams);
   // The evm hook states re-keyed to ASSET ids (`evm:<chainId>:<TOKEN>`) — the balance map's keys.
   const evmStatesById = useMemo(() => {
     const next: Record<string, {amount: string | null; status: 'loading' | 'balance' | 'unavailable' | 'error'; failure: import('../evm').EvmReadFailure | null}> = {};
@@ -1811,8 +1812,16 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   const onActivity = useCallback(() => { refreshHistory(); }, [refreshHistory]);
   // The conversion record-advancement engine (V6): every live convert record is driven from
   // wallet load — mounted screen or not. A record landing in a terminal state IS account
-  // activity (a payout arrived), so the engine's terminal callback is the same ledger refresh.
-  useConvertResumeEngine({identity, relayUrl, onTerminal: onActivity});
+  // activity (a payout arrived), so the engine's terminal callback is the ledger refresh — and,
+  // since the post-action window (founder 2026-10-05), it also re-polls the SOL rail for a
+  // bounded window when the payout lands there (a cefi venue payout, a CCTP mint) or when the
+  // record cannot say (an unknown rail runs the window anyway — bounded, and a missed payout
+  // costs more). ONE conversion-terminal site: this callback is the engine's only onTerminal.
+  const onConvertTerminal = useCallback((rec: ConvertRecord) => {
+    refreshHistory();
+    if (repollWantedForPayoutRail(convertRecordPayoutRail(rec))) armSolWindow();
+  }, [refreshHistory, armSolWindow]);
+  useConvertResumeEngine({identity, relayUrl, onTerminal: onConvertTerminal});
   // The records ALSO name the conversion's execution identities (round-1 item 9): a swap leg's
   // pool canister and a composed route's venue deposit owner are counterparties the LEDGER
   // renders as bare principals. Each leg's owning venue is resolved ONCE here and pushed into
@@ -1855,17 +1864,22 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     setRuntimePoolNames(names);
   }, [convertRecords]);
   // The SOL rail's twin of `onActivity`: a confirmed send moves the balance AND adds a ledger row,
-  // so both are re-read rather than waiting out the poll. The two token callbacks stay separate
-  // because the BALANCES are independent (a SOL send must not perturb the USDC status); the
-  // Transactions list is one list per rail, so both refresh it.
-  const onSolSent = useCallback(() => { refreshSol(); refreshSolHistory(); }, [refreshSol, refreshSolHistory]);
+  // so both are re-read rather than waiting out the poll — and, since the post-action window
+  // (founder 2026-10-05), the SAME arm re-polls the rail for the bounded window that follows a
+  // payment: tick 0 is this re-read (token states included — one request answers every rail),
+  // then the window keeps balances + history current for a few minutes so a late-confirming or
+  // honest-unknown send reconciles without the user pulling to refresh. The two token callbacks
+  // stay separate because the BALANCES are independent (a SOL send must not perturb the USDC
+  // status); the Transactions list is one list per rail, so both refresh it.
+  const onSolSent = useCallback(() => { refreshSol(); refreshSolHistory(); armSolWindow(); }, [refreshSol, refreshSolHistory, armSolWindow]);
   // Token sends name their mint (a scanned Solana Pay request may pay a token that is NOT the
   // selection); an unnamed one repolls every visible mint. Per-mint independence is preserved:
-  // only the account that moved is refreshed.
+  // only the account that moved is refreshed. The window rides either spelling.
   const onSolTokenSent = useCallback((mint?: string | null) => {
     if (mint != null) refreshToken(mint); else refreshTokens();
     refreshSolHistory();
-  }, [refreshToken, refreshTokens, refreshSolHistory]);
+    armSolWindow();
+  }, [refreshToken, refreshTokens, refreshSolHistory, armSolWindow]);
   // The pending-outbox deduction, derived (2026-09-15): per currency, Σ gross of the pending
   // records whose hand-off POSTDATES the last successful read of that currency (atByCurrency) —
   // a poll that lands after the hand-off carries the transfer's effect authoritatively, so the

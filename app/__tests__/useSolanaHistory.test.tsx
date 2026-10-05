@@ -24,7 +24,7 @@ import {getSolanaHistory} from '../solana';
 import {classifyTransportFailure} from '../transportFailure';
 import type {SolanaHistoryResult, SolanaHistoryRow} from '../solana';
 import {useSolanaHistory} from '../hooks/useSolanaHistory';
-import {POLL} from '../config/constants';
+import {POLL, SOL_ACTIVE_POLL_WINDOW_MS} from '../config/constants';
 import {M} from '../i18n';
 import {errorsEn} from '../i18n/domains/en/errors';
 import {errorsDe} from '../i18n/domains/de/errors';
@@ -273,6 +273,23 @@ describe('useSolanaHistory — lifecycle and failure handling', () => {
     act(() => { tree.unmount(); });
     await act(async () => { jest.advanceTimersByTime(POLL.history * 3); });
     expect(mockedGetSolanaHistory).toHaveBeenCalledTimes(2); // the interval was cleared
+  });
+
+  test('periodic forever: past the active window the ledger keeps reading, at the IDLE cadence (founder 2026-10-05: Solana transactions re-poll periodically)', async () => {
+    mockedGetSolanaHistory.mockResolvedValue(history([row()]));
+    const {tree} = await mount();
+    expect(mockedGetSolanaHistory).toHaveBeenCalledTimes(1);
+    // Active-cadence ticks through the active window (SOL_ACTIVE_POLL_WINDOW_MS from mount)…
+    await act(async () => { jest.advanceTimersByTime(SOL_ACTIVE_POLL_WINDOW_MS); });
+    const afterWindow = mockedGetSolanaHistory.mock.calls.length;
+    expect(afterWindow).toBeGreaterThan(1);
+    // …then the reads continue at POLL.historyIdle, never stopping: no active-spacing tick, then
+    // exactly one at the idle boundary.
+    await act(async () => { jest.advanceTimersByTime(POLL.historyIdle - POLL.history); });
+    expect(mockedGetSolanaHistory).toHaveBeenCalledTimes(afterWindow);
+    await act(async () => { jest.advanceTimersByTime(POLL.history); });
+    expect(mockedGetSolanaHistory).toHaveBeenCalledTimes(afterWindow + 1);
+    act(() => { tree.unmount(); });
   });
 });
 
