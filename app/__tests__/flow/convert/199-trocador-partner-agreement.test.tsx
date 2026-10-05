@@ -208,11 +208,17 @@ hermeticDescribe('flow 199 — the trocador partner agreement (webhook registrat
           expect(typeof l.user_agent === 'string' && (l.user_agent as string).length > 0).toBe(true);
           expect(typeof l.accept_language === 'string' && (l.accept_language as string).length > 0).toBe(true);
         }
+        // The census is scoped to THIS order: the probe trade above mints its own order id
+        // (and may log its own deliveries), and the relay access log outlives a single run.
         const webhookLines = all.filter((l) => l.kind === 'webhook');
-        expect(webhookLines.length).toBe(2); // both deliveries logged as matched webhooks
-        for (const l of webhookLines) {
-          expect(l.order_id).toBe(orderId);
+        const ownWebhooks = webhookLines.filter((l) => l.order_id === orderId);
+        expect(ownWebhooks.length).toBe(2); // both deliveries of this order logged as matched webhooks
+        for (const l of ownWebhooks) {
           expect(l.trade_id).toBe(tradeId);
+        }
+        for (const l of webhookLines) {
+          expect(typeof l.order_id === 'string' && /^trod-[0-9a-f]{16}$/.test(l.order_id as string)).toBe(true);
+          expect(typeof l.trade_id === 'string' && (l.trade_id as string).length > 0).toBe(true);
         }
         const unmatched = all.filter((l) => l.kind === 'webhook-unmatched');
         expect(unmatched.some((l) => l.method === 'GET')).toBe(true); // the creation-time probe
