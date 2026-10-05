@@ -381,7 +381,7 @@ pub async fn rpc_proxy(State(state): State<AppState>, body: Bytes) -> Response {
             &relay_error_body(
                 "solana-unconfigured",
                 "solana rpc proxy is not configured: set DPAY_SOLANA_RPC_URL in the relay's \
-                 environment (the full provider endpoint, including its api key) — see docs/OPS.md §3",
+                 environment (the full provider endpoint, including its api key) - see docs/OPS.md §3",
             ),
         );
     };
@@ -391,7 +391,7 @@ pub async fn rpc_proxy(State(state): State<AppState>, body: Bytes) -> Response {
             return err(
                 StatusCode::BAD_REQUEST,
                 format!(
-                    "request body is not valid JSON ({e}) — POST /api/v1/solana/rpc takes the \
+                    "request body is not valid JSON ({e}) - POST /api/v1/solana/rpc takes the \
                      client's JSON-RPC envelope {{jsonrpc, id, method, params}} as-is"
                 ),
             )
@@ -403,7 +403,7 @@ pub async fn rpc_proxy(State(state): State<AppState>, body: Bytes) -> Response {
     let Some(method) = envelope.get("method").and_then(Value::as_str) else {
         return err(
             StatusCode::BAD_REQUEST,
-            "request has no string `method` field — not a JSON-RPC envelope",
+            "request has no string `method` field - not a JSON-RPC envelope",
         );
     };
     let caller_id = envelope.get("id").cloned();

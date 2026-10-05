@@ -313,7 +313,7 @@ async fn connect_and_prepare(
     for statement in SCHEMA {
         if let Err(e) = client.execute(statement, &[]).await {
             schema_err = Some(format!(
-                "postgres: schema setup failed: {e} — the DSN's user may lack CREATE on its schema"
+                "postgres: schema setup failed: {e} - the DSN's user may lack CREATE on its schema"
             ));
             break;
         }

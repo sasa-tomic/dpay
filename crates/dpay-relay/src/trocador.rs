@@ -279,7 +279,7 @@ pub async fn rate_proxy(
             return err(
                 StatusCode::BAD_REQUEST,
                 format!(
-                    "request body is not valid JSON ({e}) — POST /api/v1/trocador/rate takes \
+                    "request body is not valid JSON ({e}) - POST /api/v1/trocador/rate takes \
                      {{depositLedger, settleLedger, depositAmount}}"
                 ),
             );
@@ -302,13 +302,13 @@ pub async fn rate_proxy(
         return err(
             StatusCode::BAD_REQUEST,
             "request needs a string `depositAmount` (decimal, in the deposit asset's own \
-             units — the venue's own wire format)",
+             units - the venue's own wire format)",
         );
     };
     if !is_decimal_string(deposit_amount) {
         return err(
             StatusCode::BAD_REQUEST,
-            "`depositAmount` must be a plain decimal string (e.g. \"1.5\") — the venue's own \
+            "`depositAmount` must be a plain decimal string (e.g. \"1.5\") - the venue's own \
              wire format, forwarded as-is",
         );
     }
@@ -317,7 +317,7 @@ pub async fn rate_proxy(
         return err(
             StatusCode::BAD_REQUEST,
             "unsupported pair: the registered Trocador venue rows trade exactly their \
-             registered cross-rail pairs — pass one row's two rail ids as \
+             registered cross-rail pairs - pass one row's two rail ids as \
              depositLedger/settleLedger",
         );
     };
@@ -442,7 +442,7 @@ pub async fn trade_proxy(
             return err(
                 StatusCode::BAD_REQUEST,
                 format!(
-                    "request body is not valid JSON ({e}) — POST /api/v1/trocador/trade takes \
+                    "request body is not valid JSON ({e}) - POST /api/v1/trocador/trade takes \
                      {{rateId, provider, settleAddress, refundAddress, depositLedger, \
                      settleLedger, depositAmount}}"
                 ),
@@ -462,7 +462,7 @@ pub async fn trade_proxy(
             StatusCode::BAD_REQUEST,
             "request needs string fields `rateId`, `provider` (both from the rate surface's \
              own quote), `settleAddress` (the user's own address on the settle rail), \
-             `refundAddress` (the user's own address on the DEPOSIT rail — where the venue \
+             `refundAddress` (the user's own address on the DEPOSIT rail - where the venue \
              returns funds on failure), `depositLedger`, `settleLedger` and `depositAmount`",
         );
     };
@@ -475,7 +475,7 @@ pub async fn trade_proxy(
     if !is_decimal_string(deposit_amount) {
         return err(
             StatusCode::BAD_REQUEST,
-            "`depositAmount` must be a plain decimal string (e.g. \"1.5\") — the venue's own \
+            "`depositAmount` must be a plain decimal string (e.g. \"1.5\") - the venue's own \
              wire format, forwarded as-is",
         );
     }
@@ -508,7 +508,7 @@ pub async fn trade_proxy(
     {
         return err(
             StatusCode::BAD_REQUEST,
-            "`refundAddress` must be a well-formed address on the DEPOSIT rail — an Internet \
+            "`refundAddress` must be a well-formed address on the DEPOSIT rail - an Internet \
              Computer principal, ICRC-1 account text, or 64-hex account identifier for icp, \
              a base58 32-byte pubkey for solana",
         );
@@ -659,7 +659,7 @@ pub async fn trade_status_proxy(
     else {
         return err(
             StatusCode::BAD_REQUEST,
-            "request needs a non-empty `id` query parameter (the venue's own trade_id — the \
+            "request needs a non-empty `id` query parameter (the venue's own trade_id - the \
              key the trade creation answer carried)",
         );
     };
@@ -699,7 +699,7 @@ pub async fn trade_status_proxy(
             return too_many(
                 STATUS_THROTTLED_CODE,
                 "trocador status for this trade was fetched upstream less than 60s ago (the \
-                 partner agreement's organic-demand bound) — the next fresh read arrives when \
+                 partner agreement's organic-demand bound) - the next fresh read arrives when \
                  the window opens",
                 remaining,
             );
@@ -805,7 +805,7 @@ fn unconfigured(proxy: &TrocadorProxy) -> Option<Response> {
             "trocador-unconfigured",
             &format!(
                 "trocador proxy is not configured: set {} in the relay's environment (the \
-                 partner API key — requested from commercial@trocador.app; see docs/OPS.md §3)",
+                 partner API key - requested from commercial@trocador.app; see docs/OPS.md §3)",
                 missing.join(" and ")
             ),
         ),
@@ -896,7 +896,7 @@ fn store_down() -> Response {
         StatusCode::INTERNAL_SERVER_ERROR,
         &relay_error_body(
             "trocador-store-unavailable",
-            "the compliance store refused the write — the request is refused rather than \
+            "the compliance store refused the write - the request is refused rather than \
              proceed unlogged; retry after the store recovers",
         ),
     )

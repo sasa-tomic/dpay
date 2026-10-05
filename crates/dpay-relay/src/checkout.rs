@@ -2195,18 +2195,18 @@ impl CheckoutError {
             // kind of dead it is, or they stand at the counter re-scanning it.
             CheckoutError::Superseded => provider_error(
                 StatusCode::NOT_FOUND,
-                "This code was replaced by a newer charge — ask the cashier for the current one",
+                "This code was replaced by a newer charge - ask the cashier for the current one",
             ),
             // The opposite instruction from the one above, which is the entire reason the two are
             // separate: a payer holding a cancelled code must NOT go and pay it.
             CheckoutError::Cancelled => provider_error(
                 StatusCode::NOT_FOUND,
-                "This charge was cancelled at the checkout — nothing is owed, so do not send anything. \
+                "This charge was cancelled at the checkout - nothing is owed, so do not send anything. \
                  Ask the cashier to open a fresh charge if you still want to pay",
             ),
             CheckoutError::AlreadyPaid => provider_error(
                 StatusCode::CONFLICT,
-                "This charge has already been paid — do not send again; ask the cashier to open \
+                "This charge has already been paid - do not send again; ask the cashier to open \
                  a new one if you are paying for something else",
             ),
             CheckoutError::DeadQuote => provider_error(StatusCode::NOT_FOUND, "No actual quote with ID found"),
@@ -2219,7 +2219,7 @@ impl CheckoutError {
                 &format!(
                     "this checkout is already holding its limit of {MAX_CHARGES_PER_MERCHANT} charges. \
                      They clear themselves: an unpaid charge is dropped {} h after it was opened \
-                     and a paid one {} h after. Open a fresh charge again once the oldest has aged out — \
+                     and a paid one {} h after. Open a fresh charge once the oldest has aged out - \
                      cancelling does not free one, and a retry needs a fresh nonce",
                     CHARGE_TTL_SECS / 3_600,
                     SETTLED_TTL_SECS / 3_600,
@@ -2496,7 +2496,7 @@ fn body_of(body: Result<Json<OpenCharge>, JsonRejection>) -> Result<OpenCharge, 
             StatusCode::BAD_REQUEST,
             &format!(
                 "{}. A checkout request is {{merchant_pubkey, merchant_name, cents, nonce, issued_at, \
-                 signature}}, signed with the merchant's own key — see dfx/checkout_open_signing.json",
+                 signature}}, signed with the merchant's own key - see dfx/checkout_open_signing.json",
                 rejection.body_text()
             ),
         )),
@@ -2524,18 +2524,18 @@ fn checkout_open_response(e: CheckoutOpenError, now: u64, issued_at: u64) -> Res
             StatusCode::BAD_REQUEST,
             "merchant_pubkey is 32 bytes of hex but not an Ed25519 public key, so no signature \
              could ever verify under it and no account derives from it. Send the public key your \
-             own wallet shows — a placeholder or a truncated paste lands exactly here",
+             own wallet shows - a placeholder or a truncated paste lands here",
         ),
         CheckoutOpenError::BadSignature => provider_error(
             StatusCode::UNAUTHORIZED,
             "the signature does not verify under merchant_pubkey. Sign the request with the key \
              whose account is to be paid, and sign it AFTER settling cents, nonce, issued_at and \
-             merchant_name — every one of them is covered, so changing any of them afterwards \
+             merchant_name - every one of them is covered, so changing any of them afterwards \
              invalidates it",
         ),
         CheckoutOpenError::NonceReused => provider_error(
             StatusCode::CONFLICT,
-            "this nonce was already accepted, so the charge it opened exists — poll it with \
+            "this nonce was already accepted, so the charge it opened exists - poll it with \
              GET /api/v1/checkout/{id} rather than signing again. A retry needs a FRESH nonce, and a \
              fresh nonce is a new charge, not the same one",
         ),
@@ -2569,7 +2569,7 @@ pub(crate) async fn open_charge(
         return provider_error(
             StatusCode::BAD_REQUEST,
             &format!(
-                "a charge must be at most {} CHF — split a larger sale, or take it off the checkout",
+                "a charge must be at most {} CHF - split a larger sale, or take it off the checkout",
                 MAX_CENTS / 100
             ),
         );
@@ -2723,7 +2723,7 @@ pub(crate) async fn void_charge(
     if req.cents != 0 {
         return provider_error(
             StatusCode::BAD_REQUEST,
-            "a cancellation is signed with cents = 0 — that is what keeps a checkout-open signature from \
+            "a cancellation is signed with cents = 0 - that is what keeps a checkout-open signature from \
              being replayed as one. Sign the request again with cents = 0 and send that",
         );
     }
@@ -2860,7 +2860,7 @@ async fn merchant_history(
         // The compiled catalog is this relay's own code, so a missing VCHF row is a build that
         // cannot serve this checkout at all — loud, not a silent "not seen yet".
         return Err(crate::ledger::LedgerError::Rejected(
-            "VCHF is not in this relay's compiled catalog — this build cannot serve a checkout".into(),
+            "VCHF is not in this relay's compiled catalog - this build cannot serve a checkout".into(),
         ));
     };
     state
@@ -3132,7 +3132,7 @@ pub(crate) async fn lnurlp_submit(
             }
             (
                 StatusCode::ACCEPTED,
-                Json(json!({"status": "PENDING", "message": "no matching transfer seen yet — safe to retry"})),
+                Json(json!({"status": "PENDING", "message": "no matching transfer seen yet - safe to retry"})),
             )
                 .into_response()
         }

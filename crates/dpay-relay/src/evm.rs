@@ -474,7 +474,7 @@ pub async fn rpc_proxy_chain(
             StatusCode::NOT_FOUND,
             "evm-unknown-chain",
             &format!(
-                "no such chain: `{chain}` is not a chain id — POST \
+                "no such chain: `{chain}` is not a chain id - POST \
                  /api/v1/evm/rpc/{{chain_id}} takes a numeric EVM chain id (served: \
                  {SERVED_CHAINS:?})"
             ),
@@ -485,7 +485,7 @@ pub async fn rpc_proxy_chain(
             StatusCode::NOT_FOUND,
             "evm-unknown-chain",
             &format!(
-                "chain {chain_id} is not served by this relay — served chains: \
+                "chain {chain_id} is not served by this relay - served chains: \
                  {SERVED_CHAINS:?} (the catalog, GET /api/v1/currencies, is the served-set \
                  authority)"
             ),
@@ -504,7 +504,7 @@ async fn rpc_for_chain(proxy: &EvmProxy, chain_id: u64, body: Bytes) -> Response
             "evm-unconfigured",
             &format!(
                 "evm rpc proxy is not configured for chain {chain_id}: set {} in the relay's \
-                 environment (the full provider endpoint, including its api key) — see \
+                 environment (the full provider endpoint, including its api key) - see \
                  docs/OPS.md §3",
                 chain_upstream_env_name(chain_id)
             ),
@@ -524,7 +524,7 @@ async fn proxy_body(proxy: &EvmProxy, chain_id: u64, upstream: &str, body: Bytes
             return err(
                 StatusCode::BAD_REQUEST,
                 format!(
-                    "request body is not valid JSON ({e}) — POST /api/v1/evm/rpc takes the \
+                    "request body is not valid JSON ({e}) - POST /api/v1/evm/rpc takes the \
                      client's JSON-RPC envelope {{jsonrpc, id, method, params}} as-is"
                 ),
             )
@@ -536,7 +536,7 @@ async fn proxy_body(proxy: &EvmProxy, chain_id: u64, upstream: &str, body: Bytes
     let Some(method) = envelope.get("method").and_then(Value::as_str) else {
         return err(
             StatusCode::BAD_REQUEST,
-            "request has no string `method` field — not a JSON-RPC envelope",
+            "request has no string `method` field - not a JSON-RPC envelope",
         );
     };
     let caller_id = envelope.get("id").cloned();

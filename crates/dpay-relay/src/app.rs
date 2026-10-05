@@ -427,7 +427,7 @@ impl AppState {
 const FAUCET_UNAVAILABLE: &str = "faucet unavailable: this relay serves the offline fixture \
      faucet, which needs DPAY_ENABLE_FAUCET=true and the fake-IC gateway it credits";
 #[cfg(feature = "agent")]
-const FAUCET_UNAVAILABLE: &str = "faucet unavailable: this relay's agent signs anonymously — set \
+const FAUCET_UNAVAILABLE: &str = "faucet unavailable: this relay's agent signs anonymously - set \
      DPAY_CONTROLLER_SEED, since the facade's mint is controller-gated and an anonymous relay \
      cannot credit anything";
 

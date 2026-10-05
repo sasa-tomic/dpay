@@ -330,7 +330,7 @@ pub async fn quotes_proxy(
             return err(
                 StatusCode::BAD_REQUEST,
                 format!(
-                    "request body is not valid JSON ({e}) — POST /api/v1/sideshift/quotes takes \
+                    "request body is not valid JSON ({e}) - POST /api/v1/sideshift/quotes takes \
                      {{depositLedger, settleLedger, depositAmount}}"
                 ),
             );
@@ -353,13 +353,13 @@ pub async fn quotes_proxy(
         return err(
             StatusCode::BAD_REQUEST,
             "request needs a string `depositAmount` (decimal, in the deposit asset's own \
-             units — the venue's own wire format)",
+             units - the venue's own wire format)",
         );
     };
     if !is_decimal_string(deposit_amount) {
         return err(
             StatusCode::BAD_REQUEST,
-            "`depositAmount` must be a plain decimal string (e.g. \"1.5\") — the venue's own \
+            "`depositAmount` must be a plain decimal string (e.g. \"1.5\") - the venue's own \
              wire format, forwarded as-is",
         );
     }
@@ -369,7 +369,7 @@ pub async fn quotes_proxy(
         return err(
             StatusCode::BAD_REQUEST,
             "unsupported pair: the registered SideShift venue rows trade exactly their \
-             registered cross-rail pairs — pass one row's two rail ids as \
+             registered cross-rail pairs - pass one row's two rail ids as \
              depositLedger/settleLedger",
         );
     };
@@ -447,7 +447,7 @@ pub async fn shifts_fixed_proxy(
             return err(
                 StatusCode::BAD_REQUEST,
                 format!(
-                    "request body is not valid JSON ({e}) — POST /api/v1/sideshift/shifts/fixed \
+                    "request body is not valid JSON ({e}) - POST /api/v1/sideshift/shifts/fixed \
                      takes {{quoteId, settleAddress, refundAddress, depositLedger, settleMemo?}}"
                 ),
             );
@@ -463,7 +463,7 @@ pub async fn shifts_fixed_proxy(
             StatusCode::BAD_REQUEST,
             "request needs string fields `quoteId`, `settleAddress` (the user's own address \
              on the settle rail), `refundAddress` (the user's own address on the DEPOSIT \
-             rail — where the venue returns funds on failure) and `depositLedger` (the \
+             rail - where the venue returns funds on failure) and `depositLedger` (the \
              deposit rail id)",
         );
     };
@@ -507,7 +507,7 @@ pub async fn shifts_fixed_proxy(
     {
         return err(
             StatusCode::BAD_REQUEST,
-            "`refundAddress` must be a well-formed address on the DEPOSIT rail — an Internet \
+            "`refundAddress` must be a well-formed address on the DEPOSIT rail - an Internet \
              Computer principal, ICRC-1 account text, or 64-hex account identifier for icp, \
              a base58 32-byte pubkey for solana",
         );
@@ -531,7 +531,7 @@ pub async fn shifts_fixed_proxy(
     if !crate::addrcheck::address_wellformed(settle_network, settle_address) {
         return err(
             StatusCode::BAD_REQUEST,
-            "`settleAddress` must be a well-formed address on the SETTLE rail — a base58 \
+            "`settleAddress` must be a well-formed address on the SETTLE rail - a base58 \
              32-byte pubkey for solana; an Internet Computer principal, ICRC-1 account \
              text, or 64-hex account identifier for icp; a 0x 40-hex EVM address for \
              ethereum",
@@ -655,7 +655,7 @@ fn unconfigured(proxy: &SideShiftProxy) -> Option<Response> {
             "sideshift-unconfigured",
             &format!(
                 "sideshift proxy is not configured: set {} in the relay's environment (the \
-                 partner account credentials — see docs/OPS.md §3 and the feasibility spec's \
+                 partner account credentials - see docs/OPS.md §3 and the feasibility spec's \
                  Partner-key infrastructure section)",
                 missing.join(" and ")
             ),
