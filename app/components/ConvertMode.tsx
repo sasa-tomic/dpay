@@ -28,6 +28,7 @@ import {M} from '../i18n';
 import {fmtAssetCompact} from '../lib/format';
 import type {AssetId, Identity} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
+import {fundedCurrencies} from '../lib/assetBalances';
 import {S} from '../styles';
 import {InstructionPanel} from './InstructionPanel';
 import {ConvertHeader, isLiveRecord, UnavailablePanel} from './ConvertShared';
@@ -59,6 +60,10 @@ type Props = {
   /** Switch the wallet's selection (the funded-account pointer on the fund gate). Absent while
    *  the wallet's selection is locked — the account is still named, the button withheld. */
   onSwitchAsset?: (id: AssetId) => void;
+  /** The sheet's FROM selector handoff (founder 2026-10-05): switch the source to this
+   *  currency — the host re-resolves the funded rail and the sheet re-keys. Optional; absent
+   *  leaves the FROM line a plain fact (no chips). */
+  onSwitchSource?: (c: HomeCurrency) => void;
   /** Solana-rail balances: raw-unit spendable SOL (lamports) + per-mint token amounts. The
    *  fund gate + insufficient check read these; absent/empty means "unknown" (fail soft). */
   solana?: {sol: string | null; tokens: Record<string, string | null>};
@@ -70,7 +75,7 @@ type Props = {
 
 export function ConvertMode({
   identity, relayUrl, catalog, selectedAsset, assetBalances, visibleCurrencies,
-  currencyBalances, homeCurrency, onBack, onShowDepositAddress, onSwitchAsset, solana,
+  currencyBalances, homeCurrency, onBack, onShowDepositAddress, onSwitchAsset, onSwitchSource, solana,
   evmAssets = [], evmBalance = null,
 }: Props) {
   const sourceCurrency: HomeCurrency | null = selectedAsset != null ? currencyOfAsset(selectedAsset) : null;
@@ -97,6 +102,12 @@ export function ConvertMode({
   const targetScope = useMemo(
     () => visibleCurrencies.filter(c => c !== sourceCurrency),
     [visibleCurrencies, sourceCurrency],
+  );
+  // The FROM options (founder 2026-10-05): the FUNDED currencies of the visible list, read
+  // from the SAME summed views the currency list renders — one balance source, no second one.
+  const fromOptions = useMemo(
+    () => fundedCurrencies(visibleCurrencies, currencyBalances),
+    [visibleCurrencies, currencyBalances],
   );
   // The relay's served venue registry (V5): what THIS relay serves, loaded once per relay;
   // the bundled table is the fallback until it lands. Key input to the pair walk — when the
@@ -269,6 +280,8 @@ export function ConvertMode({
       targets={targets}
       homeCurrency={homeCurrency ?? null}
       balanceRaw={balanceRaw}
+      fromOptions={fromOptions}
+      onFromChange={onSwitchSource}
       onPrepared={onPrepared}
       onBack={onBack}
     />

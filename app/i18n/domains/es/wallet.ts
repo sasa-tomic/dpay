@@ -81,7 +81,6 @@ export const walletEs: WalletMessages = {
     intro: 'Toca una moneda para hacerla principal.',
     back: 'Atrás',
     practice: 'Dinero de práctica. Ninguna tienda lo acepta.',
-    convertHint: 'Convertir en un servicio externo',
     setMainHint: 'La convierte en tu moneda principal',
     addCurrency: 'Añadir moneda',
   },

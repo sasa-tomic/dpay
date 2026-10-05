@@ -392,3 +392,20 @@ export function buildCurrencyBalances(args: {
   }
   return out;
 }
+
+/**
+ * The FUNDED currencies of a visible list, in list order — the convert sheet's FROM options
+ * (founder 2026-10-05: the source must be explicit, and only money the wallet provably holds
+ * is offered). A currency qualifies only when its summed view carries a POSITIVE raw amount:
+ * `amountRaw != null` is exactly the 'ok' contract above, so zero, absent, unreadable and
+ * still-loading balances are all excluded. PURE, like every mapper in this module.
+ */
+export function fundedCurrencies(
+  currencies: readonly HomeCurrency[],
+  views: Readonly<Partial<Record<HomeCurrency, BalanceView>>>,
+): HomeCurrency[] {
+  return currencies.filter(c => {
+    const raw = views[c]?.amountRaw;
+    return raw != null && /^\d+$/.test(raw) && BigInt(raw) > 0n;
+  });
+}

@@ -7,11 +7,13 @@
  *     in currencyBalances.test.ts). The offline approximation marker OUTRANKS everything — a
  *     wallet that is not connected renders its best-known figure, marked. The DEMO balance never
  *     reaches the headline (practice money is not the user's currency).
- *   • The action row is fork #1's four cards: Add funds / Convert / Withdraw funds / [...]. Pay
- *     and Receive stay on the bottom tab bar and are NOT duplicated here. The three money
- *     actions act on the MAIN RAIL — the account the headline names — and disable together when
- *     the catalog cannot realise the currency. The [...] opens the overflow menu (Wallet owns
- *     the sheet; the menu's guard logic is tested in currency.test.ts).
+ *   • The action row is fork #1's three cells: Add funds / Withdraw funds / [...]. Convert is
+ *     NOT in the row any more (founder 2026-10-05): ONE Convert button sits at the TOP RIGHT of
+ *     the screen, above the headline, and opens the convert sheet with NO preset source - the
+ *     sheet's own FROM selector (funded currencies only) makes the source explicit. The money
+ *     actions disable together when the catalog cannot realise the currency or a setup run owns
+ *     the money movement. The [...] opens the overflow menu (Wallet owns the sheet; the menu's
+ *     guard logic is tested in currency.test.ts).
  *   • The currency LIST is not here (it is the accounts route — HomeAccounts.test.tsx); the
  *     AFFORDANCE is the headline block itself (`btn-home-accounts`, kept from 2026-09-14).
  *
@@ -343,7 +345,7 @@ describe('HomeTab — the accounts affordance IS the headline (kept from 2026-09
   });
 });
 
-describe('HomeTab — the action row is Add funds / Convert / Withdraw funds / [...] (fork #1)', () => {
+describe('HomeTab — ONE Convert at the top right, the action row is Add funds / Withdraw / [...] (founder 2026-10-05)', () => {
   test('Pay and Receive are NOT on Home — they live on the bottom tabs, unchanged', () => {
     const ids = testIDs(mountHome());
     for (const gone of ['btn-home-pay', 'btn-home-receive', 'btn-home-add-money']) {
@@ -351,20 +353,33 @@ describe('HomeTab — the action row is Add funds / Convert / Withdraw funds / [
     }
   });
 
-  test('Add funds funds the MAIN RAIL — the account the headline is showing', () => {
-    const onDeposit = jest.fn();
-    const tree = mountHome({onDeposit});
-    act(() => { pressable(tree, 'btn-home-add-funds').props.onPress(); });
-    expect(onDeposit).toHaveBeenCalledWith(HOME_RAIL!.id);
+  test('EXACTLY ONE Convert button, rendered at the TOP RIGHT — above the headline, before every action cell', () => {
+    const tree = mountHome();
+    const ids = testIDs(tree);
+    expect(ids).toContain('btn-home-convert');
+    // Render order: the Convert row is HomeTab's FIRST child — above the headline affordance
+    // and above the action row (the RN preset mirrors nodes 2x; order still holds).
+    const raw = tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID));
+    expect(raw.indexOf('btn-home-convert')).toBeLessThan(raw.indexOf('btn-home-accounts'));
+    expect(raw.indexOf('btn-home-convert')).toBeLessThan(raw.indexOf('btn-home-add-funds'));
+    expect(raw.indexOf('btn-home-convert')).toBeLessThan(raw.indexOf('btn-home-withdraw'));
     act(() => { tree.unmount(); });
   });
 
-  test('Convert opens the swap surface with the main currency as the source', () => {
+  test('the Convert label is the plain i18n verb; a press opens the convert sheet', () => {
     const onConvert = jest.fn();
     const tree = mountHome({onConvert});
     expect(String(pressable(tree, 'btn-home-convert').props.accessibilityLabel)).toBe(M.wallet.home.actions.convert);
     act(() => { pressable(tree, 'btn-home-convert').props.onPress(); });
     expect(onConvert).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('Add funds funds the MAIN RAIL — the account the headline is showing', () => {
+    const onDeposit = jest.fn();
+    const tree = mountHome({onDeposit});
+    act(() => { pressable(tree, 'btn-home-add-funds').props.onPress(); });
+    expect(onDeposit).toHaveBeenCalledWith(HOME_RAIL!.id);
     act(() => { tree.unmount(); });
   });
 
@@ -384,7 +399,7 @@ describe('HomeTab — the action row is Add funds / Convert / Withdraw funds / [
     act(() => { tree.unmount(); });
   });
 
-  test('the three money actions disable when the currency has no rail; the menu stays live', () => {
+  test('the money actions disable when the currency has no rail; the menu stays live', () => {
     const onDeposit = jest.fn();
     const tree = mountHome({homeAsset: null, onDeposit});
     // A disabled Pressable never fires at runtime (the test renderer invokes raw handlers, so

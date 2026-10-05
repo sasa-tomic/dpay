@@ -174,8 +174,6 @@ export type WalletMessages = {
     /** The divider that separates the practice rail from the currencies holding real value. Whole
      *  sentence, never a glyph (anti-scam rule R3: play money is labelled wherever it appears). */
     practice: string;
-    /** The per-row Convert action's hint — what the venue behind it is. */
-    convertHint: string;
     /** The row tap's hint — selection IS the action (the spec supersedes tap protection). */
     setMainHint: string;
     /** [Add new currency] — the button at the list's end and its route. */
@@ -399,7 +397,6 @@ export const walletEn: WalletMessages = {
     intro: 'Tap a currency to make it main.',
     back: 'Back',
     practice: 'Practice money. No shop takes it.',
-    convertHint: 'Convert at an outside venue',
     setMainHint: 'Sets it as your main currency',
     addCurrency: 'Add currency',
   },

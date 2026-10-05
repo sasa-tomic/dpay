@@ -120,10 +120,18 @@ type Props = {
   homeCurrency: HomeCurrency | null;
   /** The source rail's raw-unit spendable balance, when known (null fails open). */
   balanceRaw: string | null;
+  /** The FUNDED currencies eligible as FROM (host-computed from the same summed views the
+   *  currency list renders — founder 2026-10-05: a zero or unreadable balance is never offered
+   *  as a source). The standing source is filtered out of the chips by the renderer. */
+  fromOptions: HomeCurrency[];
+  /** Switch the source currency — the host re-resolves the rail and the sheet re-keys (the
+   *  same reset a fresh entry gets). Optional so a bare mount stays legal; the production host
+   *  always wires it. */
+  onFromChange?: (c: HomeCurrency) => void;
   /** Hand a PREPARED record to the host: it adopts it into the engine and switches the
    *  screen into the record view (the Settlement Field tracker or the kind's own panel). */
   onPrepared: (rec: ConvertRecord) => void;
-  /** Back goes where Convert was launched from (the accounts route). */
+  /** Back goes where Convert was launched from (Home, since 2026-10-05). */
   onBack: () => void;
 };
 
@@ -330,7 +338,7 @@ function overheadHubFee(r: SwapRow | undefined): string | null {
 
 export function ConvertIntentSheet({
   identity, relayUrl, catalog, selectedAsset, assetBalances, currencyBalances,
-  targets, homeCurrency, balanceRaw, onPrepared, onBack,
+  targets, homeCurrency, balanceRaw, fromOptions, onFromChange, onPrepared, onBack,
 }: Props) {
   // ── Source facts (the standing rail's own unit + the currency it settles) ────────────────
   const sourceCurrency: HomeCurrency | null = currencyOfAsset(selectedAsset);
@@ -352,12 +360,14 @@ export function ConvertIntentSheet({
   const [pairKey, setPairKey] = useState<string | null>(null);
   const [selRowId, setSelRowId] = useState<string | null>(null);
   const [targetChipsOpen, setTargetChipsOpen] = useState(true);
+  const [fromChipsOpen, setFromChipsOpen] = useState(true);
   const [venuesOpen, setVenuesOpen] = useState(false);
   if ((selectedAsset.id ?? null) !== pairKey) {
     setPairKey(selectedAsset.id ?? null);
     setTargetSel(null);
     setSelRowId(null);
     setTargetChipsOpen(true);
+    setFromChipsOpen(true);
     setVenuesOpen(false);
   }
   // The standing default (brief 5.3): a stable source converts into its value TWIN; a
@@ -1513,6 +1523,9 @@ export function ConvertIntentSheet({
   // standing target IS the line).
   const chipTargets = targets.filter(t => t.currency !== targetCode);
   const chipCodes = chipTargets.map(t => t.currency);
+  // The FROM chips: every FUNDED currency that is not the standing source (founder 2026-10-05:
+  // the source is explicit and changeable; a zero or unreadable balance is never offered).
+  const fromCodes = fromOptions.filter(c => c !== sourceCurrency);
 
   // The host's fail-closed panels render instead of the sheet when the pair resolves
   // to nothing; the sheet only renders over a live pair.
@@ -1541,8 +1554,45 @@ export function ConvertIntentSheet({
       <View testID="convert-sheet" style={S.sheetRoot}>
         <View style={S.sheetGrabber} />
 
-        {/* ── The SELL leg: amount + presets ─────────────────────────────────────────────── */}
+        {/* ── The SELL leg: the explicit FROM selector + amount + presets ─────────────────────
+            The source is EXPLICIT (founder 2026-10-05): the line names the standing source and
+            the chips offer the funded currencies only. Both selectors (FROM above, TO below)
+            sit at the top of the sheet. */}
         <View testID="convert-source-leg">
+          <View testID="convert-from-leg">
+            {fromCodes.length > 0 && onFromChange != null ? (
+              <Pressable
+                testID="convert-from-line"
+                style={S.targetLine}
+                onPress={() => { if (!confirmBusy) setFromChipsOpen(o => !o); }}
+                accessibilityRole="button"
+                accessibilityState={{expanded: fromChipsOpen}}>
+                <Text style={S.targetLineName}>{sourceCurrency != null ? currencyName(sourceCurrency) : inSym}</Text>
+                <View style={fromChipsOpen ? S.convertDetailsChevronOpen : undefined}>
+                  <IconChevronDown size={16} color={C.sub} />
+                </View>
+              </Pressable>
+            ) : (
+              <View testID="convert-from-line" style={S.targetLine}>
+                <Text style={S.targetLineName}>{sourceCurrency != null ? currencyName(sourceCurrency) : inSym}</Text>
+              </View>
+            )}
+            {fromCodes.length > 0 && onFromChange != null && fromChipsOpen ? (
+              <View testID="convert-from-chips" style={S.chipRow}>
+                {fromCodes.map(code => (
+                  <Pressable
+                    key={code}
+                    testID={`convert-from-chip-${code}`}
+                    style={S.chip}
+                    onPress={() => { if (!confirmBusy) onFromChange(code); }}
+                    accessibilityRole="button"
+                    accessibilityLabel={currencyName(code)}>
+                    <Text style={S.chipText}>{currencyName(code)}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+          </View>
           <Text style={S.convertAmountLabel}>{M.convert.amountLabel(inSym)}</Text>
           <View style={S.amountRow}>
             <TextInput

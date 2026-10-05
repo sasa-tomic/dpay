@@ -197,7 +197,6 @@ function mountAccounts(props: Partial<Parameters<typeof AccountsTab>[0]> = {}): 
         onToggleTestnet={jest.fn()}
         onBack={jest.fn()}
         onOpenCurrency={jest.fn()}
-        onConvertCurrency={jest.fn()}
         onOpenAddCurrency={jest.fn()}
         onSelect={jest.fn()}
         onTopUp={jest.fn()}

@@ -25,12 +25,15 @@ import type {BalanceView} from '../lib/assetBalances';
 // unit). Offline outranks everything: the best-known figure renders with the approximation marker,
 // the same rule every balance surface follows.
 //
-// ── The action row (fork #1) ────────────────────────────────────────────────────────────────────
-// Add funds / Convert / Withdraw funds / [...]. Pay and Receive stay EXACTLY where they were —
-// bottom tabs, one tap from anywhere — so the row is money in, money out, and money across:
+// ── The action row (fork #1, minus Convert — founder 2026-10-05) ──────────────────────────────
+// Add funds / Withdraw funds / [...]. Pay and Receive stay EXACTLY where they were — bottom
+// tabs, one tap from anywhere. CONVERT is NOT in the row any more: the founder's rework puts
+// ONE Convert button at the TOP RIGHT of the screen (the row above the headline), and it opens
+// the sheet with NO preset source — the sheet's own FROM selector (funded currencies only)
+// makes the source explicit instead of implying it from an entry gesture. The row is money in
+// and money out:
 //   • Add funds = on-ramp (the funding surface for the main rail; partner off/on-ramps land here
 //     as the catalog's ramp capabilities grow — no new claims in the copy);
-//   • Convert = swap (the delegated-conversion engine, main currency as the source);
 //   • Withdraw funds = off-ramp (the existing withdraw surface for the main rail);
 //   • [...] = the overflow menu (Transaction list, Remove) — Wallet owns the sheet, the same
 //     root-level overlay discipline as the receipt (X6).
@@ -62,7 +65,8 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   noteFor?: (t: Txn) => TxAnnotation | undefined;
   /** Add funds — the funding surface for the main rail (the account the headline names). */
   onDeposit: (id: AssetId) => void;
-  /** Convert — the swap surface, main currency as the source. */
+  /** Convert — the swap surface, opened with NO preset source (the sheet's FROM selector
+   *  asks). */
   onConvert: () => void;
   /** Withdraw funds — the off-ramp surface for the main rail. */
   onWithdraw: () => void;
@@ -122,6 +126,23 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   const updateLine = updateOpenFailed && updateUrl != null ? M.common.linkFallback(updateUrl) : M.update.available;
   return (
     <View>
+      {/* The ONE Convert affordance (founder 2026-10-05): a quiet chip pinned to the screen's
+          top right, ABOVE the headline - the first thing on the surface, right-aligned. It
+          opens the sheet with NO preset source; the sheet's FROM selector names the funded
+          currencies. It masks with the same money-in-motion rule the action row follows. */}
+      <View style={S.homeTopRow}>
+        <Pressable
+          testID="btn-home-convert"
+          style={S.homeConvertBtn}
+          onPress={onConvert}
+          disabled={actionDisabled}
+          accessibilityRole="button"
+          accessibilityLabel={M.wallet.home.actions.convert}
+          accessibilityState={{disabled: actionDisabled}}>
+          <IconSwap size={16} color={actionIcon} />
+          <Text style={[S.homeConvertText, actionDisabled && S.disabledText]}>{M.wallet.home.actions.convert}</Text>
+        </Pressable>
+      </View>
       {/* The headline block IS the accounts affordance (kept from 2026-09-14) — tapping the
           balance opens the currency list. Its accessible name states the ACTION ("Open accounts"),
           never a second copy of the eyebrow sentence. The `a` shortcut's badge rides the eyebrow
@@ -200,19 +221,15 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
           testIDPrefix={`ata-setup-${homeCurrency}`}
         />
       ) : null}
-      {/* ONE divided panel (CALIBER): the four actions are cells of a single hairline-bordered
-          container — not four floating cards. Cells 2..4 carry the divider; the container clips,
-          so no cell carries a radius of its own. */}
+      {/* ONE divided panel (CALIBER): the actions are cells of a single hairline-bordered
+          container — not floating cards. Cells 2..3 carry the divider; the container clips,
+          so no cell carries a radius of its own. (Convert left the row for the top-right chip,
+          founder 2026-10-05.) */}
       <View style={S.homeActionRow}>
         {/* Add funds — on-ramp for the account the headline is showing. */}
         <Pressable testID="btn-home-add-funds" style={S.homeActionBtn} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={actionDisabled} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addFunds} accessibilityState={{disabled: actionDisabled}}>
           <IconPlus size={20} color={actionIcon} />
           <Text style={[S.homeActionLabel, actionDisabled && S.disabledText]}>{M.wallet.home.actions.addFunds}</Text>
-        </Pressable>
-        {/* Convert — the swap surface, this currency as the source. */}
-        <Pressable testID="btn-home-convert" style={[S.homeActionBtn, S.homeActionCell]} onPress={onConvert} disabled={actionDisabled} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.convert} accessibilityState={{disabled: actionDisabled}}>
-          <IconSwap size={20} color={actionIcon} />
-          <Text style={[S.homeActionLabel, actionDisabled && S.disabledText]}>{M.wallet.home.actions.convert}</Text>
         </Pressable>
         {/* Withdraw funds — off-ramp for the main rail. */}
         <Pressable testID="btn-home-withdraw" style={[S.homeActionBtn, S.homeActionCell]} onPress={onWithdraw} disabled={actionDisabled} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.withdraw} accessibilityState={{disabled: actionDisabled}}>

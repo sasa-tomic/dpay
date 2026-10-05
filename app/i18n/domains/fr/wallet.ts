@@ -82,7 +82,6 @@ export const walletFr: WalletMessages = {
     intro: 'Appuyez sur une devise pour la rendre principale.',
     back: 'Retour',
     practice: 'Argent d’entraînement. Aucun commerce ne l’accepte.',
-    convertHint: 'Convertir auprès d’une plateforme externe',
     setMainHint: 'Définit cette devise comme principale',
     addCurrency: 'Ajouter une devise',
   },

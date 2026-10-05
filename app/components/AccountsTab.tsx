@@ -10,7 +10,7 @@ import {
 import {AssetGlyph} from './AssetGlyph';
 import {CurrencyRow} from './CurrencyRow';
 import {HotkeyHint} from './HotkeyHint';
-import {IconChevronLeft, IconPlus, IconSwap} from './icons';
+import {IconChevronLeft, IconPlus} from './icons';
 import {RailLiquidityNote} from './RailLiquidityNote';
 import {RailUnreadableNote, railUnreadable} from './RailUnreadableNote';
 import type {AssetId} from '../lib/types';
@@ -24,11 +24,16 @@ import type {BalanceView} from '../lib/assetBalances';
 // per-rail rows and their switch affordance are gone — routing between rails of one currency was
 // the wallet's job all along, never the user's.
 //
-// The gestures, and they are deliberate (the spec supersedes the X4 tap-protection rule):
+// The gestures, and they are deliberate:
 //   • tapping a currency row SETS IT AS MAIN and returns Home — selection is the point;
-//   • the row's Convert button opens the swap surface with that currency as the source —
-//     Convert is a first-class action of EVERY currency, on every row (founder sketch);
+//   • CONVERT has NO per-row entry (founder 2026-10-05): ONE Convert button sits at the top
+//     right of Home, and the convert sheet's own FROM selector (funded currencies only) makes
+//     the source explicit. The rows are a balance sheet, not an action bar;
 //   • [Add new currency] opens the add-currency route, where hidden currencies come back.
+//
+// RADICAL VERTICAL DENSITY (founder 2026-10-05): compact cards, the badge chips ride the ONE
+// title line, the rails label is the row's single quiet line, the glyph chip is the 26px mark.
+// A row lands at ~52dp; the whole-row tap target stays >= 40dp.
 //
 // What is kept from the accounts route, byte-stable where the subject survives:
 //   • zero-balance currencies stay visible (the asset-first rule, now per currency);
@@ -45,7 +50,7 @@ import type {BalanceView} from '../lib/assetBalances';
 export function AccountsTab({
   assets, balances, currencyBalances, homeCurrency, visibleCurrencies, selectedId,
   demoFaucetAvailable, topUpBusy, hasTestnet, showTestnet, onToggleTestnet,
-  onBack, onOpenCurrency, onConvertCurrency, onConvertAsset, onOpenAddCurrency, onSelect, onTopUp, onOpenSettings,
+  onBack, onOpenCurrency, onOpenAddCurrency, onSelect, onTopUp, onOpenSettings,
 }: {
   assets: SelectableAsset[];
   /** The per-rail balance views — the outage banner's and the setup badge's facts. */
@@ -66,12 +71,6 @@ export function AccountsTab({
   onBack: () => void;
   /** Row tap — set this currency as MAIN and go Home (the deliberate gesture). */
   onOpenCurrency: (c: HomeCurrency) => void;
-  /** The row's Convert — open the swap surface with this currency as the source. */
-  onConvertCurrency: (c: HomeCurrency) => void;
-  /** The EVM-token row's Convert — open the swap surface with THIS ASSET as the source.
-   *  An EVM row has no HomeCurrency (no currency chip of its own), so its Convert is
-   *  asset-keyed; optional so the pure-row mount stays legal without the host wiring. */
-  onConvertAsset?: (id: AssetId) => void;
   /** [Add new currency] — the add-currency route. */
   onOpenAddCurrency: () => void;
   /** The practice row's select — the ONE per-asset gesture left here (practice is never main). */
@@ -132,10 +131,10 @@ export function AccountsTab({
           const mainBadge = isMain
             ? <Text testID={`currency-${currency}-main`} style={S.assetBadgeMain}>{M.wallet.homeCurrency.mainBadge}</Text>
             : null;
-          // The row: the whole left block is the set-main hit target; the Convert button is a
-          // row SIBLING (never nested — RN-web renders Pressables as <button>, and a button
-          // cannot contain a button). `aria-selected` marks the main currency, the one state
-          // this list can be "in".
+          // The row: the WHOLE left block is the set-main hit target. DENSE (founder
+          // 2026-10-05): the badges ride the ONE title line, the rails label is the single
+          // quiet line, and there is NO per-row Convert - the entry lives on Home. The
+          // `aria-selected` marks the main currency, the one state this list can be "in".
           const row = (
             <View key={currency} testID={`accounts-currency-${currency}`} style={S.assetCard} aria-selected={isMain}>
               <View style={S.assetRow}>
@@ -149,44 +148,24 @@ export function AccountsTab({
                   accessibilityState={{disabled: false}}
                 >
                   <View style={S.assetSelect}>
-                    <AssetGlyph asset={rail} />
+                    <AssetGlyph asset={rail} size={26} />
                     <View style={S.pickTextCol}>
                       <View style={S.assetTitleRow}>
-                        {/* ONE line, always (2026-10-02 audit): "Internet Computer" beside a wide
-                            balance wrapped to two lines. The clamp yields to the amount (the
-                            non-wrapping money column); the full name sits in the subtitle below.
-                            The amount clamps too — a full-precision balance never wraps. */}
+                        {/* ONE line, always (2026-10-02 audit): the title yields to the amount
+                            (the non-wrapping money column); the badges ride the same line. The
+                            amount clamps too - a full-precision balance never wraps. */}
                         <Text style={S.assetLabel} numberOfLines={1}>{currencyName(currency)}</Text>
-                        <Text style={[S.assetAmt, view != null && view.status !== 'ok' && S.assetCardZero]} numberOfLines={1}>{view?.displayText ?? '—'}</Text>
-                      </View>
-                      <View style={S.assetTitleRow}>
                         {mainBadge}
                         {setupBadge}
+                        <Text style={[S.assetAmt, view != null && view.status !== 'ok' && S.assetCardZero]} numberOfLines={1}>{view?.displayText ?? '—'}</Text>
                       </View>
-                      <Text style={S.assetSub}>{railsLabel(currency, assets) ?? ''}</Text>
-                      {/* The rail-health footer on the preferred rail — the same renderer the
+                      <Text style={S.assetSub} numberOfLines={1}>{railsLabel(currency, assets) ?? ''}</Text>
+                      {/* The rail-health footer on the preferred rail - the same renderer the
                           per-rail list used, so a thin rail says the same 2–3 words here. */}
                       <RailLiquidityNote asset={rail} tone="warn" />
                     </View>
                   </View>
                 </Pressable>
-                <View style={S.assetActions}>
-                  {/* Convert on EVERY row — the founder sketch's per-currency action. The venue
-                      check happens INSIDE the convert surface, never here. (The old per-row
-                      setup button is gone: the setup card lives in the currency's own view.) */}
-                  <Pressable
-                    testID={`btn-accounts-convert-${currency}`}
-                    style={S.assetActionBtn}
-                    onPress={() => onConvertCurrency(currency)}
-                    accessibilityRole="button"
-                    accessibilityLabel={M.convert.actionConvert}
-                    accessibilityHint={M.wallet.accounts.convertHint}
-                    accessibilityState={{disabled: false}}
-                  >
-                    <IconSwap size={16} color={C.brandText} />
-                    <Text style={S.assetActionText}>{M.convert.actionConvert}</Text>
-                  </Pressable>
-                </View>
               </View>
             </View>
           );
@@ -209,7 +188,8 @@ export function AccountsTab({
         {/* The EVM rail's rows (D13 — the same Balances list, the same select gesture): ZCHF is
             not a wallet CURRENCY (it is not in CURRENCY_RAILS — no cross-rail sum is claimed), so
             these render as per-RAIL rows with the per-asset select the practice row carries. Chip
-            labels qualify colliding symbols (`ZCHF·Arb` / `ZCHF·Eth` — chipLabel's evm arm). */}
+            labels qualify colliding symbols (`ZCHF·Arb` / `ZCHF·Eth` — chipLabel's evm arm).
+            NO Convert here either (founder 2026-10-05): the ONE entry lives on Home. */}
         {assets.filter(a => a.protocol === 'evm').map(a => (
           <CurrencyRow
             key={a.id}
@@ -223,23 +203,6 @@ export function AccountsTab({
             accessibilityLabel={M.wallet.balances.select(a.symbol)}
             accessibilityHint={M.wallet.balances.selectHint}
             variant="card"
-            actions={onConvertAsset != null ? (
-              // The SAME Convert action every currency row carries, asset-keyed: an EVM row
-              // settles no HomeCurrency, so the per-currency chip cannot exist — the convert
-              // surface is still one gesture away (the uniform-entry rule).
-              <Pressable
-                testID={`btn-accounts-convert-evm-${a.testKey}`}
-                style={S.assetActionBtn}
-                onPress={() => onConvertAsset(a.id)}
-                accessibilityRole="button"
-                accessibilityLabel={M.convert.actionConvert}
-                accessibilityHint={M.wallet.accounts.convertHint}
-                accessibilityState={{disabled: false}}
-              >
-                <IconSwap size={16} color={C.brandText} />
-                <Text style={S.assetActionText}>{M.convert.actionConvert}</Text>
-              </Pressable>
-            ) : null}
           />
         ))}
         {/* The practice divider sits IMMEDIATELY above the practice row, so the sentence and the

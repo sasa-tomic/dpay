@@ -8,8 +8,11 @@
  *   • every visible currency renders, zero balance included, with its SUMMED currency-unit
  *     figure ("0.00 Fr" — fork #2 + #4; the sum itself is buildCurrencyBalances' contract, tested
  *     in currencyBalances.test.ts);
- *   • the gestures: a row tap SETS MAIN (`onOpenCurrency`), Convert rides EVERY row
- *     (`btn-accounts-convert-<CODE>`), and [Add new currency] opens its route;
+ *   • the gestures: a row tap SETS MAIN (`onOpenCurrency`) and [Add new currency] opens its
+ *     route. NO row carries a Convert button any more (founder 2026-10-05: ONE Convert lives
+ *     at the top right of Home, and the sheet's own FROM selector names the source);
+ *   • RADICAL VERTICAL DENSITY (founder 2026-10-05): the list reads as a dense balance sheet —
+ *     compact cards, ONE title line (badges ride it), one quiet rail line, a small glyph chip.
  *   • the MAIN badge sits on the home-currency row only;
  *   • an outage belongs to a NETWORK and is stated ONCE, above the first affected row (X9);
  *   • a KNOWN-absent token account on the preferred rail still grows the "needs setup" badge.
@@ -86,7 +89,6 @@ function mount(
         onToggleTestnet={jest.fn()}
         onBack={jest.fn()}
         onOpenCurrency={jest.fn()}
-        onConvertCurrency={jest.fn()}
         onOpenAddCurrency={jest.fn()}
         onSelect={jest.fn()}
         onTopUp={jest.fn()}
@@ -180,7 +182,7 @@ describe('AccountsTab — one row per VISIBLE currency, stables then Other', () 
     expect(zchf.length).toBeGreaterThan(0);
     const evmStates = Object.fromEntries(zchf.map(a => [a.id, {amount: '3445332536202788123456', status: 'balance' as const}]));
     const evmViews = assetViews({assets: ASSETS_EVM, evmStates});
-    const tree = mount(evmViews, sums, {assets: ASSETS_EVM, onConvertAsset: jest.fn()});
+    const tree = mount(evmViews, sums, {assets: ASSETS_EVM});
     let checked = 0;
     for (const a of zchf) {
       const row = tree.root.findAll(n => n.props?.testID === `asset-${a.testKey}`)[0];
@@ -226,28 +228,19 @@ describe('AccountsTab — the gestures', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('Convert rides EVERY row and names its currency as the source', () => {
-    const onConvertCurrency = jest.fn();
-    const tree = mount(views, sums, {onConvertCurrency});
-    for (const c of VISIBLE) {
-      expect(has(tree, `btn-accounts-convert-${c}`)).toBe(true);
-      act(() => { pressable(tree, `btn-accounts-convert-${c}`).props.onPress(); });
-    }
-    expect(onConvertCurrency).toHaveBeenCalledTimes(VISIBLE.length);
-    expect(onConvertCurrency).toHaveBeenLastCalledWith(VISIBLE[VISIBLE.length - 1]);
+  test('NO row carries a Convert button (founder 2026-10-05): the ONE convert lives on Home', () => {
+    const tree = mount(views, sums);
+    for (const c of VISIBLE) expect(has(tree, `btn-accounts-convert-${c}`)).toBe(false);
+    const anyConvert = tree.root.findAll(n => typeof n.props?.testID === 'string' && String(n.props.testID).startsWith('btn-accounts-convert-'));
+    expect(anyConvert).toEqual([]);
     act(() => { tree.unmount(); });
   });
 
-  test('the EVM-token rows (no HomeCurrency) carry the SAME Convert action, wired per ASSET', () => {
-    const onConvertAsset = jest.fn();
-    const tree = mount(views, sums, {assets: ASSETS_EVM, onConvertAsset});
+  test('the EVM-token rows (no HomeCurrency) carry NO Convert either', () => {
+    const tree = mount(views, sums, {assets: ASSETS_EVM});
     const evmRows = ASSETS_EVM.filter((a): a is EvmSelectableAsset => a.protocol === 'evm');
     expect(evmRows.length).toBeGreaterThanOrEqual(1);
-    for (const a of evmRows) {
-      expect(has(tree, `btn-accounts-convert-evm-${a.testKey}`)).toBe(true);
-      act(() => { pressable(tree, `btn-accounts-convert-evm-${a.testKey}`).props.onPress(); });
-      expect(onConvertAsset).toHaveBeenCalledWith(a.id);
-    }
+    for (const a of evmRows) expect(has(tree, `btn-accounts-convert-evm-${a.testKey}`)).toBe(false);
     act(() => { tree.unmount(); });
   });
 
@@ -355,6 +348,59 @@ describe('AccountsTab - the list carries NO setup affordance (2026-10-01 founder
     // The passive badge stays; there is no per-row setup button anywhere.
     expect(has(tree, 'currency-EUR-setup')).toBe(true);
     expect(has(tree, 'btn-currency-EUR-setup')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('AccountsTab - radical vertical density (founder 2026-10-05: a balance sheet, not cards)', () => {
+  const views = assetViews();
+  const sums = currencyViews(views);
+  /** Nodes carrying a style token, directly or inside an array (both shapes render). */
+  const withToken = (tree: renderer.ReactTestRenderer, token: number | object) =>
+    tree.findAll(n => n.props?.style === token || (Array.isArray(n.props?.style) && (n.props.style as unknown[]).includes(token)));
+
+  test('the compact card tokens: tight padding, tight inter-row gap', () => {
+    expect(S.assetCard.paddingVertical).toBe(8);
+    expect(S.assetCard.paddingHorizontal).toBe(12);
+    expect(S.assetCard.marginTop).toBe(6);
+  });
+
+  test('a currency row stacks ONE title line + ONE quiet rail line; the badge rides the title line', () => {
+    const tree = mount(views, sums);
+    const chf = tree.root.findAll(n => n.props?.testID === 'accounts-currency-CHF')[0]!;
+    // The RN preset mirrors every node 2x (distinct instances), so ONE logical title line
+    // counts 2 — a second real badge row would count 4.
+    const titleRows = chf.findAll(n => n.props?.style === S.assetTitleRow);
+    expect(titleRows.length).toBe(2);
+    // The MAIN badge is a child of that ONE title line - there is no second badge row.
+    const badge = withToken(chf, S.assetBadgeMain)[0];
+    expect(badge).toBeDefined();
+    const badgeParent = badge!.parent;
+    expect(badgeParent?.props.style === S.assetTitleRow).toBe(true);
+    // ONE quiet rail line, small type (mirrored 2x by the RN preset).
+    const subs = chf.findAll(n => n.props?.style === S.assetSub);
+    expect(subs.length).toBe(2);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the glyph chip shrinks to the dense 26px mark', () => {
+    const tree = mount(views, sums);
+    const chf = tree.root.findAll(n => n.props?.testID === 'accounts-currency-CHF')[0]!;
+    const chips = chf.findAll(n => n.props?.style === S.assetGlyph || (Array.isArray(n.props?.style) && (n.props.style as unknown[]).includes(S.assetGlyph)));
+    expect(chips.length).toBeGreaterThan(0);
+    for (const chipNode of chips) {
+      const inline = (Array.isArray(chipNode.props.style) ? chipNode.props.style : [chipNode.props.style])
+        .find(s => typeof s === 'object' && s != null && 'width' in (s as object)) as {width?: number};
+      expect(inline.width).toBe(26);
+    }
+    act(() => { tree.unmount(); });
+  });
+
+  test('a currency row carries NO trailing action column', () => {
+    const tree = mount(views, sums);
+    const chf = tree.root.findAll(n => n.props?.testID === 'accounts-currency-CHF')[0]!;
+    const actionCols = chf.findAll(n => n.props?.style === S.assetActions);
+    expect(actionCols).toEqual([]);
     act(() => { tree.unmount(); });
   });
 });

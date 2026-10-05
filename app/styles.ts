@@ -277,6 +277,11 @@ function buildStyles(p: Palette) {
   homeEyebrow: {fontSize: 13, color: p.sub, marginBottom: 8, fontFamily: FONT.sansMedium},
   homeAmountRow: {flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%'},
   homeAmount: {fontSize: 44, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -1, flexShrink: 1, fontVariant: ['tabular-nums']},
+  // The ONE Convert affordance (founder 2026-10-05): a quiet chip pinned to the screen's top
+  // right, ABOVE the headline. One row, one end - the row exists for the alignment alone.
+  homeTopRow: {flexDirection: 'row', justifyContent: 'flex-end'},
+  homeConvertBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, minHeight: 40, borderRadius: 8, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card},
+  homeConvertText: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
   // The action PANEL: one card, R_CARD, hairline, cells divided by hairlines (the container
   // clips, so cells carry no radius of their own - nested-radius rule). No shadows anywhere:
   // the panel is flat on the page, elevation is reserved for the CTA + nav.
@@ -707,23 +712,25 @@ function buildStyles(p: Palette) {
   filterChipText: {color: p.sub, fontWeight: '600', fontSize: 13, fontFamily: FONT.sansMedium},
   filterChipTextActive: {color: p.brandInk, fontFamily: FONT.sansBold},
   // Asset card. White card, borderless (surface step separates it from the page); selection is
-  // a 2px `brandText` ring (brief §IV: no left stripe), so the selected card pops.
-  assetCard: {marginTop: 12, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 12, padding: 16, borderWidth: 2, borderColor: 'transparent', borderLeftColor: 'transparent', borderLeftWidth: 2},
+  // a 1px `brandText` ring (brief §IV: no left stripe), so the selected card pops. DENSE
+  // (founder 2026-10-05): the currency list is a balance sheet, not a card wall - 8px vertical
+  // padding, 6px between rows, and the row lands at ~52dp (tap target stays >= 40dp).
+  assetCard: {marginTop: 6, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, borderWidth: 1, borderColor: 'transparent', borderLeftColor: 'transparent', borderLeftWidth: 1},
   assetCardActive: {borderColor: p.brandText, borderLeftColor: p.brandText},
   assetRow: {flexDirection: 'row', alignItems: 'center'},
-  // assetSelect - the glyph-led row inside a card: the 38px AssetGlyph chip against the text
-  // column, vertically CENTERED (a monogram chip reads correctly centered against the two-line
+  // assetSelect - the glyph-led row inside a card: the 26px AssetGlyph chip against the text
+  // column, vertically CENTERED (a monogram chip reads correctly centered against the one-line
   // column).
   assetSelect: {flex: 1, flexDirection: 'row', alignItems: 'center'},
   assetSelectBlock: {flex: 1},
   // assetTitleRow - the name + trailing amount/check line at the top of a card row's text column.
   // The label's flex:1 pushes the amount to the right edge; the check trails the amount.
   assetTitleRow: {flexDirection: 'row', alignItems: 'center'},
-  assetLabel: {flex: 1, fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
+  assetLabel: {flex: 1, fontSize: 15, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
   // flexShrink 0: the amount is the money column - it wraps never (the name column flexes
   // instead); measured '1.9998\nICP' on the Accounts ICP row, 2026-09-28.
-  assetAmt: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, marginLeft: 6, flexShrink: 0, fontVariant: ['tabular-nums']},
-  assetSub: {fontSize: 12, color: p.sub2, marginTop: 4, fontFamily: FONT.sans},
+  assetAmt: {fontSize: 15, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, marginLeft: 6, flexShrink: 0, fontVariant: ['tabular-nums']},
+  assetSub: {fontSize: 11, color: p.sub2, marginTop: 2, fontFamily: FONT.sans},
   // Rail-detail panel - the chooser's inline per-rail expansion (EUR dual-rail, Stage 5). An
   // inset WELL inside the asset card (panel2 + line border, per brief §IV), so the detail reads
   // as drilling into the card rather than as a second card. Rows are glyph-led like assetSelect but top-aligned:
@@ -743,9 +750,9 @@ function buildStyles(p: Palette) {
   // BETWEEN cards rather than inside one, so it carries the list's own horizontal rhythm and a
   // little air above the row it introduces.
   railOutageRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 16, marginBottom: 2, paddingHorizontal: 2},
-  // The row's action slot. A COLUMN, not a row: since 2026-09-08 the selected row can carry two
-  // pills (Convert plus DEMO's faucet), and a row of two pills beside the flex:1 select block
-  // squeezes both off a 390px phone. Stacking is deterministic at any pill count.
+  // The row's action slot. A COLUMN, not a row: the selected row can carry a pill (DEMO's
+  // faucet; the per-row Convert pills are GONE - founder 2026-10-05 - and this slot is the
+  // practice row's alone). Stacking is deterministic at any pill count.
   assetActions: {flexDirection: 'column', alignItems: 'flex-end', gap: 8, marginLeft: 8},
   assetActionBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8, minHeight: 44, backgroundColor: p.card},
   assetActionText: {color: p.sub, fontWeight: '600', fontSize: 13, fontFamily: FONT.sansMedium},
@@ -980,13 +987,13 @@ function buildStyles(p: Palette) {
   reviewRowValue: {fontSize: 13, color: p.ink, fontFamily: FONT.sans, fontVariant: ['tabular-nums'], flexShrink: 1, textAlign: 'right'},
   reviewCard: {alignSelf: 'stretch', marginTop: 20, backgroundColor: p.card, borderRadius: 12, padding: 16},
   reviewLabel: {fontSize: 13, fontWeight: '600', color: p.sub2, marginBottom: 8, fontFamily: FONT.sans},
-  // 'Needs setup' pill on the Balances USDC (Solana) row - a warn-tinted row annotation,
-  // left-aligned under the subtitle (not a centered banner).
-  assetBadge: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 4, backgroundColor: withAlpha(p.warn, p.wash), borderWidth: 1, borderColor: withAlpha(p.warn, 0.35), fontSize: 11, fontWeight: '600', color: p.warn, fontFamily: FONT.sans, overflow: 'hidden'},
-  // 'Main' pill on the Balances row that IS the home currency's rail. Same pill geometry as
+  // 'Needs setup' pill on a currency row - an INLINE annotation on the title line (founder
+  // 2026-10-05 density rework: no second badge row), sitting right of the name.
+  assetBadge: {alignSelf: 'center', marginLeft: 6, paddingVertical: 1, paddingHorizontal: 6, borderRadius: 4, backgroundColor: withAlpha(p.warn, p.wash), borderWidth: 1, borderColor: withAlpha(p.warn, 0.35), fontSize: 10, fontWeight: '600', color: p.warn, fontFamily: FONT.sans, overflow: 'hidden'},
+  // 'Main' pill on the currency row that IS the home currency. Same inline-pill geometry as
   // `assetBadge`, brand-tinted rather than warn-tinted: this one marks the account the wallet opens
   // with, which is a statement of fact, not a warning about setup.
-  assetBadgeMain: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 4, backgroundColor: withAlpha(p.brandText, p.wash), borderWidth: 1, borderColor: withAlpha(p.brandText, 0.35), fontSize: 11, fontWeight: '600', color: p.brandText, fontFamily: FONT.sans, overflow: 'hidden'},
+  assetBadgeMain: {alignSelf: 'center', marginLeft: 6, paddingVertical: 1, paddingHorizontal: 6, borderRadius: 4, backgroundColor: withAlpha(p.brandText, p.wash), borderWidth: 1, borderColor: withAlpha(p.brandText, 0.35), fontSize: 10, fontWeight: '600', color: p.brandText, fontFamily: FONT.sans, overflow: 'hidden'},
   // ─── Walkthrough (Trip Ready J1, 2026-08-22) ────────────────────────────────────────────────
   // The first-run 3-scene pager + its Settings replay. A left-aligned label/title/body block
   // over a plain 20-radius illustration panel, then a footer with progress dots + the primary

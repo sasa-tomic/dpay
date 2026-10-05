@@ -79,6 +79,8 @@ export function CurrencyRow({testId, asset, label, amount, active, onPress, acce
   // Inside the row, the text column (pickTextCol — shared with the plain variant) stacks the
   // title line (name + right-aligned mono amount + trailing check) over the subtitle + children,
   // so the sub/annotations align under the NAME, not under the glyph chip.
+  // DENSE (founder 2026-10-05): the card row is a balance-sheet line - the glyph chip is the
+  // 26px mark and the card tokens carry the tight padding. The row itself stays the tap target.
   // O4 S3: the card carries its selected state — the row IS the selection state (the inline list
   // has no sheet chrome to wait on; e2e waits on aria-selected). The DIRECT prop is required:
   // RNW 0.21 forwards `aria-selected` verbatim but does NOT render accessibilityState.selected
@@ -96,7 +98,7 @@ export function CurrencyRow({testId, asset, label, amount, active, onPress, acce
           accessibilityState={{disabled: false}}
         >
           <View style={S.assetSelect}>
-            <AssetGlyph asset={asset} />
+            <AssetGlyph asset={asset} size={26} />
             <View style={S.pickTextCol}>
               <View style={S.assetTitleRow}>
                 {/* ONE line, always (2026-10-02 audit): the title yields to the amount (the

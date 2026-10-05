@@ -80,7 +80,6 @@ export const walletDe: WalletMessages = {
     intro: 'Antippen setzt die Hauptwährung.',
     back: 'Zurück',
     practice: 'Übungsgeld. Kein Geschäft nimmt es an.',
-    convertHint: 'Bei einem externen Handelsplatz tauschen',
     setMainHint: 'Setzt sie als Hauptwährung',
     addCurrency: 'Währung hinzufügen',
   },

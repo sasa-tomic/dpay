@@ -11,7 +11,7 @@ import {base, randNonceHex, fmtTime, fmtAssetCompact, fmtEstimate, rawToDecimal,
 import {applyOffline} from '../lib/amount';import {withTimeout} from '../lib/timeout';
 import {applySolDeduction, pendingSolDeduction} from '../lib/solRailShown';
 import {buildSelectableAssets, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
-import {buildAssetBalances, buildCurrencyBalances} from '../lib/assetBalances';
+import {buildAssetBalances, buildCurrencyBalances, fundedCurrencies} from '../lib/assetBalances';
 import {mergeHistoryByTime, mergePendingByTime, settledJoinKey} from '../lib/ledger';
 import type {AssetId, Identity, NfcStatus, PayIntent, Txn} from '../lib/types';
 import {DpayCore} from '../services/native';
@@ -2065,8 +2065,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   }, {ignoreIfInputFocused: true, enabled: !anySheetOpen});
 
   // Leaving a ROUTE — the ONE rule, shared by the Android hardware Back button and the web Escape
-  // key. `accounts` returns to whatever opened it; `convert` returns to the accounts list that
-  // launched it. Returns whether a route was actually left, which is what the BackHandler needs in
+  // key. `accounts` returns to whatever opened it; `convert` returns HOME, the one surface the
+  // convert entry lives on since the 2026-10-05 rework (the top-right button). Returns whether a
+  // route was actually left, which is what the BackHandler needs in
   // order to decide whether to fall through to its exit-confirm.
   //
   // It is one function because it was two: the hardware rule lived in the BackHandler and Escape
@@ -2078,7 +2079,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     // The add-currency route is only ever entered FROM the accounts route, so Back returns there
     // — set directly, so the accounts route's own "where was I entered from" memory is untouched.
     if (mode === 'add-currency') { setMode('accounts'); return true; }
-    if (mode === 'convert') { openAccounts(); return true; }
+    if (mode === 'convert') { setMode('home'); return true; }
     if (mode === 'addresses') { closeAddresses(); return true; }
     return false;
   }, [mode, closeAccounts, openAccounts, closeAddresses]);
@@ -2153,24 +2154,32 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     if (rail != null) selectAsset(rail.id);
     setMode('home');
   }, [onSetHomeCurrency, selectionLocked, assets, balances, selectAsset]);
-  // A row's Convert: open the convert surface with THAT currency as the source — resolved to its
-  // concrete rail through `chooseRail` (the funded rail, else the stated preference), which is the
-  // same policy every spend surface uses. A user gesture, so it respects the selection lock.
-  const openConvertForCurrency = useCallback((c: HomeCurrency) => {
+  // The ONE convert entry (founder 2026-10-05 rework): Home's top-right button, and it presets
+  // NOTHING — the sheet's FROM selector (funded currencies only) makes the source explicit. The
+  // DEFAULT FROM, resolved here so the sheet always opens over real money: the primary currency
+  // when funded, else the first funded currency in list order; with nothing funded the
+  // selection resolves to the primary currency so the sheet's fund gate prompts for it. A user
+  // gesture, so it respects the selection lock.
+  const openConvert = useCallback(() => {
+    if (!shouldAllowUserSelect(selectionLocked)) return;
+    const funded = fundedCurrencies(visibleCurrencies, currencyBalances);
+    const def = homeCurrency != null && funded.includes(homeCurrency) ? homeCurrency : funded[0] ?? homeCurrency;
+    if (def != null) {
+      const choice = chooseRail(def, assets, balances);
+      const rail = choice != null ? choice.rail : preferredRail(def, assets);
+      if (rail != null) selectAsset(rail.id);
+    }
+    setMode('convert');
+  }, [selectionLocked, visibleCurrencies, currencyBalances, homeCurrency, assets, balances, selectAsset]);
+  // The sheet's FROM selector (founder 2026-10-05): switching the source re-resolves the rail
+  // exactly like the entry did — the funded rail, else the stated preference. Still in the
+  // convert route, so no mode change. A user gesture, so it respects the selection lock.
+  const switchConvertSource = useCallback((c: HomeCurrency) => {
     if (!shouldAllowUserSelect(selectionLocked)) return;
     const choice = chooseRail(c, assets, balances);
     const rail = choice != null ? choice.rail : preferredRail(c, assets);
-    if (rail == null) return;
-    selectAsset(rail.id);
-    setMode('convert');
+    if (rail != null) selectAsset(rail.id);
   }, [selectionLocked, assets, balances, selectAsset]);
-  // An EVM-token row's Convert (the uniform-entry rule): the asset IS the source rail (there
-  // is no HomeCurrency to resolve a rail for). Same gesture contract as the currency entry.
-  const openConvertForAsset = useCallback((id: AssetId) => {
-    if (!shouldAllowUserSelect(selectionLocked)) return;
-    selectAsset(id);
-    setMode('convert');
-  }, [selectionLocked, selectAsset]);
   // Withdraw funds (the Home action row): the EXISTING withdraw surface for the main rail — the
   // Pay tab's "Send to address" sub-mode, where the IC withdraw and the Solana withdraw sheets
   // both live (the off-ramp; partner off-ramps land in this entry when the legal blockers clear).
@@ -2439,7 +2448,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               history={walletHistory}
               noteFor={noteFor}
               onDeposit={goToDeposit}
-              onConvert={() => openConvertForCurrency(homeCurrency)}
+              onConvert={openConvert}
               onWithdraw={openWithdrawForMain}
               onOpenMenu={openHomeMenu}
               onOpenAccounts={openAccounts}
@@ -2470,8 +2479,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               onToggleTestnet={toggleTestnet}
               onBack={closeAccounts}
               onOpenCurrency={openCurrencyAsMain}
-              onConvertCurrency={openConvertForCurrency}
-              onConvertAsset={openConvertForAsset}
               onOpenAddCurrency={openAddCurrency}
               onSelect={handleSelect}
               onTopUp={topUp}
@@ -2624,10 +2631,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               // render in the currency unit (fork #4).
               visibleCurrencies={visibleCurrencies}
               currencyBalances={currencyBalances}
-              // Back goes where Convert is launched FROM — the accounts route (X15 moved the
-              // action onto the selected currency's row). Returning to Home would drop the user
-              // somewhere they never were.
-              onBack={openAccounts}
+              // Back goes where Convert is launched FROM — Home, the ONE entry since the
+              // 2026-10-05 rework (the top-right button).
+              onBack={() => setMode('home')}
               // The zero-balance gate's action — the SAME deposit trip the Pay tab's gate fires.
               onShowDepositAddress={() =>
                 goToDeposit(selectedAsset != null ? selectedAsset.id : `ic:${selectedCurrency}`)
@@ -2636,6 +2642,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               // a user gesture that respects the selection lock and leaves the tabs' sub-modes
               // alone. Withheld while locked, exactly as the Pay pointer's button is.
               onSwitchAsset={payRailSwitch}
+              // The sheet's FROM selector (founder 2026-10-05): the user names the source.
+              onSwitchSource={switchConvertSource}
               // The Solana rail's SHOWN balances (the offline-deducted states the balances map
               // renders — audit F4: the fund gate + insufficient check read the same strings
               // the Balances tab shows, never a rawer number than the header's).

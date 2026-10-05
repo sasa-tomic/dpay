@@ -1613,3 +1613,48 @@ describe('hub destination — the two-quote composed surface under the sheet (20
   });
 });
 
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// The EXPLICIT FROM selector (founder 2026-10-05): the sheet no longer implies its source from
+// the entry gesture. The FROM field names the standing source and offers, as one-tap chips, the
+// FUNDED currencies only - a zero or unreadable balance is never offered as a source.
+describe('the explicit FROM selector (founder 2026-10-05)', () => {
+  test('the FROM line names the standing source currency', async () => {
+    const tree = await mountConvert('250000000', null);
+    expect(textOf(tree, 'convert-from-line')).toContain('Internet Computer');
+    await act(async () => { tree.unmount(); });
+  });
+
+  test('the FROM chips list ONLY funded currencies: a zero balance is absent (hard requirement)', async () => {
+    const tree = await mountConvert('250000000', null, {
+      currencyBalances: {
+        ICP: {displayText: '2.5 ICP', status: 'ok', failure: null, amountRaw: '250000000'},
+        CHF: {displayText: '2.00 Fr', status: 'ok', failure: null, amountRaw: '20000'},
+        USD: {displayText: '0.00 $', status: 'zero', failure: null},
+        EUR: {displayText: '—', status: 'unavailable', failure: null},
+      },
+      onSwitchSource: jest.fn(),
+    });
+    expect(present(tree, 'convert-from-chip-CHF')).toBe(true);
+    expect(present(tree, 'convert-from-chip-USD')).toBe(false);
+    expect(present(tree, 'convert-from-chip-EUR')).toBe(false);
+    // The standing source is never its own option.
+    expect(present(tree, 'convert-from-chip-ICP')).toBe(false);
+    await act(async () => { tree.unmount(); });
+  });
+
+  test('picking a FROM chip hands the currency to the host (the host re-resolves the rail)', async () => {
+    const onSwitchSource = jest.fn();
+    const tree = await mountConvert('250000000', null, {
+      currencyBalances: {
+        ICP: {displayText: '2.5 ICP', status: 'ok', failure: null, amountRaw: '250000000'},
+        CHF: {displayText: '2.00 Fr', status: 'ok', failure: null, amountRaw: '20000'},
+      },
+      onSwitchSource,
+    });
+    await act(async () => { node(tree, 'convert-from-chip-CHF')!.props.onPress(); });
+    expect(onSwitchSource).toHaveBeenCalledTimes(1);
+    expect(onSwitchSource).toHaveBeenCalledWith('CHF');
+    await act(async () => { tree.unmount(); });
+  });
+});
