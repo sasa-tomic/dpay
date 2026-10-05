@@ -65,10 +65,10 @@
     "expiryDate": "2026-09-04T03:08:23.000Z",
     "blockchain": "InternetComputer",
     "uri": "icp:ly36x-wiaaa-aaaai-aqj7q-cai/transfer?to=snzff-yj2qd-fjns7-lqhvw-rsgq7-tohk2-fjnw4-uq3d6-wtk56-pxgry-mqe&amount=9.9999&ref=828116bcad7fc45edbfb90372b81c8b9",
-    "hint": "Transfer the exact amount to the address in the URI, carrying `ref` as the transfer's memo, then report the transaction. Reporting is idempotent: if it fails, retry — the payment is confirmed by reading the ledger, not by this call."
+    "hint": "Transfer the exact amount to the address in the URI, carrying `ref` as the transfer's memo, then report the transaction. Reporting is idempotent: if it fails, retry - the payment is confirmed by reading the ledger, not by this call."
   },
   "submit_pending": {
-    "message": "no matching transfer seen yet — safe to retry",
+    "message": "no matching transfer seen yet - safe to retry",
     "status": "PENDING"
   }
 }

@@ -3028,7 +3028,7 @@ pub(crate) async fn lnurlp_callback(
             charge.reference,
         ),
         hint: "Transfer the exact amount to the address in the URI, carrying `ref` as the transfer's \
-               memo, then report the transaction. Reporting is idempotent: if it fails, retry — the \
+               memo, then report the transaction. Reporting is idempotent: if it fails, retry - the \
                payment is confirmed by reading the ledger, not by this call."
             .to_string(),
     };
