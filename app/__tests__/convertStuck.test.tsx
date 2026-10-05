@@ -277,7 +277,7 @@ describe('CrossRailStatePanel stuck surface', () => {
     rec.step = 'failed_leg';
     rec.failureCode = 'burn_refused';
     rec.destAddress = '0xAbC0000000000000000000000000000000000001';
-    rec.failureDetail = 'the crossing needs about 48000000000000 wei of ETH';
+    rec.failureDetail = 'needs about 48000000000000 wei ETH for gas';
     rec.legPlan = rec.legPlan!.map((p, i) => (i === 4 ? {...p, state: 'failed' as const} : p));
     const tree = mount(
       <CrossRailStatePanel record={rec} secretHex="sec" relayUrl="http://r" solLamports={null} onBack={() => {}} />,
@@ -285,7 +285,7 @@ describe('CrossRailStatePanel stuck surface', () => {
     const all = allText(tree, 'convert-failed-leg');
     expect(all).toContain(convertEn.crossrail.burnFailedBody(rec.destAddress!, '').slice(0, 40));
     expect(all).toContain('0xAbC0000000000000000000000000000000000001');
-    expect(all).toContain('the crossing needs about 48000000000000 wei of ETH');
+    expect(all).toContain('needs about 48000000000000 wei ETH for gas');
     // The generic failed_leg body would LIE here ("your funds are USDC in this wallet").
     expect(all).not.toContain(convertEn.multihop.failedLegBody('USDC', '').slice(0, 30));
   });
