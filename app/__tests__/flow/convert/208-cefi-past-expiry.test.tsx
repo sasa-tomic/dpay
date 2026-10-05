@@ -93,7 +93,7 @@ hermeticDescribe('flow 208 — the CeFi lifecycle is honest past quote expiry', 
       await m.driver.findByTestID('convert-quote-expired', {timeoutMs: 45_000});
       const expired = m.driver.readText('convert-quote-expired');
       expect(expired.includes('expired')).toBe(true);
-      assertIncludes(expired, 'is simply returned', 'the copy says a late deposit is RETURNED (venue-lessly, the copy law)');
+      assertIncludes(expired, 'is returned', 'the copy says a late deposit is RETURNED (venue-lessly, the copy law)'); // copy-economy sweep: 'simply' filler dropped, the refund fact stays
       assertIncludes(expired, 'keeps watching', 'the copy says dpay keeps watching in the background');
       expect(expired.includes('nothing needs reversing')).toBe(false);
 
