@@ -27,7 +27,7 @@ function convertCtaCount(m: Parameters<typeof openBalances>[0]): number {
 }
 
 hermeticDescribe('flow 170 — the pay surfaces carry zero conversion entry points', () => {
-  it('IC pay: 0; SOL pay: 0; control: the Accounts list carries the per-currency Convert entries', async () => {
+  it('IC pay: 0; SOL pay: 0; control: Home carries the ONE Convert button', async () => {
     const m = await onboardWallet('jest-pay-no-convert');
 
     // The IC pay surface: the scan gate (founder rule 2026-08-23) is its anchor.
@@ -42,14 +42,13 @@ hermeticDescribe('flow 170 — the pay surfaces carry zero conversion entry poin
     await m.driver.findByTestID('btn-sol-start-scan', {timeoutMs: 6000});
     expect(convertCtaCount(m)).toBe(0);
 
-    // Control (proves the probe can fail): the Accounts list carries the ONE legitimate entry per
-    // visible currency row — absence on pay surfaces is a real separation fact.
-    await openBalances(m);
-    await selectCurrency(m, 'icp');
-    await openBalances(m);
-    const accountsConvert = m.driver.findAllByTestID('btn-accounts-convert-ICP').length
-      + m.driver.findAllByTestID('btn-accounts-convert').length;
-    expect(accountsConvert).toBeGreaterThanOrEqual(1);
+    // Control (proves the probe can fail): Home carries the ONE Convert affordance (the
+    // 2026-10-05 rework moved the entry there; NO row carries one) — absence on pay surfaces
+    // is a real separation fact.
+    await m.driver.click('tab-home', {timeoutMs: 5000});
+    await m.driver.findByTestID('btn-home-convert', {timeoutMs: 5000});
+    const homeConvert = m.driver.findAllByTestID('btn-home-convert').length;
+    expect(homeConvert).toBeGreaterThanOrEqual(1);
 
     await m.unmount();
   }, 120_000);

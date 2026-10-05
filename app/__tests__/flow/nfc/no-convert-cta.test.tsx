@@ -78,11 +78,11 @@ hermeticDescribe('flow 171 — no NFC surface ever offers a conversion (INVARIAN
     expect(await clickByAria(m, 'Done')).toBe('Done');
     await m.driver.waitGone('nfc-status', {timeoutMs: 5000});
 
-    // --- PROBE CONTROL: the census CAN fail — Accounts carries per-currency Convert entries. ----
-    await openBalances(m);
-    await selectCurrency(m, 'icp');
-    await openBalances(m);
-    const control = m.tree.root.findAll((n) => typeof n.props.testID === 'string' && n.props.testID.startsWith('btn-accounts-convert-')).length;
+    // --- PROBE CONTROL: the census CAN fail — Home carries the ONE Convert affordance. --------
+    // (Since the 2026-10-05 rework NO row carries a Convert entry: the control counts Home's
+    // top-right button, the single entry the census would catch on a money surface.)
+    await m.driver.click('tab-home', {timeoutMs: 5000});
+    const control = m.tree.root.findAll((n) => typeof n.props.testID === 'string' && n.props.testID === 'btn-home-convert').length;
     expect(control).toBeGreaterThanOrEqual(1);
 
     // --- SOL card: idle armed SolPayMode, then the tap phases + the receipt-bound paid phase. ---
