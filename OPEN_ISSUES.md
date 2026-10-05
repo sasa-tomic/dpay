@@ -71,9 +71,35 @@ hole found in the leg-2→leg-3 deposit handoff (executor re-probe + deposit gat
 + boot sweep). The founder's own order `71c70fc7…` had expired with NO deposit sent - money
 safe, nothing reached the venue. Gates: all 8 rows PASS dirty=no `28965286` (the one test-app
 FAIL en route was flow 214's kill-arm load flake - solo green 7/7, known class). Follow-ups
-(value 4 each): raw pool ids still inline in direct/hub pendingBody (need the copyable-line
-treatment); "sent HH:MM" uses the record's createdAtMs, not the per-leg submit instant; the
-composed cefi wait lacks a "Last checked" line.
+(value 4 each) SUPERSEDED by the convert UX rework below: raw pool ids are pinned out of
+primary lines (Details fold only); "sent HH:MM" is gone - the stateful leg list shows state
+words without a wrong clock; the "Last checked" line exists (`M.convert.cefi.lastCheckedLine`
+in the cefi pending panel).
+
+**CONVERT UX REWORK (founder 2026-10-04: "make it intuitive for a new user, don't make me
+think"; "adversarially review the swap process ignoring the requirements docs"; "rework the UI
+fully"): LANDED.**
+The adversarial review lives in `docs/specs/2026-10-04-convert-ux-rework.md` (`15010b1c`, 7
+findings: jargon leaks, expert route homework, lies under state changes, inconsistent confirm
+grammar, dead ends, dense terminals, silent venue refunds). The rework keeps ALL money logic
+and rewrites presentation as FOUR SCREENS: OFFER (one recommendation line "You receive ~X.
+Arrives in a few minutes. Fee about Y."; route detail collapsed under "Options"/"Other
+venues"; venue/census facts live only in a Details fold default-closed), CONFIRM
+(order-is-the-lock EVERYWHERE via the `cowQuoteFresh`-class helper: one SILENT re-quote within
+5%, re-confirm only on a material move, exactly ONE expiry per screen - the CoW jitter-loop
+class is now the universal confirm grammar), PROGRESS (a plain story "Your ICP swap is done.
+Now exchanging for EURC." - never "Step n of m"; the leg checklist is stateful done-recedes;
+the support recipe names only the active step's own reference; ids render only under Details),
+DONE/FAILED (status word + one sentence + one action; venue refunds surface as evidence via
+the stuck probe). COPY LAW pinned by tests in all 4 locales (en plain/de du/es tu/fr vous, no
+em-dashes): no canister-id shapes `/[0-9a-z]{5}-[0-9a-z]{5}/`, no venue brands, no
+approve/withdraw/burn/attest in primary lines, leg-scoped amounts (never the route-final
+symbol on a hop figure), one fact per line. `ConvertRouteStatePanel.tsx` DELETED; flow
+230-silent-requote pins the confirm lock. Commits `b213f7d0`/`52c63133`/`d0897325`/
+`ae74d748`/`22f5f8ae` (65 files +1682/-1280); e2e visual drivers follow the Details fold
+`7dba23a2`; baselines reseeded `553a75ed` (only convert-chooser + convert-checklist, both
+modes, diff PNGs vision-reviewed = the intended rework). Gates: ALL 8 rows PASS dirty=no
+`553a75ed`, overall VERIFIED (lane flow 314.0s + test-app 364.3s @ `22f5f8ae`).
 
 **APK WEB DOWNLOAD + IN-APP UPDATE FLOW (founder 2026-10-04): LANDED.**
 (1) The landing page's download button was dead because `deploy/docker-compose.yml` always set
