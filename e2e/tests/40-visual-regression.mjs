@@ -234,7 +234,11 @@ export async function run() {
 
     await openConvertFor(driver, 'icp');
     await typeConvertAmount(driver, '1');
-    await driver.findByTestID('convert-venue-auto', {timeoutMs: 10_000});
+    // The 2026-10-04 rework: the census lines (venue attribution + clock) live inside the
+    // Details fold, default CLOSED (copy law - venue facts only under Details/Options).
+    // Quote readiness is proven by the floor line; open Details so the masked clock lines render.
+    await driver.findByTestID('convert-min-out', {timeoutMs: 10_000});
+    await driver.click('convert-details', {timeoutMs: 5_000});
     await openOtherVenues(driver);
     // The sheet grammar: ICPSwap is the auto pick (its number backs the card, attributed via
     // convert-quote-source); the fixture venue waits behind the expander with its OWN quote.
