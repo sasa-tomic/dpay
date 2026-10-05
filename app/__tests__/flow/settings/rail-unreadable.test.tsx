@@ -75,7 +75,6 @@ hermeticDescribe('flow 147 — rail-unreadable', () => {
     await m.driver.waitForFunction(() => m.driver.isPresent('rail-unreadable-solana'), {timeoutMs: 12_000, label: 'the outage banner renders'});
     const line = m.driver.readText('rail-unreadable-solana');
     expect(line).toContain('Solana');
-    expect(line).toContain('Nothing moved');
     expect(line).toContain('refused the request');
     expect(line).toContain('keeps retrying');
     // One network outage renders exactly ONE banner (the USD row hosts Solana USDC).
@@ -118,7 +117,6 @@ hermeticDescribe('flow 147 — rail-unreadable', () => {
     );
     const offlineLine = m.driver.readText('rail-unreadable-solana');
     expect(offlineLine).toContain('You seem offline');
-    expect(offlineLine).toContain('Nothing moved');
     expect(offlineLine).toContain('update on reconnect');
     expect(offlineLine).toContain('QR payments work offline');
     expect(offlineLine.includes('Settings')).toBe(false);

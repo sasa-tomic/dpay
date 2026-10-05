@@ -149,13 +149,13 @@ export const depositFr: DepositMessages = {
     ataUnverifiedDetail: asset =>
       `Votre adresse est correcte — dpay n’arrive simplement pas à joindre Solana pour confirmer votre compte ${asset}. Vérifiez votre connexion et réessayez.`,
     ataUnverifiedRefused: asset =>
-      `Votre adresse est correcte — Solana a refusé la demande, donc votre compte ${asset} n’a pas pu être confirmé. Rien n’a bougé. Réessayez dans un instant.`,
+      `Votre adresse est correcte - Solana a refusé la demande, donc votre compte ${asset} n’a pas pu être confirmé. Réessayez dans un instant.`,
     ataUnverifiedOffline: asset =>
-      `Votre adresse est correcte — vous semblez hors ligne, donc votre compte ${asset} n’a pas pu être confirmé. Rien n’a bougé. Vérifiez à nouveau une fois de retour en ligne.`,
+      `Votre adresse est correcte - vous semblez hors ligne, donc votre compte ${asset} n’a pas pu être confirmé. Vérifiez à nouveau une fois de retour en ligne.`,
     ataUnverifiedUnreachable: asset =>
       `Votre adresse est correcte — le relais de dpay n’arrive pas à joindre Solana, donc votre compte ${asset} n’a pas pu être confirmé. Votre argent est intact et vos paiements Internet Computer fonctionnent toujours. Réessayez dans un instant.`,
     ataUnverifiedUnreadable: asset =>
-      `Votre adresse est correcte — Solana a envoyé des données que dpay ne peut pas lire, donc votre compte ${asset} n’a pas pu être confirmé. Rien n’a bougé. Réessayez dans un instant.`,
+      `Votre adresse est correcte - Solana a envoyé des données que dpay ne peut pas lire, donc votre compte ${asset} n’a pas pu être confirmé. Réessayez dans un instant.`,
     retryAtaLabel: asset => `Réessayer la vérification du compte ${asset}`,
     checkAgain: 'Revérifier',
     backToRequest: 'Retour à la demande',
@@ -282,7 +282,7 @@ export const withdrawFr: WithdrawMessages = {
   badAddress: asset => `Cette adresse ${asset} ne semble pas valide.`,
   toDestination: destination => `vers ${destination}`,
   enterAmount: 'Saisissez un montant',
-  offlineReviewNote: 'Vous êtes hors ligne — vous pouvez encore vérifier cet envoi. Il ne quitte votre portefeuille qu’une fois accepté par le réseau ; hors ligne, la confirmation échoue et rien ne bouge.',
+  offlineReviewNote: 'Vous êtes hors ligne - vous pouvez encore vérifier cet envoi. Il ne quitte votre portefeuille qu’une fois accepté par le réseau ; hors ligne, la confirmation échoue.',
 
   ic: {
     resumed:

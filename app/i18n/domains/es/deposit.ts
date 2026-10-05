@@ -148,13 +148,13 @@ export const depositEs: DepositMessages = {
     ataUnverifiedDetail: asset =>
       `Tu dirección está bien; dpay simplemente no consigue contactar con Solana para confirmar tu cuenta de ${asset}. Revisa tu conexión e inténtalo de nuevo.`,
     ataUnverifiedRefused: asset =>
-      `Tu dirección está bien; Solana rechazó la solicitud, así que no se pudo confirmar tu cuenta de ${asset}. No se ha movido nada. Inténtalo de nuevo en un momento.`,
+      `Tu dirección está bien; Solana rechazó la solicitud, así que no se pudo confirmar tu cuenta de ${asset}. Inténtalo de nuevo en un momento.`,
     ataUnverifiedOffline: asset =>
-      `Tu dirección está bien; parece que estás sin conexión, así que no se pudo confirmar tu cuenta de ${asset}. No se ha movido nada. Vuelve a comprobarlo cuando recuperes la conexión.`,
+      `Tu dirección está bien; parece que estás sin conexión, así que no se pudo confirmar tu cuenta de ${asset}. Vuelve a comprobarlo cuando recuperes la conexión.`,
     ataUnverifiedUnreachable: asset =>
       `Tu dirección está bien; el relé de dpay no consigue alcanzar Solana, así que no se pudo confirmar tu cuenta de ${asset}. Tu dinero está intacto y tus pagos de Internet Computer siguen funcionando. Inténtalo de nuevo en un momento.`,
     ataUnverifiedUnreadable: asset =>
-      `Tu dirección está bien; Solana envió datos que dpay no puede leer, así que no se pudo confirmar tu cuenta de ${asset}. No se ha movido nada. Inténtalo de nuevo en un momento.`,
+      `Tu dirección está bien; Solana envió datos que dpay no puede leer, así que no se pudo confirmar tu cuenta de ${asset}. Inténtalo de nuevo en un momento.`,
     retryAtaLabel: asset => `Reintentar la revisión de la cuenta de ${asset}`,
     checkAgain: 'Revisar de nuevo',
     backToRequest: 'Volver a la solicitud',
@@ -281,7 +281,7 @@ export const withdrawEs: WithdrawMessages = {
   badAddress: asset => `Esto no parece una dirección de ${asset} válida.`,
   toDestination: destination => `a ${destination}`,
   enterAmount: 'Introduce un importe',
-  offlineReviewNote: 'Estás sin conexión — aún puedes revisar este envío. Solo sale de tu billetera cuando la red lo acepta; sin conexión, confirmar falla y nada se mueve.',
+  offlineReviewNote: 'Estás sin conexión - aún puedes revisar este envío. Solo sale de tu billetera cuando la red lo acepta; sin conexión, confirmar falla.',
 
   ic: {
     resumed: 'Había un retiro en curso cuando se cerró la app. Reintentar vuelve a enviar el mismo pago: no puede gastar dos veces.',

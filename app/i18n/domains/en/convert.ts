@@ -204,14 +204,14 @@ export type ConvertMessages = {
   abortedFee: string;
   abortedWatching: string;
   /** The provider-held abort body (2026-09-24): BOTH halves of the truth - no deposit sent
-   *  -> nothing can move and the order dies unfunded at the venue; deposit already sent ->
-   *  the trade may still settle (check Balances + the venue's own status page). */
+   *  -> the trade never started and the order dies unfunded at the venue; deposit already
+   *  sent -> the trade may still settle (check Balances + the venue's own status page). */
   abortedProvider: string;
   stuckBody: string;
   /** The stuck screen's one restating line: what was signed, amount for amount. The pool's
    *  identity lives in the receipts block (Details evidence), never in this line. */
   stuckSigned: (amount: string, minAmount: string) => string;
-  /** "Expires by 14:42 — after that nothing can move." */
+  /** "Expires by 14:42." */
   expiryLine: (at: string) => string;
 
   // --- V6: the provider-held states (convertResume.ts drivers) + the extended stuck watch -----
@@ -238,7 +238,8 @@ export type ConvertMessages = {
   stuckReceiptsTitle: string;
   /** A record-carried failure cause, rendered verbatim — never hidden (founder hard rule). */
   stuckErrorLine: (d: string) => string;
-  /** The window is CLOSED: the honest flip of expiryLine ("after that nothing can move"). */
+  /** The window is CLOSED: the honest flip of expiryLine - the clock is spent, and the
+   *  outcome now comes from the evidence, not from watching. */
   stuckExpiredLine: (at: string) => string;
   /** What the closed window means for the money: resolution comes from the evidence. */
   stuckExpiredBody: string;
@@ -805,16 +806,16 @@ export const convertEn: ConvertMessages = {
   abortedFee: 'You paid a small approval fee.',
   abortedWatching: 'The swap may still go through. Check Balances later.',
   abortedProvider:
-    'Watching stopped. No deposit sent \u2192 nothing can move; already sent \u2192 the trade may still settle. Check Balances and the venue\u2019s status page - shift id below.',
+    'Watching stopped. No deposit sent \u2192 the trade never started; already sent \u2192 the trade may still settle. Check Balances and the venue\u2019s status page - shift id below.',
   stuckBody:
     'Swap submitted - the pool\u2019s answer never arrived. Do not start a second swap.',
   stuckSigned: (amount, minAmount) =>
     `You signed an exchange of ${amount} for at least ${minAmount}.`,
-  expiryLine: at => `Expires by ${at} - after that nothing can move.`,
+  expiryLine: at => `Expires by ${at}.`,
 
   awaitingDepositTitle: 'Waiting for the deposit',
   awaitingDepositBody: sym =>
-    `Waiting for your ${sym} deposit to land - the exchange starts when it arrives. If it misses the window, the quote expires and nothing moves.`,
+    `Waiting for your ${sym} deposit to land - the exchange starts when it arrives. If it misses the window, the quote expires and your ${sym} stays in your wallet.`,
   providerProcessingTitle: 'Converting',
   providerProcessingBody: sym =>
     `The exchange holds your deposit and is converting it. Your ${sym} arrives when it completes.`,
@@ -830,7 +831,7 @@ export const convertEn: ConvertMessages = {
 
   stuckReceiptsTitle: 'What happened',
   stuckErrorLine: d => `Error: ${d}`,
-  stuckExpiredLine: at => `Expired at ${at} - nothing can move anymore.`,
+  stuckExpiredLine: at => `Expired at ${at}.`,
   stuckExpiredBody:
     'The signed swap can no longer execute. dpay settles this from the evidence above: money still in this wallet stays put; money that moved shows in your balance.',
   stuckLastCheckedLine: at => `Last checked ${at}`,
@@ -908,7 +909,7 @@ export const convertEn: ConvertMessages = {
       `The swap went through - your funds are ${sym} in this wallet. The cash-out refused${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Cash out via Pay \u25B8 Send to address - paste any destination address.',
     stuckRouteBody: 'A leg\u2019s outcome is unknown - dpay keeps watching the ledgers; this screen flips on its own.',
-    stuckRouteBodyExpired: 'The watch window has closed - nothing can move anymore. dpay settles this from the evidence above.',
+    stuckRouteBodyExpired: 'The watch window has closed. dpay settles this from the evidence above.',
     failedHop2Title: 'Second swap refused',
     failedHop2Body: (hubSym, outSym, reason) =>
       `The first swap went through - you hold ${hubSym} in this wallet. The ${hubSym} \u2192 ${outSym} swap was refused${reason ? `: ${reason}` : ''}.`,
@@ -937,7 +938,7 @@ export const convertEn: ConvertMessages = {
     checklistSignsAuto:
       'After you confirm, this wallet sends the deposit to the venue itself - the trade is the venue\u2019s.',
     refusalLine: sym =>
-      `If the deposit never arrives, the order expires - nothing moves, your ${sym} stays in your wallet.`,
+      `If the deposit never arrives, the order expires - your ${sym} stays in your wallet.`,
     insufficientLine: (needed, balance) =>
       `The deposit needs ${needed} (transfer fee included) - you have ${balance}.`,
     payoutAt: address => `Paid out to your own address: ${address}`,

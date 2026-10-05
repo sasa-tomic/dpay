@@ -301,7 +301,8 @@ describe('HomeTab — an UNREADABLE home rail says so (M2)', () => {
     const tree = mountHome({homeCurrency: 'EUR', homeAsset: EUR_RAIL, balances: eurUnreadable()});
     const line = textUnder(tree, 'rail-unreadable-solana');
     expect(line).toContain('Solana');
-    expect(line).toContain('Nothing moved');
+    expect(line).toContain('balances outdated');
+    expect(line).toContain('keeps retrying');
     act(() => { tree.unmount(); });
   });
 

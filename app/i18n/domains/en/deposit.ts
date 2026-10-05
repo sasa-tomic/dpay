@@ -530,13 +530,13 @@ export const depositEn: DepositMessages = {
     ataUnverifiedDetail: asset =>
       `Your address is fine — dpay just can’t reach Solana to confirm your ${asset} account. Check your connection and try again.`,
     ataUnverifiedRefused: asset =>
-      `Your address is fine — Solana refused the request, so your ${asset} account couldn’t be confirmed. Nothing moved. Try again in a moment.`,
+      `Your address is fine - Solana refused the request, so your ${asset} account couldn’t be confirmed. Try again in a moment.`,
     ataUnverifiedOffline: asset =>
-      `Your address is fine — you seem offline, so your ${asset} account couldn’t be confirmed. Nothing moved. Check again once you’re back online.`,
+      `Your address is fine - you seem offline, so your ${asset} account couldn’t be confirmed. Check again once you’re back online.`,
     ataUnverifiedUnreachable: asset =>
       `Your address is fine — dpay’s relay can’t reach Solana, so your ${asset} account couldn’t be confirmed. Your money is untouched and Internet Computer payments still work. Try again in a moment.`,
     ataUnverifiedUnreadable: asset =>
-      `Your address is fine — Solana sent data dpay can’t read, so your ${asset} account couldn’t be confirmed. Nothing moved. Try again in a moment.`,
+      `Your address is fine - Solana sent data dpay can’t read, so your ${asset} account couldn’t be confirmed. Try again in a moment.`,
     retryAtaLabel: asset => `Retry checking ${asset} account`,
     checkAgain: 'Check again',
     backToRequest: 'Back to request',
@@ -841,7 +841,7 @@ export const withdrawEn: WithdrawMessages = {
   badAddress: asset => `That doesn't look like a valid ${asset} address.`,
   toDestination: destination => `to ${destination}`,
   enterAmount: 'Enter an amount',
-  offlineReviewNote: 'You are offline — you can still review this send. It only leaves your wallet once the network accepts it; while offline, confirming will fail and nothing moves.',
+  offlineReviewNote: 'You are offline - you can still review this send. It only leaves your wallet once the network accepts it; while offline, confirming will fail.',
 
   ic: {
     resumed: 'A withdrawal was in progress when the app closed. Retry re-sends the same payment — no double-spend.',

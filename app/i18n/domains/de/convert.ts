@@ -138,16 +138,16 @@ export const convertDe: ConvertMessages = {
   abortedFee: 'Du hast eine kleine Genehmigungsgebühr bezahlt.',
   abortedWatching: 'Der Tausch kann noch durchgehen. Sieh später unter Guthaben nach.',
   abortedProvider:
-    'Beobachtung gestoppt. Ohne Einzahlung kann sich nichts bewegen; schon gesendet → der Tausch kann noch abschließen. Sieh unter Guthaben und auf der Statusseite des Anbieters nach - die Shift-ID steht darunter.',
+    'Beobachtung gestoppt. Ohne Einzahlung hat der Tausch nicht gestartet; schon gesendet → der Tausch kann noch abschließen. Sieh unter Guthaben und auf der Statusseite des Anbieters nach - die Shift-ID steht darunter.',
   stuckBody:
     'Tausch übermittelt - die Antwort des Pools blieb aus. Starte keinen zweiten Tausch.',
   stuckSigned: (amount, minAmount) =>
     `Du hast einen Tausch von ${amount} für mindestens ${minAmount} signiert.`,
-  expiryLine: at => `Läuft spätestens um ${at} ab - danach kann sich nichts bewegen.`,
+  expiryLine: at => `Läuft spätestens um ${at} ab.`,
 
   awaitingDepositTitle: 'Warten auf die Einzahlung',
   awaitingDepositBody: sym =>
-    `Warte auf deine ${sym}-Einzahlung - der Tausch startet, wenn sie ankommt. Verpasst sie das Zeitfenster, läuft das Angebot ab und nichts bewegt sich.`,
+    `Warte auf deine ${sym}-Einzahlung - der Tausch startet, wenn sie ankommt. Verpasst sie das Zeitfenster, läuft das Angebot ab und dein ${sym} bleibt in deiner Wallet.`,
   providerProcessingTitle: 'Tausch läuft',
   providerProcessingBody: sym =>
     `Die Börse hält deine Einzahlung und tauscht. Dein ${sym} kommt an, sobald sie abschließt.`,
@@ -163,7 +163,7 @@ export const convertDe: ConvertMessages = {
 
   stuckReceiptsTitle: 'Was passiert ist',
   stuckErrorLine: d => `Fehler: ${d}`,
-  stuckExpiredLine: at => `Abgelaufen um ${at} - nichts kann sich mehr bewegen.`,
+  stuckExpiredLine: at => `Abgelaufen um ${at}.`,
   stuckExpiredBody:
     'Der signierte Tausch kann nicht mehr ausgeführt werden. dpay klärt dies anhand der Belege oben: Geld, das noch in dieser Wallet liegt, bleibt liegen; bewegtes Geld zeigt dein Guthaben.',
   stuckLastCheckedLine: at => `Zuletzt geprüft ${at}`,
@@ -241,7 +241,7 @@ export const convertDe: ConvertMessages = {
       `Der Tausch lief - deine Mittel liegen als ${sym} in dieser Wallet. Die Auszahlung wurde abgelehnt${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Auszahlen über Bezahlen ▸ Adresse senden - beliebige Ziel-Adresse einfügen.',
     stuckRouteBody: 'Das Ergebnis eines Schritts ist offen - dpay beobachtet die Ledgers; dieser Bildschirm springt von selbst.',
-    stuckRouteBodyExpired: 'Das Beobachtungsfenster ist geschlossen - nichts kann sich mehr bewegen. dpay rechnet anhand der Nachweise oben ab.',
+    stuckRouteBodyExpired: 'Das Beobachtungsfenster ist geschlossen. dpay rechnet anhand der Nachweise oben ab.',
     failedHop2Title: 'Zweiter Tausch abgelehnt',
     failedHop2Body: (hubSym, outSym, reason) =>
       `Der erste Tausch lief - du hältst ${hubSym} in dieser Wallet. Der Tausch ${hubSym} → ${outSym} wurde abgelehnt${reason ? `: ${reason}` : ''}.`,
@@ -267,7 +267,7 @@ export const convertDe: ConvertMessages = {
     checklistSignsAuto:
       'Nach der Bestätigung sendet diese Wallet die Einzahlung selbst an den Tauschdienst - der Tausch ist dessen Sache.',
     refusalLine: sym =>
-      `Kommt die Einzahlung nie an, läuft die Bestellung ab - nichts bewegt sich, dein ${sym} bleibt in deiner Wallet.`,
+      `Kommt die Einzahlung nie an, läuft die Bestellung ab - dein ${sym} bleibt in deiner Wallet.`,
     insufficientLine: (needed, balance) =>
       `Die Einzahlung braucht ${needed} (inkl. Transfergebühr) - du hast ${balance}.`,
     payoutAt: address => `Ausgezahlt auf deine eigene Adresse: ${address}`,

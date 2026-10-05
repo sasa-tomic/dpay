@@ -228,15 +228,15 @@ export const errorsEn: ErrorMessages = {
 
   rail: {
     refused: network =>
-      `${network} refused the request — balances outdated. Nothing moved; dpay keeps retrying.`,
+      `${network} refused the request - balances outdated. dpay keeps retrying.`,
     offline: network =>
-      `You seem offline — ${network} balances outdated. Nothing moved. They update on reconnect; QR payments work offline.`,
+      `You seem offline - ${network} balances outdated. They update on reconnect; QR payments work offline.`,
     unreachable: network =>
       `${network} is unreachable while you are online — dpay’s relay can’t reach it. Money untouched; IC payments work; payments still sign offline. Settings ▸ Advanced can point this wallet at any ${network} endpoint.`,
     unreadable: network =>
-      `${network} sent data this wallet can’t read — balances outdated. Nothing moved; dpay keeps retrying.`,
+      `${network} sent data this wallet can’t read - balances outdated. dpay keeps retrying.`,
     historyStale: network =>
-      `${network} history is out of date. Nothing moved — it refreshes on its own.`,
+      `${network} history is out of date - it refreshes on its own.`,
     /** accessibilityHint for the unreachable note's Settings ▸ Advanced Pressable (the founder
      *  UX directive that made the escape tappable). Says where the tap lands — never a promise
      *  the tap fixes the outage. */

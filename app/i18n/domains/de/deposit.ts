@@ -147,13 +147,13 @@ export const depositDe: DepositMessages = {
     ataUnverifiedDetail: asset =>
       `Mit deiner Adresse ist alles in Ordnung — dpay erreicht Solana nur gerade nicht, um dein ${asset}-Konto zu bestätigen. Prüfe deine Verbindung und versuche es erneut.`,
     ataUnverifiedRefused: asset =>
-      `Mit deiner Adresse ist alles in Ordnung — Solana hat die Anfrage abgelehnt, daher konnte dein ${asset}-Konto nicht bestätigt werden. Es hat sich nichts bewegt. Versuche es gleich noch einmal.`,
+      `Mit deiner Adresse ist alles in Ordnung - Solana hat die Anfrage abgelehnt, daher konnte dein ${asset}-Konto nicht bestätigt werden. Versuche es gleich noch einmal.`,
     ataUnverifiedOffline: asset =>
-      `Mit deiner Adresse ist alles in Ordnung — du scheinst offline zu sein, daher konnte dein ${asset}-Konto nicht bestätigt werden. Es hat sich nichts bewegt. Prüfe erneut, sobald du wieder online bist.`,
+      `Mit deiner Adresse ist alles in Ordnung - du scheinst offline zu sein, daher konnte dein ${asset}-Konto nicht bestätigt werden. Prüfe erneut, sobald du wieder online bist.`,
     ataUnverifiedUnreachable: asset =>
       `Mit deiner Adresse ist alles in Ordnung — dpays Relay erreicht Solana nicht, daher konnte dein ${asset}-Konto nicht bestätigt werden. Dein Geld ist unangetastet, und deine Internet-Computer-Zahlungen funktionieren weiter. Versuche es gleich noch einmal.`,
     ataUnverifiedUnreadable: asset =>
-      `Mit deiner Adresse ist alles in Ordnung — Solana hat Daten gesendet, die dpay nicht lesen kann, daher konnte dein ${asset}-Konto nicht bestätigt werden. Es hat sich nichts bewegt. Versuche es gleich noch einmal.`,
+      `Mit deiner Adresse ist alles in Ordnung - Solana hat Daten gesendet, die dpay nicht lesen kann, daher konnte dein ${asset}-Konto nicht bestätigt werden. Versuche es gleich noch einmal.`,
     retryAtaLabel: asset => `${asset}-Konto erneut prüfen`,
     checkAgain: 'Erneut prüfen',
     backToRequest: 'Zurück zur Anfrage',
@@ -282,7 +282,7 @@ export const withdrawDe: WithdrawMessages = {
   badAddress: asset => `Das sieht nicht nach einer gültigen ${asset}-Adresse aus.`,
   toDestination: destination => `an ${destination}`,
   enterAmount: 'Betrag eingeben',
-  offlineReviewNote: 'Du bist offline — du kannst diesen Send noch prüfen. Er verlässt dein Wallet erst, wenn das Netzwerk ihn annimmt; offline schlägt das Bestätigen fehl und es bewegt sich nichts.',
+  offlineReviewNote: 'Du bist offline - du kannst diesen Send noch prüfen. Er verlässt dein Wallet erst, wenn das Netzwerk ihn annimmt; offline schlägt das Bestätigen fehl.',
 
   ic: {
     resumed:

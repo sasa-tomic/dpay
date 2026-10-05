@@ -137,16 +137,16 @@ export const convertFr: ConvertMessages = {
   abortedFee: 'Vous avez payé de petits frais d’approbation.',
   abortedWatching: 'L’échange peut encore passer. Vérifiez Soldes plus tard.',
   abortedProvider:
-    'Surveillance arrêtée. Sans dépôt envoyé, rien ne peut bouger ; déjà envoyé → l’échange peut encore aboutir. Vérifiez Soldes et la page de statut de la plateforme - l’ID du shift est en dessous.',
+    'Surveillance arrêtée. Sans dépôt envoyé, l’échange n’a jamais démarré ; déjà envoyé → l’échange peut encore aboutir. Vérifiez Soldes et la page de statut de la plateforme - l’ID du shift est en dessous.',
   stuckBody:
     'Échange envoyé - la réponse du pool n’est jamais arrivée. Ne lancez pas un second échange.',
   stuckSigned: (amount, minAmount) =>
     `Vous avez signé un échange de ${amount} pour un minimum de ${minAmount}.`,
-  expiryLine: at => `Expire au plus tard à ${at} - après, plus rien ne peut bouger.`,
+  expiryLine: at => `Expire au plus tard à ${at}.`,
 
   awaitingDepositTitle: 'En attente du dépôt',
   awaitingDepositBody: sym =>
-    `En attente de votre dépôt en ${sym} - l'échange démarre quand il arrive. S'il dépasse la fenêtre, le devis expire et rien ne bouge.`,
+    `En attente de votre dépôt en ${sym} - l'échange démarre quand il arrive. S'il dépasse la fenêtre, le devis expire et votre ${sym} reste dans votre portefeuille.`,
   providerProcessingTitle: 'Conversion en cours',
   providerProcessingBody: sym =>
     `La bourse détient votre dépôt et le convertit. Votre ${sym} arrive quand c'est terminé.`,
@@ -162,7 +162,7 @@ export const convertFr: ConvertMessages = {
 
   stuckReceiptsTitle: 'Ce qui s\u2019est passé',
   stuckErrorLine: d => `Erreur : ${d}`,
-  stuckExpiredLine: at => `Expiré à ${at} - plus rien ne peut bouger.`,
+  stuckExpiredLine: at => `Expiré à ${at}.`,
   stuckExpiredBody:
     'L\u2019échange signé ne peut plus s\u2019exécuter. dpay tranche avec les preuves ci-dessus : l\u2019argent encore dans ce portefeuille reste ; l\u2019argent parti apparaît dans votre solde.',
   stuckLastCheckedLine: at => `Dernière vérification ${at}`,
@@ -240,7 +240,7 @@ export const convertFr: ConvertMessages = {
       `L'échange est passé - vos fonds sont en ${sym} dans ce portefeuille. Le retrait a été refusé${reason ? ` : ${reason}` : ''}.`,
     failedLegExit: 'Retirer via Payer ▸ Vers une adresse - collez n\u2019importe quelle adresse de destination.',
     stuckRouteBody: 'L\u2019issue d\u2019une étape reste inconnue - dpay surveille les registres ; cet écran change tout seul.',
-    stuckRouteBodyExpired: 'La fenêtre d\u2019observation est close - plus rien ne peut bouger. dpay règle d\u2019après les preuves ci-dessus.',
+    stuckRouteBodyExpired: 'La fenêtre d\u2019observation est close. dpay règle d\u2019après les preuves ci-dessus.',
     failedHop2Title: 'Second échange refusé',
     failedHop2Body: (hubSym, outSym, reason) =>
       `Le premier échange est passé - vous détenez ${hubSym} dans ce portefeuille. L'échange ${hubSym} → ${outSym} a été refusé${reason ? ` : ${reason}` : ''}.`,
@@ -266,7 +266,7 @@ export const convertFr: ConvertMessages = {
     checklistSignsAuto:
       'Après confirmation, ce portefeuille envoie lui-même le dépôt au service - l\'échange appartient au service.',
     refusalLine: sym =>
-      `Si le dépôt n'arrive jamais, l'ordre expire - rien ne bouge et votre ${sym} reste dans votre portefeuille.`,
+      `Si le dépôt n'arrive jamais, l'ordre expire - votre ${sym} reste dans votre portefeuille.`,
     insufficientLine: (needed, balance) =>
       `Le dépôt exige ${needed} (frais de transfert inclus) - vous avez ${balance}.`,
     payoutAt: address => `Payé sur votre propre adresse : ${address}`,

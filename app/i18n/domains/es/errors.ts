@@ -32,15 +32,15 @@ export const errorsEs: ErrorMessages = {
 
   rail: {
     refused: network =>
-      `${network} rechazó la solicitud — saldos desactualizados. No se movió nada; dpay sigue reintentando.`,
+      `${network} rechazó la solicitud - saldos desactualizados. dpay sigue reintentando.`,
     offline: network =>
-      `Parece que estás sin conexión — saldos de ${network} desactualizados. No se movió nada. Se actualizan al reconectar; pagar por QR sigue funcionando.`,
+      `Parece que estás sin conexión - saldos de ${network} desactualizados. Se actualizan al reconectar; pagar por QR sigue funcionando.`,
     unreachable: network =>
       `${network} es inaccesible aunque estás en línea — el relay de dpay no logra conectar. Dinero intacto; los pagos de IC funcionan; los pagos se siguen firmando sin conexión. En Ajustes ▸ Avanzado puedes apuntar esta billetera a cualquier endpoint de ${network}.`,
     unreadable: network =>
-      `${network} envió datos que esta billetera no puede leer — saldos desactualizados. No se movió nada; dpay sigue reintentando.`,
+      `${network} envió datos que esta billetera no puede leer - saldos desactualizados. dpay sigue reintentando.`,
     historyStale: network =>
-      `El historial de ${network} está desactualizado. No se movió nada y se actualiza solo.`,
+      `El historial de ${network} está desactualizado y se actualiza solo.`,
     unreachableHint: () => 'Abre Ajustes ▸ Avanzado.',
   },
 

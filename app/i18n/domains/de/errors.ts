@@ -32,15 +32,15 @@ export const errorsDe: ErrorMessages = {
 
   rail: {
     refused: network =>
-      `${network} hat die Anfrage abgelehnt — Guthaben nicht aktuell. Nichts wurde bewegt, dpay versucht es weiter.`,
+      `${network} hat die Anfrage abgelehnt - Guthaben nicht aktuell. dpay versucht es weiter.`,
     offline: network =>
-      `Du scheinst offline — ${network}-Guthaben nicht aktuell. Nichts wurde bewegt. Sie aktualisieren sich bei neuer Verbindung; Bezahlen per QR geht auch offline.`,
+      `Du scheinst offline - ${network}-Guthaben nicht aktuell. Sie aktualisieren sich bei neuer Verbindung; Bezahlen per QR geht auch offline.`,
     unreachable: network =>
       `${network} ist nicht erreichbar, obwohl du online bist — das dpay-Relay erreicht es gerade nicht. Geld unberührt; IC-Zahlungen funktionieren; Zahlungen lassen sich weiterhin offline signieren. Unter Einstellungen ▸ Erweitert kannst du diese Wallet auf einen beliebigen ${network}-Endpunkt zeigen lassen.`,
     unreadable: network =>
-      `${network} hat Daten gesendet, die diese Wallet nicht lesen kann — Guthaben nicht aktuell. Nichts wurde bewegt, dpay versucht es weiter.`,
+      `${network} hat Daten gesendet, die diese Wallet nicht lesen kann - Guthaben nicht aktuell. dpay versucht es weiter.`,
     historyStale: network =>
-      `Der ${network}-Verlauf ist nicht aktuell. Nichts wurde bewegt — er aktualisiert sich von selbst.`,
+      `Der ${network}-Verlauf ist nicht aktuell - er aktualisiert sich von selbst.`,
     unreachableHint: () => 'Öffnet Einstellungen ▸ Erweitert.',
   },
 

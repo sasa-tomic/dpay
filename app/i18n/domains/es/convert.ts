@@ -137,16 +137,16 @@ export const convertEs: ConvertMessages = {
   abortedFee: 'Pagaste una pequeña comisión de aprobación.',
   abortedWatching: 'El intercambio puede completarse igual. Revisa Saldos más tarde.',
   abortedProvider:
-    'Vigilancia detenida. Sin depósito enviado nada puede moverse; ya enviado → el intercambio aún puede completarse. Revisa Saldos y la página de estado del proveedor - el ID de shift está debajo.',
+    'Vigilancia detenida. Sin depósito enviado el intercambio nunca empezó; ya enviado → el intercambio aún puede completarse. Revisa Saldos y la página de estado del proveedor - el ID de shift está debajo.',
   stuckBody:
     'Intercambio enviado - la respuesta del pool nunca llegó. No inicies un segundo intercambio.',
   stuckSigned: (amount, minAmount) =>
     `Firmaste un intercambio de ${amount} por un mínimo de ${minAmount}.`,
-  expiryLine: at => `Caduca a más tardar a las ${at} - después nada puede moverse.`,
+  expiryLine: at => `Caduca a más tardar a las ${at}.`,
 
   awaitingDepositTitle: 'Esperando el depósito',
   awaitingDepositBody: sym =>
-    `Esperando que llegue tu depósito en ${sym} - el intercambio empieza cuando llega. Si se pasa de la ventana, la cotización caduca y nada se mueve.`,
+    `Esperando que llegue tu depósito en ${sym} - el intercambio empieza cuando llega. Si se pasa de la ventana, la cotización caduca y tu ${sym} sigue en tu billetera.`,
   providerProcessingTitle: 'Convirtiendo',
   providerProcessingBody: sym =>
     `El exchange retiene tu depósito y lo está convirtiendo. Tu ${sym} llega cuando termine.`,
@@ -162,7 +162,7 @@ export const convertEs: ConvertMessages = {
 
   stuckReceiptsTitle: 'Qué pasó',
   stuckErrorLine: d => `Error: ${d}`,
-  stuckExpiredLine: at => `Venció a las ${at} - ya nada puede moverse.`,
+  stuckExpiredLine: at => `Venció a las ${at}.`,
   stuckExpiredBody:
     'El intercambio firmado ya no puede ejecutarse. dpay lo cierra con la evidencia de arriba: el dinero que sigue en esta billetera se queda; el que se movió se ve en tu saldo.',
   stuckLastCheckedLine: at => `Última comprobación ${at}`,
@@ -240,7 +240,7 @@ export const convertEs: ConvertMessages = {
       `El intercambio se completó - tus fondos están en ${sym} en esta billetera. El retiro fue rechazado${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Retira vía Pagar ▸ Enviar a dirección - pega cualquier dirección de destino.',
     stuckRouteBody: 'El resultado de un tramo sigue abierto - dpay vigila los libros; esta pantalla cambia sola.',
-    stuckRouteBodyExpired: 'La ventana de observación se cerró - ya nada puede moverse. dpay liquida según la evidencia de arriba.',
+    stuckRouteBodyExpired: 'La ventana de observación se cerró. dpay liquida según la evidencia de arriba.',
     failedHop2Title: 'Segundo intercambio rechazado',
     failedHop2Body: (hubSym, outSym, reason) =>
       `El primer intercambio pasó - tienes ${hubSym} en esta billetera. El intercambio ${hubSym} → ${outSym} fue rechazado${reason ? `: ${reason}` : ''}.`,
@@ -266,7 +266,7 @@ export const convertEs: ConvertMessages = {
     checklistSignsAuto:
       'Tras confirmar, esta billetera envía el depósito al servicio por sí sola - el intercambio es cosa del servicio.',
     refusalLine: sym =>
-      `Si el depósito nunca llega, la orden caduca - no se mueve nada y tu ${sym} sigue en tu billetera.`,
+      `Si el depósito nunca llega, la orden caduca - tu ${sym} sigue en tu billetera.`,
     insufficientLine: (needed, balance) =>
       `El depósito necesita ${needed} (comisión de transferencia incluida) - tienes ${balance}.`,
     payoutAt: address => `Pagado a tu propia dirección: ${address}`,

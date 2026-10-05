@@ -33,15 +33,15 @@ export const errorsFr: ErrorMessages = {
 
   rail: {
     refused: network =>
-      `${network} a refusé la requête — soldes plus à jour. Rien n’a bougé ; dpay continue de réessayer.`,
+      `${network} a refusé la requête - soldes plus à jour. dpay continue de réessayer.`,
     offline: network =>
-      `Vous semblez hors ligne — soldes ${network} plus à jour. Rien n’a bougé. Ils se mettent à jour à la reconnexion ; payer par QR fonctionne aussi hors ligne.`,
+      `Vous semblez hors ligne - soldes ${network} plus à jour. Ils se mettent à jour à la reconnexion ; payer par QR fonctionne aussi hors ligne.`,
     unreachable: network =>
       `${network} est injoignable alors que vous êtes en ligne — le relais de dpay n’arrive pas à le joindre. Argent intact ; les paiements IC fonctionnent ; les paiements se signent toujours hors ligne. Dans Paramètres ▸ Avancé, vous pouvez pointer ce portefeuille vers n’importe quel point d’accès ${network}.`,
     unreadable: network =>
-      `${network} a envoyé des données que ce portefeuille ne peut pas lire — soldes plus à jour. Rien n’a bougé ; dpay continue de réessayer.`,
+      `${network} a envoyé des données que ce portefeuille ne peut pas lire - soldes plus à jour. dpay continue de réessayer.`,
     historyStale: network =>
-      `L’historique ${network} n’est pas à jour. Rien n’a bougé — il se met à jour tout seul.`,
+      `L’historique ${network} n’est pas à jour - il se met à jour tout seul.`,
     unreachableHint: () => 'Ouvrez Paramètres ▸ Avancé.',
   },
 
