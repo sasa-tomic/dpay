@@ -114,9 +114,11 @@ type EngineCtx = {
   secretHex: string;
   publicHex: string; // the identity-scoped store scope (V6)
   relayUrl: string;
-  /** Fired once when any record reaches a terminal step this session (Wallet wires it to the
-   *  ledger refresh — a conversion landing IS account activity). */
-  onTerminal?: () => void;
+  /** Fired once when any record reaches a terminal step this session, WITH the record (the
+   *  post-action window, founder 2026-10-05: the wallet derives the payout rail from it and
+   *  arms the bounded Solana re-poll when the payout lands on Solana). Wallet wires it to the
+   *  ledger refresh + that rail decision — a conversion landing IS account activity. */
+  onTerminal?: (rec: ConvertRecord) => void;
 };
 
 type EngineOpts = {
@@ -317,7 +319,9 @@ async function probeStuckOnce(rec: ConvertRecord, ctx: EngineCtx): Promise<Conve
 
 function fireOnTerminalIfEnteredListed(before: ConvertStep | undefined, after: ConvertRecord): void {
   if (before != null && !isTerminalConvertStep(before) && isTerminalConvertStep(after.step)) {
-    state.ctx?.onTerminal?.();
+    // The RECORD rides the callback (post-action window, founder 2026-10-05): the wallet derives
+    // the payout rail from it and arms the bounded Solana re-poll when the payout lands there.
+    state.ctx?.onTerminal?.(after);
   }
 }
 

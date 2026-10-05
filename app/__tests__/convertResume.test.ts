@@ -610,6 +610,10 @@ describe('the engine — every live record driven from wallet load, mounted scre
     try {
       await sleep(30);
       expect(onTerminal).toHaveBeenCalledTimes(1);
+      // The RECORD rides the callback (post-action window, founder 2026-10-05): the wallet derives
+      // the payout rail from it and arms the bounded Solana re-poll only when the payout lands
+      // there. A bare `()` cannot answer "which rail paid out".
+      expect(onTerminal).toHaveBeenCalledWith(expect.objectContaining({id: 'leg-1', step: 'done'}));
     } finally {
       stop();
     }
