@@ -111,7 +111,7 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
       expect(m.driver.isPresent('convert-dest-reenter')).toBe(false);
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
       // Stage 2: the device's own address as destination means the crossing signs HERE.
-      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'signs on this device', 'the destination note forks to the device-signed crossing');
+      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'signs the crossing', 'the destination note forks to the device-signed crossing'); // copy-economy sweep: filler removed, fact kept;
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset');
 
       // The ADVANCED OVERRIDE: name an external wallet — the handoff disclosure returns and
@@ -121,7 +121,7 @@ hermeticDescribe('flow 195 — Route C generalized: ICP → EURC via USDC as one
       await m.driver.type('convert-dest-address', EXTERNAL);
       await m.driver.type('convert-dest-reenter', EXTERNAL);
       await m.driver.waitForFunction(() => m!.driver.readText('convert-dest-cross-note').includes('also signs the crossing'), {timeoutMs: 8_000, label: 'the external disclosure restored'});
-      assertIncludes(m.driver.readText('convert-external-sign-note'), 'your own Ethereum wallet', 'naming an external wallet restores the handoff disclosure');
+      assertIncludes(m.driver.readText('convert-external-sign-note'), 'your Ethereum wallet', 'naming an external wallet restores the handoff disclosure'); // copy-economy sweep: filler removed, fact kept;
 
       // §2 the census (unchanged from the SOL route, USDC-denominated).
       await openConvertDetails(m);

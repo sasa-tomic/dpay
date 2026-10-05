@@ -143,7 +143,7 @@ describe('the audit copy rules (2026-10-02): one name per fact, no middleman jar
       expect(busy).not.toContain('—');
       expect(busy).toMatch(/1-2/);
       expect(busy).not.toMatch(JARGON);
-      if (locale === 'en') expect(busy).toBe('Please wait, your account is being set up. This should take 1-2 minutes.');
+      if (locale === 'en') expect(busy).toBe('Setting up your account. Takes 1-2 minutes.'); // copy-economy sweep: "Please wait" filler dropped, the 1-2 min window stays
       // Register consistency per locale card (de du, es tu, fr vous).
       if (locale === 'de') expect(busy).toMatch(/dein|warte/i);
       if (locale === 'es') expect(busy).toMatch(/\btu\b/i);

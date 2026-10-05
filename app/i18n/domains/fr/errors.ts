@@ -1,5 +1,5 @@
 /**
- * i18n/domains/fr/errors.ts — French values for the copy that is thrown and rendered verbatim.
+ * i18n/domains/fr/errors.ts - French values for the copy that is thrown and rendered verbatim.
  * Types, key documentation and the reference copy: ../en/errors.ts. See also the
  * typography conventions for this locale: ../../fr.ts.
  */
@@ -26,9 +26,9 @@ export const errorsFr: ErrorMessages = {
     senderTokenAccountUnverifiedRailDown: asset =>
       `Impossible de vérifier votre compte ${asset} : Solana ne répond pas. Sans lui, ce paiement ne pourra pas être réglé. Dès qu’il répond : Recevoir ▸ Mon adresse.`,
     recipientNoTokenAccount: (solAmount, asset) =>
-      `Le destinataire n’a pas encore de compte ${asset}. Le créer coûte environ ${solAmount}, à votre charge — envoyez d’abord un peu de SOL ici`,
+      `Le destinataire n’a pas encore de compte ${asset}. Le créer coûte environ ${solAmount}, à votre charge - envoyez d’abord un peu de SOL`,
     ownTokenAccountRent: (solAmount, asset) =>
-      `La création de votre compte ${asset} coûte environ ${solAmount}. Envoyez d’abord un peu de SOL ici.`,
+      `La création de votre compte ${asset} coûte environ ${solAmount}. Envoyez d’abord un peu de SOL.`,
   },
 
   rail: {
@@ -37,7 +37,7 @@ export const errorsFr: ErrorMessages = {
     offline: network =>
       `Vous semblez hors ligne - soldes ${network} plus à jour. Ils se mettent à jour à la reconnexion ; payer par QR fonctionne aussi hors ligne.`,
     unreachable: network =>
-      `${network} est injoignable alors que vous êtes en ligne — le relais de dpay n’arrive pas à le joindre. Argent intact ; les paiements IC fonctionnent ; les paiements se signent toujours hors ligne. Dans Paramètres ▸ Avancé, vous pouvez pointer ce portefeuille vers n’importe quel point d’accès ${network}.`,
+      `${network} est injoignable alors que vous êtes en ligne - le relais de dpay n’arrive pas à le joindre. Argent intact ; les paiements IC fonctionnent ; les paiements se signent toujours hors ligne. Dans Paramètres ▸ Avancé, ce portefeuille peut pointer vers n’importe quel point d’accès ${network}.`,
     unreadable: network =>
       `${network} a envoyé des données que ce portefeuille ne peut pas lire - soldes plus à jour. dpay continue de réessayer.`,
     historyStale: network =>
@@ -53,7 +53,7 @@ export const errorsFr: ErrorMessages = {
     sendTimedOut: 'Le portefeuille n’a pas répondu : impossible de savoir si la transaction a été envoyée.',
     requestTimedOut:
       'Le portefeuille n’a pas répondu. Ouvrez-le, traitez toute demande en attente, puis réessayez.',
-    pairingTimedOut: 'délai d’association dépassé — aucun portefeuille scanné en 5 min',
+    pairingTimedOut: 'délai d’association dépassé - aucun portefeuille scanné en 5 min',
     pairingFailed: detail => `échec de l’association WalletConnect : ${detail}`,
     invalidChainId: value =>
       `Le portefeuille a indiqué un réseau que dpay ne sait pas lire (${value}). Reconnectez-le ; si cela se reproduit, utilisez une autre application de portefeuille.`,
@@ -69,23 +69,23 @@ export const errorsFr: ErrorMessages = {
   },
 
   tap: {
-    couldntConfirmOffline: 'Impossible de confirmer — vérifiez votre solde une fois en ligne',
+    couldntConfirmOffline: 'Impossible de confirmer - vérifiez votre solde une fois en ligne',
     couldntVerifyRequest: 'Impossible de vérifier cette demande',
     couldntReturnResult: 'Impossible de renvoyer le résultat. Gardez les téléphones l’un contre l’autre et réessayez.',
     merchantRefusalUnverified:
-      'D’après le registre, le transfert n’est pas passé, mais ce téléphone n’a pas pu le vérifier. Ne remettez pas la marchandise. Vérifiez vos Transactions dans un instant — l’argent y figure s’il est bien arrivé.',
+      'D’après le registre, le transfert n’est pas passé, mais ce téléphone n’a pas pu le vérifier. Ne remettez pas la marchandise. Vérifiez vos Transactions dans un instant - l’argent y figure s’il est bien arrivé.',
     merchantNothingArrived:
-      'Aucun paiement reçu. Ne remettez pas la marchandise — un transfert peut encore arriver et apparaîtra dans votre solde. Demandez un nouveau contact seulement si rien n’apparaît.',
+      'Aucun paiement reçu. Ne remettez pas la marchandise - un transfert peut encore arriver et apparaîtra dans votre solde. Demandez un nouveau contact seulement si rien n’apparaît.',
     unsupportedAsset: currency => `Actif non pris en charge (monnaie ${currency})`,
     cannotConfirmAsset: currency => `Impossible de confirmer l’actif (monnaie ${currency})`,
     couldntReadRequest: 'Impossible de lire la demande de paiement',
-    requestExpired: 'Cette demande a expiré — demandez-en une nouvelle',
-    couldntAuthorize: 'Impossible d’autoriser le paiement — réessayez',
+    requestExpired: 'Cette demande a expiré - demandez-en une nouvelle',
+    couldntAuthorize: 'Impossible d’autoriser le paiement - réessayez',
     noOpenRequest: 'Aucune demande en cours',
     paymentRejected: 'Paiement refusé',
     couldntConfirm: 'Impossible de confirmer',
-    couldntConfirmCheckBalance: 'Impossible de confirmer — vérifiez votre solde',
-    settlementNotVerified: 'Confirmé, mais ce n’est pas cette demande — vérifiez la signature avant la remise',
+    couldntConfirmCheckBalance: 'Impossible de confirmer - vérifiez votre solde',
+    settlementNotVerified: 'Confirmé, mais ce n’est pas cette demande - vérifiez la signature avant la remise',
     paymentRequestExpired: 'Cette demande de paiement a expiré',
   },
 };

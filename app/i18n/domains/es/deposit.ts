@@ -1,11 +1,11 @@
 /**
- * i18n/domains/es/deposit.ts — Spanish values for the deposit + withdraw surfaces.
+ * i18n/domains/es/deposit.ts - Spanish values for the deposit + withdraw surfaces.
  *
  * Reference copy, types and rationale: domains/en/deposit.ts. Glossary: i18n/es.ts.
  */
 import type {DepositMessages, WithdrawMessages} from '../../keys';
 
-/** Word-for-word identical on both sheets in Spanish too — one source, spread into both objects. */
+/** Word-for-word identical on both sheets in Spanish too - one source, spread into both objects. */
 const bothSheets = {
   pressEsc: 'Pulsa Esc para cerrar',
   balanceAuto: 'Tu saldo se actualiza automáticamente.',
@@ -146,7 +146,7 @@ export const depositEs: DepositMessages = {
     checkingAta: asset => `Revisando tu cuenta de ${asset}…`,
     ataUnverified: asset => `No se pudo revisar tu cuenta de ${asset}.`,
     ataUnverifiedDetail: asset =>
-      `Tu dirección está bien; dpay simplemente no consigue contactar con Solana para confirmar tu cuenta de ${asset}. Revisa tu conexión e inténtalo de nuevo.`,
+      `Tu dirección está bien; dpay no consigue contactar con Solana para confirmar tu cuenta de ${asset}. Revisa tu conexión e inténtalo de nuevo.`,
     ataUnverifiedRefused: asset =>
       `Tu dirección está bien; Solana rechazó la solicitud, así que no se pudo confirmar tu cuenta de ${asset}. Inténtalo de nuevo en un momento.`,
     ataUnverifiedOffline: asset =>
@@ -172,7 +172,7 @@ export const depositEs: DepositMessages = {
   },
 
   ata: {
-    absent: asset => `Aún no hay una cuenta de ${asset} en este dispositivo.`,
+    absent: asset => `Aún no hay una cuenta de ${asset}.`,
     cost: (setupCost, asset) =>
       `Crear tus ${asset} cuesta ${setupCost}, de tu saldo de SOL. Las cuentas son tuyas y están bajo tus claves.`,
     checkingSol: 'Revisando tu saldo de SOL…',
@@ -202,7 +202,7 @@ export const depositEs: DepositMessages = {
     confirmAction: 'Confirmar',
     cancelAction: 'Cancelar',
     settingUp: 'Espera, tu cuenta se está configurando. Esto tarda 1-2 minutos.',
-    errNextSafe: 'No salió nada de tu wallet. Puedes completar la configuración de nuevo cuando quieras.',
+    errNextSafe: 'No salió nada de tu wallet. Completa la configuración de nuevo cuando quieras.',
     errNextUnknown: 'Revisa tu saldo de SOL en un momento: si el SOL llegó, completa la configuración de nuevo para crear las cuentas; si no, tu saldo te muestra dónde está tu dinero.',
     swapFailed: 'El canje no se completó: no se creó nada y el token canjeado sigue en tu wallet.',
     swapUnknown: 'El canje fue aceptado pero aún no se confirma. Revisa tu saldo de SOL en un momento y vuelve a completar la configuración.',
@@ -237,7 +237,7 @@ export const depositEs: DepositMessages = {
       {t: token, em: true},
       {t: ' en '},
       {t: chain, em: true},
-      {t: ' en una billetera tuya — un poco más de lo que quieras mover, porque la comisión sale de ahí. Después conecta esa billetera aquí: ella firma la transferencia.'},
+      {t: ' en una billetera tuya - un poco más de lo que quieras mover, porque la comisión sale de ahí. Después conecta esa billetera aquí: ella firma la transferencia.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'Ningún proveedor vende '},
@@ -281,7 +281,7 @@ export const withdrawEs: WithdrawMessages = {
   badAddress: asset => `Esto no parece una dirección de ${asset} válida.`,
   toDestination: destination => `a ${destination}`,
   enterAmount: 'Introduce un importe',
-  offlineReviewNote: 'Estás sin conexión - aún puedes revisar este envío. Solo sale de tu billetera cuando la red lo acepta; sin conexión, confirmar falla.',
+  offlineReviewNote: 'Estás sin conexión - revisa el envío. Solo sale de tu billetera cuando la red lo acepta; sin conexión, confirmar falla.',
 
   ic: {
     resumed: 'Había un retiro en curso cuando se cerró la app. Reintentar vuelve a enviar el mismo pago: no puede gastar dos veces.',
@@ -333,8 +333,8 @@ export const withdrawEs: WithdrawMessages = {
     refuseMistypedIc: 'Esta dirección de Internet Computer está incompleta o mal escrita: comprueba que la has copiado entera.',
     refuseMistypedLegacy: 'Esta dirección de cuenta ICP está incompleta o mal escrita: comprueba que has copiado los 64 caracteres.',
     refuseOwnSubaccount:
-      'Esa es una subcuenta de tu propia billetera. dpay solo muestra y usa tu cuenta principal, así que el dinero enviado ahí dejaría de aparecer aquí. Pega la dirección de otra persona para enviar.',
-    selfWarning: 'Es tu propia dirección: el dinero vuelve directamente a ti y aun así pagas la comisión.',
+      'Esa es una subcuenta de tu billetera. dpay solo muestra y usa tu cuenta principal, así que el dinero enviado ahí dejaría de aparecer en Saldos. Pega la dirección de otra persona para enviar.',
+    selfWarning: 'Es tu dirección: el dinero vuelve directamente a ti y aun así pagas la comisión.',
 
     maxLabel: 'Máx.',
     feeLine: fee => `Comisión de red ${fee}`,
@@ -345,7 +345,7 @@ export const withdrawEs: WithdrawMessages = {
     forgetLabel: address => `Eliminar la dirección guardada ${address}`,
     unnamed: 'Sin nombre',
     ownAddress: 'Mi direcci\u00f3n',
-    ownAddressHint: 'Rellenar con la direcci\u00f3n de esta propia billetera',
+    ownAddressHint: 'Rellenar con la direcci\u00f3n de esta billetera',
     manage: 'Libreta de direcciones',
     manageHint: 'Ver, nombrar y eliminar las direcciones guardadas',
 
@@ -379,7 +379,7 @@ export const withdrawEs: WithdrawMessages = {
     copySignature: 'Copiar firma',
     sending: amount => `Enviando ${amount}…`,
     confirmingOnSolana: 'Confirmando en Solana: hasta un minuto.',
-    sentUnknown: 'Enviado — aún sin confirmar',
+    sentUnknown: 'Enviado - aún sin confirmar',
     sentUnknownBody:
       'La red la aceptó, pero la confirmación no llegó a tiempo. Puede completarse: comprueba tu saldo en lugar de enviar de nuevo.',
     sendToSolana: asset => `Envía tus ${asset} a una dirección de Solana`,

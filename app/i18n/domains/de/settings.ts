@@ -1,5 +1,5 @@
 /**
- * i18n/domains/de/settings.ts — German values for the Settings sheet + the Onboarding flow.
+ * i18n/domains/de/settings.ts - German values for the Settings sheet + the Onboarding flow.
  * Types, key documentation and the reference copy: ../en/settings.ts. Glossary: ../../de.ts.
  */
 import type {CopyWordsCopy, OnboardingMessages, SettingsMessages} from '../../keys';
@@ -44,7 +44,7 @@ export const settingsDe: SettingsMessages = {
   restore: {
     label: 'Wiederherstellen',
     warning:
-      'Ersetzt deine aktuelle Wallet. Sichere sie zuerst — ihr Guthaben ist nur mit ihrem eigenen Seed erreichbar.',
+      'Ersetzt deine aktuelle Wallet. Sichere sie zuerst - ihr Guthaben ist nur mit ihrem eigenen Seed erreichbar.',
     seedPlaceholder: '24 Wiederherstellungswörter oder 64 Hex-Zeichen',
     seedA11y: 'Wiederherstellungs-Seed',
     seedHint: '24 Wiederherstellungswörter oder der 64-Hex-Seed aus dem Backup',
@@ -107,15 +107,15 @@ export const settingsDe: SettingsMessages = {
     serverPlaceholder: 'http://<ip>:8787',
     apply: 'Übernehmen',
     applyA11y: 'Server-URL übernehmen',
-    solanaNote: 'Liest Guthaben und sendet Zahlungen. Leer folgt der Serverliste; ein eigener Anbieter nimmt dpay aus dem Pfad.',
+    solanaNote: 'Liest Guthaben und sendet Zahlungen. Leer folgt der Serverliste; ein anderer Anbieter nimmt dpay aus dem Pfad.',
     solanaLabel: 'Solana-Endpunkt',
     solanaPlaceholder: 'https://<anbieter>/?api-key=<schlüssel>',
     solanaApplyA11y: 'Solana-Endpunkt übernehmen',
-    evmNote: 'Wickelt ZCHF auf Ethereum und Arbitrum One über das dpay-Relais ab. Leer folgt dem Server; ein Endpunkt bedient ALLE Chains \u2014 er muss zuerst die richtige Chain nachweisen.',
+    evmNote: 'Wickelt ZCHF auf Ethereum und Arbitrum One über das dpay-Relais ab. Leer folgt dem Server; ein Endpunkt bedient ALLE Chains  -  er muss zuerst die richtige Chain nachweisen.',
     evmLabel: 'EVM-Endpunkt (alle Chains)',
     evmPlaceholder: 'https://<anbieter>',
     evmApplyA11y: 'EVM-Endpunkt übernehmen',
-    // F2 — der IC-Gateway-Override. Nur für Betreiber (Demos/Tests gegen eine lokale Replica),
+    // F2 - der IC-Gateway-Override. Nur für Betreiber (Demos/Tests gegen eine lokale Replica),
     // kein Nutzer-Feature; der Hinweis sagt es ehrlich, wie die Solana-Zeile darüber.
     icGatewayNote: 'Nur für Betreiber. Leer nutzt das öffentliche Gateway; setze eine lokale Replica für Demos und Tests.',
     icGatewayLabel: 'IC-Gateway',
@@ -126,17 +126,17 @@ export const settingsDe: SettingsMessages = {
   about: {
     label: 'Über dpay',
     custody:
-      'Nicht verwahrend: Dein Geld wird allein durch den Schlüssel auf diesem Gerät kontrolliert. Kein dpay-Konto. dpay kann es weder bewegen noch einfrieren noch wiederherstellen — deine 24 Backup-Wörter sind der einzige Weg zurück.',
+      'Nicht verwahrend: Dein Geld wird allein durch deinen Schlüssel kontrolliert. Kein dpay-Konto. dpay kann es weder bewegen noch einfrieren noch wiederherstellen - deine 24 Backup-Wörter sind der einzige Weg zurück.',
     privacy: 'Datenschutzerklärung',
   },
 };
 
 export const onboardingDe: OnboardingMessages = {
-  tagline: 'Auflegen oder scannen zum Bezahlen — online oder offline.',
+  tagline: 'Auflegen oder scannen zum Bezahlen - online oder offline.',
   custody: 'Kein Konto. Dein Schlüssel verlässt dieses Handy nie. Nicht einmal dpay kann dein Geld bewegen.',
   continue: 'Weiter',
   errOwnSeed:
-    'Dieser Seed sieht nicht richtig aus. Füge deine 24 Wiederherstellungswörter oder den 64-Hex-Seed genau so ein.',
+    'Dieser Seed sieht nicht richtig aus. Füge deine 24 Wiederherstellungswörter oder den 64-Hex-Seed vollständig ein.',
   errWords: 'Einige Wörter sind falsch oder fehlen. Prüfe alle 24.',
   errSaveWallet: 'Deine Wallet wurde nicht gespeichert. Tippe erneut auf Weiter. Wenn es weiter fehlschlägt, gib Speicherplatz auf dem Handy frei.',
 
@@ -149,7 +149,7 @@ export const onboardingDe: OnboardingMessages = {
     ...copyWordsDe,
     title: 'Sichere deine Wallet',
     warning:
-      'Schreib diese 24 Wörter auf und bewahre sie sicher auf. Sie sind der einzige Weg, diese Wallet wiederherzustellen — nicht einmal dpay kann sie wiederherstellen.',
+      'Schreib diese 24 Wörter auf und bewahre sie sicher auf. Sie sind der einzige Weg, diese Wallet wiederherzustellen - nicht einmal dpay kann sie wiederherstellen.',
     copyWordsHint: 'Kopiert die 24 Wörter',
     ack: 'Ich habe alle 24 Wörter aufgeschrieben',
   },
@@ -181,7 +181,7 @@ export const onboardingDe: OnboardingMessages = {
     useRandom: 'Stattdessen zufälligen Seed erzeugen',
     toggleHint: 'Füge den Seed einer bestehenden Wallet ein',
     placeholder: 'Deine 24 Wörter oder der 64-Hex-Seed',
-    a11y: 'Eigener Seed',
+    a11y: 'Seed selbst wählen',
     hint: 'Der Seed, aus dem diese Wallet gebaut wird',
     note: 'Leer lassen, um einen zu erzeugen.',
   },
@@ -192,5 +192,5 @@ export const onboardingDe: OnboardingMessages = {
   },
 
   demoNote: 'Beim Erstellen der Wallet wird kein Geld bewegt.',
-  demoGlyphNote: ' ist Übungsgeld ohne Geldwert — ∂1 ist einfach eine DEMO-Einheit.',
+  demoGlyphNote: ' ist Übungsgeld ohne Geldwert - ∂1 ist eine DEMO-Einheit.',
 };

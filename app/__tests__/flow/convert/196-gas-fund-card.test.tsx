@@ -133,7 +133,7 @@ hermeticDescribe('flow 196 — the cross-rail gas-fund card', () => {
       expect(await m.driver.waitForText('Nothing crossed', {timeoutMs: 10_000})).toBe(true);
       const failedCard = m.driver.readText('convert-failed-leg');
       assertIncludes(failedCard, DEST, 'the decline card names the USDC\'s address');
-      assertIncludes(failedCard, 'still in this wallet', 'the decline card names where the gas funding sits');
+      assertIncludes(failedCard, 'landed, untouched', 'the decline card names where the gas funding sits'); // copy-economy sweep: filler removed, fact kept;
 
       // Ledger truth: the funding left the wallet and the ckETH net position is UP.
       const icpAfter = BigInt(await getBalance(account!.publicHex, 8));

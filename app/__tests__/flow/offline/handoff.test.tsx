@@ -45,7 +45,7 @@ hermeticDescribe('flow 20 — offline envelope hand-off + reconcile-by-request_i
 
     // One-press: the scan AUTO-SIGNS while offline. The transient sign status may flash by unread
     // on a fast host, so the QR surface is the assert (the ∂25.00 rides the amountBig line).
-    expect(await m.driver.waitForText('signed on this device ✓', {timeoutMs: 8000})).toBe(true);
+    expect(await m.driver.waitForText('signed ✓', {timeoutMs: 8000})).toBe(true); // copy-economy sweep: "on this device" dropped, the signed check stays
 
     // The hand-off QR payload is base64url(envelope bytes) — the exact bytes the merchant app POSTs.
     const payload = g.__DPAY_QR_LAST as string;

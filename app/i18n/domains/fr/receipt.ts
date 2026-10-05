@@ -1,5 +1,5 @@
 /**
- * i18n/domains/fr/receipt.ts — valeurs françaises du reçu d’une transaction.
+ * i18n/domains/fr/receipt.ts - valeurs françaises du reçu d’une transaction.
  * Types, documentation des clés et copie de référence : ../en/receipt.ts. Glossaire : ../../fr.ts.
  */
 import type {ReceiptMessages} from '../../keys';
@@ -25,12 +25,12 @@ export const receiptFr: ReceiptMessages = {
   noAccount: 'Aucun compte enregistré de ce côté.',
   partyPool: 'Un pool de liquidité',
   noReferenceIc: 'Ce transfert ne portait pas de mémo.',
-  noReferenceSolana: 'Solana ne porte aucune référence dpay — la signature l’identifie.',
-  pendingProof: 'Pas encore confirmé — sera réglé dans le registre plus tard.',
+  noReferenceSolana: 'Solana ne porte aucune référence dpay - la signature l’identifie.',
+  pendingProof: 'Pas encore confirmé - sera réglé dans le registre plus tard.',
 
   copy: 'Copier le reçu',
   copied: 'Copié ✓',
   copyHint: 'Copie toutes les lignes ci-dessus',
   source: 'Lu dans le registre.',
-  sourceAnnotated: 'Lu dans le registre · nom et note enregistrés sur cet appareil.',
+  sourceAnnotated: 'Lu dans le registre · nom et note enregistrés sur votre téléphone.',
 };

@@ -79,7 +79,7 @@ describe('PassportArchive (the one full-page surface)', () => {
     expect(hasTestID(tree, 'passport-slot-flowUnderstood')).toBe(true);
     expect(hasTestID(tree, 'passport-slot-paymentTested')).toBe(true);
     // The ONE contextual next step names the first missing capability.
-    expect(findByTestID(tree, 'passport-hint').props.children).toBe('Make the practice payment — or any payment');
+    expect(findByTestID(tree, 'passport-hint').props.children).toBe('Make the practice payment - or any payment') // copy-economy sweep: em-dash to plain hyphen;
     // Incomplete NEVER retires — no Done button exists.
     expect(hasTestID(tree, 'btn-passport-done')).toBe(false);
   });
@@ -138,7 +138,7 @@ describe('PassportArchive (the one full-page surface)', () => {
     // The completed page's durable mark + promise line are present.
     const texts = tree.root.findAll(n => typeof n.props?.children === 'string').map(n => n.props.children);
     expect(texts).toContain('Trip ready');
-    expect(texts).toContain('You can pay even when your phone has no signal.');
+    expect(texts).toContain('Pay even when your phone has no signal.'); // copy-economy sweep: "You can" filler dropped
   });
 
   test('reduced motion: complete un-stamped journey still reaches Done — via the at-rest 200ms beat, no animated press', async () => {

@@ -382,7 +382,7 @@ describe('CkErc20DepositSheet — submit() routes on whether the DEPOSIT tx was 
     await driveSubmit(tree);
 
     expect(statusText(tree)).toContain('Transaction not signed.');
-    expect(statusText(tree)).toContain('spending approval is already confirmed on chain');
+    expect(statusText(tree)).toContain('spending approval is confirmed on chain') // copy-economy sweep: filler removed, fact kept;
     expect(statusText(tree)).toContain('approve, then deposit');
     act(() => { tree.unmount(); });
   });

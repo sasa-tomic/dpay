@@ -450,11 +450,11 @@ describe('rail health + ramp lines — catalog facts or silence', () => {
   it('derives the ramp line from the capabilities, and stays silent otherwise', () => {
     // The legacy row: Unavailable onramp + Partner offramp naming DFX — the partner comes from
     // the row, whatever row it is.
-    expect(railRampLine(legacyVeur)).toBe('DFX — sell only today.');
+    expect(railRampLine(legacyVeur)).toBe('DFX - sell only today.'); // copy-economy sweep: em-dash to plain hyphen
     // VCHF/EURC/SOL: Unavailable both ways ⇒ wallet-to-wallet, no ramp implied.
-    expect(railRampLine(vchf)).toBe('No fiat ramp — wallet to wallet only.');
-    expect(railRampLine(eurc)).toBe('No fiat ramp — wallet to wallet only.');
-    expect(railRampLine(sol)).toBe('No fiat ramp — wallet to wallet only.');
+    expect(railRampLine(vchf)).toBe('No fiat ramp - wallet to wallet only.'); // copy-economy sweep: em-dash to plain hyphen
+    expect(railRampLine(eurc)).toBe('No fiat ramp - wallet to wallet only.'); // copy-economy sweep: em-dash to plain hyphen
+    expect(railRampLine(sol)).toBe('No fiat ramp - wallet to wallet only.'); // copy-economy sweep: em-dash to plain hyphen
     // ckUSDC: Direct both ways ⇒ the wired deposit/cash-out statement.
     expect(railRampLine(ckusdc)).toBe('Deposit and cash-out are wired in.');
   });

@@ -101,7 +101,7 @@ hermeticDescribe('flow 190 — the hub 2-hop conversion (VCHF → ICP → ETH), 
       assertIncludes(census, 'Pool fee: 0.30% (ICPSwap fee tier)', 'each hop names its own fee tier');
       assertIncludes(census, 'Approving the next pool costs 0.0001 VCHF', 'hop 1\'s approve cost is its own census line');
       assertIncludes(census, 'Approving the next pool costs 0.0001 ICP', 'hop 2\'s approve cost is its own census line');
-      assertIncludes(census, 'the surplus stays in this wallet as ICP or ETH.', 'the surplus note covers both hops');
+      assertIncludes(census, 'the surplus stays spendable as ICP or ETH.', 'the surplus note covers both hops'); // copy-economy sweep: filler removed, fact kept;
 
       // Confirm: four legs, per-leg status, the in-wallet receipt.
       let confirmed = false;

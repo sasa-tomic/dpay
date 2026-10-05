@@ -80,7 +80,7 @@ hermeticDescribe('flow 198 — SOL → ICP via the trocador aggregator: every ve
       assertIncludes(m.driver.readText('convert-deposit-address'), DEPOSIT_ADDRESS_TROCADOR, 'the venue deposit address renders verbatim');
       const handoff = m.driver.readText('convert-deposit-handoff');
       assertIncludes(handoff, '2 SOL', 'the exact deposit amount renders in the deposit asset');
-      assertIncludes(handoff, 'exactly the deposit amount', 'the handoff says what to send');
+      assertIncludes(handoff, 'exact deposit amount', 'the handoff says what to send'); // copy-economy sweep: filler removed, fact kept;
       assertIncludes(handoff, 'not a party', 'dpay party-hood denied');
       expect(await m.driver.waitForText('Done', {timeoutMs: 1_000, unscaled: true}).catch(() => false)).toBe(false);
       expect(solSentTxs().length).toBe(0);
@@ -118,7 +118,7 @@ hermeticDescribe('flow 198 — SOL → ICP via the trocador aggregator: every ve
       expect(await m.driver.waitForText('Done', {timeoutMs: 90_000})).toBe(true);
       const done = m.driver.readText('convert-done');
       assertIncludes(done, '0.0496 ICP', 'done reports the realized settle figure');
-      assertIncludes(done, 'Paid out to your own address', 'done names the payout destination');
+      assertIncludes(done, 'Paid out to your address', 'done names the payout destination'); // copy-economy sweep: filler removed, fact kept;
       assertIncludes(done, settle.slice(0, 12), 'the payout address IS the derived IC identifier');
       expect(kp.address.length).toBeGreaterThanOrEqual(32);
     } finally {

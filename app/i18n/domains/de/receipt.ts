@@ -1,5 +1,5 @@
 /**
- * i18n/domains/de/receipt.ts — Deutsche Werte für den Transaktions-Beleg.
+ * i18n/domains/de/receipt.ts - Deutsche Werte für den Transaktions-Beleg.
  * Typen, Key-Dokumentation und die Referenz-Copy: ../en/receipt.ts. Glossar: ../../de.ts.
  */
 import type {ReceiptMessages} from '../../keys';
@@ -25,12 +25,12 @@ export const receiptDe: ReceiptMessages = {
   noAccount: 'Kein Konto auf dieser Seite vermerkt.',
   partyPool: 'Ein Liquiditätspool',
   noReferenceIc: 'Diese Überweisung trug kein Memo.',
-  noReferenceSolana: 'Solana trägt keine dpay-Referenz — die Signatur identifiziert sie.',
-  pendingProof: 'Noch nicht bestätigt — wird später im Ledger verbucht.',
+  noReferenceSolana: 'Solana trägt keine dpay-Referenz - die Signatur identifiziert sie.',
+  pendingProof: 'Noch nicht bestätigt - wird später im Ledger verbucht.',
 
   copy: 'Beleg kopieren',
   copied: 'Kopiert ✓',
   copyHint: 'Kopiert alle Zeilen oben',
   source: 'Aus dem Ledger gelesen.',
-  sourceAnnotated: 'Aus dem Ledger gelesen · Name und Notiz auf diesem Gerät gespeichert.',
+  sourceAnnotated: 'Aus dem Ledger gelesen · Name und Notiz auf deinem Handy gespeichert.',
 };

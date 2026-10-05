@@ -1,5 +1,5 @@
 /**
- * i18n/domains/es/pay.ts — Spanish values for the Pay + Receive screens.
+ * i18n/domains/es/pay.ts - Spanish values for the Pay + Receive screens.
  *
  * Reference copy, types and rationale: domains/en/pay.ts. Glossary: i18n/es.ts.
  */
@@ -28,7 +28,7 @@ export const payEs: PayMessages = {
   showThisTo: who => `Muéstraselo a ${who}`,
   showThisToMerchant: 'Muéstraselo al comercio',
   amountToWho: (amount, who) => `${amount} a ${who}`,
-  signedOnThisDevice: 'firmado en este dispositivo ✓',
+  signedOnThisDevice: 'firmado ✓',
   signedOffline: 'firmado sin conexión ✓',
   waitingToScan: who => `Esperando a que ${who} lo escanee…`,
   offlineSettles: who =>
@@ -37,7 +37,7 @@ export const payEs: PayMessages = {
     'Sin conexión: el comercio lo confirma al enviarlo. Tu saldo se actualiza cuando quede confirmado.',
   handedTo: who => `Entregado a ${who}`,
   handedToMerchant: 'Entregado al comercio',
-  handedOffHint: 'Marca el pago como entregado — tu saldo se actualiza cuando el comercio lo confirme',
+  handedOffHint: 'Marca el pago como entregado - tu saldo se actualiza cuando el comercio lo confirme',
 
   unsupportedAsset: 'Activo no admitido',
   unsupportedAssetBody: currency =>
@@ -90,13 +90,13 @@ export const payEs: PayMessages = {
     unreportable: host =>
       `${host} no dio ninguna forma de informar de un pago, así que pagar te costaría el dinero sin que se abone la venta. No se ha pagado nada. Volver a escanear no ayudará: pide al comercio otra forma de pago.`,
     proofElsewhere: (quoteHost, proofHost) =>
-      `El precio viene de ${quoteHost}, pero el comprobante de tu pago iría a ${proofHost}. Una venta no puede responder ante dos empresas. No se ha pagado nada: pide al comercio su propio código.`,
+      `El precio viene de ${quoteHost}, pero el comprobante de tu pago iría a ${proofHost}. Una venta no puede responder ante dos empresas. No se ha pagado nada: pide al comercio su código.`,
     checkoutPrice: (price, host) => `${price} · precio de ${host}`,
     checkingCheckout: 'Comprobando con el proveedor de pagos…',
     badCode:
       'Este código está dañado, o no es un código de pago. Pide al comercio que lo muestre otra vez: comprueba que no lo tape nada.',
     notHttps:
-      'Este código apunta a una dirección insegura, así que dpay no lo abre. Pide al comercio su propio código: una pegatina encima del real tiene exactamente este aspecto.',
+      'Este código apunta a una dirección insegura, así que dpay no lo abre. Pide al comercio su código: una pegatina encima del real tiene este mismo aspecto.',
     providerUnreachable:
       'No se pudo contactar con el proveedor de pagos. No se ha pagado nada: comprueba tu conexión y vuelve a escanear.',
     badDestination: host =>
@@ -196,7 +196,7 @@ export const payEs: PayMessages = {
   nfcUnavailableTitle: 'NFC no disponible',
   close: 'Cerrar',
 
-  noCameraFound: 'No se encontró ninguna cámara en este dispositivo.',
+  noCameraFound: 'No se encontró ninguna cámara.',
   pointCamera: 'Apunta la cámara a un código de pago',
   cameraPrivacy: 'Solo para escanear códigos: nunca graba ni sube nada.',
   allowCameraScan: 'Permitir la cámara',
@@ -214,7 +214,7 @@ export const receiveEs: ReceiveMessages = {
   creating: 'Creando…',
   solanaOffline: 'Solana está sin conexión: conéctate para crear una solicitud de pago.',
   solAmountUnderFee: fee =>
-    `Una solicitud en SOL debe superar la comisión de red (${fee}). La comisión es tuya: quien paga paga exactamente lo que tú escribes.`,
+    `Una solicitud en SOL debe superar la comisión de red (${fee}). La comisión es tuya: quien paga paga lo que tú escribes.`,
   solFeeLine: (fee, receives) => `Comisión ${fee} · recibes ${receives}`,
 
   receiveInTitle: 'Recibir en',
@@ -229,13 +229,13 @@ export const receiveEs: ReceiveMessages = {
     feeUnknown: network => `${network} · Comisión desconocida`,
   },
   feeNetLine: (fee, net) => `Comisión ${fee} · recibes ${net}`,
-  feeTooBig: fee => `Este importe no cubre la comisión de red (${fee}) — solicita un importe mayor.`,
+  feeTooBig: fee => `Este importe no cubre la comisión de red (${fee}) - solicita un importe mayor.`,
   showToPayer: nfc =>
     `Muéstraselo a quien paga${nfc === 'tap' ? ' · o que acerque su teléfono' : nfc === 'expired' ? ' · NFC caducado' : ''}`,
   expiredMakeNew: 'Caducada: crea una solicitud nueva',
   validForMin: minutes => `Válida ~${minutes} min`,
   expiresIn: seconds => `Caduca en 0:${seconds}`,
-  waitingForPayment: online => `Esperando el pago${online ? '…' : ' — conéctate para enviarlo…'}`,
+  waitingForPayment: online => `Esperando el pago${online ? '…' : ' - conéctate para enviarlo…'}`,
   waitingForSign: 'Esperando a que quien paga firme sin conexión…',
   offlineCantSubmit: 'Sin conexión: no se pueden enviar pagos hasta que vuelvas a conectarte',
   shareRequestLink: 'Compartir enlace de la solicitud',
@@ -272,7 +272,7 @@ export const receiveEs: ReceiveMessages = {
   broadcasting: 'Enviando a la red de Solana: puede tardar hasta un minuto.',
 
   checkout: {
-    checkoutCode: 'Muestra también un código de caja para apps OpenCryptoPay (Binance Pay, MoonPay) — el pagador debe tener la app abierta',
+    checkoutCode: 'Muestra también un código de caja para apps OpenCryptoPay (Binance Pay, MoonPay) - el pagador debe tener la app abierta',
 
     openChargeHint: 'Abrir este importe en tu caja y mostrar al cliente un código pagable',
     badAmount: reason =>
@@ -311,7 +311,7 @@ export const receiveEs: ReceiveMessages = {
     settleOption: (token, currency) => `${token} · ${currency}`,
 
     settlesAs: (amount, price) =>
-      `Usted recibe ${amount} — la comisión del libro mayor corre de su cuenta, así que el cliente paga exactamente ${price}.`,
+      `Usted recibe ${amount} - la comisión del libro mayor corre de su cuenta, así que el cliente paga ${price}.`,
     collecting: 'Cobrando el pago autorizado por el cliente…',
     collectNotApproved:
       'El cliente no autorizó lo suficiente, o la autorización ha caducado. Pídale que vuelva a pagar el código: no se ha cobrado nada.',

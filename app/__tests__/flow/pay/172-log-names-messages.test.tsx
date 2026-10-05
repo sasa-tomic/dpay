@@ -177,7 +177,7 @@ hermeticDescribe('flow 172 — device-saved notes name the transaction log, acro
     assertIncludes(m.driver.readText('txn-receipt-note'), 'coffee', '(a) receipt Note is the saved message');
     assertIncludes(m.driver.readText('txn-receipt-account'), bobPrincipal, '(a) receipt account stays the FULL payee principal');
     assertIncludes(m.driver.readText('txn-receipt-ref'), nonceA, '(a) receipt reference stays the hex nonce');
-    assertIncludes(m.driver.bodyText(), 'saved on this device', '(a) the annotated receipt foots honestly');
+    assertIncludes(m.driver.bodyText(), 'saved on your phone', '(a) the annotated receipt foots honestly'); // copy-economy sweep: filler removed, fact kept;
     await m.driver.click('btn-txn-receipt-close', {timeoutMs: 4000});
     await m.driver.waitGone('txn-receipt', {timeoutMs: 4000});
 
@@ -239,7 +239,7 @@ hermeticDescribe('flow 172 — device-saved notes name the transaction log, acro
     assertIncludes(m.driver.readText('txn-receipt-peer'), SPAY_LABEL, '(c) receipt Peer is the spay label');
     assertIncludes(m.driver.readText('txn-receipt-note'), SPAY_MESSAGE, '(c) receipt Note is the spay message');
     assertIncludes(m.driver.readText('txn-receipt-account'), SOL_MERCHANT, '(c) receipt account is the FULL merchant pubkey');
-    assertIncludes(m.driver.bodyText(), 'saved on this device', '(c) the annotated receipt foots honestly');
+    assertIncludes(m.driver.bodyText(), 'saved on your phone', '(c) the annotated receipt foots honestly'); // copy-economy sweep: filler removed, fact kept;
     await m.driver.click('btn-txn-receipt-close', {timeoutMs: 4000});
     await m.driver.waitGone('txn-receipt', {timeoutMs: 4000});
 

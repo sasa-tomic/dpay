@@ -1,17 +1,17 @@
 /**
- * i18n/fr.ts — French (fr).
+ * i18n/fr.ts - French (fr).
  *
  * Translated FROM en.ts, which is the reference copy: its style rules (plain language, honest
  * states, never a raw ledger/token identifier) carry over unchanged. When a key changes, it changes
  * in English first and `tsc` reports this locale.
  *
  * TYPOGRAPHY. `’` is the apostrophe (never `'`). A NARROW NO-BREAK SPACE (U+202F) sits before `:`
- * `;` `?` `!` — it is a real character in these strings, not an ordinary space; keep it when you
+ * `;` `?` `!` - it is a real character in these strings, not an ordinary space; keep it when you
  * edit a line. Product identity is NOT translated: dpay, Bitcoin, Ethereum, Solana, Internet
  * Computer, USDC, ckBTC/ckETH/ckUSDC, SOL, ETH, BTC, NFC, QR, testnet, devnet, mainnet, and every
- * glyph (∂ $ € ₿ • ✓ · — ~ ≈).
+ * glyph (∂ $ € ₿ • ✓ · - ~ ≈).
  *
- * GLOSSARY — one French term per concept, applied with zero variation. A future translator inherits
+ * GLOSSARY - one French term per concept, applied with zero variation. A future translator inherits
  * these; change one only by changing every site.
  *
  *   payment / to pay ............. paiement / payer
@@ -22,7 +22,7 @@
  *   offline / online ............. hors ligne / en ligne
  *   tap (NFC) .................... sans contact (the gesture: approcher les téléphones)
  *   scan ......................... scanner
- *   merchant / the shop .......... commerçant (one word for both — French has no useful split here)
+ *   merchant / the shop .......... commerçant (one word for both - French has no useful split here)
  *   payer ........................ payeur
  *   wallet ....................... portefeuille
  *   balance ...................... solde
@@ -90,7 +90,7 @@ export const fr: Messages = {
 
   nfc: {
     reason: {
-      off: 'Le NFC est désactivé dans les paramètres de votre appareil. Activez-le pour payer sans contact — ou scannez le QR pour payer maintenant.',
+      off: 'Le NFC est désactivé dans les paramètres de votre appareil. Activez-le pour payer sans contact - ou scannez le QR pour payer maintenant.',
       unsupported: 'Cet appareil n’a pas de NFC. Scannez le QR pour payer.',
       unknown: 'Impossible de vérifier l’état du NFC. Scannez le QR pour payer.',
     },
@@ -116,23 +116,23 @@ export const fr: Messages = {
 
   rail: {
     insufficientFunds: 'Solde insuffisant',
-    badFee: detail => `Frais incorrects${detail ? ` (${detail})` : ''} — réessayez`,
+    badFee: detail => `Frais incorrects${detail ? ` (${detail})` : ''} - réessayez`,
     badBurn: detail => `Montant inférieur au minimum du registre${detail ? ` (${detail})` : ''}`,
     tooOld: 'La demande a expiré',
-    createdInFuture: 'Décalage d’horloge — réessayez',
-    temporarilyUnavailable: 'Le registre est occupé — réessayez',
+    createdInFuture: 'Décalage d’horloge - réessayez',
+    temporarilyUnavailable: 'Le registre est occupé - réessayez',
     declined: detail =>
       detail ? `Le registre a refusé le paiement (${detail})` : 'Le registre a refusé le paiement',
   },
 
   sol: {
     noRecordOfCredit:
-      'Ce compte n’a pas de SOL, ou le réseau n’a pas encore synchronisé votre solde. Si vous venez de déposer, patientez un instant et réessayez — sinon, déposez d’abord des SOL à votre adresse.',
+      'Ce compte n’a pas de SOL, ou le réseau n’a pas encore synchronisé votre solde. Si vous venez de déposer, patientez un instant et réessayez - sinon, déposez d’abord des SOL à votre adresse.',
     timedOut: 'Délai dépassé. Vérifiez votre connexion et réessayez.',
     insufficient: 'Pas assez de SOL pour cet envoi et les frais de réseau.',
     rentExempt: 'Après cet envoi, votre compte passerait sous le solde minimum. Envoyez un montant plus petit.',
     blockhash: 'Le réseau était trop chargé. Réessayez.',
-    tapFailed: 'Le paiement n’a pas abouti — réessayez',
+    tapFailed: 'Le paiement n’a pas abouti - réessayez',
   },
 
   errors: errorsFr,

@@ -1,10 +1,10 @@
 /**
- * i18n/domains/en/settings.ts — the Settings sheet + the Onboarding (create/restore/backup) flow.
+ * i18n/domains/en/settings.ts - the Settings sheet + the Onboarding (create/restore/backup) flow.
  *
  * Two namespaces, one file: they are the app's two "wallet identity" surfaces and they share the
  * same recovery vocabulary (the 24 words, the 64-hex seed, the copy-feedback ladder), so keeping
  * them together is what lets that vocabulary have exactly ONE English source instead of two that
- * drift. `CopyWordsCopy` below is that shared source — spread into both `settings.backup` and
+ * drift. `CopyWordsCopy` below is that shared source - spread into both `settings.backup` and
  * `onboarding.backup`.
  *
  * Conventions (see keys.ts for the reasoning):
@@ -41,7 +41,7 @@ export type SettingsMessages = {
   title: string;
   close: string;
 
-  /** Reveal the recovery seed — words by default, raw hex behind a toggle. */
+  /** Reveal the recovery seed - words by default, raw hex behind a toggle. */
   backup: CopyWordsCopy & {
     label: string;
     /** Shown at BOTH steps of the two-step gate (the confirm and the revealed view). */
@@ -61,7 +61,7 @@ export type SettingsMessages = {
     revealA11y: string;
     revealHint: string;
     cancelA11y: string;
-    /** The action, named plainly — also the entry button's accessibilityLabel. */
+    /** The action, named plainly - also the entry button's accessibilityLabel. */
     action: string;
     /** The entry button's visible text; the ellipsis signals the confirm step. */
     entry: string;
@@ -81,7 +81,7 @@ export type SettingsMessages = {
     cancelA11y: string;
     entry: string;
     entryHint: string;
-    /** Validation failures for the pasted seed — shown inline, never silently ignored. */
+    /** Validation failures for the pasted seed - shown inline, never silently ignored. */
     errEmpty: string;
     errWords: string;
   };
@@ -105,7 +105,7 @@ export type SettingsMessages = {
     howItWorksHint: string;
   };
 
-  /** The address-book route entry — browse, name, add and remove the saved destinations
+  /** The address-book route entry - browse, name, add and remove the saved destinations
    *  (services/addressBook.ts, rendered by AddressesTab). */
   addressBook: {
     label: string;
@@ -127,7 +127,7 @@ export type SettingsMessages = {
   /**
    * The language picker. The language NAMES are deliberately NOT here: a picker shows every
    * language in its own language ("Deutsch" stays "Deutsch" on an English phone), so the endonyms
-   * are data in i18n/locale.ts, not copy — translating them is what produces the "Tedesco/German/
+   * are data in i18n/locale.ts, not copy - translating them is what produces the "Tedesco/German/
    * Allemand" mess that leaves a user unable to find their own language. Only the heading, the
    * follow-the-device option, and the per-segment accessible name are translated.
    */
@@ -151,13 +151,13 @@ export type SettingsMessages = {
     applyA11y: string;
     /**
      * The Solana RPC endpoint (`setSolanaRpcUrl`, config/constants.ts). It was configurable in code
-     * and applied at boot from storage, but reachable from NO screen — so on a phone a dead
+     * and applied at boot from storage, but reachable from NO screen - so on a phone a dead
      * provider key meant waiting for a store release, which is exactly what the 2026-09-08 outage
      * cost. Same shape as the server row above: a draft, an explicit Apply, and an empty value
      * meaning "follow the relay list again" (R2: the default endpoint is the relay’s proxy route;
      * an operator-set provider removes dpay from the path).
      *
-     * `solanaError` is not written here — `setSolanaRpcUrl` throws its own actionable refusals
+     * `solanaError` is not written here - `setSolanaRpcUrl` throws its own actionable refusals
      * (not https, a devnet host, unparseable) and the sheet renders those verbatim.
      */
     solanaNote: string;
@@ -191,7 +191,7 @@ export const settingsEn: SettingsMessages = {
   backup: {
     ...copyWordsEn,
     label: 'Backup',
-    warning: 'Recovers both your IC and Solana funds. Store it safely — never share it.',
+    warning: 'Recovers both your IC and Solana funds. Store it safely - never share it.',
     copyWordsHint: 'Copies the 24 words',
     copySeed: 'Copy seed',
     seedCopied: 'Seed copied',
@@ -215,7 +215,7 @@ export const settingsEn: SettingsMessages = {
   restore: {
     label: 'Restore',
     warning:
-      'Replaces your current wallet. Back it up first — its money is reachable only with its own seed.',
+      'Replaces your current wallet. Back it up first - its money is reachable only with its own seed.',
     seedPlaceholder: '24 recovery words or 64 hex characters',
     seedA11y: 'Recovery seed',
     seedHint: '24 recovery words or the 64-hex seed from Backup',
@@ -278,15 +278,15 @@ export const settingsEn: SettingsMessages = {
     serverPlaceholder: 'http://<ip>:8787',
     apply: 'Apply',
     applyA11y: 'Apply server URL',
-    solanaNote: 'Reads balances and sends payments. Empty follows the server list; your own provider removes dpay from the path.',
+    solanaNote: 'Reads balances and sends payments. Empty follows the server list; a custom provider removes dpay from the path.',
     solanaLabel: 'Solana endpoint',
     solanaPlaceholder: 'https://<provider>/?api-key=<key>',
     solanaApplyA11y: 'Apply Solana endpoint',
-    evmNote: 'Settles ZCHF on Ethereum and Arbitrum One through dpay’s relay. Empty follows the server; one endpoint serves ALL chains \u2014 it must prove the right chain first.',
+    evmNote: 'Settles ZCHF on Ethereum and Arbitrum One through dpay’s relay. Empty follows the server; one endpoint serves ALL chains  -  it must prove the right chain first.',
     evmLabel: 'EVM endpoint (all chains)',
     evmPlaceholder: 'https://<provider>',
     evmApplyA11y: 'Apply EVM endpoint',
-    // F2 — the IC gateway override. Operator-facing (demos/testing against a local replica), not a
+    // F2 - the IC gateway override. Operator-facing (demos/testing against a local replica), not a
     // user feature; the note says so honestly, mirroring the Solana endpoint row's disclosure.
     icGatewayNote: 'Operator only. Empty uses the public gateway; set a local replica for demos and tests.',
     icGatewayLabel: 'IC gateway',
@@ -297,14 +297,14 @@ export const settingsEn: SettingsMessages = {
   about: {
     label: 'About',
     custody:
-      'Non-custodial: only the key on this device controls your money. No dpay account. dpay cannot move, freeze, or recover it — your 24 backup words are the only recovery.',
+      'Non-custodial: only your key controls your money. No dpay account. dpay cannot move, freeze, or recover it - your 24 backup words are the only recovery.',
     privacy: 'Privacy policy',
   },
 };
 
 export type OnboardingMessages = {
   tagline: string;
-  /** The short custody line. The walkthrough tells the long version — do not duplicate it here. */
+  /** The short custody line. The walkthrough tells the long version - do not duplicate it here. */
   custody: string;
   /** Shown on BOTH the backup gate and the faucet-failed screen. */
   continue: string;
@@ -325,7 +325,7 @@ export type OnboardingMessages = {
     line: string;
   };
 
-  /** The BIP-39 backup gate — the words, the warning, and the acknowledgement. */
+  /** The BIP-39 backup gate - the words, the warning, and the acknowledgement. */
   backup: CopyWordsCopy & {
     title: string;
     warning: string;
@@ -375,16 +375,16 @@ export type OnboardingMessages = {
 
   /** What the new wallet starts with, and what the demo-dollar glyph means. */
   demoNote: string;
-  /** Follows the ∂ glyph, which is styled separately — hence the leading space. */
+  /** Follows the ∂ glyph, which is styled separately - hence the leading space. */
   demoGlyphNote: string;
 };
 
 export const onboardingEn: OnboardingMessages = {
-  tagline: 'Tap or scan to pay — online or offline.',
+  tagline: 'Tap or scan to pay - online or offline.',
   custody: 'No account. Your key never leaves this phone. Not even dpay can move your money.',
   continue: 'Continue',
   errOwnSeed:
-    "That seed doesn't look right. Paste your 24 recovery words or 64-hex seed exactly.",
+    "That seed doesn't look right. Paste your 24 recovery words or 64-hex seed in full.",
   errWords: 'Some words are wrong or missing. Check all 24.',
   errSaveWallet: 'Your wallet was not saved. Tap Continue to retry. If it keeps failing, free up phone storage.',
 
@@ -397,7 +397,7 @@ export const onboardingEn: OnboardingMessages = {
     ...copyWordsEn,
     title: 'Back up your wallet',
     warning:
-      'Write down these 24 words and store them safely. They are the only way to recover this wallet — not even dpay can recover them.',
+      'Write down these 24 words and store them safely. They are the only way to recover this wallet - not even dpay can recover them.',
     copyWordsHint: 'Copies the 24 words',
     ack: "I've written down all 24 words",
   },
@@ -440,5 +440,5 @@ export const onboardingEn: OnboardingMessages = {
   },
 
   demoNote: 'Creating a wallet moves no money.',
-  demoGlyphNote: ' is practice money with no cash value — ∂1 is just one DEMO unit.',
+  demoGlyphNote: ' is practice money with no cash value - ∂1 is one DEMO unit.',
 };

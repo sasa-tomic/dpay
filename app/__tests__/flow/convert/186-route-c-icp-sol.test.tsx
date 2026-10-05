@@ -109,7 +109,7 @@ hermeticDescribe('flow 186 — Route C: ICP → SOL via USDC as one cross-rail i
       expect(m.driver.isPresent('convert-dest-address')).toBe(false);
       expect(m.driver.isPresent('convert-dest-reenter')).toBe(false);
       await m.driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
-      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'signs on this device', 'the destination note forks to the device-signed crossing');
+      assertIncludes(m.driver.readText('convert-dest-cross-note'), 'signs the crossing', 'the destination note forks to the device-signed crossing'); // copy-economy sweep: filler removed, fact kept;
       assertIncludes(m.driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset');
 
       // §2 the cross-rail fee census (the census lines mount behind Details).

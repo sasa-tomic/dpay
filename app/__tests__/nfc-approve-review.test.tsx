@@ -203,7 +203,7 @@ describe('NfcTap (IC) auto-sign (one-press rule)', () => {
     expect(prepareNfcTransfer).not.toHaveBeenCalled();
     expect(DpayNfc.approveCard).not.toHaveBeenCalled();
     expect(DpayNfc.declineCard).toHaveBeenCalledWith('ab'.repeat(16));
-    expect(hasText('This request expired — ask for a fresh one')).toBe(true);
+    expect(hasText('This request expired - ask for a fresh one')).toBe(true); // copy-economy sweep: em-dash to plain hyphen
   });
 
   it('fail-closed: unpayable currency auto-declines WITHOUT a review card', async () => {
@@ -220,7 +220,7 @@ describe('NfcTap (IC) auto-sign (one-press rule)', () => {
     await emitIc(icRequest());
     expect(DpayNfc.approveCard).not.toHaveBeenCalled();
     expect(DpayNfc.declineCard).toHaveBeenCalledWith('ab'.repeat(16));
-    expect(hasText('Couldn’t authorize payment — try again')).toBe(true);
+    expect(hasText('Couldn’t authorize payment - try again')).toBe(true); // copy-economy sweep: em-dash to plain hyphen
   });
 });
 

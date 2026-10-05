@@ -1,5 +1,5 @@
 /**
- * i18n/domains/es/convert.ts — valores en español para la superficie de conversión delegada.
+ * i18n/domains/es/convert.ts - valores en español para la superficie de conversión delegada.
  * Tipos, documentación de claves y copia de referencia: ../en/convert.ts. Glosario: ../../es.ts.
  * Glosario: «venue» → sede; «quote» → cotización. El nombre de la sede llega como argumento
  * (nombre de presentación del registro de venues, nunca codificado aquí). Los importes y
@@ -18,24 +18,24 @@ export const convertEs: ConvertMessages = {
   maxAmount: 'Max',
   balanceLine: balance => `Saldo ${balance}`,
   counterparty: venue => `Ejecutado por el pool de ${venue}.`,
-  counterpartySigns: 'Tu teléfono firma; el pool puede usar exactamente el importe acordado.',
+  counterpartySigns: 'Tu teléfono firma; el pool puede usar solo el importe acordado.',
   quoteSource: (at, venue) => `${venue} · ${at}`,
-  quoteVerbatim: (venue, amt) => `${venue} cotizó exactamente ${amt}`,
+  quoteVerbatim: (venue, amt) => `${venue} cotizó: ${amt}`,
   rateLabel: (inSym, outSym) => `Tipo (${inSym} → ${outSym})`,
   poolFeeTier: (tier, venue) => `Comisión del pool: ${tier} (nivel de ${venue})`,
   inputFeeLine: fee => `Comisión de entrada: ${fee}`,
   outputFeeLine: fee => `Comisión de salida: ${fee}`,
   disclosures: {
     byKey: {
-      icpswap: venue => `Se ejecuta en el contrato de pool propio de ${venue}.`,
+      icpswap: venue => `Se ejecuta en el contrato de pool de ${venue}.`,
       jupiter: venue =>
-        `${venue} es un agregador on-chain autónomo en Solana - elige la ruta; la ruta la ejecuta. Esta billetera firma la transacción que construye ${venue}, y la cotización es la propia de ${venue}, tal cual. dpay no es parte.`,
+        `${venue} es un agregador on-chain autónomo en Solana - elige la ruta; la ruta la ejecuta. Esta billetera firma la transacción que construye ${venue}, y la cotización viene de ${venue}, tal cual. dpay no es parte.`,
       sideshift: venue =>
-        `${venue} es un servicio de intercambio automatizado - ni un proveedor con licencia ni un banco. Retiene tus fondos durante el intercambio y luego paga a tu propia dirección; sus términos, incluidas las verificaciones de identidad según su política, están en sideshift.ai/terms. Esta billetera muestra la cotización propia de ${venue} y la dirección de depósito - tus fondos van directamente de tu propia billetera al servicio; dpay no es parte y no cobra nada.`,
+        `${venue} es un servicio de intercambio automatizado - ni un proveedor con licencia ni un banco. Retiene tus fondos durante el intercambio y luego paga a tu dirección; sus términos, incluidas las verificaciones de identidad según su política, están en sideshift.ai/terms. La cotización y la dirección de depósito vienen de ${venue}, tal cual - tus fondos van directamente de tu billetera al servicio; dpay no es parte y no cobra nada.`,
       trocador: venue =>
-        `${venue} es un agregador de intercambio automatizado - dirige tu intercambio a uno de sus propios servicios y retiene tus fondos durante el intercambio, luego paga a tu propia dirección; sus términos, incluidas las verificaciones de identidad que un servicio pueda aplicar, están en trocador.app/terms. dpay pide a ${venue} solo servicios sin verificación de identidad. Esta billetera muestra la cotización propia de ${venue} y la dirección de depósito - tus fondos van directamente de tu propia billetera al servicio; dpay no es parte y no cobra nada.`,
+        `${venue} es un agregador de intercambio automatizado - dirige tu intercambio a uno de sus servicios y retiene tus fondos durante el intercambio, luego paga a tu dirección; sus términos, incluidas las verificaciones de identidad que un servicio pueda aplicar, están en trocador.app/terms. dpay pide a ${venue} solo servicios sin verificación de identidad. La cotización y la dirección de depósito vienen de ${venue}, tal cual - tus fondos van directamente de tu billetera al servicio; dpay no es parte y no cobra nada.`,
       cowswap: venue =>
-        `${venue} ejecuta órdenes firmadas fuera de la cadena con solvers competidores, normalmente en segundos a minutos. La revisión muestra la comisión propia de ${venue}. dpay firma su orden, no es parte y no recibe nada.`,
+        `${venue} ejecuta órdenes firmadas fuera de la cadena con solvers competidores, normalmente en segundos a minutos. La revisión muestra la comisión de ${venue}, tal cual. dpay firma su orden, no es parte y no recibe nada.`,
     },
     generic: venue => `Ejecutado por ${venue}.`,
   },
@@ -62,8 +62,8 @@ export const convertEs: ConvertMessages = {
   noPathBody: pairs => `Rutas hoy: ${pairs}`,
   noVenueBody: (inSym, outSym) => `Todavía no hay un sitio que convierta ${inSym} a ${outSym}. El par sigue listado aquí; los nuevos sitios aparecen cuando se agregan.`,
   noPathAction: 'Añadir dinero',
-  externalSignTitle: 'Un paso necesita tu propia billetera Ethereum',
-  externalSignBody: 'Firmas el cruce en tu propia billetera; dpay nunca tiene sus claves. Todo lo demás queda en esta hoja.',
+  externalSignTitle: 'Un paso necesita tu billetera Ethereum',
+  externalSignBody: 'Firmas el cruce en tu billetera; dpay nunca tiene sus claves. Todo lo demás queda en esta hoja.',
   signing: 'Firmando…',
   awaitingPool: 'Esperando el pago del pool',
   receivedDone: amt => `Recibiste ${amt}`,
@@ -71,7 +71,7 @@ export const convertEs: ConvertMessages = {
   depositLegPending: amt => `Enviando ${amt} al exchange`,
   composedOrderLine: (venue, amt) => `Orden en ${venue}, pago bloqueado ${amt}`,
   depositRefusedBody: hopSym =>
-    `El depósito fue rechazado - el intercambio sí se ejecutó y tu ${hopSym} sigue en esta billetera. No se firmará nada más: convierte o envía el ${hopSym} desde su propia cuenta.`,
+    `El depósito fue rechazado - el intercambio sí se ejecutó y tu ${hopSym} está intacto. No se firmará nada más: convierte o envía el ${hopSym} desde su cuenta.`,
 
   story: {
     letPoolUse: sym => `Deja que el pool use tu ${sym}`,
@@ -88,7 +88,7 @@ export const convertEs: ConvertMessages = {
     heading: (inSym, outSym) => `Convertir ${inSym} en ${outSym} (Solana)`,
     counterparty: venue => `Ejecutado por ${venue}.`,
     counterpartySigns: 'Tu teléfono firma la transacción de la sede - nadie más firma nada.',
-    priceImpactLine: (pct, venue) => `Impacto en el precio: ${pct} (cifra propia de ${venue})`,
+    priceImpactLine: (pct, venue) => `Impacto en el precio: ${pct} (cifra de ${venue})`,
     solFeeLine: fee => `Comisión de red de Solana: ${fee} (a la red, no a la sede, no a dpay)`,
     refusalLine: sym =>
       `Pasado el mínimo el intercambio falla entero on-chain - tu ${sym} se queda en tu billetera.`,
@@ -105,7 +105,7 @@ export const convertEs: ConvertMessages = {
 
   approvingTitle: 'Firmando',
   approvingBody: (amount, at) =>
-    `Dejas que el pool use exactamente ${amount}. Sin usar, caduca a las ${at}.`,
+    `Dejas que el pool use solo ${amount}. Sin usar, caduca a las ${at}.`,
   swappingTitle: 'Convirtiendo',
   swappingBody: 'Tu intercambio está en marcha - suele tardar unos minutos.',
   settlingTitle: 'Liquidando',
@@ -152,7 +152,7 @@ export const convertEs: ConvertMessages = {
     `El exchange retiene tu depósito y lo está convirtiendo. Tu ${sym} llega cuando termine.`,
   quoteExpiredTitle: 'Cotización caducada',
   quoteExpiredBody: sym =>
-    `La cotización caducó antes de que llegara el depósito - no se intercambió nada, y un depósito tardío simplemente se devuelve. dpay sigue vigilando en segundo plano y esta pantalla se actualiza sola. Tu ${sym} se queda donde está.`,
+    `La cotización caducó antes de que llegara el depósito - no se intercambió nada, y un depósito tardío se devuelve. dpay sigue vigilando en segundo plano y esta pantalla se actualiza sola. Tu ${sym} se queda donde está.`,
   providerRefundedTitle: 'Reembolsado',
   providerRefundedBody: sym =>
     `El exchange canceló la orden y devolvió tu ${sym}. Vigílalo en Saldos.`,
@@ -164,7 +164,7 @@ export const convertEs: ConvertMessages = {
   stuckErrorLine: d => `Error: ${d}`,
   stuckExpiredLine: at => `Venció a las ${at}.`,
   stuckExpiredBody:
-    'El intercambio firmado ya no puede ejecutarse. dpay lo cierra con la evidencia de arriba: el dinero que sigue en esta billetera se queda; el que se movió se ve en tu saldo.',
+    'El intercambio firmado ya no puede ejecutarse. dpay lo cierra con la evidencia de arriba: el dinero sin enviar se queda; el que se movió se ve en tu saldo.',
   stuckLastCheckedLine: at => `Última comprobación ${at}`,
   failedWindowClosedBody: sym =>
     `El intercambio no pudo confirmarse antes de que cerrara su ventana - tu ${sym} nunca salió de tu billetera.`,
@@ -186,13 +186,13 @@ export const convertEs: ConvertMessages = {
   },
   multihop: {
     destLabel: 'Destino',
-    destDirect: sym => `${sym} - en esta billetera`,
+    destDirect: sym => `${sym} - tu billetera`,
     destRoute: (sym, network) => `${sym} - a tu dirección de ${network}`,
     destRouteSol: (sym, network, venue) => `${sym} - a tu dirección de ${network} · último paso vía ${venue}`,
     routeHeadingCollapsed: (inSym, hopSym, network) => `Ruta: ${inSym} → ${hopSym} (hacia ${network})`,
-    destAddressLabel: 'Tu propia dirección en la red de destino',
+    destAddressLabel: 'Tu dirección en la red de destino',
     destAddressInvalid: 'Dirección no válida - se espera 0x seguido de 40 caracteres hexadecimales.',
-    destPayoutNote: 'Los fondos llegan a tu propia dirección de wallet.',
+    destPayoutNote: 'Los fondos llegan a tu dirección.',
     destChange: 'Cambiar destino',
     routeHeading: (inSym, hopSym, destSym, network) => `Ruta: ${inSym} → ${hopSym} → ${destSym} en ${network}`,
     swapPaysLabel: 'El intercambio paga a esta billetera',
@@ -206,7 +206,7 @@ export const convertEs: ConvertMessages = {
     legStateConfirmed: 'Confirmado',
     legStateFailed: 'Rechazado',
     legProgress: (n, total) => `Paso ${n} de ${total}`,
-    destInWallet: sym => `${sym} - en esta billetera`,
+    destInWallet: sym => `${sym} - tu billetera`,
     destGroupOther: 'Otros destinos',
     mechDirect: 'Pool directo',
     mechViaHub: hubSym => `Vía ${hubSym}`,
@@ -215,38 +215,38 @@ export const convertEs: ConvertMessages = {
     mechNoneSelected: 'Elige un mecanismo arriba para ver la cotización.',
     viaHub: hubSym => `vía ${hubSym} · 2 intercambios`,
     hubShape: () => '2 intercambios',
-    routeMinWalletLine: amount => `Mín. ${amount} en esta billetera`,
+    routeMinWalletLine: amount => `Mín. ${amount} de saldo`,
     hubQuoteSource: (venue1, venue2, at) => `${venue1} + ${venue2} · ${at}`,
     hubCensusHeading: 'Dos intercambios, desglosados uno por uno',
-    approveFeeLine: amount => `Aprobar el siguiente pool cuesta ${amount} (la propia tarifa de transferencia del ledger)`,
+    approveFeeLine: amount => `Aprobar el siguiente pool cuesta ${amount} (la tarifa de transferencia del ledger)`,
     hubRateLine: (inSym, destSym) => `Tasa combinada ${inSym} → ${destSym}:`,
     hubSurplusNote: (hubSym, destSym) =>
-      `Sobre el piso, el excedente se queda en esta billetera como ${hubSym} o ${destSym}.`,
+      `Sobre el piso, el excedente queda disponible como ${hubSym} o ${destSym}.`,
     gasFeeLine: amount => `Gas del retiro (cotización en vivo): ${amount}`,
     routeMinLine: amount => `Mín. ${amount} en tu dirección`,
-    routeSurplusNote: hopSym => `Sobre el piso, el excedente se queda en esta billetera como ${hopSym}.`,
+    routeSurplusNote: hopSym => `Sobre el piso, el excedente queda disponible como ${hopSym}.`,
     routeDestEstimate: (amount, sym) =>
       `Aterriza \u2248 ${amount} ${sym} en tu dirección Solana - el paso final de Jupiter re-cotiza al momento`,
     routeVenues: (icVenue, solVenue) => `Ruta: ${icVenue} → Circle CCTP → ${solVenue}`,
     gasPreflightTitle: 'Primero falta gas',
     gasPreflightBody: needed =>
-      `El cruce necesita unos ${needed} de gas en ckETH - esta billetera no tiene suficiente. Consigue ckETH en esta billetera primero y vuelve.`,
+      `El cruce necesita unos ${needed} de gas en ckETH - esta billetera no tiene suficiente. Consigue primero ckETH para esta billetera y vuelve.`,
     executingTitle: 'Ejecutando la ruta',
     doneRouteTitle: 'Retiro en camino',
     doneRouteBody: (amount, address) => `Al menos ${amount} va en camino a ${address}.`,
     doneOnItsWay: 'La entrega corre por Ethereum y puede tardar - dpay no puede vigilar esa red.',
     failedLegTitle: 'Retiro rechazado',
     failedLegBody: (sym, reason) =>
-      `El intercambio se completó - tus fondos están en ${sym} en esta billetera. El retiro fue rechazado${reason ? `: ${reason}` : ''}.`,
+      `El intercambio se completó - tienes ${sym}. El retiro fue rechazado${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Retira vía Pagar ▸ Enviar a dirección - pega cualquier dirección de destino.',
     stuckRouteBody: 'El resultado de un tramo sigue abierto - dpay vigila los libros; esta pantalla cambia sola.',
     stuckRouteBodyExpired: 'La ventana de observación se cerró. dpay liquida según la evidencia de arriba.',
     failedHop2Title: 'Segundo intercambio rechazado',
     failedHop2Body: (hubSym, outSym, reason) =>
-      `El primer intercambio pasó - tienes ${hubSym} en esta billetera. El intercambio ${hubSym} → ${outSym} fue rechazado${reason ? `: ${reason}` : ''}.`,
+      `El primer intercambio pasó - tienes ${hubSym}. El intercambio ${hubSym} → ${outSym} fue rechazado${reason ? `: ${reason}` : ''}.`,
     failedHop2Exit: hubSym =>
       `Tus ${hubSym} se pueden gastar tal cual - consérvalos, cámbialos o envíalos. Nada que revertir.`,
-    stuckHoldsLine: hubSym => `Hasta aquí: ${hubSym} en esta billetera.`,
+    stuckHoldsLine: hubSym => `Hasta ahora: ${hubSym}.`,
     insufficientHubLine: (needed, balance) =>
       `Faltan ${needed} - el monto más tres comisiones - tienes ${balance}.`,
   },
@@ -254,7 +254,7 @@ export const convertEs: ConvertMessages = {
   cefi: {
     destRow: (sym, network, venue) => `${sym} en ${network} - vía ${venue} (servicio de intercambio)`,
     destRowMulti: (sym, network) => `${sym} en ${network}`,
-    settleAddressLabel: 'El pago llega a tu propia dirección',
+    settleAddressLabel: 'El pago llega a tu dirección',
     settleRailEthereum: 'El pago se entrega en ETH nativo en Ethereum mainnet',
     depositAddressLabel: 'Dirección de depósito',
     depositAmountLabel: 'Importe exacto',
@@ -269,7 +269,7 @@ export const convertEs: ConvertMessages = {
       `Si el depósito nunca llega, la orden caduca - tu ${sym} sigue en tu billetera.`,
     insufficientLine: (needed, balance) =>
       `El depósito necesita ${needed} (comisión de transferencia incluida) - tienes ${balance}.`,
-    payoutAt: address => `Pagado a tu propia dirección: ${address}`,
+    payoutAt: address => `Pagado a tu dirección: ${address}`,
     depositExpiryLine: at => `La orden caduca ${at}`,
     noExpiryLine: 'Sin caducidad publicada - dpay sigue vigilando.',
     lastCheckedLine: at => `Última comprobación: ${at}.`,
@@ -277,14 +277,14 @@ export const convertEs: ConvertMessages = {
     settlingFundsLine: 'Fondos confirmados - tu pago queda bloqueado por el importe cotizado.',
     settlingWatchLine: 'La mayoría se liquidan en minutos - dpay supervisa cada shift e interviene si uno se demora.',
     depositNote: (venue, sym) =>
-      `Envía ${sym} desde tu billetera a la dirección de depósito de ${venue} arriba - exactamente la cantidad indicada. ${venue} la retiene durante el intercambio y luego paga a tu dirección. dpay no es parte y no cobra nada.`,
+      `Envía ${sym} desde tu billetera a la dirección de depósito de ${venue} arriba - la cantidad exacta indicada. ${venue} la retiene durante el intercambio y luego paga a tu dirección. dpay no es parte y no cobra nada.`,
     depositAutoNote: (venue, sym) =>
-      `Esta billetera envía por sí sola el depósito de ${sym} a la dirección de ${venue} - exactamente la cantidad indicada. ${venue} la retiene durante el intercambio y luego paga a tu dirección. dpay no es parte y no cobra nada.`,
+      `El depósito de ${sym} se envía solo a la dirección de ${venue} - la cantidad exacta indicada. ${venue} la retiene durante el intercambio y luego paga a tu dirección. dpay no es parte y no cobra nada.`,
     stillWaitingDeposit: 'Todavía esperando tu depósito - esta página se actualiza sola.',
     stillWaitingAuto: 'El depósito sale solo una vez - a la espera de la respuesta del servicio; esta página se actualiza sola.',
-    depositSolFeeNote: 'El depósito también paga una pequeña comisión de red en SOL - conserva algo de SOL en esta billetera.',
+    depositSolFeeNote: 'El depósito también paga una pequeña comisión de red en SOL - conserva algo de SOL.',
     solInsufficientLine: (needed, balance) =>
-      `El depósito envía exactamente ${needed} - tienes ${balance}.`,
+      `El depósito envía ${needed} - tienes ${balance}.`,
     noQuoteTitle: 'Sin mercado en vivo',
     noQuoteBody: 'Este par no tiene un mercado en vivo ahora mismo. No se envió nada. Elige otra sede o inténtalo más tarde.',
     minDepositBody: (venueMessage, min) =>
@@ -298,7 +298,7 @@ export const convertEs: ConvertMessages = {
     phase2Note: 'El segundo tramo corre solo cuando llega el pago.',
     phase2Leg: (midSym, outSym, venue) => `Luego ${midSym} → ${outSym} vía ${venue} - cotizado de nuevo al llegar el pago`,
     rowShape: midSym => `vía ${midSym}, convierte con un toque`,
-    phase2Failed: midSym => `El segundo tramo no pudo ejecutarse - tus ${midSym} están en esta billetera. Conviértelos normalmente (preseleccionado).`,
+    phase2Failed: midSym => `El segundo tramo no pudo ejecutarse - tienes ${midSym}. Conviértelos normalmente (preseleccionado).`,
     depositFailed: sym => `El depósito nunca llegó on-chain - tus ${sym} nunca salieron de la billetera.`,
   },
 
@@ -311,11 +311,11 @@ export const convertEs: ConvertMessages = {
     txAmountLabel: 'Importe',
     copy: 'Copiar',
     copied: 'Copiado',
-    approveHint: 'Permite que el TokenMessenger de Circle mueva exactamente estos USDC - nada más.',
+    approveHint: 'Permite que el TokenMessenger de Circle mueva solo estos USDC.',
     burnHint: 'Bloquea los USDC en Ethereum; el puente de Circle acuña los mismos USDC en tu dirección Solana - sin token envuelto.',
     timingNote: 'Vía rápida: de segundos a pocos minutos (medidos ~20 s). Con Ethereum congestionado, más - esta pantalla se actualiza sola.',
-    externalGasLine: 'El gas se paga con el ETH de tu propia billetera - dpay no puede pagarlo ni cotizarlo exacto.',
-    circleFeeLine: fee => `Comisión del puente de Circle (su propia cifra, del importe): como máximo ${fee}`,
+    externalGasLine: 'El gas se paga con el ETH de tu billetera - dpay no puede pagarlo ni cotizarlo por adelantado.',
+    circleFeeLine: fee => `Comisión del puente de Circle (su cifra, del importe): como máximo ${fee}`,
     mintFloorLine: (floor, sym) =>
       `Mín. ${floor} ${sym} en tu dirección Solana - el paso final los cambia por tu destino`,
     mintFloorDestLine: (floor, sym) => `Llegan como mínimo ${floor} ${sym} a tu dirección Solana`,
@@ -324,16 +324,16 @@ export const convertEs: ConvertMessages = {
     attachButton: 'Ya lo firmé - vigilar el cruce',
     burnTxInvalid: 'No es un hash de transacción Ethereum.',
     declineButton: 'No voy a firmar',
-    whatSigning: 'Firmas dos transacciones Ethereum normales en tu propia billetera: una aprobación y luego el burn. Del lado de dpay no se firma nada.',
+    whatSigning: 'Firmas dos transacciones Ethereum normales en tu billetera: una aprobación y luego el burn. Del lado de dpay no se firma nada.',
     crossingTitle: 'Cruzando a Solana',
-    crossingBody: 'Tus USDC están cruzando a Solana - el puente los acuña en tu propia dirección. Esta pantalla se actualiza sola.',
+    crossingBody: 'Tus USDC están cruzando a Solana - el puente los acuña en tu dirección. Esta pantalla se actualiza sola.',
     viewBurnTx: 'Ver la transacción de burn',
     viewCircle: 'Página de estado de Circle',
     stillCrossing: 'Aún pendiente - no es un fallo. Vía rápida: segundos o minutos; con Ethereum congestionado, más.',
     solReadyTitle: 'Los USDC ya están en Solana',
     solReadyBody: (credit, ata) => `${credit} verificado en ${ata}. Termina la ruta - o quédate los USDC; son tuyos igual.`,
     abortedCrossing: ata =>
-      `Vigilancia detenida. El cruce ya salió - aún puede completar el mint; el USDC llega de todos modos a tu propia dirección de Solana ${ata}. Revisa Saldos más tarde.`,
+      `Vigilancia detenida. El cruce salió - aún puede completar el mint; el USDC llega de todos modos a tu dirección de Solana ${ata}. Revisa Saldos más tarde.`,
     abortedSolReady: ata =>
       `Nada se firmó - el último intercambio nunca se ejecutó. Tu USDC está en tu dirección de Solana ${ata}: consérvalo o conviértelo allí.`,
     solQuoteLabel: venue => `Cotización de ${venue}`,
@@ -348,18 +348,18 @@ export const convertEs: ConvertMessages = {
     doneVia: (icVenue, solVenue) => `Vía ${icVenue}, Circle y ${solVenue}.`,
     declinedTitle: 'Handoff cancelado',
     declinedBody: address =>
-      `No cruzó nada. Tus USDC están en tu propia dirección Ethereum ${address} - envíalos donde quieras o repite esta ruta más tarde.`,
+      `No cruzó nada. Tus USDC están en tu dirección Ethereum ${address} - envíalos donde quieras o repite esta ruta más tarde.`,
     solFailedTitle: 'El intercambio en Solana falló',
     solFailedBody: ata =>
       `Los USDC ya cruzaron - están en tu dirección Solana ${ata}. El último intercambio fue rechazado: inténtalo de nuevo en un momento o quédate con los USDC.`,
     legCctpBurn: (sym, network) => `Llevar ${sym} a ${network} vía Circle (esto lo firmas en tu billetera)`,
     legSolSwap: (venue, sym) => `Cambiar a ${sym} en ${venue}`,
     destAddressCrossNote: 'Esta dirección también firma el cruce - pega una dirección que controles.',
-    deviceSignTitle: 'El cruce firma en este dispositivo',
-    deviceSignBody: 'La clave de esta propia billetera firma el cruce - sin otra billetera, sin paso extra. Deja un poco de ETH en la dirección de pago para su gas.',
-    destAddressDeviceNote: 'El cruce firma en este dispositivo - deja aquí un poco de ETH para su gas.',
+    deviceSignTitle: 'Tu teléfono firma el cruce',
+    deviceSignBody: 'La clave de esta billetera firma el cruce - sin otra billetera, sin paso extra. Deja un poco de ETH en la dirección de pago para su gas.',
+    destAddressDeviceNote: 'Tu teléfono firma el cruce - deja un poco de ETH para su gas.',
     burnFailedBody: (address, reason) =>
-      `El cruce fue rechazado antes de que algo saliera. Tu USDC está en tu propia dirección de Ethereum ${address}${reason ? `: ${reason}` : ''} - envíalo donde quieras o repite esta ruta más tarde.`,
+      `El cruce fue rechazado antes de que algo saliera. Tu USDC está en tu dirección de Ethereum ${address}${reason ? `: ${reason}` : ''} - envíalo donde quieras o repite esta ruta más tarde.`,
     checksumMismatch: 'Error de checksum',
     retypeAddress: 'Vuelve a escribir la dirección',
     retypeMismatch: 'No coincide',
@@ -372,8 +372,8 @@ export const convertEs: ConvertMessages = {
     gasFundRecheck: 'Comprobar de nuevo',
     gasFundShort: short => `Todavía faltan ${short}`,
     gasLegsNote: 'Los primeros tramos financian el gas.',
-    abortedGasBody: 'La financiación del gas llegó - sigue en esta billetera. La conversión nunca se ejecutó.',
-    declinedWithGasBody: address => `No cruzó nada. Tus USDC están en tu dirección Ethereum ${address}; el gas financiado sigue en esta billetera.`,
+    abortedGasBody: 'La financiación del gas llegó, intacta. La conversión nunca se ejecutó.',
+    declinedWithGasBody: address => `No cruzó nada. Tus USDC están en tu dirección Ethereum ${address}; el gas financiado está intacto.`,
     gasShortFailedBody: needed => `La financiación del gas se quedó por debajo de ${needed}. Nada salió de esta billetera - la conversión nunca empezó.`,
   },
 
@@ -385,8 +385,8 @@ export const convertEs: ConvertMessages = {
     quoteUnconfigured: 'Aún no hay un exchange configurado en este relay para este par - tu billetera no tiene ningún problema.',
     gasUnavailable: 'El precio del gas del minter no estuvo disponible - no se firmó nada. Inténtalo de nuevo.',
     cctpFeeUnavailable: 'No se pudo consultar la comisión del cruce - no se firmó nada. Revisa tu conexión y vuelve a intentarlo.',
-    chainDepositUnreadable: 'No se pudo verificar la dirección de depósito en Solana - no se firmó nada. Revisa tu conexión y vuelve a intentarlo, o envía el depósito desde tu propia billetera.',
-    chainSenderEmpty: sym => `Sin cuenta de tokens ${sym} en esta billetera - no se firmó nada. Recibe ${sym} primero.`,
+    chainDepositUnreadable: 'No se pudo verificar la dirección de depósito en Solana - no se firmó nada. Revisa tu conexión y vuelve a intentarlo, o envía el depósito desde tu billetera.',
+    chainSenderEmpty: sym => `Sin cuenta de tokens ${sym} - no se firmó nada. Recibe ${sym} primero.`,
     chainSenderShort: sym => `El saldo de ${sym} de la billetera no cubre este monto - no se firmó nada.`,
     chainRentShort: sym => `La cuenta de ${sym} de la sede necesita un poco de SOL para el alquiler - la billetera no alcanza. No se firmó nada; carga SOL y vuelve a intentarlo.`,
   },

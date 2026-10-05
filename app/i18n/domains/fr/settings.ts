@@ -1,12 +1,12 @@
 /**
- * i18n/domains/fr/settings.ts — French values for the Settings sheet + the Onboarding flow.
+ * i18n/domains/fr/settings.ts - French values for the Settings sheet + the Onboarding flow.
  *
  * Reference copy and all documentation: ../en/settings.ts (shapes: ../../keys.ts). Glossary and
  * typography conventions for this locale: ../../fr.ts.
  */
 import type {CopyWordsCopy, OnboardingMessages, SettingsMessages} from '../../keys';
 
-/** French twin of the English `copyWordsEn` — one source for both surfaces that reveal the words. */
+/** French twin of the English `copyWordsEn` - one source for both surfaces that reveal the words. */
 const copyWordsFr: CopyWordsCopy = {
   copyWords: 'Copier les mots',
   wordsCopied: 'Mots copiés',
@@ -46,7 +46,7 @@ export const settingsFr: SettingsMessages = {
   restore: {
     label: 'Restaurer',
     warning:
-      'Remplace votre portefeuille actuel. Sauvegardez d’abord l’actuel — son argent n’est accessible qu’avec son propre code.',
+      'Remplace votre portefeuille actuel. Sauvegardez d’abord l’actuel - son argent n’est accessible qu’avec son code.',
     seedPlaceholder: '24 mots de récupération ou 64 caractères hexa',
     seedA11y: 'Code de récupération',
     seedHint: '24 mots de récupération ou le code hexadécimal de la Sauvegarde',
@@ -109,15 +109,15 @@ export const settingsFr: SettingsMessages = {
     serverPlaceholder: 'http://<ip>:8787',
     apply: 'Appliquer',
     applyA11y: 'Appliquer l’URL du serveur',
-    solanaNote: 'Lit les soldes et envoie les paiements. Vide, il suit votre liste de serveurs ; votre propre fournisseur retire dpay du chemin.',
+    solanaNote: 'Lit les soldes et envoie les paiements. Vide, il suit votre liste de serveurs ; votre fournisseur retire dpay du chemin.',
     solanaLabel: 'Point d’accès Solana',
     solanaPlaceholder: 'https://<fournisseur>/?api-key=<clé>',
     solanaApplyA11y: 'Appliquer le point d’accès Solana',
-    evmNote: 'Règle les ZCHF sur Ethereum et Arbitrum One via le relais dpay. Vide, il suit le serveur ; un point d\u2019accès sert TOUTES les chaînes \u2014 il doit d\u2019abord prouver la bonne chaîne.',
+    evmNote: 'Règle les ZCHF sur Ethereum et Arbitrum One via le relais dpay. Vide, il suit le serveur ; un point d\u2019accès sert TOUTES les chaînes  -  il doit d\u2019abord prouver la bonne chaîne.',
     evmLabel: 'Point d’accès EVM (toutes les chaînes)',
     evmPlaceholder: 'https://<fournisseur>',
     evmApplyA11y: 'Appliquer le point d’accès EVM',
-    // F2 — le remplacement de la passerelle IC. Réservé aux opérateurs (démos/tests contre une
+    // F2 - le remplacement de la passerelle IC. Réservé aux opérateurs (démos/tests contre une
     // réplique locale), pas une fonction utilisateur ; la note le dit honnêtement, comme la
     // ligne Solana ci-dessus.
     icGatewayNote: 'Réservé aux opérateurs. Vide, la passerelle publique est utilisée ; définissez une réplique locale pour les démos et les tests.',
@@ -129,17 +129,17 @@ export const settingsFr: SettingsMessages = {
   about: {
     label: 'À propos',
     custody:
-      'Sans conservation de fonds : votre argent est contrôlé par la seule clé de cet appareil. Aucun compte dpay. dpay ne peut ni le déplacer, ni le bloquer, ni le récupérer — vos 24 mots de sauvegarde sont le seul moyen de récupération.',
+      'Sans conservation de fonds : votre argent est contrôlé par la seule clé de cet appareil. Aucun compte dpay. dpay ne peut ni le déplacer, ni le bloquer, ni le récupérer - vos 24 mots de sauvegarde sont le seul moyen de récupération.',
     privacy: 'Politique de confidentialité',
   },
 };
 
 export const onboardingFr: OnboardingMessages = {
-  tagline: 'Payez sans contact ou par scan — en ligne ou hors ligne.',
+  tagline: 'Payez sans contact ou par scan - en ligne ou hors ligne.',
   custody: 'Aucun compte. Votre clé ne quitte jamais ce téléphone. Même dpay ne peut pas déplacer votre argent.',
   continue: 'Continuer',
   errOwnSeed:
-    'Ce code ne semble pas correct. Collez vos 24 mots de récupération ou votre code hexadécimal exactement.',
+    'Ce code ne semble pas correct. Collez vos 24 mots de récupération ou votre code hexadécimal en entier.',
   errWords: 'Certains mots sont incorrects ou manquants. Vérifiez les 24.',
   errSaveWallet: 'Votre portefeuille n’a pas été enregistré. Touchez de nouveau Continuer pour réessayer. Si cela échoue encore, libérez de l’espace de stockage sur le téléphone.',
 
@@ -152,7 +152,7 @@ export const onboardingFr: OnboardingMessages = {
     ...copyWordsFr,
     title: 'Sauvegardez votre portefeuille',
     warning:
-      'Notez ces 24 mots et conservez-les en lieu sûr. C’est le seul moyen de récupérer ce portefeuille — même dpay ne peut pas les récupérer.',
+      'Notez ces 24 mots et conservez-les en lieu sûr. C’est le seul moyen de récupérer ce portefeuille - même dpay ne peut pas les récupérer.',
     copyWordsHint: 'Copie les 24 mots',
     ack: 'J’ai noté les 24 mots',
   },
@@ -195,5 +195,5 @@ export const onboardingFr: OnboardingMessages = {
   },
 
   demoNote: 'Créer le portefeuille ne déplace aucun argent.',
-  demoGlyphNote: ' désigne de l’argent d’exercice sans valeur — ∂1 est simplement une unité DÉMO.',
+  demoGlyphNote: ' désigne de l’argent d’exercice sans valeur - ∂1 est une unité DÉMO.',
 };

@@ -45,7 +45,7 @@ async function offlineHandoff(m: Mount, bobPubHex: string, cents: string, nonceH
   await armPayScan(m); // pay-intent gate (btn-new/reset disarmed)
   (g.__DPAY_TEST_SCAN as (v: string) => void)(requestQR);
   // The transient sign status can flash by unread on a fast host — the envelope QR is the assert.
-  expect(await m.driver.waitForText('signed on this device ✓', {timeoutMs: 10_000})).toBe(true);
+  expect(await m.driver.waitForText('signed ✓', {timeoutMs: 10_000})).toBe(true); // copy-economy sweep: "on this device" dropped, the signed check stays
   const payload = g.__DPAY_QR_LAST as string;
   assert(typeof payload === 'string' && payload.length >= 64,
     `hand-off QR payload must be the base64url envelope (>=64 chars), got ${payload?.length}`);

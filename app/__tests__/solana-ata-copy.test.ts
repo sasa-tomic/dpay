@@ -65,13 +65,13 @@ describe('both messages stay actionable after the correction', () => {
 
 describe('the exact strings e2e flow 77 asserts', () => {
   test('the English recipient + own-account sentences, verbatim', () => {
-    expect(errorsEn.solana.recipientNoTokenAccount(RENT, 'USDC')).toBe(
+    expect(errorsEn.solana.recipientNoTokenAccount(RENT, 'USDC')).toBe( // copy-economy sweep: em-dash to hyphen, "here" dropped; cost + remedy stay
       'They have no USDC account yet. Creating it costs about 0.00204428 SOL, paid by you '
-      + '— send a little SOL here first',
+      + '- send a little SOL first',
     );
     expect(errorsEn.solana.ownTokenAccountRent(RENT, 'USDC')).toBe(
       'Creating your USDC account costs about 0.00204428 SOL. '
-      + 'Send a little SOL here first.',
+      + 'Send a little SOL first.',
     );
   });
 });

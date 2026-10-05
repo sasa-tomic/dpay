@@ -1,5 +1,5 @@
 /**
- * i18n/domains/de/wallet.ts — German values for the `wallet` + `education` domains.
+ * i18n/domains/de/wallet.ts - German values for the `wallet` + `education` domains.
  * Types, key documentation and the reference copy: ../en/wallet.ts. Glossary: ../../de.ts.
  */
 import type {EducationMessages, WalletMessages} from '../../keys';
@@ -24,7 +24,7 @@ export const walletDe: WalletMessages = {
     chooseTitle: 'In welcher Währung denkst du?',
     chooseBody: 'Nur Anzeige.',
     railReason: {destination: 'wird für die Zahlung gebraucht', funded: 'Guthaben vorhanden'},
-    railWithReason: (line, reason) => `${line} — ${reason}`,
+    railWithReason: (line, reason) => `${line} - ${reason}`,
     mainBadge: 'Haupt',
     settingsTitle: 'Hauptwährung',
     settingsHint: 'Zuerst angezeigt; Standard beim Bezahlen.',
@@ -41,8 +41,8 @@ export const walletDe: WalletMessages = {
 
   railDetail: {
     back: 'Zurück',
-    rampNone: 'Kein Fiat-Zugang — nur Wallet zu Wallet.',
-    rampSellPartner: partner => `${partner} — heute nur Verkauf.`,
+    rampNone: 'Kein Fiat-Zugang - nur Wallet zu Wallet.',
+    rampSellPartner: partner => `${partner} - heute nur Verkauf.`,
     rampBothDirect: 'Einzahlung und Auszahlung sind eingebaut.',
   },
 
@@ -96,14 +96,14 @@ export const walletDe: WalletMessages = {
 
   addressBook: {
     title: 'Adressbuch',
-    intro: 'Nur auf diesem Gerät gespeichert.',
+    intro: 'Nur auf deinem Handy gespeichert.',
     back: 'Zurück',
-    empty: 'Noch keine gespeicherten Adressen. Adressen, an die du sendest, erscheinen hier automatisch.',
+    empty: 'Noch keine gespeicherten Adressen. Adressen, an die du sendest, erscheinen automatisch.',
     addEntry: 'Adresse hinzufügen',
     assetLabel: 'Für',
     addressLabel: 'Adresse',
     addressPlaceholder: 'Adresse einfügen',
-    addressHint: 'Genau so, wie du senden würdest',
+    addressHint: 'So, wie du senden würdest',
     nameLabel: 'Name',
     namePlaceholder: 'z. B. Alice',
     save: 'Speichern',
@@ -117,7 +117,7 @@ export const walletDe: WalletMessages = {
     unavailableOnRelay: 'Aufladen auf diesem Relay nicht verfügbar',
     failed: 'Aufladen fehlgeschlagen',
     unavailable: 'Faucet nicht verfügbar',
-    offline: 'Offline — versuche es erneut, wenn du verbunden bist',
+    offline: 'Offline - versuche es erneut, wenn du verbunden bist',
   },
 
   balances: {
@@ -144,10 +144,10 @@ export const walletDe: WalletMessages = {
     toPool: 'an einen Pool',
     fees: fee => `− ${fee} Gebühren`,
     mintCounterparty: 'Demo-Guthaben',
-    failed: 'Fehlgeschlagen — nur die Gebühr wurde abgebucht',
+    failed: 'Fehlgeschlagen - nur die Gebühr wurde abgebucht',
     dropped: count => count === 1
-      ? '1 Solana-Transaktion konnte nicht gelesen werden — sie existiert weiterhin on-chain.'
-      : `${count} Solana-Transaktionen konnten nicht gelesen werden — sie existieren weiterhin on-chain.`,
+      ? '1 Solana-Transaktion konnte nicht gelesen werden - sie existiert weiterhin on-chain.'
+      : `${count} Solana-Transaktionen konnten nicht gelesen werden - sie existieren weiterhin on-chain.`,
   },
 
   fund: {checking: 'Wird geprüft…', checkAgain: 'Erneut prüfen'},
@@ -164,7 +164,7 @@ export const walletDe: WalletMessages = {
   share: {shared: 'Geteilt ✓'},
 };
 
-/** Month abbreviations for the passport stamp date — German caps, as inked on a document page. */
+/** Month abbreviations for the passport stamp date - German caps, as inked on a document page. */
 const DE_MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 
 export const educationDe: EducationMessages = {
@@ -180,13 +180,13 @@ export const educationDe: EducationMessages = {
       },
       key: {
         eyebrow: 'Dein Geld',
-        title: 'Dein Schlüssel bleibt auf diesem Gerät',
-        body: 'dpay hält kein Geld und kann keine Zahlungen freigeben. Es gibt kein dpay-Konto — nur deinen Schlüssel.',
+        title: 'Dein Schlüssel bleibt auf deinem Handy',
+        body: 'dpay hält kein Geld und kann keine Zahlungen freigeben. Es gibt kein dpay-Konto - nur deinen Schlüssel.',
       },
       exact: {
         eyebrow: 'Keine Überraschung',
-        title: 'Genau das angeforderte Asset',
-        body: 'Der Laden fordert genau ein Asset an. Du prüfst den Betrag und gibst frei. dpay tauscht nie um.',
+        title: 'Nur das angeforderte Asset',
+        body: 'Der Laden fordert ein bestimmtes Asset an. Du prüfst den Betrag und gibst frei. dpay tauscht nie um.',
       },
     },
     stageTags: ['Signal', 'Schlüssel', 'Asset'],
@@ -207,21 +207,21 @@ export const educationDe: EducationMessages = {
     balance: amount => `${amount} Übungsgeld.`,
     review: 'Zahlung prüfen',
     skip: 'Übung überspringen',
-    bothSides: 'Die Übung braucht eine Verbindung — dein Handy spielt beide Seiten. Unterwegs nur der Laden.',
+    bothSides: 'Die Übung braucht eine Verbindung - dein Handy spielt beide Seiten. Unterwegs nur der Laden.',
     settledBody: 'Von deinem Handy signiert, vom Übungs-Ledger abgewickelt.',
     settledBalance: amount => `Noch ${amount} Übungsgeld übrig.`,
-    pendingBody: 'Signiert und gesendet, noch nicht abgewickelt — bestätigt ist nichts. So sieht ausstehend aus.',
+    pendingBody: 'Signiert und gesendet, noch nicht abgewickelt - bestätigt ist nichts. So sieht ausstehend aus.',
     refusedTitle: 'Abgelehnt',
     refusedBody: 'Es wurde nichts bewegt.',
     continue: 'Einrichtung fortsetzen',
     punchline: 'Übungsgeld hat keinen Gegenwert.',
     noFaucet: {
-      title: 'Hier gibt es kein Übungsgeld',
-      body: 'Dieser Server hat gerade keinen. In deiner Wallet fehlt nichts — mach weiter und wähle deine Währung.',
+      title: 'Kein Übungsgeld',
+      body: 'Dieser Server hat gerade keinen. In deiner Wallet fehlt nichts - mach weiter und wähle deine Währung.',
     },
     cooldown: {
       title: 'Übungsgeld, gleich',
-      body: reason => `Dieser Server gibt Übungsgeld nur ab und zu aus — gerade eben hat er es getan. Er meldet: ${reason} Mach weiter; komm jederzeit zurück.`,
+      body: reason => `Dieser Server gibt Übungsgeld nur ab und zu aus - gerade eben hat er es getan. Er meldet: ${reason} Mach weiter; komm jederzeit zurück.`,
     },
     offline: {
       title: 'Die Übung braucht eine Verbindung',
@@ -229,7 +229,7 @@ export const educationDe: EducationMessages = {
     },
     empty: {
       title: 'Noch kein Übungsgeld',
-      body: 'In deiner Wallet fehlt nichts — mach weiter und wähle deine Währung.',
+      body: 'In deiner Wallet fehlt nichts - mach weiter und wähle deine Währung.',
     },
   },
 
@@ -239,12 +239,12 @@ export const educationDe: EducationMessages = {
       body: 'Ihr Handy scannt und gibt frei; deine Verbindung bestätigt.',
     },
     offlineQr: {
-      title: 'Signiert — nicht abgewickelt',
-      body: 'Dieser signierte Code ist dein Zahlungsnachweis. Die Verbindung des Empfängers wickelt ihn ab — der Status aktualisiert sich, sobald du wieder da bist.',
+      title: 'Signiert - nicht abgewickelt',
+      body: 'Dieser signierte Code ist dein Zahlungsnachweis. Die Verbindung des Empfängers wickelt ihn ab - der Status aktualisiert sich, sobald du wieder da bist.',
     },
     pendingOutcome: {
       title: 'Noch ausstehend',
-      body: 'Das Ergebnis ist noch nicht bekannt — geh nie davon aus, dass es geklappt hat; schau hier wieder nach.',
+      body: 'Das Ergebnis ist noch nicht bekannt - geh nie davon aus, dass es geklappt hat; schau später wieder nach.',
     },
   },
   coachDismiss: title => `Tipp ausblenden: ${title}`,
@@ -254,9 +254,9 @@ export const educationDe: EducationMessages = {
     title: 'Reisebereitschaft',
     stamps: {
       recoverySaved: {label: 'Backup\ngesichert', hint: 'Kopiere deine Backup-Wörter in den Einstellungen', short: 'noch das Backup'},
-      flowUnderstood: {label: 'Ablauf\ngesehen', hint: 'Mach die Übungszahlung — oder mach eine beliebige Zahlung', short: 'noch den Ablauf ansehen'},
-      fundsReady: {label: 'Guthaben\ngeladen', hint: 'Lade echtes Guthaben auf — Übungsguthaben zählt nicht', short: 'noch Guthaben aufladen'},
-      paymentTested: {label: 'Erste\nZahlung', hint: 'Schließe eine Zahlung ab — bezahlen oder empfangen', short: 'noch eine Zahlung'},
+      flowUnderstood: {label: 'Ablauf\ngesehen', hint: 'Mach die Übungszahlung - oder mach eine beliebige Zahlung', short: 'noch den Ablauf ansehen'},
+      fundsReady: {label: 'Guthaben\ngeladen', hint: 'Lade echtes Guthaben auf - Übungsguthaben zählt nicht', short: 'noch Guthaben aufladen'},
+      paymentTested: {label: 'Erste\nZahlung', hint: 'Schließe eine Zahlung ab - bezahlen oder empfangen', short: 'noch eine Zahlung'},
     },
     close: title => `${title} schließen`,
     stripLabel: filled => `Reisebereitschaft ${filled} von 4`,
@@ -266,7 +266,7 @@ export const educationDe: EducationMessages = {
     nextLabel: hint => `Weiter: ${hint}`,
     doneHint: 'Blendet die Leiste aus',
     ready: 'Reisebereit',
-    readyLine: 'Du kannst bezahlen, auch wenn dein Handy kein Signal hat.',
+    readyLine: 'Zahle, auch wenn dein Handy kein Signal hat.',
     capstone: 'Reise\nbereit',
     capstoneMicro: 'Nichts mehr einzurichten. Gute Reise.',
     stampDate: (monthIndex, day) => `${DE_MONTHS[monthIndex]} ${day}`,

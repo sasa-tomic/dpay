@@ -1,5 +1,5 @@
 /**
- * i18n/domains/fr/wallet.ts — French values for the `wallet` + `education` domains.
+ * i18n/domains/fr/wallet.ts - French values for the `wallet` + `education` domains.
  *
  * Reference copy and all documentation: ../en/wallet.ts (shapes: ../../keys.ts). Glossary and
  * typography conventions for this locale: ../../fr.ts.
@@ -25,8 +25,8 @@ export const walletFr: WalletMessages = {
     name: {CHF: 'Francs suisses', USD: 'Dollars américains', EUR: 'Euros', BTC: 'Bitcoin', ETH: 'Ether', ICP: 'Internet Computer', SOL: 'Solana'},
     chooseTitle: 'Dans quelle monnaie pensez-vous ?',
     chooseBody: 'Affichage seulement.',
-    railReason: {destination: 'c’est lui que demande le paiement', funded: 'solde présent ici'},
-    railWithReason: (line, reason) => `${line} — ${reason}`,
+    railReason: {destination: 'c’est lui que demande le paiement', funded: 'solde présent'},
+    railWithReason: (line, reason) => `${line} - ${reason}`,
     mainBadge: 'Principale',
     settingsTitle: 'Monnaie principale',
     settingsHint: 'Affichée en premier ; par défaut pour payer.',
@@ -43,8 +43,8 @@ export const walletFr: WalletMessages = {
 
   railDetail: {
     back: 'Retour',
-    rampNone: 'Pas de rampe fiat — de wallet à wallet uniquement.',
-    rampSellPartner: partner => `${partner} — vente seule aujourd’hui.`,
+    rampNone: 'Pas de rampe fiat - de wallet à wallet uniquement.',
+    rampSellPartner: partner => `${partner} - vente seule aujourd’hui.`,
     rampBothDirect: 'Dépôt et retrait sont câblés.',
   },
 
@@ -98,14 +98,14 @@ export const walletFr: WalletMessages = {
 
   addressBook: {
     title: 'Carnet d’adresses',
-    intro: 'Enregistrées sur cet appareil uniquement.',
+    intro: 'Enregistrées sur votre téléphone uniquement.',
     back: 'Retour',
-    empty: 'Aucune adresse enregistrée pour l’instant. Celles auxquelles vous envoyez apparaissent ici automatiquement.',
+    empty: 'Aucune adresse enregistrée pour l’instant. Celles auxquelles vous envoyez apparaissent automatiquement.',
     addEntry: 'Ajouter une adresse',
     assetLabel: 'Pour',
     addressLabel: 'Adresse',
     addressPlaceholder: 'Coller l’adresse',
-    addressHint: 'Exactement comme pour un envoi',
+    addressHint: 'Comme pour un envoi',
     nameLabel: 'Nom',
     namePlaceholder: 'p. ex. Alice',
     save: 'Enregistrer',
@@ -119,7 +119,7 @@ export const walletFr: WalletMessages = {
     unavailableOnRelay: 'Recharge non disponible sur ce serveur',
     failed: 'Échec de la recharge',
     unavailable: 'Recharge indisponible',
-    offline: 'Hors ligne — réessayez une fois connecté',
+    offline: 'Hors ligne - réessayez une fois connecté',
   },
 
   balances: {
@@ -146,10 +146,10 @@ export const walletFr: WalletMessages = {
     toPool: 'à un pool',
     fees: fee => `− ${fee} de frais`,
     mintCounterparty: 'la démo',
-    failed: 'Échec — seuls les frais ont été prélevés',
+    failed: 'Échec - seuls les frais ont été prélevés',
     dropped: count => count === 1
-      ? '1 transaction Solana n’a pas pu être lue — elle existe toujours on-chain.'
-      : `${count} transactions Solana n’ont pas pu être lues — elles existent toujours on-chain.`,
+      ? '1 transaction Solana n’a pas pu être lue - elle existe toujours on-chain.'
+      : `${count} transactions Solana n’ont pas pu être lues - elles existent toujours on-chain.`,
   },
 
   fund: {checking: 'Vérification…', checkAgain: 'Revérifier'},
@@ -166,7 +166,7 @@ export const walletFr: WalletMessages = {
   share: {shared: 'Partagé ✓'},
 };
 
-/** Month abbreviations for the passport stamp date — French caps, as inked on a document page. */
+/** Month abbreviations for the passport stamp date - French caps, as inked on a document page. */
 const FR_MONTHS = ['Janv', 'Févr', 'Mars', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sept', 'Oct', 'Nov', 'Déc'];
 
 export const educationFr: EducationMessages = {
@@ -183,11 +183,11 @@ export const educationFr: EducationMessages = {
       key: {
         eyebrow: 'Votre argent',
         title: 'Votre clé reste sur ce téléphone',
-        body: 'dpay ne détient aucun argent et ne peut pas approuver de paiements. Il n’y a pas de compte dpay — seulement votre clé.',
+        body: 'dpay ne détient aucun argent et ne peut pas approuver de paiements. Il n’y a pas de compte dpay - seulement votre clé.',
       },
       exact: {
         eyebrow: 'Aucune surprise',
-        title: 'Payez exactement l’actif demandé',
+        title: 'Payez uniquement l’actif demandé',
         body: 'Le commerçant demande un actif précis. Vous vérifiez le montant et vous approuvez. dpay ne convertit jamais.',
       },
     },
@@ -209,21 +209,21 @@ export const educationFr: EducationMessages = {
     balance: amount => `${amount} en argent d’entraînement.`,
     review: 'Vérifier le paiement',
     skip: 'Passer l’entraînement',
-    bothSides: 'L’entraînement a besoin d’une connexion — votre téléphone joue les deux rôles. En voyage, seul le commerçant en a besoin.',
+    bothSides: 'L’entraînement a besoin d’une connexion - votre téléphone joue les deux rôles. En voyage, seul le commerçant en a besoin.',
     settledBody: 'Signé par votre téléphone, réglé par le registre d’entraînement.',
     settledBalance: amount => `Il reste ${amount} en argent d’entraînement.`,
-    pendingBody: 'Signé et envoyé, pas encore réglé — rien n’est confirmé. Voilà à quoi ressemble un paiement en attente.',
+    pendingBody: 'Signé et envoyé, pas encore réglé - rien n’est confirmé. Voilà à quoi ressemble un paiement en attente.',
     refusedTitle: 'Refusé',
     refusedBody: 'Rien n’a bougé.',
     continue: 'Poursuivre la configuration',
     punchline: 'L’argent d’entraînement n’a aucune valeur.',
     noFaucet: {
-      title: 'Pas d’argent d’entraînement ici',
-      body: 'Ce serveur n’en a pas pour l’instant. Rien ne manque à votre portefeuille — continuez et choisissez votre monnaie.',
+      title: 'Pas d’argent d’entraînement',
+      body: 'Ce serveur n’en a pas pour l’instant. Rien ne manque à votre portefeuille - continuez et choisissez votre monnaie.',
     },
     cooldown: {
       title: 'L’argent d’entraînement, dans un instant',
-      body: reason => `Ce serveur distribue de l’argent d’entraînement de temps en temps — il vient de le faire. Il indique : ${reason} Continuez ; revenez quand vous voudrez.`,
+      body: reason => `Ce serveur distribue de l’argent d’entraînement de temps en temps - il vient de le faire. Il indique : ${reason} Continuez ; revenez quand vous voudrez.`,
     },
     offline: {
       title: 'L’entraînement a besoin d’une connexion',
@@ -231,7 +231,7 @@ export const educationFr: EducationMessages = {
     },
     empty: {
       title: 'Pas encore d’argent d’entraînement',
-      body: 'Rien ne manque à votre portefeuille — continuez et choisissez votre monnaie.',
+      body: 'Rien ne manque à votre portefeuille - continuez et choisissez votre monnaie.',
     },
   },
 
@@ -241,12 +241,12 @@ export const educationFr: EducationMessages = {
       body: 'Son téléphone scanne et approuve ; votre connexion confirme.',
     },
     offlineQr: {
-      title: 'Signé — pas encore réglé',
-      body: 'Ce code signé est votre preuve de paiement. La connexion du destinataire le règle — le statut se met à jour dès votre retour en ligne.',
+      title: 'Signé - pas encore réglé',
+      body: 'Ce code signé est votre preuve de paiement. La connexion du destinataire le règle - le statut se met à jour dès votre retour en ligne.',
     },
     pendingOutcome: {
       title: 'Toujours en attente',
-      body: 'Le résultat n’est pas encore connu — ne supposez jamais que c’est réussi ; revenez vérifier ici.',
+      body: 'Le résultat n’est pas encore connu - ne supposez jamais que c’est réussi ; revenez vérifier plus tard.',
     },
   },
   coachDismiss: title => `Masquer le conseil : ${title}`,
@@ -256,9 +256,9 @@ export const educationFr: EducationMessages = {
     title: 'Prêt pour le voyage',
     stamps: {
       recoverySaved: {label: 'Mots\nnotés', hint: 'Copiez vos mots de récupération dans les Paramètres', short: 'encore la sauvegarde'},
-      flowUnderstood: {label: 'Parcours\nvu', hint: 'Faites le paiement d’entraînement — ou faites un paiement', short: 'encore le parcours'},
-      fundsReady: {label: 'Fonds\nchargés', hint: 'Ajoutez de l’argent utilisable — les fonds d’entraînement ne comptent pas', short: 'encore des fonds'},
-      paymentTested: {label: 'Premier\npaiement', hint: 'Faites un paiement — envoyé ou reçu', short: 'encore un paiement'},
+      flowUnderstood: {label: 'Parcours\nvu', hint: 'Faites le paiement d’entraînement - ou faites un paiement', short: 'encore le parcours'},
+      fundsReady: {label: 'Fonds\nchargés', hint: 'Ajoutez de l’argent utilisable - les fonds d’entraînement ne comptent pas', short: 'encore des fonds'},
+      paymentTested: {label: 'Premier\npaiement', hint: 'Faites un paiement - envoyé ou reçu', short: 'encore un paiement'},
     },
     close: title => `Fermer ${title}`,
     stripLabel: filled => `Prêt pour le voyage ${filled} sur 4`,
@@ -268,7 +268,7 @@ export const educationFr: EducationMessages = {
     nextLabel: hint => `À faire : ${hint}`,
     doneHint: 'Masque le bandeau',
     ready: 'Prêt à voyager',
-    readyLine: 'Vous pouvez payer même sans réseau sur votre téléphone.',
+    readyLine: 'Payez même sans réseau sur votre téléphone.',
     capstone: 'Prêt à\nvoyager',
     capstoneMicro: 'Plus rien à configurer. Bon voyage.',
     stampDate: (monthIndex, day) => `${FR_MONTHS[monthIndex]} ${day}`,

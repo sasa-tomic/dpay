@@ -1,5 +1,5 @@
 /**
- * i18n/domains/es/errors.ts — Spanish values for the copy that is thrown and rendered verbatim.
+ * i18n/domains/es/errors.ts - Spanish values for the copy that is thrown and rendered verbatim.
  * Types, key documentation and the reference copy: ../en/errors.ts. Glossary: ../../es.ts.
  */
 import type {ErrorMessages} from '../../keys';
@@ -36,7 +36,7 @@ export const errorsEs: ErrorMessages = {
     offline: network =>
       `Parece que estás sin conexión - saldos de ${network} desactualizados. Se actualizan al reconectar; pagar por QR sigue funcionando.`,
     unreachable: network =>
-      `${network} es inaccesible aunque estás en línea — el relay de dpay no logra conectar. Dinero intacto; los pagos de IC funcionan; los pagos se siguen firmando sin conexión. En Ajustes ▸ Avanzado puedes apuntar esta billetera a cualquier endpoint de ${network}.`,
+      `${network} es inaccesible aunque estás en línea - el relay de dpay no logra conectar. Dinero intacto; los pagos de IC funcionan; los pagos se siguen firmando sin conexión. En Ajustes ▸ Avanzado esta billetera puede apuntar a cualquier endpoint de ${network}.`,
     unreadable: network =>
       `${network} envió datos que esta billetera no puede leer - saldos desactualizados. dpay sigue reintentando.`,
     historyStale: network =>

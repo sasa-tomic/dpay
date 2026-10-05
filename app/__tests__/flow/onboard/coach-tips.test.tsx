@@ -91,7 +91,7 @@ hermeticDescribe('flow 91 — coach-tips', () => {
     const req3 = await DpayCore.encodeRequest(bob.publicHex, String(PAY_CENTS), randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob', '');
     await waitForScanner(m);
     g.__DPAY_TEST_SCAN!(req3);
-    expect(await m.driver.waitForText('signed on this device ✓', {timeoutMs: 10_000})).toBe(true);
+    expect(await m.driver.waitForText('signed ✓', {timeoutMs: 10_000})).toBe(true); // copy-economy sweep: "on this device" dropped, the signed check stays
     await m.driver.findByTestID('coach-offlineQr', {timeoutMs: 6000});
     await settle(m.driver, 'offlineQr');
     const payload = g.__DPAY_QR_LAST as string;

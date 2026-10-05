@@ -1,5 +1,5 @@
 /**
- * i18n/domains/es/wallet.ts — Spanish values for the `wallet` + `education` domains.
+ * i18n/domains/es/wallet.ts - Spanish values for the `wallet` + `education` domains.
  *
  * Reference copy, types and rationale: domains/en/wallet.ts. Glossary: i18n/es.ts.
  */
@@ -25,7 +25,7 @@ export const walletEs: WalletMessages = {
     chooseTitle: '¿En qué moneda piensas?',
     chooseBody: 'Solo vista.',
     railReason: {destination: 'es el que pide el cobro', funded: 'tienes saldo aquí'},
-    railWithReason: (line, reason) => `${line} — ${reason}`,
+    railWithReason: (line, reason) => `${line} - ${reason}`,
     mainBadge: 'Principal',
     settingsTitle: 'Moneda principal',
     settingsHint: 'Se muestra primero; por defecto al pagar.',
@@ -42,8 +42,8 @@ export const walletEs: WalletMessages = {
 
   railDetail: {
     back: 'Atrás',
-    rampNone: 'Sin rampa fiduciaria — de wallet a wallet.',
-    rampSellPartner: partner => `${partner} — hoy solo venta.`,
+    rampNone: 'Sin rampa fiduciaria - de wallet a wallet.',
+    rampSellPartner: partner => `${partner} - hoy solo venta.`,
     rampBothDirect: 'Depósito y retiro están integrados.',
   },
 
@@ -97,14 +97,14 @@ export const walletEs: WalletMessages = {
 
   addressBook: {
     title: 'Libreta de direcciones',
-    intro: 'Guardadas solo en este dispositivo.',
+    intro: 'Guardadas solo en tu teléfono.',
     back: 'Atrás',
     empty: 'Aún no hay direcciones guardadas. Las que uses para enviar aparecen aquí automáticamente.',
     addEntry: 'Añadir dirección',
     assetLabel: 'Para',
     addressLabel: 'Dirección',
     addressPlaceholder: 'Pega la dirección',
-    addressHint: 'Exactamente como la usarías para enviar',
+    addressHint: 'Como la usarías para enviar',
     nameLabel: 'Nombre',
     namePlaceholder: 'p. ej. Alice',
     save: 'Guardar',
@@ -145,7 +145,7 @@ export const walletEs: WalletMessages = {
     toPool: 'a un pool',
     fees: fee => `− ${fee} de comisiones`,
     mintCounterparty: 'Fondos de prueba',
-    failed: 'Falló — solo se cobró la comisión',
+    failed: 'Falló - solo se cobró la comisión',
     dropped: count => count === 1
       ? 'No se pudo leer 1 transacción de Solana: sigue existiendo on-chain.'
       : `No se pudieron leer ${count} transacciones de Solana: siguen existiendo on-chain.`,
@@ -181,7 +181,7 @@ export const educationEs: EducationMessages = {
       },
       key: {
         eyebrow: 'Tu dinero',
-        title: 'Tu clave se queda en este dispositivo',
+        title: 'Tu clave nunca sale de tu teléfono',
         body: 'dpay no guarda dinero ni puede aprobar pagos. No hay ninguna cuenta de dpay: solo tu clave.',
       },
       exact: {
@@ -267,7 +267,7 @@ export const educationEs: EducationMessages = {
     nextLabel: hint => `Siguiente: ${hint}`,
     doneHint: 'Retira la barra',
     ready: 'Listo para viajar',
-    readyLine: 'Puedes pagar aunque tu teléfono no tenga señal.',
+    readyLine: 'Paga aunque tu teléfono no tenga señal.',
     capstone: 'Listo para\nviajar',
     capstoneMicro: 'No queda nada por configurar. Disfruta del viaje.',
     stampDate: (monthIndex, day) => `${day} ${ES_MONTHS[monthIndex]}`,

@@ -1,22 +1,22 @@
 /**
- * i18n/es.ts — Spanish (neutral, international). Translated from en.ts, which stays the reference.
+ * i18n/es.ts - Spanish (neutral, international). Translated from en.ts, which stays the reference.
  *
- * Register: "tú" throughout. Vocabulary is kept neutral between Spain and Latin America — where a
+ * Register: "tú" throughout. Vocabulary is kept neutral between Spain and Latin America - where a
  * term genuinely splits, the more widely understood option wins (noted below).
  *
- * GLOSSARY — one term per concept, applied with zero variation:
+ * GLOSSARY - one term per concept, applied with zero variation:
  *   payment / to pay ........ el pago / pagar
  *   request ................. la solicitud (verb: solicitar; "Request" button = "Solicitar")
  *   receive ................. recibir
  *   settle / settled ........ confirmar / confirmado. "Liquidar" reads like a bank back office;
- *                             "confirmado" also gives the honest opposite the product needs —
+ *                             "confirmado" also gives the honest opposite the product needs -
  *                             `pending` = "Sin confirmar", never "Falló".
  *   confirmation ............ la confirmación (same root, deliberately: from the user's seat the
  *                             merchant's confirmation IS the settlement)
  *   offline / online ........ sin conexión / con conexión ("conéctate", "vuelvas a tener conexión")
  *   tap (NFC) ............... acercar (el teléfono); the feature = "pago sin contacto"
  *   scan .................... escanear
- *   wallet .................. la billetera (vs "cartera"/"monedero" — "billetera" is the one both
+ *   wallet .................. la billetera (vs "cartera"/"monedero" - "billetera" is the one both
  *                             regions read as a payment wallet)
  *   balance ................. el saldo
  *   funds ................... los fondos
@@ -28,7 +28,7 @@
  *   merchant / shop ......... el comercio / la tienda (English keeps both registers; so does this)
  *   payer ................... quien paga (a noun phrase, so "de quien paga" stays grammatical)
  *   network fee ............. la comisión de red
- *   ledger .................. la red — the consumer-level referent; "libro mayor" reads as accounting
+ *   ledger .................. la red - the consumer-level referent; "libro mayor" reads as accounting
  *                             software and gives the user nothing to act on
  *   transactions / ledger UI  Movimientos (the standard Spanish banking word for an activity list)
  *   rail .................... la vía
@@ -37,8 +37,8 @@
  *   trip readiness .......... preparación del viaje ("Listo para viajar" when it is complete)
  *   relay ................... el servidor (matches the English UI, which already says "Server")
  *   expire .................. caducar / caducado
- *   check (re-query) ........ revisar (over "comprobar"/"verificar" — shortest and fully neutral)
- *   enter (a value) ......... introducir — NOT "ingresar", which in Spain also means "to deposit"
+ *   check (re-query) ........ revisar (over "comprobar"/"verificar" - shortest and fully neutral)
+ *   enter (a value) ......... introducir - NOT "ingresar", which in Spain also means "to deposit"
  *                             and would be ambiguous on a money screen
  *   amount .................. el importe (over "monto", which is not idiomatic in Spain)
  */

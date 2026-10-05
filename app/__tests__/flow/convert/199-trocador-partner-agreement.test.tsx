@@ -169,7 +169,7 @@ hermeticDescribe('flow 199 — the trocador partner agreement (webhook registrat
         expect(await m.driver.waitForText('Done', {timeoutMs: 90_000})).toBe(true);
         const done = m.driver.readText('convert-done');
         assertIncludes(done, '0.0496 ICP', 'done reports the realized settle figure off the webhook payload');
-        assertIncludes(done, 'Paid out to your own address', 'done names the payout destination');
+        assertIncludes(done, 'Paid out to your address', 'done names the payout destination'); // copy-economy sweep: filler removed, fact kept;
         assertIncludes(done, settleAddress.slice(0, 12), 'the payout address IS the derived IC identifier');
         expect((await hitsAt()).statusCalls).toBe(statusCallsBeforePush);
 

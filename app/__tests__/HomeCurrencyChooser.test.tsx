@@ -166,7 +166,7 @@ describe('HomeCurrencyChooser — per-rail detail', () => {
     expect(isPresent(tree, 'rail-detail-liquidity-sol-usdc')).toBe(false);
     // Ramp: ckUSDC is wired both ways; Solana USDC has no fiat ramp today.
     expect(rowText(tree, 'rail-detail-ramp-ckusdc')).toBe('Deposit and cash-out are wired in.');
-    expect(rowText(tree, 'rail-detail-ramp-sol-usdc')).toBe('No fiat ramp — wallet to wallet only.');
+    expect(rowText(tree, 'rail-detail-ramp-sol-usdc')).toBe('No fiat ramp - wallet to wallet only.'); // copy-economy sweep: em-dash to plain hyphen
     act(() => { tree.unmount(); });
   });
 

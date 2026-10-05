@@ -1,5 +1,5 @@
 /**
- * i18n/domains/es/settings.ts — Spanish values for the Settings sheet + the Onboarding flow.
+ * i18n/domains/es/settings.ts - Spanish values for the Settings sheet + the Onboarding flow.
  *
  * Reference copy, types and rationale: domains/en/settings.ts. Glossary: i18n/es.ts.
  */
@@ -44,7 +44,7 @@ export const settingsEs: SettingsMessages = {
   restore: {
     label: 'Restaurar',
     warning:
-      'Sustituye tu billetera actual. Haz antes copia de la actual: su dinero solo se alcanza con su propia semilla.',
+      'Sustituye tu billetera actual. Haz antes copia de la actual: su dinero solo se alcanza con su semilla.',
     seedPlaceholder: '24 palabras de recuperación o 64 caracteres hex',
     seedA11y: 'Semilla de recuperación',
     seedHint: '24 palabras de recuperación o la semilla de 64 hex de Copia de seguridad',
@@ -107,15 +107,15 @@ export const settingsEs: SettingsMessages = {
     serverPlaceholder: 'http://<ip>:8787',
     apply: 'Aplicar',
     applyA11y: 'Aplicar la URL del servidor',
-    solanaNote: 'Lee saldos y envía pagos. Vacío sigue tu lista de servidores; tu propio proveedor saca a dpay del camino.',
+    solanaNote: 'Lee saldos y envía pagos. Vacío sigue tu lista de servidores; un proveedor tuyo saca a dpay del camino.',
     solanaLabel: 'Endpoint de Solana',
     solanaPlaceholder: 'https://<proveedor>/?api-key=<clave>',
     solanaApplyA11y: 'Aplicar el endpoint de Solana',
-    evmNote: 'Liquida ZCHF en Ethereum y Arbitrum One a través del relé de dpay. Vacío sigue el servidor; un endpoint sirve TODAS las cadenas \u2014 debe probar primero la cadena correcta.',
+    evmNote: 'Liquida ZCHF en Ethereum y Arbitrum One a través del relé de dpay. Vacío sigue el servidor; un endpoint sirve TODAS las cadenas  -  debe probar primero la cadena correcta.',
     evmLabel: 'Endpoint EVM (todas las cadenas)',
     evmPlaceholder: 'https://<proveedor>',
     evmApplyA11y: 'Aplicar el endpoint EVM',
-    // F2 — el override de la pasarela IC. Solo para operadores (demos/pruebas contra una réplica
+    // F2 - el override de la pasarela IC. Solo para operadores (demos/pruebas contra una réplica
     // local), no es una función de usuario; la nota lo dice con honestidad, como la línea de
     // Solana de arriba.
     icGatewayNote: 'Solo para operadores. Vacío usa la pasarela pública; pon una réplica local para demos y pruebas.',
@@ -178,11 +178,11 @@ export const onboardingEs: OnboardingMessages = {
   usernameHint: 'El nombre que ven los demás',
 
   ownSeed: {
-    useOwn: 'Usar mi propia semilla',
+    useOwn: 'Usar mi semilla',
     useRandom: 'Generar una semilla aleatoria',
     toggleHint: 'Pega la semilla de una billetera existente',
     placeholder: 'Tus 24 palabras o semilla de 64 hex',
-    a11y: 'Semilla propia',
+    a11y: 'Elegir mi semilla',
     hint: 'La semilla con la que crear esta billetera',
     note: 'Déjalo vacío para generar una.',
   },

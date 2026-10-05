@@ -85,7 +85,7 @@ hermeticDescribe('flow 197 — EURC(Solana) → ICP via sideshift-eurc from the 
       assertIncludes(m.driver.readText('convert-deposit-address'), DEPOSIT_ADDRESS_SIDESHIFT, 'the venue deposit address renders verbatim');
       const handoff = m.driver.readText('convert-deposit-handoff');
       assertIncludes(handoff, '2 EURC', 'the exact deposit amount renders in the deposit asset');
-      assertIncludes(handoff, 'exactly the deposit amount', 'the handoff says what to send');
+      assertIncludes(handoff, 'exact deposit amount', 'the handoff says what to send'); // copy-economy sweep: filler removed, fact kept;
       assertIncludes(handoff, 'not a party', 'dpay party-hood denied');
       expect(m.driver.isPresent('convert-deposit-sol-fee-note')).toBe(true);
       // NEGATIVE (honest-pending: the conversion must NOT complete) — window stays tight.
@@ -119,7 +119,7 @@ hermeticDescribe('flow 197 — EURC(Solana) → ICP via sideshift-eurc from the 
       expect(await m.driver.waitForText('Done', {timeoutMs: 45_000})).toBe(true);
       const done = m.driver.readText('convert-done');
       assertIncludes(done, '0.0495 ICP', 'done reports the realized settle figure');
-      assertIncludes(done, 'Paid out to your own address', 'done names the payout destination');
+      assertIncludes(done, 'Paid out to your address', 'done names the payout destination'); // copy-economy sweep: filler removed, fact kept;
       assertIncludes(done, settle.slice(0, 12), 'the payout address IS the derived IC account identifier');
       const st = sideShiftStubState();
       expect(st).not.toBeNull();

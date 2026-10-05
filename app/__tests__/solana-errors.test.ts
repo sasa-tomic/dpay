@@ -57,8 +57,8 @@ describe('friendlySolTapError — NFC tap errors never render raw', () => {
 
   it('falls back to the default copy on unknown errors (never the raw string)', () => {
     const raw = 'some novel future error code 0x99';
-    expect(friendlySolTapError(raw)).toBe("Payment didn't complete — try again");
-    expect(raw).not.toBe("Payment didn't complete — try again");
+    expect(friendlySolTapError(raw)).toBe("Payment didn't complete - try again"); // copy-economy sweep: em-dash to plain hyphen
+    expect(raw).not.toBe("Payment didn't complete - try again"); // copy-economy sweep: em-dash to plain hyphen
   });
 
   it('accepts a custom fallback (the pending/confirm path)', () => {
