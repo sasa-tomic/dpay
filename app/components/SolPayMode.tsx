@@ -47,6 +47,7 @@ import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {CoachTip} from './CoachTip';
 import {M} from '../i18n';
+import {beepPaymentComplete} from '../lib/beep';
 
 /**
  * SolPayMode — the payer-side offline-pay component for the v2 recent-blockhash SOL rail.
@@ -111,11 +112,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   const nfcReady = nfcStatus === 'ready';
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
-  // Pay-intent gate (founder rule 2026-08-23, same as IC PayMode): the camera and the HCE card
-  // start ONLY after the payer's explicit "Pay Now" tap. Disarmed by reset() and by
-  // leaving the scan sub-mode; rail/tab switches unmount this component.
-  const [scanArmed, setScanArmed] = useState(false);
-  useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
+  // Pay tab = scan intent (founder 2026-10-09, same as IC PayMode): the camera and the HCE card
+  // go live the moment the tab opens. reset() re-arms by returning to the scan phase; leaving
+  // the scan sub-mode unmounts this component; rail/tab switches unmount it too.
 
   // Whether the send sheet holds an in-flight (or unresolved-terminal) transfer — reported up by
   // SolanaWithdrawSheet itself (onSendActiveChange). While true, the send sub-mode's offline and
@@ -555,6 +554,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       void saveTxNote(identity.publicHex, {k: sig, who: sanitiseDisplayText(request.label ?? '') || undefined, msg: sanitiseDisplayText(request.message ?? '') || sanitiseDisplayText(request.memo ?? '') || undefined, ...(isSol ? {gross: (rawAmount + SOL_FEE_LAMPORTS).toString(), fee: SOL_FEE_LAMPORTS.toString()} : {})}, Date.now());
       // Refresh the account that actually moved — the REQUEST's mint, not the selection's.
       if (isSol) onSent(); else onSentToken(request.splToken);
+      beepPaymentComplete(); // broadcast CONFIRMED — the only spay-done variant that beeps
       setSpayDone({amount, who, signature: sig, note: null});
       setPhase('spay-done');
     } catch (e: unknown) {
@@ -774,7 +774,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     }
   }
 
-  function reset() { setReq(null); setSolpayUri(null); solpaySigRef.current = ''; setOcp(null); setOcpChoice(null); setOcpDone(null); setOcpClaim(null); setSpay(null); setSpayAmount(''); setSpayDone(null); setErr(null); setSignCaveat(null); setScanArmed(false); setPhase('scan'); }
+  function reset() { setReq(null); setSolpayUri(null); solpaySigRef.current = ''; setOcp(null); setOcpChoice(null); setOcpDone(null); setOcpClaim(null); setSpay(null); setSpayAmount(''); setSpayDone(null); setErr(null); setSignCaveat(null); setPhase('scan'); }
 
   // NFC card outcome: success/pending → paid (awaiting merchant confirmation); declined → back to scan.
   function onNfcOutcome(outcome: 'success' | 'pending' | 'declined') {
@@ -809,18 +809,18 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     // A merchant's `solreq:v2` names its OWN currency and mint — which need not be the selected
     // asset's — so the selection says nothing about whether the request is payable, and gating the
     // lens on it stopped a payer from even READING a code they could have settled. The camera and
-    // the HCE card are gated by ONE thing: the payer's explicit "Pay Now" press (`scanArmed`).
+    // the HCE card go live the moment the pay tab opens (founder 2026-10-09): opening the tab IS
+    // the scan intent.
     //
     // THE SIGNATURE IS GATED PER REQUEST, in `onScan`/`SolNfcTap`, on the REQUEST's own mint:
     // `solSplSignGate` refuses before signing when that mint's token account is KNOWN absent (a
     // pure offline sign against a non-existent ATA is a dead QR the payer cannot see), and every
     // UNCONFIRMED state fails open per the offline-first rule.
     //
-    // THE FUND AND SETUP INSTRUCTIONS ARE NOT DELETED, THEY ARE DEMOTED: they ride BELOW the "Pay
-    // Now" press while the camera is idle, so the 2026-08-16 funding funnel and the one-tap ATA
-    // create both keep their entry point at the moment of intent without standing in front of the
-    // lens. The send sub-mode above keeps its full-replacement gate, because there is no request
-    // to read there.
+    // THE FUND AND SETUP INSTRUCTIONS ARE NOT DELETED, THEY ARE DEMOTED: they ride BELOW the live
+    // camera, so the 2026-08-16 funding funnel and the one-tap ATA create both keep their entry
+    // point without standing in front of the lens. The send sub-mode above keeps its
+    // full-replacement gate, because there is no request to read there.
     //
     // loading/error/unavailable never produce a gate at all (the Wallet's `solPayGate` fails OPEN
     // — offline-first rule).
@@ -860,11 +860,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     return (
       <View style={S.center}>
         {toggle}
-        {/* Pay-intent gate (same rule as IC PayMode): IDLE keeps the sol-pay-scan container + hint
-            and a single primary CTA; the camera and the NFC card start ONLY on that tap. ARMED is
-            exactly the pre-gate scan surface — card in the background (if ready), QR live at the
-            same time; the payer taps the merchant's phone OR scans its QR. No setup needed in v2. */}
-        {scanArmed && nfcReady && DpaySolNfc ? (
+        {/* Pay tab = scan intent (same rule as IC PayMode, founder 2026-10-09): the camera and
+            the NFC card go live the moment the tab opens — card in the background (if ready), QR
+            live, no press first. No setup needed in v2. */}
+        {nfcReady && DpaySolNfc ? (
           <SolNfcTap
             key={nfcKey} role="card" identity={identity}
             tokenBalances={tokenBalances}
@@ -887,25 +886,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
                 <IconScan size={18} color={C.sub}/>
                 <Text style={[S.dim2, {marginTop: 0}]}>{M.pay.solScanHint}</Text>
               </View>
-              {scanArmed ? (
-                <QrScanner key={scanKey} onScan={onScan} />
-              ) : (
-            <>
-              <Pressable
-                    style={S.primary}
-                    onPress={() => setScanArmed(true)}
-                    accessibilityRole="button"
-                    accessibilityLabel={M.pay.payNowA11y}
-                    accessibilityHint={M.pay.payNowHint}
-                    testID="btn-sol-start-scan"
-                  >
-                    <Text style={S.primaryText}>{M.pay.payNow}</Text>
-                  </Pressable>
-                  {fundIdle}
-                  {fundIdle != null ? railNote : null}
-                  {fundIdle != null ? fundedElsewhere('pay') : null}
-                </>
-              )}
+              <QrScanner key={scanKey} onScan={onScan} />
+              {fundIdle}
+              {fundIdle != null ? railNote : null}
+              {fundIdle != null ? fundedElsewhere('pay') : null}
             </View>
             {/* The checkout lookup is two network reads and can take tens of seconds. IC twin:
                 PayMode's `ocp-checking`. */}

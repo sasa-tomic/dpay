@@ -39,11 +39,10 @@ hermeticDescribe('flow 148 — an unfunded selection: the pointer, the camera, t
     assertIncludes(pointer, 'Practise with it', 'and says what it is FOR');
     assertIncludes(pointer, 'cannot pay a real merchant', 'and what it is NOT — never an implied real balance');
 
-    // X3: the camera is reachable, and one press really opens it.
-    expect(m.driver.isPresent('btn-start-scan')).toBe(true);
-    await m.driver.click('btn-start-scan', {timeoutMs: 5000});
+    // X3: the camera is LIVE on open (founder 2026-10-09 auto-arm) and the fund instruction
+    // keeps its entry BELOW the lens.
     await m.driver.findByTestID('scan-cam-box', {timeoutMs: 8000});
-    expect(m.driver.isPresent('pay-fund')).toBe(false); // once armed, the screen belongs to the lens
+    expect(m.driver.isPresent('pay-fund')).toBe(true);
 
     // X3, the consequence: a request for an asset the wallet DOES hold settles.
     const bob = await generateKeypair();

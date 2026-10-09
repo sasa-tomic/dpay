@@ -288,9 +288,6 @@ export type PayMessages = {
   sendToAddress: string;
   tapOrScanToPay: string;
   solScanHint: string;
-  payNow: string;
-  payNowA11y: string;
-  payNowHint: string;
   nfcNotAvailable: string;
   whyNfcUnavailable: string;
   nfcUnavailableTitle: string;
@@ -486,9 +483,6 @@ export const payEn: PayMessages = {
   sendToAddress: 'Send to address',
   tapOrScanToPay: 'Tap or scan to pay',
   solScanHint: "Scan the merchant's code to pay offline.",
-  payNow: 'Pay Now',
-  payNowA11y: 'Pay now',
-  payNowHint: 'Starts the camera and tap-to-pay',
   nfcNotAvailable: 'NFC not available',
   whyNfcUnavailable: 'Why NFC is unavailable',
   nfcUnavailableTitle: 'NFC unavailable',

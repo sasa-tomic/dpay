@@ -85,10 +85,11 @@ hermeticDescribe('flow 171 — no NFC surface ever offers a conversion (INVARIAN
     const control = m.tree.root.findAll((n) => typeof n.props.testID === 'string' && n.props.testID === 'btn-home-convert').length;
     expect(control).toBeGreaterThanOrEqual(1);
 
-    // --- SOL card: idle armed SolPayMode, then the tap phases + the receipt-bound paid phase. ---
+    // --- SOL card: auto-armed SolPayMode (founder 2026-10-09), then the tap phases + the
+    // receipt-bound paid phase. ---
     await openBalances(m);
     await selectCurrency(m, 'sol');
-    await m.driver.findByTestID('btn-sol-start-scan', {timeoutMs: 5000});
+    await m.driver.findByTestID('scan-cam-box', {timeoutMs: 5000});
     const dispatchSol = async (event: NfcEvent): Promise<void> => {
       await armNfcCard(m, 'sol');
       (g.__DPAY_TEST_SOL_NFC_SESSION as (e: NfcEvent) => void)(event);

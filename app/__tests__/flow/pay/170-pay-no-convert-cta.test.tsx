@@ -30,16 +30,16 @@ hermeticDescribe('flow 170 — the pay surfaces carry zero conversion entry poin
   it('IC pay: 0; SOL pay: 0; control: Home carries the ONE Convert button', async () => {
     const m = await onboardWallet('jest-pay-no-convert');
 
-    // The IC pay surface: the scan gate (founder rule 2026-08-23) is its anchor.
+    // The IC pay surface: the live camera (auto-arm, founder 2026-10-09) is its anchor.
     await openBalances(m);
     await selectCurrency(m, 'vchf');
-    await m.driver.findByTestID('btn-start-scan', {timeoutMs: 6000});
+    await m.driver.findByTestID('scan-cam-box', {timeoutMs: 6000});
     expect(convertCtaCount(m)).toBe(0);
 
     // The SOL pay surface: same tab, the other rail.
     await openBalances(m);
     await selectCurrency(m, 'sol');
-    await m.driver.findByTestID('btn-sol-start-scan', {timeoutMs: 6000});
+    await m.driver.findByTestID('scan-cam-box', {timeoutMs: 6000});
     expect(convertCtaCount(m)).toBe(0);
 
     // Control (proves the probe can fail): Home carries the ONE Convert affordance (the

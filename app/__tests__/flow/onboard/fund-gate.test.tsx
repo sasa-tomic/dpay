@@ -62,7 +62,7 @@ hermeticDescribe('flow 124 — fund-gate-sibling-rail', () => {
 
     // 3. ONE tap: the switch lands the funded rail's own scan screen — no Balances detour.
     await m.driver.click('btn-fund-sibling-switch', {timeoutMs: 5000});
-    await m.driver.findByTestID('btn-sol-start-scan', {timeoutMs: 10_000});
+    await m.driver.findByTestID('scan-cam-box', {timeoutMs: 10_000});
     assertEq(m.driver.readText('active-asset-label'), 'Balance USD',
       'the chip keeps headline duty for the MAIN currency (USD)');
 

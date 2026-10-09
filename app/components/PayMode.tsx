@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {View, Text, Pressable} from 'react-native';
 import {QrCode} from './QrCode';
 import {S} from '../styles';
-import {C, DARK} from '../config/palette';
+import {C} from '../config/palette';
 import {POLL, QR_SIZE} from '../config/constants';
 import {parseRequestQR, randNonceHex} from '../lib/format';
 import {classifyScan, coinDisplayOfScheme} from '../lib/scan';
@@ -24,7 +24,7 @@ import {shareReceipt} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {NfcStatusRow} from './NfcStatusRow';
-import {QrScanner, ViewfinderBrackets} from './QrScanner';
+import {QrScanner} from './QrScanner';
 import {InstructionPanel} from './InstructionPanel';
 import {ModeToggle} from './ModeToggle';
 import {OcpAssetChoice} from './OcpAssetChoice';
@@ -38,8 +38,9 @@ import {awardPaymentTested} from '../lib/readiness';
 import {shouldShowOfflinePeak} from '../lib/peak';
 import {CoachTip} from './CoachTip';
 import {OfflinePeak} from './OfflinePeak';
-import {IconCheck, IconClock, IconScan, IconShare} from './icons';
+import {IconCheck, IconClock, IconShare} from './icons';
 import {M} from '../i18n';
+import {beepPaymentComplete} from '../lib/beep';
 
 // How long this rail waits for a submitted envelope to reach a terminal state: 12 read_state polls,
 // half a second apart. ONE definition — the online pay path, the checkout path and the checkout's
@@ -88,13 +89,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
-  // Pay-intent gate (founder rule 2026-08-23): the camera and the HCE card start ONLY after the
-  // payer's explicit "Pay Now" tap — nothing scans before the user asks. Disarmed by
-  // reset() (a concluded attempt needs a fresh intent) and by leaving the scan sub-mode; tab
-  // switches unmount this component (no disarm needed there). A payment link bypasses it —
-  // a prefilled payment never needs the camera.
-  const [scanArmed, setScanArmed] = useState(false);
-  useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
+  // Pay tab = scan intent (founder 2026-10-09, superseding the 2026-08-23 Pay Now gate): opening
+  // the pay tab IS the ask. The camera mounts and the HCE card arms immediately, so a QR lands or
+  // a tap settles with zero presses. The SIGNATURE stays gated per request (below), so
+  // auto-arming widens no failure mode. reset() re-arms by returning to the scan phase; leaving
+  // the scan sub-mode unmounts the instrument. A payment link bypasses the camera entirely: a
+  // prefilled payment never needs it.
   // Remount key for the camera. `QrScanner` reads exactly ONE code per mount (`fired` — a real
   // camera frame fires once), so a refusal that leaves the payer on the scan screen left a DEAD
   // camera behind: every refusal here ends with "scan again", and that was reachable only by
@@ -567,6 +567,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
           const out = await pollTransfer(prepared, identity.secretHex, {attempts: 1, intervalMs: 0});
           if (!alive) return;
            if (out.kind === 'settled') {
+             beepPaymentComplete(); // the offline hand-off PROVED settled — complete now
              onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
              // The handed-off payment PROVED itself on-chain — its pending-outbox record retires
              // here (the settled history row that arrives on the next refresh replaces the row).
@@ -695,6 +696,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
       const out = await payAndReport(target.details, target.method, target.asset, () => sendIcForOcp(r, target, hold));
       if (out.kind === 'not-paid') { setErr(out.message); return; }
       if (out.kind === 'paid') {
+        beepPaymentComplete(); // checkout settled — the completion beep
         onSettled();
         setPaid({amount: r.amount, currency: r.currency, who, already: false});
         setPhase('paid');
@@ -844,6 +846,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
           void removePendingPays(identity.publicHex, [r.nonceHex]);
           // Interim settlement proof (honest W3 receipt): ledger + block index + request id —
           // certified read_state, not BLS-verified on-device (W6 upgrades).
+          beepPaymentComplete(); // settled within budget — the completion beep
           setPaid({amount: r.amount, currency: r.currency, who, already: false, receipt: {ledger: p.ledger, block_index: out.blockIndex, request_id: p.requestIdHex}}); setPhase('paid');
           awardPaymentTested(journeyRef.current); return;
         }
@@ -853,7 +856,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
           // Reaching it needs a ledger that dedups an UNSTAMPED transfer, which ICRC-1 says a
           // ledger should not and DFINITY's do not — so this is how a third-party ledger's
           // settled-already answer is honoured, never a promise that approving twice is safe.
-          if (out.variant === 'Duplicate') { void removePendingPays(identity.publicHex, [r.nonceHex]); setPaid({amount: r.amount, currency: r.currency, who, already: true}); setPhase('paid'); awardPaymentTested(journeyRef.current); return; }
+          if (out.variant === 'Duplicate') { beepPaymentComplete(); void removePendingPays(identity.publicHex, [r.nonceHex]); setPaid({amount: r.amount, currency: r.currency, who, already: true}); setPhase('paid'); awardPaymentTested(journeyRef.current); return; }
           setErr(out.reason); return;
         }
         // unknown: not terminal within budget — fall through to the offline QR hand-off. The
@@ -875,7 +878,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
 
-  function reset() { setIntent(null); setOcp(null); setOcpChoice(null); setOcpClaim(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setScanArmed(false); setPhase('scan'); }
+  function reset() { setIntent(null); setOcp(null); setOcpChoice(null); setOcpClaim(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setPhase('scan'); }
 
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
@@ -1158,10 +1161,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   // traveller holding exactly what the merchant was asking for could not so much as READ the
   // request because a different row happened to be highlighted. It was checking an irrelevant
   // balance, and it was checking it before the only thing that could name the relevant one had
-  // been read. The camera is gated by ONE thing now: the payer's explicit "Pay Now" press
-  // (`scanArmed`, founder rule 2026-08-23).
+  // been read. The camera is gated by ONE thing now: the pay tab itself (founder 2026-10-09) —
+  // opening the tab is the scan intent, and the instrument is live from the first frame.
   //
-  // The HCE card arms on that same press, and the reason is the same fact rather than a weaker
+  // The HCE card arms on that same open, and the reason is the same fact rather than a weaker
   // version of it: an NFC request carries its OWN currency, so the gate was refusing taps that
   // would have SETTLED (a DEMO checkout tapped by a wallet that happens to have VCHF selected). It was
   // never the protection it read as, either — a tap for an asset the wallet genuinely lacks was
@@ -1183,9 +1186,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
   //
   // THE FUND INSTRUCTION IS NOT DELETED, IT IS DEMOTED. On the send sub-mode it still replaces the
   // form, because there is no request to read there — the user spends the SELECTED asset, so a
-  // known-zero balance really is a dead end. On the scan sub-mode it rides BELOW "Pay Now" while
-  // the camera is idle, so the 2026-08-16 funding funnel keeps its entry point at the moment of
-  // intent without standing in front of the lens.
+  // known-zero balance really is a dead end. On the scan sub-mode it rides BELOW the live camera,
+  // so the 2026-08-16 funding funnel keeps its entry point without standing in front of the lens.
   //
   // Balance is keyed to the SELECTED asset: currency 0 (DEMO) reads the primary poll; every other
   // asset reads its own assetBalances entry (a missing entry → null → fail open). DEMO itself
@@ -1303,34 +1305,13 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
     );
   }
 
-  // The composed idle viewfinder (CALIBER slice 1): the EXACT box the camera will occupy — same
-  // construction as the live camBox (stretch + 1:1 + R_CARD + the theme-invariant warm-black
-  // fill + LIFT) — with corner brackets, the scan glyph and the instruction copy inside. The
-  // void is gone and arming the camera moves nothing on screen. testID is deliberately NOT
-  // `scan-cam-box`: that id means "the camera is LIVE" (flows 79/81 pin that it appears only
-  // after the Pay Now press), so the instrument carries its own.
-  const idleViewfinder = (
-    <View testID="pay-viewfinder" style={S.camBox}>
-      <ViewfinderBrackets />
-      <View style={S.viewfinderCenter}>
-        <IconScan size={32} color={DARK.brandText} />
-        <Text style={S.camText}>{M.pay.pointCamera}</Text>
-        {/* The camera-privacy line renders ONLY on the permission screen (QrScanner), where it
-            answers the question the OS dialog raises. On the idle instrument it was one more
-            line under a hint the payer has already acted on (verbosity pass 2026-09-29). */}
-      </View>
-    </View>
-  );
-
-  // Scan screen. IDLE (scanArmed false): the NFC status row stays (it explains what's available)
-  // and a single primary CTA arms BOTH rails — until that tap, no camera stream and no HCE card.
-  // ARMED: the card arms in the background (if NFC is ready) AND the QR scanner goes live at the
-  // same time — the payer taps the merchant's phone OR scans its QR.
+  // Scan screen. The instrument is ALWAYS live: the camera streams from the moment the tab opens
+  // (founder 2026-10-09) and the HCE card arms with it (if NFC is ready) — the payer taps the
+  // merchant's phone OR scans its QR, no press first.
   //
-  // An unfunded SELECTED asset no longer removes any of that (see the camera-vs-signature rule
-  // above): while the payer is still idle the fund instruction and the funded-account pointer sit
-  // BELOW the "Pay Now" press, so the funding funnel keeps its entry and the money the wallet
-  // already holds is finally named. Once the payer arms the camera the screen belongs to the lens.
+  // An unfunded SELECTED asset removes none of that (see the camera-vs-signature rule above): the
+  // fund instruction and the funded-account pointer sit BELOW the live lens, so the funding
+  // funnel keeps its entry without standing in front of the camera.
   return (
     <View style={S.center}>
       {sendCapable ? (
@@ -1342,7 +1323,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
           right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
         />
       ) : null}
-      {scanArmed && nfcReady && DpayNfc ? (
+      {nfcReady && DpayNfc ? (
         <NfcTap
           key={nfcKey} role="card" identity={identity}
           catalog={catalog}
@@ -1362,25 +1343,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
         // sat directly under S.center.
         <View style={S.scanPhase} testID="pay-scan">
           <NfcStatusRow nfcStatus={nfcStatus} testID="pay-nfc-row" />
-          {scanArmed ? (
-            <QrScanner key={scanKey} onScan={raw => onRequestString(raw)} />
-          ) : (
-            <>
-              {idleViewfinder}
-              <Pressable
-                style={S.primary}
-                onPress={() => setScanArmed(true)}
-                accessibilityRole="button"
-                accessibilityLabel={M.pay.payNowA11y}
-                accessibilityHint={M.pay.payNowHint}
-                testID="btn-start-scan"
-              >
-                <Text style={S.primaryText}>{M.pay.payNow}</Text>
-              </Pressable>
-              {fundInstruction}
-              {fundedElsewhere('pay')}
-            </>
-          )}
+          <QrScanner key={scanKey} onScan={raw => onRequestString(raw)} />
+          {fundInstruction}
+          {fundedElsewhere('pay')}
           {/* The checkout lookup is two network reads and can take tens of seconds — on a screen the
               payer just pointed at a QR code. Say what is happening rather than freezing. */}
           {ocpBusy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingCheckout}</Text> : null}

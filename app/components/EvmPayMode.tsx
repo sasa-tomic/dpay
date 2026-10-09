@@ -82,8 +82,6 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
   const [claims, setClaims] = useState<EvmClaimRow[]>([]);
   const [checkBusy, setCheckBusy] = useState(false);
   const [checkNote, setCheckNote] = useState<string | null>(null);
-  // Pay-intent gate (the IC/SOL rule): the camera starts only on an explicit "Pay Now" press.
-  const [scanArmed, setScanArmed] = useState(false);
   const [scanKey, setScanKey] = useState(0);
   const [sendActive, setSendActive] = useState(false);
   const evmAddress = useMemo(() => deriveEvmAddress(identity.secretHex), [identity.secretHex]);
@@ -91,7 +89,6 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
 
   const reloadClaims = () => { void loadEvmClaims(claimsKey).then(setClaims); };
   useEffect(() => { reloadClaims(); }, [claimsKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
   useEffect(() => { if (subMode !== 'send') { setSendActive(false); } }, [subMode]);
 
   useEffect(() => {
@@ -269,7 +266,6 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
     setPayUri(null);
     setErr(null);
     setCheckNote(null);
-    setScanArmed(false);
     setScanKey(k => k + 1);
     setPhase('scan');
   }
@@ -341,20 +337,7 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
           <IconScan size={18} color={C.sub}/>
           <Text style={[S.dim2, {marginTop: 0}]}>{M.evm.scanHint}</Text>
         </View>
-        {scanArmed ? (
-          <QrScanner key={scanKey} onScan={(v) => { void onScan(v); }} />
-        ) : (
-          <Pressable
-            testID="btn-evm-start-scan"
-            style={S.primary}
-            onPress={() => setScanArmed(true)}
-            accessibilityRole="button"
-            accessibilityLabel={M.pay.payNowA11y}
-            accessibilityHint={M.pay.payNowHint}
-            accessibilityState={{disabled: false}}>
-            <Text style={S.primaryText}>{M.pay.payNow}</Text>
-          </Pressable>
-        )}
+        <QrScanner key={scanKey} onScan={(v) => { void onScan(v); }} />
       </View>
       {busy ? (
         <Text testID="evm-pay-signing" style={S.dim2}>{M.evm.signingOffline}</Text>

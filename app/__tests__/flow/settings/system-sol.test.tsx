@@ -251,8 +251,7 @@ hermeticDescribe('flow 79 — sol-fund-first-pay', () => {
     const panelText = m.driver.readText('sol-pay-fund');
     assertIncludes(panelText, 'No SOL available', 'gate headline');
     assertIncludes(panelText, 'Show my SOL address', 'primary deposit action');
-    expect(m.driver.isPresent('btn-sol-start-scan')).toBe(true);
-    expect(m.driver.isPresent('scan-cam-box')).toBe(false); // the camera waits for the Pay Now press
+    expect(m.driver.isPresent('scan-cam-box')).toBe(true); // the camera is LIVE on open (auto-arm)
 
     // 2. FUNNEL: one tap lands on the deposit address QR + the honest waiting cue.
     await m.driver.click('sol-pay-fund-go', {timeoutMs: 5000});
@@ -284,7 +283,7 @@ hermeticDescribe('flow 79 — sol-fund-first-pay', () => {
     assertIncludes(usdcText, 'No USDC available', 'USDC gate headline');
     assertIncludes(usdcText, 'Show my USDC address', 'USDC deposit primary');
     assertIncludes(usdcText, 'Show my SOL address', 'SOL-address secondary (fees note pair)');
-    expect(m.driver.isPresent('btn-sol-start-scan')).toBe(true);
+    expect(m.driver.isPresent('scan-cam-box')).toBe(true); // live through the rail switch (auto-arm)
 
     await m.unmount();
     g.__DPAY_TEST_SOLANA_RPC_STUB = undefined;
@@ -339,7 +338,7 @@ hermeticDescribe('flow 80 — sol-fund-funnel', () => {
     await m.driver.findByTestID('btn-sol-ata-fund', {timeoutMs: 5000});
     expect(m.driver.propOf('btn-sol-pay-ata-create', 'aria-disabled') === true
       || m.driver.propOf('btn-sol-pay-ata-create', 'disabled') === true).toBe(true);
-    expect(m.driver.isPresent('btn-sol-start-scan')).toBe(true); // X3: the scan surface stays reachable
+    expect(m.driver.isPresent('scan-cam-box')).toBe(true); // X3: the scan surface stays reachable
 
     // 2. Escape hatch → one tap to the SOL deposit address.
     await m.driver.click('btn-sol-ata-fund', {timeoutMs: 5000});
@@ -390,8 +389,7 @@ hermeticDescribe('flow 81 — ic-fund-first-pay', () => {
     assertIncludes(txt, 'No BTC available', 'panel headline names the selected asset');
     assertIncludes(txt, 'To pay in BTC, first receive BTC at your address.', 'the scan sub-mode states the PAY instruction');
     assertIncludes(txt, 'Show my BTC address', 'depositable asset offers the deposit primary');
-    expect(m.driver.isPresent('btn-start-scan')).toBe(true);
-    expect(m.driver.isPresent('scan-cam-box')).toBe(false);
+    expect(m.driver.isPresent('scan-cam-box')).toBe(true); // the camera is LIVE on open (auto-arm)
 
     // (2) One tap → the ckBTC deposit address.
     await m.driver.click('pay-fund-go');

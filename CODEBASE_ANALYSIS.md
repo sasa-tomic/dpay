@@ -510,6 +510,10 @@ Verification-only pass (spec `docs/specs/2026-09-30-vchf-multichain-verification
 - Per-chain VCHF liquidity is thin (Solana deepest non-ICP rail, Ethereum smallest); see the spec's recommendations before ordering rails.
 
 
+## Auto-armed pay tab (2026-10-09) — the tab IS the scan intent
+
+**Founder rule:** opening the pay tab starts scanning immediately. The QR camera mounts live and the HCE card arms on mount, on all three rails (IC/SOL/EVM). Supersedes the 2026-08-23 "Pay Now" gate: `scanArmed` is gone from all payers, `btn-start-scan`/`btn-sol-start-scan`/`btn-evm-start-scan` and the idle `pay-viewfinder` are deleted, and the `M.pay.payNow*` copy was removed from all four locales. The security shape is unchanged: the SIGNATURE is still gated per request (QR decode auto-signs a payable request exactly as before, the deeplink entry keeps its review + Approve, NFC validates then auto-signs). Unfunded wallets keep the funding funnel: the fund/setup panels render BELOW the live lens instead of replacing it. `QrScanner` now requests camera permission on mount (askedRef latch; the in-box button stays as the denial re-ask), so the very first pay-tab open fires the OS camera dialog once. IC merchant settlement is parallel: `submitNfcTransfer` and `confirmIncomingTransfer` run via `Promise.all` (verdict unchanged: settled iff the history row appears; refused-unverified iff an explicit rejection and no row) with poll intervals halved (24×500→48×250ms settle, 8×500→32×250ms history; same 12s/8s windows), cutting tap-to-settled latency. Jest payer suites anchor on auto-arm; flow anchors moved to `scan-cam-box` (the harness `armPayScan`/`armNfcCard` count seams absorb the rest). New accepted costs: the pay tab holds a camera stream for as long as it is open (AppState resume remount unchanged), and an NFC-ready phone arms its HCE card at tab open rather than at a press.
+
 ## Maintenance contract
 
 - **Read first.** Any agent starting work on this repo reads `CLAUDE.md` (project memory + non-negotiables) **and** this file before editing.

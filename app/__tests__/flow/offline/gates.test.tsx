@@ -45,10 +45,10 @@ hermeticDescribe('flow 110 — offline, Send-to-address says so up front and poi
     expect(panel).toContain('connection');
     expect(panel).toContain('Scan the merchant');
 
-    // The primary is the way out, not decoration: it lands on the scan surface, whose pay-intent
-    // gate (btn-start-scan) is the proof we are actually there.
+    // The primary is the way out, not decoration: it lands on the scan surface, whose live
+    // camera (auto-arm, founder 2026-10-09) is the proof we are actually there.
     await m.driver.click('pay-send-offline-go', {timeoutMs: 5000});
-    await m.driver.findByTestID('btn-start-scan', {timeoutMs: 10000});
+    await m.driver.findByTestID('scan-cam-box', {timeoutMs: 10000});
 
     // Back online: the gate is connectivity alone — the form returns.
     await setRelay(m, relayBaseURL());

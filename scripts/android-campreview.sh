@@ -293,10 +293,13 @@ check_screen() {
   sleep 2
   # Prime: a wallet whose selected asset is ALREADY the target (DEMO is the IC default) would
   # no-op the target tap, and the label-change check below could never observe a transition.
-  # Select a DIFFERENT row first — the two targets (demo, sol) are always in the catalog and are
-  # each other's primer (VEUR, the old primer, retired from the catalog 2026-09-19) — so the
-  # target tap always has an observable before-label.
-  local primer="$([ "$rid" = asset-demo ] && echo asset-sol || echo asset-demo)"
+  # Select a DIFFERENT row first — so the target tap always has an observable before-label.
+  # Anchors (2026-10-09, after the Oct 5 convert-rework list): BOTH legs navigate by CURRENCY
+  # rows (`btn-accounts-currency-CHF` / `btn-accounts-currency-SOL`) — they select reliably and
+  # sit in-viewport. The old `asset-sol` row is gone; the `asset-demo` row still exists but sits
+  # at the list bottom (off-viewport, degenerate bounds) and its tap does not select, so it is
+  # retired from this flow too.
+  local primer="$([ "$rid" = btn-accounts-currency-CHF ] && echo btn-accounts-currency-SOL || echo btn-accounts-currency-CHF)"
   for _ in 1 2 3 4 5; do
     dump_ui || { sleep 1; continue; }
     grep -q "resource-id=\"$primer\"" "$ART/ui.xml" && break
@@ -304,6 +307,12 @@ check_screen() {
     sleep 1
   done
   tap_rid "$primer" || true
+  sleep 2
+  # A row select RETURNS TO HOME (the Oct 5 rework) — re-enter the accounts route before the
+  # target scroll-and-tap loop, which can only find its anchor there.
+  tap_rid tab-home
+  sleep 1
+  tap_rid btn-home-accounts
   sleep 2
   # The accounts list is longer than one viewport — the target row (e.g. USDC · Solana) can sit
   # below the uiautomator fold. Scroll-and-retry until the row anchor is in the dumped viewport,
@@ -322,6 +331,12 @@ check_screen() {
     grep -q "resource-id=\"$rid\"" "$ART/ui.xml" || { echo "FAIL nav: anchor '$rid' not found (scrolled); ui dump: $ART/ui.xml"; exit 1; }
     tap_rid "$rid"
     sleep 2
+    # A row select RETURNS TO HOME (the Oct 5 rework) and Home carries no active-asset-label
+    # node (verified in the run-5 dump) — re-enter the accounts route before reading the label.
+    tap_rid tab-home
+    sleep 1
+    tap_rid btn-home-accounts
+    sleep 2
     dump_ui || true
     local post_label; post_label="$(rid_text active-asset-label)"
     echo "   row select attempt $attempt: '$pre_label' → '$post_label'"
@@ -329,13 +344,12 @@ check_screen() {
   done
   [ -n "$sel_ok" ] || { echo "FAIL nav: row select did not take (label stayed '$(rid_text active-asset-label)'); ui dump: $ART/ui.xml"; exit 1; }
   # Post-S3 (Balances modal retired): selecting an asset row keeps the wallet on the Home tab —
-  # land the Pay surface explicitly before the scan gate.
+  # land the Pay surface explicitly before resolving the camera box.
   tap_rid tab-pay
   sleep 2
-  # Pay-intent gate (2026-08-23): the scan surface starts disarmed — camera and NFC mount only
-  # after "Pay Now". Press the gate BEFORE resolving the camera box; RN testID surfaces as
-  # resource-id (same mechanism as the scan-cam-box anchor below).
-  tap_rid "$([ "$which" = sol ] && echo btn-sol-start-scan || echo btn-start-scan)"
+  # Auto-armed pay tab (2026-10-09): the scan surface has NO gate press — the camera is live the
+  # moment the tab opens, so the second settle gives the HAL stream time to paint before the
+  # box anchor resolves below.
   sleep 2
   local best="0 0 0" region="" attempt_png=""
   for i in 1 2 3 4; do
@@ -450,9 +464,9 @@ PY
 ensure_wallet
 
 echo "== IC (DEMO asset) Pay scan screen — positive control =="
-check_screen demo asset-demo ic
+check_screen demo btn-accounts-currency-CHF ic
 
 echo "== SOL Pay scan screen — the reported regression =="
-check_screen sol asset-sol sol
+check_screen sol btn-accounts-currency-SOL sol
 
 echo "== camera-preview gate GREEN on both rails =="

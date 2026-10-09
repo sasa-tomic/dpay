@@ -24,11 +24,18 @@ export function ViewfinderBrackets() {
 export function QrScanner({onScan}: {onScan: (v: string) => void}) {
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('back');
-  // NO mount-effect permission request: the camera permission is asked for only on the explicit
-  // scan intent (tapping the camera box / the "Allow camera scan" button below). Auto-requesting
-  // on mount made every fresh wallet-open fire a getUserMedia/vision-camera permission prompt the
-  // user never asked for (web-prod: the onboarding tap still satisfies the gesture heuristic, so
-  // the prompt appeared on first open; native: the OS dialog on every fresh install).
+  // The mount IS the scan intent now (founder 2026-10-09: the pay tab opens scanning), so this
+  // component ASKS for the camera on mount instead of deferring to a tap: native fires the OS
+  // dialog on the first pay-tab open (never again once granted), and a tab reached by a tap
+  // satisfies the web gesture heuristic. The tap fallback (below) stays for a denial: the button
+  // is the re-ask, and the one gesture some browsers insist on. askedRef latches: one ask per
+  // mount, the button owns every retry.
+  const askedRef = useRef(false);
+  useEffect(() => {
+    if (hasPermission || askedRef.current) return;
+    askedRef.current = true;
+    void requestPermission();
+  }, [hasPermission, requestPermission]);
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [epoch, setEpoch] = useState(0);
   useEffect(() => {

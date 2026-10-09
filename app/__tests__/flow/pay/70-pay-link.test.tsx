@@ -131,7 +131,7 @@ hermeticDescribe('flow 103 — a link the wallet cannot pay is refused with a us
       // Dismissing returns the payer to the normal Pay surface — the refusal is not a trap.
       await m.driver.click('btn-pay-link-error-close', {timeoutMs: 5000});
       await m.driver.waitGone('pay-link-error', {timeoutMs: 5000});
-      await m.driver.findByTestID('btn-start-scan', {timeoutMs: 5000});
+      await m.driver.findByTestID('scan-cam-box', {timeoutMs: 5000});
       await m.unmount();
     }
 

@@ -10,7 +10,7 @@
  *
  * The codec + offline signer are REAL (pure modules, no RPC): the test encodes a now-relative
  * solreq:v2 request and drives it through the same scan → AUTO-SIGN → qr path the camera flow
- * takes (the "Pay Now" gate press is the single deliberate press — no Approve button exists).
+ * takes (the tab opens scanning — no Approve button exists on the camera path).
  * The read-only sign surface only survives a scan when the sign FAILS; the U-F5 payee-line tests
  * pin it there via a throwing signer mock (the honest terminal: reason + Cancel).
  * QrScanner is stubbed so its onScan prop can be driven directly.
@@ -79,6 +79,13 @@ import {payAndReport, resolveOcpOffer, resolveOcpScan, type OcpSendResult, type 
 // Spied (not mocked) in the checkout-note test, as in the IC twin (PayMode.test.tsx): only the SEAM's
 // arguments matter here; the store's own behaviour is txNotes.test.ts's to pin.
 import * as txNotes from '../services/txNotes';
+// The completion blip is stubbed for parity with PayMode.test (SolPayMode itself beeps only the
+// CONFIRMED broadcast; the NFC card success is covered at the hook level). beep.test.ts pins what
+// the real one plays.
+jest.mock('../lib/beep', () => ({
+  beepPaymentComplete: jest.fn(),
+}));
+import {beepPaymentComplete} from '../lib/beep';
 import {buildSelectableAssets} from '../config/assets';
 import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
 import {POLL, SOL_SEND_TIMEOUT_MS} from '../config/constants';
@@ -155,11 +162,9 @@ function mountSolPay(props: Partial<SolPayModeProps> = {}) {
   return tree;
 }
 
-/** Drive the camera-scan path with the pay-intent gate armed — the AUTO-SIGN entry (the "Pay
- *  Now" gate press that armed the scanner IS the single deliberate press; the sync offline sign
- *  lands in the qr phase before this helper returns). */
+/** Drive the camera-scan path — the AUTO-SIGN entry (the scanner is mounted from the moment the
+ *  pay tab opens; the sync offline sign lands in the qr phase before this helper returns). */
 async function scanToSign(tree: renderer.ReactTestRenderer, uri: string) {
-  pressByTestID(tree, 'btn-sol-start-scan');
   const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
   await act(async () => {
     scanner.props.onScan(uri);
@@ -358,40 +363,35 @@ describe('SolPayMode — sign status shows the short destination under a merchan
   });
 });
 
-// Pay-intent scan gate (founder rule 2026-08-23, same as IC PayMode): the camera (QrScanner)
-// and the HCE card (SolNfcTap) mount ONLY after "Pay Now". The sol-pay-scan container
-// + hint stay in IDLE; reset() and leaving the scan sub-mode disarm.
-describe('SolPayMode — pay-intent scan gate', () => {
-  test('idle: NEITHER rail mounts; sol-pay-scan + CTA render; one tap arms BOTH rails', () => {
+// Pay tab = scan intent (founder 2026-10-09, same as IC PayMode): the camera (QrScanner)
+// and the HCE card (SolNfcTap) mount the moment the pay tab opens; reset() returns to a
+// live instrument; the send sub-mode is the only thing that replaces it.
+describe('SolPayMode — auto-armed scan rails', () => {
+  test('open: BOTH rails mount immediately; no gate CTA exists anymore', () => {
     const tree = mountSolPay({nfcStatus: 'ready'});
-    expect(hasTestID(tree, 'sol-pay-scan')).toBe(true); // idle keeps the container + hint
-    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
-    expect(scannerNodes(tree)).toHaveLength(0); // camera rail off
-    expect(cardNodes(tree)).toHaveLength(0); // HCE rail off (radio ready, but the scan gate has not been tapped)
-    pressByTestID(tree, 'btn-sol-start-scan');
-    expect(scannerNodes(tree)).toHaveLength(1);
-    expect(cardNodes(tree)).toHaveLength(1);
+    expect(hasTestID(tree, 'sol-pay-scan')).toBe(true);
+    expect(scannerNodes(tree)).toHaveLength(1); // camera live on open
+    expect(cardNodes(tree)).toHaveLength(1); // HCE card armed on open
+    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(false); // the gate is gone
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test("reset() (the qr-phase Cancel) returns to the scan phase with the camera live again", async () => {
+    const tree = mountSolPay();
+    await scanToSign(tree, solReqUri());
+    expect(hasTestID(tree, 'btn-sol-pay-discard')).toBe(true); // the qr-phase Cancel
+    pressByTestID(tree, 'btn-sol-pay-discard');
+    expect(scannerNodes(tree)).toHaveLength(1); // scanning again immediately
     expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(false);
     act(() => {
       tree.unmount();
     });
   });
 
-  test("reset() (the qr-phase Cancel) disarms — the next attempt needs a fresh intent", async () => {
+  test('the send sub-mode replaces the instrument; flipping back re-mounts the live camera', () => {
     const tree = mountSolPay();
-    await scanToSign(tree, solReqUri());
-    expect(hasTestID(tree, 'btn-sol-pay-discard')).toBe(true); // the qr-phase Cancel
-    pressByTestID(tree, 'btn-sol-pay-discard');
-    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true); // idle CTA back
-    expect(scannerNodes(tree)).toHaveLength(0);
-    act(() => {
-      tree.unmount();
-    });
-  });
-
-  test('leaving the scan sub-mode disarms; flipping back shows the idle CTA again', () => {
-    const tree = mountSolPay();
-    pressByTestID(tree, 'btn-sol-start-scan');
     expect(scannerNodes(tree)).toHaveLength(1);
     act(() => {
       tree.update(solPayElement({subMode: 'send'}));
@@ -400,8 +400,7 @@ describe('SolPayMode — pay-intent scan gate', () => {
     act(() => {
       tree.update(solPayElement({subMode: 'scan'}));
     });
-    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
-    expect(scannerNodes(tree)).toHaveLength(0);
+    expect(scannerNodes(tree)).toHaveLength(1);
     act(() => {
       tree.unmount();
     });
@@ -417,7 +416,6 @@ describe('SolPayMode — what the camera does with a code that is not a payment 
   const PAY_LINK = `https://dpay.kalaj.org/wallet/pay/${MERCHANT}?asset=SOL&network=solana&amount=0.5`;
 
   async function scanUnreadable(tree: renderer.ReactTestRenderer, raw: string) {
-    pressByTestID(tree, 'btn-sol-start-scan');
     const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
     await act(async () => {
       scanner.props.onScan(raw);
@@ -619,7 +617,6 @@ function mountCheckout(props: Partial<SolPayModeProps> = {}) {
 }
 
 async function scanCheckout(tree: renderer.ReactTestRenderer, code = CHECKOUT_QR) {
-  pressByTestID(tree, 'btn-sol-start-scan');
   const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
   await act(async () => {
     scanner.props.onScan(code);
@@ -1001,7 +998,7 @@ describe('SolPayMode — an unresolved checkout transfer stays recoverable', () 
     // merchant. The screen says so and puts the payer back where they can actually pay.
     expect(texts(tree)).toContain(M.pay.ocp.transferFailed);
     expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
-    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
+    expect(scannerNodes(tree)).not.toHaveLength(0); // back on the live instrument
     // The provider was never told about a transfer that never happened.
     expect(sends).toEqual([{kind: 'unknown'}]);
     act(() => { tree.unmount(); });
@@ -1075,9 +1072,8 @@ describe('SolPayMode — an unresolved checkout transfer stays recoverable', () 
 describe('SolPayMode — a scanned Solana Pay request (the open standard the receive QR speaks)', () => {
   const REFERENCE = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 
-  /** Scan any payload through the real camera gate — the entry a merchant's printed QR takes. */
+  /** Scan any payload through the mounted camera — the entry a merchant's printed QR takes. */
   async function scanCode(tree: renderer.ReactTestRenderer, uri: string) {
-    pressByTestID(tree, 'btn-sol-start-scan');
     const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
     await act(async () => {
       scanner.props.onScan(uri);
@@ -1107,6 +1103,7 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
 
   test('Approve sends ONE transfer carrying the reference key and memo, then reports Paid', async () => {
     const sent: string[] = [];
+    jest.mocked(beepPaymentComplete).mockClear(); // domain suites do not clearMocks between tests
     const tree = mountSolPay({onSent: () => sent.push('sol')});
     await scanCode(tree, `solana:${MERCHANT}?amount=0.001&reference=${REFERENCE}&memo=order-42`);
     await pressByLabel(tree, M.pay.approveA11y);
@@ -1117,6 +1114,7 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
     expect(sent).toEqual(['sol']);
     expect(textByTestID(tree, 'sol-pay-status')).toContain('0.001005 SOL');
     expect(textByTestID(tree, 'sol-spay-signature')).toBe('SigSpayBase58');
+    expect(beepPaymentComplete).toHaveBeenCalledTimes(1); // broadcast CONFIRMED: the one spay blip
     expect(hasTestID(tree, 'btn-sol-pay-done')).toBe(true);
     act(() => { tree.unmount(); });
   });
@@ -1278,11 +1276,9 @@ describe('SolPayMode — the fund-first surfaces: the camera, and the funded acc
     // the selection cannot decide whether it is payable — and hiding the lens stopped the payer
     // reading a code they could have settled. The sign gate stays per-request (`solSplSignGate`).
     const tree = mountCheckout({payGate: 'sol-zero', selectedToken: 'SOL', balances: {}});
-    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
-    expect(hasTestID(tree, 'sol-pay-fund')).toBe(true);
-    pressByTestID(tree, 'btn-sol-start-scan');
-    expect(scannerNodes(tree)).not.toHaveLength(0);
-    expect(hasTestID(tree, 'sol-pay-fund')).toBe(false);
+    expect(scannerNodes(tree)).not.toHaveLength(0); // the lens is live from the open
+    expect(hasTestID(tree, 'sol-pay-fund')).toBe(true); // the fund card rides BELOW it
+    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(false); // no gate exists
     act(() => { tree.unmount(); });
   });
 
@@ -1291,9 +1287,7 @@ describe('SolPayMode — the fund-first surfaces: the camera, and the funded acc
     // or any other mint is perfectly payable from here.
     const tree = mountCheckout({payGate: 'token-absent', selectedToken: 'USDC', balances: {}});
     expect(hasTestID(tree, 'sol-pay-ata-instructions')).toBe(true);
-    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
-    pressByTestID(tree, 'btn-sol-start-scan');
-    expect(scannerNodes(tree)).not.toHaveLength(0);
+    expect(scannerNodes(tree)).not.toHaveLength(0); // the lens is live from the open
     act(() => { tree.unmount(); });
   });
 
@@ -1362,7 +1356,8 @@ describe('SolPayMode — per-request-mint solreq sign gate (OPEN_ISSUES 6(a))', 
     await scanToSign(tree, splReqUri(EURC_MINT_ADDRESS, 'EURC'));
     await act(async () => {}); // let the remount's passive effect flush
     expect(textByTestID(tree, 'sol-pay-err')).toBe(M.errors.solana.senderNoTokenAccount('EURC'));
-    // Exactly TWO scanner mounts so far: the arm (btn-sol-start-scan) + ONE refusal remount
+    // Exactly TWO scanner mounts so far: the open (the instrument mounts with the tab) + ONE
+    // refusal remount
     // (scanKey++). A dead camera would read 1; a remount loop would read 3+.
     expect(mockScannerMounts.n).toBe(2);
     // Same wallet, fundable cross-mint request (USDC funded) — the REMOUNTED camera is live

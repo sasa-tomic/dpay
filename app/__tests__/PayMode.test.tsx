@@ -2,8 +2,8 @@
  * PayMode — auto-sign + share affordances (U-F1/U-F5, 2026-08-16 UX findings; one-press rule
  * founder directive 2026-08-24).
  *
- *   - One-press rule: the camera-scan path AUTO-SIGNS on decode (the "Pay Now" gate press that
- *     armed the scanner IS the single deliberate press) — scan lands directly in the sign
+ *   - One-press rule: the camera-scan path AUTO-SIGNS on decode (the tab opens scanning — founder
+ *     2026-10-09 — and the scan itself is the only intent) — scan lands directly in the sign
  *     handoff/paid surfaces, never a review with an Approve button. The DEEPLINK entry is a
  *     zero-press arrival and keeps today's review card with its single Approve.
  *   - U-F5: the sign/paid surfaces show the payee's SHORT pubkey (first 8 hex + '…') as a
@@ -17,7 +17,7 @@
  *
  * Uses react-test-renderer (the project's only renderer). The native/relay/receipt services are
  * mocked at their module boundaries; QrScanner + NfcTap are stubbed so the camera/HCE rails never
- * open under jest while their MOUNT presence stays assertable (the pay-intent gate tests below).
+ * open under jest while their MOUNT presence stays assertable (the auto-arm tests below).
  */
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
@@ -78,10 +78,17 @@ jest.mock('../services/opencryptopay', () => ({
   resolveOcpScan: jest.fn(),
   payAndReport: jest.fn(),
 }));
+// The completion blip is a side-effect like any other: stubbed so the settled/pending tests below
+// pin WHERE it fires (once on confirmed settle, never on an honest pending). beep.test.ts pins
+// what the real one plays.
+jest.mock('../lib/beep', () => ({
+  beepPaymentComplete: jest.fn(),
+}));
 
 import {DpayCore} from '../services/native';
 import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, fetchLedgerFee, wireRequestToIntent, type RailPrepared} from '../services/rail';
 import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import {beepPaymentComplete} from '../lib/beep';
 // Spied (not mocked) in the checkout-note tests: the store's own write behaviour is txNotes.test.ts's
 // to pin; here only the SEAM's arguments matter, and the real write keeps the rest honest.
 import * as txNotes from '../services/txNotes';
@@ -178,13 +185,12 @@ function mountPay(props: Partial<PayModeProps> = {}) {
   return tree;
 }
 
-/** Drive the camera-scan decode path — the AUTO-SIGN entry (the "Pay Now" gate press armed it,
- *  so a payable request signs immediately; no Approve press exists on this path). Arms the
- *  pay-intent gate first — the scanner stub is not mounted until "Pay Now" is pressed. */
+/** Drive the camera-scan decode path — the AUTO-SIGN entry (the scanner is mounted from the
+ *  moment the pay tab opens — founder 2026-10-09 — so a payable request signs on decode; no
+ *  Approve press exists on this path). */
 async function scanToSign(tree: renderer.ReactTestRenderer, req: Req) {
   jest.mocked(DpayCore.decodeRequest).mockResolvedValue(req);
   jest.mocked(wireRequestToIntent).mockResolvedValue({...WIRE_INTENT, amount: req.amount, currency: req.currency, nonceHex: req.nonceHex, expiry: req.expiry, toName: req.toName, memo: req.memo});
-  pressByTestID(tree, 'btn-start-scan');
   const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
   await act(async () => {
     scanner.props.onScan('abcdef123456');
@@ -544,8 +550,10 @@ describe('PayMode — share feedback (U-F1)', () => {
   test('paid screen (web): "Share receipt" flips to "Link copied ✓" after the share resolves (testID unchanged)', async () => {
     asWeb();
     jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '42'});
+    jest.mocked(beepPaymentComplete).mockClear(); // domain suites do not clearMocks between tests
     const tree = mountPay({online: true});
     await scanToSign(tree, REQ); // auto-sign → submit settled → the paid phase
+    expect(beepPaymentComplete).toHaveBeenCalledTimes(1); // the settle blip
     expect(hasTestID(tree, 'btn-share-receipt')).toBe(true);
     pressByTestID(tree, 'btn-share-receipt');
     await act(async () => {});
@@ -708,64 +716,69 @@ describe('PayMode — offline-QR reconcile + re-approve guards', () => {
   });
 });
 
-// Pay-intent scan gate (founder rule 2026-08-23): the camera (QrScanner) and the HCE card (NfcTap)
-// mount ONLY after the payer's explicit "Pay Now" tap — nothing scans before the user asks.
-// reset() (a concluded attempt needs a fresh intent) and leaving the scan sub-mode disarm; the idle
-// surface keeps the NFC status row (pay-nfc-row) inside the pay-scan phase + the CTA. Deeplink
-// prefill is unaffected by design.
-describe('PayMode — pay-intent scan gate', () => {
-  test('idle: NEITHER rail mounts (no camera, no card); the status row + CTA render; one tap arms BOTH rails', () => {
+// Pay tab = scan intent (founder 2026-10-09, superseding the 2026-08-23 Pay Now gate): the
+// camera (QrScanner) and the HCE card (NfcTap) mount the moment the pay tab opens, and reset()
+// returns to a live instrument; the send sub-mode is the only thing that replaces it.
+describe('PayMode — auto-armed scan rails', () => {
+  test('open: BOTH rails mount immediately; no gate CTA exists anymore', () => {
     const tree = mountPay({nfcStatus: 'ready'});
-    expect(hasTestID(tree, 'pay-scan')).toBe(true); // idle keeps the scan phase (its own container now)
-    expect(hasTestID(tree, 'btn-start-scan')).toBe(true);
-    expect(scannerNodes(tree)).toHaveLength(0); // camera rail off
-    expect(cardNodes(tree)).toHaveLength(0); // HCE rail off (nfcReady, but gated)
-    pressByTestID(tree, 'btn-start-scan');
-    expect(scannerNodes(tree)).toHaveLength(1);
-    expect(cardNodes(tree)).toHaveLength(1);
-    expect(hasTestID(tree, 'btn-start-scan')).toBe(false);
+    expect(hasTestID(tree, 'pay-scan')).toBe(true);
+    expect(scannerNodes(tree)).toHaveLength(1); // camera live on open
+    expect(cardNodes(tree)).toHaveLength(1); // HCE card armed on open
+    expect(hasTestID(tree, 'btn-start-scan')).toBe(false); // the gate is gone
     act(() => {
       tree.unmount();
     });
   });
 
-  test("reset() (the qr-phase Cancel) disarms — the next attempt needs a fresh intent", async () => {
+  test("reset() (the qr-phase Cancel) returns to the scan phase with the camera live again", async () => {
     const tree = mountPay();
     await scanToSign(tree, REQ); // auto-sign → qr phase (submit unknown by default)
     expect(hasTestID(tree, 'btn-notpaid')).toBe(true); // the offline qr-phase Cancel
     pressByTestID(tree, 'btn-notpaid');
-    expect(hasTestID(tree, 'btn-start-scan')).toBe(true); // idle CTA back
-    expect(scannerNodes(tree)).toHaveLength(0);
+    expect(scannerNodes(tree)).toHaveLength(1); // scanning again immediately
+    expect(hasTestID(tree, 'btn-start-scan')).toBe(false);
     act(() => {
       tree.unmount();
     });
   });
 
-  test('leaving the scan sub-mode disarms; flipping back shows the idle CTA again', () => {
-    const tree = mountPay();
-    pressByTestID(tree, 'btn-start-scan');
+  test('the send sub-mode replaces the instrument; flipping back re-mounts the live camera', () => {
+    // The send shape needs a withdraw family + a live gate for the SendSheet early-return to
+    // fire (a plain DEMO tree keeps rendering the scan branch).
+    const usdCatalog = icpCatalogOf(BUNDLED_NETWORKS);
+    const usdAssets = buildSelectableAssets(usdCatalog, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
+    const sendShape = {
+      online: true,
+      catalog: usdCatalog,
+      assets: usdAssets,
+      assetBalances: {2: '0'},
+      withdrawCurrency: 2,
+      withdrawBalance: '0',
+      homeCurrency: 'USD' as const,
+      balances: {},
+      withdrawFamily: 'CkEthErc20' as const,
+    };
+    const tree = mountPay({...sendShape, subMode: 'scan'});
     expect(scannerNodes(tree)).toHaveLength(1);
-    // Wallet owns subMode; a scan↔send flip must disarm even though this DEMO-shaped tree (null
-    // family) keeps rendering the scan branch — the disarm is state, not branch-dependent.
+    // Wallet owns subMode; the send branch replaces the scan phase entirely.
     act(() => {
-      tree.update(payElement({subMode: 'send'}));
+      tree.update(payElement({...sendShape, subMode: 'send'}));
     });
     expect(scannerNodes(tree)).toHaveLength(0);
     act(() => {
-      tree.update(payElement({subMode: 'scan'}));
+      tree.update(payElement({...sendShape, subMode: 'scan'}));
     });
-    expect(hasTestID(tree, 'btn-start-scan')).toBe(true);
-    expect(scannerNodes(tree)).toHaveLength(0);
+    expect(scannerNodes(tree)).toHaveLength(1);
     act(() => {
       tree.unmount();
     });
   });
 
-  test('a payment link reviews from IDLE — no arming, no camera, and NO auto-sign (zero-press entry)', async () => {
+  test('a payment link reviews without the camera — zero-press entry, and NO auto-sign', async () => {
     const tree = mountPay({prefillIntent: LINK_INTENT, onPrefillConsumed: () => {}});
     await act(async () => {});
-    expect(texts(tree)).toContain('to Cafe'); // review reached without btn-start-scan
-    expect(hasTestID(tree, 'btn-start-scan')).toBe(false);
+    expect(texts(tree)).toContain('to Cafe'); // review reached without any scan
     expect(hasTestID(tree, 'btn-approve')).toBe(true); // the kept link review: ONE deliberate press
     expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(0); // nothing signed before that press
     act(() => {
@@ -842,7 +855,6 @@ describe('PayMode — what the camera does with a code that is not a payment req
   /** Scan a payload the wire codec REFUSES — the entry to the fallback classifier. */
   async function scanUnreadable(tree: renderer.ReactTestRenderer, raw: string) {
     jest.mocked(DpayCore.decodeRequest).mockRejectedValue(new Error('bad wire request'));
-    pressByTestID(tree, 'btn-start-scan');
     const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
     await act(async () => {
       scanner.props.onScan(raw);
@@ -1025,7 +1037,6 @@ const DEMO_ASSET = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {showTe
  *  whatever surface the resolution produced. */
 async function scanCheckout(tree: renderer.ReactTestRenderer) {
   jest.mocked(DpayCore.decodeRequest).mockRejectedValue(new Error('not a 132-byte request'));
-  pressByTestID(tree, 'btn-start-scan');
   const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
   await act(async () => {
     scanner.props.onScan(CHECKOUT_QR);
@@ -1077,12 +1088,14 @@ describe('PayMode — OpenCryptoPay checkout', () => {
   test('an outcome that is neither paid nor failed renders as neither, carrying the reference', async () => {
     const message = M.pay.ocp.submitUnknown(M.pay.ocp.ref.icBlock('8168'));
     jest.mocked(payAndReport).mockResolvedValue({kind: 'unresolved', message});
+    jest.mocked(beepPaymentComplete).mockClear(); // domain suites do not clearMocks between tests
     const tree = mountCheckout();
     await scanCheckout(tree);
     await pressByLabel(tree, M.pay.approveA11y);
 
     // The outcome screen, not an error the payer could read as "try again", and not "Paid ✓".
     expect(textByTestID(tree, 'ocp-outcome')).toBe(message);
+    expect(beepPaymentComplete).not.toHaveBeenCalled(); // pending is not completion: no blip
     expect(texts(tree).join(' ')).not.toContain(M.nfc.paidAmount('∂1.00'));
     expect(hasTestID(tree, 'btn-approve')).toBe(false);
   });
@@ -1365,7 +1378,6 @@ describe('PayMode — OpenCryptoPay checkout', () => {
   test('a DAMAGED checkout code is named as one, without contacting any provider', async () => {
     const tree = mountCheckout();
     jest.mocked(DpayCore.decodeRequest).mockRejectedValue(new Error('not a 132-byte request'));
-    pressByTestID(tree, 'btn-start-scan');
     const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
     await act(async () => {
       scanner.props.onScan(`${CHECKOUT_QR.slice(0, -1)}Q`); // one scuffed character on the sticker
@@ -1452,7 +1464,7 @@ describe('PayMode — an unresolved checkout transfer stays recoverable', () => 
     // says so and puts the payer back where they can actually pay.
     expect(texts(tree)).toContain(M.pay.ocp.transferRefused('Not enough balance'));
     expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
-    expect(hasTestID(tree, 'btn-start-scan')).toBe(true);
+    expect(scannerNodes(tree)).not.toHaveLength(0); // back on the live instrument
     // The provider was never told about a transfer that never happened.
     expect(sends).toEqual([{kind: 'unknown'}]);
     act(() => { tree.unmount(); });
@@ -1566,13 +1578,9 @@ describe('PayMode — the fund-first surfaces: the camera, and the funded accoun
     // could not even READ the request. The scan surface must stay reachable, and the funding
     // instruction must survive as a companion rather than a replacement.
     const tree = unfunded();
-    expect(hasTestID(tree, 'btn-start-scan')).toBe(true);
-    expect(hasTestID(tree, 'pay-fund')).toBe(true);
-    // ...and one press really opens the lens (the scanner stub carries onScan).
-    pressByTestID(tree, 'btn-start-scan');
-    expect(scannerNodes(tree)).not.toHaveLength(0);
-    // Once the payer has asked for the camera, the screen is the camera's.
-    expect(hasTestID(tree, 'pay-fund')).toBe(false);
+    expect(scannerNodes(tree)).not.toHaveLength(0); // the lens is live from the open
+    expect(hasTestID(tree, 'pay-fund')).toBe(true); // the fund instruction rides BELOW it
+    expect(hasTestID(tree, 'btn-start-scan')).toBe(false); // no gate exists
     act(() => { tree.unmount(); });
   });
 

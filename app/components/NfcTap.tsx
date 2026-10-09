@@ -18,8 +18,10 @@ import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
 import {NfcTapView} from './NfcTapView';
 import {M} from '../i18n';
 
-const SETTLEMENT_POLL = {attempts: 24, intervalMs: 500};
-const HISTORY_POLL = {attempts: 8, intervalMs: 500};
+// Settlement polling. 250 ms intervals halve the detection latency of the settle moment vs the
+// original 500 ms (the attempt counts keep the same total windows: 12 s settle, 8 s history).
+const SETTLEMENT_POLL = {attempts: 48, intervalMs: 250};
+const HISTORY_POLL = {attempts: 32, intervalMs: 250};
 const RESULT_SETTLED = 0;
 const RESULT_REJECTED = 1;
 const RESULT_UNKNOWN = 2;
@@ -127,24 +129,30 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     }
     let verdict: MerchantVerdict = 'nothing-seen';
     try {
-      const submitted = await submitNfcTransfer({
-        ledger,
-        envelopeHex: event.envelopeHex,
-        requestIdHex: event.requestIdHex,
-        readStateEnvelopeHex: event.readStateEnvelopeHex,
-      }, SETTLEMENT_POLL);
-
-      // Durable exact history is authoritative for settlement even if a status endpoint claimed
-      // rejection. read_state trees are structurally decoded but not yet BLS-verified, so absence of
-      // a row within this finite poll cannot safely become a decline; it remains honest unknown.
-      // What the refusal DOES survive as is which unknown this is — see `MerchantVerdict`.
-      const settled = await confirmIncomingTransfer({
-        relayUrl,
-        receiverPublicHex: identity.publicHex,
-        currency: reqInfo.currency,
-        amount: reqInfo.amount,
-        memoHex: reqInfo.nonce,
-      }, HISTORY_POLL);
+      // Submission and history confirmation run CONCURRENTLY (founder 2026-10-09: the merchant
+      // side must not hold the RF field a moment longer than the wire needs): the history poll
+      // no longer waits for the full status poll to finish before starting, which used to cost
+      // its entire cold start per tap. The history row stays authoritative for `settled`; a
+      // rejected submission with no row is `refused-unverified`; anything else stays an honest
+      // unknown. One asymmetry is accepted: if settlement lands AFTER the history budget
+      // expires (a >8 s tail), the verdict is `nothing-seen` rather than the (status-identical,
+      // same RESULT_UNKNOWN return) refused-unverified — no false decline is possible, because
+      // only the history row can say `settled`.
+      const [submitted, settled] = await Promise.all([
+        submitNfcTransfer({
+          ledger,
+          envelopeHex: event.envelopeHex,
+          requestIdHex: event.requestIdHex,
+          readStateEnvelopeHex: event.readStateEnvelopeHex,
+        }, SETTLEMENT_POLL),
+        confirmIncomingTransfer({
+          relayUrl,
+          receiverPublicHex: identity.publicHex,
+          currency: reqInfo.currency,
+          amount: reqInfo.amount,
+          memoHex: reqInfo.nonce,
+        }, HISTORY_POLL),
+      ]);
       verdict = settled ? 'settled' : submitted.kind === 'rejected' ? 'refused-unverified' : 'nothing-seen';
     } catch (e: unknown) {
       console.warn('NfcTap merchant settlement failed:', e instanceof Error ? e.message : String(e));
