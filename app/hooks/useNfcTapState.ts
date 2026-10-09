@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {NativeEventEmitter} from 'react-native';
 import {SOL_RECEIPT_WAIT_MS} from '../config/constants';
 import {M} from '../i18n';
+import {beepPaymentComplete} from '../lib/beep';
 
 // The terminal + transitional phases both NFC tap components track. Structurally identical to
 // NfcPhaseName / SolNfcPhaseName (plus 'error') — the IC and SOL transports share the
@@ -128,6 +129,10 @@ export function useNfcTapState<E>(args: {
   const finalize = useCallback((p: NfcTapPhase, r?: string) => {
     if (finalized.current || !aliveRef.current) return; // first terminal wins; ignore after teardown
     finalized.current = true;
+    // The completion beep (founder 2026-10-09): CARD role only — the payer's tap just concluded.
+    // Reader stays silent (a merchant-side chime is a Receive-surface concern), and every
+    // non-success phase (pending/declined/error) stays silent: not complete, no beep.
+    if (p === 'success' && role === 'card') beepPaymentComplete();
     clearSettleTimer();
     setReason(r ?? null);
     setPhaseTracked(p);
