@@ -42,7 +42,7 @@ function absent(m: Mount, testID: string): void {
 async function offlineHandoff(m: Mount, bobPubHex: string, cents: string, nonceHex: string): Promise<Uint8Array> {
   const expiry = Math.floor(Date.now() / 1000) + 600;
   const requestQR = await DpayCore.encodeRequest(bobPubHex, cents, nonceHex, expiry, 0, 'bob', '');
-  await armPayScan(m); // pay-intent gate (btn-new/reset disarmed)
+  await armPayScan(m); // wait out the post-reset scanner remount (reset() re-arms by returning to scan)
   (g.__DPAY_TEST_SCAN as (v: string) => void)(requestQR);
   // The transient sign status can flash by unread on a fast host — the envelope QR is the assert.
   expect(await m.driver.waitForText('signed ✓', {timeoutMs: 10_000})).toBe(true); // copy-economy sweep: "on this device" dropped, the signed check stays

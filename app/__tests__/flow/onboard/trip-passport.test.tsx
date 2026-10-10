@@ -116,7 +116,7 @@ hermeticDescribe('flow 94 — trip-passport', () => {
     const bob = await generateKeypair();
     expect(Number(await getBalance(bob.publicHex, 0))).toBe(0);
     const requestQR = await DpayCore.encodeRequest(bob.publicHex, '2500', randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'Bob', '');
-    await armPayScan(m); // pay-intent gate: arm the scan surface (no-op when already armed)
+    await armPayScan(m); // ensure the scan surface is live (no-op when already armed)
     type ScanFn = (qr: string) => void;
     (globalThis as unknown as {__DPAY_TEST_SCAN?: ScanFn}).__DPAY_TEST_SCAN!(requestQR);
     expect(await m.driver.waitForText('Paid', {timeoutMs: 10_000})).toBe(true);

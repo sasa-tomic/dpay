@@ -95,7 +95,7 @@ try {
   // the hand-off QR is on screen), so staging paid offline would require faking state.
   const nowSecs = Math.floor(Date.now() / 1000);
   const onlineReq = buildRequestQR(cafe.publicHex, PAY_CENTS, randNonceHex(), nowSecs + 600, 0, 'Café Demo');
-  await armPayScan(driver); // pay-intent gate (no-op if the NFC session left it armed)
+  await armPayScan(driver); // ensure the scan surface is live (no-op when already armed)
   // Hold the FIRST ledger /call POST so the sign status stays on screen for the shot; every other
   // request (balance/history polls, clock read_state) passes through untouched.
   let heldCall = null;
@@ -128,7 +128,7 @@ try {
   // shows directly — no Approve press anywhere.
   await goOffline(driver, {keepGateway: true});
   const offlineReq = buildRequestQR(cafe.publicHex, PAY_CENTS, randNonceHex(), nowSecs + 900, 0, 'Café Demo');
-  await armPayScan(driver); // btn-new (reset) disarmed the surface — fresh intent required
+  await armPayScan(driver); // wait out the post-reset scanner remount before injecting
   await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), offlineReq);
   await driver.findByTestID('btn-paid', {timeoutMs: 8000});
   await driver.screenshot(`${OUT}/shot-scanned`);

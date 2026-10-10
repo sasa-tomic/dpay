@@ -544,21 +544,16 @@ function buildStyles(p: Palette) {
   // pre-permission screen is the same instrument as idle - text that touches the frame is the
   // "almost-aligned" tell the caliber exists to kill).
   camPlaceholder: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24},
-  // ── The Pay viewfinder instrument (CALIBER slice 1) ───────────────────────────────────────
-  // The idle scan screen is no longer a floating button in a void: it renders the EXACT box the
-  // camera will occupy - same construction as `camBox` (stretch + 1:1 + R_CARD + the same
-  // theme-invariant warm-black fill + LIFT), so arming the camera moves nothing on screen. The
-  // composition is geometry, not color: four 2px corner brackets (R_SHARP rules) + one scan icon
-  // + the instruction copy, all in the sanctioned on-warm-black inks (DARK.*) with the ONE aqua
-  // accent (DARK.brandText, ≈10:1 on this fill - contrast-gated approval) on the brackets and
-  // icon. testID is deliberately NOT `scan-cam-box`: flows 79/81 pin that the live camera waits
-  // for the Pay Now press, and `scan-cam-box` must keep meaning "the camera is live".
+  // ── The scan viewfinder brackets (CALIBER slice 1) ────────────────────────────────────────
+  // Four 2px corner brackets that overlay the LIVE camera box (`QrScanner` paints them last, over
+  // the absoluteFill feed, so the box reads as one instrument through permission, camera and
+  // rail). Geometry, not color: sanctioned on-warm-black inks with the ONE aqua accent
+  // (DARK.brandText, ≈10:1 on the theme-invariant warm-black fill - contrast-gated approval).
   viewfinderCorner: {position: 'absolute', width: 20, height: 20, borderColor: DARK.brandText},
   viewfinderCornerTL: {top: 12, left: 12, borderTopWidth: 2, borderLeftWidth: 2},
   viewfinderCornerTR: {top: 12, right: 12, borderTopWidth: 2, borderRightWidth: 2},
   viewfinderCornerBL: {bottom: 12, left: 12, borderBottomWidth: 2, borderLeftWidth: 2},
   viewfinderCornerBR: {bottom: 12, right: 12, borderBottomWidth: 2, borderRightWidth: 2},
-  viewfinderCenter: {flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24},
   reviewAmount: {fontSize: 32, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.5, fontVariant: ['tabular-nums']},
   reviewTo: {fontSize: 16, color: p.sub, marginTop: 8, textAlign: 'center', fontFamily: FONT.sansMedium},
   warnNote: {fontSize: 13, color: p.warn, textAlign: 'center', marginTop: 6, marginBottom: 18, paddingHorizontal: 8, lineHeight: 18, fontFamily: FONT.sans},

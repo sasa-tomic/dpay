@@ -424,14 +424,16 @@ export async function selectEvmAsset(m: Mount, testKey: string, opts: {timeoutMs
   await m.driver.findByTestID('evm-pay-scan', {timeoutMs});
 }
 
-// --- pay-intent scan/NFC gates (the CHOKE POINTS, per lib.mjs) ----------------------------------
+// --- pay scan/NFC seams (the CHOKE POINTS, per lib.mjs) ----------------------------------------
 
 function scanCount(): number {
   const f = (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_SCAN_COUNT as (() => number) | undefined;
   return typeof f === 'function' ? f() : -1;
 }
 
-/** Press whichever pay-intent gate button is on screen. Returns true when a press was issued. */
+/** Press whichever pay-intent gate button is on screen. The gates are GONE (auto-arm, founder
+ *  2026-10-09): this stays only as an inert shim so the arm* loops keep one shape, and it is a
+ *  no-op on the ungated surface. Returns true when a press was issued. */
 async function pressScanGate(m: Mount): Promise<boolean> {
   const gate = ['btn-start-scan', 'btn-sol-start-scan', 'btn-evm-start-scan'].find((t) => m.driver.isPresent(t));
   if (!gate) return false;
