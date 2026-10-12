@@ -142,6 +142,29 @@ describe('classifyScan — Solana Pay requests', () => {
   });
 });
 
+describe('classifyScan — WalletConnect pairing URIs (plan W1 step 4)', () => {
+  // The shape a dApp's "connect wallet" QR / deep link carries (WC v2 pairing URI).
+  const WC_URI = 'wc:8a5e5efdc4aa90eafd8dc14aec69227a1584d67b8b3d228be879f37d0af9cbe4@2?relay-protocol=irn&symKey=1a2b3c';
+
+  test('a wc: pairing URI is a walletconnect verdict — dpay is asked to CONNECT, not to pay', () => {
+    expect(classifyScan(WC_URI)).toEqual({kind: 'walletconnect'});
+  });
+
+  test('an UPPERCASE WC: is the same verdict — QR encoders uppercase', () => {
+    expect(classifyScan(WC_URI.toUpperCase())).toEqual({kind: 'walletconnect'});
+  });
+
+  test('the match needs the colon — wcabc: is a different scheme and stays unknown', () => {
+    expect(classifyScan('wcabc:not-a-pairing')).toEqual({kind: 'unknown'});
+  });
+
+  test('a DAMAGED pairing URI is still a walletconnect verdict — the pairing entry names the failure', () => {
+    // Same discipline as a damaged checkout code: "it is a WC pairing and it did not work" is
+    // actionable (pairFailed copy); the camera's generic shrug is not.
+    expect(classifyScan('wc:damaged@2?symKey=zzz')).toEqual({kind: 'walletconnect'});
+  });
+});
+
 describe('classifyScan — nothing recognised it', () => {
   test.each([
     ['empty', ''],

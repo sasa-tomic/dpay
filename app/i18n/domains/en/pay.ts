@@ -283,6 +283,46 @@ export type PayMessages = {
     pendingNote: string;
   };
 
+  // --- WalletConnect wallet side (plan W1): pair copy + the one review sheet ------------------
+  /** Everything the scan surface needs when a `wc:` pairing code arrives, plus every string the
+   *  WcRequestSheet renders (the proposal review and the per-method request review). The sheet is
+   *  the security boundary of the whole wallet side, so the review lines name the counterparty
+   *  app, the chain, and exactly what would be signed - never a bare hex blob alone. */
+  wc: {
+    /** A scanned/tapped `wc:` code could not pair (web, or the wallet side disabled). */
+    unavailable: string;
+    /** `pair()` threw - a damaged or expired pairing URI. */
+    pairFailed: string;
+    connectTitle: string;
+    connectHeadline: string;
+    /** A method request under review (the sheet title). */
+    requestTitle: string;
+    appLabel: string;
+    chainLabel: string;
+    chainsLabel: string;
+    messageLabel: string;
+    domainLabel: string;
+    typeLabel: string;
+    fieldsLabel: string;
+    toLabel: string;
+    amountLabel: string;
+    spenderLabel: string;
+    ownerLabel: string;
+    deadlineLabel: string;
+    dataLabel: string;
+    /** A decoded ERC-20 amount the sheet cannot scale (no decimals without the catalog). */
+    rawUnits: (amount: string) => string;
+    /** Calldata matched no known token action: raw hex plus this explicit warning line. */
+    unknownCall: string;
+    switchHeadline: (chain: string) => string;
+    approve: string;
+    reject: string;
+    submittedTitle: string;
+    /** The submitted-not-settled terminal: the network accepted the broadcast, settlement did
+     *  not happen yet - the hash is the record (the send path's honest-unknown shape). */
+    submittedNote: string;
+  };
+
   // --- the scan surface + its NFC status row ------------------------------------------------
   scanToPay: string;
   sendToAddress: string;
@@ -477,6 +517,35 @@ export const payEn: PayMessages = {
     merchantMessage: message => `From the merchant: ${message}`,
     pendingNote:
       'The network accepted this payment; confirmation is still on the way. The signature below is your record - check it before paying again.',
+  },
+
+  wc: {
+    unavailable: 'WalletConnect is unavailable. Use the dpay mobile app to connect.',
+    pairFailed: 'This WalletConnect code did not work. Ask the app for a new one.',
+    connectTitle: 'Connect',
+    connectHeadline: 'An app wants to connect',
+    requestTitle: 'Sign request',
+    appLabel: 'App',
+    chainLabel: 'Chain',
+    chainsLabel: 'Chains',
+    messageLabel: 'Message',
+    domainLabel: 'Domain',
+    typeLabel: 'Type',
+    fieldsLabel: 'Fields',
+    toLabel: 'To',
+    amountLabel: 'Amount',
+    spenderLabel: 'Spender',
+    ownerLabel: 'Owner',
+    deadlineLabel: 'Deadline',
+    dataLabel: 'Data',
+    rawUnits: amount => `${amount} raw units`,
+    unknownCall: 'Unknown contract call. Read the raw data before approving.',
+    switchHeadline: chain => `Switch chain to ${chain}`,
+    approve: 'Approve',
+    reject: 'Reject',
+    submittedTitle: 'Submitted',
+    submittedNote:
+      'The network accepted the transaction. Settlement is still pending. The hash is your record.',
   },
 
   scanToPay: 'Scan to pay',

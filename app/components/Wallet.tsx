@@ -86,6 +86,11 @@ import {mtpBuyTokenOf, type MtpBuyAsset} from '../config/funding';
 import {HomeMenu} from './HomeMenu';
 import {AddFundsMenu} from './AddFundsMenu';
 import {MtpBuySheet} from './MtpBuySheet';
+import {
+  WcRequestSheet, makeWcProposalHandler, makeWcRequestHandler, proposalChains, proposalDapp,
+  requestDapp, summarizeWcRequest, approveWcRequest, rejectWcRequest,
+} from './WcRequestSheet';
+import type {WcProposal, WcRequest} from '../walletkit';
 import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 import {modeForScreen, screenForMode, type WalletMode, type WalletRoute} from '../lib/walletRoute';
@@ -1619,14 +1624,39 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     setPendingCheckout(url);
     setMode('pay');
   }, []);
+  // W1 step 4 - the ONE WalletConnect pairing entry: a `wc:` URI from the OS deep link OR a
+  // camera scan lands here (both inbound paths, one door). Gated on a device EVM address: no
+  // address = nothing to pair FOR, the link is dropped silently (the plan's no-identity rule).
+  // A pair failure is REPORTED in the link-error surface (honest dead end with an instruction);
+  // a successful pair surfaces the proposal through the review sheet once the dApp sends it.
+  const pairWc = useCallback((uri: string) => {
+    if (evmAddress == null) return;
+    void (async () => {
+      try {
+        const wk = await import('../walletkit');
+        const ok = await wk.pair(uri);
+        if (!ok) setLinkError(M.pay.wc.unavailable);
+      } catch (e: unknown) {
+        console.warn(`wc pair failed: ${e instanceof Error ? e.message : String(e)}`);
+        setLinkError(M.pay.wc.pairFailed);
+      }
+    })();
+  }, [evmAddress]);
   const handleUrl = useCallback((url: string) => {
+    // The WalletKit redirect re-open (`dpay://…?requestId=…`, NOT a `wc:` URI) is recognized
+    // and DROPPED (plan W1 step 4, v1 decision): responses ride the foreground socket, so the
+    // redirect carries nothing to act on - this branch only keeps it from reaching the
+    // pay-link/receipt parsers below.
+    if (/^dpay:/i.test(url) && /requestId=/.test(url)) return;
+    // A `wc:` pairing URI - the wallet-side inbound path, same entry as a scanned WC code.
+    if (/^wc:/i.test(url.trim())) { pairWc(url.trim()); return; }
     const link = parsePayLink(url);
     if (link) { applyLink(link); return; }
     const dl = decodeDeeplink(url);
     if (dl) { applyReceipt(dl.blob); return; }
     const checkout = parseCheckoutCode(url);
     if (checkout) applyCheckout(checkout);
-  }, [applyLink, applyReceipt, applyCheckout]);
+  }, [applyLink, applyReceipt, applyCheckout, pairWc]);
 
   useEffect(() => {
     let alive = true;
@@ -2244,6 +2274,121 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   }, [appActive, recheckAll]);
   const armMtpArrival = useCallback(() => { mtpArrivalArmed.current = true; }, []);
 
+  // W1 steps 2-4 - the WalletConnect WALLET side. State lives at the Wallet root (the
+  // receiptTxn discipline: one owner, root-mounted overlay). The kit initializes in the
+  // post-identity path ONLY (the same gate shape as the other identity-gated services: a device
+  // EVM address must exist before anything stands up a relay socket - requests can only arrive
+  // while that socket is live). The SDK's emitter feeds the ONE review sheet; approve/reject
+  // happen ONLY through its buttons; the request handler answers the two read-only methods
+  // directly and enforces the plan's one-review-at-a-time law. Session chain state is a
+  // topic->CAIP-2 map seeded at approve (eip155:1) and moved by an approved
+  // wallet_switchEthereumChain - it is what eth_chainId reads answer from.
+  type WcReviewState = {mode: 'proposal'; proposal: WcProposal} | {mode: 'request'; request: WcRequest};
+  const [wcReview, setWcReview] = useState<WcReviewState | null>(null);
+  const wcReviewRef = useRef<WcReviewState | null>(null);
+  const wcChains = useRef(new Map<string, string>());
+  const [wcBusy, setWcBusy] = useState(false);
+  const [wcErr, setWcErr] = useState<string | null>(null);
+  const [wcSubmitted, setWcSubmitted] = useState<string | null>(null);
+  const openWcReview = useCallback((next: WcReviewState) => { wcReviewRef.current = next; setWcReview(next); }, []);
+  const closeWcReview = useCallback(() => {
+    wcReviewRef.current = null;
+    setWcReview(null);
+    setWcBusy(false);
+    setWcErr(null);
+    setWcSubmitted(null);
+  }, []);
+  useEffect(() => {
+    if (evmAddress == null) return;
+    let alive = true;
+    let offProposal: (() => void) | null = null;
+    let offRequest: (() => void) | null = null;
+    void (async () => {
+      try {
+        const wk = await import('../walletkit');
+        if (!alive) return;
+        offProposal = wk.onProposal(makeWcProposalHandler({
+          isOpen: () => wcReviewRef.current != null,
+          open: (proposal) => openWcReview({mode: 'proposal', proposal}),
+          reject: (proposal) => wk.rejectSession(proposal),
+        }));
+        offRequest = wk.onRequest(makeWcRequestHandler({
+          evmAddress,
+          isOpen: () => wcReviewRef.current != null,
+          activeChainOf: (topic) => wcChains.current.get(topic) ?? 'eip155:1',
+          respond: (topic, response) => wk.respondSessionRequest(topic, response),
+          userRejected: wk.wcUserRejected(),
+          openRequest: (request) => openWcReview({mode: 'request', request}),
+        }));
+        await wk.initWalletKit();
+      } catch (e: unknown) {
+        console.warn(`walletkit init failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    })();
+    return () => {
+      alive = false;
+      offProposal?.();
+      offRequest?.();
+    };
+  }, [evmAddress, openWcReview]);
+  // The sheet's Approve: a proposal approves the session with the device EVM address on the
+  // wired chains (and seeds the chain map); a request runs the per-method approve path. Errors
+  // (RPC refusals, gate failures) keep the sheet open with the message - the user still holds
+  // Reject, and the dApp is answered by a button press either way.
+  const approveWc = useCallback(async () => {
+    const review = wcReviewRef.current;
+    if (review == null || wcBusy || evmAddress == null) return;
+    setWcBusy(true);
+    setWcErr(null);
+    try {
+      const wk = await import('../walletkit');
+      if (review.mode === 'proposal') {
+        const session = await wk.approveSession(review.proposal, evmAddress);
+        if (session != null && typeof (session as {topic?: unknown}).topic === 'string') {
+          wcChains.current.set((session as {topic: string}).topic, 'eip155:1');
+        }
+        closeWcReview();
+      } else {
+        const out = await approveWcRequest({
+          request: review.request,
+          secretHex: identity.secretHex,
+          evmAddress,
+          activeChain: wcChains.current.get(review.request.topic) ?? 'eip155:1',
+          unsupportedChains: wk.wcUnsupportedChains(),
+          respond: (topic, response) => wk.respondSessionRequest(topic, response),
+        });
+        if (out.switchedTo != null) wcChains.current.set(review.request.topic, out.switchedTo);
+        if (out.submittedHash != null) setWcSubmitted(out.submittedHash); // submitted, NOT settled
+        else closeWcReview();
+      }
+    } catch (e: unknown) {
+      setWcErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWcBusy(false);
+    }
+  }, [wcBusy, evmAddress, identity.secretHex, closeWcReview]);
+  // The sheet's Reject: the ONLY refusal path, answering the SDK's USER_REJECTED (5000) - or,
+  // for a proposal, the SDK's rejectSession with the same error.
+  const rejectWc = useCallback(async () => {
+    const review = wcReviewRef.current;
+    if (review == null || wcBusy) return;
+    setWcBusy(true);
+    try {
+      const wk = await import('../walletkit');
+      if (review.mode === 'proposal') {
+        await wk.rejectSession(review.proposal);
+      } else {
+        await rejectWcRequest(review.request, wk.wcUserRejected(), (topic, response) => wk.respondSessionRequest(topic, response));
+      }
+      closeWcReview();
+    } catch (e: unknown) {
+      console.warn(`wc reject failed: ${e instanceof Error ? e.message : String(e)}`);
+      closeWcReview();
+    } finally {
+      setWcBusy(false);
+    }
+  }, [wcBusy, closeWcReview]);
+
   // Remove the MAIN currency (the one the menu was opened from). The guard decides; a refusal is
   // stated in the menu with its practical next step, never a silent swallow. A successful remove
   // keeps the wallet "in" a visible currency: if the removed one WAS main, main moves to the
@@ -2545,9 +2690,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
             />
           : mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solShownState.balance ?? '0'} tokenBalance={selectedTokenShownBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenShownStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solShownState, selectedTokenShownState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solShownState.status === 'ok' && solShownState.balance === '0'} solChecking={solShownState.status === 'loading' || solShownState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} />
+              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solShownState.balance ?? '0'} tokenBalance={selectedTokenShownBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenShownStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solShownState, selectedTokenShownState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solShownState.status === 'ok' && solShownState.balance === '0'} solChecking={solShownState.status === 'loading' || solShownState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onWalletConnectPair={pairWc} />
               : activeEvm && activeEvmAsset != null
-              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} />
+              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} onWalletConnectPair={pairWc} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} shownBalance={shownBalance}
@@ -2567,6 +2712,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
                   onLockChange={setSelectionLocked}
                   onOpenAddressBook={openAddresses}
                   onOpenReceipt={setReceiptTxn}
+                  onWalletConnectPair={pairWc}
                 />
           )
           : mode === 'receive'
@@ -2797,6 +2943,25 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           token={mtpBuyToken}
           onClose={() => setMtpBuyToken(null)}
           onWidgetOpened={armMtpArrival}
+        />
+      ) : null}
+      {/* W1 step 3 - the ONE WalletConnect review sheet (root-mounted, the receiptTxn discipline).
+          Every session proposal and every reviewable request answers HERE and only here: approve
+          and reject are the sheet's buttons, reads (eth_accounts/eth_chainId) never open it, and
+          a request arriving while it is open is answered 5000 by the one-review-at-a-time law. */}
+      {wcReview ? (
+        <WcRequestSheet
+          mode={wcReview.mode}
+          dapp={wcReview.mode === 'proposal' ? proposalDapp(wcReview.proposal) : requestDapp(wcReview.request)}
+          chains={wcReview.mode === 'proposal' ? proposalChains(wcReview.proposal) : []}
+          summary={wcReview.mode === 'request' ? summarizeWcRequest(wcReview.request, {activeChain: wcChains.current.get(wcReview.request.topic) ?? 'eip155:1', evmAddress: evmAddress ?? ''}) : null}
+          chain="eip155:1"
+          busy={wcBusy}
+          err={wcErr}
+          submittedHash={wcSubmitted}
+          onApprove={() => { void approveWc(); }}
+          onReject={() => { void rejectWc(); }}
+          onDone={closeWcReview}
         />
       ) : null}
       {/* An incoming payment link that cannot be paid. It states WHICH asset/chain the link asked

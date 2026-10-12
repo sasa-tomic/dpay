@@ -58,7 +58,7 @@ const OCP_IC_SEQUENCE_MS =
   + IC_SUBMIT_TIMEOUT_MS
   + IC_POLL_BUDGET.attempts * (IC_READ_STATE_TIMEOUT_MS + IC_POLL_BUDGET.intervalMs);
 
-export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail, onOpenAddressBook, onOpenReceipt}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string | null; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void; /** Open the shared TxnReceipt (Wallet root) for a finished send. */ onOpenReceipt?: (t: Txn) => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail, onOpenAddressBook, onOpenReceipt, onWalletConnectPair}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string | null; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void; /** Open the shared TxnReceipt (Wallet root) for a finished send. */ onOpenReceipt?: (t: Txn) => void; /** A scanned `wc:` pairing URI routes here (the Wallet's pairing entry, the same one the `wc:` deep link lands in, plan W1 step 4). Absent = dropped (the direct-mount harnesses). */ onWalletConnectPair?: (uri: string) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp-choose'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
@@ -402,6 +402,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
       return;
     }
     if (what.kind === 'solana-pay') { refuseScan(M.pay.spay.wrongRail); return; }
+    if (what.kind === 'walletconnect') {
+      // A WC pairing URI asks dpay (the WALLET) to connect - never this rail's payer. Routed to
+      // the Wallet's pairing entry; absent handler (harness) = dropped.
+      if (onWalletConnectPair) { setErr(null); onWalletConnectPair(raw.trim()); }
+      return;
+    }
     if (what.kind === 'address') {
       // An asset with no route off the wallet (DEMO) has nothing to prefill, so say that instead of
       // opening a form that could only refuse.

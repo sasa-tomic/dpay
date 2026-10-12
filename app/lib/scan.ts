@@ -41,6 +41,11 @@ export type ScanFallback =
    *  the SOL pay mode whether the request is payable, and the IC pay mode refuses it by name with
    *  the one instruction that helps (switch to the Solana rail and scan again). */
   | {kind: 'solana-pay'}
+  /** A WalletConnect v2 pairing URI (`wc:<topic>@2?relay-protocol=…&symKey=…`) — a dApp asking
+   *  dpay (the WALLET side) to connect, not to pay. Only the scheme is detected; the pairing
+   *  entry (Wallet's `onWalletConnectPair`, the same one the `wc:` deep link lands in) decides.
+   *  Absent handler = dropped, like a coin request on a rail that cannot answer it. */
+  | {kind: 'walletconnect'}
   /** Nothing claimed it. The caller's honest "not a payment code" error stands. */
   | {kind: 'unknown'};
 
@@ -93,6 +98,11 @@ export function classifyScan(raw: string): ScanFallback {
   // `opencryptopay` verdict: "it is a Solana Pay code and part of it is unusable" must not decay
   // into the camera's generic shrug.
   if (t.toLowerCase().startsWith('solana:')) return {kind: 'solana-pay'};
+  // A `wc:` pairing URI — the WalletConnect wallet-side inbound path (plan W1 step 4). Same
+  // scheme-prefix test with the colon guard: `wcabc:` is not claimed. It can never collide with
+  // the tests above (a pairing URI carries `@2?relay-protocol`), so its position is free; it
+  // sits with the other foreign-scheme verdicts.
+  if (t.toLowerCase().startsWith('wc:')) return {kind: 'walletconnect'};
   const shape = detectAddressShape(t);
   return shape === 'unknown' ? {kind: 'unknown'} : {kind: 'address', shape};
 }

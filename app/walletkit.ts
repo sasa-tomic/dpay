@@ -224,6 +224,23 @@ export async function respondSessionRequest(topic: string, response: WcResponse)
   await kit.respondSessionRequest({topic, response});
 }
 
+/** One SDK error object as the responder's JSON-RPC `error` half carries it. */
+export type WcSdkError = {code: number; message: string};
+
+/** The SDK's USER_REJECTED error (code 5000) — every user refusal answers with this exact
+ *  object, so the sheet's reject button and the one-review-at-a-time gate build IDENTICAL
+ *  rejections. Exported as a factory (not a const) because the sheet and the Wallet wiring may
+ *  not import WC specifiers themselves (the seam law) — they pass the value through. */
+export function wcUserRejected(): WcSdkError {
+  return getSdkError('USER_REJECTED');
+}
+
+/** The SDK's UNSUPPORTED_CHAINS error (code 5100) — a `wallet_switchEthereumChain` to a chain
+ *  outside the wired pair refuses with this (plan W1 step 3). Same pass-through rationale. */
+export function wcUnsupportedChains(): WcSdkError {
+  return getSdkError('UNSUPPORTED_CHAINS');
+}
+
 /** Everything worth restoring a UI from: settled sessions plus whatever proposals/requests are
  *  pending right now. Passive by design — reads the CACHED client and never initializes one (a
  *  state read must not stand up a relay socket). Returns null when disabled or never initialized. */

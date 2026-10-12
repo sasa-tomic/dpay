@@ -48,7 +48,7 @@ import {M} from '../i18n';
  * The camera also accepts a dpay payment link and a plain 0x address (classifyScan) — the same
  * three verdicts every rail's scanner answers.
  */
-export function EvmPayMode({identity, online, asset, balance, gasWei, gasChecking = false, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onOpenAddressBook, onOpenReceipt, onSent, onRecheckBalances, recheckBusy = false}: {
+export function EvmPayMode({identity, online, asset, balance, gasWei, gasChecking = false, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onOpenAddressBook, onOpenReceipt, onSent, onRecheckBalances, recheckBusy = false, onWalletConnectPair}: {
   identity: Identity;
   online: boolean;
   /** The SELECTED EVM asset row — this mode only mounts while one is selected. */
@@ -71,6 +71,8 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
   onSent: () => void;
   onRecheckBalances: () => void;
   recheckBusy?: boolean;
+  /** A scanned `wc:` pairing URI routes here (the Wallet's pairing entry, the same one the `wc:` deep link lands in, plan W1 step 4). Absent = dropped (the direct-mount harnesses). */
+  onWalletConnectPair?: (uri: string) => void;
 }) {
   const [phase, setPhase] = useState<'scan' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<EvmReqV1 | null>(null);
@@ -226,6 +228,12 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
   function onNotARequest(raw: string) {
     const what = classifyScan(raw);
     if (what.kind === 'link') { setErr(null); onScannedLink(raw.trim()); return; }
+    if (what.kind === 'walletconnect') {
+      // A WC pairing URI asks dpay (the WALLET) to connect - never this rail's payer. Routed to
+      // the Wallet's pairing entry; absent handler (harness) = dropped.
+      if (onWalletConnectPair) { setErr(null); onWalletConnectPair(raw.trim()); }
+      return;
+    }
     if (what.kind === 'address') {
       setErr(null);
       setScannedAddress(raw.trim());

@@ -90,6 +90,20 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="dpay" />
         </intent-filter>
+        <!-- WalletConnect (wc:) pairing URI - the wallet-side inbound path (plan W1 step 4): a
+             dApp's "connect a wallet" flow dispatches `wc:<topic>@2?relay-protocol=…&symKey=…`
+             and dpay pairs from it, the SAME entry a scanned WalletConnect QR takes (Wallet's
+             handleUrl routes both into one `pair()`). BROWSABLE lets browsers and messaging apps
+             dispatch it; like the dpay: scheme it is machine state between apps, not a
+             human-facing link. dpay answers proposals only from the mounted Wallet (identity
+             exists, so a device EVM address exists); responses ride the foreground relay socket,
+             so the redirect re-open (`dpay://…?requestId=…`) is recognized and ignored. -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="wc" />
+        </intent-filter>
       </activity>
 
       <!-- Payer-side HCE card. BIND_NFC_SERVICE ensures only the OS NFC stack can bind it; the AID
