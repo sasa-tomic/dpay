@@ -414,9 +414,10 @@ export function verifySolPayment(
 //   3. the ONLY required signature is the user's own. Track S (2026-10-12) generalized the
 //      decode to multi-signer layouts so the WC path can name every slot, but the VENUE sign
 //      path keeps the original red line: a route demanding another signer is something this
-//      wallet cannot honestly execute — refused, never partial-signed. `signVenueSwapTx` only
-//      signs co-signed txs when the caller passes `{allowCoSigners: true}` (the WC review
-//      surface, after the sheet has displayed the fee payer).
+//      wallet cannot honestly execute — refused, never partial-signed. `signVenueSwapTx` signs
+//      a co-signed tx only when the caller passes `{allowCoSigners: true}`; NO caller does
+//      today — the WC review surface refuses co-signed txs whole (`WcRequestSheet`'s
+//      coSigned check) and calls with default options.
 //
 // Fee payer (displayed-else-refuse law): the decode exposes `feePayer` explicitly so a caller
 // can always SHOW who pays fees — a sponsored tx (someone else pays) must never be silently
@@ -527,7 +528,8 @@ export type VenueSignOptions = {
   /** Allow txs whose required-signer set includes keys OTHER than the device's: the device signs
    *  its own slot(s) and the remaining slots are left exactly as received (a dApp co-signer fills
    *  them). Default false — the venue swap path keeps its "refused, never partial-signed" red
-   *  line. The WC review surface opts in AFTER the sheet has displayed the fee payer. */
+   *  line. Reserved for a review surface that displays the full co-signer set first; today's
+   *  WC sheet does NOT opt in (it refuses co-signed txs). */
   readonly allowCoSigners?: boolean;
 };
 
@@ -537,7 +539,8 @@ export type VenueSignOptions = {
  * byte-for-byte (a partially co-signed tx arrives with its co-signers' signatures in place).
  * Refuses (returns null) when the device key is NOT one of the required signers — this wallet
  * never signs a tx it is not a party to — and, unless `allowCoSigners` is set, when the tx needs
- * more signatures than the device alone can supply. Returns the raw signed bytes for broadcast,
+ * more signatures than the device alone can supply (no caller sets it today: the WC review
+ * surface refuses co-signed txs whole). Returns the raw signed bytes for broadcast,
  * the base58 signature (the tx's on-chain identity — Solana dedups resubmission by it), the fee
  * payer's base58 address, the device's signer position, and whether ALL required slots now hold
  * signatures (false ⇒ someone else must still co-sign before broadcast). The original `bytes`

@@ -5,6 +5,7 @@ import {useEffect, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, View} from 'react-native';
 import {venueDisplayName} from '../config/venues';
 import {convertAbortFlavor, convertRecordMinOut, type ConvertRecord} from '../convert';
+import {isMtpelerinProviderRecord} from '../convert/providerStatus';
 import {abortConvertRecord, acknowledgeStuckRecord, providerLastCheckedAtMs} from '../convertResume';
 import {solanaTokenOfMint} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
@@ -320,10 +321,13 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
               here — so the panel names that and renders NO manual send trio (a second,
               hand-copied deposit on top of the auto-send would be a double-spend invitation).
               An another-rail source (SOL-side) is still the USER's own transfer: the manual
-              handoff stays verbatim. The amount goes through the SAME formatter as every
+              handoff stays verbatim. The Mt Pelerin cash-out (2026-10-12, R2 step 2) joins the
+              WALLET-SENT arm: its record is adopted only AT broadcast acceptance of the sheet's
+              own EvmWithdrawSheet send, so a "send it to the address above" trio here would ask
+              for a SECOND transfer. The amount goes through the SAME formatter as every
               other money line; the address stays verbatim. */}
           {record.providerDeposit != null ? (
-            record.inCurrency != null ? (
+            record.inCurrency != null || isMtpelerinProviderRecord(record) ? (
               <View testID="convert-deposit-handoff">
                 <Text testID="convert-deposit-auto-note" style={S.convertStateMeta}>
                   {M.convert.cefi.depositAutoNote(venueName, inSymbol)}

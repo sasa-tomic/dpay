@@ -217,7 +217,6 @@ export const depositFr: DepositMessages = {
 
   mtp: {
     entryLabel: 'Acheter avec Mt Pelerin',
-    entryHint: asset => `Achète ${asset} via Mt Pelerin, livré à votre adresse`,
     chooserDeposit: 'Déposer',
     fundingLine: 'Carte ou virement, paiement sur votre adresse',
     sheetTitle: 'Acheter avec Mt Pelerin',

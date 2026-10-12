@@ -106,6 +106,10 @@ export type WcReview =
       rows: readonly WcCallRow[];
       unknownCall: boolean;
       chainId: number | null;
+      /** Non-null when the params name a chain the session is not on (or an unparseable one):
+       *  the request is refused before the sheet - what the user reviews must be the chain the
+       *  bytes move on. */
+      chainDivergence: string | null;
       signerMismatch: boolean;
     }
   /** wallet_switchEthereumChain: the requested chain and whether dpay serves it. */
@@ -542,6 +546,13 @@ export function summarizeWcRequest(request: WcRequest, ctx: {activeChain: string
       const data = tx.data ?? '';
       const decoded = decodeEvmCallData(data);
       const paramChain = tx.chainId != null && /^0x[0-9a-fA-F]+$/.test(tx.chainId) ? Number(BigInt(tx.chainId)) : null;
+      const envelopeChainId = Number(chainHexOf(chain).slice(2));
+      const chainDivergence =
+        tx.chainId != null && paramChain == null
+          ? 'chainId is not a hex quantity'
+          : paramChain != null && paramChain !== envelopeChainId
+            ? `chainId ${paramChain} does not match the session chain ${envelopeChainId}`
+            : null;
       return {
         method,
         chain,
@@ -553,6 +564,7 @@ export function summarizeWcRequest(request: WcRequest, ctx: {activeChain: string
           rows: decoded.rows,
           unknownCall: !decoded.known,
           chainId: paramChain,
+          chainDivergence,
           signerMismatch: signerMismatchOf(tx.from, ctx.evmAddress),
         },
       };
@@ -651,6 +663,12 @@ export async function approveWcRequest(args: WcApproveArgs): Promise<WcApproveOu
     case 'message': {
       if (summary.review.signerMismatch) {
         await respondError(args, -32603, 'Request asks a different address to sign');
+        return NO_OUTCOME;
+      }
+      // Re-refused at sign time (the handler gates the sheet, approve is the last gate): a
+      // message that decodes to nothing is never signed as empty bytes.
+      if (summary.review.hex != null ? hexToBytes(summary.review.hex).length === 0 : (summary.review.text ?? '').length === 0) {
+        await respondError(args, -32603, 'Malformed personal_sign: no message');
         return NO_OUTCOME;
       }
       // The EXACT bytes the dApp sent: hex when it sent hex, UTF-8 when it sent a string.
@@ -790,7 +808,7 @@ async function broadcastFilledTx(args: WcApproveArgs, tx: Extract<WcReview, {kin
   const price = txGasField(args, 'gasPrice');
   const signed = price != null
     ? signLegacyTx({chainId, nonce, gasPrice: price, gasLimit, to, value: valueWei, data: dataBytes}, privateKey)
-    : await signEip1559Filled(rpc, urls, args, privateKey, gasLimit, nonce, to, valueWei, dataBytes);
+    : await signEip1559Filled(rpc, urls, args, privateKey, gasLimit, nonce, to, valueWei, dataBytes, chainId);
 
   const localHash = toHex0x(signed.txHash);
   const accepted = await rpc.ethSendRawTransaction(urls, toHex0x(signed.raw));
@@ -845,6 +863,7 @@ async function signEip1559Filled(
   to: string,
   valueWei: bigint,
   dataBytes: Uint8Array | undefined,
+  chainId: number,
 ): Promise<ReturnType<typeof signEip1559Tx>> {
   const givenMaxFee = txGasField(args, 'maxFeePerGas');
   const givenPriority = txGasField(args, 'maxPriorityFeePerGas');
@@ -860,7 +879,7 @@ async function signEip1559Filled(
     maxFee = baseFee * 2n + priority;
   }
   return signEip1559Tx(
-    {chainId: Number(chainHexOf(chainOf(args.request, args.activeChain)).slice(2)), nonce, maxPriorityFeePerGas: priority, maxFeePerGas: maxFee, gasLimit, to, value: valueWei, data: dataBytes},
+    {chainId, nonce, maxPriorityFeePerGas: priority, maxFeePerGas: maxFee, gasLimit, to, value: valueWei, data: dataBytes},
     privateKey,
   );
 }
@@ -941,6 +960,18 @@ export function makeWcRequestHandler(deps: WcRequestHandlerDeps): (request: WcRe
     }
     if (summary.review.kind === 'typedData' && summary.review.malformed != null) {
       void safeRespond(request.topic, {id: request.id, jsonrpc: '2.0', error: {code: -32603, message: `Malformed typed data: ${summary.review.malformed}`}});
+      return;
+    }
+    if (summary.review.kind === 'tx' && summary.review.chainDivergence != null) {
+      // The reviewed chain must BE the chain the bytes move on: a tx naming another chain is
+      // refused typed, never shown behind a review of the session's chain.
+      void safeRespond(request.topic, {id: request.id, jsonrpc: '2.0', error: {code: -32603, message: `Wrong chain in request: ${summary.review.chainDivergence}`}});
+      return;
+    }
+    if (summary.review.kind === 'message' && (summary.review.hex != null ? hexToBytes(summary.review.hex).length === 0 : (summary.review.text ?? '').length === 0)) {
+      // A message that decodes to nothing (non-string params, message==signer collapse, 0x) is
+      // malformed, not signable: never empty-byte-sign on approve.
+      void safeRespond(request.topic, {id: request.id, jsonrpc: '2.0', error: {code: -32603, message: 'Malformed personal_sign: no message'}});
       return;
     }
     deps.openRequest(request);

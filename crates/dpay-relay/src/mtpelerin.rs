@@ -1088,6 +1088,12 @@ fn load_orders(path: &Path) -> OrdersInner {
 
 /// One append-only JSONL write. Creates the dir on first use; a failure is a stderr note
 /// and NEVER a request failure (the offline mode's lenience — the trocador store's rule).
+///
+/// Concurrency shape: ONE relay process owns this directory (the deployment shape — the
+/// prod compose runs one relay container). Every line leaves as a single `writeln!` on an
+/// `O_APPEND` handle, so concurrent in-process requests (or a second process, if an
+/// operator ever runs one) cannot interleave mid-line; readers do last-wins per order id
+/// on reload ([`load_orders`]), and a torn tail line is skipped, never fatal.
 fn write_jsonl(dir: &Path, path: &Path, line: &str) {
     use std::io::Write;
     if let Err(e) = std::fs::create_dir_all(dir) {

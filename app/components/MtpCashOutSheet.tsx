@@ -213,7 +213,9 @@ export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasW
   }, [record]);
 
   const continueCashOut = useCallback(async () => {
-    if (!ibanOk || !holderOk || !amountOk || ordering) return;
+    // quoteOk on the gate: the order is placed only when the venue's attributed net figure is
+    // on screen (the review's honesty law) - no quote, no order, never a '0 expected' record.
+    if (!ibanOk || !holderOk || !amountOk || quote == null || ordering) return;
     setOrdering(true);
     setErr(null);
     try {
@@ -237,7 +239,7 @@ export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasW
     } finally {
       setOrdering(false);
     }
-  }, [ibanOk, holderOk, amountOk, ordering, relayUrl, token, amountStr, sourceNetwork, iban, holder]);
+  }, [ibanOk, holderOk, amountOk, quote, ordering, relayUrl, token, amountStr, sourceNetwork, iban, holder]);
 
   // Broadcast acceptance (EvmWithdrawSheet's onSent fires the moment the network ACCEPTS —
   // done AND unknown both land here): build + adopt the lifecycle record. A kill after this
@@ -381,12 +383,12 @@ export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasW
 
                 <Pressable
                   testID="btn-mtp-cashout-continue"
-                  style={[S.primaryWide, (!ibanOk || !holderOk || !amountOk || ordering) && S.dim]}
+                  style={[S.primaryWide, (!ibanOk || !holderOk || !amountOk || quote == null || ordering) && S.dim]}
                   onPress={() => { void continueCashOut(); }}
-                  disabled={!ibanOk || !holderOk || !amountOk || ordering}
+                  disabled={!ibanOk || !holderOk || !amountOk || quote == null || ordering}
                   accessibilityRole="button"
                   accessibilityLabel={M.deposit.mtpCash.continueLabel}
-                  accessibilityState={{disabled: !ibanOk || !holderOk || !amountOk || ordering}}>
+                  accessibilityState={{disabled: !ibanOk || !holderOk || !amountOk || quote == null || ordering}}>
                   {ordering
                     ? <>
                         <ActivityIndicator size="small" color={C.brandInk} />

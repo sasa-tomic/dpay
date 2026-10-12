@@ -17,6 +17,8 @@
  *     (card is a buy-side method; the venue publishes no cash-out card figure).
  *   • The lifecycle record the send adopts is the legless CeFi shape and HYDRATES through the
  *     real store validator (the venueOfId('mtpelerin') cefi exemption) — proven, not assumed.
+ *   • The adopted record's awaiting_deposit panel takes the WALLET-SENT arm (the auto note):
+ *     the wallet's own send already went out, so the manual send trio never renders here.
  */
 import {describe, test, expect, jest, beforeEach} from '@jest/globals';
 import React from 'react';
@@ -283,6 +285,15 @@ describe('MtpCashOutSheet — the lifecycle handoff', () => {
     expect(adopted.providerRef!.statusUrl).toBe('https://relay.test/api/v1/mtpelerin/conversion?id=mtp-test000000000001');
     expect(adopted.providerDeposit!.depositAddress).toBe(OFFRAMP);
     expect(adopted.providerDeposit!.depositAmount).toBe('2');
+    // The lifecycle panel (sendClose lands it): the awaiting_deposit card takes the
+    // WALLET-SENT arm — the auto note, NEVER the manual "send it to the address above"
+    // trio with its copy button. The wallet's own send already went out; re-asking for it
+    // would invite a second transfer on top of the adopted order.
+    await act(async () => { sendSheet.props.onClose(); await Promise.resolve(); });
+    expect(has(tree, 'convert-awaiting-deposit')).toBe(true);
+    expect(textOf(tree, 'convert-deposit-handoff')).toContain(M.convert.cefi.depositAutoNote('Mt Pelerin', 'ZCHF'));
+    expect(has(tree, 'btn-convert-copy-deposit-address')).toBe(false);
+    expect(textOf(tree, 'convert-awaiting-deposit')).not.toContain(M.convert.cefi.depositNote('Mt Pelerin', 'ZCHF'));
     act(() => { tree.unmount(); });
   });
 });

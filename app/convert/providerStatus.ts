@@ -145,7 +145,12 @@ function mtpelerinReadingOf(j: Record<string, unknown>): ProviderStatusReading {
       : payload != null && typeof payload.amount === 'number' && Number.isFinite(payload.amount)
         ? String(payload.amount)
         : undefined;
-    return {kind: 'completed', amount};
+    // The webhook's amount is denominated in payload.currency (the venue's contract). The v1
+    // cash-out is CHF-only, so a payload naming any other currency is not our figure: the done
+    // state stands, the number does not (fail-closed; re-verified when the founder's R0 keys
+    // and the first real webhook land).
+    const currencyOk = payload != null && typeof payload.currency === 'string' && payload.currency.toUpperCase() === 'CHF';
+    return {kind: 'completed', amount: currencyOk ? amount : undefined};
   }
   if (j.terminal === false) return {kind: 'awaiting_deposit'};
   return {kind: 'unreachable'};

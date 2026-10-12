@@ -333,8 +333,6 @@ export type DepositMessages = {
     /** The entry label on every buy surface: the Add-funds choice, the FundingRoutes provider
      *  row, the Deposit-sheet entry. */
     entryLabel: string;
-    /** The entry's screen-reader hint; `asset` is the token the buy delivers. */
-    entryHint: (asset: string) => string;
     /** The Add-funds choice's deposit row (the buy choice names the provider). */
     chooserDeposit: string;
     /** The FundingRoutes provider row's one-line differentiator: unlike the listed providers,
@@ -699,7 +697,6 @@ export const depositEn: DepositMessages = {
 
   mtp: {
     entryLabel: 'Buy with Mt Pelerin',
-    entryHint: asset => `Buys ${asset} through Mt Pelerin, delivered to your address`,
     chooserDeposit: 'Deposit',
     fundingLine: 'Card or bank, pays out to your address',
     sheetTitle: 'Buy with Mt Pelerin',
