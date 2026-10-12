@@ -786,7 +786,9 @@ export async function approveWcRequest(args: WcApproveArgs): Promise<WcApproveOu
  *  (then legacy). Returns OUR hash (keccak of the signed bytes) - submitted, not settled; no
  *  receipt poll on this path. */
 async function broadcastFilledTx(args: WcApproveArgs, tx: Extract<WcReview, {kind: 'tx'}>, privateKey: Uint8Array): Promise<string> {
-  const chainId = tx.chainId ?? Number(chainHexOf(chainOf(args.request, args.activeChain)).slice(2));
+  // BigInt parses the hex quantity ('0x7a69' -> 31337); Number alone would read the hex digits
+  // as decimal and NaN on any chain id carrying a hex letter (Arbitrum 0xa4b1, anvil 0x7a69).
+  const chainId = tx.chainId ?? Number(BigInt(chainHexOf(chainOf(args.request, args.activeChain))));
   const urls = evmRpcUrls(chainId);
   if (urls[0] === '') throw new Error(`EVM is not configured (chain ${chainId})`);
   const to = tx.to as string;

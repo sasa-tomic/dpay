@@ -83,10 +83,15 @@ test('225 · an approved WalletConnect eth_sendTransaction param-fills, signs, b
   expect(answers).toHaveLength(1);
   expect(answers[0]!.response).toEqual({id: 1, jsonrpc: '2.0', result: out.submittedHash});
 
-  // REAL chain state: the hash the dApp holds is the chain's tx - receipt included, the payer's
-  // nonce advanced by exactly one, and the recipient's native balance up by the exact amount.
+  // REAL chain state: the hash the dApp holds is the chain's tx. The WC path answers at submit
+  // (submitted, NOT settled - no internal receipt poll by contract), so inclusion is POLLED here.
   const hash = out.submittedHash as string;
-  await expect(getEvmReceiptStatus(ANVIL_CHAIN_ID, hash)).resolves.toBe('included');
+  const status = await pollUntil(
+    'wc broadcast receipt',
+    async () => getEvmReceiptStatus(ANVIL_CHAIN_ID, hash),
+    (s) => s !== 'pending',
+  );
+  expect(status).toBe('included');
   const [paidAfter, txsAfter] = await pollUntil(
     'wc broadcast inclusion',
     async () => [
