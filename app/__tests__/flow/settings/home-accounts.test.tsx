@@ -42,8 +42,11 @@ hermeticDescribe('flow 133 — home-surface', () => {
     await m.driver.findByTestID('tab-pay', {timeoutMs: 4000});
 
     // (b) The headline is the HOME CURRENCY in the currency unit; ∂100 of practice money does NOT
-    //     reach it (X4).
-    assertEq(m.driver.readText('home-headline-label'), 'Balance CHF', "the headline names the home CURRENCY");
+    //     reach it (X4). The label populates asynchronously on cold start — settle before reading.
+    await m.driver.waitForFunction(
+      () => m.driver.readTextSafe('home-headline-label') === 'Balance CHF',
+      {timeoutMs: 10_000, label: 'the cold-start headline names the home currency'},
+    );
     expect(m.driver.readText('home-headline-amount').includes('∂')).toBe(false);
 
     // (d) The accounts AFFORDANCE is the headline itself; the LIST is not here.
