@@ -1239,10 +1239,10 @@ fn evm_sections_with(sepolia_token: Option<&str>, anvil_token: Option<&str>) -> 
                 liquidity: None,
             },
             // USDC AFTER the ZCHF row: section order IS the wallet row order and the wire
-            // byte-shape pins index rows[0] = ZCHF, rows[1] = USDC per section. The Partner
-            // onramp names the Mt Pelerin fiat rail (R1 step 0); the offramp stays the honest
-            // Unavailable until R2 step 1 flips the eligible rows. Canonical Circle deployment,
-            // verified against api.mtpelerin.com/currencies/tokens 2026-10-12.
+            // byte-shape pins index rows[0] = ZCHF, rows[1] = USDC per section. Both ramps
+            // name the Mt Pelerin fiat rail: the onramp since R1 step 0, the offramp flipped
+            // R2 step 1, 2026-10-12. Canonical Circle deployment, verified against
+            // api.mtpelerin.com/currencies/tokens 2026-10-12.
             EvmAsset {
                 token: "USDC",
                 symbol: "USDC",
@@ -1251,7 +1251,7 @@ fn evm_sections_with(sepolia_token: Option<&str>, anvil_token: Option<&str>) -> 
                 chain_id: CHAIN_ID_ARBITRUM_ONE,
                 address: USDC_ARBITRUM_ADDRESS.to_string(),
                 onramp: RampCapability::Partner,
-                offramp: RampCapability::Unavailable,
+                offramp: RampCapability::Partner,
                 // No measured venue tier for USDC on either chain — do not invent one.
                 liquidity: None,
             }]),
@@ -1267,13 +1267,16 @@ fn evm_sections_with(sepolia_token: Option<&str>, anvil_token: Option<&str>) -> 
                 min_fraction_digits: Some(2),
                 chain_id: CHAIN_ID_ETHEREUM,
                 address: ZCHF_ETHEREUM_ADDRESS.to_string(),
+                // Cash-out flipped R2 step 1, 2026-10-12: Mt Pelerin lists ZCHF cash-out on
+                // Ethereum (the Arbitrum row above stays Unavailable both ways). The onramp
+                // stays Unavailable; buy-in rides the Partner USDC row.
                 onramp: RampCapability::Unavailable,
-                offramp: RampCapability::Unavailable,
+                offramp: RampCapability::Partner,
                 liquidity: None,
             },
-            // rows[1] = USDC, mirroring the Arbitrum section (see the comment there). Ethereum
-            // ERC-20 delivery costs the partner's $1 flat fee — disclosed in the buy copy, R1
-            // step 3, not modeled here.
+            // rows[1] = USDC, mirroring the Arbitrum section (see the comment there): Partner
+            // both ways since R2 step 1, 2026-10-12. Ethereum ERC-20 delivery costs the
+            // partner's $1 flat fee — disclosed in the buy copy, R1 step 3, not modeled here.
             EvmAsset {
                 token: "USDC",
                 symbol: "USDC",
@@ -1282,7 +1285,7 @@ fn evm_sections_with(sepolia_token: Option<&str>, anvil_token: Option<&str>) -> 
                 chain_id: CHAIN_ID_ETHEREUM,
                 address: USDC_ETHEREUM_ADDRESS.to_string(),
                 onramp: RampCapability::Partner,
-                offramp: RampCapability::Unavailable,
+                offramp: RampCapability::Partner,
                 liquidity: None,
             }]),
         },
@@ -2149,11 +2152,24 @@ mod catalog_truth_tests {
         assert_eq!(eth_rows.len(), 2, "one ZCHF + one USDC row per evm section");
         let arb_zchf = &arb_rows[0];
         let eth_zchf = &eth_rows[0];
-        // The ZCHF rows: every field against the truth file. Ramps stay Unavailable until the
-        // R2 step 1 flip — this loop covers the ZCHF rows only, so the flip turns it red then.
-        for (row, address_key, chain_key, chain_id) in [
-            (arb_zchf, "zchf_arbitrum", "arbitrum_one", CHAIN_ID_ARBITRUM_ONE),
-            (eth_zchf, "zchf_ethereum", "ethereum", CHAIN_ID_ETHEREUM),
+        // The ZCHF rows: every field against the truth file. The offramp flipped R2 step 1,
+        // 2026-10-12, Ethereum ONLY (Mt Pelerin lists no ZCHF cash-out on Arbitrum), so the
+        // loop carries the per-row expected offramp instead of a shared Unavailable pin.
+        for (row, address_key, chain_key, chain_id, expected_offramp) in [
+            (
+                arb_zchf,
+                "zchf_arbitrum",
+                "arbitrum_one",
+                CHAIN_ID_ARBITRUM_ONE,
+                RampCapability::Unavailable,
+            ),
+            (
+                eth_zchf,
+                "zchf_ethereum",
+                "ethereum",
+                CHAIN_ID_ETHEREUM,
+                RampCapability::Partner,
+            ),
         ] {
             assert_eq!(row.token, "ZCHF");
             assert_eq!(row.symbol, "ZCHF");
@@ -2179,12 +2195,15 @@ mod catalog_truth_tests {
                 "unit-denominated — the VCHF/USDC display policy"
             );
             assert_eq!(row.onramp, RampCapability::Unavailable, "no fiat onramp");
-            assert_eq!(row.offramp, RampCapability::Unavailable, "no fiat offramp");
+            assert_eq!(
+                row.offramp, expected_offramp,
+                "R2 step 1 flipped the Ethereum ZCHF offramp only"
+            );
             assert_eq!(row.liquidity, None, "no measured venue tier — do not invent one");
         }
-        // The USDC rows (rows[1], R1 step 0): canonical Circle deployments against the truth
-        // file. The onramp is the Mt Pelerin Partner rail from birth; the offramp stays
-        // Unavailable until R2 step 1 flips it (same flip commit pattern as ZCHF).
+        // The USDC rows (rows[1]): canonical Circle deployments against the truth file. Both
+        // ramps are the Mt Pelerin Partner rail — the onramp since R1 step 0, the offramp
+        // flipped R2 step 1 (2026-10-12, same flip commit pattern as ZCHF-Ethereum).
         for (row, address_key, chain_key, chain_id) in [
             (&arb_rows[1], "usdc_arbitrum", "arbitrum_one", CHAIN_ID_ARBITRUM_ONE),
             (&eth_rows[1], "usdc_ethereum", "ethereum", CHAIN_ID_ETHEREUM),
@@ -2213,7 +2232,7 @@ mod catalog_truth_tests {
                 "unit-denominated — the VCHF/USDC display policy"
             );
             assert_eq!(row.onramp, RampCapability::Partner, "the Mt Pelerin fiat onramp");
-            assert_eq!(row.offramp, RampCapability::Unavailable, "no fiat offramp until R2 step 1");
+            assert_eq!(row.offramp, RampCapability::Partner, "the Mt Pelerin fiat offramp (R2 step 1)");
             assert_eq!(row.liquidity, None, "no measured venue tier — do not invent one");
         }
         // The token literal must stay distinct from the IC VCHF row (exact-case tokenEq
@@ -2396,8 +2415,9 @@ mod wire_byte_shape_tests {
     /// checksummed addresses, `min_fraction_digits` as a plain number, NO `liquidity` key.
     /// Any serializer regression (key order, an accidental liquidity key, a re-cased address)
     /// goes RED here before it reaches a route test. EXTENDED (R1 step 0, 2026-10-12) with the
-    /// rows[1] USDC wire-byte literal per section — the new rows are byte-pinned BEFORE the R2
-    /// step 1 flip turns their `offramp` red.
+    /// rows[1] USDC wire-byte literal per section. All eligible offramps flipped R2 step 1,
+    /// 2026-10-12: ZCHF-Ethereum and both USDC rows read Partner; ZCHF-Arbitrum and every
+    /// testnet row stay Unavailable.
     #[test]
     fn zchf_rows_wire_byte_shape() {
         let NetworkAssets::Evm(rows) = evm_sections_with(None, None).remove(0).assets else {
@@ -2409,18 +2429,18 @@ mod wire_byte_shape_tests {
         );
         assert_eq!(
             serde_json::to_string(&rows[1]).unwrap(),
-            "{\"token\":\"USDC\",\"symbol\":\"USDC\",\"decimals\":6,\"min_fraction_digits\":2,\"chain_id\":42161,\"address\":\"0xaf88d065e77c8cC2239327C5EDb3A432268e5831\",\"onramp\":\"Partner\",\"offramp\":\"Unavailable\"}"
+            "{\"token\":\"USDC\",\"symbol\":\"USDC\",\"decimals\":6,\"min_fraction_digits\":2,\"chain_id\":42161,\"address\":\"0xaf88d065e77c8cC2239327C5EDb3A432268e5831\",\"onramp\":\"Partner\",\"offramp\":\"Partner\"}"
         );
         let NetworkAssets::Evm(rows) = evm_sections_with(None, None).remove(1).assets else {
             panic!("the Ethereum section must carry EvmAsset rows");
         };
         assert_eq!(
             serde_json::to_string(&rows[0]).unwrap(),
-            "{\"token\":\"ZCHF\",\"symbol\":\"ZCHF\",\"decimals\":18,\"min_fraction_digits\":2,\"chain_id\":1,\"address\":\"0xB58E61C3098d85632Df34EecfB899A1Ed80921cB\",\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\"}"
+            "{\"token\":\"ZCHF\",\"symbol\":\"ZCHF\",\"decimals\":18,\"min_fraction_digits\":2,\"chain_id\":1,\"address\":\"0xB58E61C3098d85632Df34EecfB899A1Ed80921cB\",\"onramp\":\"Unavailable\",\"offramp\":\"Partner\"}"
         );
         assert_eq!(
             serde_json::to_string(&rows[1]).unwrap(),
-            "{\"token\":\"USDC\",\"symbol\":\"USDC\",\"decimals\":6,\"min_fraction_digits\":2,\"chain_id\":1,\"address\":\"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\",\"onramp\":\"Partner\",\"offramp\":\"Unavailable\"}"
+            "{\"token\":\"USDC\",\"symbol\":\"USDC\",\"decimals\":6,\"min_fraction_digits\":2,\"chain_id\":1,\"address\":\"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48\",\"onramp\":\"Partner\",\"offramp\":\"Partner\"}"
         );
     }
 

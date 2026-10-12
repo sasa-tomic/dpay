@@ -974,19 +974,19 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
   const ZCHF_ETHEREUM_ROW = {
     token: 'ZCHF', chainId: 1, decimals: 18, minFractionDigits: 2,
     address: '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB',
-    onramp: 'Unavailable', offramp: 'Unavailable', liquidity: null,
+    onramp: 'Unavailable', offramp: 'Partner', liquidity: null,
   } as const;
   // Circle's canonical USDC deployments, verified against api.mtpelerin.com/currencies/tokens
   // (Ethereum `mainnet` + `arbitrum_mainnet`, both 6 decimals, 2026-10-12).
   const USDC_ARBITRUM_ROW = {
     token: 'USDC', chainId: 42161, decimals: 6, minFractionDigits: 2,
     address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-    onramp: 'Partner', offramp: 'Unavailable', liquidity: null,
+    onramp: 'Partner', offramp: 'Partner', liquidity: null,
   } as const;
   const USDC_ETHEREUM_ROW = {
     token: 'USDC', chainId: 1, decimals: 6, minFractionDigits: 2,
     address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-    onramp: 'Partner', offramp: 'Unavailable', liquidity: null,
+    onramp: 'Partner', offramp: 'Partner', liquidity: null,
   } as const;
 
   it('the ZCHF Arbitrum row address + decimals + chainId match the shared truth', () => {
@@ -1038,22 +1038,24 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(TRUTH.chains.anvil).toBe(31337);
   });
 
-  it('the evm ZCHF rows carry no liquidity tier and honest Unavailable ramps', () => {
+  it('the evm ZCHF rows carry no liquidity tier; the offramp flipped R2 step 1 on Ethereum only', () => {
+    // R2 step 1, 2026-10-12: Mt Pelerin lists ZCHF cash-out on Ethereum, not Arbitrum, so
+    // only the Ethereum row flips to Partner.
     for (const row of [ZCHF_ARBITRUM_ROW, ZCHF_ETHEREUM_ROW]) {
       expect(row.liquidity).toBeNull();
       expect(row.onramp).toBe('Unavailable');
-      expect(row.offramp).toBe('Unavailable');
       expect(row.minFractionDigits).toBe(2); // unit-denominated, the VCHF/USDC display policy
     }
+    expect(ZCHF_ARBITRUM_ROW.offramp).toBe('Unavailable');
+    expect(ZCHF_ETHEREUM_ROW.offramp).toBe('Partner');
   });
 
-  it('the evm USDC rows carry the Partner onramp, the pre-flip Unavailable offramp, no liquidity tier (R1 step 0)', () => {
-    // The R2 step 1 flip turns the eligible rows' offramp to Partner — THIS assertion going
-    // red then is the intended forcing function, not a regression.
+  it('the evm USDC rows carry the Partner ramp both ways, no liquidity tier (R1 step 0 + R2 step 1)', () => {
+    // R2 step 1, 2026-10-12: the offramp flipped to Partner alongside the R1 onramp.
     for (const row of [USDC_ARBITRUM_ROW, USDC_ETHEREUM_ROW]) {
       expect(row.liquidity).toBeNull();
       expect(row.onramp).toBe('Partner');
-      expect(row.offramp).toBe('Unavailable');
+      expect(row.offramp).toBe('Partner');
       expect(row.minFractionDigits).toBe(2); // unit-denominated, the VCHF/USDC display policy
     }
   });
@@ -1082,11 +1084,13 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
       expect(eip55ChecksumBad(r.address)).toBe(false);
       if (r.token === 'ZCHF') {
         expect(r.onramp).toBe('Unavailable');
-        expect(r.offramp).toBe('Unavailable');
+        // R2 step 1, 2026-10-12: Ethereum ZCHF cash-out only (Mt Pelerin lists none on Arbitrum).
+        expect(r.offramp).toBe(r.chainId === TRUTH.chains.ethereum ? 'Partner' : 'Unavailable');
       } else {
         expect(r.token).toBe('USDC');
+        // R2 step 1, 2026-10-12: Partner both ways on the USDC rows.
         expect(r.onramp).toBe('Partner');
-        expect(r.offramp).toBe('Unavailable'); // R2 step 1 flips this — red then is intended
+        expect(r.offramp).toBe('Partner');
       }
     }
   });

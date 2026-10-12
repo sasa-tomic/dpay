@@ -353,26 +353,26 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
   // Sepolia testnet section (the icp-testnet empty-section convention: clients shouldn't infer
   // from absence). Addresses + decimals are IMPORTED from app/evm/chains.ts (the registry) —
   // never re-typed. Dev/Anvil rows are NEVER bundled (env-gated relay-side only, D3). Each
-  // section's rows[0] is ZCHF, rows[1] is USDC — the wire-byte pins index that order. ZCHF
-  // ramps stay honest Unavailable both ways; the USDC rows carry the Mt Pelerin Partner onramp
-  // (R1 step 0, 2026-10-12) and stay offramp-Unavailable until R2 step 1 flips the eligible
-  // rows. Liquidity null on all (no measured venue tier — do not invent one).
+  // section's rows[0] is ZCHF, rows[1] is USDC — the wire-byte pins index that order. The R2
+  // step 1 flip (2026-10-12) turned the eligible offramps Partner: ZCHF-Ethereum and both USDC
+  // rows (Mt Pelerin lists no ZCHF cash-out on Arbitrum). Liquidity null on all (no measured
+  // venue tier — do not invent one).
   {
     protocol: 'evm', name: 'Arbitrum One', environment: 'mainnet',
     assets: [
       {token: 'ZCHF', symbol: 'ZCHF', decimals: ZCHF_DECIMALS, minFractionDigits: 2, chainId: 42161,
         address: ZCHF_TOKEN[42161]!.address, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false},
       {token: 'USDC', symbol: 'USDC', decimals: USDC_EVM_DECIMALS, minFractionDigits: 2, chainId: 42161,
-        address: USDC_TOKEN[42161]!.address, liquidity: null, onramp: 'Partner', offramp: 'Unavailable', testnet: false},
+        address: USDC_TOKEN[42161]!.address, liquidity: null, onramp: 'Partner', offramp: 'Partner', testnet: false},
     ],
   },
   {
     protocol: 'evm', name: 'Ethereum', environment: 'mainnet',
     assets: [
       {token: 'ZCHF', symbol: 'ZCHF', decimals: ZCHF_DECIMALS, minFractionDigits: 2, chainId: 1,
-        address: ZCHF_TOKEN[1]!.address, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false},
+        address: ZCHF_TOKEN[1]!.address, liquidity: null, onramp: 'Unavailable', offramp: 'Partner', testnet: false},
       {token: 'USDC', symbol: 'USDC', decimals: USDC_EVM_DECIMALS, minFractionDigits: 2, chainId: 1,
-        address: USDC_TOKEN[1]!.address, liquidity: null, onramp: 'Partner', offramp: 'Unavailable', testnet: false},
+        address: USDC_TOKEN[1]!.address, liquidity: null, onramp: 'Partner', offramp: 'Partner', testnet: false},
     ],
   },
   {protocol: 'evm', name: 'Arbitrum Sepolia', environment: 'testnet', assets: []},
