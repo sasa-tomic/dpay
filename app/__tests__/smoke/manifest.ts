@@ -47,6 +47,8 @@ export const SMOKE_FILES: readonly string[] = [
   'evm-rlp.test.ts',
   'evm-abi.test.ts',
   'evm-permit.test.ts',
+  // the EIP-191 personal_sign golden vectors (ramp address-validation + the W1 responder surface)
+  'evm-signing.test.ts',
   // wallet identity
   'wallet.test.ts',
   // settlement state machines (pure)
