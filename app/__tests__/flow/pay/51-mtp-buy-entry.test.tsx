@@ -32,7 +32,7 @@ const g = globalThis as unknown as G;
 
 hermeticDescribe('flow 51 — the Mt Pelerin buy entry (EVM row only; sign-confirm; open-failure keeps the sheet)', () => {
   it('FundingRoutes row for ZCHF-on-Arbitrum opens the sheet; approve hands the golden URL; failed open keeps the sheet; SOL renders no row', async () => {
-    const {accountOf, onboardWallet, waitForWallet, selectEvmAsset, selectSolRail} = await evmEnv();
+    const {accountOf, onboardWallet, waitForWallet, selectEvmAsset, openBalances} = await evmEnv();
     const m = await onboardWallet('jest-mtp-51');
     const id = await accountOf(m);
     expect(id?.secretHex ?? '').toHaveLength(64);
@@ -102,7 +102,13 @@ hermeticDescribe('flow 51 — the Mt Pelerin buy entry (EVM row only; sign-confi
     delete g.__DPAY_TEST_MTP_OPEN;
 
     // ── A SOL asset renders NO Mt Pelerin row: the providers list stays deposit-only. ──
-    await selectSolRail(m, 'sol-usdc');
+    // (The native SOL rail, NOT an SPL token: evmEnv configures no Solana RPC, so SPL rows are
+    // fail-closed out of the picker — the SOL currency card is the reachable surface here.)
+    await openBalances(m, {timeoutMs: 5000});
+    await m.driver.click('btn-accounts-currency-SOL', {timeoutMs: 5000});
+    await m.driver.findByTestID('home-headline-label', {timeoutMs: 5000});
+    await m.driver.click('tab-receive', {timeoutMs: 5000});
+    await m.driver.click('btn-receive-address', {timeoutMs: 5000});
     await m.driver.findByTestID('funding-provider-coinbase', {timeoutMs: 5000});
     expect(m.driver.isPresent('funding-provider-mtp')).toBe(false);
 

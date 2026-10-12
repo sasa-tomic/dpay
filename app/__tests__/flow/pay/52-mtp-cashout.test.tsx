@@ -25,7 +25,7 @@ import {evmEnv} from '../evm/env';
 
 hermeticDescribe('flow 52 — the Mt Pelerin cash-out entry (offramp-gated; local validation; the unconfigured relay refuses honestly)', () => {
   it('cash-out row for ZCHF-on-Ethereum opens the sheet; invalid IBAN never sends; continue hits the relay and renders its refusal; SOL renders no row; non-eligible headline keeps the old withdraw', async () => {
-    const {accountOf, onboardWallet, waitForWallet, selectEvmAsset, selectSolRail} = await evmEnv();
+    const {accountOf, onboardWallet, waitForWallet, selectEvmAsset, openBalances} = await evmEnv();
     const m = await onboardWallet('jest-mtp-52');
     const id = await accountOf(m);
     expect(id?.secretHex ?? '').toHaveLength(64);
@@ -66,7 +66,13 @@ hermeticDescribe('flow 52 — the Mt Pelerin cash-out entry (offramp-gated; loca
     expect(m.driver.isPresent('mtp-cashout-sheet')).toBe(false);
 
     // ── A SOL asset renders NO cash-out entry. ──
-    await selectSolRail(m, 'sol-usdc');
+    // (The native SOL rail, NOT an SPL token: evmEnv configures no Solana RPC, so SPL rows are
+    // fail-closed out of the picker — the SOL currency card is the reachable surface here.)
+    await openBalances(m, {timeoutMs: 5000});
+    await m.driver.click('btn-accounts-currency-SOL', {timeoutMs: 5000});
+    await m.driver.findByTestID('home-headline-label', {timeoutMs: 5000});
+    await m.driver.click('tab-receive', {timeoutMs: 5000});
+    await m.driver.click('btn-receive-address', {timeoutMs: 5000});
     await m.driver.findByTestID('funding-provider-coinbase', {timeoutMs: 5000});
     expect(m.driver.isPresent('btn-receive-cashout')).toBe(false);
 
