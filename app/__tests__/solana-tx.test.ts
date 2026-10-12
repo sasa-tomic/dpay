@@ -1,4 +1,5 @@
 import { describe, test, expect } from '@jest/globals';
+import { ed25519 } from '@noble/curves/ed25519';
 import {
   buildTransferMessage,
   buildSignedTransfer,
@@ -12,6 +13,8 @@ import {
   buildCanonicalSolMessage,
   verifySolPayment,
   signTransaction,
+  decodeVenueSwapTx,
+  signVenueSwapTx,
   MEMO_PROGRAM_ADDRESS,
   base58Decode32,
   encodeU32LE,
@@ -445,5 +448,122 @@ describe('solana/tx — buildSolTransferInstruction (a scanned Solana Pay transf
     expect(withRefs[0]).toBe(1);
     expect(findSub(withRefs, base58Decode32(REFERENCE))).toBe(true);
     expect(findSub(withRefs, base58Decode32(SECOND_REFERENCE))).toBe(true);
+  });
+});
+
+// =============================================================================
+// Track S step 2 — the venue decode/sign generalization (multi-signer slots + fee payer
+// exposure). Backward compatibility law: every pre-existing field keeps its exact meaning
+// (sigSlotOffset stays slot 0), and the VENUE sign path keeps its "refused, never
+// partial-signed" red line — co-signed txs sign only when the caller opts in with
+// {allowCoSigners: true} (the WC review surface, after the sheet displays the fee payer).
+// =============================================================================
+describe('solana/tx — multi-signer venue generalization (Track S)', () => {
+  const KP2 = deriveSolanaKeypair('11'.repeat(32));
+  const OTHER = deriveSolanaKeypair('bb'.repeat(32));
+  const OUTSIDER = deriveSolanaKeypair('cc'.repeat(32));
+  const BH = new Uint8Array(32).fill(7);
+
+  /** A message with TWO required signers: KP2 (fee payer, writable) + OTHER (readonly). */
+  const twoSignerMessage = (): Uint8Array =>
+    assembleMessage(KP2.publicKey, [{
+      programId: new Uint8Array(32).fill(9),
+      keys: [{pubkey: OTHER.publicKey, signer: true, writable: false}],
+      data: new Uint8Array([1, 2, 3]),
+    }], BH);
+
+  /** Venue wire: compact count || count*64B signature slots (in slot order) || message. Each
+   *  slot is either a real signature (`seed`) or zero-filled (`null` — an unfilled signer). */
+  const venueWire = (msg: Uint8Array, slots: Array<Uint8Array | null>): Uint8Array => {
+    const out: number[] = [slots.length];
+    for (const s of slots) {
+      if (s == null) {
+        for (let i = 0; i < 64; i++) out.push(0);
+      } else {
+        for (const b of ed25519.sign(msg, s)) out.push(b);
+      }
+    }
+    for (const b of msg) out.push(b);
+    return new Uint8Array(out);
+  };
+
+  test('decode exposes required signers, every slot offset, and the fee payer explicitly', () => {
+    const decoded = decodeVenueSwapTx(venueWire(twoSignerMessage(), [null, null]));
+    expect(decoded).not.toBeNull();
+    expect(decoded!.requiredSignatures).toBe(2);
+    expect(decoded!.sigSlotOffset).toBe(1); // slot 0 — the pre-existing field, unchanged meaning
+    expect(decoded!.sigSlotOffsets).toEqual([1, 65]);
+    expect(decoded!.signers.length).toBe(2);
+    expect(bytesEqual(decoded!.signers[0], KP2.publicKey)).toBe(true);
+    expect(bytesEqual(decoded!.signers[1], OTHER.publicKey)).toBe(true);
+    expect(bytesEqual(decoded!.feePayer, KP2.publicKey)).toBe(true);
+  });
+
+  test('the golden single-signer tx decodes with the new fields at their compat positions', () => {
+    const kp = deriveSolanaKeypair(SEED_HEX);
+    const wire = buildSignedTransfer(kp.seed, kp.publicKey, TO_ADDRESS, LAMPORTS, BLOCKHASH_ZEROS);
+    const decoded = decodeVenueSwapTx(wire);
+    expect(decoded!.requiredSignatures).toBe(1);
+    expect(decoded!.sigSlotOffset).toBe(1);
+    expect(decoded!.sigSlotOffsets).toEqual([1]);
+    expect(toHex(decoded!.feePayer)).toBe(FROM_PUBKEY_HEX);
+    expect(toHex(decoded!.signers[0])).toBe(FROM_PUBKEY_HEX);
+  });
+
+  test('default sign REFUSES a multi-signer tx (venue red line: never partial-signed)', () => {
+    const wire = venueWire(twoSignerMessage(), [null, null]);
+    expect(signVenueSwapTx(wire, KP2.seed)).toBeNull();
+    expect(signVenueSwapTx(wire, KP2.seed, {})).toBeNull();
+  });
+
+  test('allowCoSigners signs ONLY the device slot and reports the honest fullySigned=false', () => {
+    // Unsigned wire: both slots zero. KP2 is slot 0.
+    const wire = venueWire(twoSignerMessage(), [null, null]);
+    const signed = signVenueSwapTx(wire, KP2.seed, {allowCoSigners: true});
+    expect(signed).not.toBeNull();
+    expect(signed!.signerIndex).toBe(0);
+    expect(signed!.requiredSignatures).toBe(2);
+    expect(signed!.fullySigned).toBe(false); // OTHER's slot is still zero — a co-signer is owed
+    // The device slot carries our signature; the co-signer slot is untouched zeros.
+    const ourSig = ed25519.sign(twoSignerMessage(), KP2.seed);
+    expect(Buffer.from(signed!.raw.subarray(1, 65))).toEqual(Buffer.from(ourSig));
+    expect(signed!.raw.subarray(65, 129).every(b => b === 0)).toBe(true);
+    expect(signed!.feePayer).toBe(KP2.address);
+  });
+
+  test('a pre-co-signed tx keeps the co-signer signature byte-for-byte and completes fullySigned', () => {
+    const msg = twoSignerMessage();
+    const wire = venueWire(msg, [KP2.seed, null]); // slot 0 pre-signed by KP2, slot 1 zeros
+    const signed = signVenueSwapTx(wire, OTHER.seed, {allowCoSigners: true});
+    expect(signed).not.toBeNull();
+    expect(signed!.signerIndex).toBe(1);
+    expect(signed!.fullySigned).toBe(true);
+    // Slot 0 preserved exactly as received (ed25519.sign is deterministic, so byte-equal to a
+    // fresh KP2 signature — the point is OUR write never touched the other slot).
+    const kp2Sig = ed25519.sign(msg, KP2.seed);
+    expect(Buffer.from(signed!.raw.subarray(1, 65))).toEqual(Buffer.from(kp2Sig));
+  });
+
+  test('a device key that is NOT a required signer is refused, even with allowCoSigners', () => {
+    const wire = venueWire(twoSignerMessage(), [KP2.seed, OTHER.seed]);
+    expect(signVenueSwapTx(wire, OUTSIDER.seed, {allowCoSigners: true})).toBeNull();
+  });
+
+  test('a single-signer tx whose fee payer is someone else refuses the device (not a signer)', () => {
+    const msg = assembleMessage(OUTSIDER.publicKey, [], BH); // sponsored, OUTSIDER pays + signs
+    const wire = venueWire(msg, [OUTSIDER.seed]);
+    expect(signVenueSwapTx(wire, KP2.seed)).toBeNull();
+  });
+
+  test('single-signer sign output is byte-identical to the pre-generalization contract', () => {
+    const kp = deriveSolanaKeypair(SEED_HEX);
+    const msg = buildTransferMessage(kp.publicKey, TO_ADDRESS, LAMPORTS, BLOCKHASH_ZEROS);
+    const wire = venueWire(msg, [null]); // one zero slot — the venue fixture shape
+    const signed = signVenueSwapTx(wire, kp.seed);
+    expect(signed).not.toBeNull();
+    expect(signed!.signerIndex).toBe(0);
+    expect(signed!.requiredSignatures).toBe(1);
+    expect(signed!.fullySigned).toBe(true);
+    expect(toHex(signed!.raw)).toBe(toHex(buildSignedTransfer(kp.seed, kp.publicKey, TO_ADDRESS, LAMPORTS, BLOCKHASH_ZEROS)));
   });
 });

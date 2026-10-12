@@ -406,14 +406,21 @@ export function verifySolPayment(
 // therefore not construction but VERIFICATION-then-signature, and the verification is the
 // red-line surface (multi-venue readiness V9, the Solana analog of the IC beneficiary checks):
 //
-//   1. the ONLY required signature is the user's own (sigCount === 1 — a route demanding
-//      another signer is something this wallet cannot honestly execute; refused, never partial-
-//      signed);
-//   2. the fee payer is the user (account key[0] — whoever pays fees moves value; a venue
+//   1. the fee payer is the user (account key[0] — whoever pays fees moves value; a venue
 //      building a tx that spends someone else's fees is a mis-built or hostile tx);
-//   3. for an SPL output, the destination token account present in the tx is the USER'S OWN
+//   2. for an SPL output, the destination token account present in the tx is the USER'S OWN
 //      ATA for that mint (the beneficiary check — the swap must route the output to the user,
-//      and the venue's tx names the destination account explicitly).
+//      and the venue's tx names the destination account explicitly);
+//   3. the ONLY required signature is the user's own. Track S (2026-10-12) generalized the
+//      decode to multi-signer layouts so the WC path can name every slot, but the VENUE sign
+//      path keeps the original red line: a route demanding another signer is something this
+//      wallet cannot honestly execute — refused, never partial-signed. `signVenueSwapTx` only
+//      signs co-signed txs when the caller passes `{allowCoSigners: true}` (the WC review
+//      surface, after the sheet has displayed the fee payer).
+//
+// Fee payer (displayed-else-refuse law): the decode exposes `feePayer` explicitly so a caller
+// can always SHOW who pays fees — a sponsored tx (someone else pays) must never be silently
+// refused OR silently accepted; the review displays it and the user decides.
 //
 // Shapes: the request to Jupiter asks for a LEGACY transaction (`asLegacyTransaction`), so every
 // account key is IN the bytes. A versioned (v0) reply is still decoded — static keys first,
@@ -427,20 +434,31 @@ export function verifySolPayment(
 export type DecodedVenueTx = {
   /** The exact message bytes to sign (everything after the signature slots). */
   readonly message: Uint8Array;
-  /** Offset of the single signature slot inside the ORIGINAL bytes (where the sig is written). */
+  /** Offset of signature slot 0 (the fee payer's slot) inside the ORIGINAL bytes. */
   readonly sigSlotOffset: number;
   /** Static account keys in wire order; key[0] is the fee payer. */
   readonly accountKeys: readonly Uint8Array[];
   /** False ⇒ versioned (v0) message — static keys only; see the section note. */
   readonly legacy: boolean;
+  /** numRequiredSignatures from the message header — how many leading account keys must sign. */
+  readonly requiredSignatures: number;
+  /** Every signature slot offset in wire order; slot i belongs to `signers[i]`. */
+  readonly sigSlotOffsets: readonly number[];
+  /** The required signers in wire order — accountKeys[0 .. requiredSignatures). */
+  readonly signers: readonly Uint8Array[];
+  /** The fee payer (account key[0], spelled out so callers never re-derive "key[0] is it"). */
+  readonly feePayer: Uint8Array;
 };
 
-/** Decode a venue-built unsigned transaction. Null on ANY malformed layout — pure + total. */
+/** Decode a venue-built unsigned transaction. Accepts multi-signer layouts (wire sigCount must
+ *  equal the message header's numRequiredSignatures, both >= 1). Null on ANY malformed layout —
+ *  pure + total. */
 export function decodeVenueSwapTx(bytes: Uint8Array): DecodedVenueTx | null {
   const sigCountDec = decodeCompactU16(bytes, 0);
-  if (sigCountDec.value !== 1) return null;
+  const sigCount = sigCountDec.value;
+  if (sigCount < 1) return null;
   const sigSlotOffset = sigCountDec.next;
-  const msgStart = sigSlotOffset + 64;
+  const msgStart = sigSlotOffset + 64 * sigCount;
   if (bytes.length <= msgStart) return null;
   const message = bytes.subarray(msgStart);
 
@@ -455,18 +473,32 @@ export function decodeVenueSwapTx(bytes: Uint8Array): DecodedVenueTx | null {
     headerAt = 0;
     legacy = true;
   }
-  if (message[headerAt] !== 1) return null; // exactly ONE required signature: the user's own
   if (message.length < headerAt + 3) return null;
+  const requiredSignatures = message[headerAt];
+  // The wire's signature-slot count and the header's required-signature count are the SAME
+  // number in any well-formed tx; a mismatch means the bytes do not parse honestly.
+  if (requiredSignatures < 1 || requiredSignatures !== sigCount) return null;
   const keysCountDec = decodeCompactU16(message, headerAt + 3);
   let off = keysCountDec.next;
-  if (keysCountDec.value < 1 || keysCountDec.value > 128) return null;
+  if (keysCountDec.value < requiredSignatures || keysCountDec.value > 128) return null;
   const accountKeys: Uint8Array[] = [];
   for (let i = 0; i < keysCountDec.value; i++) {
     if (off + 32 > message.length) return null;
     accountKeys.push(message.subarray(off, off + 32));
     off += 32;
   }
-  return {message, sigSlotOffset, accountKeys, legacy};
+  const sigSlotOffsets: number[] = [];
+  for (let i = 0; i < sigCount; i++) sigSlotOffsets.push(sigSlotOffset + 64 * i);
+  return {
+    message,
+    sigSlotOffset,
+    accountKeys,
+    legacy,
+    requiredSignatures,
+    sigSlotOffsets,
+    signers: accountKeys.slice(0, requiredSignatures),
+    feePayer: accountKeys[0],
+  };
 }
 
 /** The beneficiary verdict for a venue swap tx — checked BEFORE the device signs anything. */
@@ -490,26 +522,66 @@ export function verifyVenueSwapTxBeneficiaries(
   return { ok: true };
 }
 
+/** Options for `signVenueSwapTx`. */
+export type VenueSignOptions = {
+  /** Allow txs whose required-signer set includes keys OTHER than the device's: the device signs
+   *  its own slot(s) and the remaining slots are left exactly as received (a dApp co-signer fills
+   *  them). Default false — the venue swap path keeps its "refused, never partial-signed" red
+   *  line. The WC review surface opts in AFTER the sheet has displayed the fee payer. */
+  readonly allowCoSigners?: boolean;
+};
+
 /**
- * Sign a venue-built transaction in place: the single signature slot gets the user's Ed25519
- * signature over the (untouched) message. Returns the raw signed bytes for broadcast plus the
- * base58 signature (the tx's on-chain identity — Solana dedups resubmission by it) and the fee
- * payer's base58 address. The original `bytes` are never mutated.
+ * Sign a venue-built transaction in place: the slot(s) whose pubkey matches the device key get
+ * the Ed25519 signature over the (untouched) message; every other signature slot is preserved
+ * byte-for-byte (a partially co-signed tx arrives with its co-signers' signatures in place).
+ * Refuses (returns null) when the device key is NOT one of the required signers — this wallet
+ * never signs a tx it is not a party to — and, unless `allowCoSigners` is set, when the tx needs
+ * more signatures than the device alone can supply. Returns the raw signed bytes for broadcast,
+ * the base58 signature (the tx's on-chain identity — Solana dedups resubmission by it), the fee
+ * payer's base58 address, the device's signer position, and whether ALL required slots now hold
+ * signatures (false ⇒ someone else must still co-sign before broadcast). The original `bytes`
+ * are never mutated.
  */
 export function signVenueSwapTx(
   bytes: Uint8Array,
   seed: Uint8Array,
-): { raw: Uint8Array; signature: string; feePayer: string } | null {
+  opts: VenueSignOptions = {},
+): {
+  raw: Uint8Array;
+  signature: string;
+  feePayer: string;
+  signerIndex: number;
+  requiredSignatures: number;
+  fullySigned: boolean;
+} | null {
   const decoded = decodeVenueSwapTx(bytes);
   if (decoded == null) return null;
+  const devicePubkey = ed25519.getPublicKey(seed);
+  const signerIndex = decoded.signers.findIndex(s => bytesEqual(s, devicePubkey));
+  if (signerIndex < 0) return null; // not a required signer: never sign
+  if (decoded.requiredSignatures > 1 && opts.allowCoSigners !== true) return null;
   const signature = ed25519.sign(decoded.message, seed);
   const raw = new Uint8Array(bytes.length);
   raw.set(bytes);
-  raw.set(signature, decoded.sigSlotOffset);
+  raw.set(signature, decoded.sigSlotOffsets[signerIndex]);
+  // fullySigned: every required slot holds a nonzero signature after our write. A zero slot is
+  // an unfilled co-signer (fresh wire bytes are zeroed there by convention).
+  const slotIsZero = (at: number): boolean => {
+    for (let j = 0; j < 64; j++) if (raw[at + j] !== 0) return false;
+    return true;
+  };
+  let fullySigned = true;
+  for (let i = 0; i < decoded.requiredSignatures; i++) {
+    if (slotIsZero(decoded.sigSlotOffsets[i])) fullySigned = false;
+  }
   return {
     raw,
     signature: bs58.encode(signature),
-    feePayer: bs58.encode(decoded.accountKeys[0]),
+    feePayer: bs58.encode(decoded.feePayer),
+    signerIndex,
+    requiredSignatures: decoded.requiredSignatures,
+    fullySigned,
   };
 }
 
