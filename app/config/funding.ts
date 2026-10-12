@@ -35,6 +35,11 @@
 import {prettyNetwork, type SelectableAsset} from './assets';
 import type {DepositMechanism} from './catalog';
 import type {HomeCurrency} from './currency';
+import {MTP_ASSET_DELIVERY, type MtpBuyAsset, type MtpDeliveryChainId} from '../ramp/mtpelerin';
+
+/** Re-exported for the UI seams that name the buy token (the sheet, the openers) without each of
+ *  them importing the ramp module directly. */
+export type {MtpBuyAsset};
 
 /**
  * A published percentage, in the SHAPE the provider published it. The qualifier is not
@@ -307,4 +312,36 @@ export const BANK_ROUTE_PROVIDER = 'DFX.swiss';
 
 export function bankRouteApplies(home: HomeCurrency | null): boolean {
   return home === 'CHF';
+}
+
+// ── The Mt Pelerin buy route (plan R1 step 3) ──────────────────────────────────────────────────
+//
+// The named interactive provider: unlike the four rows above (domains the user reads and types),
+// this one is an IN-APP entry that opens the prefilled widget, so it needs an eligibility gate
+// and its own dated fact block. Same law as the table above: alphabetical peer (no highlight),
+// published figures only, no referral parameter.
+
+/** The date the Mt Pelerin fee/limit figures in the buy sheet were read from their published docs
+ *  (developers.mtpelerin.com, plan §2.2). ONE date for the whole block, the
+ *  `FUNDING_SOURCES_READ_ON` rule; re-measuring is the plan's own tripwire. */
+export const MTP_FACTS_READ_ON = '2026-10-12';
+
+/**
+ * Does this wallet row have a Mt Pelerin buy route? True only for a MAINNET EVM catalog row whose
+ * token is in `MTP_ASSET_DELIVERY` (ZCHF, USDC). Fail-closed: an IC or SOL row, a testnet row, or
+ * an unknown token has no route and every surface renders no entry. Structural input only — the
+ * caller hands over its row's `protocol`/`token`/`testnet` without this module importing the
+ * catalog types (the non-EVM selectable arms carry no `testnet` field at all, so it stays
+ * optional). The catalog's own `onramp` RampCapability is deliberately NOT read: the step-2
+ * delivery table is the buy gate (plan R1 step 3), as R2 gates cash-out on its own step's rule.
+ */
+export function mtpBuyEligible(row: {protocol: string; token?: string; testnet?: boolean}): boolean {
+  if (row.protocol !== 'evm' || row.testnet === true || row.token == null) return false;
+  return (MTP_ASSET_DELIVERY as Readonly<Record<string, readonly MtpDeliveryChainId[]>>)[row.token] != null;
+}
+
+/** The buy token of an ALREADY-ELIGIBLE row — call after `mtpBuyEligible`, which is what makes
+ *  the cast true. Narrowed here once so the components never cast `as MtpBuyAsset` themselves. */
+export function mtpBuyTokenOf(row: {protocol: string; token?: string; testnet?: boolean}): MtpBuyAsset | null {
+  return mtpBuyEligible(row) ? (row.token as MtpBuyAsset) : null;
 }

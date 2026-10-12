@@ -215,6 +215,31 @@ export const depositDe: DepositMessages = {
     err: 'Trust Wallet konnte nicht geöffnet werden. Versuche es erneut.',
   },
 
+  mtp: {
+    entryLabel: 'Mit Mt Pelerin kaufen',
+    entryHint: asset => `Kauft ${asset} über Mt Pelerin, geliefert an deine Adresse`,
+    chooserDeposit: 'Einzahlen',
+    fundingLine: 'Karte oder Bank, Auszahlung an deine Adresse',
+    sheetTitle: 'Mit Mt Pelerin kaufen',
+    buyLine: (fiat, asset, chain) => `Du zahlst ${fiat}, ${asset} kommt auf ${chain} an.`,
+    signHeadline: 'Eine Signatur bestätigt, dass die Adresse dir gehört.',
+    messageLabel: 'Nachricht',
+    addressLabel: 'Adresse',
+    chainLabel: 'Netzwerk',
+    approve: 'Signieren und öffnen',
+    cancel: 'Abbrechen',
+    openDone: 'Mt Pelerin ist im Browser geöffnet. Dein Guthaben aktualisiert sich, wenn du zurückkommst.',
+    openFailed: 'Mt Pelerin konnte nicht geöffnet werden. Versuche es erneut.',
+    counterparty: 'Mt Pelerin wickelt den Kauf ab. dpay ist nicht Partei und nimmt keine Gebühr.',
+    feesTitle: 'Gebühren und Limits',
+    feeBank: 'Bank: 0 % auf die ersten CHF 500 pro Nutzer und Jahr, danach ab 1,3 %',
+    feeCard: 'Karte: 2,5 %+, mind. CHF 1.20',
+    feeDelivery: 'ERC-20-Lieferung auf Ethereum: $1. ETH und andere Netzwerke: kostenlos.',
+    holdUnverified: 'Ohne Identitätsprüfung bis CHF 999 pro 30 Tage. Unverifizierte Banküberweisungen werden 7 Tage gehalten.',
+    ethGasNote: 'Im Widget gekauftes ETH landet als Gas-Guthaben.',
+    feesAsOf: readOn => `Veröffentlichte Angaben von Mt Pelerin, gelesen am ${readOn}.`,
+  },
+
   funding: {
     title: 'Noch nichts davon?',
     buyThenSend: (token, chain) => [

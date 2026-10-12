@@ -48,7 +48,7 @@ import type {BalanceView} from '../lib/assetBalances';
 /** How many ledger rows the Home feed shows. Five since 2026-09-08. */
 export const ACTIVITY_ROWS = 5;
 
-export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBalances, catalog, online, history, noteFor, onDeposit, onConvert, onWithdraw, onOpenMenu, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings, ataSetup, onAtaSetupStart, onAtaSetupConfirm, onAtaSetupCancel, onAtaSetupShowSol, updateUrl}: {
+export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBalances, catalog, online, history, noteFor, onDeposit, onBuy, onConvert, onWithdraw, onOpenMenu, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings, ataSetup, onAtaSetupStart, onAtaSetupConfirm, onAtaSetupCancel, onAtaSetupShowSol, updateUrl}: {
   assets: SelectableAsset[];
   homeCurrency: HomeCurrency;
   /** The main currency's preferred rail — the account this screen funds. Null only when the
@@ -65,6 +65,15 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   noteFor?: (t: Txn) => TxAnnotation | undefined;
   /** Add funds — the funding surface for the main rail (the account the headline names). */
   onDeposit: (id: AssetId) => void;
+  /**
+   * The Mt Pelerin buy for the SAME account (plan R1 step 3). PRESENT ONLY when the headline
+   * asset is an EVM catalog row with a delivery chain in MTP_ASSET_DELIVERY — Wallet owns that
+   * gate and the sheet, so the Add-funds press routes to THIS instead of `onDeposit` and the
+   * deposit-vs-buy choice (§8 item 1: one action row, the HomeMenu overflow pattern) opens at the
+   * app root. Absent: the press opens the deposit surface exactly as before, and nothing about
+   * the row renders differently (the direct-mount harness contract).
+   */
+  onBuy?: () => void;
   /** Convert — the swap surface, opened with NO preset source (the sheet's FROM selector
    *  asks). */
   onConvert: () => void;
@@ -226,8 +235,10 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
           so no cell carries a radius of its own. (Convert left the row for the top-right chip,
           founder 2026-10-05.) */}
       <View style={S.homeActionRow}>
-        {/* Add funds — on-ramp for the account the headline is showing. */}
-        <Pressable testID="btn-home-add-funds" style={S.homeActionBtn} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={actionDisabled} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addFunds} accessibilityState={{disabled: actionDisabled}}>
+        {/* Add funds — on-ramp for the account the headline is showing. With the buy route
+            available (onBuy present, the Wallet-owned eligibility gate) the press opens the
+            deposit-vs-buy choice instead; absent, the deposit surface opens exactly as before. */}
+        <Pressable testID="btn-home-add-funds" style={S.homeActionBtn} onPress={() => { if (homeAsset === null) return; if (onBuy != null) onBuy(); else onDeposit(homeAsset.id); }} disabled={actionDisabled} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addFunds} accessibilityState={{disabled: actionDisabled}}>
           <IconPlus size={20} color={actionIcon} />
           <Text style={[S.homeActionLabel, actionDisabled && S.disabledText]}>{M.wallet.home.actions.addFunds}</Text>
         </Pressable>

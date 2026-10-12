@@ -15,7 +15,7 @@ import {IcrcAccountSection} from './IcrcAccountSection';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
-import {IconCheck, IconCopy} from './icons';
+import {IconCheck, IconCopy, IconExternalLink} from './icons';
 import {InstrLine} from './InstrLine';
 import {TrustWalletFundButton} from './TrustWalletFundButton';
 import {isTrustWalletFundableBtc} from '../trustwallet';
@@ -33,7 +33,7 @@ import {M} from '../i18n';
  * Fee/min/confirmations still come from the relay's read-only /deposit/info (display-only
  * network facts).
  */
-export function DepositSheet({identity, relayUrl, catalog, currency, display, funding, onClose}: {identity: Identity; relayUrl: string; catalog: CurrencyDescriptor[]; currency: number; display: FamilyDisplay; funding?: ReactNode; onClose: () => void}) {
+export function DepositSheet({identity, relayUrl, catalog, currency, display, funding, onBuy, onClose}: {identity: Identity; relayUrl: string; catalog: CurrencyDescriptor[]; currency: number; display: FamilyDisplay; funding?: ReactNode; /** The Mt Pelerin buy opener (plan R1 step 3): rendered as the buy entry beside the TrustWallet button - the same-surfaces Add-money rule, and the CALLER owns eligibility (passed only when this sheet's asset has a Mt Pelerin route). Absent = no entry, nothing else changes. */ onBuy?: () => void; onClose: () => void}) {
   /** The minter's deposit-address read produced no fact. The blame is CLASSIFIED (the shared
    *  oracle — the SOL head is off the IC path this read failed on), never a flat "check your
    *  connection" while the phone is online (work order 2026-09-30). Nothing is at risk either
@@ -237,6 +237,22 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, fu
               ckERC20 assets keep the WalletConnect path — the link's data param is unusable
               for calldata). Rendered in the same slot on SolanaReceiveSheet (same-surfaces). */}
           {isTrustWalletFundableBtc(desc) ? <TrustWalletFundButton asset="BTC" address={address} /> : null}
+
+          {/* The Mt Pelerin buy entry (plan R1 step 3) - the same-surfaces Add-money slot beside
+              the Trust button. Ghost tier like its sibling; the caller owns eligibility, so an
+              asset without a Mt Pelerin route renders nothing here. */}
+          {onBuy != null ? (
+            <Pressable
+              testID="btn-deposit-mtp-buy"
+              style={S.ghostBtn}
+              onPress={onBuy}
+              accessibilityRole="button"
+              accessibilityLabel={M.deposit.mtp.entryLabel}
+              accessibilityState={{disabled: false}}>
+              <IconExternalLink size={16} color={C.sub} />
+              <Text style={S.ghostBtnText}>{M.deposit.mtp.entryLabel}</Text>
+            </Pressable>
+          ) : null}
 
           {/* Secondary route: the ckBTC ICRC-1 account (the watch above detects a plain transfer
               the same as a mint). Kept below the BTC address — the primary for external funds. */}

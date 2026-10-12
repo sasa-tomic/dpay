@@ -455,6 +455,38 @@ describe('HomeTab — the inline activity feed', () => {
   });
 });
 
+describe('HomeTab — the Add-funds buy route (plan R1 step 3)', () => {
+  /** A buy-eligible headline: an EVM catalog row with a delivery chain in MTP_ASSET_DELIVERY. */
+  const evmRow = {
+    id: 'evm:42161:ZCHF' as const, protocol: 'evm' as const, token: 'ZCHF', symbol: 'ZCHF',
+    chainId: 42161, chainName: 'Arbitrum One', address: '0x1111111111111111111111111111111111111111',
+    linkToken: 'ZCHF', networkLabel: 'ZCHF · Arbitrum One', network: 'Arbitrum One', decimals: 18,
+    minFractionDigits: 2, liquidity: null, onramp: 'Unavailable' as const, offramp: 'Unavailable' as const,
+    rampPartner: null, visible: true, testKey: 'evm-zchf-arbitrum', testnet: false,
+  };
+  const base = {
+    homeCurrency: 'CHF' as const, assets: ASSETS, online: true, history: [],
+  };
+
+  test('onBuy present: the Add-funds press routes to the buy opener, never the deposit trip', () => {
+    const onBuy = jest.fn();
+    const onDeposit = jest.fn();
+    const tree = mountHome({...base, homeAsset: evmRow, onDeposit, onBuy});
+    act(() => { pressable(tree, 'btn-home-add-funds').props.onPress(); });
+    expect(onBuy).toHaveBeenCalledTimes(1);
+    expect(onDeposit).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+
+  test('onBuy absent (or a non-EVM headline): the press is the deposit trip, byte-unchanged', () => {
+    const onDeposit = jest.fn();
+    const tree = mountHome({...base, homeAsset: evmRow, onDeposit});
+    act(() => { pressable(tree, 'btn-home-add-funds').props.onPress(); });
+    expect(onDeposit).toHaveBeenCalledWith('evm:42161:ZCHF');
+    act(() => { tree.unmount(); });
+  });
+});
+
 describe('HomeTab — the in-app update notice (founder 2026-10-04: newer version, 1-2 clicks)', () => {
   let mockOpenURL: jest.Mock<(uri: string) => Promise<void>>;
   beforeEach(() => {

@@ -47,6 +47,7 @@ import {useEvmBalances} from '../hooks/useEvmBalances';
 import {evmAssetsOf} from '../config/catalog';
 import {useEvmHistory} from '../hooks/useEvmHistory';
 import {useRecheckAll} from '../hooks/useRecheckAll';
+import {useAppActive} from '../hooks/useAppActive';
 import {useFundsReady} from '../hooks/useFundsReady';
 import {TripStrip} from './TripStrip';
 import {deriveSolanaAddress, createTokenAta} from '../solana';
@@ -81,7 +82,10 @@ import {HomeCurrencyChooser} from './HomeCurrencyChooser';
 import {AddCurrencyTab} from './AddCurrencyTab';
 import {type HomeCurrency, chooseRail, currencyOfAsset, currencyRails, offerableCurrencies, parseHiddenCurrencies, preferredRail, removeCurrencyGuard, type RemoveRefusal} from '../config/currency';
 import {type CurrencyDescriptor} from '../config/catalog';
+import {mtpBuyTokenOf, type MtpBuyAsset} from '../config/funding';
 import {HomeMenu} from './HomeMenu';
+import {AddFundsMenu} from './AddFundsMenu';
+import {MtpBuySheet} from './MtpBuySheet';
 import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 import {modeForScreen, screenForMode, type WalletMode, type WalletRoute} from '../lib/walletRoute';
@@ -2216,6 +2220,30 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   const openHomeMenu = useCallback(() => { setRemoveRefusal(null); setHomeMenuOpen(true); }, []);
   const closeHomeMenu = useCallback(() => setHomeMenuOpen(false), []);
   const openLedgerFromMenu = useCallback(() => { setHomeMenuOpen(false); setMode('ledger'); }, []);
+
+  // R1 step 3 — the Mt Pelerin buy. Wallet owns the Add-funds CHOICE and the ONE buy-sheet
+  // instance (the receiptTxn discipline: root-mounted overlays, one owner): the HomeTab action
+  // row, the receive surfaces' FundingRoutes provider row and DepositSheet's entry all route into
+  // this same state. The headline gate resolves ONCE here: null unless the headline asset is an
+  // EVM catalog row with a delivery chain in MTP_ASSET_DELIVERY — null, every Add-funds press
+  // routes to the deposit surface exactly as before and HomeTab receives no onBuy at all.
+  const [addFundsOpen, setAddFundsOpen] = useState(false);
+  const [mtpBuyToken, setMtpBuyToken] = useState<MtpBuyAsset | null>(null);  const homeBuyToken = homeAsset != null ? mtpBuyTokenOf(homeAsset) : null;
+  const openMtpBuy = useCallback((token: MtpBuyAsset) => { setAddFundsOpen(false); setMtpBuyToken(token); }, []);
+  // Arrival reconciliation (plan R1 step 3): once the widget has opened, the NEXT foreground
+  // return fires the ONE refresh (balances + all rails' histories) through the existing
+  // useAppActive mechanism (AppState 'active' / window focus) — no new poll, no timer; the
+  // useEvmBalances poll stays the other half of the arrival story.
+  const appActive = useAppActive();
+  const mtpArrivalArmed = useRef(false);
+  useEffect(() => {
+    if (appActive && mtpArrivalArmed.current) {
+      mtpArrivalArmed.current = false;
+      recheckAll();
+    }
+  }, [appActive, recheckAll]);
+  const armMtpArrival = useCallback(() => { mtpArrivalArmed.current = true; }, []);
+
   // Remove the MAIN currency (the one the menu was opened from). The guard decides; a refusal is
   // stated in the menu with its practical next step, never a silent swallow. A successful remove
   // keeps the wallet "in" a visible currency: if the removed one WAS main, main moves to the
@@ -2462,6 +2490,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               history={walletHistory}
               noteFor={noteFor}
               onDeposit={goToDeposit}
+              onBuy={homeBuyToken != null ? () => setAddFundsOpen(true) : undefined}
               onConvert={openConvert}
               onWithdraw={openWithdrawForMain}
               onOpenMenu={openHomeMenu}
@@ -2591,6 +2620,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
                   homeCurrency={homeCurrency}
                   onReceiveRailChange={receiveRailSelect}
                   onWatchRefresh={refreshEvmBalances}
+                  onBuy={openMtpBuy}
                 />
               : (
                   /* Phase 4 (2026-08-12 unified asset selection rewrite): the PHASE 3 INTERIM bridge
@@ -2630,6 +2660,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
                     onLockChange={setSelectionLocked}
                     homeCurrency={homeCurrency}
                     onReceiveRailChange={receiveRailSelect}
+                    onBuy={openMtpBuy}
                   />
                 )
           )
@@ -2744,6 +2775,29 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
             onClose={closeHomeMenu}
           />
         </AppModal>
+      ) : null}
+      {/* The Add-funds deposit-vs-buy choice (plan R1 step 3, §8 item 1: one action row). Mounted
+          at the ROOT like the menu above; rendered only while the headline asset has a Mt Pelerin
+          buy route — every other asset keeps the direct deposit trip, unchanged. */}
+      {addFundsOpen && homeBuyToken != null ? (
+        <AppModal onRequestClose={() => setAddFundsOpen(false)}>
+          <AddFundsMenu
+            onDeposit={() => { setAddFundsOpen(false); if (homeAsset != null) goToDeposit(homeAsset.id); }}
+            onBuy={() => openMtpBuy(homeBuyToken)}
+            onClose={() => setAddFundsOpen(false)}
+          />
+        </AppModal>
+      ) : null}
+      {/* The ONE Mt Pelerin buy sheet (plan R1 step 3) — root-mounted like every overlay; every
+          buy entry (HomeTab choice, FundingRoutes provider row, DepositSheet entry) opens this
+          same instance. onWidgetOpened arms the on-return refresh above. */}
+      {mtpBuyToken != null ? (
+        <MtpBuySheet
+          identity={identity}
+          token={mtpBuyToken}
+          onClose={() => setMtpBuyToken(null)}
+          onWidgetOpened={armMtpArrival}
+        />
       ) : null}
       {/* An incoming payment link that cannot be paid. It states WHICH asset/chain the link asked
           for and the one action the payer can take (founder hard rule: every dead end gives a

@@ -926,6 +926,9 @@ function buildStyles(p: Palette) {
   assetSwitchBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, backgroundColor: p.card},
   assetSwitchText: {fontSize: 16, color: p.ink, fontFamily: FONT.sans},
   fundingProviderRow: {alignSelf: 'stretch', marginTop: 10},
+  // The one interactive provider row's name + external-link glyph share a line (the affordance
+  // cue); the inert rows keep the plain stacked name.
+  fundingProviderHead: {flexDirection: 'row', alignItems: 'center', gap: 6},
   fundingProviderName: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
   fundingProviderCost: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 2, fontVariant: ['tabular-nums']},
   // The source domain: `sub` and not `sub2`, deliberately. It is the line that makes every figure

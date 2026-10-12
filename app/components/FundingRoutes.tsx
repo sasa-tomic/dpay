@@ -1,5 +1,8 @@
-import {Text, View} from 'react-native';
+import {Fragment} from 'react';
+import {Pressable, Text, View} from 'react-native';
 import {S} from '../styles';
+import {C} from '../config/palette';
+import {IconExternalLink} from './icons';
 import {InstrLine} from './InstrLine';
 import {M} from '../i18n';
 import {decimalSep, formatMonthDayYear} from '../i18n/intl';
@@ -43,7 +46,7 @@ import type {HomeCurrency} from '../config/currency';
  * they quote. The attribution line says both of those out loud, because a table of percentages that
  * omitted them would be a false claim under `CLAUDE.md`'s external-claims rule.
  */
-export function FundingRoutes({asset, isTestnet, mechanism, homeCurrency}: {
+export function FundingRoutes({asset, isTestnet, mechanism, homeCurrency, onBuy}: {
   asset: SelectableAsset;
   /** Server-declared (`isTestnetCurrency`), never inferred from a label. A test coin has no seller
    *  and gets a faucet instruction instead of a provider list. */
@@ -54,6 +57,14 @@ export function FundingRoutes({asset, isTestnet, mechanism, homeCurrency}: {
    *  above" on a wallet-signed ckERC20 deposit. */
   mechanism: DepositMechanism;
   homeCurrency: HomeCurrency | null;
+  /**
+   * The Mt Pelerin buy opener (plan R1 step 3, §8 item 2): the founder directive upgrades the
+   * inert provider rows to a named interactive option, and this row sits among them as an
+   * ALPHABETICAL peer - no highlight, no "best". PRESENT ONLY when this card's asset is an EVM
+   * catalog row with a delivery chain in `MTP_ASSET_DELIVERY` (the caller owns that gate, so a
+   * SOL or IC row never grows the row and passes nothing).
+   */
+  onBuy?: () => void;
 }) {
   const route = fundingRoute(asset, isTestnet, mechanism);
   // Play money is not money: it has no seller, its faucet is one tap away on the accounts route,
@@ -62,6 +73,11 @@ export function FundingRoutes({asset, isTestnet, mechanism, homeCurrency}: {
   if (route.kind === 'none') {
     return null;
   }
+  // The row's alphabetical slot, DERIVED from the list (never a hardcoded index): first provider
+  // whose name sorts after "Mt Pelerin" - Ramp today. Absent opener, no row anywhere.
+  const mtpSlot = onBuy != null
+    ? FUNDING_PROVIDERS.findIndex(p => p.name.localeCompare('Mt Pelerin') > 0)
+    : -1;
   return (
     <View testID="funding-routes" style={S.instrCard}>
       <Text style={S.depositStatusTitle}>{M.deposit.funding.title}</Text>
@@ -98,12 +114,33 @@ export function FundingRoutes({asset, isTestnet, mechanism, homeCurrency}: {
       {route.kind === 'testnet' ? null : (
         <>
           <Text style={S.depositStatusTitle}>{M.deposit.funding.providersTitle}</Text>
-          {FUNDING_PROVIDERS.map(p => (
-            <View key={p.key} testID={`funding-provider-${p.key}`} style={S.fundingProviderRow}>
-              <Text style={S.fundingProviderName}>{p.name}</Text>
-              <Text style={S.fundingProviderCost}>{costLine(p)}</Text>
-              <Text style={S.fundingProviderSource} selectable={true}>{p.source}</Text>
-            </View>
+          {FUNDING_PROVIDERS.map((p, i) => (
+            <Fragment key={p.key}>
+              {/* The one interactive peer: opens the Mt Pelerin buy sheet (the sheet owns the
+                  review, the facts and the open-failure note). Row grammar identical to the
+                  inert ones - the external-link glyph is the only affordance cue. */}
+              {i === mtpSlot && onBuy != null ? (
+                <Pressable
+                  testID="funding-provider-mtp"
+                  style={S.fundingProviderRow}
+                  onPress={onBuy}
+                  accessibilityRole="button"
+                  accessibilityLabel={M.deposit.mtp.entryLabel}
+                  accessibilityState={{disabled: false}}>
+                  <View style={S.fundingProviderHead}>
+                    <Text style={S.fundingProviderName}>{'Mt Pelerin'}</Text>
+                    <IconExternalLink size={14} color={C.sub} />
+                  </View>
+                  <Text style={S.fundingProviderCost}>{M.deposit.mtp.fundingLine}</Text>
+                  <Text style={S.fundingProviderSource} selectable={true}>{'developers.mtpelerin.com'}</Text>
+                </Pressable>
+              ) : null}
+              <View testID={`funding-provider-${p.key}`} style={S.fundingProviderRow}>
+                <Text style={S.fundingProviderName}>{p.name}</Text>
+                <Text style={S.fundingProviderCost}>{costLine(p)}</Text>
+                <Text style={S.fundingProviderSource} selectable={true}>{p.source}</Text>
+              </View>
+            </Fragment>
           ))}
           <Text testID="funding-attribution" style={S.dim2}>
             {M.deposit.funding.attribution(formatMonthDayYear(new Date(FUNDING_SOURCES_READ_ON)))}

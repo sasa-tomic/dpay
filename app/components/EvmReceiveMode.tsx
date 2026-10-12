@@ -35,6 +35,7 @@ import {
 import {deriveEvmAddress} from '../evm';
 import {EVM_CHAINS, toBaseUnitsSoft, type EvmChainId} from '../evm/chains';
 import {toChecksumAddress} from '../evm/identity';
+import {mtpBuyTokenOf, type MtpBuyAsset} from '../config/funding';
 import {useReportLock} from '../hooks/useReportLock';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useShareFeedback} from '../hooks/useShareFeedback';
@@ -67,7 +68,7 @@ const NOTE_CHAINS = 'Ethereum and Arbitrum One';
  * on ERC-20); the offline claim path is the deterministic exception: the settle echoes the rid
  * this device minted.
  */
-export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balances, catalog, onSelectAsset, subMode, onSubModeChange, onLockChange, gasWei, gasChecking = false, homeCurrency = null, onReceiveRailChange, onWatchRefresh}: {  identity: Identity;
+export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balances, catalog, onSelectAsset, subMode, onSubModeChange, onLockChange, gasWei, gasChecking = false, homeCurrency = null, onReceiveRailChange, onWatchRefresh, onBuy}: {  identity: Identity;
   /** The SELECTED EVM asset row — this mode only mounts while one is selected. */
   asset: SelectableAsset & {protocol: 'evm'};
   assets: SelectableAsset[];
@@ -85,6 +86,10 @@ export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balanc
   onReceiveRailChange?: (id: AssetId) => void;
   /** Re-fires the balance poll while the address screen is up (the watch-the-deposit cadence). */
   onWatchRefresh?: () => void;
+  /** The Mt Pelerin buy opener (plan R1 step 3), forwarded to the funding card's provider row.
+   *  The row renders only when THIS asset has a delivery chain in `MTP_ASSET_DELIVERY` (the gate
+   *  below), so a wired EVM token Mt Pelerin does not list simply renders no row. */
+  onBuy?: (token: MtpBuyAsset) => void;
 }) {
   // The device's 0x address, EIP-55-CHECKSUMMED for display/QR (D14 — the bare checksummed
   // address is the QR payload; the derivation is lowercase, the checksum is the display form).
@@ -196,7 +201,16 @@ export function EvmReceiveMode({identity, asset, assets, selectedAssetId, balanc
             href={`${explorer}/address/${evmAddress}`}
           />
         ) : null}
-        <FundingRoutes asset={asset} isTestnet={asset.testnet} mechanism="send-to-address" homeCurrency={homeCurrency} />
+        {/* The buy opener is pre-bound to THIS row's token only when the row has a Mt Pelerin
+            delivery chain (fail-closed): the provider row inside the card renders by the same
+            fact. */}
+        <FundingRoutes
+          asset={asset}
+          isTestnet={asset.testnet}
+          mechanism="send-to-address"
+          homeCurrency={homeCurrency}
+          onBuy={onBuy != null ? () => { const t = mtpBuyTokenOf(asset); if (t != null) onBuy(t); } : undefined}
+        />
       </View>
     );
   }

@@ -325,6 +325,51 @@ export type DepositMessages = {
     err: string;
   };
 
+  /** Mt Pelerin buy (the named-provider on-ramp, plan R1 step 3). The provider is named as the
+   *  counterparty, its published fee figures ride VERBATIM with the date they were read
+   *  (`MTP_FACTS_READ_ON`), and there is no "best" label and no referral parameter
+   *  (docs/REGULATORY.md §4). "Mt Pelerin" stays verbatim - a company name is not a message. */
+  mtp: {
+    /** The entry label on every buy surface: the Add-funds choice, the FundingRoutes provider
+     *  row, the Deposit-sheet entry. */
+    entryLabel: string;
+    /** The entry's screen-reader hint; `asset` is the token the buy delivers. */
+    entryHint: (asset: string) => string;
+    /** The Add-funds choice's deposit row (the buy choice names the provider). */
+    chooserDeposit: string;
+    /** The FundingRoutes provider row's one-line differentiator: unlike the listed providers,
+     *  this one pays out straight to the wallet's own address. */
+    fundingLine: string;
+    sheetTitle: string;
+    /** The one-line summary. `fiat` is the source currency the widget prefills (CHF). */
+    buyLine: (fiat: string, asset: string, chain: string) => string;
+    /** Why the sheet asks for one signature before the widget opens. */
+    signHeadline: string;
+    /** The review line's three labeled facts: the exact message signed, the receiving address,
+     *  the delivery chain. */
+    messageLabel: string;
+    addressLabel: string;
+    chainLabel: string;
+    approve: string;
+    cancel: string;
+    /** The post-open line: the widget is in the browser, arrival reconciles on return. */
+    openDone: string;
+    /** Open failure - the sheet STAYS with this note (the TrustWallet pattern). */
+    openFailed: string;
+    /** The counterparty disclosure. */
+    counterparty: string;
+    feesTitle: string;
+    /** Their published figures, verbatim (plan §2.2, read 2026-10-12). */
+    feeBank: string;
+    feeCard: string;
+    feeDelivery: string;
+    holdUnverified: string;
+    /** Bought ETH is not a catalog row - it lands as the wallet's gas balance. */
+    ethGasNote: string;
+    /** Attribution + as-of date (`readOn` is the pre-formatted month-day-year). */
+    feesAsOf: (readOn: string) => string;
+  };
+
   /** "Don't have any yet?" - the step BEFORE the address (founder direction 2026-09-09; design and
    *  measured provider evidence in docs/specs/2026-09-09-funding-routes-plan.md).
    *
@@ -598,6 +643,31 @@ export const depositEn: DepositMessages = {
     fund: 'Fund from Trust Wallet',
     fundHint: asset => `Opens Trust Wallet to send ${asset} to your dpay address`,
     err: "Couldn't open Trust Wallet. Try again.",
+  },
+
+  mtp: {
+    entryLabel: 'Buy with Mt Pelerin',
+    entryHint: asset => `Buys ${asset} through Mt Pelerin, delivered to your address`,
+    chooserDeposit: 'Deposit',
+    fundingLine: 'Card or bank, pays out to your address',
+    sheetTitle: 'Buy with Mt Pelerin',
+    buyLine: (fiat, asset, chain) => `Pay ${fiat}, receive ${asset} on ${chain}.`,
+    signHeadline: 'One signature proves the address is yours.',
+    messageLabel: 'Message',
+    addressLabel: 'Address',
+    chainLabel: 'Chain',
+    approve: 'Sign and open',
+    cancel: 'Cancel',
+    openDone: 'Mt Pelerin opened in your browser. Your balance updates when you return.',
+    openFailed: "Couldn't open Mt Pelerin. Try again.",
+    counterparty: 'Mt Pelerin handles the purchase. dpay is not a party to it and takes no fee.',
+    feesTitle: 'Fees and limits',
+    feeBank: 'Bank: 0% on the first CHF 500 per user per year, then from 1.3%',
+    feeCard: 'Card: 2.5%+, min CHF 1.20',
+    feeDelivery: 'ERC-20 delivery on Ethereum: $1. ETH and other chains: free.',
+    holdUnverified: 'No ID check to CHF 999 per 30 days. Unverified bank transfers are held 7 days.',
+    ethGasNote: 'ETH bought in the widget becomes your gas balance.',
+    feesAsOf: readOn => `Mt Pelerin's published figures, read ${readOn}.`,
   },
 
   funding: {
