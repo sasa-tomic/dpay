@@ -34,6 +34,12 @@ pub mod trocador;
 /// webhooks + order store, and the promised upstream rate limits — wrapped around the proxy
 /// above without changing its route contract. See the module's own doc for the signed terms.
 pub mod trocador_agreement;
+/// The Mt Pelerin off-ramp proxy + conversion webhook receiver (2026-10-12, WC integration
+/// plan R2 step 1): quote/conversion/status proxy routes with the `mtpelerin-unconfigured`
+/// 503 tripwire until `DPAY_MTPELERIN_CTKN` lands, `Mtp-Signature` HMAC verification on the
+/// receiver, and the Trocador layout's access log + order store + 60 s poll cap. See the
+/// module's own doc for the pinned contract + the OPEN upstream-path re-pin.
+pub mod mtpelerin;
 /// The agreement records' POSTGRES backend (2026-09-22, founder: "postgres is being backed up,
 /// flat files are not") — the dual-store's PG arm, selected by `DPAY_TROCADOR_PG_DSN`. Private:
 /// the only public surface is `trocador_agreement::AgreementConfig::pg_dsn` + `Agreement::open`.

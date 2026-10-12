@@ -47,6 +47,8 @@ MAPPING=(
   "sideshift.sops.json|secret|DPAY_SIDESHIFT_SECRET|optional"
   "trocador.sops.json|DPAY_TROCADOR_API_KEY|DPAY_TROCADOR_API_KEY|optional"
   "trocador-pg.sops.json|DPAY_TROCADOR_PG_DSN|DPAY_TROCADOR_PG_DSN|optional"
+  "mtpelerin.sops.json|DPAY_MTPELERIN_CTKN|DPAY_MTPELERIN_CTKN|optional"
+  "mtpelerin.sops.json|DPAY_MTPELERIN_WEBHOOK_SECRET|DPAY_MTPELERIN_WEBHOOK_SECRET|optional"
 )
 
 # EVM JSON-RPC upstreams (DPAY_EVM_RPC_URL = default chain; DPAY_EVM_RPC_URL_<CHAINID> =

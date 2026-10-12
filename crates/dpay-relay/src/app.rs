@@ -95,6 +95,12 @@
 //!   (2026-09-21; [`crate::trocador_agreement`]): access log + order store + webhooks + the
 //!   promised upstream limits wrap around the proxy; the receiver answers 200 to anything
 //!   (the venue probes at creation and never retries a failed delivery).
+//! - `GET /api/v1/mtpelerin/quote`, `POST|GET /api/v1/mtpelerin/conversion`,
+//!   `POST /api/v1/mtpelerin/webhook` — the Mt Pelerin OFF-RAMP proxy + conversion webhook
+//!   receiver (2026-10-12, R2 step 1; [`crate::mtpelerin`]): the Trocador route layout
+//!   mirrored — access log + order store, `oid` correlation, `Mtp-Signature` HMAC-SHA256
+//!   verification, terminal dedupe, and the 60 s poll cap on the webhook's fallback read.
+//!   503 `mtpelerin-unconfigured` on every route until the keys land.
 //!
 //! Read-only by construction apart from the play-money faucet: there is no value-moving route
 //! left on this crate (the 2026-08-19 IC-rail cutover moved settlement to the app's own signed
@@ -213,6 +219,14 @@ pub struct AppState {
     /// so there is no keyless device-direct read. The key is a SECRET: never logged, never
     /// echoed.
     pub trocador: Arc<crate::trocador::TrocadorProxy>,
+    /// The Mt Pelerin off-ramp proxy + webhook receiver (`crate::mtpelerin`) —
+    /// `GET /api/v1/mtpelerin/quote`, `POST|GET /api/v1/mtpelerin/conversion`,
+    /// `POST /api/v1/mtpelerin/webhook`. Same always-registered contract: unset
+    /// `DPAY_MTPELERIN_CTKN` answers 503 `mtpelerin-unconfigured` on the proxy routes,
+    /// unset `DPAY_MTPELERIN_WEBHOOK_SECRET` 503s the receiver (both LEGAL deploy states
+    /// until the founder's key exchange with hello@mtpelerin.com lands). Both are SECRETS:
+    /// never logged, never echoed.
+    pub mtpelerin: Arc<crate::mtpelerin::MtPelerinProxy>,
     /// The Jupiter proxy (`crate::jupiter`) — `GET /api/v1/jupiter/quote` +
     /// `POST /api/v1/jupiter/swap` (2026-09-16 founder ask). Same always-registered
     /// contract as the proxies above, but with NO unconfigured state at all: the venue is
@@ -274,6 +288,14 @@ impl AppState {
                 None,
                 crate::trocador::DEFAULT_API_BASE.to_string(),
                 crate::trocador::DEFAULT_TIMEOUT,
+            )),
+            // The unconfigured Mt Pelerin off-ramp proxy + webhook receiver:
+            // /api/v1/mtpelerin/* answers 503 `mtpelerin-unconfigured` naming the missing
+            // env var until `with_mtpelerin` attaches DPAY_MTPELERIN_CTKN +
+            // DPAY_MTPELERIN_WEBHOOK_SECRET (see `crate::mtpelerin` — R2 step 1,
+            // 2026-10-12; keys exchanged with hello@mtpelerin.com).
+            mtpelerin: Arc::new(crate::mtpelerin::MtPelerinProxy::new(
+                crate::mtpelerin::MtPelerinConfig::default(),
             )),
             // The Jupiter proxy, ALWAYS serving (keyless — no unconfigured state): the
             // default state carries the venue's documented lite-api base; `main` re-points
@@ -354,6 +376,18 @@ impl AppState {
     /// unconfigured proxy still answers, honestly, 503 naming the missing variable.
     pub fn with_trocador(mut self, proxy: crate::trocador::TrocadorProxy) -> Self {
         self.trocador = Arc::new(proxy);
+        self
+    }
+
+    /// Attach the Mt Pelerin off-ramp proxy + webhook receiver
+    /// (`crate::mtpelerin::MtPelerinProxy`). `main` builds it from
+    /// `DPAY_MTPELERIN_CTKN` + `DPAY_MTPELERIN_WEBHOOK_SECRET` (+ optional
+    /// `DPAY_MTPELERIN_API_BASE` / `_CONVERSION_PATH` / `_LOG_DIR`); tests build it
+    /// against the local stub upstream with a temp log dir. BOTH credential values are
+    /// SECRETS (never logged here or anywhere else), and either may stay unset: the
+    /// routes stay registered and answer, honestly, 503 naming the missing variable.
+    pub fn with_mtpelerin(mut self, proxy: crate::mtpelerin::MtPelerinProxy) -> Self {
+        self.mtpelerin = Arc::new(proxy);
         self
     }
 
@@ -505,6 +539,29 @@ pub fn app(state: AppState) -> Router {
             "/trocador/webhook",
             axum::routing::post(crate::trocador_agreement::webhook_receiver)
                 .get(crate::trocador_agreement::webhook_probe),
+        )
+        // The Mt Pelerin off-ramp proxy + webhook receiver (R2 step 1, 2026-10-12) —
+        // registered ALWAYS for the same 503-not-404 reason: until DPAY_MTPELERIN_CTKN
+        // lands the proxy routes answer 503 `mtpelerin-unconfigured`, and the receiver
+        // 503s until DPAY_MTPELERIN_WEBHOOK_SECRET does. The quote GET proxies the
+        // venue's documented currency_rates/convert; the conversion POST is the
+        // server-side order creation (correlation id = dpay's own `oid`, persisted
+        // first, `offRampAddress` + the venue's `id` stored); its GET twin is the
+        // webhook-first status read under the 60 s poll cap. The receiver verifies the
+        // `Mtp-Signature` HMAC-SHA256 over the raw body and applies first-terminal-wins
+        // dedupe. See `crate::mtpelerin`.
+        .route(
+            "/mtpelerin/quote",
+            axum::routing::get(crate::mtpelerin::quote_proxy),
+        )
+        .route(
+            "/mtpelerin/conversion",
+            axum::routing::post(crate::mtpelerin::conversion_proxy)
+                .get(crate::mtpelerin::conversion_status),
+        )
+        .route(
+            "/mtpelerin/webhook",
+            axum::routing::post(crate::mtpelerin::webhook_receiver),
         )
         // The Jupiter proxy (2026-09-16 founder ask) — registered ALWAYS, and unlike the
         // proxies above there is no unconfigured 503 branch at all: the venue is keyless

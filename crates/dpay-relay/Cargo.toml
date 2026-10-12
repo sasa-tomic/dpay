@@ -53,6 +53,11 @@ futures-util = "0.3"
 # sha256 of the served APK — the strong ETag on /download/dpay.apk + the `?v=` cache-buster
 # (computed once in `AppState::with_apk`). Already in the dep tree (transitively locked at 0.10.9).
 sha2 = "0.10"
+# The Mt Pelerin webhook receiver's HMAC-SHA256 (`src/mtpelerin.rs`, R2 step 1): the
+# `Mtp-Signature` header is HMAC-SHA256 over the full raw body, hex (their docs' own JS
+# example). Already in the dep tree (transitively locked at 0.12.1 with digest 0.10, the
+# same digest line sha2 0.10 uses), so this names an existing edge — no new crates.
+hmac = "0.12"
 # The OS CSPRNG behind the checkout's charge/quote ids (`checkout::fresh_id`) — a bearer read-token needs
 # real randomness, not a hash of a clock. Already in the tree at 0.2.17 (rand_core pulls it for
 # ed25519-dalek's key generation), so this names an existing edge rather than adding a crate.

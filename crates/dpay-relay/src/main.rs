@@ -204,6 +204,49 @@
 //!                           e2e harness sets 0). A prod binary never consults this env:
 //!                           at most one upstream read per trade per 60s is the signed
 //!                           promise itself, and there it is a compile-time property.
+//!   DPAY_MTPELERIN_CTKN     the Mt Pelerin integration key for the off-ramp proxy (R2
+//!                           step 1, 2026-10-12 — GET /api/v1/mtpelerin/quote,
+//!                           POST+GET /api/v1/mtpelerin/conversion; see src/mtpelerin.rs;
+//!                           tracked credential: `secrets/mtpelerin.sops.json` — decrypt
+//!                           into the env, never a plaintext .env). Requested from
+//!                           hello@mtpelerin.com (manual review; the same thread sets up
+//!                           the conversion webhook). SECRET deploy config: never logged,
+//!                           never echoed, never committed. Unset is LEGAL — every proxy
+//!                           route still registers and answers 503 `mtpelerin-unconfigured`
+//!                           naming this variable.
+//!   DPAY_MTPELERIN_WEBHOOK_SECRET
+//!                           the conversion webhook's SIGNATURE key — the shared secret
+//!                           the `Mtp-Signature` header's HMAC-SHA256 (over the full raw
+//!                           body, hex) is keyed with (developers.mtpelerin.com,
+//!                           integration-guides/conversion-webhook.md, fetched
+//!                           2026-10-12). Exchanged with Mt Pelerin when they set the
+//!                           webhook up; tracked credential:
+//!                           `secrets/mtpelerin.sops.json`. SECRET deploy config: never
+//!                           logged, never echoed, never committed. Unset is LEGAL — the
+//!                           receiver still registers and answers 503 naming this
+//!                           variable rather than mutate an order it cannot verify.
+//!   DPAY_MTPELERIN_API_BASE the Mt Pelerin API base the proxy calls (default
+//!                           `https://api.mtpelerin.com` — the venue's documented host).
+//!                           The offline loop points it at the relay's own test stub. A
+//!                           set-but-malformed URL refuses startup (EXIT_CONFIG).
+//!   DPAY_MTPELERIN_CONVERSION_PATH
+//!                           the conversion (order-creation) upstream path (default
+//!                           `/orders` — BEST-EFFORT: the venue's order API is
+//!                           contact-gated, so the path MUST be re-pinned from their
+//!                           technical docs before the first real conversion;
+//!                           src/mtpelerin.rs module header). Must start with `/`.
+//!   DPAY_MTPELERIN_LOG_DIR  the directory for the append-only records
+//!                           `mtpelerin-access.jsonl` (one JSON line per proxied call +
+//!                           every webhook delivery) and `mtpelerin-orders.jsonl` (the
+//!                           order store the webhook correlation rebuilds its index from
+//!                           at startup). Default: the process's current directory;
+//!                           created on first write. The Postgres arm is the documented
+//!                           follow-up when the founder's webhook setup lands.
+//!   DPAY_MTPELERIN_STATUS_SPACING_SECS  the status-read spacing in seconds — READ ONLY
+//!                           IN test-helpers BUILDS (the offline dev loop; the e2e
+//!                           harness sets 0). A prod binary never consults this env: at
+//!                           most one status read per order per 60s is the poll-fallback
+//!                           promise itself (crate::mtpelerin).
 
 use std::net::SocketAddr;
 use std::process;
@@ -351,6 +394,23 @@ async fn main() {
             dpay_relay::trocador::DEFAULT_TIMEOUT,
         )
         .with_agreement(trocador_agreement),
+    );
+    // The Mt Pelerin off-ramp proxy + webhook receiver (R2 step 1, 2026-10-12): same
+    // always-registered contract — an unset credential answers 503 naming the variable.
+    // The CTKN + the webhook signature key are SECRETS: never logged, never echoed. The
+    // proxy carries the access log + order store (JSONL under DPAY_MTPELERIN_LOG_DIR) and
+    // the 60 s poll cap on the status read; the clock seam below is the trocador
+    // agreement's, for the same offline-test reason.
+    let state = state.with_mtpelerin(
+        dpay_relay::mtpelerin::MtPelerinProxy::new(dpay_relay::mtpelerin::MtPelerinConfig {
+            ctkn: cfg.mtpelerin_ctkn.clone(),
+            webhook_secret: cfg.mtpelerin_webhook_secret.clone(),
+            api_base: cfg.mtpelerin_api_base.clone(),
+            conversion_path: cfg.mtpelerin_conversion_path.clone(),
+            log_dir: cfg.mtpelerin_log_dir.clone(),
+            trust_proxy: cfg.trust_proxy,
+            status_spacing_secs: cfg.mtpelerin_status_spacing_secs,
+        }),
     );
     // The Jupiter proxy (2026-09-16 founder ask: quotes + swap-tx builds "through our relay
     // (for caching etc)"). ALWAYS serving — the venue is keyless and the base has a constant
@@ -536,6 +596,42 @@ async fn main() {
              default sends no webhook params)."
         ),
     }
+
+    // The Mt Pelerin one-line WHETHER (never the values — the CTKN and the webhook
+    // signature key are the partner's secrets).
+    if cfg.mtpelerin_ctkn.is_some() {
+        println!(
+            "/api/v1/mtpelerin/*: ENABLED — the off-ramp proxy (quote + conversion + the \
+             webhook-first status read) attaches DPAY_MTPELERIN_CTKN server-side; the \
+             device never sees it."
+        );
+    } else {
+        println!(
+            "/api/v1/mtpelerin/*: unconfigured — the proxy routes answer 503 until \
+             DPAY_MTPELERIN_CTKN is set in the deploy environment (the Mt Pelerin \
+             integration key, requested from hello@mtpelerin.com; see docs/OPS.md §3)."
+        );
+    }
+    if cfg.mtpelerin_webhook_secret.is_some() {
+        println!(
+            "POST /api/v1/mtpelerin/webhook: ENABLED — deliveries verify the \
+             Mtp-Signature HMAC-SHA256 (DPAY_MTPELERIN_WEBHOOK_SECRET); the first \
+             terminal delivery per order wins."
+        );
+    } else {
+        println!(
+            "POST /api/v1/mtpelerin/webhook: registered but DORMANT — the receiver \
+             answers 503 until DPAY_MTPELERIN_WEBHOOK_SECRET is set (the conversion \
+             webhook's signature key, exchanged when Mt Pelerin sets the webhook up)."
+        );
+    }
+    println!(
+        "mtpelerin records: access log + order store append-only under {} \
+         (DPAY_MTPELERIN_LOG_DIR — JSONL; PG arm is the follow-up when the webhook \
+         setup lands); status reads at most 1/min per order (the poll fallback's \
+         60s promise, no prod knob).",
+        cfg.mtpelerin_log_dir.display()
+    );
     let store_line = if cfg.trocador_pg_dsn.is_some() {
         "trocador agreement: access log + order store append-only in POSTGRES \
          (DPAY_TROCADOR_PG_DSN — the backed-up store; schema created, order index \
@@ -748,6 +844,27 @@ struct Config {
     /// `#[cfg(feature = "test-helpers")]` alone (the offline stub world stands it down;
     /// a prod binary cannot, by construction). See `src/trocador_agreement.rs` §3.
     trocador_status_spacing_secs: u64,
+    /// The Mt Pelerin integration key (`DPAY_MTPELERIN_CTKN`) — the THIRD relay-held
+    /// partner credential (R2 step 1, 2026-10-12). SECRET: never logged, never echoed,
+    /// never committed. Unset is legal (503 naming the variable).
+    mtpelerin_ctkn: Option<String>,
+    /// The Mt Pelerin webhook signature key (`DPAY_MTPELERIN_WEBHOOK_SECRET`) — the
+    /// HMAC-SHA256 key the receiver verifies `Mtp-Signature` with. SECRET. Unset is
+    /// legal (the receiver 503s naming the variable).
+    mtpelerin_webhook_secret: Option<String>,
+    /// The Mt Pelerin API base (`DPAY_MTPELERIN_API_BASE`); default the venue's
+    /// documented host.
+    mtpelerin_api_base: String,
+    /// The conversion upstream path (`DPAY_MTPELERIN_CONVERSION_PATH`); default the
+    /// best-effort pin (src/mtpelerin.rs — re-pin from the venue's technical docs).
+    mtpelerin_conversion_path: String,
+    /// The Mt Pelerin records' dir (`DPAY_MTPELERIN_LOG_DIR`, default "."): the
+    /// append-only access log + order store.
+    mtpelerin_log_dir: std::path::PathBuf,
+    /// The Mt Pelerin status-read spacing in seconds. The promise's 60 — the ONLY
+    /// smaller value comes from `DPAY_MTPELERIN_STATUS_SPACING_SECS`, read under
+    /// `#[cfg(feature = "test-helpers")]` alone (same reasoning as the trocador seam).
+    mtpelerin_status_spacing_secs: u64,
 }
 
 impl Config {
@@ -1057,6 +1174,54 @@ impl Config {
         #[cfg(not(feature = "test-helpers"))]
         let trocador_status_spacing_secs: u64 = dpay_relay::trocador_agreement::STATUS_SPACING_SECS;
 
+        // The Mt Pelerin off-ramp credentials (R2 step 1, 2026-10-12). UNSET is a legal
+        // state — the routes still register and answer 503 naming the variable (the keys
+        // are exchanged with hello@mtpelerin.com on the R0 thread: the CTKN by review,
+        // the webhook secret when they set the conversion webhook up). No shape
+        // validation on either secret: the venue documents no format for the CTKN and
+        // the signature key is exactly what the operator was given; only the upstream
+        // can judge them. The base + path + log dir follow the other proxies' discipline;
+        // the path must look like a path (a typo'd base would otherwise send the
+        // conversion POST somewhere meaningless — the relay refuses rather than guess).
+        let mtpelerin_ctkn = non_empty("DPAY_MTPELERIN_CTKN");
+        let mtpelerin_webhook_secret = non_empty("DPAY_MTPELERIN_WEBHOOK_SECRET");
+        let mtpelerin_api_base = match non_empty("DPAY_MTPELERIN_API_BASE") {
+            Some(base) => {
+                reqwest::Url::parse(&base)
+                    .map_err(|e| format!("DPAY_MTPELERIN_API_BASE is not a valid URL: {e}"))?;
+                base
+            }
+            None => dpay_relay::mtpelerin::DEFAULT_API_BASE.to_string(),
+        };
+        let mtpelerin_conversion_path = match non_empty("DPAY_MTPELERIN_CONVERSION_PATH") {
+            Some(path) => {
+                if !path.starts_with('/') {
+                    return Err(format!(
+                        "DPAY_MTPELERIN_CONVERSION_PATH={path:?} must be an absolute path \
+                         (start with '/')"
+                    ));
+                }
+                path
+            }
+            None => dpay_relay::mtpelerin::DEFAULT_CONVERSION_PATH.to_string(),
+        };
+        let mtpelerin_log_dir = std::path::PathBuf::from(
+            non_empty("DPAY_MTPELERIN_LOG_DIR").unwrap_or_else(|| ".".into()),
+        );
+        #[cfg(feature = "test-helpers")]
+        let mtpelerin_status_spacing_secs: u64 =
+            match non_empty("DPAY_MTPELERIN_STATUS_SPACING_SECS") {
+                Some(raw) => raw.parse().map_err(|_| {
+                    format!(
+                        "DPAY_MTPELERIN_STATUS_SPACING_SECS={raw:?} is not a non-negative \
+                         integer (seconds)"
+                    )
+                })?,
+                None => dpay_relay::mtpelerin::STATUS_SPACING_SECS,
+            };
+        #[cfg(not(feature = "test-helpers"))]
+        let mtpelerin_status_spacing_secs: u64 = dpay_relay::mtpelerin::STATUS_SPACING_SECS;
+
         Ok(Config {
             addr,
             ledger,
@@ -1081,6 +1246,12 @@ impl Config {
             trocador_rate_per_min,
             trocador_trade_per_min,
             trocador_status_spacing_secs,
+            mtpelerin_ctkn,
+            mtpelerin_webhook_secret,
+            mtpelerin_api_base,
+            mtpelerin_conversion_path,
+            mtpelerin_log_dir,
+            mtpelerin_status_spacing_secs,
         })
     }
 }
