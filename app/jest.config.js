@@ -15,7 +15,15 @@ const transformIgnorePatterns = [
 ];
 // MC8 U6.2 — WalletConnect isolation + vite `?url` asset stubs (see the notes at the bottom of
 // this file, kept from the single-project era).
+// W1 step 2 — the wallet-side SDK stubs (`@reown/*` → walletkit-stub) plus the TWO `@walletconnect/*`
+// specifiers `walletkit.ts` names (`core`, `utils`). The specific patterns MUST sit above the
+// generic `^@walletconnect/.*` entry (first match wins): the generic stub exports only
+// `EthereumProvider`, while the walletkit stub covers `Core`/`buildApprovedNamespaces`/`getSdkError`
+// — same split the dApp side and wallet side have at runtime (two isolated SDK stacks).
 const moduleNameMapper = {
+  '^@walletconnect/core$': '<rootDir>/__stubs__/walletkit-stub',
+  '^@walletconnect/utils$': '<rootDir>/__stubs__/walletkit-stub',
+  '^@reown/.*': '<rootDir>/__stubs__/walletkit-stub',
   '^@walletconnect/.*': '<rootDir>/__stubs__/walletconnect-stub',
   '\\?url$': '<rootDir>/__stubs__/url-asset-stub',
 };

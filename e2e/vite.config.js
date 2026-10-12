@@ -222,6 +222,15 @@ export default defineConfig(({ mode }) => {
         { find: /^@walletconnect\/ethereum-provider$/, replacement: join(WEB, 'walletconnect-provider.ts') },
         { find: /^@walletconnect\/react-native-compat$/, replacement: join(WEB, 'walletconnect-provider.ts') },
 
+        // W1 step 2 — the wallet-side WC SDK, same isolation: `walletkit.ts` is the only `@reown/*`
+        // import site (no caller imports it in this build yet — the Wallet-mount wiring is a later
+        // wave), and these aliases keep ANY future import path on the noop shim so the bundle never
+        // executes real WC code nor pulls its heavy dep tree. Mirrors the two dApp-side aliases
+        // directly above.
+        { find: /^@reown\/walletkit$/, replacement: join(WEB, 'walletkit.ts') },
+        { find: /^@walletconnect\/core$/, replacement: join(WEB, 'walletkit.ts') },
+        { find: /^@walletconnect\/utils$/, replacement: join(WEB, 'walletkit.ts') },
+
         // qrcode-svg pokes `global.TextEncoder = require('text-encoding').TextEncoder` at the top of
         // its index. The `text-encoding` polyfill package is in app/node_modules and resolves via node
         // walk-up; alias it to a tiny shim that re-uses the BROWSER's native TextEncoder so we don't
