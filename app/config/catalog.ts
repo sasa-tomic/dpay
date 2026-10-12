@@ -8,7 +8,7 @@ import {SOL_DECIMALS} from '../solana/identity';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 import {EURC_DECIMALS, EURC_MINT_ADDRESS} from '../solana/tokens';
 import {parseEvmRow, type EvmAsset} from '../lib/evmCatalog';
-import {ZCHF_TOKEN, ZCHF_DECIMALS} from '../evm/chains';
+import {ZCHF_TOKEN, ZCHF_DECIMALS, USDC_TOKEN, USDC_EVM_DECIMALS} from '../evm/chains';
 
 // --- currency catalog (M0 + MC1 unit 5 + catalog v2 network-first) ---------------------------
 // The wallet's runtime source of truth for which assets exist + how to display/fund them. Fetched
@@ -352,14 +352,18 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
   // rail; section order IS the wallet row order), then Ethereum, then the EMPTY Arbitrum
   // Sepolia testnet section (the icp-testnet empty-section convention: clients shouldn't infer
   // from absence). Addresses + decimals are IMPORTED from app/evm/chains.ts (the registry) —
-  // never re-typed. Dev/Anvil rows are NEVER bundled (env-gated relay-side only, D3). Ramps
-  // Unavailable on every row — no fiat rail on this chain either; liquidity null on all (no
-  // measured venue tier — do not invent one).
+  // never re-typed. Dev/Anvil rows are NEVER bundled (env-gated relay-side only, D3). Each
+  // section's rows[0] is ZCHF, rows[1] is USDC — the wire-byte pins index that order. ZCHF
+  // ramps stay honest Unavailable both ways; the USDC rows carry the Mt Pelerin Partner onramp
+  // (R1 step 0, 2026-10-12) and stay offramp-Unavailable until R2 step 1 flips the eligible
+  // rows. Liquidity null on all (no measured venue tier — do not invent one).
   {
     protocol: 'evm', name: 'Arbitrum One', environment: 'mainnet',
     assets: [
       {token: 'ZCHF', symbol: 'ZCHF', decimals: ZCHF_DECIMALS, minFractionDigits: 2, chainId: 42161,
         address: ZCHF_TOKEN[42161]!.address, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false},
+      {token: 'USDC', symbol: 'USDC', decimals: USDC_EVM_DECIMALS, minFractionDigits: 2, chainId: 42161,
+        address: USDC_TOKEN[42161]!.address, liquidity: null, onramp: 'Partner', offramp: 'Unavailable', testnet: false},
     ],
   },
   {
@@ -367,6 +371,8 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
     assets: [
       {token: 'ZCHF', symbol: 'ZCHF', decimals: ZCHF_DECIMALS, minFractionDigits: 2, chainId: 1,
         address: ZCHF_TOKEN[1]!.address, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false},
+      {token: 'USDC', symbol: 'USDC', decimals: USDC_EVM_DECIMALS, minFractionDigits: 2, chainId: 1,
+        address: USDC_TOKEN[1]!.address, liquidity: null, onramp: 'Partner', offramp: 'Unavailable', testnet: false},
     ],
   },
   {protocol: 'evm', name: 'Arbitrum Sepolia', environment: 'testnet', assets: []},

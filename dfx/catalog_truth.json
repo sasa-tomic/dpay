@@ -22,7 +22,9 @@
   "erc20_contracts": {
     "ckusdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     "zchf_arbitrum": "0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553",
-    "zchf_ethereum": "0xB58E61C3098d85632Df34EecfB899A1Ed80921cB"
+    "zchf_ethereum": "0xB58E61C3098d85632Df34EecfB899A1Ed80921cB",
+    "usdc_arbitrum": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+    "usdc_ethereum": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
   },
   "decimals": {
     "demo": 2,
@@ -32,7 +34,8 @@
     "vchf": 8,
     "icp": 8,
     "eurc": 6,
-    "zchf": 18
+    "zchf": 18,
+    "usdc": 6
   },
   "chains": {
     "_doc": "EVM chain ids for the evm catalog sections. NEW SEMANTICS vs the IC rows: on an evm row, chain_id names the chain the money SETTLES on (the row IS money on that chain); on the IC chain-key rows, chain_id names the chain the asset is BACKED by (ckUSDC chain_id 1 = Ethereum). anvil exists for the local dev/e2e chain only and is never served by a prod relay (env-gated, catalog.rs dev_evm_sections).",

@@ -1766,14 +1766,16 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(solana["name"], "Solana");
     assert_eq!(solana["environment"], "mainnet");
     // The evm sections (D2): Arbitrum One FIRST (the recommended rail), then Ethereum — the
-    // section order IS the wallet row order. One ZCHF row each: 18 decimals, 2 display
-    // digits, honest Unavailable ramps, and the chain's OWN settlement chain_id.
+    // section order IS the wallet row order. One ZCHF row + one USDC row each (R1 step 0,
+    // 2026-10-12): rows[0] = ZCHF (18 decimals, honest Unavailable ramps), rows[1] = USDC
+    // (6 decimals, the Mt Pelerin Partner onramp, offramp still Unavailable until R2 step 1),
+    // and each row's chain's OWN settlement chain_id.
     let arbitrum = &networks[3];
     assert_eq!(arbitrum["protocol"], "evm");
     assert_eq!(arbitrum["name"], "Arbitrum One");
     assert_eq!(arbitrum["environment"], "mainnet");
     let arb_rows = arbitrum["assets"].as_array().expect("evm assets array");
-    assert_eq!(arb_rows.len(), 1);
+    assert_eq!(arb_rows.len(), 2);
     assert_eq!(arb_rows[0]["token"], "ZCHF");
     assert_eq!(arb_rows[0]["symbol"], "ZCHF");
     assert_eq!(arb_rows[0]["decimals"], 18);
@@ -1786,18 +1788,42 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(arb_rows[0]["onramp"], "Unavailable");
     assert_eq!(arb_rows[0]["offramp"], "Unavailable");
     assert!(arb_rows[0].get("liquidity").is_none(), "no invented tier");
+    assert_eq!(arb_rows[1]["token"], "USDC");
+    assert_eq!(arb_rows[1]["symbol"], "USDC");
+    assert_eq!(arb_rows[1]["decimals"], 6);
+    assert_eq!(arb_rows[1]["min_fraction_digits"], 2);
+    assert_eq!(arb_rows[1]["chain_id"], 42161);
+    assert_eq!(
+        arb_rows[1]["address"],
+        "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+    );
+    assert_eq!(arb_rows[1]["onramp"], "Partner");
+    assert_eq!(arb_rows[1]["offramp"], "Unavailable");
+    assert!(arb_rows[1].get("liquidity").is_none(), "no invented tier");
     let ethereum = &networks[4];
     assert_eq!(ethereum["protocol"], "evm");
     assert_eq!(ethereum["name"], "Ethereum");
     assert_eq!(ethereum["environment"], "mainnet");
     let eth_rows = ethereum["assets"].as_array().expect("evm assets array");
-    assert_eq!(eth_rows.len(), 1);
+    assert_eq!(eth_rows.len(), 2);
     assert_eq!(eth_rows[0]["token"], "ZCHF");
     assert_eq!(eth_rows[0]["chain_id"], 1);
     assert_eq!(
         eth_rows[0]["address"],
         "0xB58E61C3098d85632Df34EecfB899A1Ed80921cB"
     );
+    assert_eq!(eth_rows[1]["token"], "USDC");
+    assert_eq!(eth_rows[1]["symbol"], "USDC");
+    assert_eq!(eth_rows[1]["decimals"], 6);
+    assert_eq!(eth_rows[1]["min_fraction_digits"], 2);
+    assert_eq!(eth_rows[1]["chain_id"], 1);
+    assert_eq!(
+        eth_rows[1]["address"],
+        "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+    );
+    assert_eq!(eth_rows[1]["onramp"], "Partner");
+    assert_eq!(eth_rows[1]["offramp"], "Unavailable");
+    assert!(eth_rows[1].get("liquidity").is_none(), "no invented tier");
 
     // IC mainnet section: the REAL prod rows (DEMO's network None is mainnet-side). VCHF
     // (currency 7) and ICP (currency 8) carry network "Internet Computer"

@@ -81,6 +81,42 @@ export const ZCHF_TOKEN: Partial<Record<EvmChainId, ZchfDeployment>> = {
 /** ZCHF (like every ERC-20 here) carries 18 decimals. Centralised so callers never hard-code it. */
 export const ZCHF_DECIMALS = 18;
 
+/** A USDC deployment: the token address and the permit-domain kind its contract verifies. */
+export interface UsdcDeployment {
+  readonly address: string;
+  readonly domainKind: PermitDomainKind;
+}
+
+/**
+ * USDC (Circle) deployments per chain. Absent key = no mainnet deployment there. BOTH entries
+ * are Circle's canonical native USDC contracts (verified against
+ * api.mtpelerin.com/currencies/tokens 2026-10-12, R1 step 0 of the WalletConnect/Mt Pelerin
+ * plan). Their EIP-712 permit domain is the FULL kind (name + version) — deliberately NOT
+ * ZCHF's 'minimal': signing with the wrong kind yields a signature the token always rejects,
+ * so the kind is stated per deployment, never defaulted (no dpay flow signs a USDC permit
+ * today; verify on-chain before any permit use).
+ */
+export const USDC_TOKEN: Partial<Record<EvmChainId, UsdcDeployment>> = {
+  42161: {address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', domainKind: 'full'},
+  1: {address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', domainKind: 'full'},
+};
+
+/** USDC carries 6 decimals on both wired chains (Circle's own deployment parameter). Named
+ *  USDC_EVM_DECIMALS to stay distinct from the solana rail's USDC_DECIMALS (solana/spl.ts). */
+export const USDC_EVM_DECIMALS = 6;
+
+/** The USDC deployment on `chainId`, or null when the chain has no deployment. The pinned
+ *  mainnet registry only — the dev-token override seam is ZCHF-scoped (the e2e mock mirrors
+ *  ZCHF), and no catalog-derived dev USDC exists. */
+export function evmUsdcDeployment(chainId: EvmChainId): UsdcDeployment | null {
+  return USDC_TOKEN[chainId] ?? null;
+}
+
+/** The USDC token address on `chainId`, or null when the chain has no deployment. */
+export function evmUsdcToken(chainId: EvmChainId): string | null {
+  return evmUsdcDeployment(chainId)?.address ?? null;
+}
+
 /** A dev/testnet token override: the chain whose mock token address to swap, that address, and
  *  the permit-domain kind the mock verifies (the committed MockZCHF mirrors real ZCHF exactly, so
  *  the e2e driver passes 'minimal' — stated, never defaulted). */

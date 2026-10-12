@@ -3,11 +3,15 @@ import {
   clearEvmDevToken,
   EVM_CHAINS,
   evmDevToken,
+  evmUsdcDeployment,
+  evmUsdcToken,
   evmZchfDeployment,
   evmZchfToken,
   fromBaseUnits,
   setEvmDevToken,
   toBaseUnits,
+  USDC_EVM_DECIMALS,
+  USDC_TOKEN,
   ZCHF_DECIMALS,
   ZCHF_TOKEN,
 } from '../evm/chains';
@@ -46,6 +50,27 @@ describe('evm/chains — registry', () => {
     });
     expect(ZCHF_TOKEN[421614]).toBeUndefined(); // testnet mocks are injected at runtime
     expect(ZCHF_DECIMALS).toBe(18);
+  });
+
+  test('USDC mainnet deployments are pinned, both on the FULL permit domain (R1 step 0)', () => {
+    // Circle's canonical USDC contracts (verified against api.mtpelerin.com/currencies/tokens
+    // 2026-10-12). The FULL domain kind is the load-bearing pin: USDC's deployed EIP-712 domain
+    // is name+version, NOT ZCHF's ERC20PermitLight minimal — the stated kind must never inherit
+    // ZCHF's 'minimal' (no dpay flow signs a USDC permit today; verify on-chain before any use).
+    expect(USDC_TOKEN[42161]).toEqual({
+      address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+      domainKind: 'full',
+    });
+    expect(USDC_TOKEN[1]).toEqual({
+      address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+      domainKind: 'full',
+    });
+    expect(USDC_TOKEN[421614]).toBeUndefined(); // testnet rows stay out
+    expect(USDC_EVM_DECIMALS).toBe(6);
+    expect(evmUsdcToken(42161)).toBe(USDC_TOKEN[42161]?.address ?? null);
+    expect(evmUsdcToken(1)).toBe(USDC_TOKEN[1]?.address ?? null);
+    expect(evmUsdcToken(31337)).toBeNull(); // no anvil deployment — absent key, fail-closed null
+    expect(evmUsdcDeployment(1)?.domainKind).toBe('full');
   });
 });
 

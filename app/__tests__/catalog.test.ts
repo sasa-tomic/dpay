@@ -779,8 +779,8 @@ const TRUTH = JSON.parse(
   readFileSync(join(__dirname, '..', '..', 'dfx', 'catalog_truth.json'), 'utf8'),
 ) as {
   principals: {ckbtc_minter: string; cketh_minter: string; ckusdc_ledger: string; cketh_gas_ledger: string; cketh_ledger: string; vchf_ledger: string; icp_ledger: string; eurc_mint: string};
-  erc20_contracts: {ckusdc: string; zchf_arbitrum: string; zchf_ethereum: string};
-  decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number; vchf: number; icp: number; eurc: number; zchf: number};
+  erc20_contracts: {ckusdc: string; zchf_arbitrum: string; zchf_ethereum: string; usdc_arbitrum: string; usdc_ethereum: string};
+  decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number; vchf: number; icp: number; eurc: number; zchf: number; usdc: number};
   chains: {ethereum: number; arbitrum_one: number; arbitrum_sepolia: number; anvil: number};
   wire_consts: {retrieve_btc_min_amount: number; mint_account: string};
   venues: VenueTruth[];
@@ -958,13 +958,14 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     }
   });
 
-  // --- EVM rail (ZCHF) — the truth file's evm half (spec 2026-09-26, D4/D5) ---------------------
-  // The relay compiles these exact literals (catalog.rs ZCHF_*_ADDRESS); the rows ride the NEW
-  // NetworkAssets::Evm section shape, never CurrencyDescriptor. Until the app-side evm parse +
-  // bundled rows land (spec D6), the addresses are pinned HERE as the canonical spellings — the
-  // alarm reconciles truth file ↔ these literals, and the EIP-55 assertions self-verify both
-  // spellings so a mangled copy anywhere in circulation goes RED (spec risk R2). When D6 lands,
-  // its bundled-row its extend this block: bundledRow.address === the same literals.
+  // --- EVM rail (ZCHF + USDC) — the truth file's evm half (spec 2026-09-26, D4/D5; USDC rows
+  // R1 step 0 of the WalletConnect/Mt Pelerin plan, 2026-10-12) -----------------------------
+  // The relay compiles these exact literals (catalog.rs ZCHF_*_ADDRESS / USDC_*_ADDRESS); the
+  // rows ride the NEW NetworkAssets::Evm section shape, never CurrencyDescriptor. The addresses
+  // are pinned HERE as the canonical spellings — the alarm reconciles truth file ↔ these
+  // literals, and the EIP-55 assertions self-verify both spellings so a mangled copy anywhere
+  // in circulation goes RED (spec risk R2). The bundled rows (D6) pin registry ↔ truth ↔
+  // bundled in one triangle below.
   const ZCHF_ARBITRUM_ROW = {
     token: 'ZCHF', chainId: 42161, decimals: 18, minFractionDigits: 2,
     address: '0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553',
@@ -974,6 +975,18 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     token: 'ZCHF', chainId: 1, decimals: 18, minFractionDigits: 2,
     address: '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB',
     onramp: 'Unavailable', offramp: 'Unavailable', liquidity: null,
+  } as const;
+  // Circle's canonical USDC deployments, verified against api.mtpelerin.com/currencies/tokens
+  // (Ethereum `mainnet` + `arbitrum_mainnet`, both 6 decimals, 2026-10-12).
+  const USDC_ARBITRUM_ROW = {
+    token: 'USDC', chainId: 42161, decimals: 6, minFractionDigits: 2,
+    address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+    onramp: 'Partner', offramp: 'Unavailable', liquidity: null,
+  } as const;
+  const USDC_ETHEREUM_ROW = {
+    token: 'USDC', chainId: 1, decimals: 6, minFractionDigits: 2,
+    address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    onramp: 'Partner', offramp: 'Unavailable', liquidity: null,
   } as const;
 
   it('the ZCHF Arbitrum row address + decimals + chainId match the shared truth', () => {
@@ -997,6 +1010,24 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(eip55ChecksumBad(ZCHF_ETHEREUM_ROW.address)).toBe(false);
   });
 
+  it('the USDC Arbitrum row address + decimals + chainId match the shared truth (R1 step 0)', () => {
+    expect(USDC_ARBITRUM_ROW.address).toBe(TRUTH.erc20_contracts.usdc_arbitrum);
+    expect(USDC_ARBITRUM_ROW.decimals).toBe(TRUTH.decimals.usdc);
+    expect(TRUTH.decimals.usdc).toBe(6);
+    expect(USDC_ARBITRUM_ROW.chainId).toBe(TRUTH.chains.arbitrum_one);
+  });
+
+  it('the USDC Ethereum row address + decimals + chainId match the shared truth (R1 step 0)', () => {
+    expect(USDC_ETHEREUM_ROW.address).toBe(TRUTH.erc20_contracts.usdc_ethereum);
+    expect(USDC_ETHEREUM_ROW.decimals).toBe(TRUTH.decimals.usdc);
+    expect(USDC_ETHEREUM_ROW.chainId).toBe(TRUTH.chains.ethereum);
+  });
+
+  it('both USDC addresses are correctly EIP-55 checksummed (self-verifying alarm, R2)', () => {
+    expect(eip55ChecksumBad(USDC_ARBITRUM_ROW.address)).toBe(false);
+    expect(eip55ChecksumBad(USDC_ETHEREUM_ROW.address)).toBe(false);
+  });
+
   it('truth.chains pins exactly the four EVM settlement chains with the pinned ids', () => {
     expect(Object.keys(TRUTH.chains).filter(k => k !== '_doc').sort()).toEqual(
       ['anvil', 'arbitrum_one', 'arbitrum_sepolia', 'ethereum'],
@@ -1016,28 +1047,47 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     }
   });
 
+  it('the evm USDC rows carry the Partner onramp, the pre-flip Unavailable offramp, no liquidity tier (R1 step 0)', () => {
+    // The R2 step 1 flip turns the eligible rows' offramp to Partner — THIS assertion going
+    // red then is the intended forcing function, not a regression.
+    for (const row of [USDC_ARBITRUM_ROW, USDC_ETHEREUM_ROW]) {
+      expect(row.liquidity).toBeNull();
+      expect(row.onramp).toBe('Partner');
+      expect(row.offramp).toBe('Unavailable');
+      expect(row.minFractionDigits).toBe(2); // unit-denominated, the VCHF/USDC display policy
+    }
+  });
+
   it('the BUNDLED evm rows are exactly these literals (D6 bundled rows, registry-imported)', () => {
-    // D6's app half, landed: BUNDLED_NETWORKS carries the two mainnet ZCHF rows (Arbitrum One
-    // first — section order IS the wallet row order) + the EMPTY Arbitrum Sepolia testnet
-    // section. Addresses come from the registry (evm/chains.ts), never re-typed, so this pins
-    // registry ↔ truth ↔ bundled in one triangle.
+    // D6's app half, landed + extended (R1 step 0): BUNDLED_NETWORKS carries the two mainnet
+    // ZCHF rows THEN the two USDC rows per section (USDC AFTER ZCHF — section order IS the
+    // wallet row order and the wire-byte pins index rows[0]=ZCHF, rows[1]=USDC) + the EMPTY
+    // Arbitrum Sepolia testnet section. Addresses come from the registry (evm/chains.ts),
+    // never re-typed, so this pins registry ↔ truth ↔ bundled in one triangle.
     const evmSections = BUNDLED_NETWORKS.filter(s => s.protocol === 'evm');
     expect(evmSections.map(s => `${s.name}:${s.environment}`)).toEqual(['Arbitrum One:mainnet', 'Ethereum:mainnet', 'Arbitrum Sepolia:testnet']);
     expect(evmSections[2].assets).toEqual([]);
     const rows = evmSections.flatMap(s => s.assets);
     expect(rows.map(r => [r.chainId, r.address])).toEqual([
       [ZCHF_ARBITRUM_ROW.chainId, ZCHF_ARBITRUM_ROW.address],
+      [USDC_ARBITRUM_ROW.chainId, USDC_ARBITRUM_ROW.address],
       [ZCHF_ETHEREUM_ROW.chainId, ZCHF_ETHEREUM_ROW.address],
+      [USDC_ETHEREUM_ROW.chainId, USDC_ETHEREUM_ROW.address],
     ]);
     for (const r of rows) {
-      expect(r.token).toBe('ZCHF');
-      expect(r.decimals).toBe(TRUTH.decimals.zchf);
+      expect(r.decimals).toBe(r.token === 'ZCHF' ? TRUTH.decimals.zchf : TRUTH.decimals.usdc);
       expect(r.minFractionDigits).toBe(2);
       expect(r.liquidity).toBeNull();
-      expect(r.onramp).toBe('Unavailable');
-      expect(r.offramp).toBe('Unavailable');
       expect(r.testnet).toBe(false);
       expect(eip55ChecksumBad(r.address)).toBe(false);
+      if (r.token === 'ZCHF') {
+        expect(r.onramp).toBe('Unavailable');
+        expect(r.offramp).toBe('Unavailable');
+      } else {
+        expect(r.token).toBe('USDC');
+        expect(r.onramp).toBe('Partner');
+        expect(r.offramp).toBe('Unavailable'); // R2 step 1 flips this — red then is intended
+      }
     }
   });
 
