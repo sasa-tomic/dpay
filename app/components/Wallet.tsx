@@ -82,10 +82,12 @@ import {HomeCurrencyChooser} from './HomeCurrencyChooser';
 import {AddCurrencyTab} from './AddCurrencyTab';
 import {type HomeCurrency, chooseRail, currencyOfAsset, currencyRails, offerableCurrencies, parseHiddenCurrencies, preferredRail, removeCurrencyGuard, type RemoveRefusal} from '../config/currency';
 import {type CurrencyDescriptor} from '../config/catalog';
-import {mtpBuyTokenOf, type MtpBuyAsset} from '../config/funding';
+import {mtpBuyTokenOf, mtpCashOutTokenOf, type MtpBuyAsset} from '../config/funding';
+import type {SelectableAsset} from '../config/assets';
 import {HomeMenu} from './HomeMenu';
 import {AddFundsMenu} from './AddFundsMenu';
 import {MtpBuySheet} from './MtpBuySheet';
+import {MtpCashOutSheet} from './MtpCashOutSheet';
 import {
   WcRequestSheet, makeWcProposalHandler, makeWcRequestHandler, proposalChains, proposalDapp,
   requestDapp, summarizeWcRequest, approveWcRequest, rejectWcRequest,
@@ -2260,6 +2262,39 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   const [addFundsOpen, setAddFundsOpen] = useState(false);
   const [mtpBuyToken, setMtpBuyToken] = useState<MtpBuyAsset | null>(null);  const homeBuyToken = homeAsset != null ? mtpBuyTokenOf(homeAsset) : null;
   const openMtpBuy = useCallback((token: MtpBuyAsset) => { setAddFundsOpen(false); setMtpBuyToken(token); }, []);
+
+  // R2 step 2 — the Mt Pelerin CASH-OUT. One root-mounted sheet (the MtpBuySheet discipline):
+  // the HomeTab withdraw control (for an eligible headline row) and the receive surfaces'
+  // asset-gated entry route into this same state. The eligibility gate resolves ONCE per
+  // candidate asset here (funding.ts's `mtpCashOutTokenOf`: mainnet EVM row, token ZCHF/USDC,
+  // the row's own offramp RampCapability enabled) — null, every Withdraw press routes to the
+  // pay-surface withdraw exactly as before and HomeTab receives no cash-out props at all.
+  const [mtpCashOut, setMtpCashOut] = useState<{asset: SelectableAsset & {protocol: 'evm'}; token: MtpBuyAsset} | null>(null);
+  const openMtpCashOut = useCallback((row: SelectableAsset & {protocol: 'evm'}) => {
+    const t = mtpCashOutTokenOf(row);
+    if (t != null) setMtpCashOut({asset: row, token: t});
+  }, []);
+  // The headline row's cash-out facts (the HomeTab withdraw control's gate). Null unless the
+  // headline asset is an eligible EVM row.
+  const homeCashOutAsset = useMemo(() => {
+    if (homeAsset == null || homeAsset.protocol !== 'evm') return null;
+    return mtpCashOutTokenOf(homeAsset) != null ? homeAsset : null;
+  }, [homeAsset]);
+  // The SELECTED row's cash-out facts (the receive surfaces' asset-gated entry): both modes
+  // display the wallet's own selection, so one binding serves both.
+  const selectedCashOutAsset = useMemo(() => {
+    if (selectedAsset == null || selectedAsset.protocol !== 'evm') return null;
+    return mtpCashOutTokenOf(selectedAsset) != null ? selectedAsset : null;
+  }, [selectedAsset]);
+  const openCashOutSelected = selectedCashOutAsset != null
+    ? () => openMtpCashOut(selectedCashOutAsset)
+    : undefined;
+  // The sheet's own balance/gas facts, resolved for ITS asset (which may differ from the
+  // selection): the same maps the send surface reads, so the gas gate and the over-balance
+  // check see exactly what a selected-asset send would.
+  const cashOutKey = mtpCashOut != null ? `${mtpCashOut.asset.chainId}:${mtpCashOut.asset.token}` : null;
+  const cashOutBalance = cashOutKey != null ? evmTokens[cashOutKey]?.amount ?? null : null;
+  const cashOutGas = mtpCashOut != null ? evmGas[mtpCashOut.asset.chainId] ?? null : null;
   // Arrival reconciliation (plan R1 step 3): once the widget has opened, the NEXT foreground
   // return fires the ONE refresh (balances + all rails' histories) through the existing
   // useAppActive mechanism (AppState 'active' / window focus) — no new poll, no timer; the
@@ -2638,6 +2673,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               onBuy={homeBuyToken != null ? () => setAddFundsOpen(true) : undefined}
               onConvert={openConvert}
               onWithdraw={openWithdrawForMain}
+              // R2 step 2: the withdraw control becomes cash-out-aware for an eligible
+              // headline row (absent = the pay-surface withdraw, byte-identical).
+              onCashOut={homeCashOutAsset != null ? () => openMtpCashOut(homeCashOutAsset) : undefined}
+              cashOutEligible={homeCashOutAsset != null}
               onOpenMenu={openHomeMenu}
               onOpenAccounts={openAccounts}
               updateUrl={updateUrl}
@@ -2767,6 +2806,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
                   onReceiveRailChange={receiveRailSelect}
                   onWatchRefresh={refreshEvmBalances}
                   onBuy={openMtpBuy}
+                  onCashOut={openCashOutSelected}
                 />
               : (
                   /* Phase 4 (2026-08-12 unified asset selection rewrite): the PHASE 3 INTERIM bridge
@@ -2807,6 +2847,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
                     homeCurrency={homeCurrency}
                     onReceiveRailChange={receiveRailSelect}
                     onBuy={openMtpBuy}
+                    onCashOut={openCashOutSelected}
                   />
                 )
           )
@@ -2943,6 +2984,24 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           token={mtpBuyToken}
           onClose={() => setMtpBuyToken(null)}
           onWidgetOpened={armMtpArrival}
+        />
+      ) : null}
+      {/* The ONE Mt Pelerin cash-out sheet (plan R2 step 2) — root-mounted like the buy sheet;
+          every cash-out entry (HomeTab's withdraw control, the receive surfaces' gated row)
+          opens this same instance. onSent refreshes balances/history once the send's broadcast
+          was accepted (the record's adoption is the sheet's own job). */}
+      {mtpCashOut != null ? (
+        <MtpCashOutSheet
+          identity={identity}
+          relayUrl={relayUrl}
+          asset={mtpCashOut.asset}
+          token={mtpCashOut.token}
+          balance={cashOutBalance}
+          gasWei={cashOutGas?.wei ?? null}
+          gasChecking={cashOutGas == null || cashOutGas.status === 'loading'}
+          online={online}
+          onClose={() => setMtpCashOut(null)}
+          onSent={() => { void recheckAll(); }}
         />
       ) : null}
       {/* W1 step 3 - the ONE WalletConnect review sheet (root-mounted, the receiptTxn discipline).

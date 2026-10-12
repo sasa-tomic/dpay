@@ -279,6 +279,30 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
   },
 ];
 
+// The Mt Pelerin row (plan R2 step 2) — adapter-owned OUTSIDE the drift-alarmed registry, the
+// `EVM_NATIVE_VENUES` precedent: the cash-out venue trades NO convert pair (its surface is the
+// wallet's own ERC-20 send to the venue's `offRampAddress`, keyed on the catalog's `offramp`
+// RampCapability flags, not on a venue pair), so a BUNDLED_VENUES row would pin an empty pair
+// into a table drift-alarmed field-for-field against the truth file. Registry-shaped (the
+// assignability pin below is the compile-time contract), resolved through the SAME lookups
+// (`venueOfId` → hydration's cefi exemption + the state panel's display name; `cefiFamilyOf` →
+// the relay-floor family). `pair_ledgers` is deliberately EMPTY: no convert pair exists, so
+// every pair walk (`venuesForPair`, `cefiVenuesForLedger`, `cefiOtherSide`) skips the row.
+// Quote/order/status all ride the relay proxy (app/services/mtpelerin.rs twin:
+// crates/dpay-relay/src/mtpelerin.rs); the record's statusUrl is the relay's webhook-first
+// status route (60 s per-order read cap, the relay's own discipline).
+export const MTPELERIN_VENUES: readonly VenueEntry[] = [
+  {
+    venue_id: 'mtpelerin',
+    display_name: 'Mt Pelerin',
+    kind: 'cefi',
+    endpoint: 'https://api.mtpelerin.com',
+    pair_ledgers: [],
+    testnet: false,
+    disclosure_key: 'mtpelerin',
+  },
+];
+
 // The RUNTIME overlay — what THIS relay's `GET /api/v1/venues` actually serves (multi-venue
 // readiness V5). `loadVenueRegistry` (./../convert) sets it once per relay; until a reply
 // lands (or if the relay is unreachable) every lookup below falls back to the bundled table.
@@ -310,6 +334,10 @@ export function venueOfId(venueId: string): VenueEntry | null {
     // reason (app/config/evmAmm.ts): DERIVED from the catalog's chain_id + contract,
     // never hand-registered in the drift-alarmed truth file.
     ?? EVM_AMM_VENUES.find(v => v.venue_id === venueId)
+    // The Mt Pelerin cash-out row (plan R2 step 2) rides outside for the same reason: the
+    // cash-out surface keys on the catalog's offramp flags, not a venue pair, and the bundled
+    // registry is drift-alarmed against the truth file.
+    ?? MTPELERIN_VENUES.find(v => v.venue_id === venueId)
     ?? null;
 }
 
@@ -448,10 +476,11 @@ export function cefiVenuesForLedger(depositLedger: string): readonly VenueEntry[
  *  family share it — sideshift, sideshift-usdc, … / trocador, trocador-usdc, …), because
  *  the PAIR no longer disambiguates a cefi row (the trocador row trades the same ICP↔SOL
  *  pair as the sideshift row). Null = not a cefi row this app can drive. */
-export function cefiFamilyOf(v: VenueEntry): 'sideshift' | 'trocador' | null {
+export function cefiFamilyOf(v: VenueEntry): 'sideshift' | 'trocador' | 'mtpelerin' | null {
   if (v.kind !== 'cefi') return null;
   if (v.venue_id === 'sideshift' || v.venue_id.startsWith('sideshift-')) return 'sideshift';
   if (v.venue_id === 'trocador' || v.venue_id.startsWith('trocador-')) return 'trocador';
+  if (v.venue_id === 'mtpelerin' || v.venue_id.startsWith('mtpelerin-')) return 'mtpelerin';
   return null;
 }
 

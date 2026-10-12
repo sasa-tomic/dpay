@@ -370,6 +370,58 @@ export type DepositMessages = {
     feesAsOf: (readOn: string) => string;
   };
 
+  /** Mt Pelerin cash-out (the named-provider off-ramp, plan R2 step 2). Same law as the buy
+   *  group: the provider is named as the counterparty, its published fee figures ride VERBATIM
+   *  with the date they were read (`MTP_FACTS_READ_ON`), the quote is the venue's OWN figure
+   *  attributed + timestamped (plan §4: relayed, never computed), and there is no "best" label
+   *  and no referral parameter. Card fees are omitted (card is a buy-side method - the venue
+   *  publishes no cash-out card figure), the 7-day hold is omitted with them (it holds
+   *  on-ramp bank transfers). "Mt Pelerin" stays verbatim. */
+  mtpCash: {
+    /** The receive-surface entry row (+ its screen-reader label). */
+    entryLabel: string;
+    sheetTitle: string;
+    /** The one-line summary: `asset` is the token sold, `chain` the row's settlement chain. */
+    cashOutLine: (asset: string, chain: string) => string;
+    ibanLabel: string;
+    holderLabel: string;
+    amountLabel: (unit: string) => string;
+    amountPlaceholder: string;
+    quoteHeadline: string;
+    /** The venue's own net figure (their `destAmount`, fees included). */
+    quoteNet: (chf: string) => string;
+    /** Attribution + timestamp (`venue` is the provider's name, `time` the relay's read
+     *  instant through the app's clock formatter). */
+    quoteBy: (venue: string, time: string) => string;
+    quotePending: string;
+    ibanInvalid: string;
+    holderInvalid: string;
+    /** The form's continue button: it CREATES the venue order (the flow's confirm gesture). */
+    continueLabel: string;
+    orderCreating: string;
+    /** The send-phase note: the order id + the nothing-sent truth (the venue order expires
+     *  unused). */
+    orderNote: (orderId: string) => string;
+    /** Their published cash-out minimum (the price-quote API's refusal threshold). */
+    minNote: string;
+    counterparty: string;
+    feesTitle: string;
+    /** Their published figures, verbatim (plan §2.2 + §8 item 4, read 2026-10-12). */
+    feeBank: string;
+    /** The Frankencoin Association partnership (their announcement, 2025-09-23, updated
+     *  2026-08-03): ZCHF conversions are 0%, buys and cash-outs both. */
+    feeZchf: string;
+    /** The no-KYC band (their published limit). */
+    kycLine: string;
+    feesAsOf: (readOn: string) => string;
+    /** The relay/service error words, one honest line each (no verdict, one next step). */
+    errUnconfigured: string;
+    errUnreachable: string;
+    errRefused: string;
+    errUnavailable: string;
+    errShape: string;
+  };
+
   /** "Don't have any yet?" - the step BEFORE the address (founder direction 2026-09-09; design and
    *  measured provider evidence in docs/specs/2026-09-09-funding-routes-plan.md).
    *
@@ -668,6 +720,37 @@ export const depositEn: DepositMessages = {
     holdUnverified: 'No ID check to CHF 999 per 30 days. Unverified bank transfers are held 7 days.',
     ethGasNote: 'ETH bought in the widget becomes your gas balance.',
     feesAsOf: readOn => `Mt Pelerin's published figures, read ${readOn}.`,
+  },
+
+  mtpCash: {
+    entryLabel: 'Cash out with Mt Pelerin',
+    sheetTitle: 'Cash out with Mt Pelerin',
+    cashOutLine: (asset, chain) => `Sell ${asset} on ${chain} and receive CHF in your bank account.`,
+    ibanLabel: 'IBAN',
+    holderLabel: 'Account holder',
+    amountLabel: unit => `Amount (${unit})`,
+    amountPlaceholder: '0',
+    quoteHeadline: 'Quote',
+    quoteNet: chf => `Payout: ${chf}, fees included.`,
+    quoteBy: (venue, time) => `${venue}'s own figure, fetched at ${time}.`,
+    quotePending: 'Fetching the quote…',
+    ibanInvalid: 'This IBAN does not check out. Check the country code and the digits.',
+    holderInvalid: 'Enter the account holder name as your bank knows it.',
+    continueLabel: 'Continue',
+    orderCreating: 'Creating the order with Mt Pelerin…',
+    orderNote: id => `Order ${id} is open. dpay watches it once the send below goes out; if you send nothing, the order expires unused.`,
+    minNote: 'Mt Pelerin refuses cash-outs under CHF 50 (or the equivalent).',
+    counterparty: 'Mt Pelerin converts and pays out. dpay is not a party to it and takes no fee.',
+    feesTitle: 'Fees and limits',
+    feeBank: 'Bank payout: 0% on the first CHF 500 per user per year, then from 1.3%',
+    feeZchf: 'ZCHF to fiat: 0% through the Frankencoin Association partnership, any supported currency, no volume limit.',
+    kycLine: 'No ID check to CHF 999 per 30 days.',
+    feesAsOf: readOn => `Mt Pelerin's published figures, read ${readOn}.`,
+    errUnconfigured: 'Cash out is not switched on yet. Try again later.',
+    errUnreachable: 'The relay did not answer. Check your connection and try again.',
+    errRefused: 'Mt Pelerin refused the order. Check the amount and the IBAN.',
+    errUnavailable: 'Mt Pelerin could not be reached. Try again in a moment.',
+    errShape: 'Mt Pelerin sent data dpay cannot read. Nothing was created; try again.',
   },
 
   funding: {

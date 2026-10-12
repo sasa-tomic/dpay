@@ -73,7 +73,7 @@ import {
 import {
   clearAllProviderRateLimits,
   clearProviderRateLimit,
-  isTrocadorProviderRecord,
+  providerPollFloorApplies,
   providerRateLimitedUntilMs,
 } from './convert/providerStatus';
 import {clearStuckProbes, noteStuckProbeDone} from './convert/stuckProbeLog';
@@ -709,14 +709,15 @@ function scheduleNext(id: string, rec: ConvertRecord): void {
       || (isComposedConvertRecord(rec)
         && (rec.step === 'awaiting_deposit' || rec.step === 'provider_processing'));
     if (providerPhase) {
-      // CeFi provider record. Two bounds stack on the engine cadence (partner agreement,
-      // 2026-09-22 spec term 4): the TROCADOR family's 60 s FLOOR (one status request per
-      // trade id per minute, never faster — the sideshift family polls its own keyless
-      // venue host and is not party to the agreement), and a 429's Retry-After hint,
-      // consumed here: the next tick waits it out (wait-and-retry, never an error).
+      // CeFi provider record. Two bounds stack on the engine cadence (the partner
+      // agreement's 2026-09-22 spec term 4 + the Mt Pelerin relay's own 60 s cap, plan
+      // R2 step 1): the relay-floor families poll at most one status request per order
+      // per minute, never faster (the sideshift family polls its own keyless venue host
+      // and is party to neither), and a 429's Retry-After hint is consumed here: the
+      // next tick waits it out (wait-and-retry, never an error).
       const base = Math.max(
         state.opts.providerPollMs,
-        isTrocadorProviderRecord(rec) ? state.opts.providerPollFloorMs : 0,
+        providerPollFloorApplies(rec) ? state.opts.providerPollFloorMs : 0,
       );
       const limitedUntil = providerRateLimitedUntilMs(id);
       clearProviderRateLimit(id);

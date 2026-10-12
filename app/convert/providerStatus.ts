@@ -108,6 +108,49 @@ export function isTrocadorProviderRecord(record: ConvertRecord): boolean {
   return v != null && cefiFamilyOf(v) === 'trocador';
 }
 
+/** Is this a Mt Pelerin cash-out record (plan R2 step 2)? Same family shape as the
+ *  trocador check: the status read is the relay's webhook-first store, not a keyless venue
+ *  host, so the same floor discipline applies. */
+export function isMtpelerinProviderRecord(record: ConvertRecord): boolean {
+  if (record.providerRef == null && record.composedDeposit == null) return false;
+  const v = venueOfId(record.composedDeposit?.venueId ?? record.venueId);
+  return v != null && cefiFamilyOf(v) === 'mtpelerin';
+}
+
+/** Do provider polls for this record owe the relay-floor cadence (one status request per
+ *  order per minute)? The TROCADOR partner agreement's floor (2026-09-22 spec term 4) plus
+ *  the Mt Pelerin relay's own 60 s per-order read cap (plan R2 step 1): both relays 429
+ *  faster polls, so the engine mirrors the cap client-side instead of harvesting the 429s. */
+export function providerPollFloorApplies(record: ConvertRecord): boolean {
+  return isTrocadorProviderRecord(record) || isMtpelerinProviderRecord(record);
+}
+
+/** The Mt Pelerin status read's own mapping (the relay's webhook-first store — NO `status`
+ *  word): the route answers `{"order_id","venue_order_id","offRampAddress","terminal",
+ *  "created_at","status_ts","payload"}` where `payload` is the last verified webhook
+ *  delivery (`{"id","amount","currency","external_id"}`, the completion event) or null.
+ *  The store cannot distinguish "deposit not yet arrived" from "deposit arrived, converting"
+ *  — the venue's only word before completion is the completion itself — so:
+ *    terminal:true  → completed (the venue's own amount when the payload carries one)
+ *    terminal:false → awaiting_deposit (a no-transition from the step the record holds:
+ *                     "no completion word yet" is the ONLY fact, and never a verdict)
+ *  Anything unreadable → 'unreachable' (we learned nothing), never a fabricated step. */
+function mtpelerinReadingOf(j: Record<string, unknown>): ProviderStatusReading {
+  if (j.terminal === true) {
+    const payload = j.payload != null && typeof j.payload === 'object'
+      ? j.payload as Record<string, unknown>
+      : null;
+    const amount = payload != null && typeof payload.amount === 'string' && payload.amount.length > 0
+      ? payload.amount
+      : payload != null && typeof payload.amount === 'number' && Number.isFinite(payload.amount)
+        ? String(payload.amount)
+        : undefined;
+    return {kind: 'completed', amount};
+  }
+  if (j.terminal === false) return {kind: 'awaiting_deposit'};
+  return {kind: 'unreachable'};
+}
+
 /** Read a provider order status once (device-direct). Failures are outcomes, not
  *  exceptions — the caller advances nothing on 'unreachable' | 'unknown'.
  *
@@ -135,7 +178,12 @@ export async function fetchProviderStatus(
     if (r.status === 429) return {kind: 'rate_limited', retryAfterMs: retryAfterMsOf(r)};
     if (!r.ok) return {kind: 'unreachable'};
     const j = await r.json().catch(() => null) as Record<string, unknown> | null;
-    if (j == null || typeof j.status !== 'string') return {kind: 'unreachable'};
+    if (j == null) return {kind: 'unreachable'};
+    // The Mt Pelerin cash-out family (plan R2 step 2): the relay's webhook-first store
+    // speaks `terminal`/`payload`, not the generic `status` word — its own mapping runs
+    // BEFORE the generic parse (the URL is the relay route the record was born with).
+    if (typeof j.terminal === 'boolean') return mtpelerinReadingOf(j);
+    if (typeof j.status !== 'string') return {kind: 'unreachable'};
     const kind = PROVIDER_STATUS_MAP[j.status.trim().toLowerCase()];
     if (kind == null) return {kind: 'unknown'};
     if (kind === 'completed') {

@@ -33,7 +33,7 @@ import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
-import {mtpBuyTokenOf, type MtpBuyAsset} from '../config/funding';
+import {mtpBuyTokenOf, mtpCashOutTokenOf, type MtpBuyAsset} from '../config/funding';
 import {CoachTip} from './CoachTip';
 import {IconCheck, IconChevronDown, IconClock, IconQr, IconShare, IconWifiOff} from './icons';
 import {M} from '../i18n';
@@ -51,7 +51,7 @@ import {M} from '../i18n';
 // object froze the light theme's white field + near-black ink into the dark theme's memo input.
 const memoInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans});
 
-export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, subMode, onSubModeChange, codeForm, onCodeFormChange, checkoutAvailable, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onSelectAssetProgrammatic, onLockChange, homeCurrency = null, onReceiveRailChange, onBuy}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'checkout'; onCodeFormChange: (f: 'dpay' | 'checkout') => void; checkoutAvailable: boolean; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onSelectAssetProgrammatic: (id: AssetId) => void; onLockChange?: (locked: boolean) => void; homeCurrency?: HomeCurrency | null; onReceiveRailChange?: (id: AssetId) => void; /** The Mt Pelerin buy opener (plan R1 step 3), forwarded to the funding card's provider row AND the DepositSheet's buy entry. Both forward only when the displayed asset has a delivery chain in MTP_ASSET_DELIVERY - the IC rows this mode shows today never do, so the entries stay absent until an eligible row routes here. */ onBuy?: (token: MtpBuyAsset) => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, subMode, onSubModeChange, codeForm, onCodeFormChange, checkoutAvailable, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onSelectAssetProgrammatic, onLockChange, homeCurrency = null, onReceiveRailChange, onBuy, onCashOut}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'checkout'; onCodeFormChange: (f: 'dpay' | 'checkout') => void; checkoutAvailable: boolean; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onSelectAssetProgrammatic: (id: AssetId) => void; onLockChange?: (locked: boolean) => void; homeCurrency?: HomeCurrency | null; onReceiveRailChange?: (id: AssetId) => void; /** The Mt Pelerin buy opener (plan R1 step 3), forwarded to the funding card's provider row AND the DepositSheet's buy entry. Both forward only when the displayed asset has a delivery chain in MTP_ASSET_DELIVERY - the IC rows this mode shows today never do, so the entries stay absent until an eligible row routes here. */ onBuy?: (token: MtpBuyAsset) => void; /** The Mt Pelerin cash-out opener (plan R2 step 2), the buy opener's twin: the row renders only when the displayed asset is an eligible EVM row (the IC/SOL arms of this mode never are, so it stays absent until an eligible row routes here). */ onCashOut?: () => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
   // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
   // "address" = the on-chain deposit flow. The toggle renders whenever this asset HAS a deposit —
@@ -561,14 +561,33 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   // The funding card, built ONCE from the mechanism that chose the sheet below. Each sheet decides
   // WHERE to place it and in which phase — a completed deposit must not be asked "don't have any
   // yet?" — but none of them assembles one, so none can describe a deposit it does not implement.
+  // The cash-out entry (plan R2 step 2) rides BESIDE it, the buy row's twin: only when the
+  // displayed asset is an eligible EVM row — the IC/SOL arms of this mode never are, so the
+  // entries stay absent until an eligible row routes here.
+  const cashOutOpen = onCashOut != null && activeAsset != null && mtpCashOutTokenOf(activeAsset) != null
+    ? onCashOut
+    : undefined;
   const fundingCard = activeAsset != null ? (
-    <FundingRoutes
-      asset={activeAsset}
-      isTestnet={depositDesc !== null && isTestnetCurrency(depositDesc)}
-      mechanism={mechanism}
-      homeCurrency={homeCurrency}
-      onBuy={onBuy != null ? () => { const t = mtpBuyTokenOf(activeAsset); if (t != null) onBuy(t); } : undefined}
-    />
+    <>
+      <FundingRoutes
+        asset={activeAsset}
+        isTestnet={depositDesc !== null && isTestnetCurrency(depositDesc)}
+        mechanism={mechanism}
+        homeCurrency={homeCurrency}
+        onBuy={onBuy != null ? () => { const t = mtpBuyTokenOf(activeAsset); if (t != null) onBuy(t); } : undefined}
+      />
+      {cashOutOpen != null ? (
+        <Pressable
+          testID="btn-receive-cashout"
+          style={S.ghostBtn}
+          onPress={cashOutOpen}
+          accessibilityRole="button"
+          accessibilityLabel={M.deposit.mtpCash.entryLabel}
+          accessibilityState={{disabled: false}}>
+          <Text style={S.ghostBtnText}>{M.deposit.mtpCash.entryLabel}</Text>
+        </Pressable>
+      ) : null}
+    </>
   ) : null;
   const depositBuyToken = activeAsset != null ? mtpBuyTokenOf(activeAsset) : null;
   const depositBuyOpen = onBuy != null && depositBuyToken != null ? () => onBuy(depositBuyToken) : undefined;

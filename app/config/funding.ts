@@ -345,3 +345,25 @@ export function mtpBuyEligible(row: {protocol: string; token?: string; testnet?:
 export function mtpBuyTokenOf(row: {protocol: string; token?: string; testnet?: boolean}): MtpBuyAsset | null {
   return mtpBuyEligible(row) ? (row.token as MtpBuyAsset) : null;
 }
+
+/**
+ * Does this wallet row have a Mt Pelerin CASH-OUT route? The buy gate's twin (plan R2 step 2):
+ * true only for a MAINNET EVM catalog row whose token is in `MTP_ASSET_DELIVERY` (ZCHF, USDC)
+ * AND whose OWN `offramp` RampCapability is not `'Unavailable'` — the R2 step 1 catalog flip is
+ * what turns rows eligible, so the gate reads the fetched catalog's flag and nothing else.
+ * Fail-closed: an IC or SOL row, a testnet row, an unknown token, or a row whose offramp field
+ * is absent (a non-EVM arm carrying no ramp flags at all) has no route and every surface renders
+ * no entry. Structural input only, exactly like `mtpBuyEligible` — the caller hands over its
+ * row's `protocol`/`token`/`testnet`/`offramp` without this module importing the asset types.
+ */
+export function mtpCashOutEligible(row: {protocol: string; token?: string; testnet?: boolean; offramp?: string}): boolean {
+  if (row.protocol !== 'evm' || row.testnet === true || row.token == null) return false;
+  if (row.offramp == null || row.offramp === 'Unavailable') return false;
+  return (MTP_ASSET_DELIVERY as Readonly<Record<string, readonly MtpDeliveryChainId[]>>)[row.token] != null;
+}
+
+/** The cash-out token of an ALREADY-ELIGIBLE row — the `mtpBuyTokenOf` twin: call after
+ *  `mtpCashOutEligible`, which is what makes the cast true. */
+export function mtpCashOutTokenOf(row: {protocol: string; token?: string; testnet?: boolean; offramp?: string}): MtpBuyAsset | null {
+  return mtpCashOutEligible(row) ? (row.token as MtpBuyAsset) : null;
+}
