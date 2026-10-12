@@ -314,6 +314,27 @@ export type PayMessages = {
     rawUnits: (amount: string) => string;
     /** Calldata matched no known token action: raw hex plus this explicit warning line. */
     unknownCall: string;
+    /** Solana review rows (Track S): venue-neutral labels + the honest notes. */
+    fromLabel: string;
+    mintLabel: string;
+    memoLabel: string;
+    programLabel: string;
+    feePayerLabel: string;
+    signersLabel: string;
+    /** A program id the static account table cannot resolve (it sits in an address-lookup table). */
+    lookupTableProgram: string;
+    /** Unknown instruction / undecodable transaction: the explicit warning before any raw display. */
+    unknownTx: string;
+    /** The signMessage bytes are not valid UTF-8 - the raw-bytes fallback note. */
+    rawBytesNote: string;
+    /** The fee payer is not this wallet (sponsored tx): displayed, then the user decides. */
+    externalFeePayer: string;
+    /** The transaction needs signatures besides the device's: the whole request is refused. */
+    coSignNote: string;
+    /** The device is not among the required signers: the request is refused. */
+    notSignerNote: string;
+    /** signAndSendTransaction broadcasts on approve - the money-safety line. */
+    broadcastNote: string;
     switchHeadline: (chain: string) => string;
     approve: string;
     reject: string;
@@ -540,6 +561,19 @@ export const payEn: PayMessages = {
     dataLabel: 'Data',
     rawUnits: amount => `${amount} raw units`,
     unknownCall: 'Unknown contract call. Read the raw data before approving.',
+    fromLabel: 'From',
+    mintLabel: 'Mint',
+    memoLabel: 'Memo',
+    programLabel: 'Program',
+    feePayerLabel: 'Fee payer',
+    signersLabel: 'Signers',
+    lookupTableProgram: 'address-lookup table',
+    unknownTx: 'Unknown instruction. Review the raw data before approving.',
+    rawBytesNote: 'Not text - shown as raw bytes.',
+    externalFeePayer: 'Another account pays the fee.',
+    coSignNote: 'Other signers are required.',
+    notSignerNote: 'This wallet does not sign this transaction.',
+    broadcastNote: 'Approving sends this transaction to the network.',
     switchHeadline: chain => `Switch chain to ${chain}`,
     approve: 'Approve',
     reject: 'Reject',

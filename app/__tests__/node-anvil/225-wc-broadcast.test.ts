@@ -70,6 +70,7 @@ test('225 · an approved WalletConnect eth_sendTransaction param-fills, signs, b
     request: wcSendRequest(1),
     secretHex,
     evmAddress: device,
+    solanaAddress: null, // EVM-only proof: no solana identity on this path
     activeChain: 'eip155:31337',
     unsupportedChains: {code: 5100, message: 'Unsupported chains.'},
     respond: async (topic, response) => {

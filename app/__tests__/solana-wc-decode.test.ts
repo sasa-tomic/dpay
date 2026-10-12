@@ -312,11 +312,12 @@ describe('solana_signMessage primitive', () => {
 // Conformance pin — advertised <= implemented (plan §Track S step 4 + 6)
 // ============================================================================
 describe('Solana v1 method conformance pin', () => {
-  test('v1 advertises exactly the four implemented methods', () => {
+  test('v1 advertises exactly the five implemented methods', () => {
     expect([...SOLANA_V1_METHODS]).toEqual([
       'solana_getAccounts',
       'solana_requestAccounts',
       'solana_signMessage',
+      'solana_signTransaction',
       'solana_signAndSendTransaction',
     ]);
   });

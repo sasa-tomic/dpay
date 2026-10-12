@@ -43,6 +43,7 @@ export const SOLANA_V1_METHODS = [
   'solana_getAccounts',
   'solana_requestAccounts',
   'solana_signMessage',
+  'solana_signTransaction',
   'solana_signAndSendTransaction',
 ] as const;
 

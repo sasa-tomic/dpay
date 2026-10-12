@@ -6,12 +6,22 @@ import {C} from '../config/palette';
 import {M} from '../i18n';
 import {formatMonthDayYear} from '../i18n/intl';
 import {bytesToHex, hexToBytes, rawToDecimal} from '../lib/format';
+import {bytesToBase64, base64ToBytes} from '../lib/base64';
+import bs58 from 'bs58';
 import {deriveEvmKeypair} from '../evm/identity';
 import {EVM_CHAINS, type EvmChainId} from '../evm/chains';
 import {evmRpcUrls} from '../evm/endpoints';
 import {signEip1559Tx, signLegacyTx, toHex0x} from '../evm/tx';
 import {signPersonal} from '../evm/personalSign';
 import {isTypedDataError, signTypedData, typedDataDigest, type TypedData} from '../evm/typedData';
+import {deriveSolanaKeypair} from '../solana/identity';
+import {signVenueSwapTx} from '../solana/tx';
+import {ed25519} from '@noble/curves/ed25519';
+import {
+  decodeWcSolanaTx,
+  SOLANA_METHODS_OUTSIDE_V1,
+  type WcSolanaInstruction,
+} from '../solana/wcDecode';
 import type {WcProposal, WcRequest, WcResponse, WcSdkError} from '../walletkit';
 
 // WcRequestSheet - the ONE WalletConnect review surface (plan W1 step 3): every session proposal
@@ -34,6 +44,18 @@ import type {WcProposal, WcRequest, WcResponse, WcSdkError} from '../walletkit';
 // SUBMITTED, NOT SETTLED: an approved eth_sendTransaction reports the broadcast hash to the dApp
 // and shows it here with the pending-settlement note - the send path's honest-unknown shape. No
 // receipt poll on this path (the dApp can poll; dpay's own sends keep theirs).
+//
+// SOLANA (plan Track S): the same sheet is venue-neutral - solana_signMessage renders the message
+// (base58 in, UTF-8 preview with a raw-bytes fallback note), solana_signTransaction and
+// solana_signAndSendTransaction render the decodeWcSolanaTx review rows (transfers, SPL, memo,
+// fee payer + required signers always shown) behind the SAME unknown-calldata law: anything not
+// decoded exactly renders raw behind an explicit warning, never auto-approved. The sign itself is
+// signVenueSwapTx with its DEFAULT options: the device must be a required signer, and a tx
+// needing other signatures is refused WHOLE (never silently co-signed); only the device's own
+// slot is written, all other bytes preserved. signAndSendTransaction alone broadcasts - through
+// the app's own submitRawSolTx seam, lazily imported - and its base58 signature is the
+// submitted-not-settled terminal (no receipt poll). solana_signAllTransactions is outside v1 and
+// refused by name.
 
 /** The requester as the sheet shows it: the dApp's WalletConnect metadata. */
 export interface WcSheetDapp {
@@ -50,6 +72,13 @@ export interface WcCallRow {
 
 /** One free-form `name: value` line of the typed-data review (domain or message field). */
 export type WcFieldRow = readonly [string, string];
+
+/** One venue-neutral review row of a decoded Solana transaction. */
+export type WcSolanaRowKey = 'from' | 'to' | 'owner' | 'amount' | 'mint' | 'memo' | 'program' | 'data';
+export interface WcSolanaRow {
+  readonly key: WcSolanaRowKey;
+  readonly value: string;
+}
 
 /** Why the sheet shows what it shows - one variant per reviewable shape (plan W1 step 3). */
 export type WcReview =
@@ -81,6 +110,27 @@ export type WcReview =
     }
   /** wallet_switchEthereumChain: the requested chain and whether dpay serves it. */
   | {kind: 'switchChain'; chain: string; wired: boolean}
+  /** solana_signMessage: the base58 message bytes as text when printable UTF-8, else hex (the
+   *  raw-bytes fallback note rides the hex). `hex` is ALWAYS the exact sign source. */
+  | {kind: 'solanaMessage'; text: string | null; hex: string | null; signerMismatch: boolean}
+  /** solana_signTransaction / solana_signAndSendTransaction: the decodeWcSolanaTx review.
+   *  `malformed` (undecodable bytes) keeps the sheet open behind the raw-base64 display + the
+   *  explicit warning; approve re-refuses. A params `feePayer` that names a DIFFERENT payer than
+   *  the wire (`feePayerHidden`) is a dishonest display - refused. */
+  | {
+      kind: 'solanaTx';
+      send: boolean;
+      feePayer: string | null;
+      signers: readonly string[];
+      externalFeePayer: boolean;
+      deviceSigns: boolean;
+      coSigned: boolean;
+      feePayerHidden: boolean;
+      rows: readonly WcSolanaRow[];
+      unknown: boolean;
+      malformed: string | null;
+      rawBase64: string;
+    }
   /** Anything else (or a contract-creation tx): fail closed, the handler answers -32601. */
   | {kind: 'unsupported'; method: string};
 
@@ -302,8 +352,139 @@ export function decodeEvmCallData(data: string): {rows: readonly WcCallRow[]; kn
   return {rows: [], known: false};
 }
 
-// --- the request summarizer (review model) ----------------------------------------------------------
+// --- the Solana branch (plan Track S) ---------------------------------------------------------------
 
+/** The Solana methods this sheet IMPLEMENTS - the honest bound the namespace approval may never
+ *  exceed (the advertised<=implemented law; the conformance suite pins advertised == this ==
+ *  SOLANA_V1_METHODS). `solana_signAllTransactions` is deliberately absent (batches are outside
+ *  v1; wcDecode.ts SOLANA_METHODS_OUTSIDE_V1 carries the plan's reason). */
+export const SOLANA_IMPLEMENTED_METHODS = [
+  'solana_getAccounts',
+  'solana_requestAccounts',
+  'solana_signMessage',
+  'solana_signTransaction',
+  'solana_signAndSendTransaction',
+] as const;
+
+/** solana_signMessage params: the documented shape is `{pubkey, message}` (both base58); a
+ *  two-string array is read as `[pubkey, message]`, a single string as the bare message. */
+function solanaSignMessageParams(params: unknown): {pubkey: string | null; messageB58: string | null} {
+  const arr = paramsArray(params);
+  const first = arr[0];
+  if (typeof first === 'object' && first !== null) {
+    const o = first as Record<string, unknown>;
+    return {
+      pubkey: typeof o.pubkey === 'string' ? o.pubkey : null,
+      messageB58: typeof o.message === 'string' ? o.message : null,
+    };
+  }
+  if (arr.length >= 2 && typeof arr[0] === 'string' && typeof arr[1] === 'string') {
+    return {pubkey: arr[0], messageB58: arr[1]};
+  }
+  if (arr.length === 1 && typeof arr[0] === 'string') return {pubkey: null, messageB58: arr[0]};
+  return {pubkey: null, messageB58: null};
+}
+
+/** solana_signTransaction / signAndSendTransaction params: `{transaction}` base64 (canonical;
+ *  a `message` string is accepted as the same bytes). The instruction-array shape is deprecated
+ *  upstream and not our contract - detected by name so the refusal is explicit, never a parse
+ *  accident. */
+function solanaTxParams(params: unknown): {txB64: string | null; claimedFeePayer: string | null; instructionArray: boolean} {
+  const first = paramsArray(params)[0];
+  if (typeof first === 'object' && first !== null) {
+    const o = first as Record<string, unknown>;
+    if (Array.isArray(o.instructions)) return {txB64: null, claimedFeePayer: null, instructionArray: true};
+    return {
+      txB64: typeof o.transaction === 'string' ? o.transaction : typeof o.message === 'string' ? o.message : null,
+      claimedFeePayer: typeof o.feePayer === 'string' ? o.feePayer : null,
+      instructionArray: false,
+    };
+  }
+  if (typeof first === 'string') return {txB64: first, claimedFeePayer: null, instructionArray: false};
+  return {txB64: null, claimedFeePayer: null, instructionArray: false};
+}
+
+/** The venue-neutral review rows for the decoded instructions (never a guess: the raw fallback
+ *  renders program + data hex behind the unknown warning). Native SOL amounts render in SOL (the
+ *  9-decimals split is protocol constant); SPL amounts in the mint's decimals when the wire names
+ *  them (transferChecked), raw units otherwise. */
+export function solanaTxRows(instructions: readonly WcSolanaInstruction[]): readonly WcSolanaRow[] {
+  const rows: WcSolanaRow[] = [];
+  for (const ix of instructions) {
+    switch (ix.kind) {
+      case 'systemTransfer':
+        rows.push({key: 'from', value: ix.from}, {key: 'to', value: ix.to}, {key: 'amount', value: `${rawToDecimal(ix.lamports.toString(10), 9)} SOL`});
+        break;
+      case 'splTransfer':
+        rows.push({key: 'from', value: ix.source}, {key: 'to', value: ix.destination}, {key: 'owner', value: ix.owner}, {key: 'amount', value: tokenAmount(ix.amount.toString(10))});
+        break;
+      case 'splTransferChecked':
+        rows.push({key: 'from', value: ix.source}, {key: 'to', value: ix.destination}, {key: 'owner', value: ix.owner}, {key: 'mint', value: ix.mint}, {key: 'amount', value: rawToDecimal(ix.amount.toString(10), ix.decimals)});
+        break;
+      case 'memo':
+        rows.push({key: 'memo', value: ix.text ?? ix.dataHex});
+        break;
+      case 'unknown':
+        rows.push({key: 'program', value: ix.programId ?? M.pay.wc.lookupTableProgram}, {key: 'data', value: ix.dataHex});
+        break;
+    }
+  }
+  return rows;
+}
+
+/** Build the solanaTx review from the request's params (pure; the approve path re-reads the same
+ *  fields). Malformed bytes keep the sheet open behind the raw display + warning - the EVM
+ *  unknown-calldata law - and approve re-refuses with a typed error. */
+function solanaTxReview(params: unknown, chain: string, method: string, solanaAddress: string | null): WcRequestSummary {
+  const {txB64, claimedFeePayer, instructionArray} = solanaTxParams(params);
+  if (instructionArray) {
+    // The deprecated upstream shape: refused by name before any sheet (plan §2.4).
+    return {method, chain, review: {kind: 'unsupported', method: `${method} (instruction-array shape)`}};
+  }
+  const malformed = (reason: string): WcRequestSummary => ({
+    method,
+    chain,
+    review: {
+      kind: 'solanaTx', send: method === 'solana_signAndSendTransaction', feePayer: null, signers: [],
+      externalFeePayer: false, deviceSigns: false, coSigned: false,
+      feePayerHidden: claimedFeePayer != null,
+      rows: [], unknown: true, malformed: reason,
+      rawBase64: typeof txB64 === 'string' ? txB64 : '',
+    },
+  });
+  if (txB64 == null) return malformed('no transaction in the request');
+  let bytes: Uint8Array;
+  try {
+    bytes = base64ToBytes(txB64);
+  } catch {
+    return malformed('not valid base64');
+  }
+  const decoded = decodeWcSolanaTx(bytes);
+  if (decoded == null) return malformed('undecodable transaction');
+  const deviceSigns = solanaAddress != null && decoded.signers.includes(solanaAddress);
+  return {
+    method,
+    chain,
+    review: {
+      kind: 'solanaTx',
+      send: method === 'solana_signAndSendTransaction',
+      feePayer: decoded.feePayer,
+      signers: [...decoded.signers],
+      externalFeePayer: solanaAddress == null || decoded.feePayer !== solanaAddress,
+      deviceSigns,
+      coSigned: decoded.requiredSignatures > 1,
+      // A params feePayer that names a different payer than the wire hides the real one - the
+      // display would lie, so the request is refused rather than shown dishonestly.
+      feePayerHidden: claimedFeePayer != null && claimedFeePayer !== decoded.feePayer,
+      rows: solanaTxRows(decoded.instructions),
+      unknown: decoded.hasUnknown,
+      malformed: null,
+      rawBase64: txB64,
+    },
+  };
+}
+
+// --- the request summarizer (review model) ----------------------------------------------------------
 /** The chain the request names, else the session's active chain (plan W1 step 3: chainId
  *  defaults from session state). */
 function chainOf(request: WcRequest, activeChain: string): string {
@@ -317,11 +498,14 @@ function signerMismatchOf(signer: string | null, evmAddress: string): boolean {
 
 /** Turn a raw session request into the review model the sheet renders (and the approve path
  *  re-reads). Pure, total, never throws - a payload it cannot structure becomes an honest
- *  `unsupported`/`malformed` variant the handler refuses with a typed error. */
-export function summarizeWcRequest(request: WcRequest, ctx: {activeChain: string; evmAddress: string}): WcRequestSummary {
+ *  `unsupported`/`malformed` variant the handler refuses with a typed error. `solanaAddress` is
+ *  the wallet's solana identity (null = none): every solana review names the device's relation to
+ *  the request (fee payer, required signer) against it. */
+export function summarizeWcRequest(request: WcRequest, ctx: {activeChain: string; evmAddress: string; solanaAddress?: string | null}): WcRequestSummary {
   const method: string = (request.params as {request?: {method?: unknown}} | undefined)?.request?.method as string | undefined ?? '';
   const chain = chainOf(request, ctx.activeChain);
   const params: unknown = (request.params as {request?: {params?: unknown}} | undefined)?.request?.params;
+  const solanaAddress = ctx.solanaAddress ?? null;
   switch (method) {
     case 'personal_sign': {
       const {messageRaw, signer} = personalSignParams(params);
@@ -379,15 +563,44 @@ export function summarizeWcRequest(request: WcRequest, ctx: {activeChain: string
       const n = typeof cid === 'string' && /^0x[0-9a-fA-F]+$/.test(cid) ? Number(BigInt(cid)) : NaN;
       return {method, chain, review: {kind: 'switchChain', chain: Number.isNaN(n) ? chain : `eip155:${n}`, wired: WIRED_CHAIN_IDS.includes(n)}};
     }
-    default:
-      return {method, chain, review: {kind: 'unsupported', method}};
+    case 'solana_signMessage': {
+      const {pubkey, messageB58} = solanaSignMessageParams(params);
+      let bytes: Uint8Array | null = null;
+      try {
+        bytes = messageB58 != null ? bs58.decode(messageB58) : null;
+      } catch {
+        bytes = null; // not base58: the review shows nothing to sign and approve refuses typed
+      }
+      return {
+        method,
+        chain,
+        review: {
+          kind: 'solanaMessage',
+          text: bytes != null ? utf8Printable(bytes) : null,
+          hex: bytes != null ? bytesToHex(bytes) : null,
+          signerMismatch: pubkey != null && solanaAddress != null && pubkey !== solanaAddress,
+        },
+      };
+    }
+    case 'solana_signTransaction':
+    case 'solana_signAndSendTransaction':
+      return solanaTxReview(params, chain, method, solanaAddress);
+    default: {
+      // An explicitly excluded Solana method (e.g. solana_signAllTransactions) is refused BY NAME
+      // with the plan's reason attached - it is never advertised, and a stray request meets an
+      // honest refusal, not a generic unknown.
+      const outside = SOLANA_METHODS_OUTSIDE_V1.find((m) => m.method === method);
+      return {method, chain, review: {kind: 'unsupported', method: outside != null ? `${method} (${outside.reason})` : method}};
+    }
   }
 }
 
 // --- display helpers --------------------------------------------------------------------------------
 
-/** 'eip155:1' -> 'Ethereum'; an unknown CAIP-2 id renders as itself. */
+/** 'eip155:1' -> 'Ethereum', the Solana mainnet id -> 'Solana'; an unknown CAIP-2 id renders as
+ *  itself. */
 export function wcChainName(caip: string): string {
+  if (/^solana:/.test(caip)) return 'Solana';
   const m = /^eip155:(\d+)$/.exec(caip);
   const n = m ? Number(m[1]) : NaN;
   return EVM_CHAINS[n as EvmChainId]?.name ?? caip;
@@ -412,6 +625,9 @@ export interface WcApproveArgs {
   readonly request: WcRequest;
   readonly secretHex: string;
   readonly evmAddress: string;
+  /** The wallet's solana address (the device seed's m/44'/501' key), null when the wallet has no
+   *  solana identity: every solana branch refuses typed rather than sign blind. */
+  readonly solanaAddress: string | null;
   /** The session's active CAIP-2 chain (the caller's map; chainId defaults come from it). */
   readonly activeChain: string;
   /** The SDK's UNSUPPORTED_CHAINS error (Wallet passes `walletkit.wcUnsupportedChains()`). */
@@ -429,7 +645,7 @@ function respondError(args: WcApproveArgs, code: number, message: string): Promi
  *  unsupported method) answer with typed JSON-RPC errors; RPC/transport failures THROW (the
  *  sheet stays open with the error and the user still holds Reject). */
 export async function approveWcRequest(args: WcApproveArgs): Promise<WcApproveOutcome> {
-  const summary = summarizeWcRequest(args.request, {activeChain: args.activeChain, evmAddress: args.evmAddress});
+  const summary = summarizeWcRequest(args.request, {activeChain: args.activeChain, evmAddress: args.evmAddress, solanaAddress: args.solanaAddress});
   const kp = deriveEvmKeypair(args.secretHex);
   switch (summary.review.kind) {
     case 'message': {
@@ -473,6 +689,72 @@ export async function approveWcRequest(args: WcApproveArgs): Promise<WcApproveOu
       }
       await respondError(args, args.unsupportedChains.code, args.unsupportedChains.message);
       return NO_OUTCOME;
+    }
+    case 'solanaMessage': {
+      if (args.solanaAddress == null) {
+        await respondError(args, -32603, 'No Solana account');
+        return NO_OUTCOME;
+      }
+      const messageBytes = summary.review.hex != null ? hexToBytes(summary.review.hex) : null;
+      if (messageBytes == null) {
+        await respondError(args, -32603, 'Malformed Solana message');
+        return NO_OUTCOME;
+      }
+      if (summary.review.signerMismatch) {
+        await respondError(args, -32603, 'Request asks a different Solana address to sign');
+        return NO_OUTCOME;
+      }
+      // Plain ed25519 over the EXACT bytes the dApp sent (base58 in, base58 out - plan §2.4).
+      const seed = deriveSolanaKeypair(args.secretHex).seed;
+      const sig = ed25519.sign(messageBytes, seed);
+      await args.respond(args.request.topic, {id: args.request.id, jsonrpc: '2.0', result: {signature: bs58.encode(sig)}});
+      return NO_OUTCOME;
+    }
+    case 'solanaTx': {
+      if (args.solanaAddress == null) {
+        await respondError(args, -32603, 'No Solana account');
+        return NO_OUTCOME;
+      }
+      if (summary.review.malformed != null) {
+        await respondError(args, -32603, `Malformed transaction: ${summary.review.malformed}`);
+        return NO_OUTCOME;
+      }
+      if (summary.review.feePayerHidden) {
+        await respondError(args, -32603, 'Request names a different fee payer than the transaction');
+        return NO_OUTCOME;
+      }
+      if (!summary.review.deviceSigns) {
+        // The displayed-else-refuse law, refusal half: a tx this wallet need not sign is not a
+        // tx it signs (sponsored or third-party-owned flows refuse whole).
+        await respondError(args, -32603, 'This wallet is not a required signer of the transaction');
+        return NO_OUTCOME;
+      }
+      if (summary.review.coSigned) {
+        // DEFAULT refusal (never silently co-sign): a tx needing other signatures is refused
+        // whole - the device's slot would otherwise be written into someone else's ceremony.
+        await respondError(args, -32603, 'Transaction needs other signers');
+        return NO_OUTCOME;
+      }
+      const solKp = deriveSolanaKeypair(args.secretHex);
+      // signVenueSwapTx with DEFAULT options re-checks both guards above at the byte level
+      // (defense in depth) and writes ONLY the device's slot, every other byte preserved.
+      const signed = signVenueSwapTx(base64ToBytes(summary.review.rawBase64), solKp.seed);
+      if (signed == null) {
+        await respondError(args, -32603, 'Transaction refused');
+        return NO_OUTCOME;
+      }
+      if (!summary.review.send) {
+        // solana_signTransaction: the serialized signed tx back, base64, canonical. NO broadcast.
+        await args.respond(args.request.topic, {id: args.request.id, jsonrpc: '2.0', result: bytesToBase64(signed.raw)});
+        return NO_OUTCOME;
+      }
+      // solana_signAndSendTransaction: broadcast through the app's OWN send path (the relay
+      // pipe's broadcast posture). The returned signature is SUBMITTED, not settled - no receipt
+      // poll here (the dApp can poll; dpay's own sends keep theirs).
+      const sol = await import('../solana');
+      const sig58 = await sol.submitRawSolTx(signed.raw);
+      await args.respond(args.request.topic, {id: args.request.id, jsonrpc: '2.0', result: sig58});
+      return {submittedHash: sig58, switchedTo: null};
     }
     default:
       await respondError(args, -32601, `Unsupported method: ${summary.review.method}`);
@@ -593,6 +875,9 @@ export async function rejectWcRequest(request: WcRequest, userRejected: WcSdkErr
 
 export interface WcRequestHandlerDeps {
   readonly evmAddress: string;
+  /** The wallet's solana address, null when there is no solana identity: solana reads refuse
+   *  typed (never an empty success) and solana signing requests never open the sheet. */
+  readonly solanaAddress: string | null;
   /** True while the sheet shows anything (proposal or request). */
   readonly isOpen: () => boolean;
   /** The session's active chain for a topic (the caller's map, seeded at approve). */
@@ -603,13 +888,16 @@ export interface WcRequestHandlerDeps {
   readonly openRequest: (request: WcRequest) => void;
 }
 
-/** The `session_request` dispatch (plan W1 step 3):
+/** The `session_request` dispatch (plan W1 step 3 + Track S):
  *  1. eth_accounts / eth_chainId answer DIRECTLY from the paired session state - read-only, no
- *     UI (the plan's explicit decision);
+ *     UI (the plan's explicit decision); solana_getAccounts / solana_requestAccounts are the
+ *     solana reads and answer the same way (no identity = a typed refusal, never an empty
+ *     success);
  *  2. any other request while the sheet is open answers USER_REJECTED 5000 immediately - ONE
  *     review at a time in v1, nothing queues;
- *  3. an unsupported method or a malformed typed-data payload answers a typed error without
- *     opening the sheet (fail closed, never raw-sign);
+ *  3. an unsupported method (solana_signAllTransactions among them, by name), a malformed
+ *     typed-data payload, or a solana signing request with no solana identity answers a typed
+ *     error without opening the sheet (fail closed, never raw-sign);
  *  4. everything else opens the review sheet - the only path to an approve. */
 export function makeWcRequestHandler(deps: WcRequestHandlerDeps): (request: WcRequest) => void {
   const safeRespond = (topic: string, response: WcResponse): Promise<void> =>
@@ -626,11 +914,27 @@ export function makeWcRequestHandler(deps: WcRequestHandlerDeps): (request: WcRe
       void safeRespond(request.topic, {id: request.id, jsonrpc: '2.0', result: chainHexOf(deps.activeChainOf(request.topic))});
       return;
     }
+    if (method === 'solana_getAccounts' || method === 'solana_requestAccounts') {
+      if (deps.solanaAddress == null) {
+        void safeRespond(request.topic, {id: request.id, jsonrpc: '2.0', error: {code: -32603, message: 'No Solana account'}});
+      } else {
+        void safeRespond(request.topic, {id: request.id, jsonrpc: '2.0', result: [deps.solanaAddress]});
+      }
+      return;
+    }
     if (deps.isOpen()) {
       void safeRespond(request.topic, {id: request.id, jsonrpc: '2.0', error: deps.userRejected});
       return;
     }
-    const summary = summarizeWcRequest(request, {activeChain: deps.activeChainOf(request.topic), evmAddress: deps.evmAddress});
+    if (method === 'solana_signMessage' || method === 'solana_signTransaction' || method === 'solana_signAndSendTransaction') {
+      if (deps.solanaAddress == null) {
+        // No solana identity: refuse typed BEFORE any sheet - the wallet cannot sign these, and
+        // an approve button that can only refuse is not a review.
+        void safeRespond(request.topic, {id: request.id, jsonrpc: '2.0', error: {code: -32603, message: 'No Solana account'}});
+        return;
+      }
+    }
+    const summary = summarizeWcRequest(request, {activeChain: deps.activeChainOf(request.topic), evmAddress: deps.evmAddress, solanaAddress: deps.solanaAddress});
     if (summary.review.kind === 'unsupported') {
       void safeRespond(request.topic, {id: request.id, jsonrpc: '2.0', error: {code: -32601, message: `Unsupported method: ${summary.review.method}`}});
       return;
@@ -676,8 +980,13 @@ export function requestDapp(request: WcRequest): WcSheetDapp {
 }
 
 export function proposalChains(proposal: WcProposal): readonly string[] {
-  const chains = (proposal.params as {requiredNamespaces?: {eip155?: {chains?: unknown}}} | undefined)?.requiredNamespaces?.eip155?.chains;
-  return Array.isArray(chains) ? chains.filter((c): c is string => typeof c === 'string') : [];
+  const namespaces = (proposal.params as {requiredNamespaces?: Record<string, {chains?: unknown}>} | undefined)?.requiredNamespaces;
+  const chains: string[] = [];
+  for (const ns of ['eip155', 'solana']) {
+    const raw = namespaces?.[ns]?.chains;
+    if (Array.isArray(raw)) chains.push(...raw.filter((c): c is string => typeof c === 'string'));
+  }
+  return chains;
 }
 
 // --- the sheet --------------------------------------------------------------------------------------
@@ -691,6 +1000,21 @@ function rowLabel(key: WcCallRowKey): string {
     case 'amount': return wc.amountLabel;
     case 'value': return wc.amountLabel;
     case 'deadline': return wc.deadlineLabel;
+  }
+}
+
+/** The venue-neutral Solana row labels (M.pay.wc; the same economy as the EVM rows). */
+function solanaRowLabel(key: WcSolanaRowKey): string {
+  const wc = M.pay.wc;
+  switch (key) {
+    case 'from': return wc.fromLabel;
+    case 'to': return wc.toLabel;
+    case 'owner': return wc.ownerLabel;
+    case 'amount': return wc.amountLabel;
+    case 'mint': return wc.mintLabel;
+    case 'memo': return wc.memoLabel;
+    case 'program': return wc.programLabel;
+    case 'data': return wc.dataLabel;
   }
 }
 
@@ -811,6 +1135,50 @@ export function WcRequestSheet({mode, dapp, chains, summary, chain, busy, err, s
                 <Text testID="wc-review-data" style={S.receiptValue} selectable>{review.data !== '' ? review.data : '-'}</Text>
               </View>
               {review.unknownCall ? <Text testID="wc-warning" style={S.err}>{M.pay.wc.unknownCall}</Text> : null}
+            </>
+          ) : null}
+
+          {review?.kind === 'solanaMessage' ? (
+            <View style={S.receiptField}>
+              <Text style={S.receiptLabel}>{M.pay.wc.messageLabel}</Text>
+              <Text testID="wc-review-message" style={S.receiptValue} selectable>{review.text ?? review.hex ?? '-'}</Text>
+              {review.text == null ? <Text testID="wc-raw-bytes-note" style={S.receiptNote}>{M.pay.wc.rawBytesNote}</Text> : null}
+            </View>
+          ) : null}
+
+          {review?.kind === 'solanaTx' ? (
+            <>
+              {review.malformed != null ? (
+                <>
+                  <Text testID="wc-warning" style={S.err}>{M.pay.wc.unknownTx}</Text>
+                  <View style={S.receiptField}>
+                    <Text style={S.receiptLabel}>{M.pay.wc.dataLabel}</Text>
+                    <Text testID="wc-review-raw" style={S.receiptValue} selectable>{review.rawBase64 !== '' ? review.rawBase64 : '-'}</Text>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={S.receiptField}>
+                    <Text style={S.receiptLabel}>{M.pay.wc.feePayerLabel}</Text>
+                    <Text testID="wc-sol-fee-payer" style={S.receiptValue} selectable>{review.feePayer}</Text>
+                    {review.externalFeePayer ? <Text testID="wc-external-fee-payer" style={S.err}>{M.pay.wc.externalFeePayer}</Text> : null}
+                  </View>
+                  <View style={S.receiptField}>
+                    <Text style={S.receiptLabel}>{M.pay.wc.signersLabel}</Text>
+                    <Text testID="wc-sol-signers" style={S.receiptValue} selectable>{review.signers.join(', ')}</Text>
+                    {review.coSigned ? <Text testID="wc-cosign-note" style={S.err}>{M.pay.wc.coSignNote}</Text> : null}
+                    {!review.deviceSigns ? <Text testID="wc-not-signer-note" style={S.err}>{M.pay.wc.notSignerNote}</Text> : null}
+                  </View>
+                  {review.rows.map((r, i) => (
+                    <View key={`${r.key}-${i}`} style={S.receiptField}>
+                      <Text style={S.receiptLabel}>{solanaRowLabel(r.key)}</Text>
+                      <Text testID="wc-sol-row" style={S.receiptValue} selectable>{r.value}</Text>
+                    </View>
+                  ))}
+                  {review.unknown ? <Text testID="wc-warning" style={S.err}>{M.pay.wc.unknownTx}</Text> : null}
+                  {review.send ? <Text testID="wc-broadcast-note" style={S.receiptNote}>{M.pay.wc.broadcastNote}</Text> : null}
+                </>
+              )}
             </>
           ) : null}
 

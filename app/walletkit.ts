@@ -40,6 +40,7 @@ import {WalletKit} from '@reown/walletkit';
 import type {WalletKitTypes} from '@reown/walletkit';
 import {Platform} from 'react-native';
 import {WALLETCONNECT_PROJECT_ID} from './config/constants';
+import {SOLANA_MAINNET_CAIP2, SOLANA_V1_METHODS} from './solana/wcDecode';
 
 /** The real WalletKit instance type (the package exports the class as a value; the instance type is
  *  derived via InstanceType — the same move `walletconnect.ts` makes for EthereumProvider). */
@@ -72,7 +73,11 @@ export const WC_STORAGE_PREFIX = 'walletkit';
 
 /** The v1 session surface (plan W1 step 3): both wired mainnet chains, the Explorer-QA method set,
  *  and the two events every EVM wallet emits. The REQUEST DISPATCH for these methods lands with
- *  the review sheet (a later wave); the namespace is what a proposal is APPROVED against. */
+ *  the review sheet (a later wave); the namespace is what a proposal is APPROVED against. The
+ *  Solana namespace (plan Track S step 4) rides the SAME surface: mainnet-beta only, exactly
+ *  SOLANA_V1_METHODS (the single source in wcDecode.ts, the module the review decoder serves),
+ *  no events — advertised only when the caller hands a solana address (no identity = no solana
+ *  namespace, EVM still works). */
 export const WC_SUPPORTED_CHAINS = ['eip155:1', 'eip155:42161'];
 export const WC_SUPPORTED_METHODS = [
   'eth_accounts',
@@ -185,25 +190,36 @@ export async function pair(uri: string): Promise<boolean> {
 }
 
 /**
- * Approve a proposal with the dpay EVM address on both wired chains. `evmAddress` is the device
- * key's address (threaded by the caller — this module stays free of identity imports). The
- * approved namespaces are built with the SDK's own validator, which refuses proposals asking for
- * chains/methods/events dpay does not support (that refusal is the SDK's, not improvised here).
- * Returns the settled session, or null when disabled.
+ * Approve a proposal with the dpay EVM address on both wired chains and — when the wallet has a
+ * solana identity at approval time — the Solana mainnet namespace with exactly the v1 method
+ * surface (plan Track S step 4; `solanaAddress: null` leaves the solana namespace out entirely,
+ * EVM still works). Addresses are the device keys' (threaded by the caller — this module stays
+ * free of identity imports). The approved namespaces are built with the SDK's own validator,
+ * which refuses proposals asking for chains/methods/events dpay does not support (that refusal
+ * is the SDK's, not improvised here). Returns the settled session, or null when disabled.
  */
-export async function approveSession(proposal: WcProposal, evmAddress: string): Promise<WcSession | null> {
+export async function approveSession(proposal: WcProposal, evmAddress: string, solanaAddress: string | null = null): Promise<WcSession | null> {
   if (!walletKitSupported()) return null;
   const kit = await ensureWalletKit();
+  const supportedNamespaces: Parameters<typeof buildApprovedNamespaces>[0]['supportedNamespaces'] = {
+    eip155: {
+      chains: [...WC_SUPPORTED_CHAINS],
+      methods: [...WC_SUPPORTED_METHODS],
+      events: [...WC_SUPPORTED_EVENTS],
+      accounts: WC_SUPPORTED_CHAINS.map((chain) => `${chain}:${evmAddress}`),
+    },
+  };
+  if (solanaAddress != null) {
+    supportedNamespaces.solana = {
+      chains: [SOLANA_MAINNET_CAIP2],
+      methods: [...SOLANA_V1_METHODS],
+      events: [],
+      accounts: [`${SOLANA_MAINNET_CAIP2}:${solanaAddress}`],
+    };
+  }
   const namespaces = buildApprovedNamespaces({
     proposal: proposal.params,
-    supportedNamespaces: {
-      eip155: {
-        chains: [...WC_SUPPORTED_CHAINS],
-        methods: [...WC_SUPPORTED_METHODS],
-        events: [...WC_SUPPORTED_EVENTS],
-        accounts: WC_SUPPORTED_CHAINS.map((chain) => `${chain}:${evmAddress}`),
-      },
-    },
+    supportedNamespaces,
   });
   return kit.approveSession({id: proposal.id, namespaces});
 }

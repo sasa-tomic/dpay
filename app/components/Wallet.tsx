@@ -2349,6 +2349,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         }));
         offRequest = wk.onRequest(makeWcRequestHandler({
           evmAddress,
+          solanaAddress: solAddress,
           isOpen: () => wcReviewRef.current != null,
           activeChainOf: (topic) => wcChains.current.get(topic) ?? 'eip155:1',
           respond: (topic, response) => wk.respondSessionRequest(topic, response),
@@ -2365,11 +2366,13 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       offProposal?.();
       offRequest?.();
     };
-  }, [evmAddress, openWcReview]);
+  }, [evmAddress, solAddress, openWcReview]);
   // The sheet's Approve: a proposal approves the session with the device EVM address on the
-  // wired chains (and seeds the chain map); a request runs the per-method approve path. Errors
-  // (RPC refusals, gate failures) keep the sheet open with the message - the user still holds
-  // Reject, and the dApp is answered by a button press either way.
+  // wired chains (and seeds the chain map) plus - when the wallet has one - the solana identity's
+  // namespace (plan Track S step 4: no identity = no solana namespace, EVM still works); a
+  // request runs the per-method approve path. Errors (RPC refusals, gate failures) keep the
+  // sheet open with the message - the user still holds Reject, and the dApp is answered by a
+  // button press either way.
   const approveWc = useCallback(async () => {
     const review = wcReviewRef.current;
     if (review == null || wcBusy || evmAddress == null) return;
@@ -2378,7 +2381,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     try {
       const wk = await import('../walletkit');
       if (review.mode === 'proposal') {
-        const session = await wk.approveSession(review.proposal, evmAddress);
+        const session = await wk.approveSession(review.proposal, evmAddress, solAddress);
         if (session != null && typeof (session as {topic?: unknown}).topic === 'string') {
           wcChains.current.set((session as {topic: string}).topic, 'eip155:1');
         }
@@ -2388,6 +2391,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           request: review.request,
           secretHex: identity.secretHex,
           evmAddress,
+          solanaAddress: solAddress,
           activeChain: wcChains.current.get(review.request.topic) ?? 'eip155:1',
           unsupportedChains: wk.wcUnsupportedChains(),
           respond: (topic, response) => wk.respondSessionRequest(topic, response),
@@ -2401,7 +2405,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     } finally {
       setWcBusy(false);
     }
-  }, [wcBusy, evmAddress, identity.secretHex, closeWcReview]);
+  }, [wcBusy, evmAddress, solAddress, identity.secretHex, closeWcReview]);
   // The sheet's Reject: the ONLY refusal path, answering the SDK's USER_REJECTED (5000) - or,
   // for a proposal, the SDK's rejectSession with the same error.
   const rejectWc = useCallback(async () => {
@@ -3013,7 +3017,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           mode={wcReview.mode}
           dapp={wcReview.mode === 'proposal' ? proposalDapp(wcReview.proposal) : requestDapp(wcReview.request)}
           chains={wcReview.mode === 'proposal' ? proposalChains(wcReview.proposal) : []}
-          summary={wcReview.mode === 'request' ? summarizeWcRequest(wcReview.request, {activeChain: wcChains.current.get(wcReview.request.topic) ?? 'eip155:1', evmAddress: evmAddress ?? ''}) : null}
+          summary={wcReview.mode === 'request' ? summarizeWcRequest(wcReview.request, {activeChain: wcChains.current.get(wcReview.request.topic) ?? 'eip155:1', evmAddress: evmAddress ?? '', solanaAddress: solAddress}) : null}
           chain="eip155:1"
           busy={wcBusy}
           err={wcErr}

@@ -40,6 +40,7 @@ import {
   approveWcRequest,
   rejectWcRequest,
   chainHexOf,
+  solanaTxRows,
   type WcRequestSummary,
 } from '../components/WcRequestSheet';
 import {deriveEvmKeypair} from '../evm/identity';
@@ -48,14 +49,27 @@ import {signTypedData, type TypedData} from '../evm/typedData';
 import {signEip1559Tx, toHex0x} from '../evm/tx';
 import {encodeTransfer} from '../evm/abi';
 import {bytesToHex, hexToBytes} from '../lib/format';
+import {bytesToBase64} from '../lib/base64';
 import {utf8ToBytes} from '../lib/base64url';
 import {setEvmRpcUrl} from '../evm';
+import {deriveSolanaKeypair} from '../solana/identity';
+import {assembleMessage, buildSolTransferInstruction, base58Decode32, signVenueSwapTx, bytesToHex as solBytesToHex, buildMemoInstruction, type Instruction} from '../solana/tx';
+import {buildTransferCheckedInstruction} from '../solana/spl';
+import {decodeWcSolanaTx} from '../solana/wcDecode';
+import {base64ToBytes} from '../lib/base64';
+import bs58 from 'bs58';
+import {ed25519} from '@noble/curves/ed25519';
 import type {WcProposal, WcRequest, WcResponse} from '../walletkit';
 
 const PROJECT_ID = 'test-wc-requests';
 const SECRET_HEX = '11'.repeat(32);
 const DEVICE_KEY = deriveEvmKeypair(SECRET_HEX).privateKey; // the SLIP-10-derived signing key
 const DEVICE = deriveEvmKeypair(SECRET_HEX).address;
+// The Solana identity derived from the SAME seed (m/44'/501'/0'/0') - what the solana namespace
+// advertises and what every solana handler signs with.
+const SOL_KP = deriveSolanaKeypair(SECRET_HEX);
+const SOL_ADDR = SOL_KP.address;
+const SOL_CHAIN = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
 // --- module loading (the walletkit.test.ts pattern, minus its react-native mock: the mock would
 // break the sheet's real RN imports in THIS file's registry, and the default preset Platform is
@@ -90,6 +104,7 @@ function load(id: string): Loaded {
 
 afterEach(() => {
   (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
+  (require('../config/constants') as typeof import('../config/constants')).setSolanaRpcUrl('');
   setEvmRpcUrl('');
   (globalThis as unknown as {fetch: unknown}).fetch = realFetch;
 });
@@ -135,7 +150,7 @@ interface HarnessState {
 }
 
 /** The handler wired EXACTLY like the Wallet wires it (same module, same deps shape). */
-function wireHandlers(mod: Loaded, state: HarnessState) {
+function wireHandlers(mod: Loaded, state: HarnessState, solanaAddress: string | null = SOL_ADDR) {
   const proposalHandler = makeWcProposalHandler({
     isOpen: () => state.open,
     open: (proposal) => state.openedProposals.push(proposal),
@@ -143,6 +158,7 @@ function wireHandlers(mod: Loaded, state: HarnessState) {
   });
   const requestHandler = makeWcRequestHandler({
     evmAddress: DEVICE,
+    solanaAddress,
     isOpen: () => state.open,
     activeChainOf: () => 'eip155:1',
     respond: (topic, response) => mod.respondSessionRequest(topic, response),
@@ -192,6 +208,73 @@ const MAIL: TypedData = {
 
 const OTHER_ADDRESS = '0x1234567890AbCdEf1234567890aBcDeF12345678';
 
+// --- solana fixtures (Track S) -----------------------------------------------------------------------
+
+const SECOND_KP = deriveSolanaKeypair('bb'.repeat(32));
+const SOL_TO = '11111111111111111111111111111112';
+const SOL_BLOCKHASH = new Uint8Array(32).fill(7);
+
+/** A serialized UNSIGNED wire the way a dApp sends it: compact-u16 count || count zeroed 64-byte
+ *  signature slots || message. */
+function unsignedWire(msg: Uint8Array, sigCount: number): Uint8Array {
+  const out: number[] = [sigCount];
+  for (let i = 0; i < 64 * sigCount; i++) out.push(0);
+  for (const b of msg) out.push(b);
+  return new Uint8Array(out);
+}
+
+/** A one-signature System transfer paying FROM the device (the plain review case). */
+function deviceTransferTx(): Uint8Array {
+  const msg = assembleMessage(SOL_KP.publicKey, [buildSolTransferInstruction(SOL_KP.publicKey, base58Decode32(SOL_TO), 12345n)], SOL_BLOCKHASH);
+  return unsignedWire(msg, 1);
+}
+
+/** A transfer owned by ANOTHER key entirely (fee payer + only required signer = SECOND): the
+ *  external-fee-payer display and the not-a-required-signer refusal case. */
+function otherOwnerTx(): Uint8Array {
+  const msg = assembleMessage(SECOND_KP.publicKey, [buildSolTransferInstruction(SECOND_KP.publicKey, base58Decode32(SOL_TO), 12345n)], SOL_BLOCKHASH);
+  return unsignedWire(msg, 1);
+}
+
+/** A transfer beside an instruction from a program the decoder does not know: the explicit
+ *  unknown-warning case (structured row beside raw fallback, wire order kept). */
+function unknownProgramTx(): Uint8Array {
+  const arbitrary = new Uint8Array(32).fill(9);
+  const unknownIx: Instruction = {programId: arbitrary, keys: [{pubkey: arbitrary, signer: false, writable: true}], data: new Uint8Array([1, 2, 3])};
+  const msg = assembleMessage(SOL_KP.publicKey, [buildSolTransferInstruction(SOL_KP.publicKey, base58Decode32(SOL_TO), 1n), unknownIx], SOL_BLOCKHASH);
+  return unsignedWire(msg, 1);
+}
+
+/** A transfer the device co-signs with SECOND (requiredSignatures = 2): the co-sign refusal case.
+ *  A transferChecked whose owner (SECOND) is a required signer beside the fee payer (the device). */
+function coSignedTx(): Uint8Array {
+  const ix = buildTransferCheckedInstruction(new Uint8Array(32).fill(1), new Uint8Array(32).fill(2), new Uint8Array(32).fill(3), SECOND_KP.publicKey, 1_000_000n, 6);
+  const msg = assembleMessage(SOL_KP.publicKey, [ix], SOL_BLOCKHASH);
+  return unsignedWire(msg, 2);
+}
+
+function solRequest(id: number, method: string, params: unknown): WcRequest {
+  return fakeRequest(id, method, params, SOL_CHAIN);
+}
+
+/** The signAndSend fetch double: one sendTransaction answer, everything else refused loudly. */
+function routeSolBroadcast(sig58: string): Array<{method: string; body: string}> {
+  const calls: Array<{method: string; body: string}> = [];
+  (globalThis as unknown as {fetch: unknown}).fetch = (async (_url: string | URL, init?: {body?: string}) => {
+    const method = (JSON.parse(init?.body ?? '{}') as {method?: string}).method ?? '?';
+    calls.push({method, body: init?.body ?? ''});
+    if (method !== 'sendTransaction') throw new Error(`unexpected rpc ${method}`);
+    return {
+      ok: true,
+      status: 200,
+      headers: {get: () => null},
+      text: async () => JSON.stringify({jsonrpc: '2.0', id: 1, result: sig58}),
+      json: async () => ({jsonrpc: '2.0', id: 1, result: sig58}),
+    } as unknown as Response;
+  }) as typeof fetch;
+  return calls;
+}
+
 // --- the matrix --------------------------------------------------------------------------------------
 
 describe('the responder loop: proposal -> approve -> request -> respond', () => {
@@ -208,6 +291,7 @@ describe('the responder loop: proposal -> approve -> request -> respond', () => 
     }));
     const offRequest = mod.onRequest(makeWcRequestHandler({
       evmAddress: DEVICE,
+      solanaAddress: SOL_ADDR,
       isOpen: () => state.open,
       activeChainOf: () => 'eip155:1',
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
@@ -239,6 +323,7 @@ describe('the responder loop: proposal -> approve -> request -> respond', () => 
       request,
       secretHex: SECRET_HEX,
       evmAddress: DEVICE,
+      solanaAddress: SOL_ADDR,
       activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
@@ -265,7 +350,7 @@ describe('personal_sign', () => {
     const hexMessage = `0x${bytesToHex(utf8ToBytes(message))}`;
     const request = fakeRequest(1, 'personal_sign', [hexMessage, DEVICE]);
     await approveWcRequest({
-      request, secretHex: SECRET_HEX, evmAddress: DEVICE, activeChain: 'eip155:1',
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
     });
@@ -280,7 +365,7 @@ describe('personal_sign', () => {
     const kit = mod.kit()!;
     const request = fakeRequest(2, 'personal_sign', ['plain text message', DEVICE]);
     await approveWcRequest({
-      request, secretHex: SECRET_HEX, evmAddress: DEVICE, activeChain: 'eip155:1',
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
     });
@@ -305,7 +390,7 @@ describe('personal_sign', () => {
     const kit = mod.kit()!;
     const request = fakeRequest(4, 'personal_sign', ['0xdeadbeef', OTHER_ADDRESS]);
     await approveWcRequest({
-      request, secretHex: SECRET_HEX, evmAddress: DEVICE, activeChain: 'eip155:1',
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
     });
@@ -321,7 +406,7 @@ describe('eth_signTypedData_v4', () => {
     const kit = mod.kit()!;
     const request = fakeRequest(5, 'eth_signTypedData_v4', [DEVICE, JSON.stringify(MAIL)]);
     await approveWcRequest({
-      request, secretHex: SECRET_HEX, evmAddress: DEVICE, activeChain: 'eip155:1',
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
     });
@@ -353,7 +438,7 @@ describe('eth_signTypedData_v4', () => {
     const bad = {...MAIL, types: {...MAIL.types, Mail: [{name: 'weird', type: 'uint'} as never]}};
     const request = fakeRequest(7, 'eth_signTypedData_v4', [DEVICE, JSON.stringify(bad)]);
     await approveWcRequest({
-      request, secretHex: SECRET_HEX, evmAddress: DEVICE, activeChain: 'eip155:1',
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
     });
@@ -399,7 +484,7 @@ describe('wallet_switchEthereumChain', () => {
     const kit = mod.kit()!;
     const request = fakeRequest(11, 'wallet_switchEthereumChain', [{chainId: '0xa4b1'}]);
     const out = await approveWcRequest({
-      request, secretHex: SECRET_HEX, evmAddress: DEVICE, activeChain: 'eip155:1',
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
     });
@@ -413,7 +498,7 @@ describe('wallet_switchEthereumChain', () => {
     const kit = mod.kit()!;
     const request = fakeRequest(12, 'wallet_switchEthereumChain', [{chainId: '0x89'}]);
     const out = await approveWcRequest({
-      request, secretHex: SECRET_HEX, evmAddress: DEVICE, activeChain: 'eip155:1',
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
     });
@@ -491,7 +576,7 @@ describe('eth_sendTransaction', () => {
     // The dApp omits nonce, gas, and every fee field - all five fill from the chain.
     const request = fakeRequest(16, 'eth_sendTransaction', [{from: DEVICE, to, value: '0x2386f26fc10000', data: ''}]);
     const out = await approveWcRequest({
-      request, secretHex: SECRET_HEX, evmAddress: DEVICE, activeChain: 'eip155:1',
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
     });
@@ -532,7 +617,7 @@ describe('eth_sendTransaction', () => {
     const calls = routeFill();
     const request = fakeRequest(17, 'eth_sendTransaction', [{from: DEVICE, to: OTHER_ADDRESS, value: '0x1', gasPrice: '0x14', nonce: '0x0'}]);
     await approveWcRequest({
-      request, secretHex: SECRET_HEX, evmAddress: DEVICE, activeChain: 'eip155:1',
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
     });
@@ -584,7 +669,7 @@ describe('eth_sendTransaction', () => {
     const kit = mod.kit()!;
     const request = fakeRequest(21, 'eth_sendTransaction', [{from: DEVICE, to: OTHER_ADDRESS, value: '0x1'}]);
     await expect(approveWcRequest({
-      request, secretHex: SECRET_HEX, evmAddress: DEVICE, activeChain: 'eip155:1',
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
       unsupportedChains: mod.wcUnsupportedChains(),
       respond: (topic, response) => mod.respondSessionRequest(topic, response),
     })).rejects.toThrow(/not configured/);    expect(responsesOf(kit)).toHaveLength(0);
@@ -603,5 +688,394 @@ describe('unsupported methods fail closed', () => {
     expect(state.openedRequests).toHaveLength(0);
     const answers = responsesOf(kit);
     expect((answers[0]!.response as {error: {code: number}}).error.code).toBe(-32601);
+  });
+});
+
+// =====================================================================================================
+// Track S - the solana matrix (plan §Track S: approve->sign flows + refusals)
+// =====================================================================================================
+
+describe('solana_getAccounts / solana_requestAccounts (reads answer directly, no sheet)', () => {
+  test('both reads answer the wallet solana address (base58); the sheet never opens', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const state: HarnessState = {open: false, openedRequests: [], openedProposals: []};
+    const {onRequest} = wireHandlers(mod, state);
+    onRequest(solRequest(30, 'solana_requestAccounts', {}));
+    onRequest(solRequest(31, 'solana_getAccounts', []));
+    await flush();
+    expect(state.openedRequests).toHaveLength(0);
+    const answers = responsesOf(kit);
+    expect(answers[0]!.response).toEqual({id: 30, jsonrpc: '2.0', result: [SOL_ADDR]});
+    expect(answers[1]!.response).toEqual({id: 31, jsonrpc: '2.0', result: [SOL_ADDR]});
+  });
+
+  test('no solana identity: a typed refusal, NEVER an empty success', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const state: HarnessState = {open: false, openedRequests: [], openedProposals: []};
+    const {onRequest} = wireHandlers(mod, state, null);
+    onRequest(solRequest(32, 'solana_requestAccounts', {}));
+    await flush();
+    expect(state.openedRequests).toHaveLength(0);
+    const answers = responsesOf(kit);
+    expect(answers[0]!.response).toEqual({id: 32, jsonrpc: '2.0', error: {code: -32603, message: 'No Solana account'}});
+  });
+});
+
+describe('solana_signMessage', () => {
+  test('approve: plain ed25519 over the EXACT base58-decoded bytes, base58 signature out', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const message = 'Hello solana';
+    const request = solRequest(33, 'solana_signMessage', {pubkey: SOL_ADDR, message: bs58.encode(utf8ToBytes(message))});
+    const summary = summarizeWcRequest(request, {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    expect(summary.review.kind === 'solanaMessage' && summary.review.text).toBe(message); // UTF-8 preview
+    await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    const expected = ed25519.sign(utf8ToBytes(message), SOL_KP.seed);
+    expect(responsesOf(kit)[0]!.response).toEqual({id: 33, jsonrpc: '2.0', result: {signature: bs58.encode(expected)}});
+  });
+
+  test('non-UTF-8 message: the raw-bytes fallback preview, and the HEX bytes are what get signed', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const raw = new Uint8Array([0xff, 0x00, 0x81, 0x42]);
+    const request = solRequest(34, 'solana_signMessage', {pubkey: SOL_ADDR, message: bs58.encode(raw)});
+    const summary = summarizeWcRequest(request, {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    const review = summary.review as Extract<WcRequestSummary['review'], {kind: 'solanaMessage'}>;
+    expect(review.text).toBeNull(); // not reviewable text
+    expect(review.hex).toBe(solBytesToHex(raw)); // the exact bytes shown as hex
+    await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    const expected = ed25519.sign(raw, SOL_KP.seed);
+    expect(responsesOf(kit)[0]!.response).toEqual({id: 34, jsonrpc: '2.0', result: {signature: bs58.encode(expected)}});
+  });
+
+  test('a different pubkey on the request: typed refusal, never signs', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const request = solRequest(35, 'solana_signMessage', {pubkey: SECOND_KP.address, message: bs58.encode(utf8ToBytes('x'))});
+    const summary = summarizeWcRequest(request, {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    expect(summary.review.kind === 'solanaMessage' && summary.review.signerMismatch).toBe(true);
+    await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    const answers = responsesOf(kit);
+    const err = (answers[0]!.response as {error: {code: number; message: string}}).error;
+    expect(err.code).toBe(-32603);
+    expect(err.message).toContain('different Solana address');
+  });
+
+  test('a message that is not base58: typed refusal, the sheet opens behind it', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const state: HarnessState = {open: false, openedRequests: [], openedProposals: []};
+    const {onRequest} = wireHandlers(mod, state);
+    onRequest(solRequest(36, 'solana_signMessage', {pubkey: SOL_ADDR, message: 'not-base58!!'}));
+    await flush();
+    expect(state.openedRequests).toHaveLength(1); // the sheet opens (the raw display law) ...
+    await approveWcRequest({
+      request: state.openedRequests[0]!, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    const err = (responsesOf(kit)[0]!.response as {error: {code: number; message: string}}).error;
+    expect(err.code).toBe(-32603);
+    expect(err.message).toContain('Malformed Solana message');
+  });
+});
+
+describe('solana_signTransaction', () => {
+  test('the venue-neutral rows: SPL transferChecked renders mint + decimal amount, memo renders text', () => {
+    const source = new Uint8Array(32).fill(1);
+    const mint = new Uint8Array(32).fill(2);
+    const destination = new Uint8Array(32).fill(3);
+    const ix = buildTransferCheckedInstruction(source, mint, destination, SECOND_KP.publicKey, 1_500_000n, 6);
+    const memoIx = buildMemoInstruction(utf8ToBytes('note'));
+    const msg = assembleMessage(SOL_KP.publicKey, [ix, memoIx], SOL_BLOCKHASH);
+    const decoded = decodeWcSolanaTx(unsignedWire(msg, 2))!;
+    const rows = solanaTxRows(decoded.instructions);
+    expect(rows).toEqual([
+      {key: 'from', value: bs58.encode(source)},
+      {key: 'to', value: bs58.encode(destination)},
+      {key: 'owner', value: SECOND_KP.address},
+      {key: 'mint', value: bs58.encode(mint)},
+      {key: 'amount', value: '1.5'}, // the wire's own decimals, honest
+      {key: 'memo', value: 'note'},
+    ]);
+  });
+
+  test('approve: signs ONLY the device slot, preserves every other byte, answers base64 (no broadcast)', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const tx = deviceTransferTx();
+    const request = solRequest(37, 'solana_signTransaction', {transaction: bytesToBase64(tx)});
+    const summary = summarizeWcRequest(request, {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    const review = summary.review as Extract<WcRequestSummary['review'], {kind: 'solanaTx'}>;
+    expect(review.malformed).toBeNull();
+    expect(review.feePayer).toBe(SOL_ADDR);
+    expect(review.signers).toEqual([SOL_ADDR]);
+    expect(review.externalFeePayer).toBe(false);
+    expect(review.deviceSigns).toBe(true);
+    expect(review.coSigned).toBe(false);
+    expect(review.unknown).toBe(false);
+    expect(review.rows).toEqual([
+      {key: 'from', value: SOL_ADDR},
+      {key: 'to', value: SOL_TO},
+      {key: 'amount', value: '0.000012345 SOL'},
+    ]);
+    const out = await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    expect(out).toEqual({submittedHash: null, switchedTo: null});
+    const expected = signVenueSwapTx(tx, SOL_KP.seed)!;
+    const result = (responsesOf(kit)[0]!.response as {result: string}).result;
+    expect(responsesOf(kit)[0]!.response).toEqual({id: 37, jsonrpc: '2.0', result: bytesToBase64(expected.raw)});
+    const resultBytes = base64ToBytes(result);
+    // The message is byte-for-byte the wire's; exactly the device's signature slot was filled,
+    // and it holds a valid ed25519 signature over the untouched message.
+    expect(Array.from(resultBytes.slice(65))).toEqual(Array.from(tx.slice(65)));
+    expect(Array.from(resultBytes.slice(0, 65))).not.toEqual(Array.from(tx.slice(0, 65)));
+    expect(ed25519.verify(bs58.decode(expected.signature), resultBytes.slice(65), SOL_KP.publicKey)).toBe(true);
+  });
+
+  test('a transaction with an unknown program: the sheet opens behind the explicit warning; approve STILL signs (the user decides)', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const tx = unknownProgramTx();
+    const request = solRequest(38, 'solana_signTransaction', {transaction: bytesToBase64(tx)});
+    const summary = summarizeWcRequest(request, {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    const review = summary.review as Extract<WcRequestSummary['review'], {kind: 'solanaTx'}>;
+    expect(review.unknown).toBe(true);
+    expect(review.malformed).toBeNull();
+    // The structured row beside the raw fallback, wire order kept.
+    expect(review.rows.map((r) => r.key)).toEqual(['from', 'to', 'amount', 'program', 'data']);
+    const state: HarnessState = {open: false, openedRequests: [], openedProposals: []};
+    const {onRequest} = wireHandlers(mod, state);
+    onRequest(request);
+    await flush();
+    expect(state.openedRequests).toEqual([request]); // opened, never auto-approved
+    expect(responsesOf(kit)).toHaveLength(0); // NOTHING answers until a button press
+    await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    const expected = signVenueSwapTx(tx, SOL_KP.seed)!;
+    expect(responsesOf(kit)[0]!.response).toEqual({id: 38, jsonrpc: '2.0', result: bytesToBase64(expected.raw)});
+  });
+
+  test('malformed bytes (not a transaction): warning + raw display, approve refuses typed', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const junk = bytesToBase64(new Uint8Array([9, 9, 9, 9]));
+    const request = solRequest(39, 'solana_signTransaction', {transaction: junk});
+    const summary = summarizeWcRequest(request, {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    const review = summary.review as Extract<WcRequestSummary['review'], {kind: 'solanaTx'}>;
+    expect(review.malformed).not.toBeNull();
+    expect(review.rawBase64).toBe(junk);
+    const state: HarnessState = {open: false, openedRequests: [], openedProposals: []};
+    const {onRequest} = wireHandlers(mod, state);
+    onRequest(request);
+    await flush();
+    expect(state.openedRequests).toEqual([request]); // the sheet opens behind the warning
+    await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    const err = (responsesOf(kit)[0]!.response as {error: {code: number; message: string}}).error;
+    expect(err.code).toBe(-32603);
+    expect(err.message).toContain('Malformed transaction');
+  });
+
+  test('the instruction-array shape (deprecated upstream): refused by name before any sheet', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const state: HarnessState = {open: false, openedRequests: [], openedProposals: []};
+    const {onRequest} = wireHandlers(mod, state);
+    onRequest(solRequest(40, 'solana_signTransaction', {instructions: []}));
+    await flush();
+    expect(state.openedRequests).toHaveLength(0);
+    const err = (responsesOf(kit)[0]!.response as {error: {code: number; message: string}}).error;
+    expect(err.code).toBe(-32601);
+    expect(err.message).toContain('instruction-array');
+  });
+
+  test('fee-payer-hidden: a params feePayer naming a DIFFERENT payer than the wire is refused', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const tx = deviceTransferTx(); // the wire's fee payer is the device
+    const request = solRequest(41, 'solana_signTransaction', {transaction: bytesToBase64(tx), feePayer: SECOND_KP.address});
+    const summary = summarizeWcRequest(request, {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    const review = summary.review as Extract<WcRequestSummary['review'], {kind: 'solanaTx'}>;
+    expect(review.feePayerHidden).toBe(true);
+    await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    const err = (responsesOf(kit)[0]!.response as {error: {code: number; message: string}}).error;
+    expect(err.code).toBe(-32603);
+    expect(err.message).toContain('different fee payer');
+  });
+
+  test('device-not-required-signer: the external-owned tx refuses whole, never partial-signs', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const tx = otherOwnerTx(); // fee payer + only signer = SECOND; the device is not in it
+    const request = solRequest(42, 'solana_signTransaction', {transaction: bytesToBase64(tx)});
+    const summary = summarizeWcRequest(request, {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    const review = summary.review as Extract<WcRequestSummary['review'], {kind: 'solanaTx'}>;
+    expect(review.feePayer).toBe(SECOND_KP.address);
+    expect(review.externalFeePayer).toBe(true);
+    expect(review.deviceSigns).toBe(false);
+    await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    const err = (responsesOf(kit)[0]!.response as {error: {code: number; message: string}}).error;
+    expect(err.code).toBe(-32603);
+    expect(err.message).toContain('not a required signer');
+  });
+
+  test('co-signed tx (another required signer beside the device): refused whole by DEFAULT, never silently co-signed', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const tx = coSignedTx();
+    const request = solRequest(43, 'solana_signTransaction', {transaction: bytesToBase64(tx)});
+    const summary = summarizeWcRequest(request, {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    const review = summary.review as Extract<WcRequestSummary['review'], {kind: 'solanaTx'}>;
+    expect(review.coSigned).toBe(true);
+    expect(review.deviceSigns).toBe(true);
+    await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    const err = (responsesOf(kit)[0]!.response as {error: {code: number; message: string}}).error;
+    expect(err.code).toBe(-32603);
+    expect(err.message).toContain('needs other signers');
+    expect(responsesOf(kit)).toHaveLength(1); // nothing was signed or broadcast
+  });
+});
+
+describe('solana_signAndSendTransaction', () => {
+  test('approve: review + guards, then the app broadcast path; the signature is the submitted-not-settled answer', async () => {
+    const sig58 = bs58.encode(new Uint8Array(64).fill(3));
+    // The runtime operator slot (read per call), pointing the broadcast at the fetch double.
+    (require('../config/constants') as typeof import('../config/constants')).setSolanaRpcUrl('https://127.0.0.1:8999');
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const calls = routeSolBroadcast(sig58);
+    const tx = deviceTransferTx();
+    const request = solRequest(44, 'solana_signAndSendTransaction', {transaction: bytesToBase64(tx)});
+    const summary = summarizeWcRequest(request, {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    const review = summary.review as Extract<WcRequestSummary['review'], {kind: 'solanaTx'}>;
+    expect(review.send).toBe(true);
+    const out = await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    // The submitted-not-settled terminal: the signature hash, no receipt poll.
+    expect(out).toEqual({submittedHash: sig58, switchedTo: null});
+    expect(responsesOf(kit)[0]!.response).toEqual({id: 44, jsonrpc: '2.0', result: sig58});
+    // Broadcast went through the app's own path (skipPreflight posture) with EXACTLY the
+    // locally-signed bytes.
+    const expected = signVenueSwapTx(tx, SOL_KP.seed)!;
+    const sends = calls.filter((c) => c.method === 'sendTransaction');
+    expect(sends).toHaveLength(1);
+    const params = (JSON.parse(sends[0]!.body) as {params: unknown[]}).params;
+    expect(params[0]).toBe(bytesToBase64(expected.raw));
+  });
+
+  test('a co-signed send refuses typed and NEVER reaches the network', async () => {
+    (require('../config/constants') as typeof import('../config/constants')).setSolanaRpcUrl('https://127.0.0.1:8999');
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const calls = routeSolBroadcast(bs58.encode(new Uint8Array(64).fill(4)));
+    const request = solRequest(45, 'solana_signAndSendTransaction', {transaction: bytesToBase64(coSignedTx())});
+    await approveWcRequest({
+      request, secretHex: SECRET_HEX, evmAddress: DEVICE, solanaAddress: SOL_ADDR, activeChain: 'eip155:1',
+      unsupportedChains: mod.wcUnsupportedChains(),
+      respond: (topic, response) => mod.respondSessionRequest(topic, response),
+    });
+    const err = (responsesOf(kit)[0]!.response as {error: {code: number; message: string}}).error;
+    expect(err.code).toBe(-32603);
+    expect(err.message).toContain('needs other signers');
+    expect(calls.filter((c) => c.method === 'sendTransaction')).toHaveLength(0);
+  });
+});
+
+describe('solana_signAllTransactions (outside v1)', () => {
+  test('refused by name with the plan reason, and the sheet never opens', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const state: HarnessState = {open: false, openedRequests: [], openedProposals: []};
+    const {onRequest} = wireHandlers(mod, state);
+    onRequest(solRequest(46, 'solana_signAllTransactions', {transactions: [bytesToBase64(deviceTransferTx())]}));
+    await flush();
+    expect(state.openedRequests).toHaveLength(0);
+    const err = (responsesOf(kit)[0]!.response as {error: {code: number; message: string}}).error;
+    expect(err.code).toBe(-32601);
+    expect(err.message).toContain('solana_signAllTransactions');
+    expect(err.message).toContain('batches');
+  });
+});
+
+describe('the one-review-at-a-time law covers the solana surface too', () => {
+  test('a solana request while the sheet is open answers USER_REJECTED 5000 immediately', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const state: HarnessState = {open: true, openedRequests: [], openedProposals: []};
+    const {onRequest} = wireHandlers(mod, state);
+    onRequest(solRequest(47, 'solana_signMessage', {pubkey: SOL_ADDR, message: bs58.encode(utf8ToBytes('x'))}));
+    await flush();
+    expect(state.openedRequests).toHaveLength(0);
+    expect(responsesOf(kit)[0]!.response).toEqual({id: 47, jsonrpc: '2.0', error: {code: 5000, message: 'User rejected.'}});
+  });
+
+  test('a solana SIGNING request with no solana identity refuses typed before any sheet', async () => {
+    const mod = load(PROJECT_ID);
+    await mod.initWalletKit();
+    const kit = mod.kit()!;
+    const state: HarnessState = {open: false, openedRequests: [], openedProposals: []};
+    const {onRequest} = wireHandlers(mod, state, null);
+    onRequest(solRequest(48, 'solana_signTransaction', {transaction: bytesToBase64(deviceTransferTx())}));
+    await flush();
+    expect(state.openedRequests).toHaveLength(0);
+    const err = (responsesOf(kit)[0]!.response as {error: {code: number; message: string}}).error;
+    expect(err.code).toBe(-32603);
+    expect(err.message).toBe('No Solana account');
   });
 });
