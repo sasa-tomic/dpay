@@ -7,11 +7,15 @@
  *     `fetched_at` becomes the provenance instant. The fail-closed vocabulary: 503 →
  *     'unconfigured', 400/422 → 'refused', other non-2xx → 'unavailable', transport →
  *     'unreachable', unreadable body → 'shape'.
- *   • conversion — POST /api/v1/mtpelerin/conversion: the correlation id rides the
- *     X-Dpay-Order-Id header (absent → 'shape': an order that cannot be watched is never
- *     adopted), the deposit address must be an EVM address (the wallet's ERC-20 send path
- *     cannot deliver anywhere else), the venue's expirationDate parses when present and
- *     stays null when absent/garbage (never invented).
+ *   • conversion (POST /api/v1/mtpelerin/conversion): LOCAL registration since the venue's
+ *     API tier closed (2026-10-13). The answer is the record in the status route's shape:
+ *     the correlation id rides the X-Dpay-Order-Id header AND the body's `order_id` (the
+ *     pair must agree; absent → 'shape': an order that cannot be watched is never adopted),
+ *     the BORN state is pinned (terminal false, payload and venue_order_id null; a
+ *     creation answer claiming venue-side facts is a 'shape' failure), and the deposit
+ *     address is still REQUIRED and must be an EVM address (the wallet's ERC-20 send path
+ *     cannot deliver anywhere else; the real born record's null address → 'shape'). The
+ *     local record carries no expiry: expiresAtMs stays null, never invented.
  *   • isValidIban — the mod-97 checksum: golden valid/invalid vectors (lengths, letter
  *     positions, the checksum digit itself).
  */
@@ -89,22 +93,36 @@ describe('fetchMtpCashQuote — the attribution envelope', () => {
   });
 });
 
-describe('createMtpCashOrder — the correlation + deposit-address pins', () => {
+describe('createMtpCashOrder - the local creation record pins', () => {
   const ARGS = {
     sourceCurrency: 'ZCHF', destCurrency: 'CHF', sourceAmount: '2', sourceNetwork: 'mainnet',
     iban: 'CH9300762011623852957', holderName: 'Ada Lovelace', clientOrderId: 'abc123',
   };
+  const ORDER_ID = 'mtp-abc0000000000001';
+  const ADDRESS = '0xAbCdEf0123456789AbCdEf0123456789AbCdEf01';
 
-  test('the dpay order id rides X-Dpay-Order-Id; offRampAddress + expiry normalize', async () => {
-    mockFetch.mockResolvedValue(jsonResponse(200, {
-      id: 42, offRampAddress: '0xAbCdEf0123456789AbCdEf0123456789AbCdEf01', type: 'sell',
-      expirationDate: '2026-10-13T12:00:00.000Z',
-    }, {'x-dpay-order-id': 'mtp-abc0000000000001'}));
+  /** The relay's real creation answer (status_body): the BORN record, the venue's facts
+   *  null until the completion webhook names them. */
+  function bornRecord(offRampAddress: unknown, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      order_id: ORDER_ID,
+      venue_order_id: null,
+      offRampAddress,
+      terminal: false,
+      created_at: 1790000000,
+      status_ts: null,
+      payload: null,
+      ...overrides,
+    };
+  }
+
+  test('a creation record carrying the venue deposit address parses: header id, born venue facts, no invented expiry', async () => {
+    mockFetch.mockResolvedValue(jsonResponse(200, bornRecord(ADDRESS), {'x-dpay-order-id': ORDER_ID}));
     const o = await createMtpCashOrder(RELAY, ARGS);
-    expect(o.orderId).toBe('mtp-abc0000000000001');
-    expect(o.venueOrderId).toBe('42');
-    expect(o.offRampAddress).toBe('0xAbCdEf0123456789AbCdEf0123456789AbCdEf01');
-    expect(o.expiresAtMs).toBe(Date.parse('2026-10-13T12:00:00.000Z'));
+    expect(o.orderId).toBe(ORDER_ID);
+    expect(o.venueOrderId).toBeNull(); // born state: dpay creates no venue-side order
+    expect(o.offRampAddress).toBe(ADDRESS);
+    expect(o.expiresAtMs).toBeNull(); // the local record carries no expiry; never invented
     const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(init.method).toBe('POST');
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -112,23 +130,36 @@ describe('createMtpCashOrder — the correlation + deposit-address pins', () => 
     expect(body.iban).toBe('CH9300762011623852957');
   });
 
+  test('the REAL relay answer (the born record, address null) is a shape failure: the send handoff is refused, never a guessed destination', async () => {
+    mockFetch.mockResolvedValue(jsonResponse(200, bornRecord(null), {'x-dpay-order-id': ORDER_ID}));
+    await expect(createMtpCashOrder(RELAY, ARGS)).rejects.toThrow('shape');
+  });
+
   test('a non-EVM offRampAddress is a shape failure (the ERC-20 send could never deliver)', async () => {
-    mockFetch.mockResolvedValue(jsonResponse(200, {offRampAddress: 'mtpelerin@ln.mtpelerin.com'}, {'x-dpay-order-id': 'mtp-abc'}));
+    mockFetch.mockResolvedValue(jsonResponse(200, bornRecord('mtpelerin@ln.mtpelerin.com'), {'x-dpay-order-id': ORDER_ID}));
     await expect(createMtpCashOrder(RELAY, ARGS)).rejects.toThrow('shape');
   });
 
   test('a missing X-Dpay-Order-Id is a shape failure — an unwatchable order is never adopted', async () => {
-    mockFetch.mockResolvedValue(jsonResponse(200, {offRampAddress: '0xAbCdEf0123456789AbCdEf0123456789AbCdEf01'}));
+    mockFetch.mockResolvedValue(jsonResponse(200, bornRecord(ADDRESS)));
     await expect(createMtpCashOrder(RELAY, ARGS)).rejects.toThrow('shape');
   });
 
-  test('no expirationDate → expiresAtMs stays null (never invented)', async () => {
-    mockFetch.mockResolvedValue(jsonResponse(200, {offRampAddress: '0xAbCdEf0123456789AbCdEf0123456789AbCdEf01'}, {'x-dpay-order-id': 'mtp-abc'}));
-    const o = await createMtpCashOrder(RELAY, ARGS);
-    expect(o.expiresAtMs).toBeNull();
+  test('a record whose order_id disagrees with the header is a shape failure (one correlation pair)', async () => {
+    mockFetch.mockResolvedValue(jsonResponse(200, bornRecord(ADDRESS, {order_id: 'mtp-other000000000001'}), {'x-dpay-order-id': ORDER_ID}));
+    await expect(createMtpCashOrder(RELAY, ARGS)).rejects.toThrow('shape');
   });
 
-  test('HTTP 503 maps to unconfigured (the CTKN tripwire)', async () => {
+  test.each([
+    ['a venue id', {venue_order_id: '664369c938b3ca001a3cd44f'}],
+    ['a terminal flag', {terminal: true}],
+    ['a stored payload', {payload: {id: '664369c938b3ca001a3cd44f', amount: 1}}],
+  ])('a creation answer claiming %s (venue-side facts dpay never created) is a shape failure', async (_label, claim) => {
+    mockFetch.mockResolvedValue(jsonResponse(200, bornRecord(ADDRESS, claim), {'x-dpay-order-id': ORDER_ID}));
+    await expect(createMtpCashOrder(RELAY, ARGS)).rejects.toThrow('shape');
+  });
+
+  test('HTTP 503 maps to unconfigured (the fail-closed vocabulary holds on any relay refusal)', async () => {
     mockFetch.mockResolvedValue(jsonResponse(503, {dpayRelayError: 'mtpelerin-unconfigured'}));
     await expect(createMtpCashOrder(RELAY, ARGS)).rejects.toThrow('unconfigured');
   });

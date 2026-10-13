@@ -126,7 +126,7 @@ beforeEach(() => {
     destAmount: '9651.10', networkFee: null, fetchedAtMs: QUOTE_AT,
   });
   mockCreate.mockResolvedValue({
-    orderId: 'mtp-test000000000001', venueOrderId: '42', offRampAddress: OFFRAMP, expiresAtMs: null,
+    orderId: 'mtp-test000000000001', venueOrderId: null, offRampAddress: OFFRAMP, expiresAtMs: null,
   });
 });
 
@@ -198,6 +198,18 @@ describe('MtpCashOutSheet — order creation through the relay seam', () => {
     await fillAndContinue(tree);
     expect(textOf(tree, 'mtp-cashout-err')).toBe(M.deposit.mtpCash.errRefused);
     expect(has(tree, 'btn-mtp-cashout-continue')).toBe(true); // the form stays, retry lives
+    act(() => { tree.unmount(); });
+  });
+
+  test('a shape-refused creation (the record carried no deposit address) keeps the form, sends nothing', async () => {
+    // The real relay's born record has offRampAddress null: the service fails closed and
+    // the sheet answers with its honest line, form intact, the send never reached.
+    mockCreate.mockRejectedValue(new Error('shape'));
+    const tree = await mount();
+    await fillAndContinue(tree);
+    expect(textOf(tree, 'mtp-cashout-err')).toBe(M.deposit.mtpCash.errShape);
+    expect(has(tree, 'btn-mtp-cashout-continue')).toBe(true);
+    expect(has(tree, 'btn-evm-send-confirm')).toBe(false);
     act(() => { tree.unmount(); });
   });
 });

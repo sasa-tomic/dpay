@@ -26,11 +26,14 @@ import {
 //
 //   form      IBAN + account holder + amount; the quote is fetched THROUGH THE RELAY and shown
 //             attributed + timestamped (plan §4: relayed, never computed); the provider's own
-//             published figures ride verbatim + dated. Continue CREATES the sell order (the
-//             relay mints the `mtp-…` correlation id and answers `offRampAddress`) — this is
-//             the flow's ONE pre-broadcast side effect (lifecycle law C1): the order exists
-//             from here on, and backing out before the send leaves it to expire unused at the
-//             venue (the send-phase note says so, verbatim).
+//             published figures ride verbatim + dated. Continue REGISTERS the sell order THROUGH
+//             THE RELAY: since the venue's API tier closed for dpay (2026-10-13) the creation is
+//             LOCAL (the relay mints the `mtp-…` correlation id; it rides the widget link's `oid`
+//             and the venue's completion webhook echoes it back), and the venue's deposit address
+//             must ride the record for the send handoff (fail-closed 'shape' while it does not).
+//             This is the flow's ONE pre-broadcast side effect (lifecycle law C1): the
+//             correlation id exists from here on, and backing out before the send leaves it
+//             unused (the send-phase note says so, verbatim).
 //   send      the wallet's OWN send: EvmWithdrawSheet prefilled to `offRampAddress` with the
 //             exact asset/amount (the gas honesty gate + the submitted-not-settled terminal
 //             are that sheet's, untouched). The record is ADOPTED at broadcast acceptance
@@ -293,9 +296,9 @@ export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasW
               </View>
             ) : phase === 'send' && order != null ? (
               <>
-                {/* The order's honest state while the wallet's own send is pending: the venue
-                    order exists from the Continue tap (C1's one pre-broadcast side effect), and
-                    backing out now leaves it to expire unused at the venue — said verbatim. */}
+                {/* The order's honest state while the wallet's own send is pending: the
+                    correlation id exists from the Continue tap (C1's one pre-broadcast side
+                    effect), and backing out now leaves it unused (said verbatim). */}
                 <Text testID="mtp-cashout-order-note" style={S.receiptNote}>
                   {M.deposit.mtpCash.orderNote(order.orderId)}
                 </Text>

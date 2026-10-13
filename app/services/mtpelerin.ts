@@ -1,8 +1,10 @@
 // The Mt Pelerin cash-out client — the device face of the OFF-RAMP (plan R2 step 2). Quote,
-// sell-order creation AND the status fallback poll all ride dpay's relay proxy
-// (crates/dpay-relay/src/mtpelerin.rs): the relay holds the integration key server-side, mints
-// the `mtp-…` correlation id, and answers the venue's own bodies VERBATIM. This device never
-// sees a key, holds none, and could not misuse one.
+// sell-order registration AND the status fallback poll all ride dpay's relay proxy
+// (crates/dpay-relay/src/mtpelerin.rs). Since Mt Pelerin closed dpay's API tier (2026-10-13)
+// the sell order itself is created in the USER'S OWN widget session: the relay's creation is
+// LOCAL (it mints the `mtp-…` correlation id and answers the record; the id reaches the venue
+// on the widget link's `oid` and their completion webhook echoes it back as `external_id`).
+// This device never sees a key, holds none, and could not misuse one.
 //
 // What this module is NOT:
 //   - it is not a quote engine: `destAmount` is the venue's own NET figure for the fetch
@@ -44,16 +46,25 @@ export type MtpCashQuote = {
   readonly fetchedAtMs: number;
 };
 
-/** The sell order the venue issued, normalized to what the record + the send step need. */
+/** The sell order dpay registered, normalized to what the record + the send step need. The
+ *  relay's creation is LOCAL (the venue's API tier is closed for dpay, 2026-10-13): it
+ *  answers OUR record in the status route's shape, and the venue's own facts are null
+ *  until the completion webhook names them. The deposit address is still REQUIRED for the
+ *  handoff: the wallet's ERC-20 send cannot start without a venue address, so a record
+ *  without one fails closed ('shape') instead of inventing a destination. */
 export type MtpCashOrder = {
   /** dpay's own order id (the `X-Dpay-Order-Id` creation header): the correlation key the
    *  webhook echoes (`external_id`), the status route's key, and the record's providerRef. */
   readonly orderId: string;
-  /** The venue's own order id when the answer carried one. */
+  /** The venue's own order id when the creation record carried one. The born state is
+   *  null: dpay creates no venue-side order, so only the webhook can name one. */
   readonly venueOrderId: string | null;
-  /** The sell order's deposit address — the wallet's send target. REQUIRED for the handoff. */
+  /** The sell order's deposit address: the wallet's send target. REQUIRED for the
+   *  handoff (the venue issues it in the user's own widget session; until a creation
+   *  answer carries one, the flow refuses before any send). */
   readonly offRampAddress: string;
-  /** The venue's own expiry for the order when the answer carried a parseable one (ms). */
+  /** The venue's own expiry when the answer carried a parseable one (ms). The local
+   *  creation record carries no expiry: always null today, never invented. */
   readonly expiresAtMs: number | null;
 };
 
@@ -102,14 +113,19 @@ export async function fetchMtpCashQuote(
   };
 }
 
-/** Create the sell order THROUGH THE RELAY (server-side key + order-id minting). The relay
- *  persists the order FIRST, forwards the whitelisted body + its `oid` upstream, and answers
- *  the venue's body verbatim with the order id riding `X-Dpay-Order-Id`. `clientOrderId` is
- *  the locally minted convert-record id (the partner-agreement correlation law): the record
- *  that persists locally IS the id the relay logs for this order. The send target is the
- *  venue's `offRampAddress` — required, and required to be an EVM address for this rail's
- *  assets (fail-closed: a non-EVM deposit address cannot be sent to by the wallet's ERC-20
- *  path and would strand the order). */
+/** Register the sell order THROUGH THE RELAY (the correlation id is minted server-side;
+ *  the registration is local since the venue's API tier closed, 2026-10-13: the order id
+ *  reaches Mt Pelerin on the widget link's `oid` and their completion webhook echoes it
+ *  back). The answer is the record in the status route's shape, and the BORN state is
+ *  pinned honestly: `order_id` must equal the `X-Dpay-Order-Id` header (one correlation
+ *  pair), and `terminal`/`payload`/`venue_order_id` must be their born values (a creation
+ *  answer claiming venue-side facts would describe an order dpay never created). The send
+ *  target is the venue's `offRampAddress`, required and required to be an EVM address
+ *  for this rail's assets (fail-closed: a non-EVM deposit address cannot be sent to by
+ *  the wallet's ERC-20 path and would strand the order); a record without one is 'shape'
+ *  and the flow refuses before any send. `clientOrderId` is the locally minted
+ *  convert-record id (the partner-agreement correlation law): the record that persists
+ *  locally IS the id the relay logs for this order. */
 export async function createMtpCashOrder(
   relayUrl: string,
   args: {
@@ -151,19 +167,23 @@ export async function createMtpCashOrder(
   const orderId = headerValue(r, 'x-dpay-order-id');
   if (orderId == null) throw new Error('shape'); // no correlation id — the order cannot be watched
   const j = await r.json().catch(() => null) as Record<string, unknown> | null;
-  const offRamp = j != null && typeof j.offRampAddress === 'string' ? j.offRampAddress.trim() : null;
-  if (j == null || offRamp == null || offRamp.length === 0 || !EVM_ADDRESS.test(offRamp)) {
+  if (j == null || typeof j !== 'object') throw new Error('shape');
+  // The record's own id must AGREE with the header: one correlation pair, not two.
+  if (j.order_id !== orderId) throw new Error('shape');
+  // The BORN state: `terminal`/`payload`/`venue_order_id` carry venue-side facts dpay
+  // never created server-side; any other values describe an order this flow cannot have.
+  if (j.terminal !== false || j.payload != null || j.venue_order_id != null) throw new Error('shape');
+  const offRamp = typeof j.offRampAddress === 'string' ? j.offRampAddress.trim() : null;
+  if (offRamp == null || offRamp.length === 0 || !EVM_ADDRESS.test(offRamp)) {
+    // No deliverable deposit address in the record: the send cannot start, and nothing
+    // is invented (the venue issues the address in the user's own widget session).
     throw new Error('shape');
   }
-  const venueId = j.id != null && (typeof j.id === 'string' || typeof j.id === 'number')
-    ? String(j.id)
-    : null;
-  const exp = typeof j.expirationDate === 'string' ? Date.parse(j.expirationDate) : NaN;
   return {
     orderId,
-    venueOrderId: venueId,
+    venueOrderId: null,
     offRampAddress: offRamp,
-    expiresAtMs: Number.isFinite(exp) && exp > 0 ? exp : null,
+    expiresAtMs: null,
   };
 }
 
