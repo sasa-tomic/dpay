@@ -340,7 +340,16 @@ export async function fetchSolanaHistory(
     const cached = detailCache.get(info.signature);
     if (cached !== undefined) return cached;
     try {
-      const detail = await getTransaction(rpcUrl, info.signature, opts);
+      let detail: Awaited<ReturnType<typeof getTransaction>>;
+      try {
+        detail = await getTransaction(rpcUrl, info.signature, opts);
+      } catch (first) {
+        // The parallel burst trips public-RPC rate limits; one spaced retry before the
+        // signature is counted as unreadable (the tx-list honesty note is for genuinely
+        // unreadable transactions, not for our own thundering herd).
+        await new Promise((r) => setTimeout(r, 400));
+        detail = await getTransaction(rpcUrl, info.signature, opts);
+      }
       if (detail !== null) rememberDetail(info.signature, detail);
       return detail;
     } catch (e) {

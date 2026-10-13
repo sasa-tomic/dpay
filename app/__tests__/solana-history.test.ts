@@ -422,6 +422,23 @@ describe('solana history — ordering, bounds and RPC shape', () => {
     expect(calls.filter(c => c.method === 'getTransaction')).toHaveLength(3);
   });
 
+  test('one rate-limit hiccup is retried, not reported as unreadable', async () => {
+    const source = tx({keys: [OWNER, PEER], pre: [1_000_000_000, 0], post: [999_995_000, 100_000_000], slot: 30});
+    let attempts = 0;
+    const {calls} = installStub(
+      {[OWNER]: [sig('SigFlaky', 30)]},
+      {SigFlaky: () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('429 Too Many Requests');
+        return source;
+      }},
+    );
+    const {rows, dropped} = await fetchSolanaHistory(RPC, OWNER);
+    expect(dropped).toBe(0);
+    expect(rows.map(r => r.signature)).toEqual(['SigFlaky']);
+    expect(calls.filter(c => c.method === 'getTransaction')).toHaveLength(2);
+  });
+
   test('limit bounds both the signature pages and the number of detail fetches', async () => {
     const {calls} = installStub(
       {[OWNER]: [sig('SigA', 30), sig('SigB', 20)], [OWNER_ATA]: [sig('SigC', 10)]},

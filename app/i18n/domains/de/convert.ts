@@ -174,9 +174,8 @@ export const convertDe: ConvertMessages = {
     heading: (inSym, outSym, chain) => `${inSym} zu ${outSym} tauschen (${chain})`,
     feeLabel: unit => `Netzwerkgebühr (${unit}, Schätzung)`,
     pendingBody: 'Der Tausch ist on-chain bestätigt. Warten Sie, bis Ihr Guthaben ihn zeigt.',
-    failedBody: (inSym, detail) => String(detail).includes('approve landed')
-      ? `Der Tausch scheiterte nach der Freigabe. Ihre ${inSym} sind noch in Ihrer Wallet; die ungenutzte Freigabe gilt nur für den exakten Tauschbetrag.`
-      : `Es wurde nichts gesendet. Ihre ${inSym} sind noch in Ihrer Wallet.`,
+    failedBody: inSym => `Es wurde nichts gesendet. Ihre ${inSym} sind noch in Ihrer Wallet.`,
+    sentFailedBody: 'Der Tausch wurde gesendet, ist aber nicht fertig geworden. Der Transaktionseintrag unten zeigt, was bewegt wurde; die Netzwerkgebühr ist verbraucht.',
     stuckBody: outSym => `Der Tausch ist vielleicht gelandet. Ihr ${outSym}-Guthaben klärt sich von selbst; starten Sie keinen zweiten Tausch.`,
   },
   cow: {
@@ -287,9 +286,9 @@ export const convertDe: ConvertMessages = {
     solInsufficientLine: (needed, balance) =>
       `Die Einzahlung sendet ${needed} - du hast ${balance}.`,
     noQuoteTitle: 'Kein Live-Markt',
-    noQuoteBody: 'Dieses Paar hat gerade keinen Live-Markt. Nichts wurde gesendet. Wähle einen anderen Handelsplatz oder versuche es später erneut.',
+    noQuoteBody: 'Dieses Paar hat gerade keinen Live-Markt. Wähle einen anderen Handelsplatz oder versuche es später erneut.',
     minDepositBody: (venueMessage, min) =>
-      `Der Betrag liegt unter dem Minimum der Börse: „${venueMessage}“ (Minimum ${min}). Nichts wurde gesendet - erhöhe den Betrag und versuche es erneut.`,
+      `Der Betrag liegt unter dem Minimum der Börse: „${venueMessage}“ (Minimum ${min}). Erhöhe den Betrag und versuche es erneut.`,
   },
 
   chain: {
@@ -379,8 +378,8 @@ export const convertDe: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: 'Die Börse ist gerade nicht erreichbar. Nichts wurde gesendet - prüfe deine Verbindung und versuche es gleich erneut.',
-    quoteRefused: 'Für dieses Paar gibt es gerade keinen Kurs. Nichts wurde gesendet.',
+    quoteUnreachable: 'Die Börse ist gerade nicht erreichbar. Prüfe deine Verbindung und versuche es gleich erneut.',
+    quoteRefused: 'Für dieses Paar gibt es gerade keinen Kurs.',
     buildRefused: 'Der Tausch konnte nicht vorbereitet werden. Nichts bewegt - versuche es gleich erneut.',
     quoteUnavailable: code => `Kurs nicht verfügbar (${code}).`,
     quoteUnconfigured: 'Für dieses Paar ist auf diesem Relay noch keine Börse eingerichtet - mit deiner Wallet ist nichts verkehrt.',

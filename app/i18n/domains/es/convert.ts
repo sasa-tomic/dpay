@@ -173,9 +173,8 @@ export const convertEs: ConvertMessages = {
     heading: (inSym, outSym, chain) => `Convertir ${inSym} a ${outSym} (${chain})`,
     feeLabel: unit => `Tarifa de red (${unit}, estimación)`,
     pendingBody: 'El intercambio está confirmado en la cadena. Espere a que su saldo lo muestre.',
-    failedBody: (inSym, detail) => String(detail).includes('approve landed')
-      ? `El intercambio falló tras la aprobación. Su ${inSym} sigue en su cartera; la aprobación sin usar cubre solo el monto exacto del intercambio.`
-      : `No se envió nada. Su ${inSym} sigue en su cartera.`,
+    failedBody: inSym => `No se envió nada. Su ${inSym} sigue en su cartera.`,
+    sentFailedBody: 'El intercambio se envió pero no llegó a completarse. El registro de transacción de abajo muestra qué se movió; la tarifa de red está gastada.',
     stuckBody: outSym => `El intercambio puede haber llegado o no. Su saldo de ${outSym} se resolverá solo; no inicie un segundo intercambio.`,
   },
   cow: {
@@ -286,9 +285,9 @@ export const convertEs: ConvertMessages = {
     solInsufficientLine: (needed, balance) =>
       `El depósito envía ${needed} - tienes ${balance}.`,
     noQuoteTitle: 'Sin mercado en vivo',
-    noQuoteBody: 'Este par no tiene un mercado en vivo ahora mismo. No se envió nada. Elige otra sede o inténtalo más tarde.',
+    noQuoteBody: 'Este par no tiene un mercado en vivo ahora mismo. Elige otra sede o inténtalo más tarde.',
     minDepositBody: (venueMessage, min) =>
-      `Este importe está por debajo del mínimo del exchange: “${venueMessage}” (mínimo ${min}). No se envió nada - sube el importe e inténtalo de nuevo.`,
+      `Este importe está por debajo del mínimo del exchange: “${venueMessage}” (mínimo ${min}). Sube el importe e inténtalo de nuevo.`,
   },
 
   chain: {
@@ -378,8 +377,8 @@ export const convertEs: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: 'El exchange no fue accesible ahora mismo. No se envió nada - revisa tu conexión e inténtalo en un momento.',
-    quoteRefused: 'No hay cotización para este par ahora mismo. No se envió nada.',
+    quoteUnreachable: 'El exchange no fue accesible ahora mismo. Revisa tu conexión e inténtalo en un momento.',
+    quoteRefused: 'No hay cotización para este par ahora mismo.',
     buildRefused: 'No se pudo preparar el intercambio. No se movió nada - inténtalo de nuevo en un momento.',
     quoteUnavailable: code => `Cotización no disponible (${code}).`,
     quoteUnconfigured: 'Aún no hay un exchange configurado en este relay para este par - tu billetera no tiene ningún problema.',

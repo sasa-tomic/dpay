@@ -67,7 +67,10 @@ export function EvmStatePanel({record, onBack}: {record: ConvertRecord; onBack: 
       {record.step === 'failed_refunded' ? (
         <View testID="convert-failed">
           <Text style={S.convertStateTitle}>{M.convert.failedTitle}</Text>
-          <Text style={S.convertStateBody}>{isCow ? M.convert.cow.failedBody(record.inSymbol, detail) : M.convert.evm.failedBody(record.inSymbol, detail)}</Text>
+          {/* The disposition reads the structured truth (the persisted leg hashes), never the
+              failure string: with a broadcast leg on record, "nothing was sent" would be a lie
+              - the tx is on-chain and the network fee is spent. */}
+          <Text style={S.convertStateBody}>{isCow ? M.convert.cow.failedBody(record.inSymbol, detail) : legs.length > 0 ? M.convert.evm.sentFailedBody : M.convert.evm.failedBody(record.inSymbol)}</Text>
           {legs.length > 0 ? <Text style={S.convertStateMeta}>{M.convert.doneTx(legs[0]!)}</Text> : null}
         </View>
       ) : null}

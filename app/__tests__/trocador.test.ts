@@ -233,7 +233,9 @@ describe('convert.ts — the trocador family dispatch', () => {
     // The copy law (spec 2026-10-04 §3): the verdict's message is venue-less - the venue
     // rides the error object (above) and the Details fold, never the primary line.
     expect(noQuote.message).toContain('no live market right now');
-    expect(noQuote.message).toContain('Nothing was sent');
+    // The no-quote verdict is a PRE-ATTEMPT state: per the founder's copy law the
+    // "Nothing was sent" family appears only in real send-attempt refusals, never here.
+    expect(noQuote.message).not.toContain('Nothing was sent');
     expect(noQuote.message).not.toContain('Trocador');
   });
 

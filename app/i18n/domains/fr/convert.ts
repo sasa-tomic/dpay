@@ -173,9 +173,8 @@ export const convertFr: ConvertMessages = {
     heading: (inSym, outSym, chain) => `Convertir ${inSym} en ${outSym} (${chain})`,
     feeLabel: unit => `Frais de réseau (${unit}, estimation)`,
     pendingBody: 'L’échange est confirmé sur la chaîne. Attendez que votre solde l’affiche.',
-    failedBody: (inSym, detail) => String(detail).includes('approve landed')
-      ? `L’échange a échoué après l’approbation. Vos ${inSym} sont toujours dans votre portefeuille ; l’approbation inutilisée ne couvre que le montant exact de l’échange.`
-      : `Rien n’a été envoyé. Vos ${inSym} sont toujours dans votre portefeuille.`,
+    failedBody: inSym => `Rien n’a été envoyé. Vos ${inSym} sont toujours dans votre portefeuille.`,
+    sentFailedBody: 'L’échange a été envoyé mais ne s’est pas terminé. L’entrée de transaction ci-dessous montre ce qui a bougé. Les frais de réseau sont dépensés.',
     stuckBody: outSym => `L’échange a pu aboutir ou non. Votre solde de ${outSym} se résoudra de lui-même ; ne lancez pas un second échange.`,
   },
   cow: {
@@ -286,9 +285,9 @@ export const convertFr: ConvertMessages = {
     solInsufficientLine: (needed, balance) =>
       `Le dépôt envoie ${needed} - vous avez ${balance}.`,
     noQuoteTitle: 'Pas de marché en direct',
-    noQuoteBody: 'Cette paire n\u2019a pas de marché en direct pour le moment. Rien n\u2019a été envoyé. Choisissez une autre plateforme ou réessayez plus tard.',
+    noQuoteBody: 'Cette paire n\u2019a pas de marché en direct pour le moment. Choisissez une autre plateforme ou réessayez plus tard.',
     minDepositBody: (venueMessage, min) =>
-      `Ce montant est en dessous du minimum de la bourse : « ${venueMessage} » (minimum ${min}). Rien n\u2019a été envoyé - augmentez le montant et réessayez.`,
+      `Ce montant est en dessous du minimum de la bourse : « ${venueMessage} » (minimum ${min}). Augmentez le montant et réessayez.`,
   },
 
   chain: {
@@ -378,8 +377,8 @@ export const convertFr: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: 'La bourse est inaccessible pour le moment. Rien n\u2019a été envoyé - vérifiez votre connexion et réessayez dans un instant.',
-    quoteRefused: 'Pas de devis pour cette paire pour le moment. Rien n\u2019a été envoyé.',
+    quoteUnreachable: 'La bourse est inaccessible pour le moment. Vérifiez votre connexion et réessayez dans un instant.',
+    quoteRefused: 'Pas de devis pour cette paire pour le moment.',
     buildRefused: 'L\u2019échange n\u2019a pas pu être préparé. Rien n\u2019a bougé - réessayez dans un instant.',
     quoteUnavailable: code => `Devis indisponible (${code}).`,
     quoteUnconfigured: 'Aucune bourse n\u2019est encore configurée sur ce relay pour cette paire - votre portefeuille n\u2019a aucun problème.',

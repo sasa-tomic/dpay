@@ -282,9 +282,12 @@ export type ConvertMessages = {
     feeLabel: (unit: string) => string;
     /** Broadcast-and-watching: the receipts are the ledger; the screen resolves itself. */
     pendingBody: string;
-    /** The failure body: names what still sits in the wallet, per failure class (the detail
-     *  is the executor's own classification, never provider prose). */
-    failedBody: (inSym: string, detail: string) => string;
+    /** The nothing-broadcast failure body: names what still sits in the wallet. Legal only
+     *  when no leg was ever broadcast (the panel reads the persisted hashes, not the text). */
+    failedBody: (inSym: string) => string;
+    /** The sent-but-stopped failure body: a leg is on-chain, so the fee is spent and no
+     *  balance claim is made; the transaction record below carries the hashes. */
+    sentFailedBody: string;
     /** A receipt never landed: the honest unknown, the hashes stay watchable. */
     stuckBody: (outSym: string) => string;
   };
@@ -842,9 +845,8 @@ export const convertEn: ConvertMessages = {
     heading: (inSym, outSym, chain) => `Convert ${inSym} to ${outSym} (${chain})`,
     feeLabel: unit => `Network fee (${unit}, estimate)`,
     pendingBody: 'The swap is on-chain and confirmed. Waiting for your balance to show it.',
-    failedBody: (inSym, detail) => String(detail).includes('approve landed')
-      ? `The swap failed at the last step. Your ${inSym} is still in your wallet; the signed permission covers exactly this swap amount and expires unused.`
-      : `Nothing was sent. Your ${inSym} is still in your wallet.`,
+    failedBody: inSym => `Nothing was sent. Your ${inSym} is still in your wallet.`,
+    sentFailedBody: 'The swap was sent but stopped before completing. The transaction record below shows what moved; the network fee is spent.',
     stuckBody: outSym => `The swap may or may not have landed. Your ${outSym} balance will resolve on its own; do not start a second swap.`,
   },
   cow: {
@@ -958,9 +960,9 @@ export const convertEn: ConvertMessages = {
     solInsufficientLine: (needed, balance) =>
       `The deposit sends ${needed} - you have ${balance}.`,
     noQuoteTitle: 'No live market',
-    noQuoteBody: 'This pair has no live market right now. Nothing was sent. Pick another venue or try again later.',
+    noQuoteBody: 'This pair has no live market right now. Pick another venue or try again later.',
     minDepositBody: (venueMessage, min) =>
-      `This amount is below the exchange's minimum: \u201C${venueMessage}\u201D (minimum ${min}). Nothing was sent - raise the amount and try again.`,
+      `This amount is below the exchange's minimum: \u201C${venueMessage}\u201D (minimum ${min}). Raise the amount and try again.`,
   },
 
   /** The chain family (2026-09-28, the any-pair mandate): one consent, two phases - the
@@ -1060,8 +1062,8 @@ export const convertEn: ConvertMessages = {
   },
 
   errors: {
-    quoteUnreachable: 'The exchange is unreachable right now. Nothing was sent - check your connection and try again in a moment.',
-    quoteRefused: 'No quote for this pair right now. Nothing was sent.',
+    quoteUnreachable: 'The exchange is unreachable right now. Check your connection and try again in a moment.',
+    quoteRefused: 'No quote for this pair right now. Try again in a moment.',
     buildRefused: 'The exchange could not be prepared. Nothing moved - try again in a moment.',
     quoteUnavailable: code => `Quote unavailable (code ${code}).`,
     quoteUnconfigured: 'No exchange is set up on this relay for this pair yet - nothing is wrong with your wallet.',

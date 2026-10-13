@@ -96,6 +96,13 @@ export async function executeEvmConvert(
         const partial = hashes.length > 1 ? `approve landed (exact-amount allowance to ${venueDisplayName(leg.venueId)}); ` : '';
         return advance({step: 'failed_refunded', failureCode: 'swap_refused', failureDetail: `${partial}${msg.slice(0, 160)}`});
       }
+      // Anything thrown after a broadcast is an honest unknown: the leg may land, revert, or
+      // never mine. failed_refunded claims the in-amount stayed put - untrue once a swap leg
+      // was sent. stuck is the state whose copy says exactly that, and its receipts block
+      // carries the hashes for the re-check.
+      if (hashes.length > 0) {
+        return advance({step: 'stuck', failureCode: 'unknown', failureDetail: hashes.join(',')});
+      }
       return advance({step: 'failed_refunded', failureCode: 'unknown', failureDetail: msg.slice(0, 200)});
     }
     if (hashes.length > 0) {
