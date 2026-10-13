@@ -764,6 +764,20 @@ pub fn app(state: AppState) -> Router {
             "/test/jupiter-upstream/hits",
             axum::routing::get(jupiter_stub_hits),
         );
+    // Test-only MT PELERIN QUOTE UPSTREAM (flow 52 - the cash-out sheet's attributed
+    // quote): the flow's hermetic relay env points the quote proxy (src/mtpelerin.rs,
+    // DPAY_MTPELERIN_CTKN + DPAY_MTPELERIN_API_BASE) at THIS route ON THE SAME SERVER, so
+    // the flow drives the REAL client path - app → GET /api/v1/mtpelerin/quote → the
+    // relay's quote proxy → THIS stub - offline. The answer is the venue's documented
+    // currency_rates/convert shape (price-quote-api.md, fetched 2026-10-12): `destAmount`
+    // is the NET final figure, fixed by the stub (a quote is an attributed figure, not an
+    // order). The CONVERSION route never dials here - it is local since the venue's API
+    // tier closed (2026-10-13) - so this stub exists for the quote alone.
+    #[cfg(feature = "test-helpers")]
+    let api = api.route(
+        "/test/mtpelerin-upstream/currency_rates/convert",
+        axum::routing::post(mtpelerin_stub_quotes),
+    );
     // Test-only COW UPSTREAM (the second EVM venue's flow pin, 2026-10-03): the harness
     // points the cow proxy (src/cow.rs, DPAY_COW_API_BASE set explicitly in
     // harness/relay.mjs + flowRelay.ts) at these routes ON THE SAME SERVER, so the flow
@@ -2043,6 +2057,26 @@ async fn jupiter_stub_configure(Json(req): Json<serde_json::Value>) -> Response 
         last_valid_block_height: height,
     });
     (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response()
+}
+
+/// `POST /api/v1/test/mtpelerin-upstream/currency_rates/convert` - the venue's documented
+/// quote answer, fixed (the stub exists so flow 52's quote rides the REAL relay proxy
+/// offline; the figure is an attributed net value, not an order - see the mount note).
+#[cfg(feature = "test-helpers")]
+async fn mtpelerin_stub_quotes() -> Response {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "fees": {"networkFee": "2.2605", "fixFee": 0},
+            "sourceCurrency": "ZCHF",
+            "destCurrency": "CHF",
+            "sourceNetwork": "ethereum",
+            "destNetwork": "fiat",
+            "sourceAmount": 2,
+            "destAmount": "97.7395"
+        })),
+    )
+        .into_response()
 }
 
 /// `GET /api/v1/test/jupiter-upstream/swap/v1/quote` — the venue's quote shape, echoing the

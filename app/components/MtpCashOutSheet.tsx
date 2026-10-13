@@ -6,44 +6,43 @@ import {C} from '../config/palette';
 import {M} from '../i18n';
 import {formatClock, formatMonthDayYear} from '../i18n/intl';
 import {useEscapeToClose} from '../hooks/useHotkeys';
-import type {Identity} from '../lib/types';
 import type {SelectableAsset} from '../config/assets';
 import {MTP_FACTS_READ_ON, type MtpBuyAsset} from '../config/funding';
 import {toBaseUnitsSoft} from '../evm/chains';
 import {cmpRaw} from '../lib/amount';
 import {fmtAssetCompact, randNonceHex, toUnits} from '../lib/format';
 import {StatePanel} from './ConvertStatePanel';
-import {EvmWithdrawSheet} from './EvmWithdrawSheet';
+import {openWidgetUrl} from './MtpBuySheet';
+import {buildMtpSellWidgetLink} from '../ramp/mtpelerin';
 import {adoptConvertRecord, convertResumeSnapshot, subscribeConvertRecords} from '../convertResume';
 import type {ConvertRecord} from '../convert/types';
 import {
-  createMtpCashOrder, fetchMtpCashQuote, isValidIban, mtpCashStatusUrl, mtpSellNetworkOf,
-  type MtpCashOrder, type MtpCashQuote,
+  createMtpCashOrder, fetchMtpCashQuote, mtpCashStatusUrl, mtpSellNetworkOf,
+  type MtpCashQuote,
 } from '../services/mtpelerin';
 
-// MtpCashOutSheet — the Mt Pelerin OFF-ramp's ONE surface (plan R2 step 2). Three phases in
+// MtpCashOutSheet - the Mt Pelerin OFF-ramp's ONE surface (plan R2 step 2). Two phases in
 // one root-mounted card (the MtpBuySheet mount discipline):
 //
-//   form      IBAN + account holder + amount; the quote is fetched THROUGH THE RELAY and shown
-//             attributed + timestamped (plan §4: relayed, never computed); the provider's own
-//             published figures ride verbatim + dated. Continue REGISTERS the sell order THROUGH
-//             THE RELAY: since the venue's API tier closed for dpay (2026-10-13) the creation is
-//             LOCAL (the relay mints the `mtp-…` correlation id; it rides the widget link's `oid`
-//             and the venue's completion webhook echoes it back), and the venue's deposit address
-//             must ride the record for the send handoff (fail-closed 'shape' while it does not).
-//             This is the flow's ONE pre-broadcast side effect (lifecycle law C1): the
-//             correlation id exists from here on, and backing out before the send leaves it
-//             unused (the send-phase note says so, verbatim).
-//   send      the wallet's OWN send: EvmWithdrawSheet prefilled to `offRampAddress` with the
-//             exact asset/amount (the gas honesty gate + the submitted-not-settled terminal
-//             are that sheet's, untouched). The record is ADOPTED at broadcast acceptance
-//             (`onSent`) — no record exists before value moves (C1), and from then on the
-//             resume engine drives it whether or not this sheet stays open.
-//   lifecycle the adopted record renders through ConvertStatePanel (the CeFi lifecycle law:
-//             awaiting_deposit → done | provider_refunded, webhook-first — the relay's status
-//             store answers with zero upstream calls and caps reads at one per order per
-//             minute; the engine mirrors that floor client-side). The provider Stop semantics
-//             are the C2 flavor: dpay stops watching, the venue order's life is the venue's.
+//   form      amount; the quote is fetched THROUGH THE RELAY and shown attributed +
+//             timestamped (plan §4: relayed, never computed); the provider's own published
+//             figures ride verbatim + dated. Continue REGISTERS the sell order THROUGH THE
+//             RELAY (local creation since the venue's API tier closed for dpay,
+//             2026-10-13: the relay mints the `mtp-…` correlation id; the bank details and
+//             the deposit address are the WIDGET SESSION's to collect - dpay collects
+//             neither). The adopted lifecycle record is born HERE (the C1 moment moved
+//             with the flow: value moves only inside the user's widget session, which dpay
+//             cannot observe, so the watch starts at registration).
+//   lifecycle the adopted record renders through ConvertStatePanel under the widget
+//             handoff note; the sell widget link (the venue's documented bare URL - no
+//             sell-side or correlation parameters are documented, so nothing is prefilled
+//             and no oid can ride it, the ramp builder's doc) opens EXTERNAL through the
+//             R1 buy open pattern (the `__DPAY_TEST_MTP_OPEN` seam; an open failure keeps
+//             the sheet with its honest line and a retry). The panel is webhook-first -
+//             the relay's status store answers with zero upstream calls and caps reads at
+//             one per order per minute; the engine mirrors that floor client-side. The
+//             provider Stop semantics are the C2 flavor: dpay stops watching, the venue
+//             order's life is the venue's.
 //
 // CANCEL vs CLOSE: only the form's Cancel button rejects. Backdrop, Escape and Android Back
 // dismiss without answering anything. The typed error exists so the mounting Wallet (and
@@ -59,17 +58,16 @@ export class MtpCashOutUserRejected extends Error {
   }
 }
 
-export type MtpCashOutSendPrefill = {address: string; amount: string};
-
-/** The lifecycle record a successful broadcast adopts (pure; jest-pinned). Legless +
- *  providerRef (the CeFi shape), born at `awaiting_deposit`: the venue holds the order, the
- *  wallet's own transfer is on the wire, and the provider driver advances it by the relay's
- *  webhook-first status reads. The venue's deposit facts ride the providerDeposit block
- *  VERBATIM (`offRampAddress`, the exact typed amount, the venue's own expiry when the order
- *  carried one — `noExpiryLine` when it did not). `expectedNet` is the QUOTE's net fiat figure
- *  (the venue's own `destAmount`, converted to minor units for the record's raw-money field —
- *  the same normalization every cefi deposit block applies); no fee split is recorded because
- *  the venue publishes none for this method (the net figure already includes all fees). */
+/** The lifecycle record a successful registration adopts (pure; jest-pinned). Legless +
+ *  providerRef (the CeFi shape), born `awaiting_deposit` at REGISTRATION (the widget flow's
+ *  C1 moment: value moves only inside the user's own widget session, which dpay cannot
+ *  observe, so the watch starts here). NO `providerDeposit` block: dpay never learns a
+ *  deposit address (the venue's own widget session holds it and the webhook payload never
+ *  carries one), and a handoff block without an address would invite a transfer to
+ *  nothing. `expectedNet` is the QUOTE's net fiat figure (the venue's own `destAmount`,
+ *  converted to minor units for the record's raw-money field - the same normalization
+ *  every cefi deposit block applies); no fee split is recorded because the venue publishes
+ *  none for this method (the net figure already includes all fees). */
 export function buildMtpCashOutRecord(args: {
   id: string;
   createdAtMs: number;
@@ -78,12 +76,11 @@ export function buildMtpCashOutRecord(args: {
    *  status route's key. */
   orderId: string;
   statusUrl: string;
-  offRampAddress: string;
   /** The input rail identifier: the ERC-20 contract, lowercase (the Solana-record convention:
    *  no IC catalog ids on this rail — the ledger string names the token contract). */
   inLedger: string;
-  /** The exact decimal amount the send moves (the user's typed figure, verbatim). */
-  depositAmountDecimal: string;
+  /** The exact decimal amount the user registered (the typed figure, verbatim). */
+  registeredAmountDecimal: string;
   /** The same amount in the token's raw units — the record's amountIn. */
   amountIn: string;
   inSymbol: string;
@@ -91,7 +88,6 @@ export function buildMtpCashOutRecord(args: {
   /** The venue's own net fiat figure for the amount (decimal string) — the expected end
    *  state. CHF is the v1 payout currency (plan §8 item 4). */
   expectedFiatDecimal: string;
-  expiresAtMs: number | null;
 }): ConvertRecord {
   return {
     id: args.id,
@@ -116,38 +112,27 @@ export function buildMtpCashOutRecord(args: {
     slippageBps: 0,
     legs: [],
     providerRef: {orderId: args.orderId, statusUrl: args.statusUrl},
-    providerDeposit: {
-      depositAddress: args.offRampAddress,
-      depositAmount: args.depositAmountDecimal,
-      ...(args.expiresAtMs != null ? {expiresAtMs: args.expiresAtMs} : {}),
-    },
   };
 }
 
-export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasWei, gasChecking = false, online = true, onClose, onReject, onSent: onSentRefresh}: {
-  identity: Identity;
+export function MtpCashOutSheet({relayUrl, asset, token, balance, onClose, onReject, onWidgetOpened}: {
   /** The relay this phone talks to — the quote, the order AND the record's status read all
    *  ride it (the trocador-family rule: there is no keyless venue surface here). */
   relayUrl: string;
-  /** The SELECTED EVM asset row — the send spends THIS token on THIS chain. The opener
+  /** The SELECTED EVM asset row - the sale sells THIS token on THIS chain. The opener
    *  resolved it through `mtpCashOutEligible`, so `token` always has a value. */
   asset: SelectableAsset & {protocol: 'evm'};
   token: MtpBuyAsset;
-  /** The token's LAST-KNOWN raw balance — the send's over-balance gate reads the same view. */
+  /** The token's LAST-KNOWN raw balance - the form's over-balance gate reads the same view. */
   balance: string | null;
-  gasWei: string | null;
-  gasChecking?: boolean;
-  online?: boolean;
   onClose: () => void;
   /** Cancel observes the typed user-rejected error. Absent = Cancel simply closes. */
   onReject?: (e: MtpCashOutUserRejected) => void;
-  /** Fired when the send's broadcast was ACCEPTED (after the record's adoption) — the
-   *  mounting Wallet refreshes balances/history with it. */
-  onSent?: () => void;
+  /** Fired once the sell widget link OPENED (the MtpBuySheet contract): the mounting Wallet
+   *  arms its useAppActive rising-edge refresh with it. */
+  onWidgetOpened?: () => void;
 }) {
-  const [phase, setPhase] = useState<'form' | 'send' | 'lifecycle'>('form');
-  const [iban, setIban] = useState('');
-  const [holder, setHolder] = useState('');
+  const [phase, setPhase] = useState<'form' | 'lifecycle'>('form');
   const [amountStr, setAmountStr] = useState('');
   const [quote, setQuote] = useState<MtpCashQuote | null>(null);
   const [quotePending, setQuotePending] = useState(false);
@@ -155,10 +140,9 @@ export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasW
   const quoteSeq = useRef(0);
   const [ordering, setOrdering] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [order, setOrder] = useState<MtpCashOrder | null>(null);
-  const [prefill, setPrefill] = useState<MtpCashOutSendPrefill | null>(null);
   const [record, setRecord] = useState<ConvertRecord | null>(null);
   const [liveRecord, setLiveRecord] = useState<ConvertRecord | null>(null);
+  const [widgetFailed, setWidgetFailed] = useState(false);
 
   useEscapeToClose(phase === 'form' ? onClose : () => {});
 
@@ -166,14 +150,12 @@ export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasW
   const unit = asset.symbol;
   const fmt = (rawAmount: string) => fmtAssetCompact(rawAmount, decimals, unit, undefined, asset.minFractionDigits);
 
-  // The amount's raw units + the balance gate (the send's own rule, mirrored so the form
-  // cannot price an impossible cash-out).
+  // The amount's raw units + the balance gate (the venue's own economics, mirrored so the
+  // form cannot price an impossible cash-out).
   const raw = toBaseUnitsSoft(amountStr, decimals);
   const balanceKnown = balance != null;
   const overBalance = balanceKnown && cmpRaw(raw, balance!) > 0;
 
-  const ibanOk = isValidIban(iban);
-  const holderOk = holder.trim().length > 0;
   const amountOk = raw !== '0' && !overBalance;
   const sourceNetwork = mtpSellNetworkOf(asset.chainId);
 
@@ -216,9 +198,9 @@ export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasW
   }, [record]);
 
   const continueCashOut = useCallback(async () => {
-    // quoteOk on the gate: the order is placed only when the venue's attributed net figure is
+    // quoteOk on the gate: the order is registered only when the venue's attributed net figure is
     // on screen (the review's honesty law) - no quote, no order, never a '0 expected' record.
-    if (!ibanOk || !holderOk || !amountOk || quote == null || ordering) return;
+    if (!amountOk || quote == null || ordering) return;
     setOrdering(true);
     setErr(null);
     try {
@@ -230,53 +212,58 @@ export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasW
         destCurrency: 'CHF',
         sourceAmount: amountStr.trim(),
         ...(sourceNetwork != null ? {sourceNetwork} : {}),
-        iban: iban.replace(/[\s-]/g, '').toUpperCase(),
-        holderName: holder.trim(),
         clientOrderId: recordId,
       });
-      setPrefill({address: created.offRampAddress, amount: amountStr.trim()});
-      setOrder(created);
-      setPhase('send');
+      // The record is born at REGISTRATION (the widget flow's C1 moment): the sale itself
+      // - the deposit to the venue's own address - happens inside the user's widget
+      // session, which dpay cannot observe, so the watch starts here and the engine drives
+      // it whether or not this sheet stays open. A kill after this point still leaves the
+      // record live in the engine (crash safety: the correlation order exists).
+      const rec = buildMtpCashOutRecord({
+        id: `${created.orderId}`,
+        createdAtMs: Date.now(),
+        venueId: 'mtpelerin',
+        orderId: created.orderId,
+        statusUrl: mtpCashStatusUrl(relayUrl, created.orderId),
+        inLedger: asset.address.toLowerCase(),
+        registeredAmountDecimal: amountStr.trim(),
+        amountIn: raw,
+        inSymbol: unit,
+        inDecimals: decimals,
+        expectedFiatDecimal: quote.destAmount,
+      });
+      setRecord(rec);
+      void adoptConvertRecord(rec);
+      setPhase('lifecycle');
+      // The handoff: open the venue's sell widget EXTERNAL (the R1 buy pattern - the
+      // documented bare link, the user's own session). An open failure keeps the sheet on
+      // the lifecycle view with its honest line and a retry (the registration + the watch
+      // stand; only the window is missing).
+      try {
+        await openWidgetUrl(buildMtpSellWidgetLink());
+        setWidgetFailed(false);
+        onWidgetOpened?.();
+      } catch {
+        setWidgetFailed(true);
+      }
     } catch (e: unknown) {
       setErr(orderErrLine(e));
     } finally {
       setOrdering(false);
     }
-  }, [ibanOk, holderOk, amountOk, quote, ordering, relayUrl, token, amountStr, sourceNetwork, iban, holder]);
+  }, [amountOk, quote, ordering, relayUrl, token, amountStr, sourceNetwork, asset.address, raw, unit, decimals, onWidgetOpened]);
 
-  // Broadcast acceptance (EvmWithdrawSheet's onSent fires the moment the network ACCEPTS —
-  // done AND unknown both land here): build + adopt the lifecycle record. A kill after this
-  // point still leaves the record live in the engine (crash safety — the order and the funds
-  // both exist; only the watching was missing).
-  const handleSent = useCallback(() => {
-    if (order == null || record != null) return;
-    const rec = buildMtpCashOutRecord({
-      id: `${order.orderId}`,
-      createdAtMs: Date.now(),
-      venueId: 'mtpelerin',
-      orderId: order.orderId,
-      statusUrl: mtpCashStatusUrl(relayUrl, order.orderId),
-      offRampAddress: order.offRampAddress,
-      inLedger: asset.address.toLowerCase(),
-      depositAmountDecimal: amountStr.trim(),
-      amountIn: raw,
-      inSymbol: unit,
-      inDecimals: decimals,
-      expectedFiatDecimal: quote != null ? quote.destAmount : '0',
-      expiresAtMs: order.expiresAtMs,
-    });
-    setRecord(rec);
-    void adoptConvertRecord(rec);
-    onSentRefresh?.();
-  }, [order, record, relayUrl, asset.address, amountStr, raw, unit, decimals, quote, onSentRefresh]);
-
-  // The send step's close: Done/Escape after a send lands the lifecycle view; backing out
-  // BEFORE any send dismisses the whole sheet (the venue order expires unused — the note said
-  // so while the form was live).
-  const sendClose = useCallback(() => {
-    if (record != null) setPhase('lifecycle');
-    else onClose();
-  }, [record, onClose]);
+  // The widget link's retry: the registration and the watch stand; only the window is
+  // missing. Same helper, same seam, one tap away.
+  const retryWidget = useCallback(async () => {
+    try {
+      await openWidgetUrl(buildMtpSellWidgetLink());
+      setWidgetFailed(false);
+      onWidgetOpened?.();
+    } catch {
+      setWidgetFailed(true);
+    }
+  }, [onWidgetOpened]);
 
   const cancel = useCallback(() => {
     onReject?.(new MtpCashOutUserRejected());
@@ -292,59 +279,36 @@ export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasW
           <ScrollView style={S.pickScroll}>
             {phase === 'lifecycle' && shown != null ? (
               <View testID="mtp-cashout-lifecycle">
+                {/* The handoff note: the sale itself happens in the venue's own window (the
+                    bank details and the deposit address are the session's, never dpay's);
+                    dpay watches the correlation order here. */}
+                <Text testID="mtp-cashout-widget-note" style={S.receiptNote}>
+                  {M.deposit.mtpCash.widgetNote}
+                </Text>
+                {widgetFailed ? (
+                  <>
+                    <Text testID="mtp-cashout-widget-failed" style={S.err}>
+                      {M.deposit.mtpCash.widgetOpenFailed}
+                    </Text>
+                    <Pressable
+                      testID="btn-mtp-cashout-widget-retry"
+                      style={S.ghostBtn}
+                      onPress={() => { void retryWidget(); }}
+                      accessibilityRole="button"
+                      accessibilityLabel={M.deposit.mtpCash.widgetOpenRetry}>
+                      <Text style={S.ghostBtnText}>{M.deposit.mtpCash.widgetOpenRetry}</Text>
+                    </Pressable>
+                  </>
+                ) : null}
                 <StatePanel record={shown} onBack={onClose} />
               </View>
-            ) : phase === 'send' && order != null ? (
-              <>
-                {/* The order's honest state while the wallet's own send is pending: the
-                    correlation id exists from the Continue tap (C1's one pre-broadcast side
-                    effect), and backing out now leaves it unused (said verbatim). */}
-                <Text testID="mtp-cashout-order-note" style={S.receiptNote}>
-                  {M.deposit.mtpCash.orderNote(order.orderId)}
-                </Text>
-                <EvmWithdrawSheet
-                  identity={identity}
-                  asset={asset}
-                  balance={balance}
-                  gasWei={gasWei}
-                  gasChecking={gasChecking}
-                  online={online}
-                  prefill={prefill}
-                  onPrefillConsumed={() => setPrefill(null)}
-                  onSent={handleSent}
-                  onClose={sendClose}
-                />
-              </>
             ) : (
               <>
                 <Text style={S.pickTitle}>{M.deposit.mtpCash.sheetTitle}</Text>
                 <Text style={S.receiptNote}>{M.deposit.mtpCash.cashOutLine(unit, asset.chainName)}</Text>
 
-                <Text style={S.inputLabel}>{M.deposit.mtpCash.ibanLabel}</Text>
-                <TextInput
-                  testID="mtp-cashout-iban"
-                  accessibilityLabel={M.deposit.mtpCash.ibanLabel}
-                  style={S.withdrawAddrInput}
-                  value={iban}
-                  onChangeText={setIban}
-                  autoCapitalize="characters"
-                  autoCorrect={false}
-                  placeholder="CH93 0076 2011 6238 5295 7"
-                  placeholderTextColor={C.sub2}
-                />
-                {iban.length > 0 && !ibanOk ? <Text testID="mtp-cashout-iban-err" style={S.err}>{M.deposit.mtpCash.ibanInvalid}</Text> : null}
-
-                <Text style={S.inputLabel}>{M.deposit.mtpCash.holderLabel}</Text>
-                <TextInput
-                  testID="mtp-cashout-holder"
-                  accessibilityLabel={M.deposit.mtpCash.holderLabel}
-                  style={S.withdrawAddrInput}
-                  value={holder}
-                  onChangeText={setHolder}
-                  autoCapitalize="words"
-                  placeholderTextColor={C.sub2}
-                />
-                {holder.length > 0 && !holderOk ? <Text testID="mtp-cashout-holder-err" style={S.err}>{M.deposit.mtpCash.holderInvalid}</Text> : null}
+                {/* The bank details (IBAN, holder) are the WIDGET SESSION's to collect: the
+                    venue's API tier is closed for dpay, so no bank data enters dpay at all. */}
 
                 <Text style={S.inputLabel}>{M.deposit.mtpCash.amountLabel(unit)}</Text>
                 <TextInput
@@ -386,12 +350,12 @@ export function MtpCashOutSheet({identity, relayUrl, asset, token, balance, gasW
 
                 <Pressable
                   testID="btn-mtp-cashout-continue"
-                  style={[S.primaryWide, (!ibanOk || !holderOk || !amountOk || quote == null || ordering) && S.dim]}
+                  style={[S.primaryWide, (!amountOk || quote == null || ordering) && S.dim]}
                   onPress={() => { void continueCashOut(); }}
-                  disabled={!ibanOk || !holderOk || !amountOk || quote == null || ordering}
+                  disabled={!amountOk || quote == null || ordering}
                   accessibilityRole="button"
                   accessibilityLabel={M.deposit.mtpCash.continueLabel}
-                  accessibilityState={{disabled: !ibanOk || !holderOk || !amountOk || quote == null || ordering}}>
+                  accessibilityState={{disabled: !amountOk || quote == null || ordering}}>
                   {ordering
                     ? <>
                         <ActivityIndicator size="small" color={C.brandInk} />

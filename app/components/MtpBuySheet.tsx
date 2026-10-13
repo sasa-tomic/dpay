@@ -46,8 +46,9 @@ type OpenLink = (url: string) => Promise<void>;
 
 /** The one place the widget URL leaves the app. The `__DPAY_TEST_MTP_OPEN` seam (the
  *  `__DPAY_TEST_DEEPLINK` pattern) lets the flow harness answer success AND failure
- *  deterministically; production never sets it and rides Linking. */
-function openWidgetUrl(url: string): Promise<void> {
+ *  deterministically; production never sets it and rides Linking. The cash-out sheet's
+ *  handoff opens through the same helper (ONE seam, ONE open path per venue). */
+export function openWidgetUrl(url: string): Promise<void> {
   const seam = (globalThis as {__DPAY_TEST_MTP_OPEN?: OpenLink}).__DPAY_TEST_MTP_OPEN;
   return seam ? seam(url) : Linking.openURL(url);
 }

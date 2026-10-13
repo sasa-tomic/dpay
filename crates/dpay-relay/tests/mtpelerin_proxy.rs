@@ -303,8 +303,6 @@ fn conversion_body() -> String {
         "destCurrency": "CHF",
         "sourceAmount": "100",
         "sourceNetwork": "ethereum",
-        "iban": "CH9300762011623852957",
-        "holderName": "Test Holder",
     })
     .to_string()
 }
@@ -601,18 +599,6 @@ async fn conversion_refuses_malformed_bodies_and_mints_nothing() {
     type Mutate = Box<dyn Fn(&mut serde_json::Value)>;
     for (label, mutate) in [
         (
-            "drop iban",
-            Box::new(|v: &mut serde_json::Value| {
-                v.as_object_mut().unwrap().remove("iban");
-            }) as Mutate,
-        ),
-        (
-            "empty holderName",
-            Box::new(|v: &mut serde_json::Value| {
-                v["holderName"] = serde_json::json!("");
-            }) as Mutate,
-        ),
-        (
             "both amounts",
             Box::new(|v: &mut serde_json::Value| {
                 v["destAmount"] = serde_json::json!("90");
@@ -652,6 +638,43 @@ async fn conversion_refuses_malformed_bodies_and_mints_nothing() {
         store.trim().is_empty(),
         "a refused conversion mints nothing: {store}"
     );
+}
+
+/// The legacy bank-detail fields are ACCEPTED and IGNORED (they fed the closed upstream
+/// order call; the venue's own widget session collects bank details now): a body carrying
+/// them registers the same local order, and the store line carries none of them.
+#[tokio::test]
+async fn conversion_accepts_but_ignores_the_legacy_bank_fields() {
+    let (stub, base) = spawn_stub().await;
+    let dir = temp_log_dir("legacy-fields");
+    let state = state_with(MtPelerinProxy::new(MtPelerinConfig {
+        ctkn: Some(STUB_CTKN.into()),
+        webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        webhook_auth_key: None,
+        quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
+        conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        api_base: base.clone(),
+        log_dir: dir.clone(),
+        trust_proxy: false,
+        status_spacing_secs: STATUS_SPACING_SECS,
+    }));
+    let mut body = serde_json::from_str::<serde_json::Value>(&conversion_body()).unwrap();
+    body["iban"] = serde_json::json!("CH9300762011623852957");
+    body["holderName"] = serde_json::json!("Test Holder");
+    let (status, headers, resp_body) =
+        post_json(&state, "/api/v1/mtpelerin/conversion", &body.to_string()).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&resp_body)
+    );
+    assert!(headers.get("X-Dpay-Order-Id").is_some());
+    let line = std::fs::read_to_string(dir.join("mtpelerin-orders.jsonl"))
+        .expect("the order store exists");
+    assert!(!line.contains("iban"), "the store carries no bank details: {line}");
+    assert!(!line.contains("Holder"), "the store carries no bank details: {line}");
+    assert_eq!(Stub::hits(&stub.conversion_hits), 0);
 }
 
 /// The conversion surface is LOCAL end to end (2026-10-13: dpay's Mt Pelerin API tier is

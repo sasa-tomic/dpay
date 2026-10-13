@@ -14,6 +14,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   MTP_ASSET_DELIVERY,
   MTP_WIDGET_BASE,
+  buildMtpSellWidgetLink,
   buildMtpWidgetLink,
   deriveValidationCode,
   mtpDeliveryChains,
@@ -199,6 +200,18 @@ describe('ramp/mtpelerin — end-to-end: derive → sign → link', () => {
     ).toBe(
       `${MTP_WIDGET_BASE}?net=mainnet&dnet=mainnet&bsc=CHF&bdc=ZCHF&addr=${ADDR1}&code=1234&hash=${encodeURIComponent(HASH1)}`,
     );
+  });
+});
+
+describe('ramp/mtpelerin - the sell widget link (the cash-out handoff)', () => {
+  // The venue's API tier is closed for dpay (2026-10-13) and the repo's pinned parameter
+  // docs (the ON-RAMP parameter page, fetched 2026-10-12) document NO sell-side parameters
+  // and NO free-form correlation (`oid`) parameter. The sell link is therefore the widget's
+  // documented bare base URL - and the pin below is the no-invented-parameters invariant:
+  // the byte-exact base, nothing appended, until the venue documents a real parameter set.
+  it('is the documented bare widget base - no invented prefill, no invented oid parameter', () => {
+    expect(buildMtpSellWidgetLink()).toBe('https://widget.mtpelerin.com/');
+    expect(buildMtpSellWidgetLink()).toBe(MTP_WIDGET_BASE);
   });
 });
 

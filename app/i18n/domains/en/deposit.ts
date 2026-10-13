@@ -381,8 +381,6 @@ export type DepositMessages = {
     sheetTitle: string;
     /** The one-line summary: `asset` is the token sold, `chain` the row's settlement chain. */
     cashOutLine: (asset: string, chain: string) => string;
-    ibanLabel: string;
-    holderLabel: string;
     amountLabel: (unit: string) => string;
     amountPlaceholder: string;
     quoteHeadline: string;
@@ -392,14 +390,14 @@ export type DepositMessages = {
      *  instant through the app's clock formatter). */
     quoteBy: (venue: string, time: string) => string;
     quotePending: string;
-    ibanInvalid: string;
-    holderInvalid: string;
-    /** The form's continue button: it CREATES the venue order (the flow's confirm gesture). */
+    /** The form's continue button: it REGISTERS the order and opens the venue's widget. */
     continueLabel: string;
     orderCreating: string;
-    /** The send-phase note: the order id + the nothing-sent truth (the venue order expires
-     *  unused). */
-    orderNote: (orderId: string) => string;
+    /** The lifecycle handoff note: the sale happens in the venue's own window; dpay watches. */
+    widgetNote: string;
+    /** The open-failure line + the retry (the registration and the watch stand). */
+    widgetOpenFailed: string;
+    widgetOpenRetry: string;
     /** Their published cash-out minimum (the price-quote API's refusal threshold). */
     minNote: string;
     counterparty: string;
@@ -723,19 +721,17 @@ export const depositEn: DepositMessages = {
     entryLabel: 'Cash out with Mt Pelerin',
     sheetTitle: 'Cash out with Mt Pelerin',
     cashOutLine: (asset, chain) => `Sell ${asset} on ${chain} and receive CHF in your bank account.`,
-    ibanLabel: 'IBAN',
-    holderLabel: 'Account holder',
     amountLabel: unit => `Amount (${unit})`,
     amountPlaceholder: '0',
     quoteHeadline: 'Quote',
     quoteNet: chf => `Payout: ${chf}, fees included.`,
     quoteBy: (venue, time) => `${venue}'s own figure, fetched at ${time}.`,
     quotePending: 'Fetching the quote…',
-    ibanInvalid: 'This IBAN does not check out. Check the country code and the digits.',
-    holderInvalid: 'Enter the account holder name as your bank knows it.',
     continueLabel: 'Continue',
     orderCreating: 'Creating the order with Mt Pelerin…',
-    orderNote: id => `Order ${id} is open. dpay watches it once the send below goes out; if you send nothing, the order expires unused.`,
+    widgetNote: 'Finish the sale in the Mt Pelerin window that opened. It collects your bank details and shows the deposit address; dpay watches the order here.',
+    widgetOpenFailed: 'The Mt Pelerin window did not open.',
+    widgetOpenRetry: 'Open Mt Pelerin again',
     minNote: 'Mt Pelerin refuses cash-outs under CHF 50 (or the equivalent).',
     counterparty: 'Mt Pelerin converts and pays out. dpay is not a party to it and takes no fee.',
     feesTitle: 'Fees and limits',
@@ -745,7 +741,7 @@ export const depositEn: DepositMessages = {
     feesAsOf: readOn => `Mt Pelerin's published figures, read ${readOn}.`,
     errUnconfigured: 'Cash out is not switched on yet. Try again later.',
     errUnreachable: 'The relay did not answer. Check your connection and try again.',
-    errRefused: 'Mt Pelerin refused the order. Check the amount and the IBAN.',
+    errRefused: 'Mt Pelerin refused the order. Check the amount and try again.',
     errUnavailable: 'Mt Pelerin could not be reached. Try again in a moment.',
     errShape: 'Mt Pelerin sent data dpay cannot read. Nothing was created; try again.',
   },

@@ -1,24 +1,28 @@
 /**
- * MtpCashOutSheet — the Mt Pelerin OFF-ramp's ONE surface (plan R2 step 2). The pins:
+ * MtpCashOutSheet - the Mt Pelerin OFF-ramp's ONE surface (plan R2 step 2, the widget
+ * handoff, 2026-10-13). The pins:
  *
  *   • The QUOTE is the relay's attributed + timestamped envelope, rendered verbatim: the
  *     venue's own net figure, "Mt Pelerin" named, the relay's read instant shown (§4: relayed,
  *     never computed). A quote that has not landed renders the pending line, never a number.
- *   • The order is created THROUGH THE RELAY SEAM (the service module, mocked here): the
+ *   • The order is registered THROUGH THE RELAY SEAM (the service module, mocked here): the
  *     correlation id is minted locally before the call (the partner-agreement law) and rides
- *     `clientOrderId`; the IBAN is normalized (spaces stripped, uppercase) and the holder name
- *     trimmed. The send phase renders the order id + the prefilled withdraw sheet.
+ *     `clientOrderId`; the request carries the pair, the network and the amount ONLY (bank
+ *     details are the widget session's, never dpay's). The record is born at REGISTRATION
+ *     (the widget flow's C1 moment) and carries NO providerDeposit block.
+ *   • The handoff opens the venue's sell widget EXTERNAL through the `__DPAY_TEST_MTP_OPEN`
+ *     seam (the R1 buy pattern): success fires the onWidgetOpened contract; an open failure
+ *     keeps the lifecycle view with its honest line and a retry. There is NO send step and
+ *     NO EvmWithdrawSheet.
  *   • Cancel is the TYPED user-rejected path (the MtpBuyUserRejected precedent); nothing is
  *     ordered before it fires.
- *   • Validation: an IBAN that fails the mod-97 check and an empty holder both keep the
- *     continue button inert — no order call, an explicit error line.
+ *   • Validation: an unusable amount (zero, or over balance) keeps the continue button
+ *     inert - no order call.
  *   • The fee facts render verbatim + dated (bank band, the ZCHF 0% partnership, the no-KYC
  *     band, the CHF 50 minimum), the counterparty is named — and the CARD line is ABSENT
  *     (card is a buy-side method; the venue publishes no cash-out card figure).
- *   • The lifecycle record the send adopts is the legless CeFi shape and HYDRATES through the
- *     real store validator (the venueOfId('mtpelerin') cefi exemption) — proven, not assumed.
- *   • The adopted record's awaiting_deposit panel takes the WALLET-SENT arm (the auto note):
- *     the wallet's own send already went out, so the manual send trio never renders here.
+ *   • The adopted record HYDRATES through the real store validator (the
+ *     venueOfId('mtpelerin') cefi exemption) - proven, not assumed.
  */
 import {describe, test, expect, jest, beforeEach} from '@jest/globals';
 import React from 'react';
@@ -27,13 +31,11 @@ import {Text} from 'react-native';
 import {
   MtpCashOutSheet, MtpCashOutUserRejected, buildMtpCashOutRecord,
 } from '../components/MtpCashOutSheet';
-import {EvmWithdrawSheet} from '../components/EvmWithdrawSheet';
 import * as mtpService from '../services/mtpelerin';
 import {adoptConvertRecord} from '../convertResume';
 import {hydrateConvertStore} from '../convert/records';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
-import type {Identity} from '../lib/types';
 
 jest.mock('../services/mtpelerin', () => {
   const actual = jest.requireActual('../services/mtpelerin') as typeof mtpService;
@@ -54,8 +56,6 @@ const mockQuote = mtpService.fetchMtpCashQuote as jest.MockedFunction<typeof mtp
 const mockCreate = mtpService.createMtpCashOrder as jest.MockedFunction<typeof mtpService.createMtpCashOrder>;
 const mockAdopt = adoptConvertRecord as jest.MockedFunction<typeof adoptConvertRecord>;
 
-const IDENTITY: Identity = {secretHex: '11'.repeat(32), publicHex: '22'.repeat(32), username: 'Bob'};
-const OFFRAMP = '0xCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCcCc';
 const QUOTE_AT = Date.parse('2026-10-12T10:00:00Z');
 
 const ZCHF = {
@@ -66,6 +66,8 @@ const ZCHF = {
   offramp: 'Partner' as const, rampPartner: null, visible: true,
   testKey: 'evm-zchf-ethereum', testnet: false,
 };
+
+type Seam = (url: string) => Promise<void>;
 
 function has(tree: renderer.ReactTestRenderer, testID: string): boolean {
   return tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
@@ -97,19 +99,15 @@ async function pressAsync(tree: renderer.ReactTestRenderer, testID: string): Pro
   });
 }
 
-const VALID_IBAN = 'CH93 0076 2011 6238 5295 7';
-
 async function mount(props: Partial<Parameters<typeof MtpCashOutSheet>[0]> = {}): Promise<renderer.ReactTestRenderer> {
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {
     tree = renderer.create(
       <MtpCashOutSheet
-        identity={IDENTITY}
         relayUrl="https://relay.test"
         asset={ZCHF}
         token="ZCHF"
         balance="5000000000000000000"
-        gasWei="1000000000000000000"
         onClose={() => {}}
         {...props}
       />,
@@ -122,11 +120,13 @@ async function mount(props: Partial<Parameters<typeof MtpCashOutSheet>[0]> = {})
 beforeEach(() => {
   jest.clearAllMocks(); // the domain tier does not auto-clear: call records must not leak across tests
   jest.useFakeTimers();
+  delete (globalThis as {__DPAY_TEST_MTP_OPEN?: unknown}).__DPAY_TEST_MTP_OPEN;
   mockQuote.mockResolvedValue({
     destAmount: '9651.10', networkFee: null, fetchedAtMs: QUOTE_AT,
   });
+  // The relay's REAL born answer, normalized by the service: the venue's facts are null.
   mockCreate.mockResolvedValue({
-    orderId: 'mtp-test000000000001', venueOrderId: null, offRampAddress: OFFRAMP, expiresAtMs: null,
+    orderId: 'mtp-test000000000001', venueOrderId: null, offRampAddress: null, expiresAtMs: null,
   });
 });
 
@@ -158,10 +158,8 @@ describe('MtpCashOutSheet — the relay quote', () => {
   });
 });
 
-describe('MtpCashOutSheet — order creation through the relay seam', () => {
+describe('MtpCashOutSheet - order registration through the relay seam', () => {
   async function fillAndContinue(tree: renderer.ReactTestRenderer): Promise<void> {
-    type(tree, 'mtp-cashout-iban', VALID_IBAN);
-    type(tree, 'mtp-cashout-holder', '  Ada Lovelace ');
     type(tree, 'mtp-cashout-amount', '2');
     await act(async () => {
       jest.advanceTimersByTime(450);
@@ -171,7 +169,7 @@ describe('MtpCashOutSheet — order creation through the relay seam', () => {
     await pressAsync(tree, 'btn-mtp-cashout-continue');
   }
 
-  test('continue creates the order: normalized IBAN, trimmed holder, a locally minted clientOrderId', async () => {
+  test('continue registers the order: pair + network + amount, a locally minted clientOrderId, NO bank data', async () => {
     const tree = await mount();
     await fillAndContinue(tree);
     expect(mockCreate).toHaveBeenCalledTimes(1);
@@ -180,58 +178,91 @@ describe('MtpCashOutSheet — order creation through the relay seam', () => {
     expect(args.destCurrency).toBe('CHF');
     expect(args.sourceAmount).toBe('2');
     expect(args.sourceNetwork).toBe('mainnet');
-    expect(args.iban).toBe('CH9300762011623852957');
-    expect(args.holderName).toBe('Ada Lovelace');
     expect(args.clientOrderId).toMatch(/^[0-9a-f]{32}$/); // minted BEFORE the order exists
-    // The send phase: the order id + the prefilled withdraw sheet (the venue's deposit address).
-    expect(textOf(tree, 'mtp-cashout-order-note')).toContain('mtp-test000000000001');
-    expect(has(tree, 'btn-evm-send-confirm')).toBe(true);
-    const amountInput = tree.root.findAll(n => n.props?.testID === 'evm-send-amount-input')[0]!;
-    expect(String(amountInput.props.value)).toBe('2');
-    expect(textOf(tree, 'mtp-cashout-sheet')).toContain(OFFRAMP);
+    expect('iban' in args).toBe(false); // bank details are the widget session's, never dpay's
+    expect('holderName' in args).toBe(false);
+    // The lifecycle phase with the widget handoff; there is NO send step.
+    expect(has(tree, 'mtp-cashout-lifecycle')).toBe(true);
+    expect(has(tree, 'btn-evm-send-confirm')).toBe(false);
     act(() => { tree.unmount(); });
   });
 
-  test('a refused order keeps the sheet in the form with its honest line', async () => {
+  test('the handoff opens the venue sell widget through the seam and fires onWidgetOpened', async () => {
+    const opened: string[] = [];
+    (globalThis as {__DPAY_TEST_MTP_OPEN?: Seam}).__DPAY_TEST_MTP_OPEN = async (url) => {
+      opened.push(url);
+    };
+    let widgetOpened = 0;
+    const tree = await mount({onWidgetOpened: () => { widgetOpened += 1; }});
+    await fillAndContinue(tree);
+    expect(opened).toEqual(['https://widget.mtpelerin.com/']); // the documented bare link
+    expect(widgetOpened).toBe(1);
+    expect(has(tree, 'mtp-cashout-widget-note')).toBe(true);
+    expect(has(tree, 'mtp-cashout-widget-failed')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('an open failure keeps the lifecycle view with its honest line and a working retry', async () => {
+    (globalThis as {__DPAY_TEST_MTP_OPEN?: Seam}).__DPAY_TEST_MTP_OPEN = async () => {
+      throw new Error('no handler');
+    };
+    const tree = await mount();
+    await fillAndContinue(tree);
+    expect(textOf(tree, 'mtp-cashout-widget-failed')).toBe(M.deposit.mtpCash.widgetOpenFailed);
+    // The record still stands (adopted at registration).
+    expect(mockAdopt).toHaveBeenCalledTimes(1);
+    // The retry opens through the same seam and clears the failure.
+    (globalThis as {__DPAY_TEST_MTP_OPEN?: Seam}).__DPAY_TEST_MTP_OPEN = async () => {};
+    await pressAsync(tree, 'btn-mtp-cashout-widget-retry');
+    expect(has(tree, 'mtp-cashout-widget-failed')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a refused registration keeps the sheet in the form with its honest line', async () => {
     mockCreate.mockRejectedValue(new Error('refused'));
     const tree = await mount();
     await fillAndContinue(tree);
     expect(textOf(tree, 'mtp-cashout-err')).toBe(M.deposit.mtpCash.errRefused);
     expect(has(tree, 'btn-mtp-cashout-continue')).toBe(true); // the form stays, retry lives
+    expect(mockAdopt).not.toHaveBeenCalled(); // no registration, no record
     act(() => { tree.unmount(); });
   });
 
-  test('a shape-refused creation (the record carried no deposit address) keeps the form, sends nothing', async () => {
-    // The real relay's born record has offRampAddress null: the service fails closed and
-    // the sheet answers with its honest line, form intact, the send never reached.
+  test('a shape-refused registration (a record claiming venue-side facts) keeps the form, adopts nothing', async () => {
     mockCreate.mockRejectedValue(new Error('shape'));
     const tree = await mount();
     await fillAndContinue(tree);
     expect(textOf(tree, 'mtp-cashout-err')).toBe(M.deposit.mtpCash.errShape);
     expect(has(tree, 'btn-mtp-cashout-continue')).toBe(true);
-    expect(has(tree, 'btn-evm-send-confirm')).toBe(false);
+    expect(mockAdopt).not.toHaveBeenCalled();
     act(() => { tree.unmount(); });
   });
 });
 
 describe('MtpCashOutSheet — validation', () => {
-  test('a checksum-failing IBAN shows the error line and the continue never orders', async () => {
+  test('an unusable amount (zero, then over balance) keeps the continue inert', async () => {
     const tree = await mount();
-    type(tree, 'mtp-cashout-iban', 'CH93 0076 2011 6238 5295 8'); // last digit off by one
-    type(tree, 'mtp-cashout-holder', 'Ada Lovelace');
-    type(tree, 'mtp-cashout-amount', '2');
-    expect(has(tree, 'mtp-cashout-iban-err')).toBe(true);
+    type(tree, 'mtp-cashout-amount', '0');
+    expect(node(tree, 'btn-mtp-cashout-continue').props.disabled).toBe(true);
+    await pressAsync(tree, 'btn-mtp-cashout-continue');
+    expect(mockCreate).not.toHaveBeenCalled();
+    type(tree, 'mtp-cashout-amount', '9'); // balance is 5
+    expect(has(tree, 'mtp-cashout-overbal')).toBe(true);
     expect(node(tree, 'btn-mtp-cashout-continue').props.disabled).toBe(true);
     await pressAsync(tree, 'btn-mtp-cashout-continue');
     expect(mockCreate).not.toHaveBeenCalled();
     act(() => { tree.unmount(); });
   });
 
-  test('an empty holder and an over-balance amount each keep the continue inert', async () => {
+  test('no quote yet: the continue stays inert even with a valid amount (no quote, no order)', async () => {
+    mockQuote.mockRejectedValue(new Error('unconfigured'));
     const tree = await mount();
-    type(tree, 'mtp-cashout-iban', VALID_IBAN);
-    type(tree, 'mtp-cashout-amount', '9'); // balance is 5
-    expect(has(tree, 'mtp-cashout-overbal')).toBe(true);
+    type(tree, 'mtp-cashout-amount', '2');
+    await act(async () => {
+      jest.advanceTimersByTime(450);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(node(tree, 'btn-mtp-cashout-continue').props.disabled).toBe(true);
     await pressAsync(tree, 'btn-mtp-cashout-continue');
     expect(mockCreate).not.toHaveBeenCalled();
@@ -274,11 +305,9 @@ describe('MtpCashOutSheet — cancel and disclosure', () => {
   });
 });
 
-describe('MtpCashOutSheet — the lifecycle handoff', () => {
-  test('the send sheet fires onSent → the record adopts into the engine (the wiring seam)', async () => {
+describe('MtpCashOutSheet - the lifecycle record', () => {
+  test('registration adopts the legless CeFi record (awaiting_deposit, NO providerDeposit) into the engine', async () => {
     const tree = await mount();
-    type(tree, 'mtp-cashout-iban', VALID_IBAN);
-    type(tree, 'mtp-cashout-holder', 'Ada Lovelace');
     type(tree, 'mtp-cashout-amount', '2');
     await act(async () => {
       jest.advanceTimersByTime(450);
@@ -286,51 +315,42 @@ describe('MtpCashOutSheet — the lifecycle handoff', () => {
       await Promise.resolve();
     });
     await pressAsync(tree, 'btn-mtp-cashout-continue');
-    // The prefilled send sheet's onSent (broadcast accepted) is the adoption trigger.
-    const sendSheet = tree.root.findAll(n => n.type === EvmWithdrawSheet)[0]!;
-    await act(async () => { sendSheet.props.onSent(); await Promise.resolve(); });
     expect(mockAdopt).toHaveBeenCalledTimes(1);
     const adopted = mockAdopt.mock.calls[0]![0];
     expect(adopted.step).toBe('awaiting_deposit');
     expect(adopted.venueId).toBe('mtpelerin');
     expect(adopted.providerRef!.orderId).toBe('mtp-test000000000001');
     expect(adopted.providerRef!.statusUrl).toBe('https://relay.test/api/v1/mtpelerin/conversion?id=mtp-test000000000001');
-    expect(adopted.providerDeposit!.depositAddress).toBe(OFFRAMP);
-    expect(adopted.providerDeposit!.depositAmount).toBe('2');
-    // The lifecycle panel (sendClose lands it): the awaiting_deposit card takes the
-    // WALLET-SENT arm — the auto note, NEVER the manual "send it to the address above"
-    // trio with its copy button. The wallet's own send already went out; re-asking for it
-    // would invite a second transfer on top of the adopted order.
-    await act(async () => { sendSheet.props.onClose(); await Promise.resolve(); });
+    expect(adopted.providerDeposit).toBeUndefined(); // dpay never learns a deposit address
+    expect(adopted.amountIn).toBe('2000000000000000000');
+    expect(adopted.expectedNet).toBe((965110n).toString()); // the quote's net figure, minor units
+    // The panel renders the awaiting_deposit state (no handoff block: nothing to copy).
     expect(has(tree, 'convert-awaiting-deposit')).toBe(true);
-    expect(textOf(tree, 'convert-deposit-handoff')).toContain(M.convert.cefi.depositAutoNote('Mt Pelerin', 'ZCHF'));
+    expect(has(tree, 'convert-deposit-handoff')).toBe(false);
     expect(has(tree, 'btn-convert-copy-deposit-address')).toBe(false);
-    expect(textOf(tree, 'convert-awaiting-deposit')).not.toContain(M.convert.cefi.depositNote('Mt Pelerin', 'ZCHF'));
     act(() => { tree.unmount(); });
   });
 });
 
 describe('buildMtpCashOutRecord — the record HYDRATES (the store validator, real)', () => {
-  test('the legless CeFi shape survives salvageConvertStore with the mtpelerin venue row', () => {
+  test('the legless CeFi shape (no providerDeposit) survives salvageConvertStore with the mtpelerin venue row', () => {
     const rec = buildMtpCashOutRecord({
       id: 'mtp-hydrate00000001',
       createdAtMs: QUOTE_AT,
       venueId: 'mtpelerin',
       orderId: 'mtp-hydrate00000001',
       statusUrl: 'https://relay.test/api/v1/mtpelerin/conversion?id=mtp-hydrate00000001',
-      offRampAddress: OFFRAMP,
       inLedger: '0xabababababababababababababababababababab',
-      depositAmountDecimal: '2',
+      registeredAmountDecimal: '2',
       amountIn: '2000000000000000000',
       inSymbol: 'ZCHF',
       inDecimals: 18,
       expectedFiatDecimal: '9651.10',
-      expiresAtMs: null,
     });
     const hydrated = hydrateConvertStore({[rec.id]: rec});
     expect(hydrated[rec.id]).toBeDefined();
     expect(hydrated[rec.id]!.providerRef!.orderId).toBe('mtp-hydrate00000001');
-    expect(hydrated[rec.id]!.providerDeposit!.depositAddress).toBe(OFFRAMP);
+    expect(hydrated[rec.id]!.providerDeposit).toBeUndefined();
     expect(hydrated[rec.id]!.inLedger).toBe('0xabababababababababababababababababababab');
     expect(hydrated[rec.id]!.expectedNet).toBe((965110n).toString()); // 9651.10 CHF in minor units
   });

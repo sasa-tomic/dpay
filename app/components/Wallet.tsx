@@ -2294,7 +2294,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // check see exactly what a selected-asset send would.
   const cashOutKey = mtpCashOut != null ? `${mtpCashOut.asset.chainId}:${mtpCashOut.asset.token}` : null;
   const cashOutBalance = cashOutKey != null ? evmTokens[cashOutKey]?.amount ?? null : null;
-  const cashOutGas = mtpCashOut != null ? evmGas[mtpCashOut.asset.chainId] ?? null : null;
   // Arrival reconciliation (plan R1 step 3): once the widget has opened, the NEXT foreground
   // return fires the ONE refresh (balances + all rails' histories) through the existing
   // useAppActive mechanism (AppState 'active' / window focus) — no new poll, no timer; the
@@ -2996,16 +2995,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           was accepted (the record's adoption is the sheet's own job). */}
       {mtpCashOut != null ? (
         <MtpCashOutSheet
-          identity={identity}
           relayUrl={relayUrl}
           asset={mtpCashOut.asset}
           token={mtpCashOut.token}
           balance={cashOutBalance}
-          gasWei={cashOutGas?.wei ?? null}
-          gasChecking={cashOutGas == null || cashOutGas.status === 'loading'}
-          online={online}
           onClose={() => setMtpCashOut(null)}
-          onSent={() => { void recheckAll(); }}
+          onWidgetOpened={armMtpArrival}
         />
       ) : null}
       {/* W1 step 3 - the ONE WalletConnect review sheet (root-mounted, the receiptTxn discipline).

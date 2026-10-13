@@ -697,7 +697,10 @@ pub async fn quote_proxy(
 /// `POST /api/v1/mtpelerin/conversion` - LOCAL order registration (no upstream call; the
 /// venue's API tier is closed for dpay, module header). Request (device):
 /// `{"sourceCurrency", "destCurrency", "sourceAmount"|"destAmount", "sourceNetwork",
-/// "iban", "holderName", "clientOrderId"?}` — the cash-out sheet's own fields. The relay
+/// "clientOrderId"?}` - the pair, the network and exactly one amount are required.
+/// `iban`/`holderName` stay ACCEPTED but are no longer required: they fed the closed
+/// upstream order call, and the venue's own widget session collects bank details now.
+/// The relay
 /// mints the correlation id (`mtp-…`), persists the order (pair + amount + `created_at`)
 /// FIRST, and answers 200 with the record in the status route's own shape plus the order
 /// id riding `X-Dpay-Order-Id`. The order id reaches Mt Pelerin on the widget link's
@@ -718,7 +721,7 @@ pub async fn conversion_proxy(
                 format!(
                     "request body is not valid JSON ({e}) - POST /api/v1/mtpelerin/conversion \
                      takes {{sourceCurrency, destCurrency, sourceAmount|destAmount, \
-                     sourceNetwork, iban, holderName}}"
+                     sourceNetwork}}"
                 ),
             );
         }
@@ -729,17 +732,15 @@ pub async fn conversion_proxy(
             .map(str::trim)
             .filter(|s| !s.is_empty())
     };
-    let (Some(source_currency), Some(dest_currency), Some(_source_network), Some(_iban), Some(_holder_name)) = (
+    let (Some(source_currency), Some(dest_currency), Some(_source_network)) = (
         str_field("sourceCurrency"),
         str_field("destCurrency"),
         str_field("sourceNetwork"),
-        str_field("iban"),
-        str_field("holderName"),
     ) else {
         return err(
             StatusCode::BAD_REQUEST,
-            "request needs non-empty string fields `sourceCurrency`, `destCurrency`, \
-             `sourceNetwork`, `iban` and `holderName`",
+            "request needs non-empty string fields `sourceCurrency`, `destCurrency` and \
+             `sourceNetwork`",
         );
     };
     let source_amount = req.get("sourceAmount");

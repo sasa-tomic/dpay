@@ -144,3 +144,25 @@ export function buildMtpWidgetLink(link: MtpWidgetLink): string {
   if (link.ctkn !== undefined) parts.push(`_ctkn=${encodeURIComponent(link.ctkn)}`);
   return `${MTP_WIDGET_BASE}?${parts.join('&')}`;
 }
+
+/**
+ * The SELL widget link (the cash-out handoff, 2026-10-13). The venue's API tier for dpay is
+ * CLOSED (order creation happens in the USER'S OWN widget session), and dpay never learns a
+ * deposit address programmatically: the address (and the bank details) exist only inside
+ * that session, so the widget collects them.
+ *
+ * What this builder deliberately does NOT do: invent parameters. The repo's pinned parameter
+ * facts (the plan's §2.2, sourced from developers.mtpelerin.com's ON-RAMP parameter docs,
+ * fetched 2026-10-12) document BUY-side prefill only (`net`/`dnet`/`bsc`/`bdc`/`bsa`/`bda`/
+ * `curs`/`crys`/`addr`/`code`/`hash`/`rfr`/`_ctkn`); NO sell-side currency/amount parameter
+ * and NO free-form correlation (`oid`) parameter is documented anywhere in the repo's
+ * fetched docs. The sell link is therefore the widget's documented bare base URL - the
+ * user picks the sell flow (and types the amount/IBAN) in the venue's own UI. Because
+ * nothing of ours can ride the link, the conversion webhook's `external_id` cannot be
+ * correlated to dpay's order id from here: deliveries for widget-created orders answer
+ * Unmatched (200, logged, no mutation) until the venue documents a correlation parameter
+ * (the founder ask, OPEN_ISSUES). PURE: no network, no React.
+ */
+export function buildMtpSellWidgetLink(): string {
+  return MTP_WIDGET_BASE;
+}

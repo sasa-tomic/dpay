@@ -394,6 +394,24 @@ Two decisions the swarm settles outright:
    `app/__tests__/node-anvil/<next free number>-mtp-broadcast.test.ts` (number assigned at
    implementation, after W1's 225; the 219-224 convention), reusing the existing EVM send path.
 
+**2026-10-13 update (the API closure consequence; history above unchanged):** Mt Pelerin
+closed dpay's API tier - server-side order creation requires the USER'S OWN credentials (the
+widget) or B2B own-name authorizations dpay does not hold. The relay's upstream order POST is
+REMOVED (`0eb6f7f9`): `POST /api/v1/mtpelerin/conversion` is purely local (it mints the
+`mtp-…` correlation id and answers the record; no CTKN needed on it - the quote proxy keeps
+the key gate). R2 step 2's send step is REPLACED by the widget handoff: after registration the
+sheet opens the venue's sell widget EXTERNAL (the R1 open pattern), and the lifecycle record
+is born at registration with NO `providerDeposit` block (dpay never learns a deposit address -
+the webhook payload `{id, external_id, amount, currency}` never carries one and the address
+exists only in the user's own widget session). The repo's pinned parameter docs cover the
+ON-RAMP parameters only: no sell-side prefill and no `oid`/free-form correlation parameter
+exists, so the sell link is the documented bare widget URL and the webhook's `external_id`
+correlation CANNOT be established from dpay's side - deliveries for widget-created orders
+stay Unmatched until the venue documents a correlation parameter (founder ask). The
+node-anvil broadcast proof above is obsolete with the send step (dpay signs nothing in this
+flow). IBAN/holder collection is gone from the sheet (the widget collects bank details); the
+relay accepts but ignores the legacy fields.
+
 ### Track W: WalletConnect wallet-side + listing (HIGH)
 
 **W1: responder v1, EVM (~1-2 weeks, per feasibility §4 as corrected).**

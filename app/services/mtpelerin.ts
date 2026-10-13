@@ -2,18 +2,20 @@
 // sell-order registration AND the status fallback poll all ride dpay's relay proxy
 // (crates/dpay-relay/src/mtpelerin.rs). Since Mt Pelerin closed dpay's API tier (2026-10-13)
 // the sell order itself is created in the USER'S OWN widget session: the relay's creation is
-// LOCAL (it mints the `mtp-…` correlation id and answers the record; the id reaches the venue
-// on the widget link's `oid` and their completion webhook echoes it back as `external_id`).
-// This device never sees a key, holds none, and could not misuse one.
+// LOCAL (it mints the `mtp-…` correlation id and answers the record), and the sheet hands
+// off to the venue's sell widget. The bank details and the deposit address live ONLY in
+// that widget session - dpay never collects or learns them. This device never sees a key,
+// holds none, and could not misuse one.
 //
 // What this module is NOT:
 //   - it is not a quote engine: `destAmount` is the venue's own NET figure for the fetch
 //     instant, carried verbatim next to the relay's attribution envelope (venue_id +
 //     fetched_at). dpay computes nothing, blends nothing (plan §4).
-//   - it is not a signer: the ERC-20 transfer to `offRampAddress` is the wallet's own send path
-//     (EvmWithdrawSheet). Mt Pelerin's order webhook (the completion signal) terminates at the
-//     relay, which verifies the HMAC and stores the payload; the app's status poll answers the
-//     stored state with ZERO upstream calls (webhook-first).
+//   - it is not a signer and moves no funds: the sale (and the user's deposit to the
+//     venue's own address) happens entirely in the widget session. Mt Pelerin's order
+//     webhook (the completion signal) terminates at the relay, which verifies the HMAC and
+//     stores the payload; the app's status poll answers the stored state with ZERO
+//     upstream calls (webhook-first).
 //
 // Fail-closed vocabulary (the trocador service's precedent): 'unconfigured' (relay has no key —
 // 503, the venue is absent), 'unreachable', 'refused', 'unavailable', 'shape'. NO result is
@@ -46,12 +48,12 @@ export type MtpCashQuote = {
   readonly fetchedAtMs: number;
 };
 
-/** The sell order dpay registered, normalized to what the record + the send step need. The
- *  relay's creation is LOCAL (the venue's API tier is closed for dpay, 2026-10-13): it
- *  answers OUR record in the status route's shape, and the venue's own facts are null
- *  until the completion webhook names them. The deposit address is still REQUIRED for the
- *  handoff: the wallet's ERC-20 send cannot start without a venue address, so a record
- *  without one fails closed ('shape') instead of inventing a destination. */
+/** The sell order dpay registered, normalized to what the record + the lifecycle watch
+ *  need. The relay's creation is LOCAL (the venue's API tier is closed for dpay,
+ *  2026-10-13): it answers OUR record in the status route's shape, and the venue's own
+ *  facts are null until the completion webhook names them. The deposit address is
+ *  informational only now (it can be null at creation and there is no dpay send step: the
+ *  sale completes in the user's own Mt Pelerin widget session). */
 export type MtpCashOrder = {
   /** dpay's own order id (the `X-Dpay-Order-Id` creation header): the correlation key the
    *  webhook echoes (`external_id`), the status route's key, and the record's providerRef. */
@@ -59,16 +61,14 @@ export type MtpCashOrder = {
   /** The venue's own order id when the creation record carried one. The born state is
    *  null: dpay creates no venue-side order, so only the webhook can name one. */
   readonly venueOrderId: string | null;
-  /** The sell order's deposit address: the wallet's send target. REQUIRED for the
-   *  handoff (the venue issues it in the user's own widget session; until a creation
-   *  answer carries one, the flow refuses before any send). */
-  readonly offRampAddress: string;
+  /** The venue's deposit address when the record carried one (null at creation, the born
+   *  state). Informational: no dpay flow sends to it - the widget session holds the real
+   *  one. */
+  readonly offRampAddress: string | null;
   /** The venue's own expiry when the answer carried a parseable one (ms). The local
-   *  creation record carries no expiry: always null today, never invented. */
+   *  creation record carries no expiry - always null today, never invented. */
   readonly expiresAtMs: number | null;
 };
-
-const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 /** Fetch one cash-out quote THROUGH THE RELAY. `sourceAmount` is the crypto amount the user
  *  typed (plain decimal string); `sourceNetwork` is the venue's name for the token's chain. */
@@ -114,18 +114,16 @@ export async function fetchMtpCashQuote(
 }
 
 /** Register the sell order THROUGH THE RELAY (the correlation id is minted server-side;
- *  the registration is local since the venue's API tier closed, 2026-10-13: the order id
- *  reaches Mt Pelerin on the widget link's `oid` and their completion webhook echoes it
- *  back). The answer is the record in the status route's shape, and the BORN state is
- *  pinned honestly: `order_id` must equal the `X-Dpay-Order-Id` header (one correlation
- *  pair), and `terminal`/`payload`/`venue_order_id` must be their born values (a creation
- *  answer claiming venue-side facts would describe an order dpay never created). The send
- *  target is the venue's `offRampAddress`, required and required to be an EVM address
- *  for this rail's assets (fail-closed: a non-EVM deposit address cannot be sent to by
- *  the wallet's ERC-20 path and would strand the order); a record without one is 'shape'
- *  and the flow refuses before any send. `clientOrderId` is the locally minted
- *  convert-record id (the partner-agreement correlation law): the record that persists
- *  locally IS the id the relay logs for this order. */
+ *  the registration is local since the venue's API tier closed, 2026-10-13). The answer
+ *  is the record in the status route's shape, and the BORN state is pinned honestly:
+ *  `order_id` must equal the `X-Dpay-Order-Id` header (one correlation pair), and
+ *  `terminal`/`payload`/`venue_order_id` must be their born values (a creation answer
+ *  claiming venue-side facts would describe an order dpay never created). The record's
+ *  `offRampAddress` parses verbatim when present (null at creation is the born state and
+ *  is fine: no dpay flow sends to it - the sale completes in the user's own widget
+ *  session). `clientOrderId` is the locally minted convert-record id (the
+ *  partner-agreement correlation law): the record that persists locally IS the id the
+ *  relay logs for this order. */
 export async function createMtpCashOrder(
   relayUrl: string,
   args: {
@@ -133,8 +131,6 @@ export async function createMtpCashOrder(
     destCurrency: string;
     sourceAmount: string;
     sourceNetwork?: string;
-    iban: string;
-    holderName: string;
     clientOrderId?: string;
   },
   timeoutMs = 15000,
@@ -153,8 +149,6 @@ export async function createMtpCashOrder(
         destCurrency: args.destCurrency,
         sourceAmount: args.sourceAmount,
         ...(args.sourceNetwork != null && args.sourceNetwork.length > 0 ? {sourceNetwork: args.sourceNetwork} : {}),
-        iban: args.iban,
-        holderName: args.holderName,
         ...(clientOrderId != null ? {clientOrderId} : {}),
       }),
     }, timeoutMs);
@@ -173,12 +167,9 @@ export async function createMtpCashOrder(
   // The BORN state: `terminal`/`payload`/`venue_order_id` carry venue-side facts dpay
   // never created server-side; any other values describe an order this flow cannot have.
   if (j.terminal !== false || j.payload != null || j.venue_order_id != null) throw new Error('shape');
-  const offRamp = typeof j.offRampAddress === 'string' ? j.offRampAddress.trim() : null;
-  if (offRamp == null || offRamp.length === 0 || !EVM_ADDRESS.test(offRamp)) {
-    // No deliverable deposit address in the record: the send cannot start, and nothing
-    // is invented (the venue issues the address in the user's own widget session).
-    throw new Error('shape');
-  }
+  // The deposit address parses verbatim when present; absent/empty is the born state.
+  const rawAddress = typeof j.offRampAddress === 'string' ? j.offRampAddress.trim() : null;
+  const offRamp = rawAddress != null && rawAddress.length > 0 ? rawAddress : null;
   return {
     orderId,
     venueOrderId: null,
@@ -193,21 +184,6 @@ export async function createMtpCashOrder(
 export function mtpCashStatusUrl(relayUrl: string, orderId: string): string {
   const base = relayUrl.replace(/\/+$/, '');
   return `${base}/api/v1/mtpelerin/conversion?id=${encodeURIComponent(orderId)}`;
-}
-
-/** IBAN validity: the ISO 13616 structure check plus the mod-97 checksum, over the
- *  spaces/hyphens-stripped uppercase form. Pure — jest-pinned. */
-export function isValidIban(input: string): boolean {
-  const v = input.replace(/[\s-]/g, '').toUpperCase();
-  if (!/^[A-Z]{2}[0-9]{2}[A-Z0-9]{10,30}$/.test(v)) return false;
-  // Rearrange (first four to the end), map letters to 10..35, one pass mod 97.
-  const rearranged = v.slice(4) + v.slice(0, 4);
-  let rem = 0;
-  for (const ch of rearranged) {
-    const code = ch.charCodeAt(0);
-    rem = code >= 65 ? (rem * 100 + (code - 55)) % 97 : (rem * 10 + (code - 48)) % 97;
-  }
-  return rem === 1;
 }
 
 /** One response header's value, trimmed, empty → null (Headers.get is already
