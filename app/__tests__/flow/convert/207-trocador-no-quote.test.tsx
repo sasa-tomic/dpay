@@ -67,7 +67,9 @@ hermeticDescribe('flow 207 — the trocador listed-but-unquoted verdict renders 
       await m.driver.click('convert-no-quote-details', {timeoutMs: 5_000});
       assertIncludes(m.driver.readText('convert-no-quote-venue'), 'Trocador', 'the verdict is attributed to the venue (Details)');
       assertIncludes(noQuoteText, 'no live market', 'the line says the venue has no live market right now');
-      assertIncludes(noQuoteText, 'Nothing was sent', 'the line states the fail-closed fact first');
+      // Copy law (founder 2026-10-13): "Nothing was sent" only after a real send
+      // attempt; a no-quote refusal is pre-attempt, so the phrase must be absent.
+      expect(noQuoteText).not.toContain('Nothing was sent');
       assertIncludes(noQuoteText, 'Pick another venue or try again later', 'the line names the way out');
       expect(m.driver.isPresent('convert-quote-err')).toBe(false);
       const receiveText = m.driver.readText('convert-receive');
