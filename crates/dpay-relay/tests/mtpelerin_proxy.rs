@@ -30,7 +30,14 @@
 //! - terminal dedupe: the FIRST completion delivery wins — later deliveries for the
 //!   same order answer 200 idempotently and never overwrite the stored payload, across
 //!   a proxy rebuild from the same store (the startup replay);
-//! - verified-but-unknown `external_id`: 200, logged unmatched, no store mutation.
+//! - verified-but-unknown `external_id`: 200, logged unmatched, no store mutation;
+//! - the OPTIONAL `Authentication` authKey (`DPAY_MTPELERIN_WEBHOOK_AUTH_KEY`): when
+//!   configured it gates BEFORE the signature (wrong/missing header → 401 regardless of
+//!   the signature); when unset the receiver stays signature-only (back-compat);
+//! - the per-client fixed windows (the `trocador_agreement` limiter mirrored): 6/min
+//!   quote, 4/min conversion by default; 429 + `Retry-After` + the house marker over
+//!   budget, per client IP, reset by the window, device 400s never counted, a refused
+//!   conversion mints no order.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -52,6 +59,7 @@ use tower::ServiceExt;
 /// upstream — the quote endpoint is keyless by the venue's own docs).
 const STUB_CTKN: &str = "stub-ctkn";
 const STUB_WEBHOOK_SECRET: &str = "stub-webhook-secret";
+const STUB_AUTH_KEY: &str = "stub-auth-key";
 
 /// HMAC-SHA256 hex over `body` keyed with `secret` — the test-side signer (the RFC 4231
 /// vector for this computation is pinned in the module's own unit tests).
@@ -211,6 +219,9 @@ fn configured(base: &str) -> MtPelerinProxy {
     MtPelerinProxy::new(MtPelerinConfig {
         ctkn: Some(STUB_CTKN.into()),
         webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        webhook_auth_key: None,
+        quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
+        conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
         api_base: base.to_string(),
         conversion_path: "/orders".to_string(),
         log_dir: temp_log_dir("full"),
@@ -745,6 +756,9 @@ async fn webhook_first_terminal_wins_and_later_deliveries_are_idempotent() {
     let state = state_with(with_clock(MtPelerinProxy::new(MtPelerinConfig {
         ctkn: Some(STUB_CTKN.into()),
         webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        webhook_auth_key: None,
+        quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
+        conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
         api_base: base.clone(),
         conversion_path: "/orders".to_string(),
         log_dir: dir.clone(),
@@ -792,6 +806,9 @@ async fn webhook_first_terminal_wins_and_later_deliveries_are_idempotent() {
     let rebuilt = state_with(with_clock(MtPelerinProxy::new(MtPelerinConfig {
         ctkn: Some(STUB_CTKN.into()),
         webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        webhook_auth_key: None,
+        quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
+        conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
         api_base: base.clone(),
         conversion_path: "/orders".to_string(),
         log_dir: dir,
@@ -835,4 +852,215 @@ async fn webhook_verified_but_unknown_id_answers_200_without_mutation() {
     assert_eq!(status, StatusCode::OK);
     let v: serde_json::Value = serde_json::from_slice(&body).expect("the ok JSON");
     assert_eq!(v["ok"], true);
+}
+
+// ---- the webhook's OPTIONAL Authentication key ----
+
+/// When the authKey is configured, the `Authentication` header must carry it EXACTLY
+/// before the signature is even considered: correct header + good signature is accepted;
+/// a wrong, differently-cased or missing header answers 401 regardless of the signature
+/// (a refused delivery mutates nothing).
+#[tokio::test]
+async fn webhook_auth_key_gates_before_the_signature_when_configured() {
+    let (_stub, base) = spawn_stub().await;
+    let (now, with_clock) = fake_clock();
+    let state = state_with(with_clock(MtPelerinProxy::new(MtPelerinConfig {
+        ctkn: Some(STUB_CTKN.into()),
+        webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        webhook_auth_key: Some(STUB_AUTH_KEY.into()),
+        quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
+        conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        api_base: base.clone(),
+        conversion_path: "/orders".to_string(),
+        log_dir: temp_log_dir("authkey"),
+        trust_proxy: false,
+        status_spacing_secs: STATUS_SPACING_SECS,
+    })));
+    let order_id = create_order(&state).await;
+    let payload = webhook_payload(&order_id, "1");
+    let good_sig = sign(STUB_WEBHOOK_SECRET, payload.as_bytes());
+
+    // The refusals (a good signature on every one: the header gate runs FIRST):
+    let wrong_key_sig = sign("another-secret", payload.as_bytes());
+    let cases: Vec<(&str, Vec<(&str, &str)>)> = vec![
+        ("missing Authentication header", vec![]),
+        ("wrong auth key", vec![("Authentication", "wrong-auth-key")]),
+        (
+            "case-different auth key (exact match, not case-insensitive)",
+            vec![("Authentication", "STUB-AUTH-KEY")],
+        ),
+        (
+            "wrong auth key AND bad signature (the header gate answers first)",
+            vec![("Authentication", "wrong-auth-key"), ("Mtp-Signature", &wrong_key_sig)],
+        ),
+    ];
+    for (label, headers) in &cases {
+        let header_refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, *v)).collect();
+        let (status, _h, body_bytes) = request_json(
+            &state,
+            "POST",
+            "/api/v1/mtpelerin/webhook",
+            Some(&payload),
+            &header_refs,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{label}");
+        assert_eq!(relay_error_code(&body_bytes), "mtpelerin-webhook-unauthorized", "{label}");
+    }
+
+    // The correct header + good signature: accepted, the order turns terminal.
+    let (status, _h, body_bytes) = request_json(
+        &state,
+        "POST",
+        "/api/v1/mtpelerin/webhook",
+        Some(&payload),
+        &[
+            ("Authentication", STUB_AUTH_KEY),
+            ("Mtp-Signature", &good_sig),
+        ],
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&body_bytes)
+    );
+    now.store(1_000_000 + STATUS_SPACING_SECS + 1, Ordering::SeqCst);
+    let (status, _h, body) = get_json(&state, &format!("/api/v1/mtpelerin/conversion?id={order_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(&body).expect("status JSON");
+    assert_eq!(v["terminal"], true, "the authenticated delivery went through");
+}
+
+/// authKey unset (today's default; the venue may simply not hand one over): the receiver
+/// stays signature-only — a good `Mtp-Signature` alone is accepted and an
+/// `Authentication` header nobody configured is ignored.
+#[tokio::test]
+async fn webhook_without_auth_key_configured_stays_signature_only() {
+    let (_stub, base) = spawn_stub().await;
+    let state = state_with(configured(&base));
+    let order_id = create_order(&state).await;
+    let payload = webhook_payload(&order_id, "1");
+    let (status, _h, body) = request_json(
+        &state,
+        "POST",
+        "/api/v1/mtpelerin/webhook",
+        Some(&payload),
+        &[
+            ("Authentication", "some-unchecked-value"),
+            ("Mtp-Signature", &sign(STUB_WEBHOOK_SECRET, payload.as_bytes())),
+        ],
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "back-compat: no authKey configured, the HMAC alone guards ({})",
+        String::from_utf8_lossy(&body)
+    );
+}
+
+// ---- the per-client rate bounds (the trocador limiter pattern) ----
+
+/// The quote + conversion surfaces admit each upstream-bound call under a per-client
+/// fixed 60s window: over budget answers 429 + `Retry-After` + the house marker BEFORE
+/// any upstream call, a different client has its own window, device 400s never count,
+/// the window resets with the clock, and a refused conversion mints no order.
+#[tokio::test]
+async fn quote_and_conversion_are_rate_limited_per_client() {
+    let (stub, base) = spawn_stub().await;
+    let (now, with_clock) = fake_clock();
+    let dir = temp_log_dir("limits");
+    let state = state_with(with_clock(MtPelerinProxy::new(MtPelerinConfig {
+        ctkn: Some(STUB_CTKN.into()),
+        webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        webhook_auth_key: None,
+        quote_per_min: 2,
+        conversion_per_min: 1,
+        api_base: base.clone(),
+        conversion_path: "/orders".to_string(),
+        log_dir: dir.clone(),
+        trust_proxy: true,
+        status_spacing_secs: STATUS_SPACING_SECS,
+    })));
+
+    let base_secs = now.load(Ordering::SeqCst);
+    let bucket = base_secs - base_secs % 60;
+    let retry_when_full = bucket + 60 - base_secs;
+    let xff_a = &[("X-Forwarded-For", "198.51.100.1")];
+    let xff_b = &[("X-Forwarded-For", "198.51.100.9")];
+    let quote_uri = "/api/v1/mtpelerin/quote?sourceCurrency=ZCHF&destCurrency=CHF&sourceAmount=1";
+
+    // Quote, client A: 2 pass, the 3rd is refused BEFORE any upstream call.
+    for _ in 0..2 {
+        let (status, _h, _b) = request_json(&state, "GET", quote_uri, None, xff_a).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, headers, body) = request_json(&state, "GET", quote_uri, None, xff_a).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(relay_error_code(&body), "mtpelerin-quote-limited");
+    assert_eq!(
+        headers
+            .get(header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok()),
+        Some(retry_when_full.to_string().as_str()),
+        "Retry-After carries the remaining seconds of the window"
+    );
+    assert_eq!(Stub::hits(&stub.quote_hits), 2, "the refused call never went upstream");
+
+    // Client B has its own window, and a device 400 never consumes it: after one good
+    // call (1 of 2), any number of bad queries, then the second good call still passes.
+    let (status, _h, _b) = request_json(&state, "GET", quote_uri, None, xff_b).await;
+    assert_eq!(status, StatusCode::OK, "per-IP, not global");
+    for _ in 0..3 {
+        let (status, _h, _b) =
+            request_json(&state, "GET", "/api/v1/mtpelerin/quote?junk=1", None, xff_b).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    let (status, _h, _b) = request_json(&state, "GET", quote_uri, None, xff_b).await;
+    assert_eq!(status, StatusCode::OK, "400s are exempt from the window");
+    assert_eq!(Stub::hits(&stub.quote_hits), 4);
+
+    // The window resets when the clock passes it.
+    now.store(bucket + 60, Ordering::SeqCst);
+    let (status, _h, _b) = request_json(&state, "GET", quote_uri, None, xff_a).await;
+    assert_eq!(status, StatusCode::OK, "a fresh window admits again");
+    assert_eq!(Stub::hits(&stub.quote_hits), 5);
+
+    // Conversion, client A: limit 1. The FIRST creation passes; the second is refused
+    // and mints NOTHING (no upstream call, no order in the store).
+    let (status, headers, _b) = post_json_xff(&state, "/api/v1/mtpelerin/conversion", &conversion_body(), xff_a).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers.get("X-Dpay-Order-Id").is_some());
+    let (status, headers, body) =
+        post_json_xff(&state, "/api/v1/mtpelerin/conversion", &conversion_body(), xff_a).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(relay_error_code(&body), "mtpelerin-conversion-limited");
+    assert!(headers.get("X-Dpay-Order-Id").is_none(), "a refused conversion rides no header");
+    assert_eq!(Stub::hits(&stub.conversion_hits), 1, "the refused call never went upstream");
+    let order_ids: Vec<String> = std::fs::read_to_string(dir.join("mtpelerin-orders.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|v| v["order_id"].as_str().map(str::to_string))
+        .collect();
+    let mut distinct = order_ids.clone();
+    distinct.sort();
+    distinct.dedup();
+    assert_eq!(
+        distinct.len(),
+        1,
+        "the refused conversion never minted an order: {order_ids:?}"
+    );
+}
+
+/// POST JSON with an XFF header (the per-client test variant of `post_json`).
+async fn post_json_xff(
+    state: &AppState,
+    uri: &str,
+    body: &str,
+    extra_headers: &[(&str, &str)],
+) -> (StatusCode, HeaderMap, Vec<u8>) {
+    request_json(state, "POST", uri, Some(body), extra_headers).await
 }

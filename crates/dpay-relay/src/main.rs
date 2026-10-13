@@ -225,6 +225,24 @@
 //!                           logged, never echoed, never committed. Unset is LEGAL — the
 //!                           receiver still registers and answers 503 naming this
 //!                           variable rather than mutate an order it cannot verify.
+//!   DPAY_MTPELERIN_WEBHOOK_AUTH_KEY
+//!                           the webhook's OPTIONAL authentication key (the OTHER key
+//!                           Mt Pelerin's setup exchanges: the docs put the authKey in
+//!                           the delivery's `Authentication` header and key the HMAC
+//!                           with the signature key above). When set, the receiver
+//!                           requires the header to equal it exactly before the
+//!                           signature check; when unset, the HMAC alone guards.
+//!                           Exchanged on the same thread; tracked credential:
+//!                           `secrets/mtpelerin.sops.json`. SECRET deploy config: never
+//!                           logged, never echoed, never committed.
+//!   DPAY_MTPELERIN_QUOTE_PER_MIN  the per-client per-minute bound on
+//!                           GET /api/v1/mtpelerin/quote (default 6; the Trocador
+//!                           limiter budget mirrored). Upstream-bound calls only:
+//!                           device 400s and the unconfigured 503 are never counted.
+//!                           A zero or non-numeric value refuses startup (EXIT_CONFIG).
+//!   DPAY_MTPELERIN_CONVERSION_PER_MIN  the per-client per-minute bound on POST
+//!                           /api/v1/mtpelerin/conversion (default 4). Same rules as
+//!                           the quote bound above.
 //!   DPAY_MTPELERIN_API_BASE the Mt Pelerin API base the proxy calls (default
 //!                           `https://api.mtpelerin.com` — the venue's documented host).
 //!                           The offline loop points it at the relay's own test stub. A
@@ -405,6 +423,9 @@ async fn main() {
         dpay_relay::mtpelerin::MtPelerinProxy::new(dpay_relay::mtpelerin::MtPelerinConfig {
             ctkn: cfg.mtpelerin_ctkn.clone(),
             webhook_secret: cfg.mtpelerin_webhook_secret.clone(),
+            webhook_auth_key: cfg.mtpelerin_webhook_auth_key.clone(),
+            quote_per_min: cfg.mtpelerin_quote_per_min,
+            conversion_per_min: cfg.mtpelerin_conversion_per_min,
             api_base: cfg.mtpelerin_api_base.clone(),
             conversion_path: cfg.mtpelerin_conversion_path.clone(),
             log_dir: cfg.mtpelerin_log_dir.clone(),
@@ -615,8 +636,13 @@ async fn main() {
     if cfg.mtpelerin_webhook_secret.is_some() {
         println!(
             "POST /api/v1/mtpelerin/webhook: ENABLED — deliveries verify the \
-             Mtp-Signature HMAC-SHA256 (DPAY_MTPELERIN_WEBHOOK_SECRET); the first \
-             terminal delivery per order wins."
+             Mtp-Signature HMAC-SHA256 (DPAY_MTPELERIN_WEBHOOK_SECRET){}; the first \
+             terminal delivery per order wins.",
+            if cfg.mtpelerin_webhook_auth_key.is_some() {
+                " + the Authentication header (DPAY_MTPELERIN_WEBHOOK_AUTH_KEY)"
+            } else {
+                ""
+            }
         );
     } else {
         println!(
@@ -629,8 +655,11 @@ async fn main() {
         "mtpelerin records: access log + order store append-only under {} \
          (DPAY_MTPELERIN_LOG_DIR — JSONL; PG arm is the follow-up when the webhook \
          setup lands); status reads at most 1/min per order (the poll fallback's \
-         60s promise, no prod knob).",
-        cfg.mtpelerin_log_dir.display()
+         60s promise, no prod knob); per-client bounds: quote {}/min, conversion \
+         {}/min (DPAY_MTPELERIN_QUOTE_PER_MIN / DPAY_MTPELERIN_CONVERSION_PER_MIN).",
+        cfg.mtpelerin_log_dir.display(),
+        cfg.mtpelerin_quote_per_min,
+        cfg.mtpelerin_conversion_per_min
     );
     let store_line = if cfg.trocador_pg_dsn.is_some() {
         "trocador agreement: access log + order store append-only in POSTGRES \
@@ -852,6 +881,15 @@ struct Config {
     /// HMAC-SHA256 key the receiver verifies `Mtp-Signature` with. SECRET. Unset is
     /// legal (the receiver 503s naming the variable).
     mtpelerin_webhook_secret: Option<String>,
+    /// The Mt Pelerin webhook's OPTIONAL authentication key
+    /// (`DPAY_MTPELERIN_WEBHOOK_AUTH_KEY`), the other exchanged key: when set the
+    /// receiver requires the `Authentication` header to equal it before the signature
+    /// check. SECRET. Unset is legal (the HMAC alone guards).
+    mtpelerin_webhook_auth_key: Option<String>,
+    /// The per-client quote bound (`DPAY_MTPELERIN_QUOTE_PER_MIN`, default 6).
+    mtpelerin_quote_per_min: u32,
+    /// The per-client conversion bound (`DPAY_MTPELERIN_CONVERSION_PER_MIN`, default 4).
+    mtpelerin_conversion_per_min: u32,
     /// The Mt Pelerin API base (`DPAY_MTPELERIN_API_BASE`); default the venue's
     /// documented host.
     mtpelerin_api_base: String,
@@ -1185,6 +1223,17 @@ impl Config {
         // conversion POST somewhere meaningless — the relay refuses rather than guess).
         let mtpelerin_ctkn = non_empty("DPAY_MTPELERIN_CTKN");
         let mtpelerin_webhook_secret = non_empty("DPAY_MTPELERIN_WEBHOOK_SECRET");
+        // The webhook's OPTIONAL authKey (the docs' second exchanged key): until the
+        // founder's thread lands it, unset is the normal state and the HMAC alone guards.
+        let mtpelerin_webhook_auth_key = non_empty("DPAY_MTPELERIN_WEBHOOK_AUTH_KEY");
+        let mtpelerin_quote_per_min = parse_per_min(
+            "DPAY_MTPELERIN_QUOTE_PER_MIN",
+            dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
+        )?;
+        let mtpelerin_conversion_per_min = parse_per_min(
+            "DPAY_MTPELERIN_CONVERSION_PER_MIN",
+            dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        )?;
         let mtpelerin_api_base = match non_empty("DPAY_MTPELERIN_API_BASE") {
             Some(base) => {
                 reqwest::Url::parse(&base)
@@ -1248,6 +1297,9 @@ impl Config {
             trocador_status_spacing_secs,
             mtpelerin_ctkn,
             mtpelerin_webhook_secret,
+            mtpelerin_webhook_auth_key,
+            mtpelerin_quote_per_min,
+            mtpelerin_conversion_per_min,
             mtpelerin_api_base,
             mtpelerin_conversion_path,
             mtpelerin_log_dir,

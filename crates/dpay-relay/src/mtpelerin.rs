@@ -17,8 +17,13 @@
 //!   transaction COMPLETES, so a matched delivery IS the terminal fact. The `Mtp-Signature`
 //!   header carries HMAC-SHA256 over the FULL request body, hex-encoded, keyed with the
 //!   signature key (their own JS example: `createHmac('sha256', KEY).update(body).digest('hex')`).
-//!   An `Authentication` header key is also part of their setup; dpay wires the SIGNATURE
-//!   key (`DPAY_MTPELERIN_WEBHOOK_SECRET`) because that is what authenticates the payload.
+//!   An `Authentication` header key is also part of their setup: the venue exchanges TWO
+//!   keys (the authKey and the signature key). dpay wires the SIGNATURE key
+//!   (`DPAY_MTPELERIN_WEBHOOK_SECRET`) because that is what authenticates the payload;
+//!   the authKey (`DPAY_MTPELERIN_WEBHOOK_AUTH_KEY`) is OPTIONAL: when the operator has
+//!   exchanged and configured it, the receiver also requires the `Authentication` header
+//!   to match it exactly (constant-time) BEFORE the signature check; unset, the HMAC
+//!   alone guards.
 //! - Sell orders (developers.mtpelerin.com/integration-guides/events.md): the order
 //!   carries `offRampAddress` — the VENUE's own deposit address the user's crypto is sent
 //!   to — plus their order `id`. Both persist into the order store at creation.
@@ -57,6 +62,15 @@
 //! seam, crate::trocador_agreement §3's reasoning verbatim). Terminal dedupe: the FIRST
 //! completed delivery wins — later deliveries (redeliveries, replays after a restore) are
 //! answered 200 idempotently and never overwrite the stored payload.
+//!
+//! # Per-client bounds (the Trocador agreement's limiter pattern)
+//!
+//! The quote and conversion surfaces admit each upstream-bound call under a per-client
+//! fixed 60s window (6/min quote, 4/min conversion; `DPAY_MTPELERIN_QUOTE_PER_MIN` /
+//! `DPAY_MTPELERIN_CONVERSION_PER_MIN` override) and answer 429 + `Retry-After` + the
+//! house marker when the window is full, keyed per client IP (`DPAY_TRUST_PROXY`
+//! honesty). Device 400s and the unconfigured 503 are never counted; the webhook
+//! receiver is not windowed (the auth key + the HMAC gate it).
 //!
 //! # Failure semantics (same contract as crate::trocador)
 //!
@@ -124,6 +138,22 @@ pub const STATUS_THROTTLED_CODE: &str = "mtpelerin-status-throttled";
 /// The 401 code for a webhook delivery whose `Mtp-Signature` does not verify.
 pub const WEBHOOK_UNAUTHORIZED_CODE: &str = "mtpelerin-webhook-unauthorized";
 
+/// The webhook authentication header (Mt Pelerin's documented name, conversion-webhook
+/// setup): carries the exchanged authKey when the operator configured
+/// `DPAY_MTPELERIN_WEBHOOK_AUTH_KEY`.
+pub const AUTH_HEADER: &str = "Authentication";
+
+/// The per-client per-minute quote bound (`DPAY_MTPELERIN_QUOTE_PER_MIN` default): the
+/// Trocador agreement's limiter budget mirrored (6/min on the quote surface).
+pub const DEFAULT_QUOTE_PER_MIN: u32 = 6;
+/// The per-client per-minute conversion bound (`DPAY_MTPELERIN_CONVERSION_PER_MIN`
+/// default; 4/min on order creation, the Trocador trade budget's twin).
+pub const DEFAULT_CONVERSION_PER_MIN: u32 = 4;
+
+/// The 429 house codes for the per-client windows (the trocador marker style).
+pub const QUOTE_LIMITED_CODE: &str = "mtpelerin-quote-limited";
+pub const CONVERSION_LIMITED_CODE: &str = "mtpelerin-conversion-limited";
+
 /// The response header conversion creation answers with: the relay-minted order id — the
 /// `oid` the webhook echoes back as `external_id` and the status route's key.
 pub const ORDER_ID_HEADER: &str = "X-Dpay-Order-Id";
@@ -152,6 +182,25 @@ const MAP_PRUNE_LEN: usize = 8192;
 /// (the trocador agreement's `with_clock` seam verbatim).
 pub type NowFn = Arc<dyn Fn() -> u64 + Send + Sync>;
 
+/// Which upstream-bound surface a limit admission is for (the per-client fixed windows;
+/// the trocador agreement's `LimitKind` mirrored).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LimitKind {
+    /// `GET /api/v1/mtpelerin/quote`, the quote surface.
+    Quote,
+    /// `POST /api/v1/mtpelerin/conversion`, order creation.
+    Conversion,
+}
+
+impl LimitKind {
+    fn window_key(self) -> &'static str {
+        match self {
+            LimitKind::Quote => "quote",
+            LimitKind::Conversion => "conversion",
+        }
+    }
+}
+
 /// The proxy's configuration, read once at startup (main.rs from the env).
 #[derive(Clone, Debug)]
 pub struct MtPelerinConfig {
@@ -161,6 +210,17 @@ pub struct MtPelerinConfig {
     /// `DPAY_MTPELERIN_WEBHOOK_SECRET` — the webhook signature key (HMAC-SHA256 over the
     /// raw body). SECRET. Unset is legal (the receiver 503s naming the variable).
     pub webhook_secret: Option<String>,
+    /// `DPAY_MTPELERIN_WEBHOOK_AUTH_KEY`, the webhook's OPTIONAL authentication key
+    /// (Mt Pelerin's docs exchange an authKey alongside the signature key). When set,
+    /// the receiver requires the `Authentication` header to equal it exactly
+    /// (constant-time) before the signature check; unset, the HMAC alone guards. SECRET.
+    pub webhook_auth_key: Option<String>,
+    /// `DPAY_MTPELERIN_QUOTE_PER_MIN`, the per-client per-minute quote bound
+    /// (default 6).
+    pub quote_per_min: u32,
+    /// `DPAY_MTPELERIN_CONVERSION_PER_MIN`, the per-client per-minute conversion bound
+    /// (default 4).
+    pub conversion_per_min: u32,
     /// `DPAY_MTPELERIN_API_BASE` — default the venue's documented host.
     pub api_base: String,
     /// `DPAY_MTPELERIN_CONVERSION_PATH` — default the best-effort pin (module header).
@@ -178,6 +238,9 @@ impl Default for MtPelerinConfig {
         MtPelerinConfig {
             ctkn: None,
             webhook_secret: None,
+            webhook_auth_key: None,
+            quote_per_min: DEFAULT_QUOTE_PER_MIN,
+            conversion_per_min: DEFAULT_CONVERSION_PER_MIN,
             api_base: DEFAULT_API_BASE.to_string(),
             conversion_path: DEFAULT_CONVERSION_PATH.to_string(),
             log_dir: PathBuf::from("."),
@@ -242,6 +305,7 @@ pub enum WebhookOutcome {
 pub struct MtPelerinProxy {
     ctkn: Option<String>,
     webhook_secret: Option<String>,
+    webhook_auth_key: Option<String>,
     base: String,
     conversion_path: String,
     timeout: Duration,
@@ -249,9 +313,14 @@ pub struct MtPelerinProxy {
     log_dir: PathBuf,
     trust_proxy: bool,
     status_spacing_secs: u64,
+    quote_per_min: u32,
+    conversion_per_min: u32,
     orders: Mutex<OrdersInner>,
     /// order/query id → unix secs of the last status read (the 60 s promise).
     spacing: Mutex<HashMap<String, u64>>,
+    /// `"kind|ip"` → (window bucket, admitted count): the per-client fixed windows
+    /// (the trocador agreement's limiter verbatim).
+    limiter: Mutex<HashMap<String, (u64, u32)>>,
     now: NowFn,
 }
 
@@ -265,6 +334,7 @@ impl MtPelerinProxy {
         MtPelerinProxy {
             ctkn: config.ctkn,
             webhook_secret: config.webhook_secret,
+            webhook_auth_key: config.webhook_auth_key,
             base: config.api_base,
             conversion_path: config.conversion_path,
             timeout: DEFAULT_TIMEOUT,
@@ -272,8 +342,11 @@ impl MtPelerinProxy {
             log_dir: config.log_dir,
             trust_proxy: config.trust_proxy,
             status_spacing_secs: config.status_spacing_secs,
+            quote_per_min: config.quote_per_min,
+            conversion_per_min: config.conversion_per_min,
             orders: Mutex::new(orders),
             spacing: Mutex::new(HashMap::new()),
+            limiter: Mutex::new(HashMap::new()),
             now: Arc::new(crate::now_secs),
         }
     }
@@ -324,6 +397,35 @@ impl MtPelerinProxy {
             map.retain(|_, ts| now.saturating_sub(*ts) < 3600);
         }
         map.insert(id.to_string(), now);
+        Ok(())
+    }
+
+    /// Admit one upstream-bound call under the per-client fixed window (the trocador
+    /// agreement's `admit` verbatim). `Ok(())` = proceed (and the call IS counted);
+    /// `Err(remaining)` = the window is full: answer 429 with `Retry-After: remaining`.
+    /// Exempt by their call sites: device 400s, the unconfigured 503, status reads (the
+    /// poll cap has its own spacing), every webhook delivery.
+    fn admit(&self, kind: LimitKind, ip: Option<&str>) -> Result<(), u64> {
+        const WINDOW: u64 = 60;
+        let limit = match kind {
+            LimitKind::Quote => self.quote_per_min,
+            LimitKind::Conversion => self.conversion_per_min,
+        };
+        let now = (self.now)();
+        let bucket = now - now % WINDOW;
+        let key = format!("{}|{}", kind.window_key(), ip.unwrap_or("-"));
+        let mut map = self.limiter.lock().unwrap_or_else(|p| p.into_inner());
+        if map.len() > MAP_PRUNE_LEN {
+            map.retain(|_, (b, _)| *b == bucket);
+        }
+        let entry = map.entry(key).or_insert((bucket, 0));
+        if entry.0 != bucket {
+            *entry = (bucket, 0);
+        }
+        if entry.1 >= limit {
+            return Err((bucket + WINDOW - now).max(1));
+        }
+        entry.1 += 1;
         Ok(())
     }
 
@@ -549,6 +651,17 @@ pub async fn quote_proxy(
         body.insert("isCardPayment".into(), json!(card == "true"));
     }
 
+    // The per-client window admits the call right before it is made (the trocador
+    // discipline: device 400s above are never counted, only upstream-bound calls).
+    if let Err(retry) = proxy.admit(LimitKind::Quote, fp.ip.as_deref()) {
+        return too_many(
+            QUOTE_LIMITED_CODE,
+            "mtpelerin quote requests are rate-limited for this client: at most a \
+             fixed number of quotes per client per minute reach the venue",
+            retry,
+        );
+    }
+
     let url = match reqwest::Url::parse(&format!("{}{}", proxy.base, QUOTE_PATH)) {
         Ok(u) => u,
         Err(_) => {
@@ -679,6 +792,17 @@ pub async fn conversion_proxy(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.chars().take(MAX_CLIENT_ORDER_ID_CHARS).collect::<String>());
+
+    // The per-client window admits the call BEFORE the order is minted (the trocador
+    // trade rule: a refused call persists nothing).
+    if let Err(retry) = proxy.admit(LimitKind::Conversion, fp.ip.as_deref()) {
+        return too_many(
+            CONVERSION_LIMITED_CODE,
+            "mtpelerin conversion creation is rate-limited for this client: at most a \
+             fixed number of orders per client per minute reach the venue",
+            retry,
+        );
+    }
 
     // Persist FIRST (the correlation id exists before any upstream call), then forward
     // the whitelisted body + our `oid`.
@@ -814,7 +938,9 @@ pub async fn conversion_status(
 /// completion); the first terminal payload wins and later deliveries are idempotent.
 /// Verified-but-unknown ids and probes still answer 200 (they are authentic venue
 /// traffic — a non-2xx could only invite redelivery of what we cannot correlate);
-/// signature failures answer 401 and mutate nothing.
+/// authentication and signature failures answer 401 and mutate nothing. When
+/// `DPAY_MTPELERIN_WEBHOOK_AUTH_KEY` is configured, the `Authentication` header must
+/// equal it exactly (constant-time) BEFORE the signature is even considered.
 pub async fn webhook_receiver(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -826,11 +952,45 @@ pub async fn webhook_receiver(
         return response;
     }
     let secret = proxy.webhook_secret.clone().expect("checked above");
+    let started = Instant::now();
+    // The OPTIONAL authKey gate, BEFORE the signature check (the docs exchange two keys:
+    // the authKey rides the `Authentication` header, the signKey keys the HMAC). Only
+    // enforced when the operator configured it: until then the HMAC alone guards.
+    if let Some(auth_key) = proxy.webhook_auth_key.as_deref() {
+        let presented = headers
+            .get(auth_header_name())
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim);
+        let matches = presented
+            .map(|p| constant_time_eq(p.as_bytes(), auth_key.as_bytes()))
+            .unwrap_or(false);
+        if !matches {
+            proxy.log(&AccessLine {
+                kind: "webhook-unauthorized",
+                route: "/api/v1/mtpelerin/webhook",
+                method: "POST",
+                ip: fp.ip.clone(),
+                user_agent: fp.user_agent.clone(),
+                accept_language: fp.accept_language.clone(),
+                order_id: None,
+                venue_order_id: None,
+                upstream_status: None,
+                duration_ms: Some(started.elapsed().as_millis() as u64),
+            });
+            return json_response(
+                StatusCode::UNAUTHORIZED,
+                &relay_error_body(
+                    WEBHOOK_UNAUTHORIZED_CODE,
+                    "webhook authentication missing or invalid - when the Authentication \
+                     key is exchanged the Authentication header must carry it exactly",
+                ),
+            );
+        }
+    }
     let signature = headers
         .get(signature_header_name())
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
-    let started = Instant::now();
     if !verify_signature(&secret, &body, signature.as_deref()) {
         proxy.log(&AccessLine {
             kind: "webhook-unauthorized",
@@ -915,6 +1075,27 @@ pub fn verify_signature(secret: &str, body: &[u8], signature: Option<&str>) -> b
 /// The `Mtp-Signature` header name, lowercase static (axum wants the lowercase form).
 fn signature_header_name() -> header::HeaderName {
     header::HeaderName::from_static("mtp-signature")
+}
+
+/// The `Authentication` header name, lowercase static (axum's lookup is
+/// case-insensitive; the static avoids a runtime parse).
+fn auth_header_name() -> header::HeaderName {
+    header::HeaderName::from_static("authentication")
+}
+
+/// Constant-time byte equality for equal-purpose secrets: both sides are hashed to
+/// fixed 32-byte digests first (so length never leaks and the compare is a fixed-size
+/// XOR fold, the classic `constant_time_eq` shape). Only ever answers "equal or not";
+/// never logs either side.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    use sha2::{Digest, Sha256};
+    let da = Sha256::digest(a);
+    let db = Sha256::digest(b);
+    let mut diff = 0u8;
+    for (x, y) in da.iter().zip(db.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 /// `mtp-` + 16 lowercase hex from the OS CSPRNG — the checkout's `fresh_id` discipline,
@@ -1371,6 +1552,16 @@ mod tests {
         assert!(decimal_json_number("-1").is_none());
         assert!(decimal_json_number("1.5.5").is_none());
         assert!(decimal_json_number(".").is_none());
+    }
+
+    #[test]
+    fn constant_time_eq_answers_exactly_equality() {
+        assert!(constant_time_eq(b"same", b"same"));
+        assert!(constant_time_eq(b"", b""));
+        assert!(!constant_time_eq(b"same", b"sam"));
+        assert!(!constant_time_eq(b"same", b"same "));
+        assert!(!constant_time_eq(b"", b"x"));
+        assert!(!constant_time_eq(b"a", b"b"));
     }
 
     #[test]
