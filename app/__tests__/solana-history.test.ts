@@ -51,13 +51,16 @@ afterEach(() => {
 });
 
 /** Route both history RPC methods to in-memory tables keyed by address / signature. A transaction
- *  entry may be a thunk so a test can make one detail fetch throw. */
-function installStub(signatures: Record<string, SigEntry[]>, transactions: Record<string, TxSource> = {}) {
+ *  entry may be a thunk so a test can make one detail fetch throw; a signature-page entry may be a
+ *  thunk so a test can make one page read throw (the retry-once path). */
+function installStub(signatures: Record<string, SigEntry[] | (() => SigEntry[])>, transactions: Record<string, TxSource> = {}) {
   const calls: {method: string; params: unknown[]}[] = [];
   (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
     getSignaturesForAddress: (params: unknown[]) => {
       calls.push({method: 'getSignaturesForAddress', params});
-      return signatures[params[0] as string] ?? [];
+      const entry = signatures[params[0] as string];
+      if (entry === undefined) return [];
+      return typeof entry === 'function' ? entry() : entry;
     },
     getTransaction: (params: unknown[]) => {
       calls.push({method: 'getTransaction', params});
@@ -437,6 +440,30 @@ describe('solana history — ordering, bounds and RPC shape', () => {
     expect(dropped).toBe(0);
     expect(rows.map(r => r.signature)).toEqual(['SigFlaky']);
     expect(calls.filter(c => c.method === 'getTransaction')).toHaveLength(2);
+  });
+
+  test('a rate-limit hiccup on a signature page is retried, not reported as a failed read', async () => {
+    // The page burst (owner + one ATA per registered mint) runs concurrently; a single 429 on ONE
+    // page used to reject the whole fetch and mark the ledger stale. One spaced retry must absorb
+    // the hiccup; a second throw still fails the read (the stale banner stays honest).
+    const source = tx({keys: [OWNER, PEER], pre: [1_000_000_000, 0], post: [999_995_000, 100_000_000], slot: 30});
+    let attempts = 0;
+    const {calls} = installStub(
+      {
+        [OWNER]: () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('429 Too Many Requests');
+          return [sig('SigPage', 30)];
+        },
+        [OWNER_ATA]: [sig('SigPage', 30)], // same signature from both pages: dedup unaffected
+      },
+      {SigPage: source},
+    );
+    const {rows, dropped} = await fetchSolanaHistory(RPC, OWNER);
+    expect(dropped).toBe(0);
+    expect(rows.map(r => r.signature)).toEqual(['SigPage']);
+    const ownerPageCalls = calls.filter(c => c.method === 'getSignaturesForAddress' && c.params[0] === OWNER);
+    expect(ownerPageCalls).toHaveLength(2);
   });
 
   test('limit bounds both the signature pages and the number of detail fetches', async () => {

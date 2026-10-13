@@ -324,7 +324,17 @@ export async function fetchSolanaHistory(
     ...REGISTERED_MINTS.map(({mint}) => bs58.encode(deriveAta(ownerAddress, mint))),
   ];
   const pages = await Promise.all(
-    addresses.map((address) => getSignaturesForAddress(rpcUrl, address, limit, opts)),
+    addresses.map(async (address) => {
+      try {
+        return await getSignaturesForAddress(rpcUrl, address, limit, opts);
+      } catch (first) {
+        // The parallel burst (one page per address, concurrently) trips public-RPC rate limits;
+        // one spaced retry before the whole list is declared unreadable — the ledger's stale
+        // banner is for a genuinely failed read, not for our own thundering herd.
+        await new Promise((r) => setTimeout(r, 400));
+        return getSignaturesForAddress(rpcUrl, address, limit, opts);
+      }
+    }),
   );
 
   // Union the pages, newest-first by slot. Array#sort is stable, so signatures sharing a slot keep
