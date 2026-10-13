@@ -251,7 +251,7 @@ export const depositDe: DepositMessages = {
     quotePending: 'Kurs wird geladen…',
     continueLabel: 'Weiter',
     orderCreating: 'Bestellung bei Mt Pelerin wird erstellt…',
-    widgetNote: 'Schließe den Verkauf im geöffneten Mt-Pelerin-Fenster ab. Dort gibst du deine Bankdaten ein und siehst die Einzahlungsadresse; dpay beobachtet die Bestellung hier.',
+    widgetNote: 'Schließe den Verkauf im geöffneten Mt-Pelerin-Fenster ab. Dort gibst du deine Bankdaten ein und siehst die Einzahlungsadresse; dpay beobachtet die Bestellung.',
     widgetOpenFailed: 'Das Mt-Pelerin-Fenster hat sich nicht geöffnet.',
     widgetOpenRetry: 'Mt Pelerin erneut öffnen',
     minNote: 'Mt Pelerin lehnt Auszahlungen unter CHF 50 (oder Gegenwert) ab.',

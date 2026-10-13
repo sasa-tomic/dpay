@@ -729,7 +729,7 @@ export const depositEn: DepositMessages = {
     quotePending: 'Fetching the quote…',
     continueLabel: 'Continue',
     orderCreating: 'Creating the order with Mt Pelerin…',
-    widgetNote: 'Finish the sale in the Mt Pelerin window that opened. It collects your bank details and shows the deposit address; dpay watches the order here.',
+    widgetNote: 'Finish the sale in the Mt Pelerin window that opened. It collects your bank details and shows the deposit address; dpay watches the order.',
     widgetOpenFailed: 'The Mt Pelerin window did not open.',
     widgetOpenRetry: 'Open Mt Pelerin again',
     minNote: 'Mt Pelerin refuses cash-outs under CHF 50 (or the equivalent).',

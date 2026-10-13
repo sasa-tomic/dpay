@@ -250,7 +250,7 @@ export const depositEs: DepositMessages = {
     quotePending: 'Obteniendo la cotización…',
     continueLabel: 'Continuar',
     orderCreating: 'Creando el pedido con Mt Pelerin…',
-    widgetNote: 'Termina la venta en la ventana de Mt Pelerin que se abrió. Ahí introduces tus datos bancarios y ves la dirección de depósito; dpay observa el pedido aquí.',
+    widgetNote: 'Termina la venta en la ventana de Mt Pelerin que se abrió. Ahí introduces tus datos bancarios y ves la dirección de depósito; dpay observa el pedido.',
     widgetOpenFailed: 'La ventana de Mt Pelerin no se abrió.',
     widgetOpenRetry: 'Abrir Mt Pelerin de nuevo',
     minNote: 'Mt Pelerin rechaza retiros de menos de CHF 50 (o su equivalente).',
