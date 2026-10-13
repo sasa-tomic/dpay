@@ -24,14 +24,17 @@
  * never even created (core returns the globally shared instance); only a distinct fixed prefix
  * yields two isolated Cores and stores. Never rely on init order.
  *
- * IMPORT ORDER (load-bearing): `@walletconnect/react-native-compat` MUST be imported before any
- * `@reown/*` import (walletkit RN docs) — its side effects install the polyfills the SDK expects
- * on React Native. `fast-text-encoding` (explicit dep per the same docs) rides right after it.
+ * IMPORT ORDER (load-bearing): `./evm/textDecoderHermes` FIRST (Hermes's TextDecoder rejects the
+ * `fatal` option and `@walletconnect/pay` constructs with it at module scope — without the shim
+ * the import chain crashes the app at start), then `@walletconnect/react-native-compat` before
+ * any `@reown/*` import (walletkit RN docs) — its side effects install the polyfills the SDK
+ * expects on React Native. `fast-text-encoding` (explicit dep per the same docs) rides after.
  *
  * DISABLED GUARD (mirrors `walletconnect.ts`): web (`Platform.OS === 'web'` — the browser has no
  * wallet side here) or an empty `WALLETCONNECT_PROJECT_ID` disables every export (null / no-op /
  * false), so callers never special-case the disabled path.
  */
+import './evm/textDecoderHermes'; // MUST stay first: Hermes TextDecoder rejects {fatal}; @walletconnect/pay constructs with it at module scope
 import '@walletconnect/react-native-compat'; // side-effect FIRST: RN polyfills before any @reown/* import
 import 'fast-text-encoding'; // explicit per the walletkit RN install docs (TextEncoder/TextDecoder polyfill)
 import {Core} from '@walletconnect/core';

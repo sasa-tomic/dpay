@@ -49,6 +49,8 @@ export const SMOKE_FILES: readonly string[] = [
   'evm-permit.test.ts',
   // the EIP-191 personal_sign golden vectors (ramp address-validation + the W1 responder surface)
   'evm-signing.test.ts',
+  // the Hermes TextDecoder boot guard (the WalletConnect import chain dies at start without it)
+  'text-decoder-hermes.test.ts',
   // wallet identity
   'wallet.test.ts',
   // settlement state machines (pure)
