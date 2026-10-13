@@ -23,7 +23,9 @@ class RestrictedTextDecoder {
   }
 
   decode(input?: Uint8Array): string {
-    return input == null ? '' : new RealDecoderAtLoad('utf-8').decode(input);
+    // Mirror Hermes exactly: a bare decode() reads `.buffer` of the undefined argument.
+    if (input == null) throw new TypeError("Cannot read property 'buffer' of undefined");
+    return new RealDecoderAtLoad('utf-8').decode(input);
   }
 }
 
@@ -42,7 +44,9 @@ describe('textDecoderHermes — the WalletConnect boot guard', () => {
 
   it('the wrapper drops fatal/ignoreBOM, keeps the label, and still decodes utf-8', () => {
     const Wrapped = wrapRestrictedTextDecoder(RestrictedTextDecoder as never);
-    // The exact construction the pay module performs at import time.
+    // The exact construction the pay module performs at import time, INCLUDING the bare
+    // `decode()` right after it — Hermes's decode reads `.buffer` of the undefined argument,
+    // so the wrapper must default it instead of forwarding.
     const d = new Wrapped('utf-8', {fatal: true, ignoreBOM: true});
     expect(d.encoding).toBe('utf-8');
     expect(d.fatal).toBe(false);

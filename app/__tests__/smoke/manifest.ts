@@ -51,6 +51,8 @@ export const SMOKE_FILES: readonly string[] = [
   'evm-signing.test.ts',
   // the Hermes TextDecoder boot guard (the WalletConnect import chain dies at start without it)
   'text-decoder-hermes.test.ts',
+  // the @walletconnect/pay metro-stub contract (keeps the defective pay dist out of the bundle)
+  'wc-pay-stub.test.ts',
   // wallet identity
   'wallet.test.ts',
   // settlement state machines (pure)

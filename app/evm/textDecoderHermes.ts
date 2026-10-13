@@ -45,6 +45,10 @@ export function wrapRestrictedTextDecoder(
     }
 
     decode(input?: DecodeInput): string {
+      // Node defaults `decode()` to the empty string; Hermes's own decode reads `.buffer` of the
+      // undefined argument instead (the pay glue calls `decode()` bare once at module scope).
+      // Never forward undefined.
+      if (input == null) return '';
       // `stream` decoding is not part of any call site here (the WC glue decodes whole
       // wasm-memory slices); not forwarded, matching Hermes's own option-poor surface.
       return this.inner.decode(input);

@@ -5,7 +5,7 @@ const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
  * Metro configuration
  * https://reactnative.dev/docs/metro
  *
- * Resolver alias: `@walletconnect/ethereum-provider@2.23.10` STATICALLY references
+ * Resolver alias 1: `@walletconnect/ethereum-provider@2.23.10` STATICALLY references
  * `@reown/appkit/core` (the built-in QR modal). The installed `@reown/appkit@1.8.19`
  * does not export that subpath and is web-only (lit, DOM APIs) — it cannot bundle under
  * Metro/RN. We redirect the import to a local stub (`shims/reown-appkit-core.js`) so
@@ -14,6 +14,12 @@ const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
  * a custom <QRCode> (display_uri event). ethereum-provider only dynamic-imports the modal when
  * showQrModal is true, so the stub's `createAppKit()` is never called at runtime. See the shim's
  * FIXME for retirement conditions.
+ *
+ * Resolver alias 2: `@walletconnect/pay` (the Hermes boot-crash fix). `@reown/walletkit` imports
+ * it for one `isAvailable()` probe; its dist evaluates option-requiring TextDecoder glue at
+ * module scope, which crashes Hermes before any UI (unfixable by app code — module scope cannot
+ * be caught). The stub (`shims/walletconnect-pay.js`) answers `isAvailable(): false`, walletkit
+ * skips its pay branch, the defective dist never ships. See the shim header.
  *
  * @type {import('metro-config').MetroConfig}
  */
@@ -24,6 +30,12 @@ const config = {
         return {
           type: 'sourceFile',
           filePath: path.resolve(__dirname, 'shims/reown-appkit-core.js'),
+        };
+      }
+      if (moduleName === '@walletconnect/pay') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(__dirname, 'shims/walletconnect-pay.js'),
         };
       }
       return context.resolveRequest(context, moduleName, platform);
