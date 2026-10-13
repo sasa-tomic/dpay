@@ -18,9 +18,11 @@
 //!   `{"venue_id":"mtpelerin","quote":<venue body VERBATIM>,"fetched_at":<unix secs>}`,
 //!   upstream errors pass through verbatim unwrapped, and unknown/missing params are
 //!   400 house errors with zero upstream hits;
-//! - conversion creation: the relay mints the correlation id (`mtp-…`), passes it
-//!   upstream as `oid`, answers the venue's body VERBATIM with `X-Dpay-Order-Id`, and
-//!   persists the order FIRST — the venue's `id` + `offRampAddress` land in the store;
+//! - conversion creation is LOCAL (the upstream order POST is GONE: Mt Pelerin closed
+//!   dpay's API tier, 2026-10-13): the relay mints the correlation id (`mtp-…`), persists
+//!   the record (pair + amount + created_at) with ZERO upstream calls, and answers the
+//!   record in the status route's own shape with `X-Dpay-Order-Id`; no CTKN is needed on
+//!   the conversion surface (the stub's `/orders` route stays up as a zero-hit canary);
 //! - the poll cap: the status read is webhook-first (zero upstream calls) and spaced at
 //!   most one per id per 60 s — 429 `mtpelerin-status-throttled` + `Retry-After` within
 //!   the window (the injectable clock walks it, no sleeping);
@@ -159,8 +161,10 @@ async fn stub_convert(
         .into_response()
 }
 
-/// The venue's (best-effort-pinned) order-creation answer: the sell order carries the
-/// venue's own `id` and the `offRampAddress` the user's crypto goes to.
+/// The REMOVED upstream order-creation endpoint, kept as a CANARY: since 2026-10-13 the
+/// relay must never dial it (the API tier is closed; order creation happens in the
+/// user's own widget session). Every test pins its hit count at zero; any dial fails
+/// the suite loudly.
 async fn stub_orders(
     State(stub): State<Stub>,
     uri: axum::http::Uri,
@@ -187,8 +191,8 @@ async fn stub_orders(
 }
 
 /// Bind the stub on an ephemeral loopback port; return (its state, the API BASE the
-/// relay should be given — the proxy appends `/currency_rates/convert` and the
-/// configured conversion path).
+/// relay should be given — the proxy appends `/currency_rates/convert`; the `/orders`
+/// route stays up ONLY as the zero-hit canary).
 async fn spawn_stub() -> (Stub, String) {
     let stub = Stub::new();
     let router = Router::new()
@@ -223,7 +227,6 @@ fn configured(base: &str) -> MtPelerinProxy {
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
         api_base: base.to_string(),
-        conversion_path: "/orders".to_string(),
         log_dir: temp_log_dir("full"),
         trust_proxy: false,
         status_spacing_secs: STATUS_SPACING_SECS,
@@ -308,31 +311,31 @@ fn conversion_body() -> String {
 
 // ---- the 503-not-404 contract ----
 
-/// Unconfigured (BOTH credentials unset — TODAY'S DEFAULT): every route answers 503
-/// with the `mtpelerin-unconfigured` marker naming its own variable, with zero
-/// upstream calls. The venue is absent, not broken.
+/// Unconfigured (BOTH credentials unset — TODAY'S DEFAULT): the QUOTE route answers 503
+/// with the `mtpelerin-unconfigured` marker naming the CTKN variable, with zero upstream
+/// calls (the venue is absent, not broken; the quote route is the only one that needs
+/// the key: the conversion routes are local, 2026-10-13). The receiver gates on
+/// ITS OWN variable.
 #[tokio::test]
 async fn unconfigured_answers_503_naming_the_missing_variable() {
     let (stub, _unused) = spawn_stub().await;
+    let dir = temp_log_dir("unconf");
     let state = state_with(MtPelerinProxy::new(MtPelerinConfig {
-        log_dir: temp_log_dir("unconf"),
+        log_dir: dir.clone(),
         ..MtPelerinConfig::default()
     }));
-    for (method, uri, body) in [
-        ("GET", "/api/v1/mtpelerin/quote?sourceCurrency=ZCHF&destCurrency=CHF&sourceAmount=1", None),
-        ("POST", "/api/v1/mtpelerin/conversion", Some(conversion_body())),
-        ("GET", "/api/v1/mtpelerin/conversion?id=mtp-0123456789abcdef", None),
-    ] {
-        let (status, _h, body_bytes) =
-            request_json(&state, method, uri, body.as_deref(), &[]).await;
-        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{uri}");
-        assert_eq!(relay_error_code(&body_bytes), "mtpelerin-unconfigured");
-        assert!(
-            String::from_utf8_lossy(&body_bytes).contains("DPAY_MTPELERIN_CTKN"),
-            "names the CTKN variable: {}",
-            String::from_utf8_lossy(&body_bytes)
-        );
-    }
+    let (status, _h, body_bytes) = get_json(
+        &state,
+        "/api/v1/mtpelerin/quote?sourceCurrency=ZCHF&destCurrency=CHF&sourceAmount=1",
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(relay_error_code(&body_bytes), "mtpelerin-unconfigured");
+    assert!(
+        String::from_utf8_lossy(&body_bytes).contains("DPAY_MTPELERIN_CTKN"),
+        "names the CTKN variable: {}",
+        String::from_utf8_lossy(&body_bytes)
+    );
     // The receiver gates on ITS OWN variable: still unset → 503 naming the secret.
     let (status, _h, body_bytes) =
         post_json(&state, "/api/v1/mtpelerin/webhook", "{}").await;
@@ -341,8 +344,26 @@ async fn unconfigured_answers_503_naming_the_missing_variable() {
         String::from_utf8_lossy(&body_bytes).contains("DPAY_MTPELERIN_WEBHOOK_SECRET"),
         "names the webhook secret variable"
     );
+    // The conversion routes are LOCAL: no key, no 503. Creation registers the order and
+    // an unknown-id status read is a 404, never a 503.
+    let (status, headers, body) =
+        post_json(&state, "/api/v1/mtpelerin/conversion", &conversion_body()).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "creation is local - it needs no CTKN: {}",
+        String::from_utf8_lossy(&body)
+    );
+    assert!(headers.get("X-Dpay-Order-Id").is_some());
+    let (status, _h, _b) =
+        get_json(&state, "/api/v1/mtpelerin/conversion?id=mtp-0123456789abcdef").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "a local read, not a 503");
     assert_eq!(Stub::hits(&stub.quote_hits), 0, "zero upstream calls");
-    assert_eq!(Stub::hits(&stub.conversion_hits), 0, "zero upstream calls");
+    assert_eq!(
+        Stub::hits(&stub.conversion_hits),
+        0,
+        "zero upstream calls - the order POST no longer exists"
+    );
 }
 
 /// CTKN set but the webhook secret unset: the proxy routes work, the receiver stays
@@ -470,14 +491,27 @@ async fn quote_malformed_queries_are_refused_before_any_upstream_call() {
 
 // ---- the conversion surface ----
 
-/// Order creation: the relay mints the correlation id, passes it upstream as `oid`,
-/// answers the venue's body VERBATIM with `X-Dpay-Order-Id`, and the venue's `id` +
-/// `offRampAddress` land in the order store (visible through the status route).
+/// Order creation is LOCAL (no upstream POST, removed 2026-10-13): the relay mints the
+/// correlation id, persists the record (pair + amount + created_at) BEFORE answering,
+/// and answers the record in the status route's own shape with `X-Dpay-Order-Id`. The
+/// venue's `id` exists only from the completion webhook onward (dpay creates no
+/// venue-side order); the stub's `/orders` canary stays at zero throughout.
 #[tokio::test]
-async fn conversion_forwards_oid_persists_and_answers_verbatim() {
+async fn conversion_mints_persists_and_answers_locally() {
     let (stub, base) = spawn_stub().await;
     let (now, with_clock) = fake_clock();
-    let state = state_with(with_clock(configured(&base)));
+    let dir = temp_log_dir("local");
+    let state = state_with(with_clock(MtPelerinProxy::new(MtPelerinConfig {
+        ctkn: Some(STUB_CTKN.into()),
+        webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        webhook_auth_key: None,
+        quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
+        conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        api_base: base.clone(),
+        log_dir: dir.clone(),
+        trust_proxy: false,
+        status_spacing_secs: STATUS_SPACING_SECS,
+    })));
 
     let (status, headers, resp_body) = post_json(&state, "/api/v1/mtpelerin/conversion", &conversion_body()).await;
     assert_eq!(
@@ -486,10 +520,14 @@ async fn conversion_forwards_oid_persists_and_answers_verbatim() {
         "body: {}",
         String::from_utf8_lossy(&resp_body)
     );
-    assert_eq!(Stub::hits(&stub.conversion_hits), 1, "exactly one upstream call");
+    assert_eq!(
+        Stub::hits(&stub.conversion_hits),
+        0,
+        "ZERO upstream calls - the order POST is gone (canary route)"
+    );
 
-    // The relay's own correlation id: minted here, carried in the header, passed
-    // upstream as `oid`, never the venue's id.
+    // The relay's own correlation id: minted here, carried in the header, the `oid` the
+    // widget link will carry and the webhook echoes back.
     let order_id = headers
         .get("X-Dpay-Order-Id")
         .and_then(|v| v.to_str().ok())
@@ -497,43 +535,68 @@ async fn conversion_forwards_oid_persists_and_answers_verbatim() {
         .to_string();
     assert!(order_id.starts_with("mtp-"), "{order_id}");
     assert_eq!(order_id.len(), "mtp-".len() + 16, "{order_id}");
-    let (seen_headers, seen_uri, seen_body) = stub.last();
-    assert_eq!(seen_uri, "/orders");
-    let v: serde_json::Value = serde_json::from_str(&seen_body).expect("upstream JSON");
-    assert_eq!(v["oid"], order_id, "the correlation id is OURS");
-    assert_eq!(v["sourceCurrency"], "ZCHF");
-    assert_eq!(v["iban"], "CH9300762011623852957");
-    assert_eq!(v["holderName"], "Test Holder");
-    assert_eq!(v["sourceAmount"], 100, "the amount rides as a number");
-    assert!(seen_headers.get("Authentication").is_none());
 
-    // What the DEVICE got: the venue's answer VERBATIM (an order is not a quote
-    // surface — no wrap), no credential echoed.
+    // What the DEVICE got: the record in the status route's own shape; venue facts
+    // still absent (only a webhook delivery can name them), the relay's mint instant
+    // pinned by the fake clock. No credential echoed (none was needed).
     let text = String::from_utf8_lossy(&resp_body);
-    let v: serde_json::Value = serde_json::from_str(&text).expect("verbatim JSON");
-    assert_eq!(v["id"], "664369c938b3ca001a3cd44f");
-    assert_eq!(v["offRampAddress"], "0xMTP-DEPOSIT-ADDRESS");
-    assert!(v.get("venue_id").is_none(), "NO wrap on an order");
     assert!(!text.contains(STUB_CTKN), "no credential is ever echoed");
+    let v: serde_json::Value = serde_json::from_str(&text).expect("the record is JSON");
+    assert_eq!(v["order_id"], order_id.as_str());
+    assert_eq!(v["venue_order_id"], serde_json::Value::Null);
+    assert_eq!(v["offRampAddress"], serde_json::Value::Null);
+    assert_eq!(v["terminal"], false);
+    assert_eq!(v["payload"], serde_json::Value::Null);
+    assert_eq!(v["created_at"], 1_000_000, "the clock's instant");
+    assert!(v.get("venue_id").is_none(), "no quote-wrap on an order");
 
-    // The store: the status route serves the persisted order (webhook-first, zero
-    // upstream) with the offRampAddress + venue id attached.
+    // The store: the FIRST line already carries the requested conversion verbatim
+    // (persist-first), and the status route serves the same record with zero upstream.
+    let first_line = std::fs::read_to_string(dir.join("mtpelerin-orders.jsonl"))
+        .expect("the order store exists")
+        .lines()
+        .next()
+        .expect("the creation line")
+        .to_string();
+    let stored: serde_json::Value = serde_json::from_str(&first_line).expect("store JSON");
+    assert_eq!(stored["order_id"], order_id.as_str());
+    assert_eq!(stored["source_currency"], "ZCHF");
+    assert_eq!(stored["dest_currency"], "CHF");
+    assert_eq!(stored["amount_field"], "sourceAmount");
+    assert_eq!(stored["amount"], 100, "the amount rides as a number");
+    assert_eq!(stored["created_at"], 1_000_000);
+
     now.store(1_000_000 + STATUS_SPACING_SECS + 1, Ordering::SeqCst);
     let (status, _h, body) = get_json(&state, &format!("/api/v1/mtpelerin/conversion?id={order_id}")).await;
     assert_eq!(status, StatusCode::OK);
     let v: serde_json::Value = serde_json::from_slice(&body).expect("status JSON");
-    assert_eq!(v["order_id"], order_id);
-    assert_eq!(v["venue_order_id"], "664369c938b3ca001a3cd44f", "the venue's id persisted");
-    assert_eq!(v["offRampAddress"], "0xMTP-DEPOSIT-ADDRESS", "the deposit address persisted");
+    assert_eq!(v["order_id"], order_id.as_str());
+    assert_eq!(v["venue_order_id"], serde_json::Value::Null, "no venue id before the webhook");
     assert_eq!(v["terminal"], false, "no completion delivery yet");
-    assert_eq!(Stub::hits(&stub.conversion_hits), 1, "the status read made NO upstream call");
+    assert_eq!(
+        Stub::hits(&stub.conversion_hits),
+        0,
+        "the status read made NO upstream call either"
+    );
 }
 
-/// Malformed conversion bodies are 400s BEFORE any upstream call and mint no order.
+/// Malformed conversion bodies are 400s BEFORE anything is minted: no order record, no
+/// store line, no upstream dial.
 #[tokio::test]
-async fn conversion_refuses_malformed_bodies_before_any_upstream_call() {
+async fn conversion_refuses_malformed_bodies_and_mints_nothing() {
     let (stub, base) = spawn_stub().await;
-    let state = state_with(configured(&base));
+    let dir = temp_log_dir("refusals");
+    let state = state_with(MtPelerinProxy::new(MtPelerinConfig {
+        ctkn: Some(STUB_CTKN.into()),
+        webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        webhook_auth_key: None,
+        quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
+        conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        api_base: base.clone(),
+        log_dir: dir.clone(),
+        trust_proxy: false,
+        status_spacing_secs: STATUS_SPACING_SECS,
+    }));
     let ok = serde_json::from_str::<serde_json::Value>(&conversion_body()).unwrap();
     type Mutate = Box<dyn Fn(&mut serde_json::Value)>;
     for (label, mutate) in [
@@ -584,6 +647,81 @@ async fn conversion_refuses_malformed_bodies_before_any_upstream_call() {
         assert_eq!(status, StatusCode::BAD_REQUEST, "not json ({label})");
     }
     assert_eq!(Stub::hits(&stub.conversion_hits), 0, "zero upstream hits on every refusal");
+    let store = std::fs::read_to_string(dir.join("mtpelerin-orders.jsonl")).unwrap_or_default();
+    assert!(
+        store.trim().is_empty(),
+        "a refused conversion mints nothing: {store}"
+    );
+}
+
+/// The conversion surface is LOCAL end to end (2026-10-13: dpay's Mt Pelerin API tier is
+/// closed; the order id reaches the venue on the widget link's `oid`): with CTKN NEVER
+/// configured, creation registers the order, the completion webhook correlates it, and
+/// the status read answers terminal, while the quote route keeps its 503 gate and the
+/// `/orders` canary never takes a hit.
+#[tokio::test]
+async fn conversion_lifecycle_works_without_ctkn_and_never_dials_upstream() {
+    let (stub, base) = spawn_stub().await;
+    let (now, with_clock) = fake_clock();
+    let state = state_with(with_clock(MtPelerinProxy::new(MtPelerinConfig {
+        ctkn: None,
+        webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        webhook_auth_key: None,
+        quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
+        conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        api_base: base.clone(),
+        log_dir: temp_log_dir("no-ctkn"),
+        trust_proxy: false,
+        status_spacing_secs: STATUS_SPACING_SECS,
+    })));
+
+    // The quote route keeps its gate: no CTKN, 503 naming the variable.
+    let (status, _h, body) = get_json(
+        &state,
+        "/api/v1/mtpelerin/quote?sourceCurrency=ZCHF&destCurrency=CHF&sourceAmount=1",
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(relay_error_code(&body), "mtpelerin-unconfigured");
+
+    // Creation: 200 + the correlation id + the record, with zero upstream dials.
+    let (status, headers, resp_body) =
+        post_json(&state, "/api/v1/mtpelerin/conversion", &conversion_body()).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "{}",
+        String::from_utf8_lossy(&resp_body)
+    );
+    let order_id = headers
+        .get("X-Dpay-Order-Id")
+        .and_then(|v| v.to_str().ok())
+        .expect("the order id header")
+        .to_string();
+    assert_eq!(Stub::hits(&stub.conversion_hits), 0, "no upstream order POST exists anymore");
+    assert_eq!(Stub::hits(&stub.quote_hits), 0);
+
+    // The webhook correlates the order WITHOUT any CTKN anywhere in the relay.
+    let payload = webhook_payload(&order_id, "1");
+    let (status, _h, body) = request_json(
+        &state,
+        "POST",
+        "/api/v1/mtpelerin/webhook",
+        Some(&payload),
+        &[("Mtp-Signature", &sign(STUB_WEBHOOK_SECRET, payload.as_bytes()))],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+
+    // The status read answers terminal, still keyless.
+    now.store(1_000_000 + STATUS_SPACING_SECS + 1, Ordering::SeqCst);
+    let (status, _h, body) =
+        get_json(&state, &format!("/api/v1/mtpelerin/conversion?id={order_id}")).await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(&body).expect("status JSON");
+    assert_eq!(v["terminal"], true, "the keyless lifecycle completed");
+    assert_eq!(v["venue_order_id"], "664369c938b3ca001a3cd44f", "the webhook named the venue id");
+    assert_eq!(Stub::hits(&stub.conversion_hits), 0);
 }
 
 // ---- the poll cap (the 1/min fallback discipline) ----
@@ -760,7 +898,6 @@ async fn webhook_first_terminal_wins_and_later_deliveries_are_idempotent() {
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
         api_base: base.clone(),
-        conversion_path: "/orders".to_string(),
         log_dir: dir.clone(),
         trust_proxy: false,
         status_spacing_secs: STATUS_SPACING_SECS,
@@ -810,7 +947,6 @@ async fn webhook_first_terminal_wins_and_later_deliveries_are_idempotent() {
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
         api_base: base.clone(),
-        conversion_path: "/orders".to_string(),
         log_dir: dir,
         trust_proxy: false,
         status_spacing_secs: STATUS_SPACING_SECS,
@@ -830,7 +966,11 @@ async fn webhook_first_terminal_wins_and_later_deliveries_are_idempotent() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "idempotent on the rebuilt store too");
-    assert_eq!(Stub::hits(&stub.conversion_hits), 1, "creation only - nothing else dials upstream");
+    assert_eq!(
+        Stub::hits(&stub.conversion_hits),
+        0,
+        "creation is local - nothing ever dials the removed order endpoint"
+    );
 }
 
 /// A verified delivery whose `external_id` names no order: 200 (authentic venue
@@ -871,7 +1011,6 @@ async fn webhook_auth_key_gates_before_the_signature_when_configured() {
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
         api_base: base.clone(),
-        conversion_path: "/orders".to_string(),
         log_dir: temp_log_dir("authkey"),
         trust_proxy: false,
         status_spacing_secs: STATUS_SPACING_SECS,
@@ -963,10 +1102,11 @@ async fn webhook_without_auth_key_configured_stays_signature_only() {
 
 // ---- the per-client rate bounds (the trocador limiter pattern) ----
 
-/// The quote + conversion surfaces admit each upstream-bound call under a per-client
-/// fixed 60s window: over budget answers 429 + `Retry-After` + the house marker BEFORE
-/// any upstream call, a different client has its own window, device 400s never count,
-/// the window resets with the clock, and a refused conversion mints no order.
+/// The quote + conversion surfaces admit each call under a per-client fixed 60s window:
+/// over budget answers 429 + `Retry-After` + the house marker before anything happens
+/// (no upstream quote dial, no order mint), a different client has its own window,
+/// device 400s never count, the window resets with the clock, and a refused conversion
+/// mints no order.
 #[tokio::test]
 async fn quote_and_conversion_are_rate_limited_per_client() {
     let (stub, base) = spawn_stub().await;
@@ -979,7 +1119,6 @@ async fn quote_and_conversion_are_rate_limited_per_client() {
         quote_per_min: 2,
         conversion_per_min: 1,
         api_base: base.clone(),
-        conversion_path: "/orders".to_string(),
         log_dir: dir.clone(),
         trust_proxy: true,
         status_spacing_secs: STATUS_SPACING_SECS,
@@ -1028,8 +1167,8 @@ async fn quote_and_conversion_are_rate_limited_per_client() {
     assert_eq!(status, StatusCode::OK, "a fresh window admits again");
     assert_eq!(Stub::hits(&stub.quote_hits), 5);
 
-    // Conversion, client A: limit 1. The FIRST creation passes; the second is refused
-    // and mints NOTHING (no upstream call, no order in the store).
+    // Conversion, client A: limit 1. The FIRST creation passes (a LOCAL registration);
+    // the second is refused and mints NOTHING (no order in the store, no header).
     let (status, headers, _b) = post_json_xff(&state, "/api/v1/mtpelerin/conversion", &conversion_body(), xff_a).await;
     assert_eq!(status, StatusCode::OK);
     assert!(headers.get("X-Dpay-Order-Id").is_some());
@@ -1038,7 +1177,11 @@ async fn quote_and_conversion_are_rate_limited_per_client() {
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(relay_error_code(&body), "mtpelerin-conversion-limited");
     assert!(headers.get("X-Dpay-Order-Id").is_none(), "a refused conversion rides no header");
-    assert_eq!(Stub::hits(&stub.conversion_hits), 1, "the refused call never went upstream");
+    assert_eq!(
+        Stub::hits(&stub.conversion_hits),
+        0,
+        "the window bounds the surface - and creation never dials the venue anyway"
+    );
     let order_ids: Vec<String> = std::fs::read_to_string(dir.join("mtpelerin-orders.jsonl"))
         .unwrap_or_default()
         .lines()

@@ -204,14 +204,15 @@
 //!                           e2e harness sets 0). A prod binary never consults this env:
 //!                           at most one upstream read per trade per 60s is the signed
 //!                           promise itself, and there it is a compile-time property.
-//!   DPAY_MTPELERIN_CTKN     the Mt Pelerin integration key for the off-ramp proxy (R2
-//!                           step 1, 2026-10-12 — GET /api/v1/mtpelerin/quote,
-//!                           POST+GET /api/v1/mtpelerin/conversion; see src/mtpelerin.rs;
+//!   DPAY_MTPELERIN_CTKN     the Mt Pelerin integration key for the QUOTE proxy (R2
+//!                           step 1, 2026-10-12 — GET /api/v1/mtpelerin/quote, the one
+//!                           route that still dials the venue upstream; the conversion
+//!                           routes are local and need no key; see src/mtpelerin.rs;
 //!                           tracked credential: `secrets/mtpelerin.sops.json` — decrypt
 //!                           into the env, never a plaintext .env). Requested from
 //!                           hello@mtpelerin.com (manual review; the same thread sets up
 //!                           the conversion webhook). SECRET deploy config: never logged,
-//!                           never echoed, never committed. Unset is LEGAL — every proxy
+//!                           never echoed, never committed. Unset is LEGAL — the quote
 //!                           route still registers and answers 503 `mtpelerin-unconfigured`
 //!                           naming this variable.
 //!   DPAY_MTPELERIN_WEBHOOK_SECRET
@@ -247,12 +248,6 @@
 //!                           `https://api.mtpelerin.com` — the venue's documented host).
 //!                           The offline loop points it at the relay's own test stub. A
 //!                           set-but-malformed URL refuses startup (EXIT_CONFIG).
-//!   DPAY_MTPELERIN_CONVERSION_PATH
-//!                           the conversion (order-creation) upstream path (default
-//!                           `/orders` — BEST-EFFORT: the venue's order API is
-//!                           contact-gated, so the path MUST be re-pinned from their
-//!                           technical docs before the first real conversion;
-//!                           src/mtpelerin.rs module header). Must start with `/`.
 //!   DPAY_MTPELERIN_LOG_DIR  the directory for the append-only records
 //!                           `mtpelerin-access.jsonl` (one JSON line per proxied call +
 //!                           every webhook delivery) and `mtpelerin-orders.jsonl` (the
@@ -427,7 +422,6 @@ async fn main() {
             quote_per_min: cfg.mtpelerin_quote_per_min,
             conversion_per_min: cfg.mtpelerin_conversion_per_min,
             api_base: cfg.mtpelerin_api_base.clone(),
-            conversion_path: cfg.mtpelerin_conversion_path.clone(),
             log_dir: cfg.mtpelerin_log_dir.clone(),
             trust_proxy: cfg.trust_proxy,
             status_spacing_secs: cfg.mtpelerin_status_spacing_secs,
@@ -622,15 +616,17 @@ async fn main() {
     // signature key are the partner's secrets).
     if cfg.mtpelerin_ctkn.is_some() {
         println!(
-            "/api/v1/mtpelerin/*: ENABLED — the off-ramp proxy (quote + conversion + the \
-             webhook-first status read) attaches DPAY_MTPELERIN_CTKN server-side; the \
-             device never sees it."
+            "/api/v1/mtpelerin/quote: ENABLED - the quote proxy attaches \
+             DPAY_MTPELERIN_CTKN server-side; the device never sees it. Conversion \
+             creation + the status read are LOCAL (no key needed): the order id rides \
+             the widget link's oid and the webhook echoes it back."
         );
     } else {
         println!(
-            "/api/v1/mtpelerin/*: unconfigured — the proxy routes answer 503 until \
+            "/api/v1/mtpelerin/quote: unconfigured - the quote route answers 503 until \
              DPAY_MTPELERIN_CTKN is set in the deploy environment (the Mt Pelerin \
-             integration key, requested from hello@mtpelerin.com; see docs/OPS.md §3)."
+             integration key, requested from hello@mtpelerin.com; see docs/OPS.md §3). \
+             The conversion routes are local and work without it."
         );
     }
     if cfg.mtpelerin_webhook_secret.is_some() {
@@ -893,9 +889,6 @@ struct Config {
     /// The Mt Pelerin API base (`DPAY_MTPELERIN_API_BASE`); default the venue's
     /// documented host.
     mtpelerin_api_base: String,
-    /// The conversion upstream path (`DPAY_MTPELERIN_CONVERSION_PATH`); default the
-    /// best-effort pin (src/mtpelerin.rs — re-pin from the venue's technical docs).
-    mtpelerin_conversion_path: String,
     /// The Mt Pelerin records' dir (`DPAY_MTPELERIN_LOG_DIR`, default "."): the
     /// append-only access log + order store.
     mtpelerin_log_dir: std::path::PathBuf,
@@ -1242,18 +1235,6 @@ impl Config {
             }
             None => dpay_relay::mtpelerin::DEFAULT_API_BASE.to_string(),
         };
-        let mtpelerin_conversion_path = match non_empty("DPAY_MTPELERIN_CONVERSION_PATH") {
-            Some(path) => {
-                if !path.starts_with('/') {
-                    return Err(format!(
-                        "DPAY_MTPELERIN_CONVERSION_PATH={path:?} must be an absolute path \
-                         (start with '/')"
-                    ));
-                }
-                path
-            }
-            None => dpay_relay::mtpelerin::DEFAULT_CONVERSION_PATH.to_string(),
-        };
         let mtpelerin_log_dir = std::path::PathBuf::from(
             non_empty("DPAY_MTPELERIN_LOG_DIR").unwrap_or_else(|| ".".into()),
         );
@@ -1301,7 +1282,6 @@ impl Config {
             mtpelerin_quote_per_min,
             mtpelerin_conversion_per_min,
             mtpelerin_api_base,
-            mtpelerin_conversion_path,
             mtpelerin_log_dir,
             mtpelerin_status_spacing_secs,
         })

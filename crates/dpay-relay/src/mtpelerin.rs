@@ -24,37 +24,41 @@
 //!   exchanged and configured it, the receiver also requires the `Authentication` header
 //!   to match it exactly (constant-time) BEFORE the signature check; unset, the HMAC
 //!   alone guards.
-//! - Sell orders (developers.mtpelerin.com/integration-guides/events.md): the order
-//!   carries `offRampAddress` — the VENUE's own deposit address the user's crypto is sent
-//!   to — plus their order `id`. Both persist into the order store at creation.
+//! - Sell orders (developers.mtpelerin.com/integration-guides/events.md): the venue's
+//!   order carries `offRampAddress` — the VENUE's own deposit address the user's crypto is
+//!   sent to — and their own `id`. dpay never creates that order server-side (see below):
+//!   the id persists when the completion webhook names it; the address stays a record
+//!   field for whenever a venue payload carries one.
 //!
-//! # What is deliberately OPEN (undocumented until the founder's key exchange lands)
+//! # What Mt Pelerin answered (founder-forwarded, 2026-10-13): the order POST is GONE
 //!
-//! The full order-creation API is NOT public: developers.mtpelerin.com/integration-guides/
-//! integration-methods/api.md lists "Create buy/sell/swap orders" but refers the technical
-//! docs to a contact request. The conversion route therefore pins a BEST-EFFORT upstream
-//! path (`DEFAULT_CONVERSION_PATH`) and forwards a whitelisted JSON body with our `oid`
-//! attached; the path is overridable (`DPAY_MTPELERIN_CONVERSION_PATH`) and MUST be
-//! re-pinned from the venue's technical docs before the first real conversion — the exact
-//! discipline the Trocador codes shipped with (crate::trocador's OPEN note). A wrong path
-//! cannot fail silently: the venue's own 404 passes through verbatim.
+//! dpay's API tier is CLOSED: server-side order creation requires the USER'S OWN
+//! credentials (they recommend the widget) or B2B own-name orders (legal-entity
+//! verification plus regulatory authorizations dpay does not hold and must not imply).
+//! The upstream order POST is therefore REMOVED. The conversion route is purely local:
+//! validate the device body, mint our `mtp-…` correlation id, persist the record, answer
+//! with it. The order id reaches Mt Pelerin on the widget link's `oid` parameter; their
+//! completion webhook echoes it back as `external_id`, and that is the whole correlation
+//! story. The quote proxy keeps calling the documented `currency_rates/convert` upstream.
 //!
 //! # The guard (the unconfigured-refusal pattern)
 //!
-//! Until `DPAY_MTPELERIN_CTKN` (the integration key, sops: secrets/mtpelerin.sops.json)
-//! is set, EVERY proxy route answers 503 `mtpelerin-unconfigured` naming the variable —
-//! the routes are registered on every build (503-not-404 philosophy, crate::trocador).
-//! The webhook receiver's credential is the SIGNATURE key: until
-//! `DPAY_MTPELERIN_WEBHOOK_SECRET` is set it answers 503 naming that variable, because an
-//! unverifiable delivery must never mutate an order. Both are LEGAL unset states: the
-//! venue is simply absent until the founder's R0 email thread lands the keys.
+//! `DPAY_MTPELERIN_CTKN` (the integration key, sops: secrets/mtpelerin.sops.json) gates
+//! the QUOTE surface, the one route that still dials upstream. Unset, it answers 503
+//! `mtpelerin-unconfigured` naming the variable, and the route is registered on every
+//! build (503-not-404 philosophy, crate::trocador). The conversion routes are LOCAL: they
+//! dial nothing and work with no key at all. The webhook receiver's credential is the
+//! SIGNATURE key: until `DPAY_MTPELERIN_WEBHOOK_SECRET` is set it answers 503 naming that
+//! variable, because an unverifiable delivery must never mutate an order. Both unset
+//! states are LEGAL: the venue is simply absent until the keys are exchanged.
 //!
 //! # Correlation + poll discipline (the Trocador partner-agreement precedent, §2 terms 2+4)
 //!
 //! The correlation id is OURS: conversion creation mints `mtp-` + 16 lowercase hex (the
-//! checkout's CSPRNG discipline), passes it upstream as `oid`, persists the order BEFORE
-//! the upstream call, and answers with the `X-Dpay-Order-Id` header. A webhook delivery
-//! echoes it back as `external_id`; the venue's `id` rides the same record. Status reads
+//! checkout's CSPRNG discipline), persists the order BEFORE anything else, and answers
+//! with the `X-Dpay-Order-Id` header. The id reaches the venue on the widget link's `oid`
+//! parameter; a webhook delivery echoes it back as `external_id`, and the venue's own
+//! `id` rides the same record. Status reads
 //! (the webhook's FALLBACK channel — Mt Pelerin documents no retry) are the store's
 //! webhook-first answer with ZERO upstream calls, spaced at most one read per order id per
 //! 60 s (`mtpelerin-status-throttled` 429 + `Retry-After` beyond that; the promise is
@@ -65,21 +69,23 @@
 //!
 //! # Per-client bounds (the Trocador agreement's limiter pattern)
 //!
-//! The quote and conversion surfaces admit each upstream-bound call under a per-client
-//! fixed 60s window (6/min quote, 4/min conversion; `DPAY_MTPELERIN_QUOTE_PER_MIN` /
+//! The quote and conversion surfaces admit each call under a per-client fixed 60s window
+//! (6/min quote, 4/min conversion; `DPAY_MTPELERIN_QUOTE_PER_MIN` /
 //! `DPAY_MTPELERIN_CONVERSION_PER_MIN` override) and answer 429 + `Retry-After` + the
 //! house marker when the window is full, keyed per client IP (`DPAY_TRUST_PROXY`
-//! honesty). Device 400s and the unconfigured 503 are never counted; the webhook
-//! receiver is not windowed (the auth key + the HMAC gate it).
+//! honesty). Device 400s are never counted; the webhook receiver is not windowed (the
+//! auth key + the HMAC gate it).
 //!
 //! # Failure semantics (same contract as crate::trocador)
 //!
-//! Upstream HTTP status → SAME status, body VERBATIM. Relay-originated failures carry
+//! The QUOTE surface passes the upstream through verbatim: same HTTP status, same body.
+//! Relay-originated failures carry
 //! `{"dpayRelayError": "mtpelerin-unconfigured"|"mtpelerin-upstream-unreachable"|
 //! "mtpelerin-status-throttled", "detail": …}` (503 unconfigured, 504 transport, 429 the
 //! poll cap). The CTKN, the webhook secret and the reqwest error text are never logged,
-//! never echoed; redirects are not followed. Device-body refusals are 400 house errors
-//! BEFORE any upstream call. The access log + order store are the Trocador agreement's
+//! never echoed; redirects are not followed. Conversion creation is local: its refusals
+//! are 400 house errors (device body) and 429 (window full), and nothing else. The access
+//! log + order store are the Trocador agreement's
 //! JSONL pattern (append-only, `mtpelerin-access.jsonl` / `mtpelerin-orders.jsonl` under
 //! `DPAY_MTPELERIN_LOG_DIR`, last-wins replay at startup) — the Postgres arm is the
 //! documented follow-up when the founder's webhook setup lands (the Trocador store's
@@ -113,14 +119,9 @@ pub const MTPELERIN_VENUE_ID: &str = "mtpelerin";
 pub const DEFAULT_API_BASE: &str = "https://api.mtpelerin.com";
 
 /// The documented price-quote path (price-quote-api.md, fetched 2026-10-12). Never
-/// overridden — the doc pins it.
+/// overridden — the doc pins it. The ONLY upstream path this module dials: order creation
+/// has no upstream leg (the venue's API tier is closed for dpay, module header).
 pub const QUOTE_PATH: &str = "/currency_rates/convert";
-
-/// The conversion (order-creation) upstream path. BEST-EFFORT AND UNPINNED: the venue's
-/// order API is contact-gated (module header "deliberately OPEN") — re-pin from the
-/// technical docs before the first real conversion. Overridable via
-/// `DPAY_MTPELERIN_CONVERSION_PATH`.
-pub const DEFAULT_CONVERSION_PATH: &str = "/orders";
 
 /// Per-upstream-call timeout (same rule as crate::trocador: single round trips, no knob).
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -155,7 +156,8 @@ pub const QUOTE_LIMITED_CODE: &str = "mtpelerin-quote-limited";
 pub const CONVERSION_LIMITED_CODE: &str = "mtpelerin-conversion-limited";
 
 /// The response header conversion creation answers with: the relay-minted order id — the
-/// `oid` the webhook echoes back as `external_id` and the status route's key.
+/// `oid` on the widget link, the value the webhook echoes back as `external_id`, and the
+/// status route's key.
 pub const ORDER_ID_HEADER: &str = "X-Dpay-Order-Id";
 
 /// The order-id prefix (`mtp-` + 16 lowercase hex — see `fresh_order_id`; a distinct
@@ -223,8 +225,6 @@ pub struct MtPelerinConfig {
     pub conversion_per_min: u32,
     /// `DPAY_MTPELERIN_API_BASE` — default the venue's documented host.
     pub api_base: String,
-    /// `DPAY_MTPELERIN_CONVERSION_PATH` — default the best-effort pin (module header).
-    pub conversion_path: String,
     /// `DPAY_MTPELERIN_LOG_DIR` — the append-only records' directory (default ".").
     pub log_dir: PathBuf,
     /// `DPAY_TRUST_PROXY` — the shared client-IP honesty flag (trocador agreement doc).
@@ -242,7 +242,6 @@ impl Default for MtPelerinConfig {
             quote_per_min: DEFAULT_QUOTE_PER_MIN,
             conversion_per_min: DEFAULT_CONVERSION_PER_MIN,
             api_base: DEFAULT_API_BASE.to_string(),
-            conversion_path: DEFAULT_CONVERSION_PATH.to_string(),
             log_dir: PathBuf::from("."),
             trust_proxy: false,
             status_spacing_secs: STATUS_SPACING_SECS,
@@ -251,18 +250,29 @@ impl Default for MtPelerinConfig {
 }
 
 /// One order record — the in-memory form of a `mtpelerin-orders.jsonl` state line
-/// (last-wins on load). The correlation triple is OUR order id (the upstream `oid`, the
-/// webhook's `external_id`, the status route's key), the venue's own `id`, and the
-/// `offRampAddress` the sell order named.
+/// (last-wins on load). The correlation triple is OUR order id (the widget link's `oid`,
+/// the webhook's `external_id`, the status route's key), the venue's own `id` (which only
+/// a webhook delivery can name, since dpay creates no venue-side order), and the
+/// `offRampAddress` a venue payload named. The requested conversion's own detail
+/// (currencies + amount) is known at creation and rides the record from the first line.
 #[derive(Clone, Debug)]
 pub struct OrderRecord {
     pub order_id: String,
     pub client_order_id: Option<String>,
-    /// Mt Pelerin's own transaction/order id (their `id` field).
+    /// Mt Pelerin's own transaction/order id (their `id` field), set only by a webhook
+    /// delivery (no upstream order call exists anymore).
     pub venue_order_id: Option<String>,
     /// The VENUE's deposit address for the off-ramp (their `offRampAddress`) — the user
     /// sends THEIR OWN crypto transfer to it; funds never touch a dpay-controlled address.
+    /// Populated only from a venue payload; creation cannot know it.
     pub offramp_address: Option<String>,
+    /// The requested pair, verbatim from the device body.
+    pub source_currency: Option<String>,
+    pub dest_currency: Option<String>,
+    /// Which amount field the device passed (`sourceAmount` or `destAmount`) and its
+    /// validated decimal number.
+    pub amount_field: Option<String>,
+    pub amount: Option<serde_json::Number>,
     pub created_at: u64,
     /// Whether a completion webhook has been applied (the webhook fires on completion —
     /// a matched delivery IS the terminal fact; first terminal wins).
@@ -307,7 +317,6 @@ pub struct MtPelerinProxy {
     webhook_secret: Option<String>,
     webhook_auth_key: Option<String>,
     base: String,
-    conversion_path: String,
     timeout: Duration,
     client: reqwest::Client,
     log_dir: PathBuf,
@@ -336,7 +345,6 @@ impl MtPelerinProxy {
             webhook_secret: config.webhook_secret,
             webhook_auth_key: config.webhook_auth_key,
             base: config.api_base,
-            conversion_path: config.conversion_path,
             timeout: DEFAULT_TIMEOUT,
             client: http_client(),
             log_dir: config.log_dir,
@@ -363,7 +371,9 @@ impl MtPelerinProxy {
         self.trust_proxy
     }
 
-    /// The missing proxy credential name. Unset is a LEGAL state (503, not 404).
+    /// The missing QUOTE-proxy credential name (the CTKN gates the one upstream-bound
+    /// surface; the conversion routes are local and need no key). Unset is a LEGAL state
+    /// (503, not 404).
     fn missing_credential(&self) -> Option<&'static str> {
         if self.ctkn.is_none() {
             Some("DPAY_MTPELERIN_CTKN")
@@ -429,16 +439,29 @@ impl MtPelerinProxy {
         Ok(())
     }
 
-    /// Mint an order id and persist the record BEFORE the upstream call (the
-    /// persist-first promise). JSONL appends are best-effort (stderr on failure) — the
-    /// in-memory index is still the correlation source of truth.
-    fn open_order(&self, client_order_id: Option<&str>) -> String {
+    /// Mint an order id and persist the record FIRST (the persist-first promise: the
+    /// correlation id exists before anything else can happen to it). Carries the
+    /// requested conversion's own detail (pair + amount) so the store line is complete
+    /// from birth. JSONL appends are best-effort (stderr on failure) — the in-memory
+    /// index is still the correlation source of truth. Returns the full record.
+    fn open_order(
+        &self,
+        client_order_id: Option<&str>,
+        source_currency: &str,
+        dest_currency: &str,
+        amount_field: &str,
+        amount: serde_json::Number,
+    ) -> OrderRecord {
         let order_id = fresh_order_id();
         let record = OrderRecord {
             order_id: order_id.clone(),
             client_order_id: client_order_id.map(str::to_string),
             venue_order_id: None,
             offramp_address: None,
+            source_currency: Some(source_currency.to_string()),
+            dest_currency: Some(dest_currency.to_string()),
+            amount_field: Some(amount_field.to_string()),
+            amount: Some(amount),
             created_at: (self.now)(),
             terminal: false,
             status_ts: None,
@@ -451,36 +474,7 @@ impl MtPelerinProxy {
             &self.log_dir.join(ORDERS_LOG_FILE),
             &order_record_line(&record),
         );
-        order_id
-    }
-
-    /// Attach the venue's creation answer (`id`, `offRampAddress`) to the order and
-    /// append the state transition (best-effort, like every JSONL write).
-    fn attach_creation(&self, order_id: &str, venue_order_id: Option<&str>, offramp: Option<&str>) {
-        let mut orders = self.orders.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(record) = orders.by_order.get_mut(order_id) else {
-            return;
-        };
-        if let Some(v) = venue_order_id.filter(|s| !s.is_empty()) {
-            record.venue_order_id = Some(v.to_string());
-        }
-        if let Some(a) = offramp.filter(|s| !s.is_empty()) {
-            record.offramp_address = Some(a.to_string());
-        }
-        // Own the updated state (ends the map borrow): the venue index learns the id
-        // below, and the persist runs against the SAME owned snapshot the index holds.
-        let record = record.clone();
-        if let Some(v) = &record.venue_order_id {
-            orders
-                .by_venue
-                .insert(v.clone(), order_id.to_string());
-        }
-        drop(orders);
-        write_jsonl(
-            &self.log_dir,
-            &self.log_dir.join(ORDERS_LOG_FILE),
-            &order_record_line(&record),
-        );
+        record
     }
 
     /// Apply one webhook delivery: `external_id` is the echoed `oid`. FIRST terminal
@@ -700,22 +694,22 @@ pub async fn quote_proxy(
     json_response(outcome.status, &outcome.body)
 }
 
-/// `POST /api/v1/mtpelerin/conversion` — server-side order creation. Request (device):
-/// `{"sourceCurrency", "destCurrency", "sourceAmount"| "destAmount", "sourceNetwork",
+/// `POST /api/v1/mtpelerin/conversion` - LOCAL order registration (no upstream call; the
+/// venue's API tier is closed for dpay, module header). Request (device):
+/// `{"sourceCurrency", "destCurrency", "sourceAmount"|"destAmount", "sourceNetwork",
 /// "iban", "holderName", "clientOrderId"?}` — the cash-out sheet's own fields. The relay
-/// mints the correlation id (`mtp-…`), persists the order FIRST, forwards the whitelisted
-/// body + `oid` upstream, and answers the venue's body VERBATIM with the order id riding
-/// `X-Dpay-Order-Id`. The venue's `id` + `offRampAddress` (the sell order's deposit
-/// address) persist into the order store when the answer carries them.
+/// mints the correlation id (`mtp-…`), persists the order (pair + amount + `created_at`)
+/// FIRST, and answers 200 with the record in the status route's own shape plus the order
+/// id riding `X-Dpay-Order-Id`. The order id reaches Mt Pelerin on the widget link's
+/// `oid` parameter; their completion webhook echoes it back as `external_id`, and that
+/// delivery is what names the venue's `id` (and any deposit address) in the store. No
+/// CTKN is required here: the route dials nothing (the quote proxy keeps the key gate).
 pub async fn conversion_proxy(
     State(state): State<AppState>,
     fp: MtpFingerprint,
     body: Bytes,
 ) -> Response {
     let proxy = state.mtpelerin.clone();
-    if let Some(response) = unconfigured(proxy.missing_credential()) {
-        return response;
-    }
     let req: Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -735,7 +729,7 @@ pub async fn conversion_proxy(
             .map(str::trim)
             .filter(|s| !s.is_empty())
     };
-    let (Some(source_currency), Some(dest_currency), Some(source_network), Some(iban), Some(holder_name)) = (
+    let (Some(source_currency), Some(dest_currency), Some(_source_network), Some(_iban), Some(_holder_name)) = (
         str_field("sourceCurrency"),
         str_field("destCurrency"),
         str_field("sourceNetwork"),
@@ -799,53 +793,22 @@ pub async fn conversion_proxy(
         return too_many(
             CONVERSION_LIMITED_CODE,
             "mtpelerin conversion creation is rate-limited for this client: at most a \
-             fixed number of orders per client per minute reach the venue",
+             fixed number of orders per client per minute are registered",
             retry,
         );
     }
 
-    // Persist FIRST (the correlation id exists before any upstream call), then forward
-    // the whitelisted body + our `oid`.
-    let order_id = proxy.open_order(client_order_id.as_deref());
-    let mut upstream = serde_json::Map::new();
-    upstream.insert("oid".into(), json!(order_id));
-    upstream.insert("sourceCurrency".into(), json!(source_currency));
-    upstream.insert("destCurrency".into(), json!(dest_currency));
-    upstream.insert("sourceNetwork".into(), json!(source_network));
-    upstream.insert("iban".into(), json!(iban));
-    upstream.insert("holderName".into(), json!(holder_name));
-    upstream.insert(amount.0.into(), Value::Number(amount_number));
-    if let Some(dest_net) = str_field("destNetwork") {
-        upstream.insert("destNetwork".into(), json!(dest_net));
-    }
-
-    let url = match reqwest::Url::parse(&format!("{}{}", proxy.base, proxy.conversion_path)) {
-        Ok(u) => u,
-        Err(_) => {
-            return err(
-                StatusCode::BAD_REQUEST,
-                "upstream URL could not be built for the conversion method",
-            )
-        }
-    };
+    // Persist FIRST (the correlation id exists before anything else), then answer with
+    // the record: the same status-shape body the GET route serves for this id, with the
+    // venue fields still absent (only a webhook delivery can name them).
     let started = Instant::now();
-    let outcome = post_upstream(
-        &proxy,
-        url,
-        &Bytes::from(Value::Object(upstream).to_string()),
-    )
-    .await;
-    // The sell order's deposit address + the venue's own id ride the 2xx answer.
-    let (mut venue_order_id, mut offramp) = (None, None);
-    if outcome.status.is_success() {
-        if let Ok(v) = serde_json::from_slice::<Value>(&outcome.body) {
-            venue_order_id = json_string_field(&v, "id").or_else(|| {
-                v.get("id").and_then(Value::as_u64).map(|n| n.to_string())
-            });
-            offramp = json_string_field(&v, "offRampAddress");
-        }
-    }
-    proxy.attach_creation(&order_id, venue_order_id.as_deref(), offramp.as_deref());
+    let record = proxy.open_order(
+        client_order_id.as_deref(),
+        source_currency,
+        dest_currency,
+        amount.0,
+        amount_number,
+    );
     proxy.log(&AccessLine {
         kind: "conversion",
         route: "/api/v1/mtpelerin/conversion",
@@ -853,13 +816,13 @@ pub async fn conversion_proxy(
         ip: fp.ip.clone(),
         user_agent: fp.user_agent.clone(),
         accept_language: fp.accept_language.clone(),
-        order_id: Some(order_id.clone()),
-        venue_order_id: venue_order_id.clone(),
-        upstream_status: Some(outcome.status.as_u16()),
+        order_id: Some(record.order_id.clone()),
+        venue_order_id: None,
+        upstream_status: None,
         duration_ms: Some(started.elapsed().as_millis() as u64),
     });
-    let mut response = json_response(outcome.status, &outcome.body);
-    if let Ok(value) = HeaderValue::from_str(&order_id) {
+    let mut response = json_response(StatusCode::OK, &status_body(&record));
+    if let Ok(value) = HeaderValue::from_str(&record.order_id) {
         response.headers_mut().insert(ORDER_ID_HEADER, value);
     }
     response
@@ -867,19 +830,17 @@ pub async fn conversion_proxy(
 
 /// `GET /api/v1/mtpelerin/conversion?id=<order id>` — the status read: the webhook's
 /// FALLBACK channel (Mt Pelerin documents no delivery retry). The store answers with ZERO
-/// upstream calls (webhook-first), and the promised poll cap bounds reads: at most one
-/// per id per 60 s, 429 + `Retry-After` beyond (`mtpelerin-status-throttled`). `id` is
-/// dpay's order id (the `X-Dpay-Order-Id` creation carried); the venue's own id resolves
-/// too. Unknown ids are a 404 house error.
+/// upstream calls (webhook-first), so the route needs no CTKN (the key gates the quote
+/// proxy, the one upstream-bound surface), and the promised poll cap bounds reads: at
+/// most one per id per 60 s, 429 + `Retry-After` beyond (`mtpelerin-status-throttled`).
+/// `id` is dpay's order id (the `X-Dpay-Order-Id` creation carried); the venue's own id
+/// resolves too. Unknown ids are a 404 house error.
 pub async fn conversion_status(
     State(state): State<AppState>,
     Query(params): Query<BTreeMap<String, String>>,
     fp: MtpFingerprint,
 ) -> Response {
     let proxy = state.mtpelerin.clone();
-    if let Some(response) = unconfigured(proxy.missing_credential()) {
-        return response;
-    }
     let Some(id) = params.get("id").map(String::as_str).filter(|s| !s.is_empty())
     else {
         return err(
@@ -914,6 +875,14 @@ pub async fn conversion_status(
     let Some(record) = record else {
         return err(StatusCode::NOT_FOUND, "no such conversion order");
     };
+    json_response(StatusCode::OK, &status_body(&record))
+}
+
+/// One order record in the status route's JSON shape: the body BOTH the status read and
+/// the creation answer serve (creation answers the record exactly as the store now holds
+/// it). The venue's facts (`venue_order_id`, `offRampAddress`, `payload`) are null until
+/// a verified webhook delivery names them.
+fn status_body(record: &OrderRecord) -> Bytes {
     let payload = record
         .last_webhook_payload
         .as_deref()
@@ -927,7 +896,7 @@ pub async fn conversion_status(
         "status_ts": record.status_ts,
         "payload": payload,
     });
-    json_response(StatusCode::OK, &Bytes::from(body.to_string()))
+    Bytes::from(body.to_string())
 }
 
 /// `POST /api/v1/mtpelerin/webhook` — the conversion webhook receiver. Contract
@@ -1167,6 +1136,18 @@ fn order_record_line(record: &OrderRecord) -> String {
     if let Some(v) = &record.offramp_address {
         object.insert("offramp_address".into(), json!(v));
     }
+    if let Some(v) = &record.source_currency {
+        object.insert("source_currency".into(), json!(v));
+    }
+    if let Some(v) = &record.dest_currency {
+        object.insert("dest_currency".into(), json!(v));
+    }
+    if let Some(v) = &record.amount_field {
+        object.insert("amount_field".into(), json!(v));
+    }
+    if let Some(v) = &record.amount {
+        object.insert("amount".into(), json!(v));
+    }
     object.insert("created_at".into(), json!(record.created_at));
     object.insert("terminal".into(), json!(record.terminal));
     if let Some(v) = record.status_ts {
@@ -1252,6 +1233,19 @@ fn load_orders(path: &Path) -> OrdersInner {
                 .get("offramp_address")
                 .and_then(Value::as_str)
                 .map(str::to_string),
+            source_currency: value
+                .get("source_currency")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            dest_currency: value
+                .get("dest_currency")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            amount_field: value
+                .get("amount_field")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            amount: value.get("amount").and_then(Value::as_number).cloned(),
             created_at: value.get("created_at").and_then(Value::as_u64).unwrap_or(0),
             terminal: value
                 .get("terminal")

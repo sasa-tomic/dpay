@@ -382,7 +382,7 @@ impl AppState {
     /// Attach the Mt Pelerin off-ramp proxy + webhook receiver
     /// (`crate::mtpelerin::MtPelerinProxy`). `main` builds it from
     /// `DPAY_MTPELERIN_CTKN` + `DPAY_MTPELERIN_WEBHOOK_SECRET` (+ optional
-    /// `DPAY_MTPELERIN_API_BASE` / `_CONVERSION_PATH` / `_LOG_DIR`); tests build it
+    /// `DPAY_MTPELERIN_API_BASE` / `_LOG_DIR`); tests build it
     /// against the local stub upstream with a temp log dir. BOTH credential values are
     /// SECRETS (never logged here or anywhere else), and either may stay unset: the
     /// routes stay registered and answer, honestly, 503 naming the missing variable.
