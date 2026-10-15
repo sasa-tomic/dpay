@@ -34,7 +34,7 @@ hermeticDescribe('flow 54 - the Pay scan card: the WC hint line and the wc: clas
     // carries the hint line under the privacy line.
     await armPayScan(m);
     await m.driver.findByTestID('pay-scan', {timeoutMs: 5000});
-    expect(m.driver.readText('wc-scan-hint')).toBe('WalletConnect codes connect your dapps here.');
+    expect(m.driver.readText('wc-scan-hint')).toBe('WalletConnect codes connect your dapps.');
     expect(m.driver.isPresent('btn-pay-wc')).toBe(false);
 
     // The classifier route: a `wc:` pairing URI off the camera lands in the Wallet's pairing

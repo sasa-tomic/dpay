@@ -225,7 +225,7 @@ export const payEs: PayMessages = {
     submittedTitle: 'Enviada',
     submittedNote:
       'La red aceptó la transacción. La confirmación está pendiente. El hash es tu comprobante.',
-    scanHint: 'Los códigos WalletConnect conectan tus dapps aquí.',
+    scanHint: 'Los códigos WalletConnect conectan tus dapps.',
   },
 
   scanToPay: 'Escanear y pagar',

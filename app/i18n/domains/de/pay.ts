@@ -225,7 +225,7 @@ export const payDe: PayMessages = {
     submittedTitle: 'Übermittelt',
     submittedNote:
       'Das Netzwerk hat die Transaktion angenommen. Die Bestätigung steht noch aus. Der Hash ist dein Beleg.',
-    scanHint: 'WalletConnect-Codes verbinden deine dApps hier.',
+    scanHint: 'WalletConnect-Codes verbinden deine dApps.',
   },
 
   scanToPay: 'Scannen & zahlen',

@@ -587,7 +587,7 @@ export const payEn: PayMessages = {
     submittedTitle: 'Submitted',
     submittedNote:
       'The network accepted the transaction. Settlement is still pending. The hash is your record.',
-    scanHint: 'WalletConnect codes connect your dapps here.',
+    scanHint: 'WalletConnect codes connect your dapps.',
   },
 
   scanToPay: 'Scan to pay',
