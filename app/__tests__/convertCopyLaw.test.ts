@@ -52,7 +52,8 @@ const DETAILS_ONLY = new Set<string>([
   'multihop.routeDestEstimate', 'multihop.gasFeeLine', 'multihop.routeSurplusNote',
   // CeFi: counterparty census, checklist sentences, deposit handoff notes, order handles
   'cefi.counterparty', 'cefi.checklistSigns', 'cefi.checklistSignsAuto',
-  'cefi.depositNote', 'cefi.depositAutoNote', 'cefi.shiftId', 'cefi.refusalLine',
+  'cefi.depositNote', 'cefi.depositAutoNote', 'cefi.shiftId', 'cefi.orderId',
+  'cefi.refusalLine',
   'cefi.destRow', 'cefi.destRowMulti',
   // chain: the order narration block (under Details)
   'chain.orderLine', 'chain.phase2Leg', 'chain.rowShape',

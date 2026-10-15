@@ -829,7 +829,7 @@ describe('the CeFi panel lines — no-expiry honesty + the last-checked timestam
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-awaiting-deposit')).toBe(true);
     expect(textOf(tree, 'convert-deposit-no-expiry')).toContain(convertEn.cefi.noExpiryLine);
-    expect(textOf(tree, 'convert-shift-id')).toContain('shift-x1');
+    expect(textOf(tree, 'convert-shift-id')).toContain(convertEn.cefi.shiftId('shift-x1'));
   });
 
   test('an expiry the venue DID publish renders the expiry line, not the no-expiry fact', async () => {
@@ -882,8 +882,47 @@ describe('the CeFi panel lines — no-expiry honesty + the last-checked timestam
       mockEngineSub.cb?.({[cefiBase.id]: {...cefiBase, step: 'aborted', abortedFromStep: 'awaiting_deposit', abortedAtMs: 1}});
     });
     expect(textOf(tree, 'convert-aborted')).toContain(convertEn.abortedProvider.slice(0, 60));
-    expect(textOf(tree, 'convert-aborted-shift-id')).toContain('shift-x1');
+    expect(textOf(tree, 'convert-aborted-shift-id')).toContain(convertEn.cefi.shiftId('shift-x1'));
     expect(present(tree, 'btn-convert-stop')).toBe(false); // terminal: no second Stop
+  });
+
+  // The per-venue id label (2026-10-15): "Shift" is SideShift's own noun; a Mt Pelerin
+  // record is a plain ORDER. The panel picks by the record's venue family. The mtp record
+  // shape is buildMtpCashOutRecord's: no IC catalog ids, no providerDeposit block (dpay
+  // never learns the venue address; the widget session moves the deposit).
+  const mtpBase: ConvertRecord = {
+    ...cefiBase,
+    id: 'mtp-view',
+    venueId: 'mtpelerin',
+    inCurrency: undefined,
+    inLedger: '0xdpac000000000000000000000000000000000001',
+    inSymbol: 'USDC',
+    outLedger: 'CHF',
+    outSymbol: 'CHF',
+    providerRef: {orderId: 'mtp-x1', statusUrl: 'https://relay/api/v1/mtpelerin/conversion?id=mtp-x1'},
+    providerDeposit: undefined,
+  };
+
+  test('a Mt Pelerin card calls its id an ORDER, never "Shift"', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[mtpBase.id]: mtpBase});
+    const tree = await mountConvert('250000000', null);
+    await act(async () => {
+      mockEngineSub.cb?.({[mtpBase.id]: {...mtpBase, step: 'provider_refunded'}});
+    });
+    await openDetails(tree);
+    expect(textOf(tree, 'convert-refunded-venue')).toContain('Mt Pelerin');
+    expect(textOf(tree, 'convert-shift-id')).toBe(convertEn.cefi.orderId('mtp-x1'));
+    expect(textOf(tree, 'convert-shift-id')).not.toContain('Shift');
+  });
+
+  test('the aborted Mt Pelerin card points at the order with the same family label', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[mtpBase.id]: mtpBase});
+    const tree = await mountConvert('250000000', null);
+    jest.mocked(convertAbortFlavor).mockReturnValue('provider');
+    await act(async () => {
+      mockEngineSub.cb?.({[mtpBase.id]: {...mtpBase, step: 'aborted', abortedFromStep: 'awaiting_deposit', abortedAtMs: 1}});
+    });
+    expect(textOf(tree, 'convert-aborted-shift-id')).toBe(convertEn.cefi.orderId('mtp-x1'));
   });
 });
 

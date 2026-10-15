@@ -273,6 +273,7 @@ export const convertEs: ConvertMessages = {
     noExpiryLine: 'Sin caducidad publicada - dpay sigue vigilando.',
     lastCheckedLine: at => `Última comprobación: ${at}.`,
     shiftId: id => `Shift ${id}`,
+    orderId: id => `Pedido ${id}`,
     settlingFundsLine: 'Fondos confirmados - tu pago queda bloqueado por el importe cotizado.',
     settlingWatchLine: 'La mayoría se liquidan en minutos - dpay supervisa cada shift e interviene si uno se demora.',
     depositNote: (venue, sym) =>

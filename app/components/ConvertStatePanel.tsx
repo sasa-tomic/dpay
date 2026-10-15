@@ -65,6 +65,13 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
   // The record's own venue, looked up per V1 — display name and pool principal follow the
   // record, never a module constant.
   const venueName = venueDisplayName(record.venueId);
+  // The id handle's noun follows the venue family (the per-venue label, 2026-10-15):
+  // SideShift's own vocabulary is "shift" and the Trocador trades keep it; a Mt Pelerin
+  // record is a plain order. The record's venue decides via the existing providerStatus
+  // classification, so no new venue fact and no literal in the copy.
+  const providerIdLabel = isMtpelerinProviderRecord(record)
+    ? M.convert.cefi.orderId
+    : M.convert.cefi.shiftId;
   // Both legs share the prepare-time expiry (the authority death the countdown shows).
   // The signed envelope's expiry: a pool leg carries its own; a CHAIN phase-1 record's only
   // signed thing is the deposit, whose window is the venue order's (chainRoute.expiresAtMs).
@@ -188,7 +195,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
               handle the user needs for the venue's own status page renders here. */}
           {convertAbortFlavor(record) === 'provider' && record.providerRef != null ? (
             <Text testID="convert-aborted-shift-id" style={S.convertStateMeta} selectable>
-              {M.convert.cefi.shiftId(record.providerRef.orderId)}
+              {providerIdLabel(record.providerRef.orderId)}
             </Text>
           ) : null}
         </View>
@@ -354,7 +361,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
                     when talking to the venue's own status page — visible, not buried. */}
                 {record.providerRef != null ? (
                   <Text testID="convert-shift-id" style={S.convertStateMeta} selectable>
-                    {M.convert.cefi.shiftId(record.providerRef.orderId)}
+                    {providerIdLabel(record.providerRef.orderId)}
                   </Text>
                 ) : null}
               </View>
@@ -425,7 +432,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
                     when talking to the venue's own status page — visible, not buried. */}
                 {record.providerRef != null ? (
                   <Text testID="convert-shift-id" style={S.convertStateMeta} selectable>
-                    {M.convert.cefi.shiftId(record.providerRef.orderId)}
+                    {providerIdLabel(record.providerRef.orderId)}
                   </Text>
                 ) : null}
               </View>
@@ -499,7 +506,7 @@ export function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () 
                     {M.convert.cefi.counterparty(venueName)}
                   </Text>
                   <Text testID="convert-shift-id" style={S.convertStateMeta} selectable>
-                    {M.convert.cefi.shiftId(record.providerRef.orderId)}
+                    {providerIdLabel(record.providerRef.orderId)}
                   </Text>
                 </View>
               ) : null}

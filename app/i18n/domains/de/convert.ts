@@ -274,6 +274,7 @@ export const convertDe: ConvertMessages = {
     noExpiryLine: 'Kein Ablaufdatum veröffentlicht - dpay beobachtet weiter.',
     lastCheckedLine: at => `Zuletzt geprüft: ${at}.`,
     shiftId: id => `Shift ${id}`,
+    orderId: id => `Bestellung ${id}`,
     settlingFundsLine: 'Fonds bestätigt - deine Auszahlung ist auf den genannten Betrag festgelegt.',
     settlingWatchLine: 'Die meisten laufen in Minuten durch - dpay überwacht jeden Shift und greift ein, falls einer hakt.',
     depositNote: (venue, sym) =>

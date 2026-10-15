@@ -483,7 +483,11 @@ export type ConvertMessages = {
     /** The provider_processing tail line: when the engine last completed a status read.
      *  A timestamp, nothing more - no SLA is claimed and no verdict is implied (2026-09-24). */
     lastCheckedLine: (at: string) => string;
+    /** The venue order's id handle, family-aware (2026-10-15): SideShift/Trocador trades keep
+     *  SideShift's own "shift" noun, Mt Pelerin records read as orders. The panel picks by the
+     *  record's venue family (providerStatus), never a fixed label. */
     shiftId: (id: string) => string;
+    orderId: (id: string) => string;
     /** Shown while the venue holds/settles the deposit: dpay owns the escalation, not the user.
      *  A calming, commitment-bearing PAIR - what is already true (funds in, payout locked),
      *  then what dpay is doing (watching every shift, stepping in) and the zero-action close. */
@@ -948,6 +952,7 @@ export const convertEn: ConvertMessages = {
     noExpiryLine: 'No published expiry - dpay keeps watching.',
     lastCheckedLine: at => `Last checked ${at}.`,
     shiftId: id => `Shift ${id}`,
+    orderId: id => `Order ${id}`,
     settlingFundsLine: 'Funds confirmed - your payout is locked at the quoted amount.',
     settlingWatchLine: 'Most settle within minutes - dpay monitors every shift and steps in if one stalls.',
     depositNote: (venue, sym) =>

@@ -273,6 +273,7 @@ export const convertFr: ConvertMessages = {
     noExpiryLine: 'Pas d’expiration publiée - dpay continue de surveiller.',
     lastCheckedLine: at => `Dernière vérification : ${at}.`,
     shiftId: id => `Shift ${id}`,
+    orderId: id => `Commande ${id}`,
     settlingFundsLine: 'Fonds confirmés - votre versement est verrouillé au montant coté.',
     settlingWatchLine: 'La plupart se règlent en minutes - dpay surveille chaque shift et intervient si l\u2019un bloque.',
     depositNote: (venue, sym) =>
