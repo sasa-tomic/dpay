@@ -347,36 +347,6 @@ export function mtpBuyTokenOf(row: {protocol: string; token?: string; testnet?: 
 }
 
 /**
- * The token the Add-funds entry OFFERS, or null when the catalog holds no buyable row. This is
- * the catalog-level gate the Home Add-funds choice needs: `mtpBuyEligible` answers it for ONE
- * row, and the home headline rail is the wrong row to ask. The CURRENCY_RAILS preference lands
- * on an IC row for every home currency (CHF -> VCHF, USD -> ckUSDC), so headline-gating hid the
- * buy entry entirely (the 2026-10-15 defect).
- *
- * A row qualifies when it is a MAINNET EVM catalog row, its OWN `onramp` RampCapability is
- * `'Partner'` (the catalog's declaration that a partner delivers this row; the same table the
- * buy sheet's delivery chains come from names WHICH chains), and its token is in
- * `MTP_ASSET_DELIVERY`. No new eligibility concepts: the two tables the whole buy route already
- * reads, applied at catalog scope.
- *
- * When several rows qualify, ZCHF wins (the Swiss-franc wallet's own asset, 1:1 CHF on their
- * published pricing), and otherwise the caller's FIRST qualifying row in catalog order (the
- * FundingRoutes rule: order is presentation, never a ranking). Pure; structural input exactly
- * like `mtpBuyEligible`.
- */
-export function mtpBuyOfferOf(rows: readonly {protocol: string; token?: string; testnet?: boolean; onramp?: string}[]): MtpBuyAsset | null {
-  const delivery = MTP_ASSET_DELIVERY as Readonly<Record<string, readonly MtpDeliveryChainId[]>>;
-  let first: MtpBuyAsset | null = null;
-  for (const row of rows) {
-    if (row.protocol !== 'evm' || row.testnet === true || row.token == null) continue;
-    if (row.onramp !== 'Partner' || delivery[row.token] == null) continue;
-    if (row.token === 'ZCHF') return 'ZCHF';
-    if (first === null) first = row.token as MtpBuyAsset;
-  }
-  return first;
-}
-
-/**
  * Does this wallet row have a Mt Pelerin CASH-OUT route? The buy gate's twin (plan R2 step 2):
  * true only for a MAINNET EVM catalog row whose token is in `MTP_ASSET_DELIVERY` (ZCHF, USDC)
  * AND whose OWN `offramp` RampCapability is not `'Unavailable'` — the R2 step 1 catalog flip is

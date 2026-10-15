@@ -83,10 +83,9 @@ import {HomeCurrencyChooser} from './HomeCurrencyChooser';
 import {AddCurrencyTab} from './AddCurrencyTab';
 import {type HomeCurrency, chooseRail, currencyOfAsset, currencyRails, offerableCurrencies, parseHiddenCurrencies, preferredRail, removeCurrencyGuard, type RemoveRefusal} from '../config/currency';
 import {type CurrencyDescriptor} from '../config/catalog';
-import {mtpBuyOfferOf, mtpCashOutTokenOf, type MtpBuyAsset} from '../config/funding';
+import {mtpCashOutTokenOf, type MtpBuyAsset} from '../config/funding';
 import type {SelectableAsset} from '../config/assets';
 import {HomeMenu} from './HomeMenu';
-import {AddFundsMenu} from './AddFundsMenu';
 import {MtpBuySheet} from './MtpBuySheet';
 import {MtpCashOutSheet} from './MtpCashOutSheet';
 import {
@@ -2255,38 +2254,30 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   const closeHomeMenu = useCallback(() => setHomeMenuOpen(false), []);
   const openLedgerFromMenu = useCallback(() => { setHomeMenuOpen(false); setMode('ledger'); }, []);
 
-  // R1 step 3 — the Mt Pelerin buy. Wallet owns the Add-funds CHOICE and the ONE buy-sheet
-  // instance (the receiptTxn discipline: root-mounted overlays, one owner): the HomeTab action
-  // row, the receive surfaces' FundingRoutes provider row and DepositSheet's entry all route into
-  // this same state. The buy offer is CATALOG-scoped, not headline-scoped: the headline rail is
-  // always an IC token under today's CURRENCY_RAILS, so gating on it hid the buy entry forever.
-  // mtpBuyOfferOf answers non-null iff any mainnet EVM row is onramp-Partner with a delivery
-  // chain in MTP_ASSET_DELIVERY (ZCHF preferred); null keeps every Add-funds press on the
-  // deposit path exactly as before and HomeTab receives no onBuy at all.
-  const [addFundsOpen, setAddFundsOpen] = useState(false);
+  // R1 step 3 — the Mt Pelerin buy. Wallet owns the ONE buy-sheet instance (the receiptTxn
+  // discipline: root-mounted overlays, one owner); the buy entries are peer rows INSIDE the
+  // funding surfaces (the receive surfaces' FundingRoutes provider row and DepositSheet's
+  // onBuy entry — per-asset gated by funding.ts's mtpBuyTokenOf, exactly the TrustWallet rule),
+  // and every one of them routes into this same state. No Add-funds gate: the Home press keeps
+  // its pre-wave single path (straight to the deposit surface).
   const [mtpBuyToken, setMtpBuyToken] = useState<MtpBuyAsset | null>(null);
-  const catalogBuyToken = mtpBuyOfferOf(assets);
-  const openMtpBuy = useCallback((token: MtpBuyAsset) => { setAddFundsOpen(false); setMtpBuyToken(token); }, []);
+  const openMtpBuy = useCallback((token: MtpBuyAsset) => { setMtpBuyToken(token); }, []);
 
   // R2 step 2 — the Mt Pelerin CASH-OUT. One root-mounted sheet (the MtpBuySheet discipline):
-  // the HomeTab withdraw control (for an eligible headline row) and the receive surfaces'
-  // asset-gated entry route into this same state. The eligibility gate resolves ONCE per
-  // candidate asset here (funding.ts's `mtpCashOutTokenOf`: mainnet EVM row, token ZCHF/USDC,
-  // the row's own offramp RampCapability enabled) — null, every Withdraw press routes to the
-  // pay-surface withdraw exactly as before and HomeTab receives no cash-out props at all.
+  // the receive surfaces' asset-gated entry AND the withdraw flow's per-asset entry (the
+  // EvmPayMode send surface, the pay side of the same rail) route into this same state. The
+  // eligibility gate resolves ONCE per candidate asset here (funding.ts's `mtpCashOutTokenOf`:
+  // mainnet EVM row, token ZCHF/USDC, the row's own offramp RampCapability enabled) — the
+  // home Withdraw press itself keeps the pre-wave single path into the pay surface; no
+  // headline-level gate stands in front of it.
   const [mtpCashOut, setMtpCashOut] = useState<{asset: SelectableAsset & {protocol: 'evm'}; token: MtpBuyAsset} | null>(null);
   const openMtpCashOut = useCallback((row: SelectableAsset & {protocol: 'evm'}) => {
     const t = mtpCashOutTokenOf(row);
     if (t != null) setMtpCashOut({asset: row, token: t});
   }, []);
-  // The headline row's cash-out facts (the HomeTab withdraw control's gate). Null unless the
-  // headline asset is an eligible EVM row.
-  const homeCashOutAsset = useMemo(() => {
-    if (homeAsset == null || homeAsset.protocol !== 'evm') return null;
-    return mtpCashOutTokenOf(homeAsset) != null ? homeAsset : null;
-  }, [homeAsset]);
-  // The SELECTED row's cash-out facts (the receive surfaces' asset-gated entry): both modes
-  // display the wallet's own selection, so one binding serves both.
+  // The SELECTED row's cash-out facts: both receive modes display the wallet's own selection,
+  // and the withdraw surface the home button opens shows the selection too — so one binding
+  // serves all three.
   const selectedCashOutAsset = useMemo(() => {
     if (selectedAsset == null || selectedAsset.protocol !== 'evm') return null;
     return mtpCashOutTokenOf(selectedAsset) != null ? selectedAsset : null;
@@ -2727,13 +2718,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               history={walletHistory}
               noteFor={noteFor}
               onDeposit={goToDeposit}
-              onBuy={catalogBuyToken != null ? () => setAddFundsOpen(true) : undefined}
               onConvert={openConvert}
               onWithdraw={openWithdrawForMain}
-              // R2 step 2: the withdraw control becomes cash-out-aware for an eligible
-              // headline row (absent = the pay-surface withdraw, byte-identical).
-              onCashOut={homeCashOutAsset != null ? () => openMtpCashOut(homeCashOutAsset) : undefined}
-              cashOutEligible={homeCashOutAsset != null}
               onOpenMenu={openHomeMenu}
               onOpenAccounts={openAccounts}
               updateUrl={updateUrl}
@@ -2788,7 +2774,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           ? (activeSol && solAddress
               ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solShownState.balance ?? '0'} tokenBalance={selectedTokenShownBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenShownStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solShownState, selectedTokenShownState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solShownState.status === 'ok' && solShownState.balance === '0'} solChecking={solShownState.status === 'loading' || solShownState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onWalletConnectPair={pairWc} onWalletConnectEntry={wcEntrySupported ? openWcEntry : undefined} />
               : activeEvm && activeEvmAsset != null
-              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} onWalletConnectPair={pairWc} onWalletConnectEntry={wcEntrySupported ? openWcEntry : undefined} />
+              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} onWalletConnectPair={pairWc} onWalletConnectEntry={wcEntrySupported ? openWcEntry : undefined} onCashOut={openCashOutSelected} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} shownBalance={shownBalance}
@@ -3021,21 +3007,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           />
         </AppModal>
       ) : null}
-      {/* The Add-funds deposit-vs-buy choice (plan R1 step 3, §8 item 1: one action row). Mounted
-          at the ROOT like the menu above; rendered only while the headline asset has a Mt Pelerin
-          buy route — every other asset keeps the direct deposit trip, unchanged. */}
-      {addFundsOpen && catalogBuyToken != null ? (
-        <AppModal onRequestClose={() => setAddFundsOpen(false)}>
-          <AddFundsMenu
-            onDeposit={() => { setAddFundsOpen(false); if (homeAsset != null) goToDeposit(homeAsset.id); }}
-            onBuy={() => openMtpBuy(catalogBuyToken)}
-            onClose={() => setAddFundsOpen(false)}
-          />
-        </AppModal>
-      ) : null}
       {/* The ONE Mt Pelerin buy sheet (plan R1 step 3) — root-mounted like every overlay; every
-          buy entry (HomeTab choice, FundingRoutes provider row, DepositSheet entry) opens this
-          same instance. onWidgetOpened arms the on-return refresh above. */}
+          buy entry (the FundingRoutes provider row, the DepositSheet entry) opens this same
+          instance. onWidgetOpened arms the on-return refresh above. */}
       {mtpBuyToken != null ? (
         <MtpBuySheet
           identity={identity}
@@ -3045,7 +3019,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         />
       ) : null}
       {/* The ONE Mt Pelerin cash-out sheet (plan R2 step 2) — root-mounted like the buy sheet;
-          every cash-out entry (HomeTab's withdraw control, the receive surfaces' gated row)
+          every cash-out entry (the receive surfaces' gated row, the withdraw flow's
+          btn-pay-cashout row)
           opens this same instance. onSent refreshes balances/history once the send's broadcast
           was accepted (the record's adoption is the sheet's own job). */}
       {mtpCashOut != null ? (

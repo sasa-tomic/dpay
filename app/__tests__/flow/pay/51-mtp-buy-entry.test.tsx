@@ -12,10 +12,9 @@
  *     delivery chain — plus the verbatim fee facts and the counterparty disclosure. Approve signs
  *     with the DEVICE key and hands the golden widget URL to the open seam; a FAILED open keeps
  *     the sheet with the failed-link note (the TrustWalletFundButton pattern).
- *   • HomeTab's Add funds opens the deposit-vs-buy CHOICE (the AddFundsMenu): the gate is
- *     CATALOG-level (`mtpBuyOfferOf`, funding.ts) since 2026-10-15 — the shipped catalog always
- *     holds buyable EVM rows, whatever rail the headline prefers — and the menu's Deposit row
- *     keeps the direct deposit trip exactly as before. Flow 53 owns the menu's buy arm.
+ *   • HomeTab's Add funds keeps the PRE-WAVE single path: ONE press lands the home rail's
+ *     deposit surface (flow 134's contract); the buy is discovered INSIDE that surface (the
+ *     DepositSheet onBuy entry / the FundingRoutes provider row), never behind a chooser.
  *
  * The open seam (`__DPAY_TEST_MTP_OPEN`, the `__DPAY_TEST_DEEPLINK` pattern) answers success AND
  * failure deterministically — the real Linking has no handler under jest. The on-return arrival
@@ -114,13 +113,10 @@ hermeticDescribe('flow 51 — the Mt Pelerin buy entry (EVM row only; sign-confi
     await m.driver.findByTestID('funding-provider-coinbase', {timeoutMs: 5000});
     expect(m.driver.isPresent('funding-provider-mtp')).toBe(false);
 
-    // ── The Add-funds press opens the deposit-vs-buy CHOICE (catalog-level gate, 2026-10-15):
-    // the catalog holds buyable EVM rows whatever the headline is, so even this SOL headline
-    // gets the menu — and its DEPOSIT row still lands on the deposit trip, byte-unchanged. ──
+    // ── The Add-funds press keeps the PRE-WAVE single path (one tap, no chooser): it lands the
+    // deposit surface of the home rail directly, whatever the catalog carries. ──
     await m.driver.click('tab-home', {timeoutMs: 5000});
     await m.driver.click('btn-home-add-funds', {timeoutMs: 5000});
-    await m.driver.findByTestID('home-add-funds-menu', {timeoutMs: 5000});
-    await m.driver.click('btn-add-funds-deposit', {timeoutMs: 5000});
     await m.driver.findByTestID('receive-mode-toggle', {timeoutMs: 5000});
     expect(m.driver.isPresent('mtp-buy-sheet')).toBe(false);
     expect(m.driver.isPresent('home-add-funds-menu')).toBe(false);

@@ -8,7 +8,9 @@
  * `DPAY_MTPELERIN_API_BASE={{base}}/test/mtpelerin-upstream`, the trocador-stub pattern):
  *
  *   • The receive surface (the Ethereum ZCHF row) renders the cash-out entry — the buy row's
- *     twin, gated on the row's own offramp flag — and a SOL asset renders none.
+ *     twin, gated on the row's own offramp flag — and a SOL asset renders none. The withdraw
+ *     surface (the same asset's send-to-address form in the Pay tab) carries the same entry,
+ *     so the off-ramp is discovered inside the flow the home Withdraw button opens.
  *   • The sheet (Wallet-owned, root-mounted) asks for the amount, shows the verbatim fee facts
  *     and the counterparty, and VALIDATES locally before anything is sent (an unusable amount
  *     keeps Continue inert - no order, no widget open).
@@ -114,6 +116,18 @@ hermeticDescribe('flow 52 - the Mt Pelerin cash-out entry (offramp-gated; local 
     await m.driver.click('btn-receive-address', {timeoutMs: 5000});
     await m.driver.findByTestID('funding-provider-coinbase', {timeoutMs: 5000});
     expect(m.driver.isPresent('btn-receive-cashout')).toBe(false);
+
+    // ── The WITHDRAW flow carries the entry too (2026-10-15, the pay side of the same rail):
+    // the eligible EVM asset's send surface shows the row and opens the SAME root-mounted
+    // sheet — inside the surface, no chooser, no extra step. An ineligible asset would render
+    // none (the per-asset gate, already pinned on the receive side above). ──
+    await selectEvmAsset(m, 'evm-zchf-ethereum'); // lands tab-pay, scan sub-mode
+    await m.driver.click('btn-pay-send', {timeoutMs: 5000});
+    await m.driver.findByTestID('btn-pay-cashout', {timeoutMs: 5000});
+    await m.driver.click('btn-pay-cashout', {timeoutMs: 5000});
+    await m.driver.findByTestID('mtp-cashout-sheet', {timeoutMs: 5000});
+    await m.driver.click('btn-mtp-cashout-cancel', {timeoutMs: 5000});
+    expect(m.driver.isPresent('mtp-cashout-sheet')).toBe(false);
 
     // ── A non-eligible headline (VCHF/IC): the withdraw press keeps the OLD flow — the sheet
     // never opens from it (the HomeTab contract's flow-level half; the unit half is

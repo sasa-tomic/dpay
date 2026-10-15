@@ -330,11 +330,9 @@ export type DepositMessages = {
    *  (`MTP_FACTS_READ_ON`), and there is no "best" label and no referral parameter
    *  (docs/REGULATORY.md §4). "Mt Pelerin" stays verbatim - a company name is not a message. */
   mtp: {
-    /** The entry label on every buy surface: the Add-funds choice, the FundingRoutes provider
-     *  row, the Deposit-sheet entry. */
+    /** The entry label on every buy surface: the FundingRoutes provider row, the Deposit-sheet
+     *  entry. */
     entryLabel: string;
-    /** The Add-funds choice's deposit row (the buy choice names the provider). */
-    chooserDeposit: string;
     /** The FundingRoutes provider row's one-line differentiator: unlike the listed providers,
      *  this one pays out straight to the wallet's own address. */
     fundingLine: string;
@@ -695,7 +693,6 @@ export const depositEn: DepositMessages = {
 
   mtp: {
     entryLabel: 'Buy with Mt Pelerin',
-    chooserDeposit: 'Deposit',
     fundingLine: 'Card or bank, pays out to your address',
     sheetTitle: 'Buy with Mt Pelerin',
     buyLine: (fiat, asset, chain) => `Pay ${fiat}, receive ${asset} on ${chain}.`,

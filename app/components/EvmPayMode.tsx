@@ -7,12 +7,13 @@ import {InstructionPanel} from './InstructionPanel';
 import {ModeToggle} from './ModeToggle';
 import {S} from '../styles';
 import {C} from '../config/palette';
-import {IconClock, IconScan} from './icons';
+import {IconClock, IconExternalLink, IconScan} from './icons';
 import {QR_SIZE} from '../config/constants';
 import {cmpRaw} from '../lib/amount';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import {classifyScan} from '../lib/scan';
 import {fmtAssetCompact, short} from '../lib/format';
+import {mtpCashOutTokenOf} from '../config/funding';
 import type {Identity, Txn} from '../lib/types';
 import type {SelectableAsset} from '../config/assets';
 import {
@@ -48,7 +49,7 @@ import {M} from '../i18n';
  * The camera also accepts a dpay payment link and a plain 0x address (classifyScan) — the same
  * three verdicts every rail's scanner answers.
  */
-export function EvmPayMode({identity, online, asset, balance, gasWei, gasChecking = false, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onOpenAddressBook, onOpenReceipt, onSent, onRecheckBalances, recheckBusy = false, onWalletConnectPair, onWalletConnectEntry}: {
+export function EvmPayMode({identity, online, asset, balance, gasWei, gasChecking = false, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onOpenAddressBook, onOpenReceipt, onSent, onRecheckBalances, recheckBusy = false, onWalletConnectPair, onWalletConnectEntry, onCashOut}: {
   identity: Identity;
   online: boolean;
   /** The SELECTED EVM asset row — this mode only mounts while one is selected. */
@@ -75,6 +76,11 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
   onWalletConnectPair?: (uri: string) => void;
   /** Open the root-mounted WC entry sheet (discover + instructions). Absent = the entry row does not render (unsupported platform, or the direct-mount harnesses). */
   onWalletConnectEntry?: () => void;
+  /** The Mt Pelerin cash-out opener (plan R2 step 2), bound to the SELECTED asset by Wallet.
+   *  The row renders only when THIS asset is an eligible EVM row (funding.ts's per-asset gate,
+   *  the receive surface's rule) — the withdraw flow discovers the off-ramp the same way its
+   *  deposit twin discovers the buy: a peer row inside the existing surface. */
+  onCashOut?: () => void;
 }) {
   const [phase, setPhase] = useState<'scan' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<EvmReqV1 | null>(null);
@@ -156,9 +162,28 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
         </View>
       );
     }
+    // The Mt Pelerin cash-out entry (plan R2 step 2): the withdraw flow's peer row, gated by
+    // the SAME per-asset rule the receive surface uses (funding.ts's mtpCashOutTokenOf). An
+    // eligible row discovers the off-ramp inside the existing surface — exactly where its
+    // deposit twin discovers the buy — never behind a chooser. Ghost tier + external-link
+    // icon: the TrustWallet row's shape. Absent on the offline and unfunded gates above: a
+    // balance the send cannot move is not a balance the sale can sell.
+    const cashOutOpen = onCashOut != null && mtpCashOutTokenOf(asset) != null ? onCashOut : undefined;
     return (
       <View style={S.centerTop}>
         {toggle}
+        {cashOutOpen != null ? (
+          <Pressable
+            testID="btn-pay-cashout"
+            style={S.ghostBtn}
+            onPress={cashOutOpen}
+            accessibilityRole="button"
+            accessibilityLabel={M.deposit.mtpCash.entryLabel}
+            accessibilityState={{disabled: false}}>
+            <IconExternalLink size={16} color={C.sub} />
+            <Text style={S.ghostBtnText}>{M.deposit.mtpCash.entryLabel}</Text>
+          </Pressable>
+        ) : null}
         <EvmWithdrawSheet
           identity={identity}
           asset={asset}

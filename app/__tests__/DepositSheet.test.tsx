@@ -70,12 +70,12 @@ function has(tree: renderer.ReactTestRenderer, testID: string): boolean {
   return tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
 }
 
-async function mount(): Promise<renderer.ReactTestRenderer> {
+async function mount(onBuy?: () => void): Promise<renderer.ReactTestRenderer> {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(
       <DepositSheet identity={IDENTITY} relayUrl="https://relay.test" catalog={CATALOG}
-        currency={1} display={familyDisplay(CATALOG, 1)!} onClose={() => {}} />,
+        currency={1} display={familyDisplay(CATALOG, 1)!} onBuy={onBuy} onClose={() => {}} />,
     );
   });
   // Flush the address fetch, the principal derivation and the best-effort info miss.
@@ -142,6 +142,26 @@ describe('DepositSheet — failure paths leave a reason behind', () => {
     expect(warnings('deposit address fetch failed:')).toBe('');
     expect(warnings('icpSelfPrincipal failed')).toBe('');
     expect(has(tree, 'ic-also-address')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('DepositSheet — the Mt Pelerin buy entry is a peer row in the same surface', () => {
+  /** The press fires the caller-bound opener: the entry never routes anywhere on its own —
+   *  the caller (ReceiveMode, per-asset gated by mtpBuyTokenOf) owns where the buy goes. */
+  test('onBuy present: the entry renders beside the Trust slot and fires the opener once', async () => {
+    const onBuy = jest.fn();
+    const tree = await mount(onBuy);
+    expect(has(tree, 'btn-deposit-mtp-buy')).toBe(true);
+    const row = tree.root.find(node => node.props.testID === 'btn-deposit-mtp-buy');
+    act(() => { row.props.onPress(); });
+    expect(onBuy).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('onBuy absent (no Mt Pelerin route for this asset): no entry, the sheet is byte-unchanged', async () => {
+    const tree = await mount();
+    expect(has(tree, 'btn-deposit-mtp-buy')).toBe(false);
     act(() => { tree.unmount(); });
   });
 });

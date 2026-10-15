@@ -455,41 +455,10 @@ describe('HomeTab — the inline activity feed', () => {
   });
 });
 
-describe('HomeTab — the Add-funds buy route (plan R1 step 3)', () => {
-  /** A buy-eligible headline: an EVM catalog row with a delivery chain in MTP_ASSET_DELIVERY. */
+describe('HomeTab — the action row keeps the pre-wave single paths', () => {
+  /** An EVM headline with both ramp routes live: the ROW must not branch on it either way —
+   *  the buy and the cash-out are rows INSIDE the surfaces these presses open. */
   const evmRow = {
-    id: 'evm:42161:ZCHF' as const, protocol: 'evm' as const, token: 'ZCHF', symbol: 'ZCHF',
-    chainId: 42161, chainName: 'Arbitrum One', address: '0x1111111111111111111111111111111111111111',
-    linkToken: 'ZCHF', networkLabel: 'ZCHF · Arbitrum One', network: 'Arbitrum One', decimals: 18,
-    minFractionDigits: 2, liquidity: null, onramp: 'Unavailable' as const, offramp: 'Unavailable' as const,
-    rampPartner: null, visible: true, testKey: 'evm-zchf-arbitrum', testnet: false,
-  };
-  const base = {
-    homeCurrency: 'CHF' as const, assets: ASSETS, online: true, history: [],
-  };
-
-  test('onBuy present: the Add-funds press routes to the buy opener, never the deposit trip', () => {
-    const onBuy = jest.fn();
-    const onDeposit = jest.fn();
-    const tree = mountHome({...base, homeAsset: evmRow, onDeposit, onBuy});
-    act(() => { pressable(tree, 'btn-home-add-funds').props.onPress(); });
-    expect(onBuy).toHaveBeenCalledTimes(1);
-    expect(onDeposit).not.toHaveBeenCalled();
-    act(() => { tree.unmount(); });
-  });
-
-  test('onBuy absent (or a non-EVM headline): the press is the deposit trip, byte-unchanged', () => {
-    const onDeposit = jest.fn();
-    const tree = mountHome({...base, homeAsset: evmRow, onDeposit});
-    act(() => { pressable(tree, 'btn-home-add-funds').props.onPress(); });
-    expect(onDeposit).toHaveBeenCalledWith('evm:42161:ZCHF');
-    act(() => { tree.unmount(); });
-  });
-});
-
-describe('HomeTab — the withdraw control goes cash-out-aware (plan R2 step 2)', () => {
-  /** A cash-out-eligible headline: an EVM row with the offramp flip landed. */
-  const evmCashOutRow = {
     id: 'evm:1:ZCHF' as const, protocol: 'evm' as const, token: 'ZCHF', symbol: 'ZCHF',
     chainId: 1, chainName: 'Ethereum', address: '0x2222222222222222222222222222222222222222',
     linkToken: 'ZCHF', networkLabel: 'ZCHF · Ethereum', network: 'Ethereum', decimals: 18,
@@ -500,36 +469,21 @@ describe('HomeTab — the withdraw control goes cash-out-aware (plan R2 step 2)'
     homeCurrency: 'CHF' as const, assets: ASSETS, online: true, history: [],
   };
 
-  test('both props present: the Withdraw press opens the cash-out, never the pay-surface withdraw', () => {
-    const onWithdraw = jest.fn();
-    const onCashOut = jest.fn();
-    const tree = mountHome({...base, homeAsset: evmCashOutRow, onWithdraw, onCashOut, cashOutEligible: true});
-    act(() => { pressable(tree, 'btn-home-withdraw').props.onPress(); });
-    expect(onCashOut).toHaveBeenCalledTimes(1);
-    expect(onWithdraw).not.toHaveBeenCalled();
+  test('Add funds is the deposit trip for ANY headline — no chooser, no buy branch', () => {
+    const onDeposit = jest.fn();
+    const tree = mountHome({...base, homeAsset: evmRow, onDeposit});
+    act(() => { pressable(tree, 'btn-home-add-funds').props.onPress(); });
+    expect(onDeposit).toHaveBeenCalledTimes(1);
+    expect(onDeposit).toHaveBeenCalledWith('evm:1:ZCHF');
     act(() => { tree.unmount(); });
   });
 
-  test('props absent: the press is the pay-surface withdraw, byte-identical (the harness contract)', () => {
+  test('Withdraw is the pay-surface withdraw, byte-identical — no cash-out branch', () => {
     const onWithdraw = jest.fn();
-    const tree = mountHome({...base, homeAsset: evmCashOutRow, onWithdraw});
-    act(() => { pressable(tree, 'btn-home-withdraw').props.onPress(); });
-    expect(onWithdraw).toHaveBeenCalledTimes(1);
-    act(() => { tree.unmount(); });
-  });
-
-  test('cashOutEligible without onCashOut fails closed to the withdraw path (never a dead press)', () => {
-    const onWithdraw = jest.fn();
-    const tree = mountHome({...base, homeAsset: evmCashOutRow, onWithdraw, cashOutEligible: true});
+    const tree = mountHome({...base, homeAsset: evmRow, onWithdraw});
     act(() => { pressable(tree, 'btn-home-withdraw').props.onPress(); });
     expect(onWithdraw).toHaveBeenCalledTimes(1);
     act(() => { tree.unmount(); });
-  });
-
-  test('neither optional prop renders anything new (no extra testIDs vs the bare mount)', () => {
-    const bare = testIDs(mountHome(base));
-    const armed = testIDs(mountHome({...base, homeAsset: evmCashOutRow, onCashOut: () => {}, cashOutEligible: true}));
-    expect(armed.sort()).toEqual(bare.sort());
   });
 });
 

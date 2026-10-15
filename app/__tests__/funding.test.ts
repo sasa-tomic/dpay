@@ -24,12 +24,11 @@
 import {describe, test, expect} from '@jest/globals';
 import {
   fundingRoute, bankRouteApplies,
-  mtpBuyOfferOf, mtpBuyEligible, mtpBuyTokenOf,
+  mtpBuyEligible, mtpBuyTokenOf,
   FUNDING_PROVIDERS, FUNDING_SOURCES_READ_ON,
 } from '../config/funding';
 import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import {BUNDLED_NETWORKS, depositMechanism, icpCatalogOf, type CurrencyDescriptor} from '../config/catalog';
-import {preferredRail} from '../config/currency';
 
 const CATALOG: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: true, solanaEnabled: true, solanaTokens: true});
@@ -225,54 +224,18 @@ describe('the provider table obeys the constraints it exists under', () => {
   });
 });
 
-describe('mtpBuyOfferOf — the CATALOG-LEVEL buy gate (the 2026-10-15 visibility fix)', () => {
+describe('mtpBuyTokenOf — the row-level buy gate', () => {
   // The whole visible catalog: IC + SOL + the EVM sections, exactly what the wallet builds.
   const ALL = buildSelectableAssets(CATALOG, {
     showTestnet: false, solanaEnabled: true, solanaTokens: true, evmEnabled: true,
     networks: BUNDLED_NETWORKS,
   });
-  /** One hand-shaped EVM row for the fail-closed arms (the HomeTab.test.tsx fixture shape). */
-  const evmRow = (over: {token?: string; testnet?: boolean; onramp?: string}) => ({
-    id: `evm:1:${over.token ?? 'ZCHF'}`, protocol: 'evm', token: over.token ?? 'ZCHF',
-    symbol: over.token ?? 'ZCHF', chainId: 1, chainName: 'Ethereum',
-    address: '0x1111111111111111111111111111111111111111', linkToken: over.token ?? 'ZCHF',
-    networkLabel: 'ZCHF · Ethereum', network: 'Ethereum', decimals: 18, minFractionDigits: 2,
-    liquidity: null, onramp: over.onramp ?? 'Partner', offramp: 'Partner', rampPartner: null,
-    visible: true, testKey: 'evm-fixture', testnet: over.testnet ?? false,
-  });
 
-  test('the shipped catalog offers Buy: a Partner EVM row with a delivery chain exists', () => {
-    // THE DEFECT'S INVERSE. Eligibility read against the home HEADLINE rail is always null:
-    // CURRENCY_RAILS prefers an IC row for every home currency (CHF -> VCHF, USD -> ckUSDC),
-    // so a headline-gated Add-funds gate hid the buy entry from every user. The gate is the
-    // CATALOG: the same shipped catalog always carries buyable EVM rows.
-    const chfHeadline = preferredRail('CHF', ALL);
-    expect(chfHeadline?.protocol).toBe('ic'); // the headline is an IC row, today and by design
-    expect(mtpBuyTokenOf(chfHeadline!)).toBeNull(); // ...and never buy-eligible row-by-row
-    expect(mtpBuyOfferOf(ALL)).not.toBeNull(); // ...yet the catalog offers Buy at catalog scope
-  });
-
-  test('ZCHF wins when present (the Swiss-franc wallet buys its own asset); else catalog order', () => {
-    // The 2026-10-15 flip makes ZCHF-Ethereum a Partner onramp row, so the offer is ZCHF.
-    expect(mtpBuyOfferOf(ALL)).toBe('ZCHF');
-    // Without it, the first qualifying row in the caller's order is the offer (order is
-    // presentation, the FundingRoutes rule; USDC rows were Partner since R1 step 0).
-    expect(mtpBuyOfferOf([evmRow({token: 'USDC'})])).toBe('USDC');
-  });
-
-  test('fail-closed: no EVM rows, a testnet row, an Unavailable onramp, an unknown token', () => {
-    expect(mtpBuyOfferOf(ALL.filter(a => a.protocol !== 'evm'))).toBeNull();
-    expect(mtpBuyOfferOf([evmRow({testnet: true})])).toBeNull();
-    expect(mtpBuyOfferOf([evmRow({onramp: 'Unavailable'})])).toBeNull();
-    expect(mtpBuyOfferOf([evmRow({token: 'PEPE'})])).toBeNull(); // sold somewhere, not HERE
-    expect(mtpBuyOfferOf([])).toBeNull();
-  });
-
-  test('the row-level gate is unchanged: delivery chain decides, onramp is the catalog-scope half', () => {
+  test('delivery chain decides: the token table, not the onramp flag', () => {
     // FundingRoutes/DepositSheet stay delivery-chain-gated (mtpBuyTokenOf): the token table
     // decides, so ZCHF qualifies on BOTH its rows (the Arbitrum row's buy delivers on
     // Ethereum, the one chain ZCHF lands on; flow 51 pins that exact sheet) and USDC on both.
-    // The onramp flag matters only at catalog scope. Fail-closed arm: an unknown token.
+    // Fail-closed arm: an unknown token.
     const rows = ALL.filter(a => a.protocol === 'evm');
     expect(mtpBuyTokenOf(rows.find(a => a.id === 'evm:1:ZCHF')!)).toBe('ZCHF');
     expect(mtpBuyTokenOf(rows.find(a => a.id === 'evm:42161:ZCHF')!)).toBe('ZCHF');
