@@ -234,6 +234,8 @@ export async function approveSession(proposal: WcProposal, evmAddress: string, s
  * approve still runs the SDK check - this is the pre-Approve honest gate the sheet renders from.
  * `solanaAddress: null` leaves the solana namespace unbuilt, so a proposal REQUIRING solana is
  * unservable (EVM-only wallets reject solana-required dApps here, not at approve time).
+ * A proposal with an EMPTY (or missing) requiredNamespaces map passes vacuously - there is
+ * nothing to refuse - and the SDK's own approval check remains the gate.
  */
 export function proposalServable(proposal: WcProposal, solanaAddress: string | null): boolean {
   const required = (proposal.params as {requiredNamespaces?: Record<string, {chains?: unknown; methods?: unknown; events?: unknown}> | undefined} | undefined)?.requiredNamespaces ?? {};

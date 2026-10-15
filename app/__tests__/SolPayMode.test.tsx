@@ -1450,3 +1450,21 @@ describe('SolPayMode — per-request-mint solreq sign gate (OPEN_ISSUES 6(a))', 
     act(() => { tree.unmount(); });
   });
 });
+
+describe('SolPayMode — the dapp-pairing entry row (the same-surfaces hard rule, founder 2026-10-15)', () => {
+  test('the handler present: the row sits on the scan screen and opens the entry sheet on press', () => {
+    const onWalletConnectEntry = jest.fn();
+    const tree = mountSolPay({onWalletConnectEntry});
+    expect(hasTestID(tree, 'btn-sol-pay-wc')).toBe(true);
+    expect(textByTestID(tree, 'btn-sol-pay-wc')).toBe(M.pay.wc.connectEntry);
+    pressByTestID(tree, 'btn-sol-pay-wc');
+    expect(onWalletConnectEntry).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the handler absent (unsupported platform / harness): no row, no dead entry', () => {
+    const tree = mountSolPay({});
+    expect(hasTestID(tree, 'btn-sol-pay-wc')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});

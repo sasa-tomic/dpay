@@ -1125,7 +1125,7 @@ describe('proposalServable (the pre-Approve honest gate)', () => {
 
   test('a namespace dpay does not build (an EVM-only wallet) is not', () => {
     const mod = load(PROJECT_ID);
-    expect(mod.proposalServable(proposalWithRequired({polkadot: {chains: ['polkadot:91b171bb', ], methods: [], events: []}}), SOL_ADDR)).toBe(false);
+    expect(mod.proposalServable(proposalWithRequired({polkadot: {chains: ['polkadot:91b171bb'], methods: [], events: []}}), SOL_ADDR)).toBe(false);
   });
 });
 
