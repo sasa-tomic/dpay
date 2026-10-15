@@ -1161,13 +1161,16 @@ export function WcRequestSheet({mode, dapp, chains, summary, chain, busy, err, s
                 </Text>
               </View>
               {review.rows.length > 0 ? (
-                <View style={S.receiptField}>
-                  {review.rows.map((r) => (
-                    <Text key={r.key} testID="wc-review-call-row" style={S.receiptValue} selectable>
-                      {rowLabel(r.key)}: {r.key === 'amount' || r.key === 'value' ? tokenAmount(r.value) : r.value}
+                // One receiptField per decoded row - the same house row pattern the Solana
+                // review below uses (label left, value under it), not a run-on "k: v" wall.
+                review.rows.map((r) => (
+                  <View key={r.key} style={S.receiptField}>
+                    <Text style={S.receiptLabel}>{rowLabel(r.key)}</Text>
+                    <Text testID="wc-review-call-row" style={S.receiptValue} selectable>
+                      {r.key === 'amount' || r.key === 'value' ? tokenAmount(r.value) : r.value}
                     </Text>
-                  ))}
-                </View>
+                  </View>
+                ))
               ) : null}
               <View style={S.receiptField}>
                 <Text style={S.receiptLabel}>{M.pay.wc.dataLabel}</Text>

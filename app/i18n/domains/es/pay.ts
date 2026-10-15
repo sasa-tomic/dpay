@@ -225,15 +225,7 @@ export const payEs: PayMessages = {
     submittedTitle: 'Enviada',
     submittedNote:
       'La red aceptó la transacción. La confirmación está pendiente. El hash es tu comprobante.',
-    connectEntry: 'Conectar con una dapp',
-    entryWhat: 'dpay se conecta con dapps en Ethereum y Solana.',
-    entryHow: 'En la dapp, elige WalletConnect y escanea su código QR.',
-    entryHonest: 'Cada solicitud se muestra antes de que la apruebes.',
-    entryDisconnect: 'Una dapp permanece conectada hasta que la desconectes.',
-    entryScan: 'Escanear código QR',
-    sessionsTitle: 'Dapps conectadas',
-    disconnect: 'Desconectar',
-    disconnectFailed: 'No se pudo desconectar. Inténtalo de nuevo.',
+    scanHint: 'Los códigos WalletConnect conectan tus dapps aquí.',
   },
 
   scanToPay: 'Escanear y pagar',

@@ -225,15 +225,7 @@ export const payDe: PayMessages = {
     submittedTitle: 'Übermittelt',
     submittedNote:
       'Das Netzwerk hat die Transaktion angenommen. Die Bestätigung steht noch aus. Der Hash ist dein Beleg.',
-    connectEntry: 'Mit einer dApp verbinden',
-    entryWhat: 'dpay verbindet sich mit dApps auf Ethereum und Solana.',
-    entryHow: 'Wähle in der dApp WalletConnect und scanne ihren QR-Code.',
-    entryHonest: 'Jede Anfrage wird dir gezeigt, bevor du sie freigibst.',
-    entryDisconnect: 'Eine dApp bleibt verbunden, bis du sie trennst.',
-    entryScan: 'QR-Code scannen',
-    sessionsTitle: 'Verbundene dApps',
-    disconnect: 'Trennen',
-    disconnectFailed: 'Trennen fehlgeschlagen. Versuche es erneut.',
+    scanHint: 'WalletConnect-Codes verbinden deine dApps hier.',
   },
 
   scanToPay: 'Scannen & zahlen',

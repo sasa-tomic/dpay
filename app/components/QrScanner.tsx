@@ -20,8 +20,10 @@ export function ViewfinderBrackets() {
   );
 }
 
-/** Reusable camera scanner (permission + focus-aware). Fires onScan once per mount. */
-export function QrScanner({onScan}: {onScan: (v: string) => void}) {
+/** Reusable camera scanner (permission + focus-aware). Fires onScan once per mount. `wcHint` is
+ *  the optional one-line education rendered under the privacy line in the permission empty state
+ *  (the dark card) - only the IC pay scan card passes it; the other rails' cards stay bare. */
+export function QrScanner({onScan, wcHint}: {onScan: (v: string) => void; wcHint?: string}) {
   const {hasPermission, requestPermission} = useCameraPermission();
   const device = useCameraDevice('back');
   // The mount IS the scan intent now (founder 2026-10-09: the pay tab opens scanning), so this
@@ -73,6 +75,7 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
               3.0:1 here). See `S.camText`/`S.camSubText`. */}
           <Text style={S.camText}>{M.pay.pointCamera}</Text>
           <Text style={S.camSubText}>{M.pay.cameraPrivacy}</Text>
+          {wcHint != null ? <Text testID="wc-scan-hint" style={S.camSubText}>{wcHint}</Text> : null}
           {/* The permission gesture is a GATE a test has to pass through, so it gets a stable
               testID like every other gate in the app: `e2e/web-scan-smoke.mjs` had to address it
               by its localised aria-label, which is exactly the coupling Tab.tsx refuses for the

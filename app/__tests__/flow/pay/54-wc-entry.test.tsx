@@ -1,76 +1,68 @@
 /**
- * Flow 54 — the WalletConnect entry (founder directive 2026-10-15: WalletConnect needs more
- * than opening wc: — discoverability, instructions, session management).
+ * Flow 54 - WalletConnect's ONE entry is the camera (the founder's lean-UI call 2026-10-15: the
+ * entry row + instruction sheet are gone; scanning a `wc:` code on the pay tab is the whole
+ * wallet side, exactly as it was before the entry wave).
  *
- * WRITTEN, NOT YET RUN: this file joins the flow suite at the next `just flow` (the wave's
- * scope keeps the dev loop to focused suites + smoke + typecheck). What it pins, over the fake
- * relay and the EVM harness:
+ * WRITTEN, NOT YET RUN: this file joins the flow suite at the next `just flow`. What it pins,
+ * over the fake relay and the EVM harness:
  *
- *   • The EVM pay scan screen carries the discoverable entry row (btn-evm-pay-wc) — absent
- *     while the project-id seam is empty, present once it is armed (Wallet reads the override
- *     LIVE per render, the `walletConnectProjectId()` getter).
- *   • Tapping it opens the ONE root-mounted entry sheet with exactly the four instruction
- *     lines (what / how / honesty / disconnect), each stated once.
- *   • The sheet's primary action ("Scan QR code") closes it back over the already-live camera;
- *     scanning a `wc:` QR then routes through the pre-existing classifier path (lib/scan.ts →
- *     Wallet.pairWc), which this flow does NOT re-drive (WC relay = external transport; the
- *     pairing loop is pinned by wc-requests.test.tsx on the SDK fake).
- *   • With no sessions the sheet renders NO list section (the instructions ARE the empty
- *     state); the connected-dapps rows + Disconnect are pinned by wc-entry.test.tsx at the
- *     component level against `connectedAppOf`.
+ *   • The IC Pay scan card carries exactly ONE line of WC education (`wc-scan-hint`, under the
+ *     camera privacy line in the permission empty state) and NO entry row (`btn-pay-wc` exists
+ *     nowhere). The Solana scan card stays bare: no hint, no row (education is IC-pay-only).
+ *   • A scanned `wc:` payload routes through the pre-existing classifier path (lib/scan.ts
+ *     kind=walletconnect → Wallet.pairWc) via the `__DPAY_TEST_SCAN` camera seam - no real
+ *     pairing. The jest env is doubly disabled (`Platform.OS === 'web'` + the project-id
+ *     override ''), so `walletkit.pair()` refuses with `false` and the routing surfaces as the
+ *     honest link-error card (pay-link-error naming the mobile app) - never as "isn't a dpay
+ *     payment code".
+ *   • The old `__DPAY_TEST_WC_NATIVE` arm is RETIRED with the entry row: the gate that read it
+ *     is deleted and the scan path never read it (nothing does anymore - this file is the
+ *     proof: it drives the full `wc:` route without touching the flag).
  */
 import {it, expect} from '@jest/globals';
 import {hermeticDescribe} from '../harness/hermetic';
 import {evmEnv} from '../evm/env';
+import {scanSeam} from './local';
 
-type G = Record<string, unknown>;
-const g = globalThis as unknown as G;
-
-hermeticDescribe('flow 54 — the WC entry row, the instruction sheet, and the scan hand-off', () => {
-  it('the entry row opens the instruction sheet; the scan button closes it over the live camera', async () => {
-    // Arm BOTH seams BEFORE the first Wallet render - the entry-row gate reads them live: the
-    // project id (the gate's second half) and the native-platform half (the flow env IS web).
-    g.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = 'flow-54';
-    g.__DPAY_TEST_WC_NATIVE = true;
-    const {onboardWallet, waitForWallet, selectEvmAsset} = await evmEnv();
+hermeticDescribe('flow 54 - the Pay scan card: the WC hint line and the wc: classifier route', () => {
+  it('the hint line sits in the IC scan card, no entry row exists, and a scanned wc: payload routes to pairing', async () => {
+    const {onboardWallet, waitForWallet, armPayScan} = await evmEnv();
     const m = await onboardWallet('jest-wc-54');
     await waitForWallet(m);
-    await selectEvmAsset(m, 'evm-zchf-arbitrum');
-    await m.driver.click('tab-pay', {timeoutMs: 5000});
-    await m.driver.findByTestID('evm-pay-scan', {timeoutMs: 5000});
 
-    // The entry row is ON the scan screen, beside the live camera.
-    await m.driver.findByTestID('btn-evm-pay-wc', {timeoutMs: 5000});
+    // The pay tab opens scanning (the mount IS the scan intent); the camera placeholder branch
+    // carries the hint line under the privacy line.
+    await armPayScan(m);
+    await m.driver.findByTestID('pay-scan', {timeoutMs: 5000});
+    expect(m.driver.readText('wc-scan-hint')).toBe('WalletConnect codes connect your dapps here.');
+    expect(m.driver.isPresent('btn-pay-wc')).toBe(false);
 
-    // Tap: the root-mounted instruction sheet. Four facts, no more.
-    await m.driver.click('btn-evm-pay-wc', {timeoutMs: 5000});
-    await m.driver.findByTestID('wc-entry-sheet', {timeoutMs: 5000});
-    const body = m.driver.bodyText();
-    expect(body).toContain('dpay connects to dapps on Ethereum and Solana.');
-    expect(body).toContain('In the dapp, choose WalletConnect, then scan its QR code.');
-    expect(body).toContain('Every request is shown before you approve it.');
-    expect(body).toContain('A dapp stays connected until you disconnect it.');
-    expect(body).not.toContain('Connected dapps'); // no sessions -> no list section at all
-
-    // The primary action closes the sheet; the camera beneath is the instrument (the same
-    // classifier path a scanned wc: QR always took).
-    await m.driver.click('btn-wc-entry-scan', {timeoutMs: 5000});
-    await m.driver.waitGone('wc-entry-sheet', {timeoutMs: 5000});
-    expect(m.driver.isPresent('evm-pay-scan')).toBe(true);
+    // The classifier route: a `wc:` pairing URI off the camera lands in the Wallet's pairing
+    // entry (pairWc), which on this disabled env answers the honest refusal card - the proof it
+    // was ROUTED (a non-payment payload would have said "isn't a dpay payment code" instead).
+    await m.driver.settleFrames(1);
+    scanSeam()('wc:8a5f2c@2?relay-protocol=irn&symKey=4d7a9b1c');
+    await m.driver.findByTestID('pay-link-error', {timeoutMs: 5000});
+    expect(m.driver.readText('pay-link-error-body')).toBe(
+      'WalletConnect is unavailable. Use the dpay mobile app to connect.',
+    );
+    expect(m.driver.bodyText()).not.toContain("isn't a dpay payment code");
 
     await m.unmount();
-    g.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
-    g.__DPAY_TEST_WC_NATIVE = false;
   }, 150_000);
 
-  it('without the project-id seam the entry row does not render at all (no dead entry)', async () => {
-    const {onboardWallet, waitForWallet, selectEvmAsset} = await evmEnv();
+  it('the Solana scan card stays bare: no hint line, no entry row (education is IC-pay-only)', async () => {
+    const {onboardWallet, waitForWallet, openBalances, selectCurrency, armPayScan} = await evmEnv();
     const m = await onboardWallet('jest-wc-54b');
     await waitForWallet(m);
-    await selectEvmAsset(m, 'evm-zchf-arbitrum');
+    await openBalances(m, {timeoutMs: 5000});
+    await selectCurrency(m, 'sol', {timeoutMs: 5000});
     await m.driver.click('tab-pay', {timeoutMs: 5000});
-    await m.driver.findByTestID('evm-pay-scan', {timeoutMs: 5000});
-    expect(m.driver.isPresent('btn-evm-pay-wc')).toBe(false);
+    await m.driver.findByTestID('sol-pay-scan', {timeoutMs: 5000});
+    expect(m.driver.isPresent('wc-scan-hint')).toBe(false);
+    expect(m.driver.isPresent('btn-sol-pay-wc')).toBe(false);
+    // The scanner still arms on the SOL card - the wc: classifier rides it there too.
+    await armPayScan(m);
     await m.unmount();
   }, 150_000);
 });

@@ -175,12 +175,6 @@ export const PROOF_POLL_BUDGET = 30;
 // Mirrors the POLL override seam exactly.
 export const WALLETCONNECT_PROJECT_ID =
   ((globalThis as unknown as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID ?? '648afbc757419fa381f77ba0c900bc85');
-/** The SAME value, read LIVE: the const above freezes at first import, so a jest/flow test that
- *  arms the override after the module graph loaded would never be seen by a const reader. The
- *  Wallet's entry-row gate reads this per render; `walletkit.ts` keeps the const. */
-export function walletConnectProjectId(): string {
-  return (globalThis as unknown as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID ?? '648afbc757419fa381f77ba0c900bc85';
-}
 
 // ── The Solana RPC endpoint for the native device-key SOL rail (balances, history, send) ────────
 //

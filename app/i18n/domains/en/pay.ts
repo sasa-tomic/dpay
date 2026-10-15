@@ -345,24 +345,9 @@ export type PayMessages = {
     /** The submitted-not-settled terminal: the network accepted the broadcast, settlement did
      *  not happen yet - the hash is the record (the send path's honest-unknown shape). */
     submittedNote: string;
-    /** The pay-scan entry row and the entry sheet title (one string, two mounts). */
-    connectEntry: string;
-    /** Entry sheet: what pairing does. */
-    entryWhat: string;
-    /** Entry sheet: how the user gets a pairing code. */
-    entryHow: string;
-    /** Entry sheet: the never-auto-approve honesty line. */
-    entryHonest: string;
-    /** Entry sheet: sessions are user-controlled. */
-    entryDisconnect: string;
-    /** Entry sheet: the primary action (closes over the live camera). */
-    entryScan: string;
-    /** The connected-dapps list header. */
-    sessionsTitle: string;
-    /** Row action: drop the session from dpay's side. */
-    disconnect: string;
-    /** A disconnect that failed: the retry stays one tap away. */
-    disconnectFailed: string;
+    /** The ONE WalletConnect education line, under the privacy line in the Pay scan card's
+     *  empty state: scanning a `wc:` code is the only pairing entry, and this says so. */
+    scanHint: string;
   };
 
   // --- the scan surface + its NFC status row ------------------------------------------------
@@ -602,15 +587,7 @@ export const payEn: PayMessages = {
     submittedTitle: 'Submitted',
     submittedNote:
       'The network accepted the transaction. Settlement is still pending. The hash is your record.',
-    connectEntry: 'Connect to a dapp',
-    entryWhat: 'dpay connects to dapps on Ethereum and Solana.',
-    entryHow: 'In the dapp, choose WalletConnect, then scan its QR code.',
-    entryHonest: 'Every request is shown before you approve it.',
-    entryDisconnect: 'A dapp stays connected until you disconnect it.',
-    entryScan: 'Scan QR code',
-    sessionsTitle: 'Connected dapps',
-    disconnect: 'Disconnect',
-    disconnectFailed: "Couldn't disconnect. Try again.",
+    scanHint: 'WalletConnect codes connect your dapps here.',
   },
 
   scanToPay: 'Scan to pay',
