@@ -1057,7 +1057,7 @@ function tokenAmount(raw: string): string {
   return M.pay.wc.rawUnits(raw);
 }
 
-export function WcRequestSheet({mode, dapp, chains, summary, chain, busy, err, submittedHash, onApprove, onReject, onDone}: {
+export function WcRequestSheet({mode, dapp, chains, summary, chain, busy, err, submittedHash, servable = true, onApprove, onReject, onDone}: {
   mode: 'proposal' | 'request';
   dapp: WcSheetDapp;
   /** Proposal mode: the chains the dApp asked for. */
@@ -1069,6 +1069,9 @@ export function WcRequestSheet({mode, dapp, chains, summary, chain, busy, err, s
   busy: boolean;
   err: string | null;
   submittedHash: string | null;
+  /** Proposal mode: can dpay serve the required namespaces (`walletkit.proposalServable`)?
+   *  False disables Approve (it could only ever error) and states why; Reject stays live. */
+  servable?: boolean;
   onApprove: () => void;
   onReject: () => void;
   onDone: () => void;
@@ -1095,7 +1098,7 @@ export function WcRequestSheet({mode, dapp, chains, summary, chain, busy, err, s
 
           {mode === 'proposal' ? (
             <>
-              <Text style={S.depositStatusTitle}>{M.pay.wc.connectHeadline}</Text>
+              {!servable ? <Text testID="wc-proposal-unsupported" style={S.err}>{M.pay.wc.proposalUnsupported}</Text> : null}
               <View style={S.receiptField}>
                 <Text style={S.receiptLabel}>{M.pay.wc.chainsLabel}</Text>
                 <Text testID="wc-chains" style={S.receiptValueSans}>{chains.length > 0 ? chains.map(wcChainName).join(', ') : '-'}</Text>
@@ -1104,7 +1107,10 @@ export function WcRequestSheet({mode, dapp, chains, summary, chain, busy, err, s
           ) : null}
 
           {review?.kind === 'switchChain' ? (
-            <Text style={S.depositStatusTitle}>{M.pay.wc.switchHeadline(wcChainName(review.chain))}</Text>
+            <>
+              <Text style={S.depositStatusTitle}>{M.pay.wc.switchHeadline(wcChainName(review.chain))}</Text>
+              {!review.wired ? <Text testID="wc-switch-unwired" style={S.err}>{M.pay.wc.switchUnwired}</Text> : null}
+            </>
           ) : null}
 
           {review != null && review.kind !== 'switchChain' ? (
@@ -1237,12 +1243,12 @@ export function WcRequestSheet({mode, dapp, chains, summary, chain, busy, err, s
               {err != null ? <Text testID="wc-err" style={S.err}>{err}</Text> : null}
               <Pressable
                 testID="btn-wc-approve"
-                style={[S.primaryWide, busy && S.dim]}
+                style={[S.primaryWide, (busy || !servable) && S.dim]}
                 onPress={onApprove}
-                disabled={busy}
+                disabled={busy || !servable}
                 accessibilityRole="button"
                 accessibilityLabel={M.pay.wc.approve}
-                accessibilityState={{disabled: busy}}>
+                accessibilityState={{disabled: busy || !servable}}>
                 {busy ? <ActivityIndicator size="small" color={C.brandInk} /> : <Text style={S.primaryText}>{M.pay.wc.approve}</Text>}
               </Pressable>
               <Pressable

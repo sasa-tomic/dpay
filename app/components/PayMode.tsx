@@ -58,7 +58,7 @@ const OCP_IC_SEQUENCE_MS =
   + IC_SUBMIT_TIMEOUT_MS
   + IC_POLL_BUDGET.attempts * (IC_READ_STATE_TIMEOUT_MS + IC_POLL_BUDGET.intervalMs);
 
-export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail, onOpenAddressBook, onOpenReceipt, onWalletConnectPair}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string | null; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void; /** Open the shared TxnReceipt (Wallet root) for a finished send. */ onOpenReceipt?: (t: Txn) => void; /** A scanned `wc:` pairing URI routes here (the Wallet's pairing entry, the same one the `wc:` deep link lands in, plan W1 step 4). Absent = dropped (the direct-mount harnesses). */ onWalletConnectPair?: (uri: string) => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail, onOpenAddressBook, onOpenReceipt, onWalletConnectPair, onWalletConnectEntry}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string | null; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void; /** Open the shared TxnReceipt (Wallet root) for a finished send. */ onOpenReceipt?: (t: Txn) => void; /** A scanned `wc:` pairing URI routes here (the Wallet's pairing entry, the same one the `wc:` deep link lands in, plan W1 step 4). Absent = dropped (the direct-mount harnesses). */ onWalletConnectPair?: (uri: string) => void; /** Open the root-mounted WC entry sheet (discover + instructions). Absent = the entry row does not render (unsupported platform, or the direct-mount harnesses). */ onWalletConnectEntry?: () => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp-choose'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
@@ -1350,6 +1350,20 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
         <View style={S.scanPhase} testID="pay-scan">
           <NfcStatusRow nfcStatus={nfcStatus} testID="pay-nfc-row" />
           <QrScanner key={scanKey} onScan={raw => onRequestString(raw)} />
+          {/* The dapp-pairing entry (founder 2026-10-15): discoverability for the wallet side the
+              wc: QR classification already serves. The camera above is the instrument; the entry
+              opens the instructions + connected-dapps sheet at the Wallet root. */}
+          {onWalletConnectEntry ? (
+            <Pressable
+              testID="btn-pay-wc"
+              style={[S.ghostBtn, S.ghostBtnMuted, {marginTop: 10}]}
+              onPress={onWalletConnectEntry}
+              accessibilityRole="button"
+              accessibilityLabel={M.pay.wc.connectEntry}
+              accessibilityState={{disabled: false}}>
+              <Text style={S.ghostBtnText}>{M.pay.wc.connectEntry}</Text>
+            </Pressable>
+          ) : null}
           {fundInstruction}
           {fundedElsewhere('pay')}
           {/* The checkout lookup is two network reads and can take tens of seconds — on a screen the

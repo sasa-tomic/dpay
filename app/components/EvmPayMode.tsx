@@ -48,7 +48,7 @@ import {M} from '../i18n';
  * The camera also accepts a dpay payment link and a plain 0x address (classifyScan) — the same
  * three verdicts every rail's scanner answers.
  */
-export function EvmPayMode({identity, online, asset, balance, gasWei, gasChecking = false, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onOpenAddressBook, onOpenReceipt, onSent, onRecheckBalances, recheckBusy = false, onWalletConnectPair}: {
+export function EvmPayMode({identity, online, asset, balance, gasWei, gasChecking = false, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onOpenAddressBook, onOpenReceipt, onSent, onRecheckBalances, recheckBusy = false, onWalletConnectPair, onWalletConnectEntry}: {
   identity: Identity;
   online: boolean;
   /** The SELECTED EVM asset row — this mode only mounts while one is selected. */
@@ -73,6 +73,8 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
   recheckBusy?: boolean;
   /** A scanned `wc:` pairing URI routes here (the Wallet's pairing entry, the same one the `wc:` deep link lands in, plan W1 step 4). Absent = dropped (the direct-mount harnesses). */
   onWalletConnectPair?: (uri: string) => void;
+  /** Open the root-mounted WC entry sheet (discover + instructions). Absent = the entry row does not render (unsupported platform, or the direct-mount harnesses). */
+  onWalletConnectEntry?: () => void;
 }) {
   const [phase, setPhase] = useState<'scan' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<EvmReqV1 | null>(null);
@@ -346,6 +348,19 @@ export function EvmPayMode({identity, online, asset, balance, gasWei, gasCheckin
           <Text style={[S.dim2, {marginTop: 0}]}>{M.evm.scanHint}</Text>
         </View>
         <QrScanner key={scanKey} onScan={(v) => { void onScan(v); }} />
+        {/* The dapp-pairing entry (founder 2026-10-15): the IC twin's `btn-pay-wc`, the same
+            element on every rail's scan screen (the same-surfaces hard rule). */}
+        {onWalletConnectEntry ? (
+          <Pressable
+            testID="btn-evm-pay-wc"
+            style={[S.ghostBtn, S.ghostBtnMuted, {marginTop: 10}]}
+            onPress={onWalletConnectEntry}
+            accessibilityRole="button"
+            accessibilityLabel={M.pay.wc.connectEntry}
+            accessibilityState={{disabled: false}}>
+            <Text style={S.ghostBtnText}>{M.pay.wc.connectEntry}</Text>
+          </Pressable>
+        ) : null}
       </View>
       {busy ? (
         <Text testID="evm-pay-signing" style={S.dim2}>{M.evm.signingOffline}</Text>

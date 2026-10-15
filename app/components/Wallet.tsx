@@ -4,11 +4,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
 import {M} from '../i18n';
-import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, HIDDEN_CURRENCIES_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY, PRACTICE_CURRENCY} from '../config/constants';
+import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, HIDDEN_CURRENCIES_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY, PRACTICE_CURRENCY, walletConnectProjectId} from '../config/constants';
 import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog';
 import {setIcClockRoutingCanister} from '../services/icp';
 import {base, randNonceHex, fmtTime, fmtAssetCompact, fmtEstimate, rawToDecimal, toUnits} from '../lib/format';
-import {applyOffline} from '../lib/amount';import {withTimeout} from '../lib/timeout';
+import {applyOffline} from '../lib/amount';
+import {withTimeout} from '../lib/timeout';
 import {applySolDeduction, pendingSolDeduction} from '../lib/solRailShown';
 import {buildSelectableAssets, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
 import {buildAssetBalances, buildCurrencyBalances, fundedCurrencies} from '../lib/assetBalances';
@@ -92,6 +93,7 @@ import {
   WcRequestSheet, makeWcProposalHandler, makeWcRequestHandler, proposalChains, proposalDapp,
   requestDapp, summarizeWcRequest, approveWcRequest, rejectWcRequest,
 } from './WcRequestSheet';
+import {WcEntrySheet, connectedAppOf, type WcConnectedApp} from './WcEntrySheet';
 import type {WcProposal, WcRequest} from '../walletkit';
 import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
@@ -2260,7 +2262,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // EVM catalog row with a delivery chain in MTP_ASSET_DELIVERY — null, every Add-funds press
   // routes to the deposit surface exactly as before and HomeTab receives no onBuy at all.
   const [addFundsOpen, setAddFundsOpen] = useState(false);
-  const [mtpBuyToken, setMtpBuyToken] = useState<MtpBuyAsset | null>(null);  const homeBuyToken = homeAsset != null ? mtpBuyTokenOf(homeAsset) : null;
+  const [mtpBuyToken, setMtpBuyToken] = useState<MtpBuyAsset | null>(null);
+  const homeBuyToken = homeAsset != null ? mtpBuyTokenOf(homeAsset) : null;
   const openMtpBuy = useCallback((token: MtpBuyAsset) => { setAddFundsOpen(false); setMtpBuyToken(token); }, []);
 
   // R2 step 2 — the Mt Pelerin CASH-OUT. One root-mounted sheet (the MtpBuySheet discipline):
@@ -2317,7 +2320,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // directly and enforces the plan's one-review-at-a-time law. Session chain state is a
   // topic->CAIP-2 map seeded at approve (eip155:1) and moved by an approved
   // wallet_switchEthereumChain - it is what eth_chainId reads answer from.
-  type WcReviewState = {mode: 'proposal'; proposal: WcProposal} | {mode: 'request'; request: WcRequest};
+  type WcReviewState = {mode: 'proposal'; proposal: WcProposal; servable: boolean} | {mode: 'request'; request: WcRequest};
   const [wcReview, setWcReview] = useState<WcReviewState | null>(null);
   const wcReviewRef = useRef<WcReviewState | null>(null);
   const wcChains = useRef(new Map<string, string>());
@@ -2343,7 +2346,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
         if (!alive) return;
         offProposal = wk.onProposal(makeWcProposalHandler({
           isOpen: () => wcReviewRef.current != null,
-          open: (proposal) => openWcReview({mode: 'proposal', proposal}),
+          open: (proposal) => openWcReview({mode: 'proposal', proposal, servable: wk.proposalServable(proposal, solAddress)}),
           reject: (proposal) => wk.rejectSession(proposal),
         }));
         offRequest = wk.onRequest(makeWcRequestHandler({
@@ -2426,6 +2429,51 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       setWcBusy(false);
     }
   }, [wcBusy, closeWcReview]);
+
+  // The WC entry + connected-dapps surface (founder 2026-10-15): one root-mounted sheet serving
+  // BOTH jobs - the discover instructions (a user cannot otherwise know dpay pairs with dApps)
+  // and, when sessions exist, the rows with Disconnect. State at the wallet root like every
+  // overlay (the receiptTxn discipline); walletkit stays a dynamic import (the seam law). The
+  // entry row renders on the pay scan screens ONLY when WC can actually answer (non-web + a
+  // project id - the same two facts `walletkit`'s own support check reads), so no rail ships a
+  // dead entry.
+  const [wcEntryOpen, setWcEntryOpen] = useState(false);
+  const [wcSessions, setWcSessions] = useState<WcConnectedApp[] | null>(null);
+  const [wcSessionBusy, setWcSessionBusy] = useState<string | null>(null);
+  const [wcSessionFailed, setWcSessionFailed] = useState(false);
+  const loadWcSessions = useCallback(async () => {
+    setWcSessions(null);
+    try {
+      const wk = await import('../walletkit');
+      const disc = await wk.discover();
+      setWcSessions(Object.values(disc?.sessions ?? {}).map(connectedAppOf));
+    } catch (e: unknown) {
+      console.warn(`wc discover failed: ${e instanceof Error ? e.message : String(e)}`);
+      setWcSessions([]);
+    }
+  }, []);
+  const openWcEntry = useCallback(() => {
+    setWcSessionFailed(false);
+    setWcEntryOpen(true);
+    void loadWcSessions();
+  }, [loadWcSessions]);
+  const disconnectWcSession = useCallback(async (topic: string) => {
+    setWcSessionBusy(topic);
+    setWcSessionFailed(false);
+    try {
+      const wk = await import('../walletkit');
+      await wk.disconnectSession(topic);
+      await loadWcSessions();
+    } catch (e: unknown) {
+      console.warn(`wc disconnect failed: ${e instanceof Error ? e.message : String(e)}`);
+      setWcSessionFailed(true);
+    } finally {
+      setWcSessionBusy(null);
+    }
+  }, [loadWcSessions]);
+  // The support gate: read LIVE (the jest/flow override arms after this module loaded - the
+  // const in config/constants froze at import time).
+  const wcEntrySupported = Platform.OS !== 'web' && walletConnectProjectId() !== '';
 
   // Remove the MAIN currency (the one the menu was opened from). The guard decides; a refusal is
   // stated in the menu with its practical next step, never a silent swallow. A successful remove
@@ -2732,9 +2780,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
             />
           : mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solShownState.balance ?? '0'} tokenBalance={selectedTokenShownBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenShownStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solShownState, selectedTokenShownState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solShownState.status === 'ok' && solShownState.balance === '0'} solChecking={solShownState.status === 'loading' || solShownState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onWalletConnectPair={pairWc} />
+              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solShownState.balance ?? '0'} tokenBalance={selectedTokenShownBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenShownStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solShownState, selectedTokenShownState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solShownState.status === 'ok' && solShownState.balance === '0'} solChecking={solShownState.status === 'loading' || solShownState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onWalletConnectPair={pairWc} onWalletConnectEntry={wcEntrySupported ? openWcEntry : undefined} />
               : activeEvm && activeEvmAsset != null
-              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} onWalletConnectPair={pairWc} />
+              ? <EvmPayMode identity={identity} online={online} asset={activeEvmAsset} balance={selectedEvmBalance} gasWei={selectedEvmGas?.wei ?? null} gasChecking={selectedEvmGas == null || selectedEvmGas.status === 'loading'} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={evmPrefill} onSendPrefillConsumed={() => setEvmPrefill(null)} prefillScan={pendingCheckout} onPrefillScanConsumed={() => setPendingCheckout(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} onOpenReceipt={setReceiptTxn} onSent={onEvmSent} onRecheckBalances={recheckAll} recheckBusy={recheckBusy} onWalletConnectPair={pairWc} onWalletConnectEntry={wcEntrySupported ? openWcEntry : undefined} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} shownBalance={shownBalance}
@@ -2755,6 +2803,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
                   onOpenAddressBook={openAddresses}
                   onOpenReceipt={setReceiptTxn}
                   onWalletConnectPair={pairWc}
+                  onWalletConnectEntry={wcEntrySupported ? openWcEntry : undefined}
                 />
           )
           : mode === 'receive'
@@ -3017,9 +3066,23 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
           busy={wcBusy}
           err={wcErr}
           submittedHash={wcSubmitted}
+          servable={wcReview.mode === 'proposal' ? wcReview.servable : true}
           onApprove={() => { void approveWc(); }}
           onReject={() => { void rejectWc(); }}
           onDone={closeWcReview}
+        />
+      ) : null}
+      {/* The WC entry + connected-dapps sheet (root-mounted, the receiptTxn discipline): the
+          instructions, and - when `discover()` returns settled sessions - one row per dApp with
+          Disconnect. Empty sessions render no section: the instructions ARE the empty state. */}
+      {wcEntryOpen ? (
+        <WcEntrySheet
+          sessions={wcSessions}
+          busyTopic={wcSessionBusy}
+          failed={wcSessionFailed}
+          onScan={() => setWcEntryOpen(false)}
+          onDisconnect={(topic) => { void disconnectWcSession(topic); }}
+          onClose={() => setWcEntryOpen(false)}
         />
       ) : null}
       {/* An incoming payment link that cannot be paid. It states WHICH asset/chain the link asked

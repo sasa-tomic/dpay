@@ -1762,3 +1762,21 @@ describe('PayMode — what the affordability gate is allowed to read, and what i
     act(() => { tree.unmount(); });
   });
 });
+
+describe('PayMode — the dapp-pairing entry row (founder 2026-10-15)', () => {
+  test('the handler present: the row sits on the scan screen and opens the entry sheet on press', () => {
+    const onWalletConnectEntry = jest.fn();
+    const tree = mountPay({onWalletConnectEntry});
+    expect(hasTestID(tree, 'btn-pay-wc')).toBe(true);
+    expect(textByTestID(tree, 'btn-pay-wc')).toBe(M.pay.wc.connectEntry);
+    pressByTestID(tree, 'btn-pay-wc');
+    expect(onWalletConnectEntry).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the handler absent (unsupported platform / harness): no row, no dead entry', () => {
+    const tree = mountPay({});
+    expect(hasTestID(tree, 'btn-pay-wc')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});

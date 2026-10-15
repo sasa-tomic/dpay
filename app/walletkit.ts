@@ -227,6 +227,36 @@ export async function approveSession(proposal: WcProposal, evmAddress: string, s
   return kit.approveSession({id: proposal.id, namespaces});
 }
 
+/**
+ * Can dpay SERVE this proposal? True iff every REQUIRED namespace is inside what
+ * `approveSession` builds (the SDK's `buildApprovedNamespaces` refuses the rest, which used to
+ * surface as an error-only Approve). Mirror of that validator, not a reimplementation of it:
+ * approve still runs the SDK check - this is the pre-Approve honest gate the sheet renders from.
+ * `solanaAddress: null` leaves the solana namespace unbuilt, so a proposal REQUIRING solana is
+ * unservable (EVM-only wallets reject solana-required dApps here, not at approve time).
+ */
+export function proposalServable(proposal: WcProposal, solanaAddress: string | null): boolean {
+  const required = (proposal.params as {requiredNamespaces?: Record<string, {chains?: unknown; methods?: unknown; events?: unknown}> | undefined} | undefined)?.requiredNamespaces ?? {};
+  const allOf = (list: unknown, ok: (v: unknown) => boolean): boolean =>
+    (Array.isArray(list) ? list : []).every(ok);
+  for (const [ns, req] of Object.entries(required)) {
+    const r = req ?? {};
+    if (ns === 'eip155') {
+      if (!allOf(r.chains, (c) => typeof c === 'string' && WC_SUPPORTED_CHAINS.includes(c))) return false;
+      if (!allOf(r.methods, (m) => typeof m === 'string' && WC_SUPPORTED_METHODS.includes(m))) return false;
+      if (!allOf(r.events, (e) => typeof e === 'string' && WC_SUPPORTED_EVENTS.includes(e))) return false;
+    } else if (ns === 'solana') {
+      if (solanaAddress == null) return false;
+      if (!allOf(r.chains, (c) => c === SOLANA_MAINNET_CAIP2)) return false;
+      if (!allOf(r.methods, (m) => typeof m === 'string' && SOLANA_V1_METHODS.includes(m as never))) return false;
+      if (!allOf(r.events, () => false)) return false; // the solana namespace advertises no events
+    } else {
+      return false; // a namespace dpay does not build is a proposal it cannot approve
+    }
+  }
+  return true;
+}
+
 /** Reject a proposal — the user said no to the connection itself (SDK error USER_REJECTED, 5000).
  *  No-op when disabled. */
 export async function rejectSession(proposal: WcProposal): Promise<void> {

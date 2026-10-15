@@ -294,7 +294,6 @@ export type PayMessages = {
     /** `pair()` threw - a damaged or expired pairing URI. */
     pairFailed: string;
     connectTitle: string;
-    connectHeadline: string;
     /** A method request under review (the sheet title). */
     requestTitle: string;
     appLabel: string;
@@ -336,12 +335,34 @@ export type PayMessages = {
     /** signAndSendTransaction broadcasts on approve - the money-safety line. */
     broadcastNote: string;
     switchHeadline: (chain: string) => string;
+    /** switch-chain to a chain outside the wired pair: the one honest pre-Approve line. */
+    switchUnwired: string;
+    /** A proposal dpay cannot serve: Approve is disabled; this line is why. */
+    proposalUnsupported: string;
     approve: string;
     reject: string;
     submittedTitle: string;
     /** The submitted-not-settled terminal: the network accepted the broadcast, settlement did
      *  not happen yet - the hash is the record (the send path's honest-unknown shape). */
     submittedNote: string;
+    /** The pay-scan entry row and the entry sheet title (one string, two mounts). */
+    connectEntry: string;
+    /** Entry sheet: what pairing does. */
+    entryWhat: string;
+    /** Entry sheet: how the user gets a pairing code. */
+    entryHow: string;
+    /** Entry sheet: the never-auto-approve honesty line. */
+    entryHonest: string;
+    /** Entry sheet: sessions are user-controlled. */
+    entryDisconnect: string;
+    /** Entry sheet: the primary action (closes over the live camera). */
+    entryScan: string;
+    /** The connected-dapps list header. */
+    sessionsTitle: string;
+    /** Row action: drop the session from dpay's side. */
+    disconnect: string;
+    /** A disconnect that failed: the retry stays one tap away. */
+    disconnectFailed: string;
   };
 
   // --- the scan surface + its NFC status row ------------------------------------------------
@@ -543,8 +564,7 @@ export const payEn: PayMessages = {
   wc: {
     unavailable: 'WalletConnect is unavailable. Use the dpay mobile app to connect.',
     pairFailed: 'This WalletConnect code did not work. Ask the app for a new one.',
-    connectTitle: 'Connect',
-    connectHeadline: 'An app wants to connect',
+    connectTitle: 'An app wants to connect',
     requestTitle: 'Sign request',
     appLabel: 'App',
     chainLabel: 'Chain',
@@ -575,11 +595,22 @@ export const payEn: PayMessages = {
     notSignerNote: 'This wallet does not sign this transaction.',
     broadcastNote: 'Approving sends this transaction to the network.',
     switchHeadline: chain => `Switch chain to ${chain}`,
+    switchUnwired: 'dpay cannot switch to this chain.',
+    proposalUnsupported: 'dpay does not support what this app requires.',
     approve: 'Approve',
     reject: 'Reject',
     submittedTitle: 'Submitted',
     submittedNote:
       'The network accepted the transaction. Settlement is still pending. The hash is your record.',
+    connectEntry: 'Connect to a dapp',
+    entryWhat: 'dpay connects to dapps on Ethereum and Solana.',
+    entryHow: 'In the dapp, choose WalletConnect, then scan its QR code.',
+    entryHonest: 'Every request is shown before you approve it.',
+    entryDisconnect: 'A dapp stays connected until you disconnect it.',
+    entryScan: 'Scan QR code',
+    sessionsTitle: 'Connected dapps',
+    disconnect: 'Disconnect',
+    disconnectFailed: "Couldn't disconnect. Try again.",
   },
 
   scanToPay: 'Scan to pay',

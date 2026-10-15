@@ -41,8 +41,13 @@ import {
   rejectWcRequest,
   chainHexOf,
   solanaTxRows,
+  WcRequestSheet,
   type WcRequestSummary,
 } from '../components/WcRequestSheet';
+import {M} from '../i18n';
+import {Text as RNText} from 'react-native';
+import React from 'react';
+import renderer, {act} from 'react-test-renderer';
 import {deriveEvmKeypair} from '../evm/identity';
 import {signPersonal} from '../evm/personalSign';
 import {signTypedData, type TypedData} from '../evm/typedData';
@@ -1077,5 +1082,121 @@ describe('the one-review-at-a-time law covers the solana surface too', () => {
     const err = (responsesOf(kit)[0]!.response as {error: {code: number; message: string}}).error;
     expect(err.code).toBe(-32603);
     expect(err.message).toBe('No Solana account');
+  });
+});
+
+// --- the founder-directive pins (2026-10-15): an unservable proposal never shows an error-only
+// Approve, and an unwired switch-chain warns BEFORE the press. -------------------------------
+
+/** A proposal carrying exactly these required namespaces (the rest of the fixture unchanged). */
+function proposalWithRequired(required: unknown, id = 42): WcProposal {
+  const base = fakeProposal(id);
+  (base.params as {requiredNamespaces: unknown}).requiredNamespaces = required;
+  return base;
+}
+
+describe('proposalServable (the pre-Approve honest gate)', () => {
+  test('a proposal inside the wired EVM surface is servable - with or without a solana identity', () => {
+    const mod = load(PROJECT_ID);
+    const p = proposalWithRequired({eip155: {chains: ['eip155:1', 'eip155:42161'], methods: ['personal_sign', 'eth_sendTransaction'], events: ['chainChanged']}});
+    expect(mod.proposalServable(p, SOL_ADDR)).toBe(true);
+    expect(mod.proposalServable(p, null)).toBe(true);
+  });
+
+  test('an EVM chain outside the wired pair is not', () => {
+    const mod = load(PROJECT_ID);
+    const p = proposalWithRequired({eip155: {chains: ['eip155:10'], methods: ['personal_sign'], events: []}});
+    expect(mod.proposalServable(p, SOL_ADDR)).toBe(false);
+  });
+
+  test('a method or event outside v1 is not', () => {
+    const mod = load(PROJECT_ID);
+    expect(mod.proposalServable(proposalWithRequired({eip155: {chains: ['eip155:1'], methods: ['eth_sign'], events: []}}), SOL_ADDR)).toBe(false);
+    expect(mod.proposalServable(proposalWithRequired({eip155: {chains: ['eip155:1'], methods: ['personal_sign'], events: ['accountsChanged', 'somethingElse']}}), SOL_ADDR)).toBe(false);
+  });
+
+  test('a required solana namespace is servable only WITH a solana identity, inside the v1 surface', () => {
+    const mod = load(PROJECT_ID);
+    const p = proposalWithRequired({solana: {chains: [SOL_CHAIN], methods: ['solana_signMessage', 'solana_signTransaction'], events: []}});
+    expect(mod.proposalServable(p, SOL_ADDR)).toBe(true);
+    expect(mod.proposalServable(p, null)).toBe(false);
+    expect(mod.proposalServable(proposalWithRequired({solana: {chains: [SOL_CHAIN], methods: ['solana_signMessage'], events: ['accountsChanged']}}), SOL_ADDR)).toBe(false);
+  });
+
+  test('a namespace dpay does not build (an EVM-only wallet) is not', () => {
+    const mod = load(PROJECT_ID);
+    expect(mod.proposalServable(proposalWithRequired({polkadot: {chains: ['polkadot:91b171bb', ], methods: [], events: []}}), SOL_ADDR)).toBe(false);
+  });
+});
+
+describe('the sheet: an unservable proposal and the unwired switch-chain warn before Approve', () => {
+  const DAPP = {name: 'fake-dapp', url: 'https://fake.invalid'};
+
+  function renderSheet(props: Partial<Parameters<typeof WcRequestSheet>[0]>): renderer.ReactTestRenderer {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <WcRequestSheet
+          mode="proposal" dapp={DAPP} chains={['eip155:10']} summary={null} chain="eip155:1"
+          busy={false} err={null} submittedHash={null}
+          onApprove={() => {}} onReject={() => {}} onDone={() => {}}
+          {...props}
+        />,
+      );
+    });
+    return tree;
+  }
+
+  function byTestID(tree: renderer.ReactTestRenderer, id: string): Array<renderer.ReactTestInstance> {
+    return tree.root.findAll((n) => n.props.testID === id);
+  }
+
+  /** The node (host trees carry a testID on more than one fiber; presence + [0] is the house
+   *  convention — PayMode.test.tsx's helpers), or undefined. */
+  function firstByTestID(tree: renderer.ReactTestRenderer, id: string): renderer.ReactTestInstance | undefined {
+    return byTestID(tree, id)[0];
+  }
+
+  test('servable=false: Approve is disabled and the reason line replaces the error-only button', () => {
+    const tree = renderSheet({servable: false});
+    const reason = firstByTestID(tree, 'wc-proposal-unsupported');
+    expect(reason).toBeDefined();
+    expect(reason!.props.children).toBe(M.pay.wc.proposalUnsupported);
+    const approve = firstByTestID(tree, 'btn-wc-approve')!;
+    expect(approve.props.disabled).toBe(true);
+    expect(approve.props.accessibilityState).toEqual({disabled: true});
+    // Reject stays live - it is the one action an unservable proposal still has.
+    expect(firstByTestID(tree, 'btn-wc-reject')!.props.disabled).toBe(false);
+  });
+
+  test('servable=true (the default): no reason line, Approve live', () => {
+    const tree = renderSheet({});
+    expect(byTestID(tree, 'wc-proposal-unsupported')).toHaveLength(0);
+    expect(firstByTestID(tree, 'btn-wc-approve')!.props.disabled).toBe(false);
+  });
+
+  test('an unwired switch-chain request shows the honest warning line BEFORE Approve', () => {
+    const summary = summarizeWcRequest(fakeRequest(21, 'wallet_switchEthereumChain', [{chainId: '0x89'}]), {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    const tree = renderSheet({mode: 'request', chains: [], summary});
+    const warn = firstByTestID(tree, 'wc-switch-unwired');
+    expect(warn).toBeDefined();
+    expect(warn!.props.children).toBe(M.pay.wc.switchUnwired);
+    // Approve stays live: pressing it performs the typed UNSUPPORTED_CHAINS refusal.
+    expect(firstByTestID(tree, 'btn-wc-approve')!.props.disabled).toBe(false);
+  });
+
+  test('a wired switch-chain request shows no warning', () => {
+    const summary = summarizeWcRequest(fakeRequest(22, 'wallet_switchEthereumChain', [{chainId: '0x1'}]), {activeChain: 'eip155:1', evmAddress: DEVICE, solanaAddress: SOL_ADDR});
+    const tree = renderSheet({mode: 'request', chains: [], summary});
+    expect(byTestID(tree, 'wc-switch-unwired')).toHaveLength(0);
+  });
+
+  test('the proposal headline names the situation once (the old duplicate self-naming line is gone)', () => {
+    const tree = renderSheet({});
+    const texts = tree.root.findAllByType(RNText).map((n) => String(n.props.children));
+    // One statement, not two: the sheet says "An app wants to connect" exactly once and the
+    // bare self-name "Connect" (the old duplicate title) is gone.
+    expect(texts.filter((t) => t === M.pay.wc.connectTitle)).toHaveLength(1);
+    expect(texts).not.toContain('Connect');
   });
 });
