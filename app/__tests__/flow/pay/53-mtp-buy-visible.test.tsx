@@ -45,6 +45,7 @@ hermeticDescribe('flow 53: the buy choice is visible on Home (catalog-level gate
     await waitForWallet(m);
 
     // ── Add funds opens the CHOICE menu (the defect: it never appeared at all). ──
+    await m.driver.click('tab-home', {timeoutMs: 5000});
     await m.driver.click('btn-home-add-funds', {timeoutMs: 5000});
     await m.driver.findByTestID('home-add-funds-menu', {timeoutMs: 5000});
     expect(m.driver.isPresent('btn-add-funds-deposit')).toBe(true);

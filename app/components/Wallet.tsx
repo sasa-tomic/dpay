@@ -2474,8 +2474,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     }
   }, [loadWcSessions]);
   // The support gate: read LIVE (the jest/flow override arms after this module loaded - the
-  // const in config/constants froze at import time).
-  const wcEntrySupported = Platform.OS !== 'web' && walletConnectProjectId() !== '';
+  // const in config/constants froze at import time). The platform half hides the entry on web
+  // (walletkit guards web); the flow tier runs on web, so `__DPAY_TEST_WC_NATIVE` simulates the
+  // native platform for this surface alone (the __DPAY_TEST_MTP_OPEN pattern: prod never sets).
+  const wcEntrySupported =
+    (Platform.OS !== 'web' || (globalThis as {__DPAY_TEST_WC_NATIVE?: boolean}).__DPAY_TEST_WC_NATIVE === true) &&
+    walletConnectProjectId() !== '';
 
   // Remove the MAIN currency (the one the menu was opened from). The guard decides; a refusal is
   // stated in the menu with its practical next step, never a silent swallow. A successful remove

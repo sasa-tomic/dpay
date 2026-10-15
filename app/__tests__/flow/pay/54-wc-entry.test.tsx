@@ -28,8 +28,10 @@ const g = globalThis as unknown as G;
 
 hermeticDescribe('flow 54 — the WC entry row, the instruction sheet, and the scan hand-off', () => {
   it('the entry row opens the instruction sheet; the scan button closes it over the live camera', async () => {
-    // Arm the project-id seam BEFORE the first Wallet render - the entry-row gate reads it live.
+    // Arm BOTH seams BEFORE the first Wallet render - the entry-row gate reads them live: the
+    // project id (the gate's second half) and the native-platform half (the flow env IS web).
     g.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = 'flow-54';
+    g.__DPAY_TEST_WC_NATIVE = true;
     const {onboardWallet, waitForWallet, selectEvmAsset} = await evmEnv();
     const m = await onboardWallet('jest-wc-54');
     await waitForWallet(m);
@@ -58,6 +60,7 @@ hermeticDescribe('flow 54 — the WC entry row, the instruction sheet, and the s
 
     await m.unmount();
     g.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
+    g.__DPAY_TEST_WC_NATIVE = false;
   }, 150_000);
 
   it('without the project-id seam the entry row does not render at all (no dead entry)', async () => {
