@@ -974,7 +974,7 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
   const ZCHF_ETHEREUM_ROW = {
     token: 'ZCHF', chainId: 1, decimals: 18, minFractionDigits: 2,
     address: '0xB58E61C3098d85632Df34EecfB899A1Ed80921cB',
-    onramp: 'Unavailable', offramp: 'Partner', liquidity: null,
+    onramp: 'Partner', offramp: 'Partner', liquidity: null,
   } as const;
   // Circle's canonical USDC deployments, verified against api.mtpelerin.com/currencies/tokens
   // (Ethereum `mainnet` + `arbitrum_mainnet`, both 6 decimals, 2026-10-12).
@@ -1038,15 +1038,17 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(TRUTH.chains.anvil).toBe(31337);
   });
 
-  it('the evm ZCHF rows carry no liquidity tier; the offramp flipped R2 step 1 on Ethereum only', () => {
+  it('the evm ZCHF rows carry no liquidity tier; the ramps flipped per row (offramp R2 step 1, onramp 2026-10-15)', () => {
     // R2 step 1, 2026-10-12: Mt Pelerin lists ZCHF cash-out on Ethereum, not Arbitrum, so
-    // only the Ethereum row flips to Partner.
+    // only the Ethereum row flips to Partner. 2026-10-15: the onramp follows on Ethereum
+    // only (Mt Pelerin confirmed buy support; their service delivers no ZCHF on Arbitrum).
     for (const row of [ZCHF_ARBITRUM_ROW, ZCHF_ETHEREUM_ROW]) {
       expect(row.liquidity).toBeNull();
-      expect(row.onramp).toBe('Unavailable');
       expect(row.minFractionDigits).toBe(2); // unit-denominated, the VCHF/USDC display policy
     }
+    expect(ZCHF_ARBITRUM_ROW.onramp).toBe('Unavailable');
     expect(ZCHF_ARBITRUM_ROW.offramp).toBe('Unavailable');
+    expect(ZCHF_ETHEREUM_ROW.onramp).toBe('Partner');
     expect(ZCHF_ETHEREUM_ROW.offramp).toBe('Partner');
   });
 
@@ -1083,8 +1085,9 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
       expect(r.testnet).toBe(false);
       expect(eip55ChecksumBad(r.address)).toBe(false);
       if (r.token === 'ZCHF') {
-        expect(r.onramp).toBe('Unavailable');
-        // R2 step 1, 2026-10-12: Ethereum ZCHF cash-out only (Mt Pelerin lists none on Arbitrum).
+        // 2026-10-15: Ethereum ZCHF carries the Partner ramp both ways (Mt Pelerin confirmed
+        // buy + cash-out; their service delivers no ZCHF on Arbitrum).
+        expect(r.onramp).toBe(r.chainId === TRUTH.chains.ethereum ? 'Partner' : 'Unavailable');
         expect(r.offramp).toBe(r.chainId === TRUTH.chains.ethereum ? 'Partner' : 'Unavailable');
       } else {
         expect(r.token).toBe('USDC');

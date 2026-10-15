@@ -1267,10 +1267,14 @@ fn evm_sections_with(sepolia_token: Option<&str>, anvil_token: Option<&str>) -> 
                 min_fraction_digits: Some(2),
                 chain_id: CHAIN_ID_ETHEREUM,
                 address: ZCHF_ETHEREUM_ADDRESS.to_string(),
-                // Cash-out flipped R2 step 1, 2026-10-12: Mt Pelerin lists ZCHF cash-out on
-                // Ethereum (the Arbitrum row above stays Unavailable both ways). The onramp
-                // stays Unavailable; buy-in rides the Partner USDC row.
-                onramp: RampCapability::Unavailable,
+                // Both ramps are the Mt Pelerin rail on this row: the offramp flipped R2 step 1,
+                // 2026-10-12; the onramp flipped 2026-10-15 against Mt Pelerin's own confirmation
+                // (founder email 2026-10-13: "buy (on-ramp) and cash-out (off-ramp) for ZCHF and
+                // USDC on Ethereum and Arbitrum"), which made the pre-confirmation "buy-in rides
+                // the Partner USDC row" note stale. The Arbitrum row above stays Unavailable both
+                // ways: their service delivers no ZCHF on Arbitrum (MTP_ASSET_DELIVERY, measured
+                // 2026-10-12), so there is no buy route to declare.
+                onramp: RampCapability::Partner,
                 offramp: RampCapability::Partner,
                 liquidity: None,
             },
@@ -2152,15 +2156,17 @@ mod catalog_truth_tests {
         assert_eq!(eth_rows.len(), 2, "one ZCHF + one USDC row per evm section");
         let arb_zchf = &arb_rows[0];
         let eth_zchf = &eth_rows[0];
-        // The ZCHF rows: every field against the truth file. The offramp flipped R2 step 1,
-        // 2026-10-12, Ethereum ONLY (Mt Pelerin lists no ZCHF cash-out on Arbitrum), so the
-        // loop carries the per-row expected offramp instead of a shared Unavailable pin.
-        for (row, address_key, chain_key, chain_id, expected_offramp) in [
+        // The ZCHF rows: every field against the truth file. Both ramp flips were per-row:
+        // the offramp R2 step 1, 2026-10-12, and the onramp 2026-10-15 (Mt Pelerin confirmed
+        // buy support; Ethereum ONLY, because Mt Pelerin delivers no ZCHF on Arbitrum), so the
+        // loop carries the per-row expected ramps instead of a shared pin.
+        for (row, address_key, chain_key, chain_id, expected_onramp, expected_offramp) in [
             (
                 arb_zchf,
                 "zchf_arbitrum",
                 "arbitrum_one",
                 CHAIN_ID_ARBITRUM_ONE,
+                RampCapability::Unavailable,
                 RampCapability::Unavailable,
             ),
             (
@@ -2168,6 +2174,7 @@ mod catalog_truth_tests {
                 "zchf_ethereum",
                 "ethereum",
                 CHAIN_ID_ETHEREUM,
+                RampCapability::Partner,
                 RampCapability::Partner,
             ),
         ] {
@@ -2194,7 +2201,10 @@ mod catalog_truth_tests {
                 Some(2),
                 "unit-denominated — the VCHF/USDC display policy"
             );
-            assert_eq!(row.onramp, RampCapability::Unavailable, "no fiat onramp");
+            assert_eq!(
+                row.onramp, expected_onramp,
+                "the onramp flipped 2026-10-15 on Ethereum only (Mt Pelerin confirmed buy)"
+            );
             assert_eq!(
                 row.offramp, expected_offramp,
                 "R2 step 1 flipped the Ethereum ZCHF offramp only"
@@ -2415,9 +2425,9 @@ mod wire_byte_shape_tests {
     /// checksummed addresses, `min_fraction_digits` as a plain number, NO `liquidity` key.
     /// Any serializer regression (key order, an accidental liquidity key, a re-cased address)
     /// goes RED here before it reaches a route test. EXTENDED (R1 step 0, 2026-10-12) with the
-    /// rows[1] USDC wire-byte literal per section. All eligible offramps flipped R2 step 1,
-    /// 2026-10-12: ZCHF-Ethereum and both USDC rows read Partner; ZCHF-Arbitrum and every
-    /// testnet row stay Unavailable.
+    /// rows[1] USDC wire-byte literal per section. The ramp flips: offramp R2 step 1
+    /// (2026-10-12), onramp 2026-10-15 (Mt Pelerin confirmed buy). ZCHF-Ethereum and both
+    /// USDC rows read Partner; ZCHF-Arbitrum and every testnet row stay Unavailable.
     #[test]
     fn zchf_rows_wire_byte_shape() {
         let NetworkAssets::Evm(rows) = evm_sections_with(None, None).remove(0).assets else {
@@ -2436,7 +2446,7 @@ mod wire_byte_shape_tests {
         };
         assert_eq!(
             serde_json::to_string(&rows[0]).unwrap(),
-            "{\"token\":\"ZCHF\",\"symbol\":\"ZCHF\",\"decimals\":18,\"min_fraction_digits\":2,\"chain_id\":1,\"address\":\"0xB58E61C3098d85632Df34EecfB899A1Ed80921cB\",\"onramp\":\"Unavailable\",\"offramp\":\"Partner\"}"
+            "{\"token\":\"ZCHF\",\"symbol\":\"ZCHF\",\"decimals\":18,\"min_fraction_digits\":2,\"chain_id\":1,\"address\":\"0xB58E61C3098d85632Df34EecfB899A1Ed80921cB\",\"onramp\":\"Partner\",\"offramp\":\"Partner\"}"
         );
         assert_eq!(
             serde_json::to_string(&rows[1]).unwrap(),

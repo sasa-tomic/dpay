@@ -1813,8 +1813,8 @@ async fn currencies_route_returns_demo_catalog() {
         eth_rows[0]["address"],
         "0xB58E61C3098d85632Df34EecfB899A1Ed80921cB"
     );
-    assert_eq!(eth_rows[0]["onramp"], "Unavailable");
-    assert_eq!(eth_rows[0]["offramp"], "Partner"); // R2 step 1: Ethereum ZCHF cash-out only
+    assert_eq!(eth_rows[0]["onramp"], "Partner"); // 2026-10-15: Mt Pelerin confirmed ZCHF buy
+    assert_eq!(eth_rows[0]["offramp"], "Partner"); // R2 step 1: Ethereum ZCHF cash-out
     assert_eq!(eth_rows[1]["token"], "USDC");
     assert_eq!(eth_rows[1]["symbol"], "USDC");
     assert_eq!(eth_rows[1]["decimals"], 6);

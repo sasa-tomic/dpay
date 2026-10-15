@@ -83,4 +83,18 @@ describe('AddFundsMenu — the deposit-vs-buy choice', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
     act(() => { tree.unmount(); });
   });
+
+  // The 2026-10-15 visibility defect's menu-side half: a choice menu that opens with only
+  // "Deposit" is the bug wearing a disguise - the surface exists, buy renders nowhere. The
+  // eligibility gate must live in exactly ONE place (the mounting Wallet, on funding.ts's
+  // catalog-level `mtpBuyOfferOf`); NOTHING inside the menu may hide the buy row again.
+  test('the buy row is UNCONDITIONAL: both rows always render together, deposit first', () => {
+    const tree = mount(jest.fn(), jest.fn(), jest.fn());
+    expect(has(tree, 'btn-add-funds-deposit')).toBe(true);
+    expect(has(tree, 'btn-add-funds-buy')).toBe(true);
+    const rows = tree.root.findAllByType(Text).map(n => String(n.props.children ?? ''));
+    expect(rows.indexOf(M.deposit.mtp.chooserDeposit)).toBeGreaterThanOrEqual(0);
+    expect(rows.indexOf(M.deposit.mtp.entryLabel)).toBeGreaterThan(rows.indexOf(M.deposit.mtp.chooserDeposit));
+    act(() => { tree.unmount(); });
+  });
 });
