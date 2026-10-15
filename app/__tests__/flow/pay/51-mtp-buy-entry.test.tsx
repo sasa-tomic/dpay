@@ -1,5 +1,6 @@
 /**
- * Flow 51 — the Mt Pelerin buy entry (plan R1 step 3 + the step-4 flow leg).
+ * Flow 51 — the Mt Pelerin buy entry (plan R1 step 3 + the step-4 flow leg; the in-app
+ * embed, 2026-10-15).
  *
  * The buy entry lives on THREE surfaces; the flow tier exercises the two the real catalog can
  * reach, over the fake-relay catalog (the EVM mainnet sections the relay always serves):
@@ -10,19 +11,26 @@
  *   • The sheet (Wallet-owned, root-mounted) reviews the validation signature — the exact
  *     `MtPelerin-{code}` message (the per-address derivation), the device's EIP-55 address, the
  *     delivery chain — plus the verbatim fee facts and the counterparty disclosure. Approve signs
- *     with the DEVICE key and hands the golden widget URL to the open seam; a FAILED open keeps
- *     the sheet with the failed-link note (the TrustWalletFundButton pattern).
+ *     with the DEVICE key, hands the golden widget URL to the RELAY's token route and opens the
+ *     IN-APP embed (the webview stub's marker carries the tokenized URL; the `_ctkn` was injected
+ *     SERVER-side and the external seam stays cold). The token window is pinned to 1/min: the
+ *     SECOND approve is limiter-429'd, which drives the EXTERNAL fallback — there the
+ *     `__DPAY_TEST_MTP_OPEN` seam fires with the UNTOKENIZED URL, and a rejecting seam keeps the
+ *     sheet with the failed-link note (the TrustWalletFundButton pattern).
  *   • HomeTab's Add funds keeps the PRE-WAVE single path: ONE press lands the home rail's
  *     deposit surface (flow 134's contract); the buy is discovered INSIDE that surface (the
  *     DepositSheet onBuy entry / the FundingRoutes provider row), never behind a chooser.
  *
  * The open seam (`__DPAY_TEST_MTP_OPEN`, the `__DPAY_TEST_DEEPLINK` pattern) answers success AND
- * failure deterministically — the real Linking has no handler under jest. The on-return arrival
- * refresh (the useAppActive arm) is not observable in a jest mount (no backgrounding) and is
- * pinned by the Wallet wiring review, not here.
+ * failure deterministically — the real Linking has no handler under jest; the IN-APP embed never
+ * touches it. The on-return arrival refresh (the useAppActive arm) is not observable in a jest
+ * mount (no backgrounding) and is pinned by the Wallet wiring review, not here.
  */
 import {it, expect, jest} from '@jest/globals';
-import {hermeticDescribe} from '../harness/hermetic';
+import {mkdirSync, rmSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {hermeticDescribe, hermeticFlow} from '../harness/hermetic';
 import {evmEnv} from '../evm/env';
 import {deriveEvmKeypair, toChecksumAddress} from '../../../evm/identity';
 import {signPersonalBase64} from '../../../evm/personalSign';
@@ -30,6 +38,20 @@ import {deriveValidationCode, validationMessage} from '../../../ramp/mtpelerin';
 
 type G = Record<string, unknown>;
 const g = globalThis as unknown as G;
+
+// The JSONL records stay OUT of the repo (the flow-52 pattern). The token route is keyed
+// (`DPAY_MTPELERIN_CTKN`, a FAKE value) so the happy path embeds IN-APP, and its per-client
+// window is pinned to 1/min so the second approve deterministically drives the EXTERNAL
+// fallback (a limiter refusal is a token-fetch failure; the sheet falls back, the seam fires).
+const LOG_DIR = join(tmpdir(), 'dpay-flow-51-mtp-log');
+rmSync(LOG_DIR, {recursive: true, force: true});
+mkdirSync(LOG_DIR, {recursive: true});
+
+hermeticFlow({relay: {env: {
+  DPAY_MTPELERIN_CTKN: 'flow-ctkn',
+  DPAY_MTPELERIN_WIDGET_PER_MIN: '1',
+  DPAY_MTPELERIN_LOG_DIR: LOG_DIR,
+}}});
 
 hermeticDescribe('flow 51 — the Mt Pelerin buy entry (EVM row only; sign-confirm; open-failure keeps the sheet)', () => {
   it('FundingRoutes row for ZCHF-on-Arbitrum opens the sheet; approve hands the golden URL; failed open keeps the sheet; SOL renders no row', async () => {
@@ -68,34 +90,49 @@ hermeticDescribe('flow 51 — the Mt Pelerin buy entry (EVM row only; sign-confi
     await m.driver.click('btn-mtp-cancel', {timeoutMs: 5000});
     expect(m.driver.isPresent('mtp-buy-sheet')).toBe(false);
 
-    // ── Approve signs with the device key and opens the golden widget URL. ──
+    // ── Approve signs with the device key, fetches the relay-tokenized URL and opens the
+    // IN-APP embed: the stub's marker view carries the tokenized URL as text, and the
+    // external seam stays COLD on the happy path (the embed never touches it). ──
     const openSeam = jest.fn<(uri: string) => Promise<void>>();
     g.__DPAY_TEST_MTP_OPEN = openSeam;
     await m.driver.click('funding-provider-mtp', {timeoutMs: 5000});
     await m.driver.findByTestID('mtp-buy-sheet', {timeoutMs: 5000});
     await m.driver.waitForText(validationMessage(code), {timeoutMs: 5000});
     await m.driver.click('btn-mtp-sign', {timeoutMs: 5000});
-    await m.driver.waitForText('Mt Pelerin opened in your browser', {timeoutMs: 5000});
-    expect(openSeam).toHaveBeenCalledTimes(1);
-    const url = openSeam.mock.calls[0][0] as string;
-    expect(url.startsWith('https://widget.mtpelerin.com/?')).toBe(true);
-    expect(url).toContain('net=mainnet&dnet=mainnet&bsc=CHF&bdc=ZCHF&');
-    expect(url).toContain(`addr=${encodeURIComponent(checksummed)}`);
-    expect(url).toContain(`code=${code}`);
-    // The hash is the device key's personal_sign over the reviewed message, base64, URL-encoded.
+    await m.driver.findByTestID('mtp-widget-embed', {timeoutMs: 15000});
+    expect(openSeam).not.toHaveBeenCalled();
+    const embedBody = m.driver.bodyText();
+    expect(embedBody).toContain('https://widget.mtpelerin.com/?net=mainnet');
+    expect(embedBody).toContain(`addr=${encodeURIComponent(checksummed)}`);
+    expect(embedBody).toContain(`code=${code}`);
+    // The hash is the device key's personal_sign over the reviewed message, base64, URL-encoded;
+    // the `_ctkn` rode SERVER-side (the fake relay token, never a client value).
     const expectedHash = encodeURIComponent(signPersonalBase64(device.privateKey, validationMessage(code)));
-    expect(url).toContain(`hash=${expectedHash}`);
+    expect(embedBody).toContain(`hash=${expectedHash}`);
+    expect(embedBody).toContain('_ctkn=flow-ctkn');
+    // Closing the embed reveals the sheet's opened line; Done closes the sheet.
+    await m.driver.click('btn-mtp-embed-close', {timeoutMs: 5000});
+    expect(m.driver.isPresent('mtp-widget-embed')).toBe(false);
+    await m.driver.waitForText('Mt Pelerin is open. Your balance updates when you return.', {timeoutMs: 5000});
     await m.driver.click('btn-mtp-close', {timeoutMs: 5000});
     expect(m.driver.isPresent('mtp-buy-sheet')).toBe(false);
 
-    // ── Open failure keeps the sheet with the failed-link note (the TrustWallet pattern). ──
+    // ── The fallback path: the token window (1/min) is spent, so this approve is limiter-429'd,
+    // the sheet falls back to the EXTERNAL open and the seam fires with the UNTOKENIZED golden
+    // URL. A rejecting seam keeps the sheet with the failed-link note (the TrustWallet
+    // pattern); the retry stays one tap away. ──
     openSeam.mockReset();
     openSeam.mockRejectedValue(new Error('No activity found'));
     await m.driver.click('funding-provider-mtp', {timeoutMs: 5000});
     await m.driver.findByTestID('mtp-buy-sheet', {timeoutMs: 5000});
     await m.driver.waitForText(validationMessage(code), {timeoutMs: 5000});
     await m.driver.click('btn-mtp-sign', {timeoutMs: 5000});
-    await m.driver.waitForText("Couldn't open Mt Pelerin", {timeoutMs: 5000});
+    await m.driver.waitForText("Couldn't open Mt Pelerin", {timeoutMs: 15000});
+    expect(openSeam).toHaveBeenCalledTimes(1);
+    const fallbackUrl = openSeam.mock.calls[0][0] as string;
+    expect(fallbackUrl.startsWith('https://widget.mtpelerin.com/?')).toBe(true);
+    expect(fallbackUrl).not.toContain('_ctkn'); // the token rides server-side only
+    expect(m.driver.isPresent('mtp-widget-embed')).toBe(false);
     expect(m.driver.isPresent('mtp-buy-sheet')).toBe(true);
     expect(m.driver.isPresent('btn-mtp-sign')).toBe(true); // the retry stays one tap away
     await m.driver.click('btn-mtp-cancel', {timeoutMs: 5000});

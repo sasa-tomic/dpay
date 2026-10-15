@@ -43,14 +43,29 @@
 //!
 //! # The guard (the unconfigured-refusal pattern)
 //!
-//! `DPAY_MTPELERIN_CTKN` (the integration key, sops: secrets/mtpelerin.sops.json) gates
-//! the QUOTE surface, the one route that still dials upstream. Unset, it answers 503
-//! `mtpelerin-unconfigured` naming the variable, and the route is registered on every
+//! `DPAY_MTPELERIN_CTKN` (the integration key, sops: secrets/mtpelerin.sops.json) gates the
+//! QUOTE surface and the WIDGET-TOKEN surface (the two routes that turn the key into an
+//! answer; see `widget_token` below). Unset, both answer 503
+//! `mtpelerin-unconfigured` naming the variable, and the routes are registered on every
 //! build (503-not-404 philosophy, crate::trocador). The conversion routes are LOCAL: they
 //! dial nothing and work with no key at all. The webhook receiver's credential is the
 //! SIGNATURE key: until `DPAY_MTPELERIN_WEBHOOK_SECRET` is set it answers 503 naming that
 //! variable, because an unverifiable delivery must never mutate an order. Both unset
 //! states are LEGAL: the venue is simply absent until the keys are exchanged.
+//!
+//! # The widget-token route (the in-app embed's server-side token injector, 2026-10-15)
+//!
+//! The widget used to open in the EXTERNAL browser (a direct link needs no `_ctkn`); the
+//! in-app webview embed needs the token, and the token must never ship in the client
+//! bundle. The device therefore posts the widget URL IT built — the buy prefill it reviewed
+//! (or the sell widget's bare base URL), always WITHOUT a `_ctkn` — to
+//! `POST /api/v1/mtpelerin/widget-token`. The route validates the shape fail-closed (https,
+//! host exactly `widget.mtpelerin.com`, root path, every query param on the documented BUY
+//! whitelist, an incoming `_ctkn` REFUSED — never forwarded), rebuilds the URL server-side
+//! on the fixed base and appends `_ctkn` from the config, answering `{"url": …}`. The token
+//! exists only in relay memory + the answer body; it is never logged. The route admits one
+//! call per client per fixed 60 s window (`DPAY_MTPELERIN_WIDGET_PER_MIN`, default 15 —
+//! one token per widget open; device 400s never counted).
 //!
 //! # Correlation + poll discipline (the Trocador partner-agreement precedent, §2 terms 2+4)
 //!
@@ -150,10 +165,14 @@ pub const DEFAULT_QUOTE_PER_MIN: u32 = 6;
 /// The per-client per-minute conversion bound (`DPAY_MTPELERIN_CONVERSION_PER_MIN`
 /// default; 4/min on order creation, the Trocador trade budget's twin).
 pub const DEFAULT_CONVERSION_PER_MIN: u32 = 4;
+/// The per-client per-minute widget-token bound (`DPAY_MTPELERIN_WIDGET_PER_MIN` default;
+/// 15/min — one token per widget open, an order of magnitude above one user's real pacing).
+pub const DEFAULT_WIDGET_PER_MIN: u32 = 15;
 
 /// The 429 house codes for the per-client windows (the trocador marker style).
 pub const QUOTE_LIMITED_CODE: &str = "mtpelerin-quote-limited";
 pub const CONVERSION_LIMITED_CODE: &str = "mtpelerin-conversion-limited";
+pub const WIDGET_LIMITED_CODE: &str = "mtpelerin-widget-limited";
 
 /// The response header conversion creation answers with: the relay-minted order id — the
 /// `oid` on the widget link, the value the webhook echoes back as `external_id`, and the
@@ -192,6 +211,8 @@ pub enum LimitKind {
     Quote,
     /// `POST /api/v1/mtpelerin/conversion`, order creation.
     Conversion,
+    /// `POST /api/v1/mtpelerin/widget-token`, the embed's server-side token injection.
+    Widget,
 }
 
 impl LimitKind {
@@ -199,6 +220,7 @@ impl LimitKind {
         match self {
             LimitKind::Quote => "quote",
             LimitKind::Conversion => "conversion",
+            LimitKind::Widget => "widget",
         }
     }
 }
@@ -223,6 +245,9 @@ pub struct MtPelerinConfig {
     /// `DPAY_MTPELERIN_CONVERSION_PER_MIN`, the per-client per-minute conversion bound
     /// (default 4).
     pub conversion_per_min: u32,
+    /// `DPAY_MTPELERIN_WIDGET_PER_MIN`, the per-client per-minute widget-token bound
+    /// (default 15).
+    pub widget_per_min: u32,
     /// `DPAY_MTPELERIN_API_BASE` — default the venue's documented host.
     pub api_base: String,
     /// `DPAY_MTPELERIN_LOG_DIR` — the append-only records' directory (default ".").
@@ -241,6 +266,7 @@ impl Default for MtPelerinConfig {
             webhook_auth_key: None,
             quote_per_min: DEFAULT_QUOTE_PER_MIN,
             conversion_per_min: DEFAULT_CONVERSION_PER_MIN,
+            widget_per_min: DEFAULT_WIDGET_PER_MIN,
             api_base: DEFAULT_API_BASE.to_string(),
             log_dir: PathBuf::from("."),
             trust_proxy: false,
@@ -324,6 +350,7 @@ pub struct MtPelerinProxy {
     status_spacing_secs: u64,
     quote_per_min: u32,
     conversion_per_min: u32,
+    widget_per_min: u32,
     orders: Mutex<OrdersInner>,
     /// order/query id → unix secs of the last status read (the 60 s promise).
     spacing: Mutex<HashMap<String, u64>>,
@@ -352,6 +379,7 @@ impl MtPelerinProxy {
             status_spacing_secs: config.status_spacing_secs,
             quote_per_min: config.quote_per_min,
             conversion_per_min: config.conversion_per_min,
+            widget_per_min: config.widget_per_min,
             orders: Mutex::new(orders),
             spacing: Mutex::new(HashMap::new()),
             limiter: Mutex::new(HashMap::new()),
@@ -371,9 +399,9 @@ impl MtPelerinProxy {
         self.trust_proxy
     }
 
-    /// The missing QUOTE-proxy credential name (the CTKN gates the one upstream-bound
-    /// surface; the conversion routes are local and need no key). Unset is a LEGAL state
-    /// (503, not 404).
+    /// The missing QUOTE/widget credential name (the CTKN gates both token-bearing
+    /// surfaces: the quote proxy and the widget-token injector; the conversion routes are
+    /// local and need no key). Unset is a LEGAL state (503, not 404).
     fn missing_credential(&self) -> Option<&'static str> {
         if self.ctkn.is_none() {
             Some("DPAY_MTPELERIN_CTKN")
@@ -420,6 +448,7 @@ impl MtPelerinProxy {
         let limit = match kind {
             LimitKind::Quote => self.quote_per_min,
             LimitKind::Conversion => self.conversion_per_min,
+            LimitKind::Widget => self.widget_per_min,
         };
         let now = (self.now)();
         let bucket = now - now % WINDOW;
@@ -877,6 +906,136 @@ pub async fn conversion_status(
         return err(StatusCode::NOT_FOUND, "no such conversion order");
     };
     json_response(StatusCode::OK, &status_body(&record))
+}
+
+/// The documented widget origin the token route serves (the ramp builder's `MTP_WIDGET_BASE`).
+pub const WIDGET_HOST: &str = "widget.mtpelerin.com";
+
+/// The widget-token surface's whitelisted query params (the venue's documented BUY prefill
+/// set — `app/ramp/mtpelerin.ts` `buildMtpWidgetLink`'s own list; the sell link is the bare
+/// base and carries none of them). `_ctkn` is deliberately NOT on it: the token is injected
+/// SERVER-side only, and an incoming `_ctkn` is refused, never forwarded. Anything else is
+/// refused (the quote surface's no-smuggling rule).
+const WIDGET_PARAMS: &[&str] = &[
+    "net", "dnet", "bsc", "bdc", "bsa", "bda", "addr", "code", "hash",
+];
+
+/// `POST /api/v1/mtpelerin/widget-token` — the in-app embed's server-side token injector
+/// (module header "The widget-token route"). Body: `{"url": <the widget URL the client
+/// built>}` — the reviewed buy prefill, or the sell widget's bare base URL, always WITHOUT
+/// a `_ctkn`. The answer is `{"url": …}` with `_ctkn` appended SERVER-side from the config:
+/// the client never holds the token, so it can never ship in the bundle. Validation is
+/// fail-closed BEFORE anything is issued: valid https URL, host exactly
+/// `widget.mtpelerin.com`, root path, every query param on the documented buy whitelist, an
+/// incoming `_ctkn` REFUSED (400 — never forwarded, never overwritten). The per-client
+/// fixed window admits the call after validation (device 400s never counted,
+/// `DPAY_MTPELERIN_WIDGET_PER_MIN` default 15, 429 `mtpelerin-widget-limited` +
+/// `Retry-After` when full). No CTKN → 503 `mtpelerin-unconfigured` (the quote tripwire
+/// verbatim; the route is registered on every build, 503-not-404). The token is never
+/// logged: the access line names the route, never the answer.
+pub async fn widget_token(State(state): State<AppState>, fp: MtpFingerprint, body: Bytes) -> Response {
+    let proxy = state.mtpelerin.clone();
+    if let Some(response) = unconfigured(proxy.missing_credential()) {
+        return response;
+    }
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "request body is not valid JSON ({e}) - POST /api/v1/mtpelerin/\
+                     widget-token takes {{url}}"
+                ),
+            );
+        }
+    };
+    let Some(raw) = json_string_field(&req, "url") else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "request needs a non-empty string field `url` (the widget URL the client \
+             built - without `_ctkn`, the integration key rides server-side only)",
+        );
+    };
+    let parsed = match reqwest::Url::parse(&raw) {
+        Ok(u) => u,
+        Err(_) => return err(StatusCode::BAD_REQUEST, "`url` is not a valid URL"),
+    };
+    if parsed.scheme() != "https" {
+        return err(StatusCode::BAD_REQUEST, "`url` must be https");
+    }
+    if parsed.host_str() != Some(WIDGET_HOST) {
+        return err(
+            StatusCode::BAD_REQUEST,
+            format!("`url` host must be exactly `{WIDGET_HOST}`"),
+        );
+    }
+    if !matches!(parsed.path(), "/" | "") {
+        return err(StatusCode::BAD_REQUEST, "`url` path must be the widget root");
+    }
+    let pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    for (k, _) in &pairs {
+        if k == "_ctkn" {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "`url` must NOT carry `_ctkn` - the integration key is injected \
+                 server-side only and an incoming value is refused, never forwarded",
+            );
+        }
+        if !WIDGET_PARAMS.contains(&k.as_str()) {
+            return err(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "unknown widget parameter `{k}` - the widget surface accepts \
+                     exactly: {}",
+                    WIDGET_PARAMS.join(", ")
+                ),
+            );
+        }
+    }
+
+    // The per-client window admits the call right before the token is issued (the trocador
+    // discipline: device 400s above are never counted).
+    if let Err(retry) = proxy.admit(LimitKind::Widget, fp.ip.as_deref()) {
+        return too_many(
+            WIDGET_LIMITED_CODE,
+            "mtpelerin widget tokens are rate-limited for this client: at most a fixed \
+             number of embed opens per client per minute",
+            retry,
+        );
+    }
+
+    // Rebuild on the FIXED base (path and host above are validated, the params are
+    // whitelist-checked): the answer is our canonical serialization + the token, never the
+    // client's bytes echoed back.
+    let mut out = reqwest::Url::parse(&format!("https://{WIDGET_HOST}/"))
+        .expect("the fixed widget base parses");
+    {
+        let mut ser = out.query_pairs_mut();
+        for (k, v) in &pairs {
+            ser.append_pair(k, v);
+        }
+        ser.append_pair("_ctkn", proxy.ctkn.as_deref().expect("checked above"));
+    }
+    proxy.log(&AccessLine {
+        kind: "widget-token",
+        route: "/api/v1/mtpelerin/widget-token",
+        method: "POST",
+        ip: fp.ip.clone(),
+        user_agent: fp.user_agent.clone(),
+        accept_language: fp.accept_language.clone(),
+        order_id: None,
+        venue_order_id: None,
+        upstream_status: None,
+        duration_ms: None,
+    });
+    json_response(
+        StatusCode::OK,
+        &Bytes::from(serde_json::json!({ "url": out.as_str() }).to_string()),
+    )
 }
 
 /// One order record in the status route's JSON shape: the body BOTH the status read and

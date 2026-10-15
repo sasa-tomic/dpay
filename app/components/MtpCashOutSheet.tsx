@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {ActivityIndicator, Pressable, ScrollView, Text, TextInput, View} from 'react-native';
+import {ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View} from 'react-native';
 import {AppModal} from './AppModal';
+import {MtpWidgetEmbed} from './MtpWidgetEmbed';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {M} from '../i18n';
@@ -13,6 +14,7 @@ import {cmpRaw} from '../lib/amount';
 import {fmtAssetCompact, randNonceHex, toUnits} from '../lib/format';
 import {StatePanel} from './ConvertStatePanel';
 import {openWidgetUrl} from './MtpBuySheet';
+import {widgetTokenOf} from '../services/mtpelerin';
 import {buildMtpSellWidgetLink} from '../ramp/mtpelerin';
 import {adoptConvertRecord, convertResumeSnapshot, subscribeConvertRecords} from '../convertResume';
 import type {ConvertRecord} from '../convert/types';
@@ -34,15 +36,17 @@ import {
 //             with the flow: value moves only inside the user's widget session, which dpay
 //             cannot observe, so the watch starts at registration).
 //   lifecycle the adopted record renders through ConvertStatePanel under the widget
-//             handoff note; the sell widget link (the venue's documented bare URL - no
-//             sell-side or correlation parameters are documented, so nothing is prefilled
-//             and no oid can ride it, the ramp builder's doc) opens EXTERNAL through the
-//             R1 buy open pattern (the `__DPAY_TEST_MTP_OPEN` seam; an open failure keeps
-//             the sheet with its honest line and a retry). The panel is webhook-first -
-//             the relay's status store answers with zero upstream calls and caps reads at
-//             one per order per minute; the engine mirrors that floor client-side. The
-//             provider Stop semantics are the C2 flavor: dpay stops watching, the venue
-//             order's life is the venue's.
+//             handoff note; the sell widget (the venue's documented bare URL - no sell-side
+//             or correlation parameters are documented, so nothing is prefilled and no oid
+//             can ride it, the ramp builder's doc) opens IN-APP on native (the embed - the
+//             relay injects the `_ctkn` server-side, the client never holds it), EXTERNAL
+//             on web and whenever the token fetch fails (the fallback; the
+//             `__DPAY_TEST_MTP_OPEN` seam rides only that path - an open failure keeps the
+//             sheet with its honest line and a retry). The panel is webhook-first - the
+//             relay's status store answers with zero upstream calls and caps reads at one
+//             per order per minute; the engine mirrors that floor client-side. The provider
+//             Stop semantics are the C2 flavor: dpay stops watching, the venue order's life
+//             is the venue's.
 //
 // CANCEL vs CLOSE: only the form's Cancel button rejects. Backdrop, Escape and Android Back
 // dismiss without answering anything. The typed error exists so the mounting Wallet (and
@@ -143,8 +147,12 @@ export function MtpCashOutSheet({relayUrl, asset, token, balance, onClose, onRej
   const [record, setRecord] = useState<ConvertRecord | null>(null);
   const [liveRecord, setLiveRecord] = useState<ConvertRecord | null>(null);
   const [widgetFailed, setWidgetFailed] = useState(false);
+  /** The tokenized widget URL while the IN-APP embed is open (null = closed). */
+  const [embedUrl, setEmbedUrl] = useState<string | null>(null);
 
-  useEscapeToClose(phase === 'form' ? onClose : () => {});
+  // One Esc closes one thing: the embed layer owns Escape while open; the lifecycle phase
+  // keeps the sheet's own handler off (the panel's Back button is the exit there).
+  useEscapeToClose(embedUrl != null ? () => {} : (phase === 'form' ? onClose : () => {}));
 
   const decimals = asset.decimals;
   const unit = asset.symbol;
@@ -197,6 +205,34 @@ export function MtpCashOutSheet({relayUrl, asset, token, balance, onClose, onRej
     return subscribeConvertRecords(pick);
   }, [record]);
 
+  // The widget handoff: the EMBED first (native — the tokenized URL comes from the RELAY,
+  // the `_ctkn` is injected server-side and the client never holds it), the EXTERNAL open
+  // as the web-platform and token-fetch-failure fallback (any service word — unconfigured
+  // relay, limiter, transport — falls back; the `__DPAY_TEST_MTP_OPEN` seam rides only this
+  // path). An open failure keeps the sheet with its honest line and a retry (the
+  // registration + the watch stand; only the window is missing).
+  const openSellWidget = useCallback(async () => {
+    const url = buildMtpSellWidgetLink();
+    if (Platform.OS !== 'web') {
+      try {
+        const tokened = await widgetTokenOf(relayUrl, url);
+        setEmbedUrl(tokened);
+        setWidgetFailed(false);
+        onWidgetOpened?.();
+        return;
+      } catch {
+        // fall through to the external open — the fallback IS the feature here
+      }
+    }
+    try {
+      await openWidgetUrl(url);
+      setWidgetFailed(false);
+      onWidgetOpened?.();
+    } catch {
+      setWidgetFailed(true);
+    }
+  }, [relayUrl, onWidgetOpened]);
+
   const continueCashOut = useCallback(async () => {
     // quoteOk on the gate: the order is registered only when the venue's attributed net figure is
     // on screen (the review's honesty law) - no quote, no order, never a '0 expected' record.
@@ -235,35 +271,13 @@ export function MtpCashOutSheet({relayUrl, asset, token, balance, onClose, onRej
       setRecord(rec);
       void adoptConvertRecord(rec);
       setPhase('lifecycle');
-      // The handoff: open the venue's sell widget EXTERNAL (the R1 buy pattern - the
-      // documented bare link, the user's own session). An open failure keeps the sheet on
-      // the lifecycle view with its honest line and a retry (the registration + the watch
-      // stand; only the window is missing).
-      try {
-        await openWidgetUrl(buildMtpSellWidgetLink());
-        setWidgetFailed(false);
-        onWidgetOpened?.();
-      } catch {
-        setWidgetFailed(true);
-      }
+      await openSellWidget();
     } catch (e: unknown) {
       setErr(orderErrLine(e));
     } finally {
       setOrdering(false);
     }
-  }, [amountOk, quote, ordering, relayUrl, token, amountStr, sourceNetwork, asset.address, raw, unit, decimals, onWidgetOpened]);
-
-  // The widget link's retry: the registration and the watch stand; only the window is
-  // missing. Same helper, same seam, one tap away.
-  const retryWidget = useCallback(async () => {
-    try {
-      await openWidgetUrl(buildMtpSellWidgetLink());
-      setWidgetFailed(false);
-      onWidgetOpened?.();
-    } catch {
-      setWidgetFailed(true);
-    }
-  }, [onWidgetOpened]);
+  }, [amountOk, quote, ordering, relayUrl, token, amountStr, sourceNetwork, asset.address, raw, unit, decimals, openSellWidget]);
 
   const cancel = useCallback(() => {
     onReject?.(new MtpCashOutUserRejected());
@@ -273,8 +287,9 @@ export function MtpCashOutSheet({relayUrl, asset, token, balance, onClose, onRej
   const shown = liveRecord ?? record;
 
   return (
-    <AppModal onRequestClose={onClose}>
-      <Pressable style={S.pickBackdrop} onPress={onClose}>
+    <>
+    <AppModal onRequestClose={embedUrl != null ? () => {} : onClose}>
+      <Pressable style={S.pickBackdrop} onPress={embedUrl != null ? () => {} : onClose}>
         <View testID="mtp-cashout-sheet" style={S.pickCard} onStartShouldSetResponder={() => true}>
           <ScrollView style={S.pickScroll}>
             {phase === 'lifecycle' && shown != null ? (
@@ -293,7 +308,7 @@ export function MtpCashOutSheet({relayUrl, asset, token, balance, onClose, onRej
                     <Pressable
                       testID="btn-mtp-cashout-widget-retry"
                       style={S.ghostBtn}
-                      onPress={() => { void retryWidget(); }}
+                      onPress={() => { void openSellWidget(); }}
                       accessibilityRole="button"
                       accessibilityLabel={M.deposit.mtpCash.widgetOpenRetry}>
                       <Text style={S.ghostBtnText}>{M.deposit.mtpCash.widgetOpenRetry}</Text>
@@ -392,6 +407,13 @@ export function MtpCashOutSheet({relayUrl, asset, token, balance, onClose, onRej
         </View>
       </Pressable>
     </AppModal>
+    {/* The IN-APP embed: a ROOT-LEVEL SIBLING of the sheet's own AppModal (the MtpBuySheet
+        discipline — never nested inside the card). Closing it returns to the lifecycle view
+        with the watch still running; the external fallback never renders it. */}
+    {embedUrl != null ? (
+      <MtpWidgetEmbed url={embedUrl} onClose={() => setEmbedUrl(null)} />
+    ) : null}
+    </>
   );
 }
 

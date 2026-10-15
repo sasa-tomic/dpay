@@ -10,10 +10,12 @@
  *     `clientOrderId`; the request carries the pair, the network and the amount ONLY (bank
  *     details are the widget session's, never dpay's). The record is born at REGISTRATION
  *     (the widget flow's C1 moment) and carries NO providerDeposit block.
- *   • The handoff opens the venue's sell widget EXTERNAL through the `__DPAY_TEST_MTP_OPEN`
- *     seam (the R1 buy pattern): success fires the onWidgetOpened contract; an open failure
- *     keeps the lifecycle view with its honest line and a retry. There is NO send step and
- *     NO EvmWithdrawSheet.
+ *   • The handoff opens the venue's sell widget IN-APP through the relay's token route
+ *     (widgetTokenOf, mocked here): the tokenized answer renders the embed (the webview
+ *     stub's marker carries the exact URL) and the `__DPAY_TEST_MTP_OPEN` external seam
+ *     never fires. A token-fetch failure falls back to the external seam; a fallback
+ *     failure keeps the lifecycle view with its honest line and a retry. There is NO send
+ *     step and NO EvmWithdrawSheet.
  *   • Cancel is the TYPED user-rejected path (the MtpBuyUserRejected precedent); nothing is
  *     ordered before it fires.
  *   • Validation: an unusable amount (zero, or over balance) keeps the continue button
@@ -43,6 +45,7 @@ jest.mock('../services/mtpelerin', () => {
     ...actual,
     fetchMtpCashQuote: jest.fn<typeof actual.fetchMtpCashQuote>(),
     createMtpCashOrder: jest.fn<typeof actual.createMtpCashOrder>(),
+    widgetTokenOf: jest.fn<typeof actual.widgetTokenOf>(),
   };
 });
 
@@ -54,6 +57,7 @@ jest.mock('../convertResume', () => ({
 
 const mockQuote = mtpService.fetchMtpCashQuote as jest.MockedFunction<typeof mtpService.fetchMtpCashQuote>;
 const mockCreate = mtpService.createMtpCashOrder as jest.MockedFunction<typeof mtpService.createMtpCashOrder>;
+const mockToken = mtpService.widgetTokenOf as jest.MockedFunction<typeof mtpService.widgetTokenOf>;
 const mockAdopt = adoptConvertRecord as jest.MockedFunction<typeof adoptConvertRecord>;
 
 const QUOTE_AT = Date.parse('2026-10-12T10:00:00Z');
@@ -88,14 +92,16 @@ function type(tree: renderer.ReactTestRenderer, testID: string, value: string): 
   act(() => { node(tree, testID).props.onChangeText(value); });
 }
 
-/** Press + pump the promise chains (the MtpBuySheet.test idiom). */
+/** Press + pump the promise chains (the MtpBuySheet.test idiom). The handoff chain is
+ *  register → adopt → embed-token fetch → (fallback) external open: six microtask hops
+ *  land every terminal state before the assertion. */
 async function pressAsync(tree: renderer.ReactTestRenderer, testID: string): Promise<void> {
   const n = node(tree, testID);
   await act(async () => {
     n.props.onPress();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let i = 0; i < 6; i += 1) {
+      await Promise.resolve();
+    }
   });
 }
 
@@ -128,6 +134,9 @@ beforeEach(() => {
   mockCreate.mockResolvedValue({
     orderId: 'mtp-test000000000001', venueOrderId: null, offRampAddress: null, expiresAtMs: null,
   });
+  // The relay's token answer: the bare sell widget + the server-side `_ctkn` (the client
+  // never holds the token outside this answer).
+  mockToken.mockImplementation(async (_relay: string, url: string) => `${url}?_ctkn=relay-token`);
 });
 
 describe('MtpCashOutSheet — the relay quote', () => {
@@ -187,34 +196,48 @@ describe('MtpCashOutSheet - order registration through the relay seam', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('the handoff opens the venue sell widget through the seam and fires onWidgetOpened', async () => {
-    const opened: string[] = [];
+  test('the handoff fetches the relay-tokenized sell widget and renders the IN-APP embed; the external seam never fires', async () => {
+    const seam: string[] = [];
     (globalThis as {__DPAY_TEST_MTP_OPEN?: Seam}).__DPAY_TEST_MTP_OPEN = async (url) => {
-      opened.push(url);
+      seam.push(url);
     };
     let widgetOpened = 0;
     const tree = await mount({onWidgetOpened: () => { widgetOpened += 1; }});
     await fillAndContinue(tree);
-    expect(opened).toEqual(['https://widget.mtpelerin.com/']); // the documented bare link
+    expect(mockToken).toHaveBeenCalledTimes(1);
+    expect(mockToken).toHaveBeenCalledWith('https://relay.test', 'https://widget.mtpelerin.com/'); // the documented bare link, untokenized
+    // The embed renders the tokenized answer; the external seam stayed cold.
+    expect(has(tree, 'mtp-widget-embed')).toBe(true);
+    expect(textOf(tree, 'mtp-widget-embed-url')).toBe('https://widget.mtpelerin.com/?_ctkn=relay-token');
+    expect(seam).toEqual([]);
     expect(widgetOpened).toBe(1);
     expect(has(tree, 'mtp-cashout-widget-note')).toBe(true);
     expect(has(tree, 'mtp-cashout-widget-failed')).toBe(false);
+    // Closing the embed returns to the lifecycle view (the watch stands).
+    const close = tree.root.findAll(n => n.props && n.props.testID === 'btn-mtp-embed-close')[0];
+    await act(async () => { close.props.onPress(); });
+    expect(has(tree, 'mtp-widget-embed')).toBe(false);
+    expect(has(tree, 'mtp-cashout-lifecycle')).toBe(true);
     act(() => { tree.unmount(); });
   });
 
-  test('an open failure keeps the lifecycle view with its honest line and a working retry', async () => {
+  test('a token-fetch failure falls back to the external seam; a fallback failure keeps the lifecycle view with its honest line and a working retry', async () => {
     (globalThis as {__DPAY_TEST_MTP_OPEN?: Seam}).__DPAY_TEST_MTP_OPEN = async () => {
       throw new Error('no handler');
     };
+    mockToken.mockRejectedValue(new Error('unconfigured'));
     const tree = await mount();
     await fillAndContinue(tree);
+    expect(has(tree, 'mtp-widget-embed')).toBe(false);
     expect(textOf(tree, 'mtp-cashout-widget-failed')).toBe(M.deposit.mtpCash.widgetOpenFailed);
     // The record still stands (adopted at registration).
     expect(mockAdopt).toHaveBeenCalledTimes(1);
-    // The retry opens through the same seam and clears the failure.
-    (globalThis as {__DPAY_TEST_MTP_OPEN?: Seam}).__DPAY_TEST_MTP_OPEN = async () => {};
+    // The retry goes embed-first again: the relay answers this time and the layer opens.
+    mockToken.mockImplementation(async (_relay: string, url: string) => `${url}?_ctkn=relay-token`);
     await pressAsync(tree, 'btn-mtp-cashout-widget-retry');
+    expect(mockToken).toHaveBeenCalledTimes(2);
     expect(has(tree, 'mtp-cashout-widget-failed')).toBe(false);
+    expect(has(tree, 'mtp-widget-embed')).toBe(true);
     act(() => { tree.unmount(); });
   });
 

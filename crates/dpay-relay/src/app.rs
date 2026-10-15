@@ -95,12 +95,15 @@
 //!   (2026-09-21; [`crate::trocador_agreement`]): access log + order store + webhooks + the
 //!   promised upstream limits wrap around the proxy; the receiver answers 200 to anything
 //!   (the venue probes at creation and never retries a failed delivery).
-//! - `GET /api/v1/mtpelerin/quote`, `POST|GET /api/v1/mtpelerin/conversion`,
-//!   `POST /api/v1/mtpelerin/webhook` — the Mt Pelerin OFF-RAMP proxy + conversion webhook
-//!   receiver (2026-10-12, R2 step 1; [`crate::mtpelerin`]): the Trocador route layout
-//!   mirrored — access log + order store, `oid` correlation, `Mtp-Signature` HMAC-SHA256
-//!   verification, terminal dedupe, and the 60 s poll cap on the webhook's fallback read.
-//!   503 `mtpelerin-unconfigured` on every route until the keys land.
+//! - `GET /api/v1/mtpelerin/quote`, `POST /api/v1/mtpelerin/widget-token`,
+//!   `POST|GET /api/v1/mtpelerin/conversion`, `POST /api/v1/mtpelerin/webhook` — the Mt
+//!   Pelerin OFF-RAMP proxy + conversion webhook receiver (2026-10-12, R2 step 1;
+//!   [`crate::mtpelerin`]): the Trocador route layout mirrored — access log + order store,
+//!   `oid` correlation, `Mtp-Signature` HMAC-SHA256 verification, terminal dedupe, and the
+//!   60 s poll cap on the webhook's fallback read. The widget-token route (2026-10-15)
+//!   injects the integration key into the embed's widget URL server-side — the client
+//!   never holds `_ctkn`. 503 `mtpelerin-unconfigured` on every keyed route until the keys
+//!   land.
 //!
 //! Read-only by construction apart from the play-money faucet: there is no value-moving route
 //! left on this crate (the 2026-08-19 IC-rail cutover moved settlement to the app's own signed
@@ -220,10 +223,11 @@ pub struct AppState {
     /// echoed.
     pub trocador: Arc<crate::trocador::TrocadorProxy>,
     /// The Mt Pelerin off-ramp proxy + webhook receiver (`crate::mtpelerin`) —
-    /// `GET /api/v1/mtpelerin/quote`, `POST|GET /api/v1/mtpelerin/conversion`,
-    /// `POST /api/v1/mtpelerin/webhook`. Same always-registered contract: unset
-    /// `DPAY_MTPELERIN_CTKN` answers 503 `mtpelerin-unconfigured` on the proxy routes,
-    /// unset `DPAY_MTPELERIN_WEBHOOK_SECRET` 503s the receiver (both LEGAL deploy states
+    /// `GET /api/v1/mtpelerin/quote`, `POST /api/v1/mtpelerin/widget-token`,
+    /// `POST|GET /api/v1/mtpelerin/conversion`, `POST /api/v1/mtpelerin/webhook`. Same
+    /// always-registered contract: unset `DPAY_MTPELERIN_CTKN` answers 503
+    /// `mtpelerin-unconfigured` on the keyed proxy routes (quote + widget-token), unset
+    /// `DPAY_MTPELERIN_WEBHOOK_SECRET` 503s the receiver (both LEGAL deploy states
     /// until the founder's key exchange with hello@mtpelerin.com lands). Both are SECRETS:
     /// never logged, never echoed.
     pub mtpelerin: Arc<crate::mtpelerin::MtPelerinProxy>,
@@ -542,17 +546,22 @@ pub fn app(state: AppState) -> Router {
         )
         // The Mt Pelerin off-ramp proxy + webhook receiver (R2 step 1, 2026-10-12) —
         // registered ALWAYS for the same 503-not-404 reason: until DPAY_MTPELERIN_CTKN
-        // lands the proxy routes answer 503 `mtpelerin-unconfigured`, and the receiver
-        // 503s until DPAY_MTPELERIN_WEBHOOK_SECRET does. The quote GET proxies the
-        // venue's documented currency_rates/convert; the conversion POST is the
-        // server-side order creation (correlation id = dpay's own `oid`, persisted
-        // first, `offRampAddress` + the venue's `id` stored); its GET twin is the
-        // webhook-first status read under the 60 s poll cap. The receiver verifies the
-        // `Mtp-Signature` HMAC-SHA256 over the raw body and applies first-terminal-wins
-        // dedupe. See `crate::mtpelerin`.
+        // lands the keyed proxy routes answer 503 `mtpelerin-unconfigured`, and the
+        // receiver 503s until DPAY_MTPELERIN_WEBHOOK_SECRET does. The quote GET proxies the
+        // venue's documented currency_rates/convert; the widget-token POST injects that
+        // CTKN into the embed's widget URL server-side (the client never holds `_ctkn`);
+        // the conversion POST is the server-side order creation (correlation id = dpay's
+        // own `oid`, persisted first, `offRampAddress` + the venue's `id` stored); its GET
+        // twin is the webhook-first status read under the 60 s poll cap. The receiver
+        // verifies the `Mtp-Signature` HMAC-SHA256 over the raw body and applies
+        // first-terminal-wins dedupe. See `crate::mtpelerin`.
         .route(
             "/mtpelerin/quote",
             axum::routing::get(crate::mtpelerin::quote_proxy),
+        )
+        .route(
+            "/mtpelerin/widget-token",
+            axum::routing::post(crate::mtpelerin::widget_token),
         )
         .route(
             "/mtpelerin/conversion",

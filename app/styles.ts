@@ -634,6 +634,14 @@ function buildStyles(p: Palette) {
   ghostBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18, minHeight: 44, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8, backgroundColor: p.card},
   ghostBtnText: {color: p.sub, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   ghostBtnMuted: {backgroundColor: 'transparent'},
+  // The Mt Pelerin in-app embed (2026-10-15): a full-screen AppModal layer hosting the venue's
+  // widget webview. The root is the page surface (the widget renders its own chrome inside);
+  // the header row pins the ONE control (Close) and the hairline under it separates the
+  // venue's viewport from the app's.
+  mtpEmbedRoot: {flex: 1, backgroundColor: p.bg},
+  mtpEmbedHeader: {flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', paddingTop: 10, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: p.line},
+  mtpEmbedHeaderBtn: {marginTop: 0, marginBottom: 10},
+  mtpEmbedFrame: {flex: 1},
   // SendTerminal's stacked secondary actions (Check status / View receipt): full-width so every
   // action on the terminal shares ONE column and one height - the primary copy button above and
   // the Done ghost below are the anchors, these two never render at mixed widths.

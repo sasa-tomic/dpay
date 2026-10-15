@@ -1,11 +1,12 @@
 // The Mt Pelerin cash-out client — the device face of the OFF-RAMP (plan R2 step 2). Quote,
-// sell-order registration AND the status fallback poll all ride dpay's relay proxy
-// (crates/dpay-relay/src/mtpelerin.rs). Since Mt Pelerin closed dpay's API tier (2026-10-13)
-// the sell order itself is created in the USER'S OWN widget session: the relay's creation is
-// LOCAL (it mints the `mtp-…` correlation id and answers the record), and the sheet hands
-// off to the venue's sell widget. The bank details and the deposit address live ONLY in
-// that widget session - dpay never collects or learns them. This device never sees a key,
-// holds none, and could not misuse one.
+// sell-order registration, the status fallback poll AND the widget-embed token injection all
+// ride dpay's relay proxy (crates/dpay-relay/src/mtpelerin.rs). Since Mt Pelerin closed dpay's
+// API tier (2026-10-13) the sell order itself is created in the USER'S OWN widget session: the
+// relay's creation is LOCAL (it mints the `mtp-…` correlation id and answers the record), and
+// the sheet hands off to the venue's sell widget. The bank details and the deposit address live
+// ONLY in that widget session - dpay never collects or learns them. This device never sees a
+// key, holds none, and could not misuse one (the widget token is injected SERVER-side and
+// reaches the device only inside the tokenized URL, never as a value it stores).
 //
 // What this module is NOT:
 //   - it is not a quote engine: `destAmount` is the venue's own NET figure for the fetch
@@ -184,6 +185,46 @@ export async function createMtpCashOrder(
 export function mtpCashStatusUrl(relayUrl: string, orderId: string): string {
   const base = relayUrl.replace(/\/+$/, '');
   return `${base}/api/v1/mtpelerin/conversion?id=${encodeURIComponent(orderId)}`;
+}
+
+/** The documented widget origin, prefix form (the ramp builder's `MTP_WIDGET_BASE`; duplicated
+ *  here because app/ramp/mtpelerin.ts is buy-owned and this module stays venue-client-owned). */
+const MTP_WIDGET_PREFIX = 'https://widget.mtpelerin.com/';
+
+/** Ask the relay to inject the widget integration key SERVER-side (POST
+ *  /api/v1/mtpelerin/widget-token, 2026-10-15): the device posts the widget URL it built
+ *  WITHOUT `_ctkn` — the reviewed buy prefill, or the sell widget's bare base — and the relay
+ *  validates the shape fail-closed (https, the documented host, the parameter whitelist, an
+ *  incoming `_ctkn` refused) and answers `{"url": …}` with the token appended from its own
+ *  config. THE CLIENT NEVER HOLDS THE TOKEN: it arrives only inside this answer and rides
+ *  straight into the in-app webview (the embed), so it can never ship in the bundle.
+ *
+ *  Fail-closed like the quote/order clients (the house vocabulary, plus the limiter word):
+ *  'unconfigured' (relay has no key — 503), 'refused' (400/422 — the URL failed the relay's
+ *  validation), 'limited' (429 — the per-client window), 'unreachable' (transport),
+ *  'unavailable' (other non-2xx), 'shape' (unreadable answer — including an answer that does
+ *  not point at the documented widget origin WITH a token, which the embed must never load). */
+export async function widgetTokenOf(relayUrl: string, widgetUrl: string, timeoutMs = 8000): Promise<string> {
+  const base = relayUrl.replace(/\/+$/, '');
+  let r: Response;
+  try {
+    r = await relayFetch(base, '/api/v1/mtpelerin/widget-token', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url: widgetUrl}),
+    }, timeoutMs);
+  } catch {
+    throw new Error('unreachable');
+  }
+  if (r.status === 429) throw new Error('limited');
+  if (r.status === 503) throw new Error('unconfigured');
+  if (r.status === 400 || r.status === 422) throw new Error('refused');
+  if (!r.ok) throw new Error('unavailable');
+  const j = await r.json().catch(() => null) as {url?: unknown} | null;
+  const url = typeof j?.url === 'string' ? j.url : '';
+  if (!url.startsWith(MTP_WIDGET_PREFIX)) throw new Error('shape');
+  if (!/[?&]_ctkn=/.test(url)) throw new Error('shape'); // no token, no embed: the route's whole point
+  return url;
 }
 
 /** One response header's value, trimmed, empty → null (Headers.get is already

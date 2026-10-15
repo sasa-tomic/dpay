@@ -1,6 +1,6 @@
 /**
  * Flow 52 - the Mt Pelerin cash-out entry (plan R2 step 2, the flow leg; the widget
- * handoff, 2026-10-13).
+ * handoff, 2026-10-13; the in-app embed, 2026-10-15).
  *
  * Over the fake-relay catalog (the EVM mainnet sections the relay always serves, the R2 step 1
  * flip applied: ZCHF on Ethereum carries `offramp: 'Partner'`), against the file's OWN relay
@@ -13,13 +13,16 @@
  *     so the off-ramp is discovered inside the flow the home Withdraw button opens.
  *   • The sheet (Wallet-owned, root-mounted) asks for the amount, shows the verbatim fee facts
  *     and the counterparty, and VALIDATES locally before anything is sent (an unusable amount
- *     keeps Continue inert - no order, no widget open).
+ *     keeps Continue inert - no order, no widget).
  *   • Continue registers the order through the REAL relay's LOCAL conversion route (no upstream
- *     dial - the venue's API tier is closed for dpay) and hands off to the venue's sell widget
- *     through the open seam: the documented bare link (no sell-side or correlation parameters
- *     are documented, so nothing is prefilled), the lifecycle view renders, and there is NO
- *     send step and NO deposit-address handoff (dpay never learns an address; the bank details
- *     are the widget session's).
+ *     dial - the venue's API tier is closed for dpay) and opens the sell widget IN-APP: the
+ *     relay's token route appends the `_ctkn` SERVER-side to the documented bare link (no
+ *     sell-side or correlation parameters are documented, so nothing else is prefilled), the
+ *     embed marker carries the tokenized URL and the external seam stays cold. The token window
+ *     is pinned to 1/min: the SECOND continue is limiter-429'd, which drives the EXTERNAL
+ *     fallback — there the `__DPAY_TEST_MTP_OPEN` seam fires with the bare UNTOKENIZED link.
+ *     There is NO send step and NO deposit-address handoff (dpay never learns an address; the
+ *     bank details are the widget session's).
  *   • Cancel is the typed rejection and closes the sheet.
  */
 import {it, expect, jest} from '@jest/globals';
@@ -41,9 +44,12 @@ mkdirSync(LOG_DIR, {recursive: true});
 
 // The file's own relay: the quote proxy keyed (CTKN, a FAKE value - the venue's quote
 // endpoint is keyless upstream, the tripwire is dpay's own gate) and pointed at the
-// in-process stub. The conversion route is local and never dials anything.
+// in-process stub. The conversion route is local and never dials anything. The widget-token
+// window is pinned to 1/min so the SECOND continue deterministically drives the EXTERNAL
+// fallback (a limiter refusal is a token-fetch failure; the sheet falls back, the seam fires).
 hermeticFlow({relay: {env: {
   DPAY_MTPELERIN_CTKN: 'flow-ctkn',
+  DPAY_MTPELERIN_WIDGET_PER_MIN: '1',
   DPAY_MTPELERIN_API_BASE: '{{base}}/api/v1/test/mtpelerin-upstream',
   DPAY_MTPELERIN_LOG_DIR: LOG_DIR,
 }}});
@@ -76,7 +82,7 @@ hermeticDescribe('flow 52 - the Mt Pelerin cash-out entry (offramp-gated; local 
     expect(m.driver.isPresent('mtp-cashout-iban')).toBe(false);
 
     // ── Local validation FIRST: a zero amount keeps Continue inert - no order, no widget. ──
-    const openSeam = jest.fn<(uri: string) => Promise<void>>();
+    const openSeam = jest.fn<(uri: string) => Promise<void>>().mockResolvedValue(undefined);
     g.__DPAY_TEST_MTP_OPEN = openSeam;
     await m.driver.type('mtp-cashout-amount', '0', {timeoutMs: 5000});
     expect(await isDisabled(m, 'btn-mtp-cashout-continue')).toBe(true);
@@ -87,21 +93,41 @@ hermeticDescribe('flow 52 - the Mt Pelerin cash-out entry (offramp-gated; local 
     await m.driver.type('mtp-cashout-amount', '2', {timeoutMs: 5000});
     await m.driver.waitForText('Payout: 97.7395 CHF, fees included.', {timeoutMs: 15000});
 
-    // ── Continue: the LOCAL registration through the real relay, then the widget handoff. ──
+    // ── Continue: the LOCAL registration through the real relay, then the IN-APP embed —
+    // the tokenized bare link, the external seam COLD on the happy path. ──
     await m.driver.click('btn-mtp-cashout-continue', {timeoutMs: 5000});
     await m.driver.findByTestID('mtp-cashout-lifecycle', {timeoutMs: 15000});
-    expect(openSeam).toHaveBeenCalledTimes(1);
-    expect(openSeam.mock.calls[0][0]).toBe('https://widget.mtpelerin.com/');
+    await m.driver.findByTestID('mtp-widget-embed', {timeoutMs: 15000});
+    expect(openSeam).not.toHaveBeenCalled();
+    expect(m.driver.bodyText()).toContain('https://widget.mtpelerin.com/?_ctkn=flow-ctkn');
     // NO send step exists: the sale happens in the venue's own window.
     expect(m.driver.isPresent('btn-evm-send-confirm')).toBe(false);
     // The adopted record: awaiting_deposit, and NO deposit-address handoff block (dpay never
     // learns an address - the webhook payload never carries one and the widget session holds it).
     await m.driver.findByTestID('convert-awaiting-deposit', {timeoutMs: 15000});
     expect(m.driver.isPresent('convert-deposit-handoff')).toBe(false);
-    // The lifecycle handoff note names the widget as the place the sale completes.
+    // Closing the embed returns to the lifecycle view; the handoff note names the widget as
+    // the place the sale completes.
+    await m.driver.click('btn-mtp-embed-close', {timeoutMs: 5000});
+    expect(m.driver.isPresent('mtp-widget-embed')).toBe(false);
     await m.driver.waitForText('Finish the sale in the Mt Pelerin window', {timeoutMs: 5000});
 
     // ── The lifecycle's back closes the sheet (the panel's own affordance). ──
+    await m.driver.click('btn-convert-back', {timeoutMs: 5000});
+    expect(m.driver.isPresent('mtp-cashout-sheet')).toBe(false);
+
+    // ── The fallback path: the token window (1/min) is spent, so this continue is limiter-429'd
+    // and the sheet falls back to the EXTERNAL open — the seam fires with the documented bare
+    // UNTOKENIZED link, and the lifecycle view stands (the registration + the watch). ──
+    await m.driver.click('btn-receive-cashout', {timeoutMs: 5000});
+    await m.driver.findByTestID('mtp-cashout-sheet', {timeoutMs: 5000});
+    await m.driver.type('mtp-cashout-amount', '2', {timeoutMs: 5000});
+    await m.driver.waitForText('Payout: 97.7395 CHF, fees included.', {timeoutMs: 15000});
+    await m.driver.click('btn-mtp-cashout-continue', {timeoutMs: 15000});
+    await m.driver.findByTestID('mtp-cashout-lifecycle', {timeoutMs: 15000});
+    expect(openSeam).toHaveBeenCalledTimes(1);
+    expect(openSeam.mock.calls[0][0]).toBe('https://widget.mtpelerin.com/');
+    expect(m.driver.isPresent('mtp-widget-embed')).toBe(false);
     await m.driver.click('btn-convert-back', {timeoutMs: 5000});
     expect(m.driver.isPresent('mtp-cashout-sheet')).toBe(false);
     delete g.__DPAY_TEST_MTP_OPEN;

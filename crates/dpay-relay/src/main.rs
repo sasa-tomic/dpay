@@ -244,6 +244,9 @@
 //!   DPAY_MTPELERIN_CONVERSION_PER_MIN  the per-client per-minute bound on POST
 //!                           /api/v1/mtpelerin/conversion (default 4). Same rules as
 //!                           the quote bound above.
+//!   DPAY_MTPELERIN_WIDGET_PER_MIN  the per-client per-minute bound on POST
+//!                           /api/v1/mtpelerin/widget-token (default 15 — one token per
+//!                           widget open). Same rules as the quote bound above.
 //!   DPAY_MTPELERIN_API_BASE the Mt Pelerin API base the proxy calls (default
 //!                           `https://api.mtpelerin.com` — the venue's documented host).
 //!                           The offline loop points it at the relay's own test stub. A
@@ -421,6 +424,7 @@ async fn main() {
             webhook_auth_key: cfg.mtpelerin_webhook_auth_key.clone(),
             quote_per_min: cfg.mtpelerin_quote_per_min,
             conversion_per_min: cfg.mtpelerin_conversion_per_min,
+            widget_per_min: cfg.mtpelerin_widget_per_min,
             api_base: cfg.mtpelerin_api_base.clone(),
             log_dir: cfg.mtpelerin_log_dir.clone(),
             trust_proxy: cfg.trust_proxy,
@@ -652,10 +656,12 @@ async fn main() {
          (DPAY_MTPELERIN_LOG_DIR — JSONL; PG arm is the follow-up when the webhook \
          setup lands); status reads at most 1/min per order (the poll fallback's \
          60s promise, no prod knob); per-client bounds: quote {}/min, conversion \
-         {}/min (DPAY_MTPELERIN_QUOTE_PER_MIN / DPAY_MTPELERIN_CONVERSION_PER_MIN).",
+         {}/min, widget tokens {}/min (DPAY_MTPELERIN_QUOTE_PER_MIN / \
+         DPAY_MTPELERIN_CONVERSION_PER_MIN / DPAY_MTPELERIN_WIDGET_PER_MIN).",
         cfg.mtpelerin_log_dir.display(),
         cfg.mtpelerin_quote_per_min,
-        cfg.mtpelerin_conversion_per_min
+        cfg.mtpelerin_conversion_per_min,
+        cfg.mtpelerin_widget_per_min
     );
     let store_line = if cfg.trocador_pg_dsn.is_some() {
         "trocador agreement: access log + order store append-only in POSTGRES \
@@ -886,6 +892,8 @@ struct Config {
     mtpelerin_quote_per_min: u32,
     /// The per-client conversion bound (`DPAY_MTPELERIN_CONVERSION_PER_MIN`, default 4).
     mtpelerin_conversion_per_min: u32,
+    /// The per-client widget-token bound (`DPAY_MTPELERIN_WIDGET_PER_MIN`, default 15).
+    mtpelerin_widget_per_min: u32,
     /// The Mt Pelerin API base (`DPAY_MTPELERIN_API_BASE`); default the venue's
     /// documented host.
     mtpelerin_api_base: String,
@@ -1227,6 +1235,10 @@ impl Config {
             "DPAY_MTPELERIN_CONVERSION_PER_MIN",
             dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
         )?;
+        let mtpelerin_widget_per_min = parse_per_min(
+            "DPAY_MTPELERIN_WIDGET_PER_MIN",
+            dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
+        )?;
         let mtpelerin_api_base = match non_empty("DPAY_MTPELERIN_API_BASE") {
             Some(base) => {
                 reqwest::Url::parse(&base)
@@ -1281,6 +1293,7 @@ impl Config {
             mtpelerin_webhook_auth_key,
             mtpelerin_quote_per_min,
             mtpelerin_conversion_per_min,
+            mtpelerin_widget_per_min,
             mtpelerin_api_base,
             mtpelerin_log_dir,
             mtpelerin_status_spacing_secs,

@@ -226,6 +226,7 @@ fn configured(base: &str) -> MtPelerinProxy {
         webhook_auth_key: None,
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        widget_per_min: dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
         api_base: base.to_string(),
         log_dir: temp_log_dir("full"),
         trust_proxy: false,
@@ -356,6 +357,21 @@ async fn unconfigured_answers_503_naming_the_missing_variable() {
     let (status, _h, _b) =
         get_json(&state, "/api/v1/mtpelerin/conversion?id=mtp-0123456789abcdef").await;
     assert_eq!(status, StatusCode::NOT_FOUND, "a local read, not a 503");
+    // The widget-token route is the CTKN's OTHER surface: no key → 503 naming the same
+    // variable, before any body validation (the route is registered on every build).
+    let (status, _h, body_bytes) = post_json(
+        &state,
+        "/api/v1/mtpelerin/widget-token",
+        &serde_json::json!({"url": format!("{}/", WIDGET_BASE)}).to_string(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(relay_error_code(&body_bytes), "mtpelerin-unconfigured");
+    assert!(
+        String::from_utf8_lossy(&body_bytes).contains("DPAY_MTPELERIN_CTKN"),
+        "names the CTKN variable: {}",
+        String::from_utf8_lossy(&body_bytes)
+    );
     assert_eq!(Stub::hits(&stub.quote_hits), 0, "zero upstream calls");
     assert_eq!(
         Stub::hits(&stub.conversion_hits),
@@ -505,6 +521,7 @@ async fn conversion_mints_persists_and_answers_locally() {
         webhook_auth_key: None,
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        widget_per_min: dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
         api_base: base.clone(),
         log_dir: dir.clone(),
         trust_proxy: false,
@@ -590,6 +607,7 @@ async fn conversion_refuses_malformed_bodies_and_mints_nothing() {
         webhook_auth_key: None,
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        widget_per_min: dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
         api_base: base.clone(),
         log_dir: dir.clone(),
         trust_proxy: false,
@@ -653,6 +671,7 @@ async fn conversion_accepts_but_ignores_the_legacy_bank_fields() {
         webhook_auth_key: None,
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        widget_per_min: dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
         api_base: base.clone(),
         log_dir: dir.clone(),
         trust_proxy: false,
@@ -692,6 +711,7 @@ async fn conversion_lifecycle_works_without_ctkn_and_never_dials_upstream() {
         webhook_auth_key: None,
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        widget_per_min: dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
         api_base: base.clone(),
         log_dir: temp_log_dir("no-ctkn"),
         trust_proxy: false,
@@ -920,6 +940,7 @@ async fn webhook_first_terminal_wins_and_later_deliveries_are_idempotent() {
         webhook_auth_key: None,
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        widget_per_min: dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
         api_base: base.clone(),
         log_dir: dir.clone(),
         trust_proxy: false,
@@ -969,6 +990,7 @@ async fn webhook_first_terminal_wins_and_later_deliveries_are_idempotent() {
         webhook_auth_key: None,
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        widget_per_min: dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
         api_base: base.clone(),
         log_dir: dir,
         trust_proxy: false,
@@ -1033,6 +1055,7 @@ async fn webhook_auth_key_gates_before_the_signature_when_configured() {
         webhook_auth_key: Some(STUB_AUTH_KEY.into()),
         quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
         conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        widget_per_min: dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
         api_base: base.clone(),
         log_dir: temp_log_dir("authkey"),
         trust_proxy: false,
@@ -1141,6 +1164,7 @@ async fn quote_and_conversion_are_rate_limited_per_client() {
         webhook_auth_key: None,
         quote_per_min: 2,
         conversion_per_min: 1,
+        widget_per_min: dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
         api_base: base.clone(),
         log_dir: dir.clone(),
         trust_proxy: true,
@@ -1219,6 +1243,225 @@ async fn quote_and_conversion_are_rate_limited_per_client() {
         1,
         "the refused conversion never minted an order: {order_ids:?}"
     );
+}
+
+// ---- the widget-token surface (the in-app embed's server-side token injector) ----
+
+/// The widget origin the route serves (the module's `WIDGET_HOST` on https, root).
+const WIDGET_BASE: &str = "https://widget.mtpelerin.com/";
+
+/// The reviewed BUY prefill the device would build (the ramp builder's fixed parameter
+/// order; the hash is URL-encoded base64 - `%2B/%2F/%3D` - exactly as the builder emits it).
+fn widget_buy_url() -> String {
+    format!(
+        "{WIDGET_BASE}?net=mainnet&dnet=mainnet&bsc=CHF&bdc=ZCHF\
+         &addr=0xAbCdEf0123456789AbCdEf0123456789AbCdEf01&code=1234\
+         &hash=YWJjZGVmZ2hpamtsbW5vcA%3D%3D"
+    )
+}
+
+fn widget_body(url: &str) -> String {
+    serde_json::json!({ "url": url }).to_string()
+}
+
+/// Happy path: the tokenized URL comes back 200, rebuilt on the fixed base with the
+/// whitelisted params preserved IN ORDER and `_ctkn` appended EXACTLY ONCE from the
+/// config. The route is local (zero upstream dials) and the token never lands in the
+/// access log (the line names the route, never the answer).
+#[tokio::test]
+async fn widget_token_appends_the_ctkn_exactly_once_and_never_logs_it() {
+    let (stub, base) = spawn_stub().await;
+    let dir = temp_log_dir("widget-happy");
+    let state = state_with(MtPelerinProxy::new(MtPelerinConfig {
+        ctkn: Some(STUB_CTKN.into()),
+        webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        webhook_auth_key: None,
+        quote_per_min: dpay_relay::mtpelerin::DEFAULT_QUOTE_PER_MIN,
+        conversion_per_min: dpay_relay::mtpelerin::DEFAULT_CONVERSION_PER_MIN,
+        widget_per_min: dpay_relay::mtpelerin::DEFAULT_WIDGET_PER_MIN,
+        api_base: base.clone(),
+        log_dir: dir.clone(),
+        trust_proxy: false,
+        status_spacing_secs: STATUS_SPACING_SECS,
+    }));
+
+    let (status, headers, body) =
+        post_json(&state, "/api/v1/mtpelerin/widget-token", &widget_body(&widget_buy_url())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()),
+        Some("application/json")
+    );
+    let v: serde_json::Value = serde_json::from_slice(&body).expect("the answer is JSON");
+    let url = v["url"].as_str().expect("the answer carries {url}");
+    assert!(
+        url.starts_with(&format!("{WIDGET_BASE}?")),
+        "rebuilt on the fixed base: {url}"
+    );
+    for param in [
+        "net=mainnet",
+        "dnet=mainnet",
+        "bsc=CHF",
+        "bdc=ZCHF",
+        "addr=0xAbCdEf0123456789AbCdEf0123456789AbCdEf01",
+        "code=1234",
+        "hash=YWJjZGVmZ2hpamtsbW5vcA%3D%3D",
+    ] {
+        assert!(url.contains(param), "the reviewed prefill survives: {param} in {url}");
+    }
+    assert_eq!(
+        url.matches("_ctkn=stub-ctkn").count(),
+        1,
+        "the token rides exactly once: {url}"
+    );
+    assert_eq!(
+        Stub::hits(&stub.quote_hits),
+        0,
+        "the route is local - no upstream dial"
+    );
+    assert_eq!(Stub::hits(&stub.conversion_hits), 0);
+
+    // The token is NEVER logged: the access line names the route, never the answer.
+    let access = std::fs::read_to_string(dir.join("mtpelerin-access.jsonl")).unwrap_or_default();
+    assert!(access.contains("widget-token"), "the route was logged");
+    assert!(
+        !access.contains(STUB_CTKN),
+        "the token never lands in the access log: {access}"
+    );
+}
+
+/// Fail-closed shapes: a foreign host, an http scheme, a non-root path, an incoming
+/// `_ctkn` (refused, never forwarded or overwritten), an unknown parameter (the quote
+/// surface's no-smuggling rule), a missing `url` field and a non-JSON body are all 400
+/// house errors before anything is admitted (device 400s never consume the window).
+#[tokio::test]
+async fn widget_token_refuses_hostile_shapes_fail_closed() {
+    let (_stub, base) = spawn_stub().await;
+    let dir = temp_log_dir("widget-hostile");
+    let state = state_with(MtPelerinProxy::new(MtPelerinConfig {
+        ctkn: Some(STUB_CTKN.into()),
+        log_dir: dir.clone(),
+        ..MtPelerinConfig::default()
+    }));
+    let cases: Vec<(&str, String)> = vec![
+        ("foreign host", widget_body("https://evil.example/?net=mainnet")),
+        ("http scheme", widget_body("http://widget.mtpelerin.com/")),
+        ("non-root path", widget_body("https://widget.mtpelerin.com/buy")),
+        (
+            "incoming _ctkn",
+            widget_body(&format!("{WIDGET_BASE}?_ctkn=sneaky")),
+        ),
+        (
+            "unknown parameter",
+            widget_body(&format!("{WIDGET_BASE}?rfr=spoiler")),
+        ),
+        ("missing url field", "{}".to_string()),
+        ("not json", "not json".to_string()),
+    ];
+    for (label, body) in cases {
+        let (status, _h, body_bytes) =
+            post_json(&state, "/api/v1/mtpelerin/widget-token", &body).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{label} is refused: {}",
+            String::from_utf8_lossy(&body_bytes)
+        );
+        let text = String::from_utf8_lossy(&body_bytes);
+        assert!(text.contains("\"error\""), "house shape: {text}");
+        assert!(!text.contains("dpayRelayError"), "a 400 device error, not 503-class");
+    }
+    // The empty-object case names the missing field; the _ctkn case must NOT echo the
+    // incoming value into the store either way (fail-closed means fail BEFORE issuance).
+    let access = std::fs::read_to_string(dir.join("mtpelerin-access.jsonl")).unwrap_or_default();
+    assert!(
+        !access.contains("sneaky"),
+        "a refused _ctkn is never persisted: {access}"
+    );
+}
+
+/// The per-client fixed window (the quote limiter's twin): over budget answers
+/// 429 + `Retry-After` + the house marker BEFORE any token is issued, a different
+/// client has its own window, and device 400s never count.
+#[tokio::test]
+async fn widget_token_is_rate_limited_per_client() {
+    let (_stub, base) = spawn_stub().await;
+    let (now, with_clock) = fake_clock();
+    let state = state_with(with_clock(MtPelerinProxy::new(MtPelerinConfig {
+        ctkn: Some(STUB_CTKN.into()),
+        webhook_secret: Some(STUB_WEBHOOK_SECRET.into()),
+        widget_per_min: 1,
+        api_base: base.clone(),
+        log_dir: temp_log_dir("widget-limits"),
+        trust_proxy: true,
+        status_spacing_secs: STATUS_SPACING_SECS,
+        ..MtPelerinConfig::default()
+    })));
+    let base_secs = now.load(Ordering::SeqCst);
+    let bucket = base_secs - base_secs % 60;
+    let retry_when_full = bucket + 60 - base_secs;
+    let xff_a = &[("X-Forwarded-For", "198.51.100.1")];
+    let xff_b = &[("X-Forwarded-For", "198.51.100.9")];
+
+    // Client A: the one admission passes; the second is refused before issuance.
+    let (status, _h, body) = request_json(
+        &state,
+        "POST",
+        "/api/v1/mtpelerin/widget-token",
+        Some(&widget_body(&widget_buy_url())),
+        xff_a,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, headers, body) = request_json(
+        &state,
+        "POST",
+        "/api/v1/mtpelerin/widget-token",
+        Some(&widget_body(&widget_buy_url())),
+        xff_a,
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(relay_error_code(&body), "mtpelerin-widget-limited");
+    assert_eq!(
+        headers
+            .get(header::RETRY_AFTER)
+            .and_then(|v| v.to_str().ok()),
+        Some(retry_when_full.to_string().as_str()),
+        "Retry-After carries the remaining seconds of the window"
+    );
+
+    // Client B has its own window; a device 400 never consumes it.
+    let (status, _h, _b) = request_json(
+        &state,
+        "POST",
+        "/api/v1/mtpelerin/widget-token",
+        Some(&widget_body("https://evil.example/")),
+        xff_b,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _h, _b) = request_json(
+        &state,
+        "POST",
+        "/api/v1/mtpelerin/widget-token",
+        Some(&widget_body(&widget_buy_url())),
+        xff_b,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "per-IP, not global; 400s are exempt");
+
+    // The window resets when the clock passes it.
+    now.store(bucket + 60, Ordering::SeqCst);
+    let (status, _h, _b) = request_json(
+        &state,
+        "POST",
+        "/api/v1/mtpelerin/widget-token",
+        Some(&widget_body(&widget_buy_url())),
+        xff_a,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "a fresh window admits again");
 }
 
 /// POST JSON with an XFF header (the per-client test variant of `post_json`).

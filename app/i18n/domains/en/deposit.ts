@@ -348,8 +348,11 @@ export type DepositMessages = {
     chainLabel: string;
     approve: string;
     cancel: string;
-    /** The post-open line: the widget is in the browser, arrival reconciles on return. */
+    /** The post-open line: the widget is open (in-app embed on native, the browser on
+     *  web/fallback); arrival reconciles on return. */
     openDone: string;
+    /** The in-app embed's ONE control (the full-screen widget layer's close button). */
+    embedClose: string;
     /** Open failure - the sheet STAYS with this note (the TrustWallet pattern). */
     openFailed: string;
     /** The counterparty disclosure. */
@@ -702,7 +705,8 @@ export const depositEn: DepositMessages = {
     chainLabel: 'Chain',
     approve: 'Sign and open',
     cancel: 'Cancel',
-    openDone: 'Mt Pelerin opened in your browser. Your balance updates when you return.',
+    openDone: 'Mt Pelerin is open. Your balance updates when you return.',
+    embedClose: 'Close',
     openFailed: "Couldn't open Mt Pelerin. Try again.",
     counterparty: 'Mt Pelerin handles the purchase. dpay is not a party to it and takes no fee.',
     feesTitle: 'Fees and limits',

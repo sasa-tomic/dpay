@@ -17,10 +17,16 @@
  *     fine (no dpay flow sends to it: the sale completes in the user's own widget
  *     session). The request carries the pair, the network and the amount only: bank
  *     details are the widget session's, never dpay's.
+ *   • widget-token (POST /api/v1/mtpelerin/widget-token): the device posts the widget URL
+ *     it built WITHOUT `_ctkn`; the answer's URL is the embed's ONLY source of the token,
+ *     so it is validated fail-closed (the documented widget origin + a `_ctkn` param must
+ *     be present — anything else is 'shape') and carried verbatim. The limiter word
+ *     'limited' (429) joins the house vocabulary: every failure word sends the sheet to
+ *     the EXTERNAL-open fallback, never to a degraded embed.
  */
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import {
-  createMtpCashOrder, fetchMtpCashQuote, mtpCashStatusUrl, mtpSellNetworkOf,
+  createMtpCashOrder, fetchMtpCashQuote, mtpCashStatusUrl, mtpSellNetworkOf, widgetTokenOf,
 } from '../services/mtpelerin';
 
 const RELAY = 'https://relay.test';
@@ -166,6 +172,57 @@ describe('createMtpCashOrder - the local creation record pins', () => {
   test('HTTP 503 maps to unconfigured (the fail-closed vocabulary holds on any relay refusal)', async () => {
     mockFetch.mockResolvedValue(jsonResponse(503, {dpayRelayError: 'mtpelerin-unconfigured'}));
     await expect(createMtpCashOrder(RELAY, ARGS)).rejects.toThrow('unconfigured');
+  });
+});
+
+describe('widgetTokenOf — the server-side token injection', () => {
+  const BUY_URL = 'https://widget.mtpelerin.com/?net=mainnet&dnet=mainnet&bsc=CHF&bdc=ZCHF&addr=0xAb&code=1234&hash=YWJj';
+
+  test('the relay answer (the tokenized URL) parses: POST body is the untokenized widget URL', async () => {
+    const tokened = `${BUY_URL}&_ctkn=relay-token`;
+    mockFetch.mockResolvedValue(jsonResponse(200, {url: tokened}));
+    const url = await widgetTokenOf(RELAY, BUY_URL);
+    expect(url).toBe(tokened); // verbatim: the embed loads exactly what the relay answered
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body.url).toBe(BUY_URL); // the device posts the URL it built, no `_ctkn` on it
+    const [url0] = mockFetch.mock.calls[0] as [string];
+    expect(url0).toBe(`${RELAY}/api/v1/mtpelerin/widget-token`);
+  });
+
+  test('an answer pointing OFF the documented widget origin is a shape failure (the embed never loads it)', async () => {
+    mockFetch.mockResolvedValue(jsonResponse(200, {url: 'https://evil.example/?_ctkn=x'}));
+    await expect(widgetTokenOf(RELAY, BUY_URL)).rejects.toThrow('shape');
+  });
+
+  test('an answer without a token is a shape failure (no token, no embed)', async () => {
+    mockFetch.mockResolvedValue(jsonResponse(200, {url: 'https://widget.mtpelerin.com/?net=mainnet'}));
+    await expect(widgetTokenOf(RELAY, BUY_URL)).rejects.toThrow('shape');
+  });
+
+  test.each([
+    ['a non-object body', {}],
+    ['a non-string url', {url: 42}],
+  ])('%s is a shape failure', async (_label, body) => {
+    mockFetch.mockResolvedValue(jsonResponse(200, body));
+    await expect(widgetTokenOf(RELAY, BUY_URL)).rejects.toThrow('shape');
+  });
+
+  test.each([
+    [503, 'unconfigured'],
+    [400, 'refused'],
+    [422, 'refused'],
+    [429, 'limited'],
+    [500, 'unavailable'],
+  ])('HTTP %i maps to %s', async (status, word) => {
+    mockFetch.mockResolvedValue(jsonResponse(status, {}));
+    await expect(widgetTokenOf(RELAY, BUY_URL)).rejects.toThrow(word);
+  });
+
+  test('a transport failure is unreachable', async () => {
+    mockFetch.mockRejectedValue(new Error('socket'));
+    await expect(widgetTokenOf(RELAY, BUY_URL)).rejects.toThrow('unreachable');
   });
 });
 

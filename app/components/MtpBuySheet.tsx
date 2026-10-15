@@ -1,6 +1,7 @@
 import {useCallback, useEffect, useMemo, useState} from 'react';
-import {ActivityIndicator, Linking, Pressable, ScrollView, Text, View} from 'react-native';
+import {ActivityIndicator, Linking, Platform, Pressable, ScrollView, Text, View} from 'react-native';
 import {AppModal} from './AppModal';
+import {MtpWidgetEmbed} from './MtpWidgetEmbed';
 import {ModeToggle} from './ModeToggle';
 import {S} from '../styles';
 import {C} from '../config/palette';
@@ -11,6 +12,7 @@ import type {Identity} from '../lib/types';
 import {deriveEvmKeypair, toChecksumAddress} from '../evm/identity';
 import {EVM_CHAINS, type EvmChainId} from '../evm/chains';
 import {signPersonalBase64} from '../evm/personalSign';
+import {widgetTokenOf} from '../services/mtpelerin';
 import {
   buildMtpWidgetLink, deriveValidationCode, mtpDeliveryChains,
   validationMessage, type MtpBuyAsset, type MtpDeliveryChainId,
@@ -21,8 +23,11 @@ import {loadValidationSalt} from '../ramp/codeSalts';
 // MtpBuySheet — the Mt Pelerin on-ramp's ONE surface (plan R1 step 3). Reviews the validation
 // signature (message `MtPelerin-{code}`, the receiving address, the delivery chain), signs it with
 // the DEVICE key on approve (the only signature a plain buy needs, plan §2.2), and opens the
-// prefilled widget externally. Facts about the provider are disclosed verbatim + dated; the
-// provider is named as the counterparty; no "best" label, no referral parameter (§4).
+// prefilled widget: IN-APP on native (the embed — the relay injects the `_ctkn` server-side, the
+// client never holds it), EXTERNAL on web and whenever the token fetch fails (the fallback; the
+// `__DPAY_TEST_MTP_OPEN` seam rides only that path). Facts about the provider are disclosed
+// verbatim + dated; the provider is named as the counterparty; no "best" label, no referral
+// parameter (§4).
 //
 // MOUNT POINT: the Wallet ROOT (the TxnReceipt discipline) — AppModal's web host is absolutely
 // positioned against the nearest positioned ancestor, so a sheet mounted inside a list or a tab
@@ -44,24 +49,30 @@ export class MtpBuyUserRejected extends Error {
 
 type OpenLink = (url: string) => Promise<void>;
 
-/** The one place the widget URL leaves the app. The `__DPAY_TEST_MTP_OPEN` seam (the
- *  `__DPAY_TEST_DEEPLINK` pattern) lets the flow harness answer success AND failure
- *  deterministically; production never sets it and rides Linking. The cash-out sheet's
- *  handoff opens through the same helper (ONE seam, ONE open path per venue). */
+/** The one place the widget URL leaves the app (the EXTERNAL fallback path). The
+ *  `__DPAY_TEST_MTP_OPEN` seam (the `__DPAY_TEST_DEEPLINK` pattern) lets the flow harness answer
+ *  success AND failure deterministically; production never sets it and rides Linking. The
+ *  cash-out sheet's external fallback opens through the same helper (ONE seam, ONE external open
+ *  path per venue); the IN-APP embed never touches it. */
 export function openWidgetUrl(url: string): Promise<void> {
   const seam = (globalThis as {__DPAY_TEST_MTP_OPEN?: OpenLink}).__DPAY_TEST_MTP_OPEN;
   return seam ? seam(url) : Linking.openURL(url);
 }
 
-export function MtpBuySheet({identity, token, onClose, onReject, onWidgetOpened}: {
+export function MtpBuySheet({identity, relayUrl, token, onClose, onReject, onWidgetOpened}: {
   identity: Identity;
+  /** The relay this phone talks to — the embed's tokenized widget URL comes from it
+   *  (server-side `_ctkn` injection; the trocador-family rule: keyed venue surfaces ride
+   *  the relay). */
+  relayUrl: string;
   /** The asset to buy (their `bdc` crypto code) — the opener resolved it through
    *  `mtpBuyEligible`, so a delivery chain always exists. */
   token: MtpBuyAsset;
   onClose: () => void;
   /** Cancel observes the typed user-rejected error. Absent = Cancel simply closes. */
   onReject?: (e: MtpBuyUserRejected) => void;
-  /** Fired once the widget link OPENED — the mounting Wallet arms the on-return refresh with it. */
+  /** Fired once the widget OPENED — in-app (the embed) or external (the fallback); the
+   *  mounting Wallet arms the on-return refresh with it. */
   onWidgetOpened?: () => void;
 }) {
   // The device EVM keypair: the address IS the validation subject, the private key signs. Derived
@@ -94,8 +105,12 @@ export function MtpBuySheet({identity, token, onClose, onReject, onWidgetOpened}
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [opened, setOpened] = useState(false);
+  /** The tokenized widget URL while the IN-APP embed is open (null = closed). */
+  const [embedUrl, setEmbedUrl] = useState<string | null>(null);
 
-  useEscapeToClose(onClose);
+  // One Esc closes one thing: while the embed layer is open it owns Escape (the AppModal
+  // discipline), so the sheet's own handler is gated off.
+  useEscapeToClose(embedUrl != null ? () => {} : onClose);
 
   const approve = useCallback(async () => {
     if (kp == null || code == null || busy) return;
@@ -104,6 +119,21 @@ export function MtpBuySheet({identity, token, onClose, onReject, onWidgetOpened}
     try {
       const hash = signPersonalBase64(kp.privateKey, validationMessage(code));
       const url = buildMtpWidgetLink({asset: token, deliveryChain: chain, address: shown ?? kp.address, code, hash});
+      // The EMBED first (native): the tokenized URL comes from the RELAY (the `_ctkn` is
+      // injected server-side and the client never holds it). The external open is the
+      // web-platform and token-fetch-failure fallback (unconfigured relay, limiter,
+      // transport — any service word falls back; the seam rides only this path).
+      if (Platform.OS !== 'web') {
+        try {
+          const tokened = await widgetTokenOf(relayUrl, url);
+          setEmbedUrl(tokened);
+          setOpened(true);
+          onWidgetOpened?.();
+          return;
+        } catch {
+          // fall through to the external open — the fallback IS the feature here
+        }
+      }
       await openWidgetUrl(url);
       setOpened(true);
       onWidgetOpened?.();
@@ -115,7 +145,7 @@ export function MtpBuySheet({identity, token, onClose, onReject, onWidgetOpened}
     } finally {
       setBusy(false);
     }
-  }, [kp, code, busy, token, chain, shown, onWidgetOpened]);
+  }, [kp, code, busy, token, chain, shown, relayUrl, onWidgetOpened]);
 
   const cancel = useCallback(() => {
     onReject?.(new MtpBuyUserRejected());
@@ -123,8 +153,9 @@ export function MtpBuySheet({identity, token, onClose, onReject, onWidgetOpened}
   }, [onReject, onClose]);
 
   return (
-    <AppModal onRequestClose={onClose}>
-      <Pressable style={S.pickBackdrop} onPress={onClose}>
+    <>
+    <AppModal onRequestClose={embedUrl != null ? () => {} : onClose}>
+      <Pressable style={S.pickBackdrop} onPress={embedUrl != null ? () => {} : onClose}>
         <View testID="mtp-buy-sheet" style={S.pickCard} onStartShouldSetResponder={() => true}>
           <ScrollView style={S.pickScroll}>
             <Text style={S.pickTitle}>{M.deposit.mtp.sheetTitle}</Text>
@@ -214,5 +245,13 @@ export function MtpBuySheet({identity, token, onClose, onReject, onWidgetOpened}
         </View>
       </Pressable>
     </AppModal>
+    {/* The IN-APP embed: a ROOT-LEVEL SIBLING of the sheet's own AppModal (never nested —
+        AppModal's web host is absolutely positioned against the nearest positioned ancestor
+        and nesting would clip the widget to the sheet card). Closing it reveals the sheet's
+        opened line; the external fallback never renders it. */}
+    {embedUrl != null ? (
+      <MtpWidgetEmbed url={embedUrl} onClose={() => setEmbedUrl(null)} />
+    ) : null}
+    </>
   );
 }

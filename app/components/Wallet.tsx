@@ -2962,6 +2962,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       {mtpBuyToken != null ? (
         <MtpBuySheet
           identity={identity}
+          relayUrl={relayUrl}
           token={mtpBuyToken}
           onClose={() => setMtpBuyToken(null)}
           onWidgetOpened={armMtpArrival}

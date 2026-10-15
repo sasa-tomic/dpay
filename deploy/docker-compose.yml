@@ -106,6 +106,9 @@ services:
       DPAY_MTPELERIN_WEBHOOK_AUTH_KEY: ${DPAY_MTPELERIN_WEBHOOK_AUTH_KEY:-}
       DPAY_MTPELERIN_QUOTE_PER_MIN: ${DPAY_MTPELERIN_QUOTE_PER_MIN:-}
       DPAY_MTPELERIN_CONVERSION_PER_MIN: ${DPAY_MTPELERIN_CONVERSION_PER_MIN:-}
+      # The widget-token surface's per-client bound (POST /api/v1/mtpelerin/widget-token,
+      # default 15 — one token per widget open; 0 refused at startup).
+      DPAY_MTPELERIN_WIDGET_PER_MIN: ${DPAY_MTPELERIN_WIDGET_PER_MIN:-}
       # Records directory override for the append-only JSONL store (PG arm is the follow-up;
       # with no volume mounted, unset writes into the ephemeral container cwd like Trocador).
       DPAY_MTPELERIN_LOG_DIR: ${DPAY_MTPELERIN_LOG_DIR:-}

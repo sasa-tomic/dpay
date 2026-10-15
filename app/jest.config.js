@@ -25,6 +25,10 @@ const moduleNameMapper = {
   '^@walletconnect/utils$': '<rootDir>/__stubs__/walletkit-stub',
   '^@reown/.*': '<rootDir>/__stubs__/walletkit-stub',
   '^@walletconnect/.*': '<rootDir>/__stubs__/walletconnect-stub',
+  // The Mt Pelerin embed's webview (2026-10-15): under jest the native module is never
+  // loaded — the stub renders the embed URL as a marker view so the domain + flow tiers can
+  // assert the in-app widget without a browser (see __stubs__/webview-stub.tsx).
+  '^react-native-webview$': '<rootDir>/__stubs__/webview-stub',
   '\\?url$': '<rootDir>/__stubs__/url-asset-stub',
 };
 const testPathIgnorePatterns = ['/node_modules/', '<rootDir>/__tests__/walletconnect-fake.ts'];
