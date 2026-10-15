@@ -83,7 +83,7 @@ import {HomeCurrencyChooser} from './HomeCurrencyChooser';
 import {AddCurrencyTab} from './AddCurrencyTab';
 import {type HomeCurrency, chooseRail, currencyOfAsset, currencyRails, offerableCurrencies, parseHiddenCurrencies, preferredRail, removeCurrencyGuard, type RemoveRefusal} from '../config/currency';
 import {type CurrencyDescriptor} from '../config/catalog';
-import {mtpBuyTokenOf, mtpCashOutTokenOf, type MtpBuyAsset} from '../config/funding';
+import {mtpBuyOfferOf, mtpCashOutTokenOf, type MtpBuyAsset} from '../config/funding';
 import type {SelectableAsset} from '../config/assets';
 import {HomeMenu} from './HomeMenu';
 import {AddFundsMenu} from './AddFundsMenu';
@@ -2258,12 +2258,14 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // R1 step 3 — the Mt Pelerin buy. Wallet owns the Add-funds CHOICE and the ONE buy-sheet
   // instance (the receiptTxn discipline: root-mounted overlays, one owner): the HomeTab action
   // row, the receive surfaces' FundingRoutes provider row and DepositSheet's entry all route into
-  // this same state. The headline gate resolves ONCE here: null unless the headline asset is an
-  // EVM catalog row with a delivery chain in MTP_ASSET_DELIVERY — null, every Add-funds press
-  // routes to the deposit surface exactly as before and HomeTab receives no onBuy at all.
+  // this same state. The buy offer is CATALOG-scoped, not headline-scoped: the headline rail is
+  // always an IC token under today's CURRENCY_RAILS, so gating on it hid the buy entry forever.
+  // mtpBuyOfferOf answers non-null iff any mainnet EVM row is onramp-Partner with a delivery
+  // chain in MTP_ASSET_DELIVERY (ZCHF preferred); null keeps every Add-funds press on the
+  // deposit path exactly as before and HomeTab receives no onBuy at all.
   const [addFundsOpen, setAddFundsOpen] = useState(false);
   const [mtpBuyToken, setMtpBuyToken] = useState<MtpBuyAsset | null>(null);
-  const homeBuyToken = homeAsset != null ? mtpBuyTokenOf(homeAsset) : null;
+  const catalogBuyToken = mtpBuyOfferOf(assets);
   const openMtpBuy = useCallback((token: MtpBuyAsset) => { setAddFundsOpen(false); setMtpBuyToken(token); }, []);
 
   // R2 step 2 — the Mt Pelerin CASH-OUT. One root-mounted sheet (the MtpBuySheet discipline):
@@ -2721,7 +2723,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               history={walletHistory}
               noteFor={noteFor}
               onDeposit={goToDeposit}
-              onBuy={homeBuyToken != null ? () => setAddFundsOpen(true) : undefined}
+              onBuy={catalogBuyToken != null ? () => setAddFundsOpen(true) : undefined}
               onConvert={openConvert}
               onWithdraw={openWithdrawForMain}
               // R2 step 2: the withdraw control becomes cash-out-aware for an eligible
@@ -3018,11 +3020,11 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
       {/* The Add-funds deposit-vs-buy choice (plan R1 step 3, §8 item 1: one action row). Mounted
           at the ROOT like the menu above; rendered only while the headline asset has a Mt Pelerin
           buy route — every other asset keeps the direct deposit trip, unchanged. */}
-      {addFundsOpen && homeBuyToken != null ? (
+      {addFundsOpen && catalogBuyToken != null ? (
         <AppModal onRequestClose={() => setAddFundsOpen(false)}>
           <AddFundsMenu
             onDeposit={() => { setAddFundsOpen(false); if (homeAsset != null) goToDeposit(homeAsset.id); }}
-            onBuy={() => openMtpBuy(homeBuyToken)}
+            onBuy={() => openMtpBuy(catalogBuyToken)}
             onClose={() => setAddFundsOpen(false)}
           />
         </AppModal>

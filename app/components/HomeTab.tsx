@@ -66,11 +66,12 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, currencyBala
   /** Add funds — the funding surface for the main rail (the account the headline names). */
   onDeposit: (id: AssetId) => void;
   /**
-   * The Mt Pelerin buy for the SAME account (plan R1 step 3). PRESENT ONLY when the headline
-   * asset is an EVM catalog row with a delivery chain in MTP_ASSET_DELIVERY — Wallet owns that
-   * gate and the sheet, so the Add-funds press routes to THIS instead of `onDeposit` and the
-   * deposit-vs-buy choice (§8 item 1: one action row, the HomeMenu overflow pattern) opens at the
-   * app root. Absent: the press opens the deposit surface exactly as before, and nothing about
+   * The Mt Pelerin buy (plan R1 step 3). PRESENT ONLY when the CATALOG holds an onramp-Partner
+   * EVM row with a delivery chain in MTP_ASSET_DELIVERY (mtpBuyOfferOf; ZCHF preferred) — Wallet
+   * owns that gate and the sheet, so the Add-funds press routes to THIS instead of `onDeposit`
+   * and the deposit-vs-buy choice (§8 item 1: one action row, the HomeMenu overflow pattern)
+   * opens at the app root. Absent: the press opens the deposit surface exactly as before, and
+   * nothing about
    * the row renders differently (the direct-mount harness contract).
    */
   onBuy?: () => void;
