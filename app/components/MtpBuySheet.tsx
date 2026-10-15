@@ -123,7 +123,9 @@ export function MtpBuySheet({identity, relayUrl, token, onClose, onReject, onWid
       // injected server-side and the client never holds it). The external open is the
       // web-platform and token-fetch-failure fallback (unconfigured relay, limiter,
       // transport — any service word falls back; the seam rides only this path).
-      if (Platform.OS !== 'web') {
+      // `__DPAY_TEST_MTP_EMBED` lets the web-hosted flow tier exercise the embed path
+      // (prod web never sets it, so web keeps the external open).
+      if (Platform.OS !== 'web' || (globalThis as {__DPAY_TEST_MTP_EMBED?: boolean}).__DPAY_TEST_MTP_EMBED === true) {
         try {
           const tokened = await widgetTokenOf(relayUrl, url);
           setEmbedUrl(tokened);

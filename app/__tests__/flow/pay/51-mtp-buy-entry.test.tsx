@@ -47,6 +47,11 @@ const LOG_DIR = join(tmpdir(), 'dpay-flow-51-mtp-log');
 rmSync(LOG_DIR, {recursive: true, force: true});
 mkdirSync(LOG_DIR, {recursive: true});
 
+// The flow tier hosts the app on WEB, where the widget hand-off is the EXTERNAL open by
+// design; this seam forces the embed path so the flow can exercise it (prod web never
+// sets it). The token-fetch-failure arm below still falls back to the external seam.
+g.__DPAY_TEST_MTP_EMBED = true;
+
 hermeticFlow({relay: {env: {
   DPAY_MTPELERIN_CTKN: 'flow-ctkn',
   DPAY_MTPELERIN_WIDGET_PER_MIN: '1',

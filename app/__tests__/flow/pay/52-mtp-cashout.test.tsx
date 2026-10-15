@@ -47,6 +47,11 @@ mkdirSync(LOG_DIR, {recursive: true});
 // in-process stub. The conversion route is local and never dials anything. The widget-token
 // window is pinned to 1/min so the SECOND continue deterministically drives the EXTERNAL
 // fallback (a limiter refusal is a token-fetch failure; the sheet falls back, the seam fires).
+// The flow tier hosts the app on WEB, where the widget hand-off is the EXTERNAL open by
+// design; this seam forces the embed path so the flow can exercise it (prod web never
+// sets it). The token-fetch-failure arm below still falls back to the external seam.
+g.__DPAY_TEST_MTP_EMBED = true;
+
 hermeticFlow({relay: {env: {
   DPAY_MTPELERIN_CTKN: 'flow-ctkn',
   DPAY_MTPELERIN_WIDGET_PER_MIN: '1',
@@ -125,6 +130,11 @@ hermeticDescribe('flow 52 - the Mt Pelerin cash-out entry (offramp-gated; local 
     await m.driver.waitForText('Payout: 97.7395 CHF, fees included.', {timeoutMs: 15000});
     await m.driver.click('btn-mtp-cashout-continue', {timeoutMs: 15000});
     await m.driver.findByTestID('mtp-cashout-lifecycle', {timeoutMs: 15000});
+    // The fallback resolves a beat AFTER the lifecycle mounts (token 429, then the
+    // external open) and leaves no UI signal - poll the seam instead of racing it.
+    for (let waited = 0; openSeam.mock.calls.length === 0 && waited < 10_000; waited += 50) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
     expect(openSeam).toHaveBeenCalledTimes(1);
     expect(openSeam.mock.calls[0][0]).toBe('https://widget.mtpelerin.com/');
     expect(m.driver.isPresent('mtp-widget-embed')).toBe(false);

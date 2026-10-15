@@ -213,14 +213,16 @@ export function MtpCashOutSheet({relayUrl, asset, token, balance, onClose, onRej
   // registration + the watch stand; only the window is missing).
   const openSellWidget = useCallback(async () => {
     const url = buildMtpSellWidgetLink();
-    if (Platform.OS !== 'web') {
+    // `__DPAY_TEST_MTP_EMBED` lets the web-hosted flow tier exercise the embed path
+    // (prod web never sets it, so web keeps the external open).
+    if (Platform.OS !== 'web' || (globalThis as {__DPAY_TEST_MTP_EMBED?: boolean}).__DPAY_TEST_MTP_EMBED === true) {
       try {
         const tokened = await widgetTokenOf(relayUrl, url);
         setEmbedUrl(tokened);
         setWidgetFailed(false);
         onWidgetOpened?.();
         return;
-      } catch {
+      } catch (e) {
         // fall through to the external open — the fallback IS the feature here
       }
     }
