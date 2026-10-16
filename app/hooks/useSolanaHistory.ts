@@ -3,8 +3,7 @@ import {POLL} from '../config/constants';
 import {M} from '../i18n';
 import {short, fmtTime} from '../lib/format';
 import {getSolanaHistory} from '../solana';
-import {classifyTransportFailure} from '../transportFailure';
-import type {SolanaHistoryRow, SolanaReadFailure} from '../solana';
+import type {SolanaHistoryRow} from '../solana';
 import type {Txn} from '../lib/types';
 import {usePollCadence} from './usePollCadence';
 
@@ -14,11 +13,11 @@ import {usePollCadence} from './usePollCadence';
  *
  * Reads through the seam (`solana.ts#getSolanaHistory` → `solana/history.ts`), which no-ops without
  * touching the network when the SOL rail is off (`solanaRpcUrl()` empty — the offline inner loop).
- * Best-effort exactly like the IC hook: a failed poll KEEPS the prior list (an RPC outage must never
- * blank the ledger) — but since R3 (spec 2026-09-09 §"What the app says…") the failure is not
- * swallowed: the seam classifies the cause (`SolanaReadFailure`) and this hook exposes it as
- * `failure`, so the ledger can mark the list STALE instead of letting a stale ledger render as
- * current indefinitely. A clean read clears it. A null `address` (no device key) polls nothing.
+ * Best-effort exactly like the IC hook: a failed poll KEEPS the prior list (an RPC outage must
+ * never blank the ledger), logs the classified cause, and lets the cadence retry — the list itself
+ * never claims to be out of date (founder 2026-10-16: the old stale banner read as a lie while the
+ * rows shown were current; a failed refresh is silent, the retry is not). A null `address` (no
+ * device key) polls nothing.
  *
  * CADENCE (`usePollCadence`): `POLL.history` around a money flow — the wallet just opened, a send
  * just confirmed — and `POLL.historyIdle` the rest of the time, and nothing at all while the app is
@@ -30,12 +29,9 @@ import {usePollCadence} from './usePollCadence';
  * that count alongside the rows so the ledger can say the list may be short (each unreadable
  * transaction still exists on-chain; the short list is never silently short).
  */
-export function useSolanaHistory(address: string | null): {history: Txn[]; dropped: number; failure: SolanaReadFailure | null; refreshHistory: () => void} {
+export function useSolanaHistory(address: string | null): {history: Txn[]; dropped: number; refreshHistory: () => void} {
   const [history, setHistory] = useState<Txn[]>([]);
   const [dropped, setDropped] = useState(0);
-  // Why the LAST poll produced no fact (seam-classified), or null when the list is current. The
-  // rows shown while this is set are the last known truth — still shown, now marked stale.
-  const [failure, setFailure] = useState<SolanaReadFailure | null>(null);
   const genRef = useRef(0);
   // The live poll, assigned by the effect below and driven by the cadence hook. Held in a ref so
   // the cadence never restarts just because this component re-rendered.
@@ -72,16 +68,6 @@ export function useSolanaHistory(address: string | null): {history: Txn[]; dropp
         // cleanup below): classify nothing, log nothing beyond the defect note.
         if (ctrl.signal.aborted || !fresh()) return;
         console.warn(`useSolanaHistory fetch failed for ${address}: `, e);
-        // Same defensive oracle wrap as the balance poll's residual catch: the cause is classified,
-        // never guessed — and an oracle that itself throws must not turn a defect into a crash.
-        let classified: SolanaReadFailure = 'unreachable';
-        try {
-          classified = await classifyTransportFailure();
-        } catch {
-          classified = 'unreachable';
-        }
-        if (!fresh()) return;
-        setFailure(classified);
         return; // keep the existing list — an unreadable poll is not an empty ledger
       } finally {
         inFlight.current = false;
@@ -89,14 +75,12 @@ export function useSolanaHistory(address: string | null): {history: Txn[]; dropp
       if (!fresh()) return; // a poll from a previous address must not overwrite the current list
       if (result.kind === 'offline') return; // SOL rail off (empty RPC URL): nothing was read, nothing changes
       if (result.kind === 'error') {
-        // No fact this poll, WITH the cause. The prior rows are still the last truth so they stay —
-        // but the failure rides out so the ledger can mark the list stale (never silent again).
+        // No fact this poll. The prior rows are still the last truth so they stay; the failure is
+        // logged, not surfaced — the poll retries on its own cadence and the list never claims to
+        // be out of date (founder 2026-10-16, the stale-banner removal).
         console.warn(`useSolanaHistory: history read failed (${result.failure}) for ${address} — keeping the last known list`);
-        setFailure(result.failure);
         return;
       }
-      // A clean read is a recovery: the stale marker must not outlive the fix.
-      setFailure(null);
       if (result.dropped > 0) {
         // Each dropped transaction was already logged with its signature + reason by the reader; this
         // records the COUNT so a short list is never silently short.
@@ -125,7 +109,7 @@ export function useSolanaHistory(address: string | null): {history: Txn[]; dropp
     address ?? '',
   );
 
-  return {history, dropped, failure, refreshHistory};
+  return {history, dropped, refreshHistory};
 }
 
 /** One `SolanaHistoryRow` as a ledger row. Pure; every honesty decision it makes is documented. */

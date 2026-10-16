@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {POLL} from '../config/constants';
 import {short, fmtTime} from '../lib/format';
-import {getEvmHistory, type EvmHistoryRow, type EvmReadFailure} from '../evm';
+import {getEvmHistory, type EvmHistoryRow} from '../evm';
 import type {EvmKey} from '../evm';
 import type {Txn} from '../lib/types';
 import {usePollCadence} from './usePollCadence';
@@ -10,8 +10,9 @@ import {usePollCadence} from './usePollCadence';
  * The EVM rail's half of the Transactions list — the `useSolanaHistory` twin over the seam's
  * `getEvmHistory` (D16): one `eth_getLogs` Transfer walk per visible (chain, token) row per
  * tick, merged into the ONE `Txn` list the Ledger renders. Best-effort: a failed poll KEEPS the
- * prior list and rides the classified `failure` out (the stale marker), never blanking the
- * ledger. An empty key list polls nothing.
+ * prior list and logs the cause, never blanking the ledger — and never marks the list stale
+ * (founder 2026-10-16: a failed refresh must not claim the data is out of date). An empty key list
+ * polls nothing.
  *
  * Cadence: POLL.history around a money flow, POLL.historyIdle otherwise, nothing backgrounded
  * (the shared `usePollCadence` machinery). One tick costs one getLogs walk per row — the page
@@ -20,10 +21,9 @@ import {usePollCadence} from './usePollCadence';
 export function useEvmHistory(
   address: string | null,
   keys: readonly EvmKey[],
-): {history: Txn[]; dropped: number; failure: EvmReadFailure | null; refreshHistory: () => void} {
+): {history: Txn[]; dropped: number; refreshHistory: () => void} {
   const [history, setHistory] = useState<Txn[]>([]);
   const [dropped, setDropped] = useState(0);
-  const [failure, setFailure] = useState<EvmReadFailure | null>(null);
   const genRef = useRef(0);
   const pollRef = useRef<() => void>(() => {});
   const inFlight = useRef(false);
@@ -54,32 +54,29 @@ export function useEvmHistory(
         })));
         if (!fresh()) return;
         let droppedTotal = 0;
-        let sawFailure: EvmReadFailure | null = null;
         const okRows: Txn[] = [];
         const failedLegs = new Set<Txn['assetId']>(); // rows these legs own stay the last truth
         for (const {k, out} of results) {
           const legId: Txn['assetId'] = `evm:${k.chainId}:${k.token}`;
           if (out.kind === 'offline') continue; // that chain's rail is off — nothing was read
           if (out.kind === 'error') {
-            sawFailure = sawFailure ?? out.failure;
+            console.warn(`useEvmHistory: read failed on chain ${k.chainId} (${out.failure}) — keeping that leg's last known rows`);
             failedLegs.add(legId);
             continue; // the FAILED leg's prior rows are kept below — a partial read never blanks them
           }
           droppedTotal += out.dropped;
           okRows.push(...out.rows.map(row => toTxn(row, legId)));
         }
-        setFailure(sawFailure);
         setDropped(droppedTotal);
         setHistory(prev => {
           const kept = prev.filter(t => failedLegs.has(t.assetId)); // failed legs: last truth stays
           const txns = [...okRows, ...kept];
-          if (sawFailure === null) txns.sort((a, b) => b.ts - a.ts); // newest-first across rows
+          if (failedLegs.size === 0) txns.sort((a, b) => b.ts - a.ts); // newest-first across rows
           return txns;
         });
       } catch (e) {
         if (ctrl.signal.aborted || !fresh()) return;
-        console.warn(`useEvmHistory fetch failed for ${address}:`, e);
-        setFailure('unreachable'); // keep the existing list
+        console.warn(`useEvmHistory fetch failed for ${address}:`, e); // keep the existing list
       } finally {
         inFlight.current = false;
       }
@@ -102,7 +99,7 @@ export function useEvmHistory(
     `${address ?? ''}|${keySig}`,
   );
 
-  return {history, dropped, failure, refreshHistory};
+  return {history, dropped, refreshHistory};
 }
 
 /** One `EvmHistoryRow` as a ledger row (the SOL `toTxn` twin). Pure; the honesty rules carry. */

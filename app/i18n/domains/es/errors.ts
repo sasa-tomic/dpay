@@ -39,8 +39,6 @@ export const errorsEs: ErrorMessages = {
       `${network} es inaccesible aunque estás en línea - el relay de dpay no logra conectar. Dinero intacto; los pagos de IC funcionan; los pagos se siguen firmando sin conexión. En Ajustes ▸ Avanzado esta billetera puede apuntar a cualquier endpoint de ${network}.`,
     unreadable: network =>
       `${network} envió datos que esta billetera no puede leer - saldos desactualizados. dpay sigue reintentando.`,
-    historyStale: network =>
-      `El historial de ${network} está desactualizado y se actualiza solo.`,
     unreachableHint: () => 'Abre Ajustes ▸ Avanzado.',
   },
 

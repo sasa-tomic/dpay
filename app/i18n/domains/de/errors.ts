@@ -39,8 +39,6 @@ export const errorsDe: ErrorMessages = {
       `${network} ist nicht erreichbar, obwohl du online bist - das dpay-Relay erreicht es gerade nicht. Geld unberührt; IC-Zahlungen funktionieren; Zahlungen lassen sich weiterhin offline signieren. Unter Einstellungen ▸ Erweitert lässt sich diese Wallet auf einen beliebigen ${network}-Endpunkt zeigen.`,
     unreadable: network =>
       `${network} hat Daten gesendet, die diese Wallet nicht lesen kann - Guthaben nicht aktuell. dpay versucht es weiter.`,
-    historyStale: network =>
-      `Der ${network}-Verlauf ist nicht aktuell - er aktualisiert sich von selbst.`,
     unreachableHint: () => 'Öffnet Einstellungen ▸ Erweitert.',
   },
 

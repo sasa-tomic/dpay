@@ -446,9 +446,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
   // `buildSelectableAssets`' `solanaEnabled` is: no device key ⇒ no rail ⇒ no polling. The two
   // lists are merged newest-first below and rendered by the ONE Ledger surface both rails share;
   // `solDropped` (transactions the reader could not parse) rides along so the Ledger can say the
-  // list may be short — they still exist on-chain. `failure` does the same for a FAILED poll: the
-  // last known rows stay, marked stale (`sol-history-stale`) instead of rendering as current.
-  const {history: solHistory, dropped: solDropped, failure: solHistoryFailure, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
+  // list may be short — they still exist on-chain. A FAILED poll keeps the last known rows and
+  // retries silently: no staleness claim in the UI (founder 2026-10-16, the banner read as a lie).
+  const {history: solHistory, dropped: solDropped, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
 
   // The EVM rail — the SOL block's twin (D16): one device-derived secp256k1 address (the SAME
   // seed, m/44'/60'/0'/0/0), a balance poll over every VISIBLE evm row (one eth_getBalance per
@@ -473,7 +473,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
     syncEvmCatalogDeployments(evmSections.flatMap(s => s.assets));
   }, [evmSections]);
   const {tokens: evmTokens, gas: evmGas, freshAt: evmFreshAt, refresh: refreshEvmBalances} = useEvmBalances(identity.secretHex, evmKeys);
-  const {history: evmHistory, dropped: evmDropped, failure: evmHistoryFailure, refreshHistory: refreshEvmHistory} = useEvmHistory(evmAddress, evmKeys);
+  const {history: evmHistory, dropped: evmDropped, refreshHistory: refreshEvmHistory} = useEvmHistory(evmAddress, evmKeys);
   const ledgerHistory = useMemo(() => mergeHistoryByTime(mergeHistoryByTime(history, solHistory), evmHistory), [history, solHistory, evmHistory]);
   const onEvmSent = useCallback(() => { refreshEvmBalances(); refreshEvmHistory(); }, [refreshEvmBalances, refreshEvmHistory]);
   // THE ONE REFRESH (founder 2026-10-05): every Pay surface's Check-again wires the SAME hook —
@@ -2878,7 +2878,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setEvmR
               evmAssets={evmAssets}
               evmBalance={selectedEvmBalance}
             />
-           : <Ledger history={walletHistory} catalog={catalog} assets={assets} dropped={solDropped + evmDropped} staleFailure={solHistoryFailure ?? evmHistoryFailure} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
+           : <Ledger history={walletHistory} catalog={catalog} assets={assets} dropped={solDropped + evmDropped} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
       </ScrollView>
 
       {/* O4 S1 — persistent bottom navigation: the primary tabs moved from the top pill row

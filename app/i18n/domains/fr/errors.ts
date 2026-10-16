@@ -40,8 +40,6 @@ export const errorsFr: ErrorMessages = {
       `${network} est injoignable alors que vous êtes en ligne - le relais de dpay n’arrive pas à le joindre. Argent intact ; les paiements IC fonctionnent ; les paiements se signent toujours hors ligne. Dans Paramètres ▸ Avancé, ce portefeuille peut pointer vers n’importe quel point d’accès ${network}.`,
     unreadable: network =>
       `${network} a envoyé des données que ce portefeuille ne peut pas lire - soldes plus à jour. dpay continue de réessayer.`,
-    historyStale: network =>
-      `L’historique ${network} n’est pas à jour - il se met à jour tout seul.`,
     unreachableHint: () => 'Ouvrez Paramètres ▸ Avancé.',
   },
 

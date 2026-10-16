@@ -16,12 +16,8 @@ import renderer, {act} from 'react-test-renderer';
 jest.mock('../solana', () => ({
   getSolanaHistory: jest.fn(),
 }));
-jest.mock('../transportFailure', () => ({
-  classifyTransportFailure: jest.fn(async () => 'unreachable' as const),
-}));
 
 import {getSolanaHistory} from '../solana';
-import {classifyTransportFailure} from '../transportFailure';
 import type {SolanaHistoryResult, SolanaHistoryRow} from '../solana';
 import {useSolanaHistory} from '../hooks/useSolanaHistory';
 import {POLL, SOL_ACTIVE_POLL_WINDOW_MS} from '../config/constants';
@@ -33,7 +29,6 @@ import {errorsFr} from '../i18n/domains/fr/errors';
 import type {Txn} from '../lib/types';
 
 const mockedGetSolanaHistory = getSolanaHistory as jest.MockedFunction<typeof getSolanaHistory>;
-const mockedClassify = classifyTransportFailure as jest.MockedFunction<typeof classifyTransportFailure>;
 
 const ADDRESS = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
 const PEER = 'Cy5PMxYMFTs4NoSxyUtp54G2HPbmvJr8qZnxnWUqiLT9';
@@ -78,8 +73,6 @@ let warn: ReturnType<typeof jest.spyOn>;
 beforeEach(() => {
   jest.useFakeTimers();
   mockedGetSolanaHistory.mockReset();
-  mockedClassify.mockReset();
-  mockedClassify.mockResolvedValue('unreachable');
   warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
@@ -179,33 +172,30 @@ describe('useSolanaHistory — lifecycle and failure handling', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('the rail being OFF (seam answers offline) leaves the list untouched — not an error, nothing to mark', async () => {
+  test('the rail being OFF (seam answers offline) leaves the list untouched — not an error, nothing to log', async () => {
     mockedGetSolanaHistory.mockResolvedValue({kind: 'offline'});
-    const {rows, apiRef, tree} = await mount();
+    const {rows, tree} = await mount();
     expect(mockedGetSolanaHistory).toHaveBeenCalledWith(ADDRESS, expect.any(AbortSignal));
     expect(rows()).toEqual([]);
-    expect(apiRef.current!.failure).toBe(null); // offline ≠ failure: no stale marker may render
     act(() => { tree.unmount(); });
   });
 
-  test('a raw rejection with a LIVE signal is a seam defect: rows kept, cause classified (never silently current)', async () => {
+  test('a raw rejection with a LIVE signal keeps the last known rows — logged, never surfaced as a stale claim', async () => {
     mockedGetSolanaHistory.mockResolvedValue(history([row()]));
     const {rows, apiRef, tree} = await mount();
     expect(rows()).toHaveLength(1);
 
-    // The seam classifies every rail failure into a value; a live-signal throw reaching the hook is
-    // a defect — and even that must not let stale rows render as current. The oracle (mocked here)
-    // decides the cause, exactly as the balance poll's residual catch now does.
-    mockedClassify.mockResolvedValueOnce('offline');
+    // A live-signal throw reaching the hook is a defect, but the list must not comment on it: the
+    // rows shown are the last known truth and the poll retries on its own cadence (founder
+    // 2026-10-16: the old "history is out of date" banner read as a lie while the rows were current).
     mockedGetSolanaHistory.mockRejectedValue(new Error('fetch failed'));
     await act(async () => { await apiRef.current!.refreshHistory(); });
     expect(rows()).toHaveLength(1);                  // unchanged rows — an outage is not an empty ledger
-    expect(apiRef.current!.failure).toBe('offline'); // …but the list is marked stale with the oracle's verdict
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(ADDRESS), expect.any(Error));
     act(() => { tree.unmount(); });
   });
 
-  test('an aborted/cancelled read is silenced: the address switch aborts the signal and drops the late result (rows AND failure)', async () => {
+  test('an aborted/cancelled read is silenced: the address switch aborts the signal and drops the late result (rows AND the error)', async () => {
     let oldReject!: (e: unknown) => void;
     mockedGetSolanaHistory.mockReturnValueOnce(new Promise<SolanaHistoryResult>((_, rej) => { oldReject = rej; }));
     mockedGetSolanaHistory.mockResolvedValueOnce(history([row({signature: 'Sig3333333333333333333333333333333333333333'})]));
@@ -214,10 +204,9 @@ describe('useSolanaHistory — lifecycle and failure handling', () => {
     await act(async () => { tree = renderer.create(<Harness address={ADDRESS} apiRef={apiRef} />); });
     act(() => { tree.update(<Harness address={'NewAddr00000000000000000000000000000000000000'} apiRef={apiRef} />); });
     // The cancelled poll's rejection arrives AFTER the switch: its signal is aborted (the cleanup
-    // path), so it sets nothing — no failure, no rows. (The new address's own initial read was
+    // path), so it sets nothing — no rows, no warn. (The new address's own initial read was
     // skipped meanwhile by the one-in-flight guard, which is correct: skip, never queue.)
     await act(async () => { oldReject(new Error('The user aborted a request.')); for (let i = 0; i < 10; i++) await Promise.resolve(); });
-    expect(apiRef.current!.failure).toBe(null);
     expect(apiRef.current!.history).toEqual([]);
     // The new address then reads cleanly on the next tick — the cancellation left no scar.
     await act(async () => { await apiRef.current!.refreshHistory(); });
@@ -225,24 +214,22 @@ describe('useSolanaHistory — lifecycle and failure handling', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('a classified read failure EXPOSES the cause and keeps the last known rows (never silent again)', async () => {
+  test('a classified read failure keeps the last known rows silently — the list never claims to be stale', async () => {
     mockedGetSolanaHistory.mockResolvedValue(history([row()]));
     const {rows, apiRef, tree} = await mount();
     expect(rows()).toHaveLength(1);
-    expect(apiRef.current!.failure).toBe(null);
 
     // The seam classified this at the transport layer (endpoint answered, did not serve us); the
-    // hook must NOT swallow it — the rows stay (last truth) and the cause rides out for the marker.
+    // rows stay (last truth) and the poll retries — no user-facing staleness claim (founder
+    // 2026-10-16), only the log line.
     mockedGetSolanaHistory.mockResolvedValue({kind: 'error', failure: 'refused'});
     await act(async () => { await apiRef.current!.refreshHistory(); });
     expect(rows()).toHaveLength(1);                        // an outage is not an empty ledger
-    expect(apiRef.current!.failure).toBe('refused');      // ... but the list is now marked stale
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('refused'));
 
-    // Recovery: ONE clean read and the stale marker is gone — it must not outlive the fix.
+    // Recovery: ONE clean read and the fresh rows replace the old.
     mockedGetSolanaHistory.mockResolvedValue(history([row({signature: 'Sig2222222222222222222222222222222222222222'})]));
     await act(async () => { await apiRef.current!.refreshHistory(); });
-    expect(apiRef.current!.failure).toBe(null);
     expect(rows()[0].nonce).toBe('Sig2222222222222222222222222222222222222222'); // the fresh rows replaced the old
     act(() => { tree.unmount(); });
   });
@@ -293,18 +280,13 @@ describe('useSolanaHistory — lifecycle and failure handling', () => {
   });
 });
 
-describe('history staleness copy — rail.historyStale (all four locales)', () => {
-  // Assertions for the key this slice ADDED live here, not in HomeRailHonesty (that file belongs to
-  // the parallel balance-note work). The cause keys (refused/offline/…) stay covered there.
-  const LOCALES = {en: errorsEn, de: errorsDe, es: errorsEs, fr: errorsFr};
-  for (const [tag, errors] of Object.entries(LOCALES)) {
-    test(`${tag}: names the network, never 'undefined', and stays a short list line`, () => {
-      const line = errors.rail.historyStale('Solana');
-      expect(typeof line).toBe('string');
-      expect(line).toContain('Solana'); // the network name is interpolated, not dropped
-      expect(line).not.toContain('undefined');
-      expect(line.length).toBeGreaterThan(20); // a sentence, not a fragment
-      expect(line.length).toBeLessThan(180);   // compact — the ledger's list surface
+describe('history-stale copy — removed (founder 2026-10-16: the banner was a lie)', () => {
+  // The `errors.rail.historyStale` key and the Ledger `sol-history-stale` line are GONE: a failed
+  // refresh must not claim the list is out of date while the rows shown are the last known truth.
+  // This pin exists so the copy cannot quietly return through an i18n re-add.
+  for (const [tag, errors] of Object.entries({en: errorsEn, de: errorsDe, es: errorsEs, fr: errorsFr})) {
+    test(`${tag}: rail carries no historyStale key`, () => {
+      expect((errors.rail as Record<string, unknown>).historyStale).toBeUndefined();
     });
   }
 });

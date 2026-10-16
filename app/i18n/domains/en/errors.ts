@@ -99,10 +99,6 @@ export type ErrorMessages = {
     offline: (network: string) => string;
     unreachable: (network: string) => string;
     unreadable: (network: string) => string;
-    /** The TRANSACTIONS list's staleness line (Ledger's `sol-history-stale`): the last history read
-     *  failed, so the rows shown are the last known truth. The cause-specific rail copy above is the
-     *  BALANCE surface's (it says "balances"); this sentence only marks the list itself. */
-    historyStale: (network: string) => string;
     /** accessibilityHint for the unreachable note's tappable Settings ▸ Advanced escape. */
     unreachableHint: (network: string) => string;
   };
@@ -235,8 +231,6 @@ export const errorsEn: ErrorMessages = {
       `${network} is unreachable while you are online - dpay’s relay can’t reach it. Money untouched; IC payments work; payments still sign offline. Settings ▸ Advanced can point this wallet at any ${network} endpoint.`,
     unreadable: network =>
       `${network} sent data this wallet can’t read - balances outdated. dpay keeps retrying.`,
-    historyStale: network =>
-      `${network} history is out of date - it refreshes on its own.`,
     /** accessibilityHint for the unreachable note's Settings ▸ Advanced Pressable (the founder
      *  UX directive that made the escape tappable). Says where the tap lands - never a promise
      *  the tap fixes the outage. */
