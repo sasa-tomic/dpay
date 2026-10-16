@@ -148,6 +148,7 @@ export const walletDe: WalletMessages = {
     dropped: count => count === 1
       ? '1 Solana-Transaktion konnte nicht gelesen werden - sie existiert weiterhin on-chain.'
       : `${count} Solana-Transaktionen konnten nicht gelesen werden - sie existieren weiterhin on-chain.`,
+    staleSince: minutes => `Der Transaktionsverlauf ist nicht aktuell - zuletzt aktualisiert vor ${minutes} Min.`,
   },
 
   fund: {checking: 'Wird geprüft…', checkAgain: 'Erneut prüfen'},

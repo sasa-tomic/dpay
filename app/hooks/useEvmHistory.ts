@@ -17,13 +17,19 @@ import {usePollCadence} from './usePollCadence';
  * Cadence: POLL.history around a money flow, POLL.historyIdle otherwise, nothing backgrounded
  * (the shared `usePollCadence` machinery). One tick costs one getLogs walk per row — the page
  * cap (`EVM_LOG_PAGE_SIZE`) is the budget knob, never a correctness one (R4).
+ *
+ * `lastSuccessAt` (the SOL hook's twin): the wall clock of the last FULLY clean read — every leg
+ * answered. A single failing leg keeps the clock old, because ITS rows keep aging while the others
+ * refresh; the Ledger turns the oldest rail's age into the (time-gated) staleness note. Null when
+ * no full read has landed or the rail is off.
  */
 export function useEvmHistory(
   address: string | null,
   keys: readonly EvmKey[],
-): {history: Txn[]; dropped: number; refreshHistory: () => void} {
+): {history: Txn[]; dropped: number; lastSuccessAt: number | null; refreshHistory: () => void} {
   const [history, setHistory] = useState<Txn[]>([]);
   const [dropped, setDropped] = useState(0);
+  const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
   const genRef = useRef(0);
   const pollRef = useRef<() => void>(() => {});
   const inFlight = useRef(false);
@@ -33,6 +39,7 @@ export function useEvmHistory(
   useEffect(() => {
     if (!enabled || address === null) {
       pollRef.current = () => {};
+      setLastSuccessAt(null); // the rail switched off: an unknown must not keep aging as stale
       return;
     }
     const list = keySig.split('|').filter(s => s.length > 0).map(s => {
@@ -68,6 +75,9 @@ export function useEvmHistory(
           okRows.push(...out.rows.map(row => toTxn(row, legId)));
         }
         setDropped(droppedTotal);
+        // The clock only moves on a FULLY clean read: one persistently failing leg keeps its rows
+        // aging, so the list's age must age with them (the honest staleness input).
+        if (failedLegs.size === 0) setLastSuccessAt(Date.now());
         setHistory(prev => {
           const kept = prev.filter(t => failedLegs.has(t.assetId)); // failed legs: last truth stays
           const txns = [...okRows, ...kept];
@@ -99,7 +109,7 @@ export function useEvmHistory(
     `${address ?? ''}|${keySig}`,
   );
 
-  return {history, dropped, refreshHistory};
+  return {history, dropped, lastSuccessAt, refreshHistory};
 }
 
 /** One `EvmHistoryRow` as a ledger row (the SOL `toTxn` twin). Pure; the honesty rules carry. */

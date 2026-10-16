@@ -215,27 +215,33 @@ describe('Ledger — the dropped-transactions honesty note', () => {
   });
 });
 
-describe('Ledger — no stale-history line (founder 2026-10-16: the banner was a lie)', () => {
-  // The R3 stale marker (`sol-history-stale`) is REMOVED: a failed background refresh must not
-  // claim "history is out of date" while the rows shown are the last known truth. This pin keeps
-  // the line from returning: neither branch of the ledger may ever render it.
-  test('the populated-list branch never renders a stale line', () => {
-    const tree = mount([txn('solana:SOL', '1000000000', TS_NEW)]);
-    expect(testIDs(tree)).not.toContain('sol-history-stale');
-    expect(texts(tree)).not.toContain(M.errors.rail.offline('Solana'));
+describe('Ledger — the time-gated stale-age note (founder 2026-10-16)', () => {
+  // The note states an AGE of the last successful refresh, only after HISTORY_STALE_AFTER_MS
+  // (120s), and only in the populated branch. It replaced the failure-classified `sol-history-stale`
+  // banner, which fired on single RPC hiccups while the rows shown were current.
+  test('an age past the threshold renders the note with the whole minutes, in the populated branch', () => {
+    const staleSinceMs = Date.now() - 5 * 60_000;
+    const tree = mount([txn('solana:SOL', '1', TS_NEW)], 0);
+    act(() => { tree.update(<Ledger history={[txn('solana:SOL', '1', TS_NEW)]} catalog={CATALOG} assets={ASSETS} dropped={0} staleSinceMs={staleSinceMs} onOpenReceipt={() => {}} />); });
+    expect(testIDs(tree)).toContain('tx-stale-note');
+    expect(texts(tree)).toContain(M.wallet.ledger.staleSince(5));
     act(() => { tree.unmount(); });
   });
 
-  test('the EMPTY branch never renders a stale line either', () => {
+  test('a fresh age (under the threshold) and null render nothing — unknown is not stale', () => {
+    const fresh = mount([txn('solana:SOL', '1', TS_NEW)]);
+    act(() => { fresh.update(<Ledger history={[txn('solana:SOL', '1', TS_NEW)]} catalog={CATALOG} assets={ASSETS} staleSinceMs={Date.now() - 10_000} onOpenReceipt={() => {}} />); });
+    expect(testIDs(fresh)).not.toContain('tx-stale-note');
+    act(() => { fresh.unmount(); });
+    const unknown = mount([txn('solana:SOL', '1', TS_NEW)]);
+    expect(testIDs(unknown)).not.toContain('tx-stale-note');
+    act(() => { unknown.unmount(); });
+  });
+
+  test('the EMPTY branch never renders it — an empty list has no rows to be stale', () => {
     const empty = mount([]);
-    expect(testIDs(empty)).not.toContain('sol-history-stale');
+    act(() => { empty.update(<Ledger history={[]} catalog={CATALOG} assets={ASSETS} staleSinceMs={Date.now() - 10 * 60_000} onOpenReceipt={() => {}} />); });
+    expect(testIDs(empty)).not.toContain('tx-stale-note');
     act(() => { empty.unmount(); });
-  });
-
-  test('the dropped note still renders on its own — the honest short-list note is untouched', () => {
-    const tree = mount([txn('solana:SOL', '1', TS_NEW)], 2);
-    expect(testIDs(tree)).toContain('ledger-dropped-note');
-    expect(testIDs(tree)).not.toContain('sol-history-stale');
-    act(() => { tree.unmount(); });
   });
 });

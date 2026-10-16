@@ -290,3 +290,44 @@ describe('history-stale copy — removed (founder 2026-10-16: the banner was a l
     });
   }
 });
+
+describe('useSolanaHistory — lastSuccessAt, the honest staleness clock', () => {
+  test('null until a clean read, set by a clean read, untouched by failures, nulled when the rail goes away', async () => {
+    // Never read (offline seam): unknown, not stale.
+    mockedGetSolanaHistory.mockResolvedValue({kind: 'offline'});
+    const offline = await mount();
+    expect(offline.apiRef.current!.lastSuccessAt).toBe(null);
+    act(() => { offline.tree.unmount(); });
+
+    // A clean read stamps the clock (fake timers: Date.now() is the mocked now).
+    mockedGetSolanaHistory.mockResolvedValue(history([row()]));
+    const ok = await mount();
+    const first = ok.apiRef.current!.lastSuccessAt;
+    expect(first).toBeGreaterThan(0);
+    // A FAILED read must not refresh the age (the rows keep aging; so does the clock).
+    mockedGetSolanaHistory.mockResolvedValue({kind: 'error', failure: 'refused'});
+    await act(async () => { await ok.apiRef.current!.refreshHistory(); });
+    expect(ok.apiRef.current!.lastSuccessAt).toBe(first);
+    // A raw rejection likewise.
+    mockedGetSolanaHistory.mockRejectedValue(new Error('fetch failed'));
+    await act(async () => { await ok.apiRef.current!.refreshHistory(); });
+    expect(ok.apiRef.current!.lastSuccessAt).toBe(first);
+    // The NEXT clean read refreshes it.
+    await act(async () => { jest.advanceTimersByTime(5_000); });
+    mockedGetSolanaHistory.mockResolvedValue(history([row({signature: 'Sig2222222222222222222222222222222222222222'})]));
+    await act(async () => { await ok.apiRef.current!.refreshHistory(); });
+    expect(ok.apiRef.current!.lastSuccessAt).toBe(first! + 5_000);
+    act(() => { ok.tree.unmount(); });
+  });
+
+  test('an address switch to null (rail off) nulls the clock — an unknown must not age as stale', async () => {
+    mockedGetSolanaHistory.mockResolvedValue(history([row()]));
+    const apiRef: React.MutableRefObject<ReturnType<typeof useSolanaHistory> | null> = {current: null};
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<Harness address={ADDRESS} apiRef={apiRef} />); });
+    expect(apiRef.current!.lastSuccessAt).toBeGreaterThan(0);
+    await act(async () => { tree.update(<Harness address={null} apiRef={apiRef} />); });
+    expect(apiRef.current!.lastSuccessAt).toBe(null);
+    act(() => { tree.unmount(); });
+  });
+});

@@ -15,6 +15,11 @@ export const BALANCE_TIMEOUT_MS = 4000;
 // own ample bound so a full-but-slow page still lands. The interval below is also lengthened —
 // history changes only when a payment settles, and the relay now TTL-caches walks anyway.
 export const HISTORY_TIMEOUT_MS = 10000;
+// How old a rail's last SUCCESSFUL history read may get before the merged Transactions list says
+// so (founder 2026-10-16: "It should be shown if refreshing actually fails for real for some time.
+// Probably something like 'Transaction list is stale since X minutes ago'"). TWO failed idle polls
+// (POLL.historyIdle = 60s each) before the note appears: one hiccup never lies about staleness.
+export const HISTORY_STALE_AFTER_MS = 120_000;
 export const FAUCET_TIMEOUT_MS = 6000;
 // DEPOSIT_TIMEOUT_MS bounds the best-effort deposit-info load + the ckERC20 onramp-params fetch.
 // DEPOSIT_ADDRESS_TIMEOUT_MS bounds the CRITICAL deposit-address fetch on its OWN controller: the

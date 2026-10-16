@@ -291,6 +291,11 @@ export type WalletMessages = {
      * A note, never an error - everything the list DOES show is still true.
      */
     dropped: (count: number) => string;
+    /** The Transactions list's AGE line (`Ledger`'s `tx-stale-note`, populated branch only): the
+     *  oldest rail's last SUCCESSFUL refresh is older than HISTORY_STALE_AFTER_MS. An age
+     *  statement, never a failure verdict and never a cause - the founder 2026-10-16 wording
+     *  ("shown if refreshing actually fails for real for some time"). */
+    staleSince: (minutes: number) => string;
   };
 
   /** The shared "add funds before you pay" panel's recheck link (both rails). */
@@ -465,6 +470,7 @@ export const walletEn: WalletMessages = {
     dropped: count => count === 1
       ? '1 Solana transaction couldn’t be read - it still exists on-chain.'
       : `${count} Solana transactions couldn’t be read - they still exist on-chain.`,
+    staleSince: minutes => `Transaction list is stale - last refreshed ${minutes} min ago.`,
   },
 
   fund: {checking: 'Checking…', checkAgain: 'Check again'},

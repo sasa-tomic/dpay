@@ -150,6 +150,7 @@ export const walletFr: WalletMessages = {
     dropped: count => count === 1
       ? '1 transaction Solana n’a pas pu être lue - elle existe toujours on-chain.'
       : `${count} transactions Solana n’ont pas pu être lues - elles existent toujours on-chain.`,
+    staleSince: minutes => `L’historique des transactions n’est pas à jour - dernière mise à jour il y a ${minutes} min.`,
   },
 
   fund: {checking: 'Vérification…', checkAgain: 'Revérifier'},

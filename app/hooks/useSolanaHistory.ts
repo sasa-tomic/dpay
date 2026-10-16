@@ -28,10 +28,19 @@ import {usePollCadence} from './usePollCadence';
  * The reader also reports how many transactions it could NOT parse (`dropped`) — the hook surfaces
  * that count alongside the rows so the ledger can say the list may be short (each unreadable
  * transaction still exists on-chain; the short list is never silently short).
+ *
+ * `lastSuccessAt` is the ONE honest staleness input: the wall clock of the last CLEAN read, null
+ * until one lands (and nulled again when the rail switches off). It says NOTHING about failures —
+ * the Wallet takes the oldest rail's value and the Ledger shows an age note only after
+ * HISTORY_STALE_AFTER_MS (founder 2026-10-16: the note must appear when refreshing "actually fails
+ * for real for some time", phrased as an age, never as a failure verdict).
  */
-export function useSolanaHistory(address: string | null): {history: Txn[]; dropped: number; refreshHistory: () => void} {
+export function useSolanaHistory(address: string | null): {history: Txn[]; dropped: number; lastSuccessAt: number | null; refreshHistory: () => void} {
   const [history, setHistory] = useState<Txn[]>([]);
   const [dropped, setDropped] = useState(0);
+  // Wall clock of the last clean read; null = never read (or the rail switched off). Failure
+  // classification is deliberately NOT tracked here anymore — age, not verdicts.
+  const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
   const genRef = useRef(0);
   // The live poll, assigned by the effect below and driven by the cadence hook. Held in a ref so
   // the cadence never restarts just because this component re-rendered.
@@ -49,6 +58,7 @@ export function useSolanaHistory(address: string | null): {history: Txn[]; dropp
   useEffect(() => {
     if (address === null) {
       pollRef.current = () => {};
+      setLastSuccessAt(null); // the rail switched off: an unknown must not keep aging as stale
       return;
     }
     let alive = true;
@@ -88,6 +98,7 @@ export function useSolanaHistory(address: string | null): {history: Txn[]; dropp
       }
       // Set on EVERY poll (not only when > 0): a clean read after a dirty one clears the note.
       setDropped(result.dropped);
+      setLastSuccessAt(Date.now()); // the ONLY clock write: a clean read, never a failure
       setHistory(result.rows.map(toTxn));
     };
     pollRef.current = () => { void poll(); };
@@ -109,7 +120,7 @@ export function useSolanaHistory(address: string | null): {history: Txn[]; dropp
     address ?? '',
   );
 
-  return {history, dropped, refreshHistory};
+  return {history, dropped, lastSuccessAt, refreshHistory};
 }
 
 /** One `SolanaHistoryRow` as a ledger row. Pure; every honesty decision it makes is documented. */

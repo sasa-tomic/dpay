@@ -2,6 +2,7 @@ import {useState} from 'react';
 import {View, Text, Pressable} from 'react-native';
 import {S} from '../styles';
 import {M} from '../i18n';
+import {HISTORY_STALE_AFTER_MS} from '../config/constants';
 import {assetTestKey, type CurrencyDescriptor} from '../config/catalog';
 import {chipLabel, type SelectableAsset} from '../config/assets';
 import {HistoryRow} from './HistoryRow';
@@ -33,7 +34,15 @@ function filterTestKey(asset: SelectableAsset, catalog: CurrencyDescriptor[]): s
 // non-zero, the honesty note `M.wallet.ledger.dropped` renders in BOTH branches (empty list and
 // populated) — the unreadable transactions still exist on-chain, and a short (or empty) list must
 // never read as the whole truth. Nothing renders when it is 0.
-export function Ledger({history, catalog, assets, dropped = 0, noteFor, onOpenReceipt}: {history: Txn[]; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; dropped?: number; /** Resolve a row's device-saved annotation (txNotes name/message + saved-address label). Optional and purely additive — without it rows render exactly as the ledger said them. */ noteFor?: (t: Txn) => TxAnnotation | undefined; onOpenReceipt: (t: Txn) => void}) {
+//
+// `staleSinceMs` (optional, default null): the OLDEST rail's last-successful-refresh wall clock
+// (Wallet computes the min across the history hooks). When that age crosses
+// HISTORY_STALE_AFTER_MS, the populated branch renders `M.wallet.ledger.staleSince(minutes)` — an
+// AGE statement ("last refreshed N min ago"), not a failure verdict, and only when refreshing has
+// "actually failed for real for some time" (founder 2026-10-16). The empty branch renders nothing:
+// an empty list has no rows to be stale. An unknown age (null) renders nothing — unknown is not
+// stale.
+export function Ledger({history, catalog, assets, dropped = 0, staleSinceMs = null, noteFor, onOpenReceipt}: {history: Txn[]; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; dropped?: number; staleSinceMs?: number | null; /** Resolve a row's device-saved annotation (txNotes name/message + saved-address label). Optional and purely additive — without it rows render exactly as the ledger said them. */ noteFor?: (t: Txn) => TxAnnotation | undefined; onOpenReceipt: (t: Txn) => void}) {
   const [filter, setFilter] = useState<AssetId | null>(null);
   if (history.length === 0) {
     return (
@@ -56,6 +65,9 @@ export function Ledger({history, catalog, assets, dropped = 0, noteFor, onOpenRe
       <Text style={S.histTitle}>{M.wallet.ledger.recent}</Text>
       {dropped > 0 ? (
         <Text style={S.dim2} testID="ledger-dropped-note">{M.wallet.ledger.dropped(dropped)}</Text>
+      ) : null}
+      {staleSinceMs !== null && Date.now() - staleSinceMs >= HISTORY_STALE_AFTER_MS ? (
+        <Text style={S.dim2} testID="tx-stale-note">{M.wallet.ledger.staleSince(Math.max(1, Math.floor((Date.now() - staleSinceMs) / 60_000)))}</Text>
       ) : null}
       {showFilter ? (
         <View style={S.filterRow}>
