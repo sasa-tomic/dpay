@@ -112,6 +112,10 @@ elif [ "$(newest "$HOST_GLIBC" 2.39)" = "2.38" ]; then
   BASE="ubuntu:24.04"              # glibc 2.39
 elif [ "$(newest "$HOST_GLIBC" 2.39)" = "2.39" ]; then
   BASE="ubuntu:24.04"              # glibc 2.39
+elif [ "$(newest "$HOST_GLIBC" 2.42)" = "2.42" ]; then
+  BASE="ubuntu:25.10"              # glibc 2.42
+elif [ "$(newest "$HOST_GLIBC" 2.43)" = "2.43" ]; then
+  BASE="ubuntu:26.04"              # glibc 2.43
 else
   echo "host glibc $HOST_GLIBC is newer than any base this script knows about." >&2
   echo "Set DPAY_RUNTIME_BASE to an image with glibc >= $HOST_GLIBC, or build a static musl binary." >&2
