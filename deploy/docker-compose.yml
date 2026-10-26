@@ -185,7 +185,7 @@ services:
   # relay over the compose network — no inbound host ports, TLS terminates at the edge. The named
   # tunnel's ingress is configured in Cloudflare Zero Trust. The token is supplied through .env.
   cloudflared:
-    image: ${DPAY_CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2026.7.1}
+    image: ${DPAY_CLOUDFLARED_IMAGE:-cloudflare/cloudflared:2026.10.2}
     restart: unless-stopped
     command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in deploy/.env}
     depends_on:
